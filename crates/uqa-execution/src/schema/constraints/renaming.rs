@@ -31,6 +31,33 @@ pub fn rename_constraint(
     recurse: bool,
 ) -> Result<bool, SQLError> {
     let (mut columns, mut constraints) = table_constraint_state(context, table)?;
+    if let Some(position) = constraints
+        .key_constraints
+        .iter()
+        .position(|key| key.name.as_deref() == Some(from))
+    {
+        ensure_constraint_name_available(&columns, &constraints, Some(to), table)?;
+        let relation =
+            uqa_core::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
+        if !context.names.relation_name_available(
+            &uqa_core::RelationIdentity::new(&relation.schema, to).qualified_name(),
+        )? {
+            return Err(constraint_error(
+                "42P07",
+                format!("relation \"{to}\" already exists"),
+            ));
+        }
+        let key = &mut constraints.key_constraints[position];
+        key.name = Some(to.into());
+        let identity = key.catalog_identity;
+        for inherited in &mut constraints.hierarchy.partition_inherited_key_constraints {
+            if inherited.catalog_identity == identity {
+                inherited.name = Some(to.into());
+            }
+        }
+        publish_constraint_state(context, table, columns, constraints)?;
+        return Ok(true);
+    }
     if rename_foreign_key(table, &mut columns, &mut constraints, from, to)? {
         publish_constraint_state(context, table, columns, constraints)?;
         return Ok(true);

@@ -78,6 +78,30 @@ fn drop_constraint_group(
             capture_foreign_key_dependencies(context, [(table.to_string(), name.to_string())])?;
         return foreign_keys::drop_targets(context, targets, direct);
     }
+    if direct {
+        if let Some(key) = constraints
+            .key_constraints
+            .iter()
+            .find(|key| key.name.as_deref() == Some(name))
+        {
+            let catalog = context
+                .publication
+                .indexes
+                .identities
+                .catalog
+                .current_catalog_snapshot();
+            for row in catalog.catalog_indexes() {
+                let definition = crate::catalog::index::index_definition(row)
+                    .map_err(|error| ddl_storage_error("DROP CONSTRAINT index", error))?;
+                if key.catalog_identity.is_some_and(|identity| {
+                    definition.relationships.owning_constraint == Some(identity.object_id)
+                }) && definition.relationships.parent_index.is_some()
+                {
+                    return Err(constraint_error("2BP01", format!("cannot drop constraint {name} on table {table} because its parent index requires it")));
+                }
+            }
+        }
+    }
     drop_constraint_one(context, table, name, if_exists, cascade)
 }
 
@@ -183,12 +207,42 @@ fn drop_key_constraint_dependencies(
     key: &uqa_sql::ast::TableKeyConstraint,
     cascade: bool,
 ) -> Result<(), SQLError> {
-    let canonical = context
+    let catalog = context
         .publication
+        .indexes
+        .identities
         .catalog
-        .resolve_table_name(table)
-        .map_err(|error| ddl_storage_error("DROP CONSTRAINT dependency", error))?
-        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+        .current_catalog_snapshot();
+    let rows = &catalog.snapshot().definitions.catalog_indexes;
+    let owner = key
+        .catalog_identity
+        .ok_or_else(|| SQLError::Internal("key has no catalog identity".into()))?;
+    let index = rows
+        .values()
+        .find(|row| {
+            crate::catalog::index::index_definition(row)
+                .ok()
+                .is_some_and(|definition| {
+                    definition.relationships.owning_constraint == Some(owner.object_id)
+                })
+        })
+        .ok_or_else(|| SQLError::Internal("key has no owned index".into()))?;
+    let indexes =
+        crate::schema::indexes::registry::lifecycle::descendants(rows, &index.relation)
+            .map_err(|error| ddl_storage_error("DROP CONSTRAINT index dependencies", error))?;
+    let index_ids = indexes
+        .iter()
+        .map(|row| {
+            crate::catalog::index::index_definition(row).map(|definition| {
+                definition
+                    .catalog
+                    .expect("validated index")
+                    .identity
+                    .object_id
+            })
+        })
+        .collect::<Result<std::collections::BTreeSet<_>, _>>()
+        .map_err(|error| ddl_storage_error("DROP CONSTRAINT identity", error))?;
     let mut dependents = Vec::new();
     for referrer in context
         .relations
@@ -200,16 +254,9 @@ fn drop_key_constraint_dependencies(
             .try_foreign_keys(&referrer)
             .map_err(|error| ddl_storage_error("DROP CONSTRAINT dependency", error))?
         {
-            if foreign_key.ref_table == canonical
-                && foreign_key
-                    .referenced_key
-                    .as_ref()
-                    .is_none_or(|name| key.name.as_ref() == Some(name))
-                && foreign_key.ref_columns.len() == key.columns.len()
-                && foreign_key
-                    .ref_columns
-                    .iter()
-                    .all(|column| key.columns.contains(column))
+            if foreign_key
+                .referenced_index
+                .is_some_and(|id| index_ids.contains(&id))
             {
                 let name = foreign_key.name.clone().ok_or_else(|| {
                     SQLError::Internal("dependent FOREIGN KEY has no durable name".into())

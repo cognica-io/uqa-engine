@@ -126,7 +126,7 @@ fn selection_preserves_declared_identity_and_standalone_expression_predicate_and
 }
 
 #[test]
-fn partition_indexes_reach_descendants_but_ordinary_inheritance_and_unrelated_tables_do_not() {
+fn persisted_partition_indexes_bind_local_incarnations_and_leave_ordinary_inheritance_local() {
     let mut snapshot = empty_catalog().snapshot().clone();
     for (name, parent, partitioned, partition) in [
         ("root", None, true, false),
@@ -151,20 +151,46 @@ fn partition_indexes_reach_descendants_but_ordinary_inheritance_and_unrelated_ta
             }),
         );
     }
+    let persisted = |name, table, id: u8, parent: Option<u8>| {
+        let mut row = index(name, table, true);
+        let mut definition = index_definition(&row).unwrap();
+        definition.catalog = Some(uqa_sql::catalog::index::IndexCatalogIdentity {
+            identity: ConstraintCatalogIdentity {
+                object_id: [id; 16],
+                oid: 17000 + i64::from(id),
+            },
+            table_object_id: [1; 16],
+            physical_key: format!("physical:{id}"),
+        });
+        definition.relationships.parent_index = parent.map(|parent| [parent; 16]);
+        row.definition_json = Some(serde_json::to_string(&definition).unwrap());
+        row
+    };
     snapshot.definitions.catalog_indexes = Arc::new(
         [
-            index("root_key", "root", true),
-            index("ordinary_key", "ordinary", true),
+            persisted("root_key", "root", 2, None),
+            persisted("child_key", "child", 3, Some(2)),
+            persisted("leaf_key", "leaf", 4, Some(3)),
+            persisted("ordinary_key", "ordinary", 5, None),
         ]
         .into_iter()
         .map(|index| (index.relation.clone(), index))
         .collect(),
     );
     let catalog = CatalogReadView::new(snapshot);
-    for target in ["public.root", "public.child", "public.leaf"] {
+    for (target, name, id, ancestry) in [
+        ("public.root", "root_key", 2, vec![]),
+        ("public.child", "child_key", 3, vec![[2; 16]]),
+        ("public.leaf", "leaf_key", 4, vec![[3; 16], [2; 16]]),
+    ] {
         let keys = enforced_keys(&catalog, &resolution(), target, Vec::new()).unwrap();
         assert_eq!(keys.len(), 1);
-        assert_eq!(keys[0].name.as_deref(), Some("root_key"));
+        assert_eq!(keys[0].name.as_deref(), Some(name));
+        assert_eq!(
+            keys[0].index_catalog.as_ref().unwrap().identity.object_id,
+            [id; 16]
+        );
+        assert_eq!(keys[0].index_ancestors, ancestry);
     }
     assert!(
         enforced_keys(&catalog, &resolution(), "public.inherited", Vec::new())

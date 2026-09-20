@@ -162,6 +162,7 @@ pub(in crate::compiler) fn compile_create_table(
                         )?;
                         foreign_keys.push(ForeignKey {
                             referenced_key: None,
+                            referenced_index: None,
                             name: cname,
                             object_id: None,
                             catalog_identity: None,
@@ -533,6 +534,7 @@ pub(in crate::compiler) fn compile_column_def(
                     }
                     references = Some(crate::ast::ForeignKeyRef {
                         referenced_key: None,
+                        referenced_index: None,
                         name: constraint_name(&cstr.conname),
                         object_id: None,
                         catalog_identity: None,

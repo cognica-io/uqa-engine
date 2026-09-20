@@ -6,21 +6,13 @@
 
 use super::*;
 use uqa_sql::{
-    ast::{Expr, TableConstraintSet, TableHierarchy},
+    ast::{Expr, TableConstraintSet},
     catalog::index::{EnforcedKey, IndexCatalogIdentity, IndexDefinition},
     RowSchema, SQLParam,
 };
 
 struct Context;
 
-impl crate::schema::indexes::IndexBuildCatalog for Context {
-    fn table_hierarchy(&self, _: &str) -> Result<TableHierarchy, SQLError> {
-        panic!("same-table index needs no hierarchy lookup")
-    }
-    fn scan_tables(&self, _: &str) -> Result<Vec<String>, SQLError> {
-        panic!("same-table index needs no hierarchy scan")
-    }
-}
 impl uqa_sql::semantics::conflict::ConflictCatalog for Context {
     fn try_describe_table(&self, _: &str) -> Result<Option<Vec<ColumnDef>>, String> {
         Ok(Some(Vec::new()))
@@ -103,7 +95,7 @@ fn opaque_bindings_follow_registry_replacement_and_rollback_without_name_lookup(
     let original_key = ValueIndexKey::Index("opaque:2".into());
     assert_eq!(
         first
-            .indexable_fields(&Context, "public.t", &[], &[])
+            .indexable_fields("public.t", &[], &[])
             .unwrap()
             .as_slice(),
         std::slice::from_ref(&original_key)
@@ -125,4 +117,40 @@ fn opaque_bindings_follow_registry_replacement_and_rollback_without_name_lookup(
         values(&cache.bind(original).unwrap(), &original_key).unwrap(),
         Value::Row(vec![Value::Int(7)])
     );
+}
+
+#[test]
+fn legacy_partition_namespaces_are_scoped_to_their_physical_tables() {
+    let mut source = rows(2, true).as_ref().clone();
+    let mut second = source.values().next().unwrap().clone();
+    second.relation.name = "child_index".into();
+    second.table_name = "public.child".into();
+    second.columns_json = serde_json::to_string(&vec![IndexKey::Expression(Box::new(
+        Expr::Literal(Value::Int(9)),
+    ))])
+    .unwrap();
+    let mut definition = super::super::index_definition(&second).unwrap();
+    definition.catalog.as_mut().unwrap().identity.object_id = [3; 16];
+    definition.catalog.as_mut().unwrap().identity.oid = 17003;
+    definition.catalog.as_mut().unwrap().table_object_id = [4; 16];
+    second.definition_json = Some(serde_json::to_string(&definition).unwrap());
+    source.insert(second.relation.clone(), second);
+    let prepared = PhysicalIndexDefinitions::prepare(&source).unwrap();
+    let key = ValueIndexKey::Index("opaque:2".into());
+    assert_eq!(
+        values(&prepared, &key).unwrap(),
+        Value::Row(vec![Value::Int(7)])
+    );
+    let child = prepared
+        .document_values(
+            IndexExpressionContext {
+                catalog: &Context,
+                expressions: &Context,
+            },
+            "public.child",
+            std::slice::from_ref(&key),
+            &Document::new(),
+        )
+        .unwrap();
+    assert_eq!(child[&key], Value::Row(vec![Value::Int(9)]));
 }

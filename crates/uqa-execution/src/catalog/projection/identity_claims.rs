@@ -15,7 +15,7 @@ use uqa_sql::{
 };
 
 mod relations;
-pub(crate) use relations::relation_claims;
+pub(crate) use relations::{legacy_relation_claims, relation_claims};
 
 pub fn catalog_oid_in_use(
     catalog: &CatalogReadView,

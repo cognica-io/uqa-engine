@@ -19,7 +19,7 @@ fn identities(engine: &Engine) -> Vec<uqa_sql::ResultRow> {
 }
 
 #[test]
-fn lost_partition_parent_preserves_rows_origins_and_independent_subtree_enforcement() {
+fn legacy_lost_partition_parent_preserves_rows_origins_and_independent_subtree_enforcement() {
     for provider in 0..3 {
         let (_directory, first, second) = sessions(provider);
         fixture(&first);
@@ -27,6 +27,7 @@ fn lost_partition_parent_preserves_rows_origins_and_independent_subtree_enforcem
         let factory = Arc::clone(first.storage.provider.as_ref().unwrap());
         let raw = factory.open_session().unwrap();
         raw.catalog.drop_table("public.p").unwrap();
+        legacy_index_registry(raw.catalog.as_ref());
         drop(second);
         drop(first);
         let restored = Engine::from_persistent_provider(Arc::clone(&factory)).unwrap();
@@ -60,6 +61,7 @@ fn later_restore_failure_rolls_back_parent_edges_and_local_constraint_state() {
         let factory = Arc::clone(first.storage.provider.as_ref().unwrap());
         let raw = factory.open_session().unwrap();
         raw.catalog.drop_table("public.p").unwrap();
+        legacy_index_registry(raw.catalog.as_ref());
         let before_rows = raw.catalog.load_tables().unwrap();
         raw.catalog.set_metadata("sql_triggers_json", "{").unwrap();
         drop(second);
@@ -122,6 +124,7 @@ fn legacy_partition_foreign_key_addresses_convert_with_and_without_the_original_
         if missing_parent {
             raw.catalog.drop_table("public.p").unwrap();
         }
+        legacy_index_registry(raw.catalog.as_ref());
         drop(second);
         drop(first);
         let restored = Engine::from_persistent_provider(factory).unwrap();
@@ -144,4 +147,39 @@ fn legacy_partition_foreign_key_addresses_convert_with_and_without_the_original_
             error(&restored, "INSERT INTO other VALUES(12)", "23503");
         }
     }
+}
+
+// These fixtures predate persisted constraint and partition indexes; current index graphs reject a missing parent.
+pub(super) fn legacy_index_registry(catalog: &dyn uqa_storage::CatalogFacade) {
+    for row in catalog.load_catalog_indexes().unwrap() {
+        let definition = crate::catalog_indexes::index_definition(&row).unwrap();
+        if !definition.relationships.is_empty() {
+            catalog.drop_catalog_index(&row.relation).unwrap();
+        }
+    }
+    for mut row in catalog.load_tables().unwrap() {
+        let mut columns: Vec<uqa_sql::ast::ColumnDef> =
+            serde_json::from_str(&row.columns_json).unwrap();
+        let mut constraints: uqa_sql::ast::TableConstraintSet =
+            serde_json::from_str(&row.constraints_json).unwrap();
+        for reference in columns
+            .iter_mut()
+            .filter_map(|column| column.references.as_mut())
+        {
+            reference.referenced_index = None;
+        }
+        for key in constraints
+            .foreign_keys
+            .iter_mut()
+            .chain(&mut constraints.hierarchy.partition_inherited_foreign_keys)
+        {
+            key.referenced_index = None;
+        }
+        row.columns_json = serde_json::to_string(&columns).unwrap();
+        row.constraints_json = serde_json::to_string(&constraints).unwrap();
+        catalog.save_table(&row).unwrap();
+    }
+    catalog
+        .delete_metadata("sql_index_registry_version")
+        .unwrap();
 }

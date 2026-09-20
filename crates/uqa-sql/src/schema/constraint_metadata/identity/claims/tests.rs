@@ -174,6 +174,18 @@ fn temporal_keys_do_not_reuse_an_ordinary_unique_constraint() {
 }
 
 #[test]
+fn equivalent_parent_keys_require_distinct_local_declarations() {
+    let (_, constraints) = declaration();
+    let mut target = constraints.key_constraints.clone();
+    let mut inherited = constraints.key_constraints;
+    inherited.push(inherited[0].clone());
+    let added = crate::schema::inheritance::alter::append_inherited_keys(&mut target, &inherited);
+    assert_eq!(added.len(), 1);
+    assert_eq!(target.len(), 2);
+    assert!(added[0].catalog_identity.is_none());
+}
+
+#[test]
 fn current_key_and_check_metadata_rejects_missing_or_cross_kind_duplicate_identities() {
     let (mut columns, mut constraints) = declaration();
     materialize_constraint_metadata(

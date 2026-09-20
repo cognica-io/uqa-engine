@@ -613,6 +613,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                         )?;
                         let foreign_key = ForeignKey {
                             referenced_key: None,
+                            referenced_index: None,
                             name,
                             object_id: None,
                             catalog_identity: None,

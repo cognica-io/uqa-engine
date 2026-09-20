@@ -214,6 +214,7 @@ pub fn prepare_index_definition(
     }
     Ok(crate::catalog::index::IndexDefinition {
         catalog: None,
+        relationships: crate::catalog::index::IndexRelationships::default(),
         key_names,
         key_types,
         included_columns: c.included_columns.clone(),

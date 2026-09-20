@@ -214,17 +214,30 @@ pub fn append_inherited_keys(
     target: &mut Vec<TableKeyConstraint>,
     inherited: &[TableKeyConstraint],
 ) -> Vec<TableKeyConstraint> {
+    append_inherited_keys_matching(target, inherited, |_, _| true)
+}
+
+/// Each parent index requires a distinct child. The caller supplies attachment eligibility independently of SQL key equivalence.
+pub fn append_inherited_keys_matching(
+    target: &mut Vec<TableKeyConstraint>,
+    inherited: &[TableKeyConstraint],
+    can_attach: impl Fn(&TableKeyConstraint, &TableKeyConstraint) -> bool,
+) -> Vec<TableKeyConstraint> {
     let mut appended = Vec::new();
+    let mut used = std::collections::BTreeSet::new();
     for constraint in inherited {
-        if target
-            .iter()
-            .any(|candidate| key_equivalent(candidate, constraint))
-        {
+        if let Some((position, _)) = target.iter().enumerate().find(|(position, candidate)| {
+            !used.contains(position)
+                && key_equivalent(candidate, constraint)
+                && can_attach(candidate, constraint)
+        }) {
+            used.insert(position);
             continue;
         }
         let mut constraint = constraint.clone();
         constraint.name = None;
         constraint.catalog_identity = None;
+        used.insert(target.len());
         target.push(constraint.clone());
         appended.push(constraint);
     }

@@ -99,7 +99,19 @@ pub(super) fn recursive_alter_children<S: Clone + 'static>(
     recurse: bool,
     action: &AlterTableAction,
 ) -> Result<Vec<String>, SQLError> {
-    let recursive = matches!(action, AlterTableAction::AddColumn { .. })
+    let partition_column = matches!(
+        action,
+        AlterTableAction::RenameColumn { .. } | AlterTableAction::DropColumn { .. }
+    ) && context
+        .hierarchy
+        .partitions
+        .catalog
+        .try_table_hierarchy(table)
+        .map_err(SQLError::Internal)?
+        .partition_spec
+        .is_some();
+    let recursive = partition_column
+        || matches!(action, AlterTableAction::AddColumn { .. })
         || matches!(action, AlterTableAction::AddCheckConstraint { constraint } if !constraint.no_inherit)
         || matches!(
             action,
@@ -149,12 +161,13 @@ pub(super) fn recursive_alter_children<S: Clone + 'static>(
             .catalog
             .direct_hierarchy_children(table);
     }
-    let requires_children = matches!(
-        action,
-        AlterTableAction::AddColumn { .. }
-            | AlterTableAction::AddCheckConstraint { .. }
-            | AlterTableAction::AddNotNullConstraint { .. }
-    );
+    let requires_children = partition_column
+        || matches!(
+            action,
+            AlterTableAction::AddColumn { .. }
+                | AlterTableAction::AddCheckConstraint { .. }
+                | AlterTableAction::AddNotNullConstraint { .. }
+        );
     if requires_children
         && !context
             .hierarchy

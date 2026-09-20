@@ -35,7 +35,7 @@ struct PreparedIndex {
 
 #[derive(Default)]
 pub struct PhysicalIndexDefinitions {
-    indexes: BTreeMap<String, PreparedIndex>,
+    indexes: BTreeMap<(String, String), PreparedIndex>,
 }
 
 struct CacheEntry {
@@ -87,7 +87,7 @@ impl PhysicalIndexDefinitions {
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?;
             if indexes
                 .insert(
-                    identity.physical_key.clone(),
+                    (row.table_name.clone(), identity.physical_key.clone()),
                     PreparedIndex {
                         table: row.table_name.clone(),
                         method: row.index_type.clone(),
@@ -107,7 +107,6 @@ impl PhysicalIndexDefinitions {
 
     pub fn indexable_fields(
         &self,
-        catalog: &dyn crate::schema::indexes::IndexBuildCatalog,
         table: &str,
         columns: &[ColumnDef],
         constraints: &[TableKeyConstraint],
@@ -128,22 +127,11 @@ impl PhysicalIndexDefinitions {
                     .map(ValueIndexKey::Column),
             );
         }
-        for (physical_key, index) in &self.indexes {
+        for ((_, physical_key), index) in &self.indexes {
             if !index.method.eq_ignore_ascii_case("btree") {
                 continue;
             }
-            let applies = index.table == table
-                || catalog
-                    .table_hierarchy(&index.table)
-                    .map_err(storage_error)?
-                    .partition_spec
-                    .is_some()
-                    && catalog
-                        .scan_tables(&index.table)
-                        .map_err(storage_error)?
-                        .iter()
-                        .any(|candidate| candidate == table);
-            if !applies {
+            if index.table != table {
                 continue;
             }
             if index.keys.iter().any(|key| key.column().is_none()) {
@@ -171,9 +159,14 @@ impl PhysicalIndexDefinitions {
                         document.get(column).cloned().unwrap_or(Value::Null)
                     }
                     ValueIndexKey::Index(key) => {
-                        let index = self.indexes.get(key).ok_or_else(|| {
-                            SQLError::Internal(format!("missing physical index definition {key}"))
-                        })?;
+                        let index = self
+                            .indexes
+                            .get(&(table.to_owned(), key.clone()))
+                            .ok_or_else(|| {
+                                SQLError::Internal(format!(
+                                    "missing physical index definition {key}"
+                                ))
+                            })?;
                         if index_predicate_accepts(
                             expressions,
                             table,
@@ -190,10 +183,6 @@ impl PhysicalIndexDefinitions {
             })
             .collect()
     }
-}
-
-fn storage_error(error: SQLError) -> StorageBackendError {
-    StorageBackendError::backend("physical index catalog", error)
 }
 
 pub mod rebuild;

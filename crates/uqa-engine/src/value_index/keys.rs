@@ -45,7 +45,7 @@ impl Engine {
         let columns = state.columns.snapshot();
         let constraints = state.key_constraints.snapshot();
         self.physical_index_definitions()?
-            .indexable_fields(self, &name, &columns, &constraints)
+            .indexable_fields(&name, &columns, &constraints)
     }
 
     pub(crate) fn value_index_document_values(

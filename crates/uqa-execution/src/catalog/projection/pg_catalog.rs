@@ -15,6 +15,7 @@ mod sequences;
 mod types;
 pub use attributes::{build_pg_attrdef, build_pg_attribute};
 pub use constraints::build_pg_constraint;
+pub(crate) use indexes::legacy::catalog_index_relations as legacy_index_relations;
 pub use indexes::{
     build_pg_index, build_pg_indexes, catalog_index_relations, index_access_method_oid,
     CatalogIndexRelation,

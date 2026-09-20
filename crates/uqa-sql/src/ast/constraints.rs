@@ -102,6 +102,9 @@ pub use uqa_core::catalog_identity::CatalogObjectIdentity as ConstraintCatalogId
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct ForeignKeyRef {
+    /// Incarnation of the selected unique index; names are retained only for diagnostics and legacy conversion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub referenced_index: Option<[u8; 16]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub referenced_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -265,6 +268,9 @@ pub struct DetachedPartitionConstraint {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct ForeignKey {
+    /// Incarnation of the selected unique index, retained across index and constraint renames.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub referenced_index: Option<[u8; 16]>,
     /// Name of the selected unique index in the referenced relation namespace.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub referenced_key: Option<String>,

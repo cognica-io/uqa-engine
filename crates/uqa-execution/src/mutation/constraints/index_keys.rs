@@ -145,10 +145,7 @@ impl EnforcedKeyExecution for EnforcedKey {
         ignored: Option<DocId>,
     ) -> Result<Option<DocId>, SQLError> {
         if self.keys.iter().any(|key| key.column().is_none()) {
-            let identity = self.index_catalog.as_ref().ok_or_else(|| {
-                SQLError::Internal("expression index has no physical identity".into())
-            })?;
-            let key = uqa_storage::ValueIndexKey::Index(identity.physical_key.clone());
+            let key = local_physical_key(self, context, table)?;
             let indexed = context
                 .indexes
                 .value_index_scan_key(
@@ -156,9 +153,7 @@ impl EnforcedKeyExecution for EnforcedKey {
                     &key,
                     &uqa_core::Predicate::Equals(Value::Row(values.to_vec())),
                 )?
-                .ok_or_else(|| {
-                    SQLError::Internal(format!("missing physical index {identity:?}"))
-                })?;
+                .ok_or_else(|| SQLError::Internal(format!("missing physical index {key:?}")))?;
             let changes = context
                 .reads
                 .command_overlay_changed_ids(table)?
@@ -236,4 +231,31 @@ impl EnforcedKeyExecution for EnforcedKey {
         }
         Ok(None)
     }
+}
+
+fn local_physical_key(
+    index: &EnforcedKey,
+    context: ConstraintContext<'_>,
+    table: &str,
+) -> Result<uqa_storage::ValueIndexKey, SQLError> {
+    let identity = index
+        .index_catalog
+        .as_ref()
+        .ok_or_else(|| SQLError::Internal("expression index has no physical identity".into()))?;
+    let local_keys = context
+        .catalog
+        .enforced_keys(table)
+        .map_err(SQLError::Internal)?;
+    let identity = local_keys
+        .iter()
+        .find(|key| {
+            key.index_catalog.as_ref().is_some_and(|candidate| {
+                candidate.identity.object_id == identity.identity.object_id
+            }) || key.index_ancestors.contains(&identity.identity.object_id)
+        })
+        .and_then(|key| key.index_catalog.as_ref())
+        .ok_or_else(|| SQLError::Internal("partition arbiter has no local index".into()))?;
+    Ok(uqa_storage::ValueIndexKey::Index(
+        identity.physical_key.clone(),
+    ))
 }

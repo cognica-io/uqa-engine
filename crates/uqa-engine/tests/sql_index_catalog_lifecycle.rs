@@ -167,6 +167,7 @@ fn assert_unnamed_index_catalog(engine: &Engine) {
         vec![
             ("items_body_idx", "gin"),
             ("items_embedding_idx", "ivf"),
+            ("items_pkey", "btree"),
             ("items_qty_idx", "btree"),
             ("items_qty_idx1", "btree"),
         ]
@@ -438,7 +439,7 @@ fn indexes_and_other_relations_cannot_share_one_schema_identity() {
 }
 
 fn assert_unnamed_index_storage(db: &Path) {
-    assert_eq!(catalog_index_count(db, "items"), 4);
+    assert_eq!(catalog_index_count(db, "items"), 5);
     assert_eq!(storage_count(db, "_btree_indexes", "items", "qty"), 1);
     assert_eq!(storage_count(db, "_btree_index_entries", "items", "qty"), 3);
     assert!(storage_count(db, "_occurrence_clusters", "items", "body") > 0);
@@ -470,7 +471,7 @@ fn unsupported_access_methods_have_no_current_or_reopen_side_effects() {
             );
         }
 
-        assert!(engine.list_catalog_indexes().unwrap().is_empty());
+        assert_eq!(index_identities(&engine), vec!["public.docs_pkey"]);
         assert!(engine
             .sql("SELECT * FROM fts_index_stats('docs')", &[])
             .unwrap()
@@ -478,7 +479,7 @@ fn unsupported_access_methods_have_no_current_or_reopen_side_effects() {
             .is_empty());
         assert_eq!(engine.table_field_analyzer("docs", "body").unwrap(), None);
         assert_no_text_index(&engine, "docs", "body");
-        assert_eq!(catalog_index_count(&db, "docs"), 0);
+        assert_eq!(catalog_index_count(&db, "docs"), 1);
         assert!(persisted_fts_fields(&db, "docs").is_empty());
         assert_eq!(
             storage_count(&db, "_occurrence_clusters", "docs", "body"),
@@ -487,10 +488,10 @@ fn unsupported_access_methods_have_no_current_or_reopen_side_effects() {
     }
 
     let reopened = Engine::open(&db).unwrap();
-    assert!(reopened.list_catalog_indexes().unwrap().is_empty());
+    assert_eq!(index_identities(&reopened), vec!["public.docs_pkey"]);
     assert_eq!(reopened.table_field_analyzer("docs", "body").unwrap(), None);
     assert_no_text_index(&reopened, "docs", "body");
-    assert_eq!(catalog_index_count(&db, "docs"), 0);
+    assert_eq!(catalog_index_count(&db, "docs"), 1);
     assert!(persisted_fts_fields(&db, "docs").is_empty());
 }
 
@@ -533,7 +534,7 @@ fn dropping_shared_gin_cleans_physical_state_only_after_the_last_reference() {
                 .into_iter()
                 .map(|row| row.relation.qualified_name())
                 .collect::<Vec<_>>(),
-            vec!["public.docs_body_gin_b"]
+            vec!["public.docs_body_gin_b", "public.docs_pkey"]
         );
         assert_shared_gin_is_live(&engine);
         assert!(storage_count(&db, "_occurrence_clusters", "docs", "body") > 0);
@@ -551,7 +552,7 @@ fn dropping_shared_gin_cleans_physical_state_only_after_the_last_reference() {
         assert_shared_gin_is_live(&engine);
         engine.sql("DROP INDEX docs_body_gin_b", &[]).unwrap();
 
-        assert!(engine.list_catalog_indexes().unwrap().is_empty());
+        assert_eq!(index_identities(&engine), vec!["public.docs_pkey"]);
         assert!(engine
             .sql("SELECT * FROM fts_index_stats('docs')", &[])
             .unwrap()
@@ -575,7 +576,7 @@ fn dropping_shared_gin_cleans_physical_state_only_after_the_last_reference() {
     }
 
     let reopened = Engine::open(&db).unwrap();
-    assert!(reopened.list_catalog_indexes().unwrap().is_empty());
+    assert_eq!(index_identities(&reopened), vec!["public.docs_pkey"]);
     assert!(reopened
         .sql("SELECT * FROM fts_index_stats('docs')", &[])
         .unwrap()

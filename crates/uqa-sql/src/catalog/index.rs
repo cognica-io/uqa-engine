@@ -11,6 +11,8 @@ use crate::ast::Expr;
 pub struct IndexDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catalog: Option<IndexCatalogIdentity>,
+    #[serde(default, skip_serializing_if = "IndexRelationships::is_empty")]
+    pub relationships: IndexRelationships,
     #[serde(default)]
     pub included_columns: Vec<String>,
     #[serde(default)]
@@ -35,6 +37,9 @@ pub struct IndexCatalogIdentity {
 }
 
 pub mod identity;
+
+mod relationships;
+pub use relationships::{can_attach_index, IndexAttachmentShape, IndexRelationships};
 
 mod enforced_key;
 pub use enforced_key::{referenceable_keys, EnforcedKey};

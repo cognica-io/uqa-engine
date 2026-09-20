@@ -10,53 +10,28 @@ use super::{CatalogReadView, SQLError};
 
 impl CatalogReadView {
     pub fn has_constraint_index(&self, relation: &uqa_core::RelationIdentity) -> bool {
-        self.snapshot.tables.iter().any(|(table, snapshot)| {
-            table.schema == relation.schema
-                && snapshot
-                    .keys
-                    .iter()
-                    .any(|key| key.name.as_ref() == Some(&relation.name))
-        })
+        self.snapshot
+            .definitions
+            .catalog_indexes
+            .get(relation)
+            .is_some_and(|row| {
+                crate::catalog::index::index_definition(row)
+                    .is_ok_and(|definition| definition.relationships.owning_constraint.is_some())
+            })
     }
 
     pub fn constraint_index(
         &self,
         relation: &uqa_core::RelationIdentity,
     ) -> Result<Option<uqa_storage::CatalogIndexRow>, SQLError> {
-        for (table, snapshot) in &self.snapshot.tables {
-            if table.schema != relation.schema {
-                continue;
-            }
-            let Some(key) = snapshot
-                .keys
-                .iter()
-                .find(|key| key.name.as_ref() == Some(&relation.name))
-            else {
-                continue;
-            };
-            let definition = uqa_sql::catalog::index::IndexDefinition {
-                unique: true,
-                nulls_not_distinct: key.nulls_not_distinct,
-                ..Default::default()
-            };
-            return Ok(Some(uqa_storage::CatalogIndexRow {
-                relation: relation.clone(),
-                table_name: table.qualified_name(),
-                index_type: if key.without_overlaps {
-                    "gist"
-                } else {
-                    "btree"
-                }
-                .into(),
-                columns_json: serde_json::to_string(&key.columns)
-                    .map_err(|error| SQLError::Internal(error.to_string()))?,
-                parameters_json: "{}".into(),
-                definition_json: Some(
-                    serde_json::to_string(&definition)
-                        .map_err(|error| SQLError::Internal(error.to_string()))?,
-                ),
-            }));
-        }
-        Ok(None)
+        let Some(row) = self.snapshot.definitions.catalog_indexes.get(relation) else {
+            return Ok(None);
+        };
+        let definition = crate::catalog::index::index_definition(row)
+            .map_err(|error| SQLError::Internal(error.to_string()))?;
+        Ok(definition
+            .relationships
+            .owning_constraint
+            .map(|_| row.clone()))
     }
 }

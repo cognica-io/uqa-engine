@@ -9,6 +9,7 @@ use uqa_sql::{ast::DropStmt, SQLError, SQLResult};
 use uqa_storage::CatalogIndexRow;
 mod binding;
 mod context;
+mod tree;
 pub use context::*;
 
 pub fn run_drop_index(
@@ -37,8 +38,9 @@ pub fn run_drop_index(
             context.catalog.has_constraint_index(&index.relation),
         )?;
     }
+    let tree = tree::bind_removals(context, &indexes, stmt.cascade)?;
     let mut dependents = std::collections::BTreeSet::new();
-    for index in &indexes {
+    for index in tree.values() {
         let referrers = context
             .referrers
             .referrers_to(&index.table_name)
@@ -47,6 +49,12 @@ pub fn run_drop_index(
             })?;
         uqa_sql::schema::indexes::removal::collect_index_dependents(
             &index.relation.name,
+            crate::catalog::index::index_definition(index)
+                .map_err(|error| ddl_storage_error("DROP INDEX identity", error))?
+                .catalog
+                .ok_or_else(|| SQLError::Internal("index has no identity".into()))?
+                .identity
+                .object_id,
             referrers,
             stmt.cascade,
             &mut dependents,
@@ -63,8 +71,8 @@ pub fn run_drop_index(
                 &context.constraints,
                 targets,
             )?;
+            drop_tree_side_effects(context, &tree)?;
             for row in indexes {
-                drop_index_side_effects(context, &row)?;
                 context
                     .publication
                     .drop_catalog_index_relation(&row.relation)
@@ -106,9 +114,11 @@ fn lock_index_partitions(context: &IndexRemovalContext<'_>, table: &str) -> Resu
 fn drop_index_side_effects(
     context: &IndexRemovalContext<'_>,
     row: &CatalogIndexRow,
+    survivors: &[CatalogIndexRow],
+    removed_fields: &mut std::collections::BTreeSet<(String, String)>,
 ) -> Result<(), SQLError> {
     if row.index_type.eq_ignore_ascii_case("gin") {
-        drop_gin_index_side_effects(context, row)?;
+        drop_gin_index_side_effects(context, row, survivors, removed_fields)?;
     } else if row.index_type.eq_ignore_ascii_case("ivf")
         || row.index_type.eq_ignore_ascii_case("hnsw")
     {
@@ -120,6 +130,8 @@ fn drop_index_side_effects(
 fn drop_gin_index_side_effects(
     context: &IndexRemovalContext<'_>,
     row: &CatalogIndexRow,
+    indexes: &[CatalogIndexRow],
+    removed_fields: &mut std::collections::BTreeSet<(String, String)>,
 ) -> Result<(), SQLError> {
     let fields: std::collections::BTreeSet<String> =
         uqa_sql::schema::indexes::removal::catalog_index_columns(
@@ -129,12 +141,10 @@ fn drop_gin_index_side_effects(
         )?
         .into_iter()
         .collect();
-    let indexes = context
-        .catalog
-        .list_catalog_indexes()
-        .map_err(|err| ddl_storage_error("DROP INDEX", err))?;
-
     for field in fields {
+        if !removed_fields.insert((row.table_name.clone(), field.clone())) {
+            continue;
+        }
         let still_referenced = uqa_sql::schema::indexes::removal::gin_field_is_referenced(
             &row.relation,
             &row.table_name,
@@ -150,7 +160,7 @@ fn drop_gin_index_side_effects(
         )?;
         if still_referenced {
             let mut named_owner_remains = false;
-            for candidate in &indexes {
+            for candidate in indexes {
                 if candidate.relation == row.relation
                     || candidate.table_name != row.table_name
                     || !candidate.index_type.eq_ignore_ascii_case("gin")
@@ -253,10 +263,29 @@ pub fn drop_index_dependency(
         .bound_catalog_index(&relation.qualified_name())
         .map_err(|error| ddl_storage_error("DROP INDEX dependency", error))?
         .ok_or_else(|| SQLError::Internal("dependent index disappeared".into()))?;
-    drop_index_side_effects(context, &row)?;
+    let tree = tree::bind_removals(context, &[row], true)?;
+    drop_tree_side_effects(context, &tree)?;
     context
         .publication
         .drop_catalog_index_relation(relation)
         .map_err(|error| ddl_storage_error("DROP INDEX dependency", error))?;
+    Ok(())
+}
+
+fn drop_tree_side_effects(
+    context: &IndexRemovalContext<'_>,
+    tree: &std::collections::BTreeMap<uqa_core::RelationIdentity, CatalogIndexRow>,
+) -> Result<(), SQLError> {
+    let survivors = context
+        .catalog
+        .list_catalog_indexes()
+        .map_err(|error| ddl_storage_error("DROP INDEX survivors", error))?
+        .into_iter()
+        .filter(|row| !tree.contains_key(&row.relation))
+        .collect::<Vec<_>>();
+    let mut removed_fields = std::collections::BTreeSet::new();
+    for row in tree.values() {
+        drop_index_side_effects(context, row, &survivors, &mut removed_fields)?;
+    }
     Ok(())
 }

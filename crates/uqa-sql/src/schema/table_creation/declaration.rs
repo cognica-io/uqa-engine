@@ -123,6 +123,7 @@ pub fn bind_created_table_foreign_keys(
     c: &mut CreateTable,
     registered_columns: &mut [ColumnDef],
 ) -> Result<(), SQLError> {
+    let local_columns = registered_columns.to_vec();
     for column in registered_columns {
         let Some(reference) = column.references.clone() else {
             continue;
@@ -131,7 +132,7 @@ pub fn bind_created_table_foreign_keys(
         super::super::foreign_keys::validate_bound_foreign_key_definition_with_local_state(
             context,
             &c.name,
-            None,
+            Some(&local_columns),
             Some(&c.key_constraints),
             &mut foreign_key,
         )?;
@@ -146,6 +147,7 @@ pub fn bind_created_table_foreign_keys(
             ));
         };
         reference.referenced_key = foreign_key.referenced_key;
+        reference.referenced_index = foreign_key.referenced_index;
         reference.table = foreign_key.ref_table;
         reference.column = Some(referenced_column.clone());
     }
@@ -153,7 +155,7 @@ pub fn bind_created_table_foreign_keys(
         super::super::foreign_keys::validate_bound_foreign_key_definition_with_local_state(
             context,
             &c.name,
-            None,
+            Some(&local_columns),
             Some(&c.key_constraints),
             foreign_key,
         )?;

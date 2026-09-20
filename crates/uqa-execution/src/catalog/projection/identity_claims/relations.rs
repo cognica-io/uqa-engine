@@ -20,6 +20,21 @@ pub(crate) fn relation_claims(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<Vec<RelationClaim>, SQLError> {
+    collect_relation_claims(catalog, resolution, false)
+}
+
+pub(crate) fn legacy_relation_claims(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+) -> Result<Vec<RelationClaim>, SQLError> {
+    collect_relation_claims(catalog, resolution, true)
+}
+
+fn collect_relation_claims(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    legacy: bool,
+) -> Result<Vec<RelationClaim>, SQLError> {
     let snapshot = catalog.snapshot();
     let definitions = &snapshot.definitions;
     let mut claims = uqa_sql::catalog::SystemRelation::all()
@@ -64,7 +79,12 @@ pub(crate) fn relation_claims(
             stable_object_oid("relation", object_id),
         );
     }
-    for index in super::super::pg_catalog::catalog_index_relations(catalog, resolution)? {
+    let indexes = if legacy {
+        super::super::pg_catalog::legacy_index_relations(catalog, resolution)?
+    } else {
+        super::super::pg_catalog::catalog_index_relations(catalog, resolution)?
+    };
+    for index in indexes {
         let oid = index.oid();
         claims.push(RelationClaim {
             relation: index.relation,

@@ -297,8 +297,18 @@ impl Engine {
     ) -> StorageBackendResult<bool> {
         let field = field.into();
         self.with_implicit_storage_transaction(|engine| {
-            engine.install_vector_field(table, field, dimensions, spec, true, true)
+            engine.rebuild_vector_field_in_transaction(table, field, dimensions, spec)
         })
+    }
+
+    pub(crate) fn rebuild_vector_field_in_transaction(
+        &self,
+        table: &str,
+        field: impl Into<FieldName>,
+        dimensions: u32,
+        spec: VectorIndexSpec,
+    ) -> StorageBackendResult<bool> {
+        self.install_vector_field(table, field.into(), dimensions, spec, true, true)
     }
 
     pub(crate) fn rebuild_vector_field(

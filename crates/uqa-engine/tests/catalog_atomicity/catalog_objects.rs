@@ -114,7 +114,7 @@ fn sqlite_reopen_preserves_structural_ownership_for_every_relation_kind() {
                 [],
                 |row| row.get(0),
             )?;
-            assert_eq!(rows, 4);
+            assert_eq!(rows, 5);
             let kinds: String = conn.query_row(
                 "SELECT group_concat(kind, ',') FROM (
                      SELECT kind FROM _relations WHERE schema_name = 'app' ORDER BY kind
@@ -122,7 +122,7 @@ fn sqlite_reopen_preserves_structural_ownership_for_every_relation_kind() {
                 [],
                 |row| row.get(0),
             )?;
-            assert_eq!(kinds, "foreign_table,sequence,table,view");
+            assert_eq!(kinds, "foreign_table,index,sequence,table,view");
             Ok(())
         })
         .unwrap();

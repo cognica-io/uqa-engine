@@ -157,28 +157,7 @@ fn create_after_preflight(
             .create_vector_field(&table.name, field, dimensions)
             .map_err(|error| storage_error("CREATE TABLE vector field", error))?;
     }
-    for column in &table.columns {
-        context
-            .schema_transactions
-            .with_schema_write(Box::new(|schema| {
-                publication::register_column(
-                    schema,
-                    &table.name,
-                    column.clone(),
-                    Some(&table.columns),
-                )
-            }))
-            .map_err(|error| storage_error("CREATE TABLE column", error))?;
-    }
-    let mut registered_columns = context
-        .analysis
-        .foreign_keys
-        .columns
-        .try_describe_table(&table.name)
-        .map_err(|error| {
-            uqa_sql::catalog::errors::storage_error("CREATE TABLE columns", error.as_ref())
-        })?
-        .ok_or_else(|| SQLError::UnknownTable(table.name.clone()))?;
+    let mut registered_columns = table.columns.clone();
     declaration::bind_created_table_foreign_keys(
         &context.analysis.foreign_keys,
         &mut table,

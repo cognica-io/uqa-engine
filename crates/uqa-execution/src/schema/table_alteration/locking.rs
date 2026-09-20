@@ -286,6 +286,23 @@ fn locks_all_descendants<S: Clone + 'static>(
     recurse: bool,
     action: &AlterTableAction,
 ) -> Result<bool, SQLError> {
+    if matches!(
+        action,
+        AlterTableAction::AddKeyConstraint { .. }
+            | AlterTableAction::DropConstraint { .. }
+            | AlterTableAction::RenameColumn { .. }
+            | AlterTableAction::DropColumn { .. }
+    ) && context
+        .hierarchy
+        .partitions
+        .catalog
+        .try_table_hierarchy(parent)
+        .map_err(|error| SQLError::Internal(error.to_string()))?
+        .partition_spec
+        .is_some()
+    {
+        return Ok(true);
+    }
     // PostgreSQL prepares ADD CONSTRAINT by locking every inheritor before execution can merge a constraint or stop its propagation with NO INHERIT.
     if matches!(
         action,

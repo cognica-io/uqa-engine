@@ -20,6 +20,7 @@ impl Engine {
             types: self,
             bindings: self.schema_dependency_binding_context(),
             identities: self.catalog_identity_reservation_context(),
+            indexes: self.index_registry_context(),
         }
     }
 }

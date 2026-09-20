@@ -64,7 +64,7 @@ pub struct ConstraintCatalogColumn {
 
 #[derive(Debug, Clone)]
 pub struct ForeignKeyCatalogData {
-    pub referenced_key: Option<String>,
+    pub referenced_index: Option<[u8; 16]>,
     pub schema: String,
     pub table: String,
     pub column_ordinals: Vec<i64>,
@@ -511,46 +511,30 @@ fn foreign_key_catalog_row(
         referenced_columns,
         &referenced_name,
     )?;
-    let mut referenced_keys = referenced.keys.as_ref().clone();
-    for column in referenced_columns.iter() {
-        let kind = if column.primary_key {
-            Some(TableKeyConstraintKind::PrimaryKey)
-        } else if column.unique {
-            Some(TableKeyConstraintKind::Unique)
-        } else {
-            None
-        };
-        let Some(kind) = kind else {
-            continue;
-        };
-        if referenced_keys.iter().any(|constraint| {
-            constraint.kind == kind
-                && constraint.columns.as_slice() == std::slice::from_ref(&column.name)
-        }) {
-            continue;
-        }
-        referenced_keys.push(uqa_sql::ast::TableKeyConstraint {
-            catalog_identity: None,
-            name: None,
-            kind,
-            columns: vec![column.name.clone()],
-            nulls_not_distinct: false,
-            without_overlaps: false,
-        });
-    }
-    let referenced_key = referenced_keys.iter().find(|constraint| {
-        constraint.columns.len() == foreign_key.ref_columns.len()
-            && foreign_key
-                .ref_columns
-                .iter()
-                .all(|column| constraint.columns.contains(column))
-    });
+    let referenced_key = catalog
+        .catalog_indexes()
+        .find(|row| {
+            crate::catalog::index::index_definition(row)
+                .ok()
+                .is_some_and(|definition| {
+                    definition.catalog.is_some_and(|identity| {
+                        Some(identity.identity.object_id) == foreign_key.referenced_index
+                    })
+                })
+        })
+        .map(|row| serde_json::from_str::<Vec<uqa_sql::ast::IndexKey>>(&row.columns_json))
+        .transpose()
+        .map_err(|error| SQLError::Internal(error.to_string()))?;
     let positions_in_unique_constraint = foreign_key
         .ref_columns
         .iter()
         .map(|column| {
             referenced_key
-                .and_then(|constraint| constraint.columns.iter().position(|item| item == column))
+                .as_ref()
+                .and_then(|keys| {
+                    keys.iter()
+                        .position(|key| key.column() == Some(column.as_str()))
+                })
                 .map(|index| catalog_ordinal(index, "referenced key column"))
                 .transpose()
         })
@@ -570,10 +554,7 @@ fn foreign_key_catalog_row(
         ),
         period: foreign_key.period,
         foreign_key: Some(ForeignKeyCatalogData {
-            referenced_key: foreign_key
-                .referenced_key
-                .clone()
-                .or_else(|| referenced_key.and_then(|key| key.name.clone())),
+            referenced_index: foreign_key.referenced_index,
             schema: referenced_schema,
             table: referenced_table,
             column_ordinals: referenced_column_rows

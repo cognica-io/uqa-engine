@@ -86,7 +86,19 @@ impl Engine {
             &resolution,
             mode.allows_migration(),
         )?;
-        for row in rows {
+        for (relation, columns, constraints) in rows.schemas {
+            let state = uqa_execution::schema::publication::TableSchemaCatalog::table_state(
+                self,
+                &relation.qualified_name(),
+            )?
+            .ok_or_else(|| StorageBackendError::Other("restored index owner disappeared".into()))?;
+            state.publish_constraints(columns, constraints);
+        }
+        uqa_execution::schema::indexes::registry::build_restored_partition_indexes(
+            &self.index_registry_context(),
+            &rows.builds,
+        )?;
+        for row in rows.rows {
             self.durable
                 .catalog_indexes
                 .write()

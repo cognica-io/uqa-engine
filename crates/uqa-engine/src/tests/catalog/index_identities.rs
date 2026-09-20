@@ -144,6 +144,9 @@ fn legacy_physical_keys_and_catalog_addresses_are_preserved_during_initial_conve
         raw.catalog
             .delete_metadata("sql_index_catalog_identity_version")
             .unwrap();
+        raw.catalog
+            .delete_metadata("sql_index_registry_version")
+            .unwrap();
         drop(second);
         drop(first);
         let restored = Engine::from_persistent_provider(factory).unwrap();
@@ -181,6 +184,9 @@ fn later_index_restore_failure_rolls_back_identity_conversion_and_its_marker() {
         raw.catalog.save_catalog_index_row(&legacy).unwrap();
         raw.catalog
             .delete_metadata("sql_index_catalog_identity_version")
+            .unwrap();
+        raw.catalog
+            .delete_metadata("sql_index_registry_version")
             .unwrap();
         drop(second);
         drop(first);

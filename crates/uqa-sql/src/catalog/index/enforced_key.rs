@@ -14,6 +14,8 @@ pub struct EnforcedKey {
     pub keys: Vec<IndexKey>,
     pub index: Option<uqa_core::RelationIdentity>,
     pub index_catalog: Option<super::IndexCatalogIdentity>,
+    /// Ordered parent incarnations used to bind a partition-root arbiter to its local physical index.
+    pub index_ancestors: Vec<[u8; 16]>,
     pub predicate: Option<Box<Expr>>,
     pub constraint_owned: bool,
 }
@@ -37,6 +39,7 @@ impl From<TableKeyConstraint> for EnforcedKey {
                 .collect(),
             index: None,
             index_catalog: None,
+            index_ancestors: Vec::new(),
             constraint,
             predicate: None,
             constraint_owned: true,

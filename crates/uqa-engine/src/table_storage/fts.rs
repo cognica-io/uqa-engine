@@ -30,7 +30,7 @@ impl Engine {
         })
     }
 
-    pub(super) fn add_fts_field_with_analyzer_inner(
+    pub(crate) fn add_fts_field_with_analyzer_inner(
         &self,
         table: &str,
         field: FieldName,

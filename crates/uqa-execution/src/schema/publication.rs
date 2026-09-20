@@ -62,6 +62,7 @@ pub struct SchemaPublicationContext<'a> {
     pub types: &'a dyn FunctionTypeResolver,
     pub bindings: SchemaDependencyBindingContext<'a>,
     pub identities: crate::catalog::identity::CatalogIdentityReservationContext<'a>,
+    pub indexes: super::indexes::registry::IndexRegistryContext<'a>,
 }
 
 impl<'a> SchemaPublicationContext<'a> {
@@ -174,12 +175,20 @@ pub fn register_column(
     let mut constraints = state.constraints();
     constraints.columns_declared = Some(true);
     materialize_metadata(context, &table_name, &mut columns, &mut constraints)?;
+    let indexes = super::indexes::registry::prepare_constraint_indexes(
+        &context.indexes,
+        &table_name,
+        state.object_id(),
+        &mut columns,
+        &mut constraints,
+    )?;
     let state = current_table_state(context.catalog, &table_name, state.as_ref())?;
     state.mark_statistics_dirty()?;
     state.persist_candidate(&columns, &constraints)?;
     let hierarchy = std::mem::take(&mut constraints.hierarchy);
     state.publish_columns(true, columns, constraints);
     state.publish_hierarchy(hierarchy);
+    indexes.publish(&context.indexes)?;
     if legacy_auto_increment {
         state.persist_next_id()?;
     }
@@ -205,6 +214,17 @@ pub fn replace_constraint_state(
             || !columns.is_empty(),
     );
     for column in &mut columns {
+        if let Some(default) = &mut column.default {
+            regclass::bind_sequence_references_in_expr(context.bindings.references, default)
+                .map_err(StorageBackendError::Other)?;
+        }
+        if let Some(generated) = &mut column.generated {
+            regclass::bind_sequence_references_in_expr(
+                context.bindings.references,
+                &mut generated.expression,
+            )
+            .map_err(StorageBackendError::Other)?;
+        }
         if let Some(reference) = &mut column.references {
             reference.table = resolve_table_name(context.catalog, &reference.table)?;
         }
@@ -220,6 +240,13 @@ pub fn replace_constraint_state(
     )
     .map_err(StorageBackendError::Other)?;
     materialize_metadata(context, &table_name, &mut columns, &mut constraints)?;
+    let indexes = super::indexes::registry::prepare_constraint_indexes(
+        &context.indexes,
+        &table_name,
+        state.object_id(),
+        &mut columns,
+        &mut constraints,
+    )?;
     let state = current_table_state(context.catalog, &table_name, state.as_ref())?;
     state.persist_candidate(&columns, &constraints)?;
     let hierarchy = std::mem::take(&mut constraints.hierarchy);
@@ -229,6 +256,7 @@ pub fn replace_constraint_state(
         constraints,
     );
     state.publish_hierarchy(hierarchy);
+    indexes.publish(&context.indexes)?;
     state.mark_statistics_dirty()?;
     state.refresh_value_indexes()?;
     Ok(())

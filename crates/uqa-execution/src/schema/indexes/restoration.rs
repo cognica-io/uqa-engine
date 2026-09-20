@@ -18,7 +18,7 @@ fn invalid(message: impl ToString) -> StorageBackendError {
     StorageBackendError::Other(message.to_string())
 }
 
-pub fn restore(
+fn restore_addresses(
     storage: &dyn CatalogFacade,
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
@@ -35,8 +35,12 @@ pub fn restore(
     };
     let mut rows = storage.load_catalog_indexes()?;
     let (candidate, names) = candidate_catalog(catalog, &rows)?;
-    let claims =
-        crate::catalog::projection::relation_claims(&candidate, resolution).map_err(invalid)?;
+    let claims = if storage.get_metadata(registry::REGISTRY_VERSION)?.is_some() {
+        crate::catalog::projection::relation_claims(&candidate, resolution)
+    } else {
+        crate::catalog::projection::legacy_relation_claims(&candidate, resolution)
+    }
+    .map_err(invalid)?;
     let mut occupied = claims
         .iter()
         .filter(|claim| !names.contains(&claim.relation))
@@ -61,7 +65,7 @@ pub fn restore(
                 .map_err(invalid)?;
             if !occupied.insert(identity.identity.oid)
                 || !objects.insert(identity.identity.object_id)
-                || !physical.insert(identity.physical_key.clone())
+                || !physical.insert((identity.table_object_id, identity.physical_key.clone()))
             {
                 return Err(invalid(
                     "duplicate index catalog identity or physical namespace",
@@ -74,7 +78,6 @@ pub fn restore(
             )));
         }
     }
-    let mut converted = Vec::new();
     for (row, definition) in rows.iter_mut().zip(&mut definitions) {
         if definition.catalog.is_some() {
             continue;
@@ -96,7 +99,10 @@ pub fn restore(
             oid = crate::catalog::identity::allocate_catalog_oid("relation").map_err(invalid)?;
         }
         let physical_key = row.relation.qualified_name();
-        if !physical.insert(physical_key.clone()) {
+        if !physical.insert((
+            candidate.snapshot().tables[&table].object_id,
+            physical_key.clone(),
+        )) {
             return Err(invalid("duplicate legacy physical index namespace"));
         }
         definition.catalog = Some(IndexCatalogIdentity {
@@ -105,13 +111,6 @@ pub fn restore(
             physical_key,
         });
         row.definition_json = Some(serde_json::to_string(definition)?);
-        converted.push(row.clone());
-    }
-    for row in converted {
-        storage.save_catalog_index_row(&row)?;
-    }
-    if !current {
-        storage.set_metadata(VERSION, "1")?;
     }
     Ok(rows)
 }
@@ -123,6 +122,7 @@ fn candidate_catalog(
     let mut snapshot = catalog.snapshot().clone();
     let mut names = BTreeSet::new();
     for row in rows {
+        let definition = crate::catalog::index::index_definition(row)?;
         if !names.insert(row.relation.clone()) {
             return Err(invalid("duplicate stored index name"));
         }
@@ -143,10 +143,13 @@ fn candidate_catalog(
             || snapshot.definitions.sequences.contains_key(&row.relation)
             || snapshot.tables.iter().any(|(table, state)| {
                 table.schema == row.relation.schema
-                    && state
-                        .keys
-                        .iter()
-                        .any(|key| key.name.as_ref() == Some(&row.relation.name))
+                    && state.keys.iter().any(|key| {
+                        key.name.as_ref() == Some(&row.relation.name)
+                            && (definition.relationships.owning_constraint.is_none()
+                                || table.qualified_name() != row.table_name
+                                || key.catalog_identity.map(|id| id.object_id)
+                                    != definition.relationships.owning_constraint)
+                    })
             })
         {
             return Err(invalid(format!(
@@ -165,3 +168,8 @@ fn candidate_catalog(
 
 #[cfg(test)]
 mod tests;
+
+mod legacy;
+mod registry;
+mod tables;
+pub use registry::{restore, RestoredIndexCatalog};
