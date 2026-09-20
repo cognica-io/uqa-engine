@@ -255,7 +255,9 @@ fn rename_view(
         new_name,
         "ALTER VIEW RENAME TO",
     )?;
-    context.creation.reserve_name(&target.qualified_name())?;
+    context
+        .creation
+        .reserve_row_type_name(&target.qualified_name())?;
     rewrite_relation_rename_dependents(context.dependencies, relation, &target).map_err(
         |error| {
             SQLError::Internal(format!(

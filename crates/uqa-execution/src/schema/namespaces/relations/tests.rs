@@ -187,6 +187,9 @@ impl DatabasePrivilegeCatalog for Fixture {
     }
 }
 impl CreationRelationGuards for Fixture {
+    fn named_type_exists(&self, _: &RelationIdentity) -> bool {
+        false
+    }
     fn tables(&self) -> Box<dyn CreationRelationNames + '_> {
         self.events.borrow_mut().push("table_names");
         Box::new(EmptyNames)

@@ -31,7 +31,9 @@ mod type_names;
 use procedures::lookup_regprocedure_oid;
 pub use procedures::resolve_regprocedure_input_oid;
 
-pub use type_names::{resolve_catalog_column_type, resolve_catalog_domain_type_by_oid};
+pub use type_names::{
+    named_type_exists, resolve_catalog_column_type, resolve_catalog_domain_type_by_oid,
+};
 
 fn cross_database_reference(name: &str) -> SQLError {
     SQLError::Unsupported(format!(

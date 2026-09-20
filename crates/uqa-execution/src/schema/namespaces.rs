@@ -12,6 +12,7 @@ pub mod privileges;
 pub mod relation_names;
 pub mod removal;
 pub mod restoration;
+pub mod type_names;
 
 use crate::catalog::security::roles::RoleCatalogGuards;
 use crate::catalog::security::roles::{

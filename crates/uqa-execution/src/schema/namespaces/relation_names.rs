@@ -21,10 +21,26 @@ pub fn reserve_relation_name(
     relation: &RelationIdentity,
     in_use: impl FnOnce() -> Result<bool, SQLError>,
 ) -> Result<(), SQLError> {
+    reserve_catalog_name(
+        session,
+        relation,
+        RELATION_CATALOG_CLASS_ID,
+        "pg_class_relname_nsp_index",
+        in_use,
+    )
+}
+
+pub(super) fn reserve_catalog_name(
+    session: &dyn SharedObjectLockSession,
+    identity: &RelationIdentity,
+    class_id: u32,
+    index: &str,
+    in_use: impl FnOnce() -> Result<bool, SQLError>,
+) -> Result<(), SQLError> {
     let guard = session.acquire_shared_catalog(
         SharedCatalogLock::Name {
-            class_id: RELATION_CATALOG_CLASS_ID,
-            name: &relation.qualified_name(),
+            class_id,
+            name: &identity.qualified_name(),
         },
         RelationLockMode::AccessExclusive,
     )?;
@@ -32,9 +48,7 @@ pub fn reserve_relation_name(
     if in_use()? {
         return Err(SQLError::Routine {
             sqlstate: "23505".into(),
-            message:
-                "duplicate key value violates unique constraint \"pg_class_relname_nsp_index\""
-                    .into(),
+            message: format!("duplicate key value violates unique constraint \"{index}\""),
         });
     }
     guard.retain();

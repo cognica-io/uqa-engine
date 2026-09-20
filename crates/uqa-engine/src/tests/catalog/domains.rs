@@ -9,6 +9,8 @@
 use crate::tests::relation_lock_support::{before_commit, error, reopen, sessions, sql};
 use uqa_core::Value;
 
+mod type_names;
+
 #[test]
 fn domains_with_matching_constraint_names_commit_independently() {
     for provider in 0..3 {

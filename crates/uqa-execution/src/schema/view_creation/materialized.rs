@@ -116,7 +116,7 @@ pub fn register_materialized_view_plan(
         };
         context.namespace.retain_owner(&owner)?;
         context.namespace.ensure_create(&name)?;
-        context.namespace.reserve_name(&name)?;
+        context.namespace.reserve_row_type_name(&name)?;
         let materialized_column_types = query_schema.column_types().to_vec();
         let materialized_rows = if with_no_data {
             Vec::new()

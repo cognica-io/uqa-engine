@@ -9,17 +9,13 @@
 use crate::Engine;
 use uqa_execution::schema::domains::{DomainCreationContext, DomainDeclarationBinding};
 use uqa_sql::catalog::roles::RoleReference;
-use uqa_sql::{
-    ast::CreateDomain, catalog::domain::StoredDomain, schema::domains::DomainCreationCatalog,
-    SQLError,
-};
+use uqa_sql::{ast::CreateDomain, catalog::domain::StoredDomain, SQLError};
 
 impl Engine {
     pub(crate) fn domain_creation_context(&self) -> DomainCreationContext<'_> {
         DomainCreationContext {
             creation: self.relation_creation_context(),
             writer: self,
-            catalog: self,
             bindings: self,
             allocate_identity: || {
                 crate::new_nonzero_catalog_identity("domain", "object identity")
@@ -28,20 +24,6 @@ impl Engine {
             publication: self,
             changes: self,
         }
-    }
-}
-impl DomainCreationCatalog for Engine {
-    fn domain_type_exists(&self, name: &str) -> bool {
-        uqa_execution::catalog::projection::resolve_catalog_column_type(
-            &self.catalog_execution(),
-            name,
-        )
-        .is_some()
-    }
-    fn domain_table_exists(&self, name: &str) -> Result<bool, SQLError> {
-        self.try_table(name)
-            .map(|table| table.is_some())
-            .map_err(|error| SQLError::Internal(error.to_string()))
     }
 }
 impl DomainDeclarationBinding for Engine {

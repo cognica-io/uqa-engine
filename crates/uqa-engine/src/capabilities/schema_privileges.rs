@@ -103,6 +103,12 @@ impl<T, G: std::ops::Deref<Target = BTreeMap<RelationIdentity, T>>> CreationRela
     }
 }
 impl CreationRelationGuards for Engine {
+    fn named_type_exists(&self, identity: &RelationIdentity) -> bool {
+        uqa_execution::catalog::projection::named_type_exists(
+            self.durable.domains.read().values(),
+            identity,
+        )
+    }
     fn tables(&self) -> Box<dyn CreationRelationNames + '_> {
         Box::new(CreationNamesGuard(self.storage.tables.read()))
     }

@@ -17,6 +17,8 @@ use std::{
     collections::BTreeMap,
 };
 
+mod type_names;
+
 struct Catalog {
     path: RefCell<Vec<String>>,
     schemas: RefCell<BTreeMap<String, BoundSchemaSecurity>>,

@@ -393,7 +393,7 @@ impl Engine {
             )));
         }
         self.relation_creation_context()
-            .reserve_name(&to)
+            .reserve_row_type_name(&to)
             .map_err(|error| StorageBackendError::backend("ALTER TABLE name", error))?;
         let persist_catalog = {
             let tables = self.storage.tables.read();

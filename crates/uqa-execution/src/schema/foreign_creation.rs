@@ -236,7 +236,7 @@ impl ForeignCreationContext<'_> {
             ),
         )?;
         self.ensure_foreign_server_exists(&server_name)?;
-        self.creation.reserve_name(name)?;
+        self.creation.reserve_row_type_name(name)?;
         let mut opt_map: std::collections::BTreeMap<String, String> =
             std::collections::BTreeMap::new();
         for (k, v) in options {

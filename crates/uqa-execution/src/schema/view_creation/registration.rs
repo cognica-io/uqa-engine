@@ -189,7 +189,7 @@ fn register_view_plan_inner(
         &view.rewrite_definition(),
     )?;
     if existing_view.is_none() {
-        context.namespace.reserve_name(&name)?;
+        context.namespace.reserve_row_type_name(&name)?;
     }
     publication::publish_regular_view(context.publication, context.changes, relation, view, &name)?;
     Ok(())

@@ -21,11 +21,33 @@ pub trait CreationRelationNames {
     fn contains(&self, relation: &RelationIdentity) -> bool;
 }
 pub trait CreationRelationGuards {
+    fn named_type_exists(&self, identity: &RelationIdentity) -> bool;
     fn tables(&self) -> Box<dyn CreationRelationNames + '_>;
     fn views(&self) -> Box<dyn CreationRelationNames + '_>;
     fn sequences(&self) -> Box<dyn CreationRelationNames + '_>;
     fn foreign_tables(&self) -> Box<dyn CreationRelationNames + '_>;
     fn indexes(&self) -> Box<dyn CreationRelationNames + '_>;
+}
+
+/// Domains and row types share the type namespace; sequences and indexes do not define row types.
+pub fn type_name_in_use(catalog: &dyn CreationRelationGuards, identity: &RelationIdentity) -> bool {
+    catalog.named_type_exists(identity)
+        || catalog.tables().contains(identity)
+        || catalog.views().contains(identity)
+        || catalog.foreign_tables().contains(identity)
+}
+
+pub fn ensure_type_name_available(
+    catalog: &dyn CreationRelationGuards,
+    identity: &RelationIdentity,
+) -> Result<(), SQLError> {
+    if type_name_in_use(catalog, identity) {
+        return Err(SQLError::Routine {
+            sqlstate: "42710".into(),
+            message: format!("type \"{}\" already exists", identity.name),
+        });
+    }
+    Ok(())
 }
 
 /// Every relation kind shares the same namespace, independently of query visibility.

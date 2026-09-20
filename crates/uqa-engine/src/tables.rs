@@ -221,7 +221,7 @@ impl Engine {
             .retain_owner(owner)
             .map_err(|error| StorageBackendError::backend("CREATE TABLE owner", error))?;
         self.relation_creation_context()
-            .reserve_name(&name)
+            .reserve_row_type_name(&name)
             .map_err(|error| StorageBackendError::backend("CREATE TABLE name", error))?;
         let table = TableState {
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
