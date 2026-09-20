@@ -23,13 +23,13 @@ It is designed for applications that need more than a relational table but do no
 - Use the same SQL result and parameter shapes against a local or Cloud UQA node through authenticated Rust, Python, Node.js, and browser HTTP engines.
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
-## New in 0.3.7
+## New in 0.3.8
 
-Version 0.3.7 fixes data loss when independent sessions insert rows that require generated physical identities, including distinct TEXT primary keys. Successful INSERT and RETURNING results now retain distinct rows in new readers and after database reopen, including concurrent processes, multi-row statements and fixed transaction snapshots.
+Version 0.3.8 preserves JSONB types through `->` and `#>` extraction, so expressions such as `basis::jsonb->'query' = '{}'::jsonb` work on both empty and populated tables. Text extraction with `->>` and `#>>` continues to return text.
 
-Encrypted SQLite and compressed-encrypted databases now encrypt cross-process notification state with the database credential. Existing plaintext notification sidecars cause open to fail; review the upgrade guide before updating encrypted deployments.
+JSON extraction distinguishes present JSON null from missing keys and SQL NULL, keeps text object keys separate from integer array indexes, and decodes path operands as PostgreSQL text arrays. Generated-column typing and SQL rendering preserve the extraction operators and their result types.
 
-Read the [release history](HISTORY.md#037---2026-09-18) and the [upgrade guide](docs/manual/reference/10-upgrading.md) for the fixes and package update instructions.
+Read the [release history](HISTORY.md#038---2026-09-20) and the [upgrade guide](docs/manual/reference/10-upgrading.md) for the fixes and package update instructions.
 
 ## Mathematical foundation
 
@@ -42,7 +42,7 @@ The manuscript consolidates and revises the published work on [unified query alg
 Install the prebuilt Python package to get both the Python binding and the `usql` command:
 
 ```sh
-python -m pip install uqa==0.3.7
+python -m pip install uqa==0.3.8
 usql
 ```
 
@@ -94,7 +94,7 @@ cargo run -p uqa-cli --bin usql -- -c "SELECT 1 AS ready"
 Add the released package to your application:
 
 ```sh
-cargo add uqa@0.3.7
+cargo add uqa@0.3.8
 ```
 
 `uqa` is the primary Rust package on crates.io. It is a thin facade over `uqa-engine` that also re-exports the core `Value` type; applications that need the implementation package directly can depend on `uqa-engine`. Public component crates including `uqa-engine`, `uqa-client`, `uqa-api`, and `uqa-cli` are also published independently. The following example creates an in-memory engine, inserts data, and runs SQL through the same interface used by a persistent engine.
