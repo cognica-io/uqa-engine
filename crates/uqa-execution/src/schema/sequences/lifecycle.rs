@@ -73,6 +73,7 @@ pub fn alter_sequence_lifecycle(
         return Ok(());
     }
     let target_name = target.qualified_name();
+    context.creation.reserve_name(&target_name)?;
     rewrite_sequence_schema_dependencies(&context.schemas, source, &target_name).map_err(
         |error| {
             SQLError::Internal(format!(

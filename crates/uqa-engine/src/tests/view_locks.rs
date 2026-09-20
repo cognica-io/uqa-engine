@@ -7,10 +7,11 @@
 //! View definition, read and refresh locks across persistent provider sessions.
 
 use super::{
-    relation_lock_support::{after_wait, error, sessions, sql},
+    relation_lock_support::{after_shared_wait, after_wait, error, sessions, sql},
     *,
 };
 use std::{sync::mpsc, thread, time::Duration};
+use uqa_execution::row_locks::shared_objects::SharedCatalogLock;
 
 #[test]
 fn view_reads_retain_definition_locks_until_transaction_or_savepoint_end() {
@@ -139,43 +140,37 @@ fn view_creation_retains_source_locks_including_unpopulated_materialized_views()
 }
 
 #[test]
-fn concurrent_view_creation_rechecks_a_previously_absent_target() {
+fn concurrent_view_creation_reports_catalog_uniqueness_for_absent_targets() {
     for provider in 0..3 {
-        for (initial, next, expected) in [
+        for (initial, next) in [
             (
                 "CREATE VIEW v AS SELECT 1 AS v",
                 "CREATE VIEW v AS SELECT 2 AS v",
-                Some("42P07"),
             ),
             (
                 "CREATE VIEW v AS SELECT 1 AS v",
                 "CREATE OR REPLACE VIEW v AS SELECT 2 AS v",
-                None,
             ),
             (
                 "CREATE MATERIALIZED VIEW v AS SELECT 1 AS v",
                 "CREATE MATERIALIZED VIEW IF NOT EXISTS v AS SELECT 2 AS v",
-                None,
             ),
         ] {
             let (_directory, first, second) = sessions(provider);
             sql(&first, "BEGIN");
             sql(&first, initial);
-            let (second, result) = after_wait(&first, second, next, "public.v", "COMMIT");
-            if let Some(expected) = expected {
-                assert_eq!(result.unwrap_err().sqlstate(), Some(expected));
-            } else {
-                result.unwrap();
-                let expected = if next.starts_with("CREATE OR REPLACE") {
-                    2
-                } else {
-                    1
-                };
-                assert_eq!(
-                    sql(&second, "SELECT * FROM v").rows[0]["v"],
-                    Value::Int(expected)
-                );
-            }
+            let (second, result) = after_shared_wait(
+                &first,
+                second,
+                next,
+                SharedCatalogLock::Name {
+                    class_id: 1259,
+                    name: "public.v",
+                },
+                "COMMIT",
+            );
+            assert_eq!(result.unwrap_err().sqlstate(), Some("23505"));
+            assert_eq!(sql(&second, "SELECT * FROM v").rows[0]["v"], Value::Int(1));
         }
     }
 }

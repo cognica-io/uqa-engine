@@ -82,6 +82,10 @@ pub fn rename_bound_index(
         new_name,
         "ALTER INDEX RENAME",
     )?;
+    context
+        .binding
+        .creation
+        .reserve_name(&target.qualified_name())?;
     let catalog = context
         .registry
         .identities

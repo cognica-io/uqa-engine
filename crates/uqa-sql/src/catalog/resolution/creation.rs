@@ -28,6 +28,18 @@ pub trait CreationRelationGuards {
     fn indexes(&self) -> Box<dyn CreationRelationNames + '_>;
 }
 
+/// Every relation kind shares the same namespace, independently of query visibility.
+pub fn relation_name_in_use(
+    catalog: &dyn CreationRelationGuards,
+    relation: &RelationIdentity,
+) -> bool {
+    catalog.tables().contains(relation)
+        || catalog.views().contains(relation)
+        || catalog.sequences().contains(relation)
+        || catalog.foreign_tables().contains(relation)
+        || catalog.indexes().contains(relation)
+}
+
 pub fn temporary_creation_parts(
     state: &dyn RelationCandidateState,
     name: &str,

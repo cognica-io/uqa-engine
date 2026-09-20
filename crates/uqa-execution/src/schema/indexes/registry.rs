@@ -21,6 +21,7 @@ pub(super) mod builds;
 pub(super) mod constraints;
 pub(crate) mod foreign_keys;
 pub mod lifecycle;
+mod names;
 mod owners;
 pub(super) mod partitions;
 mod recheck;
@@ -171,6 +172,7 @@ pub fn prepare_constraint_indexes(
     if catalog.snapshot().tables[&relation].object_id != table_object_id {
         return Err(invalid("index owner changed before preparation"));
     }
+    names::reserve_new_names(context, previous, &rows)?;
     recheck::validate(context, &catalog, &candidate, &rows, &relation)?;
     Ok(change)
 }

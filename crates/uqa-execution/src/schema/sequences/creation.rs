@@ -95,6 +95,7 @@ pub fn create_sequence(
     {
         return sequence_create_collision(&name, if_not_exists);
     }
+    context.creation.reserve_name(&name)?;
     if !context.publication.insert_sequence(
         &name,
         &relation,

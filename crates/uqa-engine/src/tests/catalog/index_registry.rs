@@ -12,6 +12,7 @@ use std::sync::Arc;
 use uqa_core::Value;
 use uqa_sql::catalog::index::IndexDefinition;
 
+mod name_reservations;
 mod physical;
 mod renaming;
 mod restoration;

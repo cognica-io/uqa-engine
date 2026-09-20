@@ -315,18 +315,17 @@ fn run_alter_table_action<S: Clone + 'static>(
                 .map_err(|e| ddl_storage_error("ALTER TABLE RENAME COLUMN", e))?;
         }
         AlterTableAction::RenameTable { to } => {
-            if context
-                .lifecycle
-                .has_table(&to)
-                .map_err(|err| ddl_storage_error("ALTER TABLE RENAME", err))?
-            {
-                return Err(SQLError::Unsupported(format!(
-                    "ALTER TABLE RENAME: relation `{to}` already exists"
-                )));
-            }
+            let source = uqa_core::RelationIdentity::from_legacy_name(&stmt.table)
+                .map_err(SQLError::Internal)?;
+            let target = uqa_sql::schema::relation_alteration::relation_rename_target(
+                context.binding.names,
+                &source,
+                &to,
+                "ALTER TABLE RENAME",
+            )?;
             if !context
                 .lifecycle
-                .rename_table(&stmt.table, &to)
+                .rename_table(&stmt.table, &target.qualified_name())
                 .map_err(|e| ddl_storage_error("ALTER TABLE RENAME", e))?
             {
                 return Err(SQLError::Unsupported(format!(

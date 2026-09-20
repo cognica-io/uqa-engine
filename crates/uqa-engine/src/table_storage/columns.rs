@@ -391,6 +391,9 @@ impl Engine {
                 "relation `{to}` already exists as {kind}"
             )));
         }
+        self.relation_creation_context()
+            .reserve_name(&to)
+            .map_err(|error| StorageBackendError::backend("ALTER TABLE name", error))?;
         let persist_catalog = {
             let tables = self.storage.tables.read();
             if !tables.contains_key(&from_relation) || tables.contains_key(&to_relation) {

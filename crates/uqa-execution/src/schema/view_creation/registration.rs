@@ -89,28 +89,26 @@ fn replacement_view(
             } else {
                 None
             };
-            Ok(Some(RelationBinding {
+            Ok(view.map(|view| RelationBinding {
                 name: name.into(),
-                object_id: view.as_ref().map(|view| view.object_id),
+                object_id: Some(view.object_id),
                 value: view,
             }))
         },
         |binding| {
-            if let Some(view) = &binding.value {
-                context.owners.ensure_owner(name, view)?;
-            }
+            context.owners.ensure_owner(name, &binding.value)?;
             context.namespace.ensure_create(name)
         },
-    )?
-    .ok_or_else(|| SQLError::Internal("view creation binding disappeared".into()))?;
-    if let Some(existing) = &binding.value {
+    )?;
+    if let Some(binding) = &binding {
+        let existing = &binding.value;
         let existing_schema = uqa_sql::semantics::view_rewrite::context::stored_view_schema(
             context.rewrite,
             &existing.rewrite_definition(),
         )?;
         validate_replacement_schema(&existing_schema, replacement_schema)?;
     }
-    Ok(binding.value)
+    Ok(binding.map(|binding| binding.value))
 }
 
 pub(super) fn reject_regrole_constants(
@@ -190,6 +188,9 @@ fn register_view_plan_inner(
         &name,
         &view.rewrite_definition(),
     )?;
+    if existing_view.is_none() {
+        context.namespace.reserve_name(&name)?;
+    }
     publication::publish_regular_view(context.publication, context.changes, relation, view, &name)?;
     Ok(())
 }

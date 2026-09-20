@@ -104,9 +104,6 @@ impl RelationEventAlterTransactions for Engine {
     }
 }
 impl TableLifecycle for Engine {
-    fn has_table(&self, table: &str) -> StorageBackendResult<bool> {
-        self.try_has_table(table)
-    }
     fn rename_table(&self, from: &str, to: &str) -> StorageBackendResult<bool> {
         self.try_rename_table(from, to)
     }

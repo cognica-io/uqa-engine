@@ -102,6 +102,7 @@ pub fn run_create_index(
     )?;
     super::validate_unique_index(&context.unique, &c, &name)?;
 
+    context.creation.reserve_name(&relation.qualified_name())?;
     build_physical_index(context.vectors, context.publication, &c, &am)?;
     // Publish the original option values and bound key metadata so reopening restores the same physical index.
     let catalog_index_type = if am.is_empty() { "btree" } else { &am };

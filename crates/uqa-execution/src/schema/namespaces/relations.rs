@@ -101,6 +101,12 @@ impl RelationCreationContext<'_> {
     pub fn persistent_relation_name(&self, name: &str) -> Result<String, SQLError> {
         self.lock_relation_namespace(|| self.persistent_name(name))
     }
+    pub fn reserve_name(&self, name: &str) -> Result<(), SQLError> {
+        let relation = RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?;
+        super::relation_names::reserve_relation_name(self.locks, &relation, || {
+            Ok(creation::relation_name_in_use(self.relations, &relation))
+        })
+    }
     /// Resolve an explicit SET SCHEMA destination, including temporary namespace allocation and authority, before the caller checks whether that namespace permits relocation.
     pub fn relocation_target(
         &self,

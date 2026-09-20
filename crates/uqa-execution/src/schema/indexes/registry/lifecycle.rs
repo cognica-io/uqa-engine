@@ -52,6 +52,7 @@ pub fn register(
         .allocator(crate::catalog::identity::allocate_catalog_object_id);
     partitions::materialize(&catalog, &mut rows, &mut allocator)?;
     validation::validate(&catalog, &rows)?;
+    super::names::reserve_new_names(context, previous, &rows)?;
     super::recheck::validate(context, &catalog, &catalog, &rows, &table)?;
     difference(previous, &rows)?.publish(context)
 }

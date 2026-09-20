@@ -126,6 +126,16 @@ fn rename_key_constraint(
             format!("relation \"{to}\" already exists"),
         ));
     }
+    let target = uqa_core::RelationIdentity::new(&relation.schema, to);
+    crate::schema::namespaces::relation_names::reserve_relation_name(
+        context.publication.indexes.identities.locks,
+        &target,
+        || {
+            Ok(!context
+                .names
+                .relation_name_available(&target.qualified_name())?)
+        },
+    )?;
     let key = &mut constraints.key_constraints[position];
     key.name = Some(to.into());
     let identity = key.catalog_identity;

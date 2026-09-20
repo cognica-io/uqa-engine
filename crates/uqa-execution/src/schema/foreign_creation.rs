@@ -232,6 +232,7 @@ impl ForeignCreationContext<'_> {
                 .allocator(crate::catalog::identity::allocate_catalog_object_id),
         )?;
         self.ensure_foreign_server_exists(&server_name)?;
+        self.creation.reserve_name(name)?;
         let mut opt_map: std::collections::BTreeMap<String, String> =
             std::collections::BTreeMap::new();
         for (k, v) in options {

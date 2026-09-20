@@ -62,32 +62,21 @@ fn bind_materialized_view_target(
     name: &str,
     if_not_exists: bool,
 ) -> Result<Option<String>, SQLError> {
-    bind_relation(
-        context.locks,
-        RelationLockMode::AccessExclusive,
-        false,
-        || {
-            let resolved = context.namespace.resolve_persistent_name(name)?;
-            if let Some(kind) = context.names.relation_kind_at(&resolved).map_err(|error| {
-                SQLError::Internal(format!("resolve relation `{resolved}`: {error}"))
-            })? {
-                if if_not_exists {
-                    return Ok(None);
-                }
-                return Err(SQLError::Routine {
-                    sqlstate: "42P07".into(),
-                    message: format!("relation \"{resolved}\" already exists as {kind}"),
-                });
-            }
-            Ok(Some(RelationBinding {
-                name: context.namespace.persistent_relation_name(name)?,
-                object_id: None,
-                value: (),
-            }))
-        },
-        |target| context.namespace.ensure_create(&target.name),
-    )
-    .map(|binding| binding.map(|target| target.name))
+    let resolved = context.namespace.resolve_persistent_name(name)?;
+    if let Some(kind) = context
+        .names
+        .relation_kind_at(&resolved)
+        .map_err(|error| SQLError::Internal(format!("resolve relation `{resolved}`: {error}")))?
+    {
+        if if_not_exists {
+            return Ok(None);
+        }
+        return Err(SQLError::Routine {
+            sqlstate: "42P07".into(),
+            message: format!("relation \"{resolved}\" already exists as {kind}"),
+        });
+    }
+    context.namespace.persistent_relation_name(name).map(Some)
 }
 
 pub fn register_materialized_view_plan(
@@ -127,6 +116,7 @@ pub fn register_materialized_view_plan(
         };
         context.namespace.retain_owner(&owner)?;
         context.namespace.ensure_create(&name)?;
+        context.namespace.reserve_name(&name)?;
         let materialized_column_types = query_schema.column_types().to_vec();
         let materialized_rows = if with_no_data {
             Vec::new()

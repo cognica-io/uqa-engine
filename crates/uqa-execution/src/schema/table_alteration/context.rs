@@ -17,7 +17,6 @@ use uqa_sql::{ast::EventEnableMode, SQLError};
 use uqa_storage::StorageBackendResult;
 
 pub trait TableLifecycle {
-    fn has_table(&self, table: &str) -> StorageBackendResult<bool>;
     fn rename_table(&self, from: &str, to: &str) -> StorageBackendResult<bool>;
     fn rename_column(&self, table: &str, from: &str, to: &str) -> StorageBackendResult<bool>;
 }

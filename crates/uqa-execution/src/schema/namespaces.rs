@@ -9,6 +9,7 @@ pub mod authority;
 pub mod identity;
 pub mod locking;
 pub mod privileges;
+pub mod relation_names;
 pub mod removal;
 pub mod restoration;
 

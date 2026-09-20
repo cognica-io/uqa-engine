@@ -263,6 +263,7 @@ fn rename_foreign_table(
         new_name,
         "ALTER FOREIGN TABLE RENAME TO",
     )?;
+    context.creation.reserve_name(&target.qualified_name())?;
     rewrite_relation_rename_dependents(context.dependencies, relation, &target).map_err(
         |error| {
             SQLError::Internal(format!(
