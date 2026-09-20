@@ -116,10 +116,13 @@ fn object_name(names: &[String]) -> Result<(Option<&str>, &str), SQLError> {
         [local] => Ok((None, local)),
         [schema, local] => Ok((Some(schema), local)),
         [_, _, _] => Err(cross_database_reference(&qualified_name_list(names))),
-        _ => Err(SQLError::Parse(format!(
-            "improper qualified name (too many dotted names): {}",
-            qualified_name_list(names)
-        ))),
+        _ => Err(SQLError::Routine {
+            sqlstate: "42601".into(),
+            message: format!(
+                "improper qualified name (too many dotted names): {}",
+                qualified_name_list(names)
+            ),
+        }),
     }
 }
 

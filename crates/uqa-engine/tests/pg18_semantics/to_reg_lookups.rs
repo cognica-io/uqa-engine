@@ -732,7 +732,7 @@ fn assert_lookup_errors(eng: &Engine) {
         ),
         ("SELECT to_regnamespace(value => 'public')", "42883", None),
     ] {
-        let error = eng.sql(sql, &[]).unwrap_err();
+        let error = eng.sql(sql, &[]).expect_err(sql);
         assert_eq!(error.sqlstate(), Some(state), "{sql}: {error}");
         if let Some(detail) = detail {
             assert!(error.to_string().contains(detail), "{sql}: {error}");
