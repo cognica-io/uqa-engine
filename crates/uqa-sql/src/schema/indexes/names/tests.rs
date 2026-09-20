@@ -11,10 +11,14 @@ use std::collections::BTreeSet;
 struct Catalog {
     keys: Vec<TableKeyConstraint>,
     names: BTreeSet<String>,
+    automatic: BTreeSet<String>,
     relations: BTreeSet<String>,
 }
 
 impl IndexNameCatalog for Catalog {
+    fn automatic_constraint_names(&self, _: &str) -> Result<BTreeSet<String>, SQLError> {
+        Ok(self.automatic.clone())
+    }
     fn existing_constraint_keys(&self, _: &str) -> Result<Vec<TableKeyConstraint>, SQLError> {
         Ok(self.keys.clone())
     }
@@ -77,4 +81,19 @@ fn an_existing_owner_keeps_its_current_name_after_structure_changes() {
     name_constraint_indexes(&catalog, "public.t", &mut keys).unwrap();
     assert_eq!(keys[0].name.as_deref(), Some("renamed"));
     assert_eq!(keys[0].columns, ["renamed_column"]);
+}
+
+#[test]
+fn automatic_key_names_skip_schema_constraints_without_rejecting_explicit_names() {
+    let catalog = Catalog {
+        automatic: ["t_v_key", "t_v_key1"].map(str::to_owned).into(),
+        relations: ["public.t_v_key2".into()].into(),
+        ..Default::default()
+    };
+    let mut keys = [key()];
+    name_constraint_indexes(&catalog, "public.t", &mut keys).unwrap();
+    assert_eq!(keys[0].name.as_deref(), Some("t_v_key3"));
+    keys[0].name = Some("t_v_key".into());
+    name_constraint_indexes(&catalog, "public.t", &mut keys).unwrap();
+    assert_eq!(keys[0].name.as_deref(), Some("t_v_key"));
 }

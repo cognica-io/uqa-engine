@@ -24,7 +24,7 @@ Enforced unique-index selection and partition applicability live in `crates/uqa-
 
 Stored index identity reservation, constraint-name normalization, complete constraint/partition registry publication and restoration live in `crates/uqa-execution/src/schema/indexes/`; physical key binding, expression evaluation and rebuild projection live in `crates/uqa-execution/src/catalog/index/physical.rs`. Engine retains catalog generations, document guards and publication handles.
 
-Borrowed constraint names and individual catalog identities live in `crates/uqa-sql/src/schema/constraint_changes/names.rs`. Execution's `schema/constraints/names.rs` coordinates destinations by the owning relation's immutable identity, including constraint triggers. Structural publication rebinds key names from current owned indexes after catalog waits.
+Borrowed constraint names and individual catalog identities live in `crates/uqa-sql/src/schema/constraint_changes/names.rs`. Execution's `schema/constraints/names.rs` supplies schema-wide automatic-name scopes and coordinates destinations by the owning relation's immutable identity, including constraint triggers. Structural publication rebinds key names from current owned indexes after catalog waits.
 
 Domain persistence and private catalog merging live in `crates/uqa-execution/src/catalog/domain/`. Independent domain definitions and OID claims share the existing storage metadata transaction; Engine supplies registry and catalog adapters.
 

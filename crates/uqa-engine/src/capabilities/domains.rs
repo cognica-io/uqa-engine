@@ -48,6 +48,10 @@ impl DomainDeclarationBinding for Engine {
     fn bind_domain_declaration(&self, definition: &mut CreateDomain) -> Result<(), SQLError> {
         let scope = super::query_scope::new_for_catalog_binding(self);
         let binding = uqa_execution::query::binding::binding_context(&scope)?;
+        let names = self
+            .schema_publication_context()
+            .constraint_names()
+            .automatic_names(&definition.name)?;
         uqa_sql::schema::domains::prepare_domain_definition(
             &uqa_sql::schema::SchemaBindingContext {
                 catalog: self,
@@ -55,6 +59,7 @@ impl DomainDeclarationBinding for Engine {
             },
             self,
             definition,
+            &names,
         )
     }
 }

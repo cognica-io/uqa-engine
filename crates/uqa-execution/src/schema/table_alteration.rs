@@ -60,7 +60,7 @@ pub fn run_alter_table<S: Clone + 'static>(
                 continue;
             }
         }
-        let column_check = prepare_alter_action(context, &table, recurse, &mut action, mode)?;
+        let column_checks = prepare_alter_action(context, &table, recurse, &mut action, mode)?;
         run_recursive_alter_action(
             context,
             AlterTableStmt {
@@ -72,7 +72,7 @@ pub fn run_alter_table<S: Clone + 'static>(
             },
             action,
         )?;
-        if let Some(mut action) = column_check {
+        for mut action in column_checks {
             materialize_recursive_action_names(context, &table, recurse, &mut action)?;
             run_recursive_alter_action(
                 context,
@@ -96,7 +96,7 @@ fn prepare_alter_action<S: Clone + 'static>(
     recurse: bool,
     action: &mut AlterTableAction,
     mode: crate::row_locks::RelationLockMode,
-) -> Result<Option<AlterTableAction>, SQLError> {
+) -> Result<Vec<AlterTableAction>, SQLError> {
     match action {
         AlterTableAction::AddColumn { column, .. } => {
             column.ty = uqa_sql::type_resolution::resolve_declared_column_type(
@@ -114,14 +114,17 @@ fn prepare_alter_action<S: Clone + 'static>(
     }
     materialize_recursive_action_names(context, table, recurse, action)?;
     // Column merging can stop at an existing child column. Its CHECK still has an independent inheritance lifecycle and must reach every supplying edge.
-    let mut column_check = if let AlterTableAction::AddColumn { column, .. } = action {
+    let mut column_checks = if let AlterTableAction::AddColumn { column, checks, .. } = action {
         uqa_sql::schema::constraint_changes::take_column_check(column)
+            .into_iter()
+            .chain(std::mem::take(checks))
             .map(|constraint| AlterTableAction::AddCheckConstraint { constraint })
+            .collect()
     } else {
-        None
+        Vec::new()
     };
     locking::prepare_table_alter_action(&context.binding, context, table, recurse, action, mode)?;
-    if let Some(check) = &mut column_check {
+    for check in &mut column_checks {
         locking::prepare_table_alter_action(
             &context.binding,
             context,
@@ -132,7 +135,7 @@ fn prepare_alter_action<S: Clone + 'static>(
         )?;
     }
     context.binding.locks.prepare_definition_write()?;
-    Ok(column_check)
+    Ok(column_checks)
 }
 
 #[expect(
@@ -194,6 +197,7 @@ fn run_alter_table_action<S: Clone + 'static>(
             column,
             key_constraints,
             if_not_exists,
+            ..
         } => {
             crate::schema::columns::addition::add_column(
                 &context.addition,

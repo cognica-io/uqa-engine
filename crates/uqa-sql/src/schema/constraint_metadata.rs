@@ -9,6 +9,13 @@ use std::collections::BTreeSet;
 use uqa_core::RelationIdentity;
 pub mod identity;
 
+/// Explicit names share their relation's event namespace; automatic names also avoid every constraint in the containing schema.
+#[derive(Default)]
+pub struct ConstraintNameScope {
+    pub events: BTreeSet<String>,
+    pub schema: BTreeSet<String>,
+}
+
 #[derive(Debug)]
 pub enum ConstraintMetadataError {
     Invalid(String),
@@ -109,17 +116,17 @@ pub fn materialize_constraint_metadata(
         columns,
         constraints,
         allocate,
-        &BTreeSet::new(),
+        &ConstraintNameScope::default(),
     )
 }
 
-/// Event constraints occupy the same per-relation namespace as declared constraints.
+/// Validate explicit local names before excluding schema-wide names from automatic selection.
 pub fn materialize_constraint_metadata_with_names(
     relation: &RelationIdentity,
     columns: &mut [crate::ast::ColumnDef],
     constraints: &mut crate::ast::TableConstraintSet,
     allocate: &mut CatalogIdentityAllocator<'_>,
-    event_names: &BTreeSet<String>,
+    names: &ConstraintNameScope,
 ) -> ConstraintMetadataResult<bool> {
     identity::claims::validate_present_identities(columns, constraints)?;
     for identity in identity::claims::identities(columns, constraints) {
@@ -127,7 +134,7 @@ pub fn materialize_constraint_metadata_with_names(
     }
     // Releases predating typed table-key persistence stored column-level PRIMARY KEY and UNIQUE declarations only as ColumnDef flags. Promote those legacy flags before assigning names so catalog publication always sees named constraints.
     let mut changed = materialize_column_key_constraints(columns, constraints);
-    let mut used = existing_constraint_names(relation, columns, constraints, event_names)?;
+    let mut used = constraint_names_for_assignment(relation, columns, constraints, names)?;
 
     let mut column_object_ids = BTreeSet::new();
     for column in columns.iter_mut() {
@@ -225,11 +232,11 @@ pub fn materialize_constraint_metadata_with_names(
     Ok(changed)
 }
 
-fn existing_constraint_names(
+fn constraint_names_for_assignment(
     relation: &RelationIdentity,
     columns: &[crate::ast::ColumnDef],
     constraints: &crate::ast::TableConstraintSet,
-    event_names: &BTreeSet<String>,
+    names: &ConstraintNameScope,
 ) -> ConstraintMetadataResult<BTreeSet<String>> {
     let mut used = BTreeSet::new();
     for column in columns {
@@ -252,7 +259,7 @@ fn existing_constraint_names(
     for constraint in &constraints.foreign_keys {
         record_constraint_name(&mut used, constraint.name.as_deref())?;
     }
-    for name in event_names {
+    for name in &names.events {
         if !used.insert(name.clone()) {
             return Err(ConstraintMetadataError::Execution(Box::new(
                 crate::schema::constraint_changes::constraint_error(
@@ -265,6 +272,7 @@ fn existing_constraint_names(
             )));
         }
     }
+    used.extend(names.schema.iter().cloned());
     Ok(used)
 }
 
@@ -410,7 +418,7 @@ fn record_constraint_name(
     Ok(())
 }
 
-fn assign_constraint_name(
+pub(super) fn assign_constraint_name(
     target: &mut Option<String>,
     base: String,
     used: &mut BTreeSet<String>,

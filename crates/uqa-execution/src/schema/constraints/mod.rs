@@ -111,10 +111,7 @@ fn materialize_constraint_candidate(
         columns,
         constraints,
         &mut allocate,
-        &context
-            .publication
-            .constraint_names()
-            .trigger_names(&relation),
+        &context.publication.constraint_names().name_scope(&relation),
     )
     .map_err(|error| {
         ddl_storage_error(

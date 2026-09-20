@@ -46,15 +46,19 @@ pub fn materialize_recursive_action_names(
     constraints: &mut TableConstraintSet,
     action: &mut AlterTableAction,
     allocate: &mut CatalogIdentityAllocator<'_>,
+    names: &super::constraint_metadata::ConstraintNameScope,
 ) -> Result<(), SQLError> {
     match action {
-        AlterTableAction::AddColumn { column, .. } => {
+        AlterTableAction::AddColumn { column, checks, .. } => {
             columns.push(column.clone());
-            super::constraint_metadata::materialize_constraint_metadata(
+            let existing_checks = constraints.checks.len();
+            constraints.checks.extend(checks.iter().cloned());
+            super::constraint_metadata::materialize_constraint_metadata_with_names(
                 relation,
                 columns,
                 constraints,
                 allocate,
+                names,
             )
             .map_err(|error| {
                 crate::catalog::errors::storage_error("ALTER TABLE ADD COLUMN", &error)
@@ -62,16 +66,18 @@ pub fn materialize_recursive_action_names(
             *column = columns
                 .pop()
                 .ok_or_else(|| SQLError::Internal("new column disappeared".into()))?;
+            *checks = constraints.checks.split_off(existing_checks);
         }
         AlterTableAction::AddCheckConstraint { constraint }
             if !constraint.no_inherit && constraint.name.is_none() =>
         {
             constraints.checks.push(constraint.clone());
-            super::constraint_metadata::materialize_constraint_metadata(
+            super::constraint_metadata::materialize_constraint_metadata_with_names(
                 relation,
                 columns,
                 constraints,
                 allocate,
+                names,
             )
             .map_err(|error| {
                 crate::catalog::errors::storage_error("ALTER TABLE ADD CONSTRAINT", &error)
@@ -94,11 +100,12 @@ pub fn materialize_recursive_action_names(
                 definition.not_null = true;
                 definition.not_null_explicit = true;
                 definition.not_null_validated = *validated;
-                super::constraint_metadata::materialize_constraint_metadata(
+                super::constraint_metadata::materialize_constraint_metadata_with_names(
                     relation,
                     columns,
                     constraints,
                     allocate,
+                    names,
                 )
                 .map_err(|error| {
                     crate::catalog::errors::storage_error("ALTER TABLE ADD CONSTRAINT", &error)

@@ -109,7 +109,10 @@ fn metadata_names_share_the_event_constraint_namespace() {
                 next += 1;
                 Ok([next; 16])
             },
-            &occupied,
+            &crate::schema::constraint_metadata::ConstraintNameScope {
+                events: occupied,
+                ..Default::default()
+            },
         );
         if explicit {
             let crate::schema::constraint_metadata::ConstraintMetadataError::Execution(error) =
@@ -126,5 +129,56 @@ fn metadata_names_share_the_event_constraint_namespace() {
                 .collect::<Vec<_>>();
             assert_eq!(names, ["t_a_not_null1", "t_a_check1", "t_a_key1"]);
         }
+    }
+}
+
+#[test]
+fn schema_constraint_names_exclude_only_automatic_declarations() {
+    for explicit in [false, true] {
+        let statement = if explicit {
+            "CREATE TABLE t(a int CONSTRAINT t_a_check CHECK(a>0))"
+        } else {
+            "CREATE TABLE t(a int NOT NULL CHECK(a>0) UNIQUE REFERENCES parent(v))"
+        };
+        let crate::Statement::CreateTable(table) = crate::compile(statement).unwrap().remove(0)
+        else {
+            panic!("table declaration")
+        };
+        let mut columns = table.columns;
+        let mut constraints = TableConstraintSet {
+            key_constraints: table.key_constraints,
+            ..Default::default()
+        };
+        let names = crate::schema::constraint_metadata::ConstraintNameScope {
+            schema: ["t_a_check", "t_a_fkey", "t_a_key", "t_a_not_null"]
+                .map(str::to_owned)
+                .into(),
+            ..Default::default()
+        };
+        let mut next = 0_u8;
+        crate::schema::constraint_metadata::materialize_constraint_metadata_with_names(
+            &uqa_core::RelationIdentity::new("public", "t"),
+            &mut columns,
+            &mut constraints,
+            &mut |_: &str| {
+                next += 1;
+                Ok([next; 16])
+            },
+            &names,
+        )
+        .unwrap();
+        let mut actual = ConstraintNames::from_definition(&columns, &constraints)
+            .entries()
+            .map(|entry| entry.name)
+            .collect::<Vec<_>>();
+        actual.sort_unstable();
+        assert_eq!(
+            actual,
+            if explicit {
+                vec!["t_a_check"]
+            } else {
+                vec!["t_a_check1", "t_a_fkey1", "t_a_key1", "t_a_not_null1"]
+            }
+        );
     }
 }

@@ -230,6 +230,10 @@ impl ForeignCreationContext<'_> {
             &mut self
                 .identities
                 .allocator(crate::catalog::identity::allocate_catalog_object_id),
+            &crate::schema::constraints::names::name_scope(
+                &self.identities.catalog.current_catalog_snapshot(),
+                &RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?,
+            ),
         )?;
         self.ensure_foreign_server_exists(&server_name)?;
         self.creation.reserve_name(name)?;

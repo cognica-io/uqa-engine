@@ -13,6 +13,8 @@ use crate::tests::relation_lock_support::{
 use uqa_core::RelationIdentity;
 use uqa_execution::row_locks::shared_objects::SharedCatalogLock;
 
+mod automatic;
+
 #[test]
 fn check_rename_waits_for_an_uncommitted_owned_index_constraint_name() {
     for provider in 0..3 {

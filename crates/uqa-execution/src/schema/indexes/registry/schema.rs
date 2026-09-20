@@ -187,13 +187,13 @@ pub(in crate::schema::indexes) fn prepare_descendants(
                             .iter()
                             .cloned(),
                     );
-                let event_names = crate::schema::constraints::names::event_names(original, &child);
+                let names = crate::schema::constraints::names::name_scope(&view, &child);
                 materialize_constraint_metadata_with_names(
                     &child,
                     &mut columns,
                     &mut constraints,
                     allocator,
-                    &event_names,
+                    &names,
                 )
                 .map_err(metadata_error)?;
                 replace(candidate, &child, &columns, &constraints)?;

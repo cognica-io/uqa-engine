@@ -225,6 +225,11 @@ pub(super) fn materialize_recursive_action_names<S: Clone + 'static>(
         &mut constraints,
         action,
         &mut allocate,
+        &context
+            .hierarchy
+            .publication
+            .constraint_names()
+            .name_scope(&relation),
     )
 }
 

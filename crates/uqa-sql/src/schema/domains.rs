@@ -44,6 +44,7 @@ pub fn prepare_domain_definition(
     context: &SchemaBindingContext<'_, '_>,
     domains: &dyn DomainCatalog,
     definition: &mut CreateDomain,
+    schema_names: &BTreeSet<String>,
 ) -> Result<(), SQLError> {
     let identity =
         RelationIdentity::from_legacy_name(&definition.name).map_err(SQLError::Internal)?;
@@ -86,11 +87,17 @@ pub fn prepare_domain_definition(
         }
     }
     let mut names = BTreeSet::new();
+    let mut automatic = schema_names.clone();
     if let Some(not_null) = &mut definition.not_null {
-        let name = not_null
-            .name
-            .get_or_insert_with(|| format!("{}_not_null", identity.name));
+        super::constraint_metadata::assign_constraint_name(
+            &mut not_null.name,
+            format!("{}_not_null", identity.name),
+            &mut automatic,
+        )
+        .map_err(|error| crate::catalog::errors::storage_error("domain constraint name", &error))?;
+        let name = not_null.name.as_ref().expect("assigned NOT NULL name");
         names.insert(name.clone());
+        automatic.insert(name.clone());
     }
     for check in &mut definition.checks {
         if let Some(name) = &check.name {
@@ -104,15 +111,17 @@ pub fn prepare_domain_definition(
                 ));
             }
         } else {
-            let base = format!("{}_check", identity.name);
-            let mut name = base.clone();
-            let mut suffix = 1;
-            while !names.insert(name.clone()) {
-                name = format!("{base}{suffix}");
-                suffix += 1;
-            }
-            check.name = Some(name);
+            super::constraint_metadata::assign_constraint_name(
+                &mut check.name,
+                format!("{}_check", identity.name),
+                &mut automatic,
+            )
+            .map_err(|error| {
+                crate::catalog::errors::storage_error("domain constraint name", &error)
+            })?;
+            names.insert(check.name.clone().expect("assigned CHECK name"));
         }
+        automatic.extend(check.name.iter().cloned());
         bind_domain_check(context, &definition.base, &mut check.expression)?;
     }
     definition

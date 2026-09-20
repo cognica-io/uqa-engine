@@ -15,7 +15,10 @@ use std::collections::BTreeSet;
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::{ColumnDef, TableConstraintSet},
-    schema::{constraint_changes::names::ConstraintNames, constraint_metadata::CatalogOidClass},
+    schema::{
+        constraint_changes::names::ConstraintNames,
+        constraint_metadata::{CatalogOidClass, ConstraintNameScope},
+    },
     SQLError,
 };
 
@@ -78,6 +81,74 @@ pub(crate) fn event_names(
         .collect()
 }
 
+pub(crate) fn schema_names(catalog: &CatalogReadView, schema: &str) -> BTreeSet<String> {
+    let snapshot = catalog.snapshot();
+    let mut names = BTreeSet::new();
+    for (relation, table) in &snapshot.tables {
+        if relation.schema == schema {
+            names.extend(
+                table_names(table)
+                    .entries()
+                    .map(|entry| entry.name.to_owned()),
+            );
+        }
+    }
+    for (relation, table) in snapshot.definitions.foreign_tables.iter() {
+        if relation.schema == schema {
+            names.extend(
+                ConstraintNames {
+                    columns: &table.columns,
+                    checks: &table.checks,
+                    foreign_keys: &[],
+                    keys: &[],
+                }
+                .entries()
+                .map(|entry| entry.name.to_owned()),
+            );
+        }
+    }
+    for relation in snapshot
+        .definitions
+        .triggers
+        .keys()
+        .filter(|relation| relation.schema == schema)
+    {
+        names.extend(trigger_names(catalog, relation).map(str::to_owned));
+    }
+    for domain in snapshot
+        .definitions
+        .domains
+        .values()
+        .filter(|domain| domain.identity.schema == schema)
+    {
+        names.extend(
+            domain
+                .definition
+                .checks
+                .iter()
+                .filter_map(|check| check.name.clone()),
+        );
+        names.extend(
+            domain
+                .definition
+                .not_null
+                .as_ref()
+                .and_then(|constraint| constraint.name.clone()),
+        );
+    }
+    names
+}
+
+pub(crate) fn name_scope(
+    catalog: &CatalogReadView,
+    relation: &RelationIdentity,
+) -> ConstraintNameScope {
+    ConstraintNameScope {
+        events: event_names(catalog, relation),
+        schema: schema_names(catalog, &relation.schema),
+    }
+}
+
 fn owner(
     catalog: &CatalogReadView,
     object_id: [u8; 16],
@@ -99,8 +170,16 @@ impl ConstraintNameContext<'_> {
         ))
     }
 
-    pub fn trigger_names(&self, relation: &RelationIdentity) -> BTreeSet<String> {
-        event_names(&self.catalog.current_catalog_snapshot(), relation)
+    pub fn name_scope(&self, relation: &RelationIdentity) -> ConstraintNameScope {
+        name_scope(&self.catalog.current_catalog_snapshot(), relation)
+    }
+
+    pub fn automatic_names(&self, table: &str) -> Result<BTreeSet<String>, SQLError> {
+        let relation = RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
+        Ok(schema_names(
+            &self.catalog.current_catalog_snapshot(),
+            &relation.schema,
+        ))
     }
     pub fn bind(&self, table: &str) -> Result<[u8; 16], SQLError> {
         let relation = RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;

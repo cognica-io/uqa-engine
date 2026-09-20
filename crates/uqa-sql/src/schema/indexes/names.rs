@@ -22,6 +22,10 @@ pub trait IndexNameCatalog {
         &self,
         table: &str,
     ) -> Result<std::collections::BTreeSet<String>, SQLError>;
+    fn automatic_constraint_names(
+        &self,
+        table: &str,
+    ) -> Result<std::collections::BTreeSet<String>, SQLError>;
     fn relation_name_available(&self, qualified_name: &str) -> Result<bool, SQLError>;
 }
 
@@ -33,6 +37,7 @@ pub fn name_constraint_indexes(
     let relation = RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
     let existing = catalog.existing_constraint_keys(table)?;
     let occupied = catalog.existing_constraint_names(table)?;
+    let automatic = catalog.automatic_constraint_names(table)?;
     let mut used = std::collections::BTreeSet::new();
     for key in keys {
         if let Some(old) = existing.iter().find(|old| {
@@ -83,6 +88,7 @@ pub fn name_constraint_indexes(
             let candidate = object_name(&relation.name, &component, &label);
             if !used.contains(&candidate)
                 && !occupied.contains(&candidate)
+                && !automatic.contains(&candidate)
                 && available(catalog, &relation, &candidate)?
             {
                 used.insert(candidate.clone());

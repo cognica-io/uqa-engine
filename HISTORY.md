@@ -22,6 +22,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Choose automatic constraint names from the complete schema namespace across ordinary/foreign tables, domains and constraint triggers while keeping explicit duplicate checks local to their owner. Carry parent-selected names through recursive CHECK and NOT NULL additions. Preserve every column CHECK declaration, including its name, enforcement and inheritance attributes, during CREATE TABLE and ADD COLUMN.
 - Preserve constraint ownership when cascading domain or schema deletion through indexed domain columns. Remove column-owned key indexes and foreign keys through the column lifecycle while retaining direct expression and predicate dependencies, savepoint undo and reopen behavior.
 - Persist independent domain definitions and OID claims so concurrent transactions creating or dropping different domains can commit without overwriting one shared registry. Preserve private changes and peer commits through catalog refresh, savepoint undo and reopen; convert earlier domain catalogs atomically and fence incompatible development writers.
 - Bind legacy unqualified foreign-key targets before converting their stored index identities. Resolve against the complete stored table catalog, reject ambiguous or dangling targets before conversion writes, and keep the canonical target after later same-name table creation.

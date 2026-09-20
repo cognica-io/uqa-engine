@@ -20,8 +20,10 @@ pub(super) fn add_column(command: &AlterTableCmd) -> Result<AlterTableAction, SQ
             "ADD COLUMN expected ColumnDef, got {definition:?}"
         )));
     };
+    let (definition, checks) = crate::compiler::tree::compile_column_def(column)?;
     Ok(AlterTableAction::AddColumn {
-        column: crate::compiler::tree::compile_column_def(column)?,
+        column: definition,
+        checks,
         key_constraints: crate::compiler::tree::compile_column_key_constraints(column)?,
         if_not_exists: command.missing_ok,
     })

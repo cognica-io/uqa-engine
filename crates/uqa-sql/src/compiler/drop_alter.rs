@@ -729,7 +729,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                     .ok_or_else(|| SQLError::Internal("ALTER COLUMN TYPE without type".into()))?;
                 let (ty, using) = match def_inner {
                     NodeEnum::ColumnDef(column) => (
-                        compile_column_def(column)?.ty,
+                        compile_column_def(column)?.0.ty,
                         column
                             .raw_default
                             .as_deref()

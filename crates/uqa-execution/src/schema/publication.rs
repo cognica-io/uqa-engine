@@ -127,7 +127,7 @@ fn materialize_metadata(
         columns,
         constraints,
         &mut allocate,
-        &context.constraint_names().trigger_names(&relation),
+        &context.constraint_names().name_scope(&relation),
     )
     .map_err(|error| StorageBackendError::backend("constraint identity", error))
 }

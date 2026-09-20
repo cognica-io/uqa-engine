@@ -150,11 +150,12 @@ pub fn register_table_constraints(
     )
     .map_err(StorageBackendError::Other)?;
     let mut allocate = context.identity_allocator();
-    uqa_sql::schema::constraint_metadata::materialize_constraint_metadata(
+    uqa_sql::schema::constraint_metadata::materialize_constraint_metadata_with_names(
         &relation,
         &mut columns,
         &mut constraints,
         &mut allocate,
+        &context.constraint_names().name_scope(&relation),
     )
     .map_err(|error| StorageBackendError::backend("constraint identity", error))?;
     let indexes = crate::schema::indexes::registry::prepare_constraint_indexes(
