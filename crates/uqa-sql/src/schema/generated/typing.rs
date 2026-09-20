@@ -627,6 +627,22 @@ fn infer_dispatched_function(
         })
     };
     Ok(Some(match dispatch {
+        FunctionDispatch::JsonExtract { as_text, .. } => match first()? {
+            input @ (GenerationType::Json | GenerationType::JsonB) => {
+                if as_text {
+                    GenerationType::Text
+                } else {
+                    input
+                }
+            }
+            other => {
+                return Err(function_type_error(
+                    dispatch.label(),
+                    &other,
+                    "json or jsonb",
+                ))
+            }
+        },
         FunctionDispatch::NamedArgument | FunctionDispatch::VariadicArgument => return Ok(None),
         FunctionDispatch::ArraySubscripts | FunctionDispatch::Subscript => match first()? {
             GenerationType::Array(element) => *element,

@@ -41,29 +41,6 @@ pub(super) fn extract_strings(nodes: &[Node]) -> Result<Vec<String>> {
     nodes.iter().map(extract_string).collect()
 }
 
-/// Translate a `#>` / `#>>` operator into the argument list of
-/// `json_extract_path`. The right-hand side is a Postgres text-array
-/// literal like `'{a,b,c}'`; we split it into individual literal
-/// segments so the scalar function can walk the path.
-fn json_path_args(lhs: Expr, rhs: Expr) -> Vec<Expr> {
-    let segments = match &rhs {
-        Expr::Literal(uqa_core::Value::Str(s)) => s
-            .trim_matches(|c: char| c == '{' || c == '}')
-            .split(',')
-            .map(|seg| Expr::Literal(uqa_core::Value::Str(seg.trim().to_string())))
-            .collect::<Vec<_>>(),
-        Expr::Literal(uqa_core::Value::List(items)) => items
-            .iter()
-            .map(|v| Expr::Literal(v.clone()))
-            .collect::<Vec<_>>(),
-        _ => vec![rhs],
-    };
-    let mut out = Vec::with_capacity(segments.len() + 1);
-    out.push(lhs);
-    out.extend(segments);
-    out
-}
-
 // -------------------------------------------------------------------------
 // CREATE TABLE
 // -------------------------------------------------------------------------

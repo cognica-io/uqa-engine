@@ -15,6 +15,9 @@ use uqa_sql::ast::{Expr, Statement};
 use uqa_sql::expr::{eval, EvalContext};
 use uqa_sql::{compile, ResultRow};
 
+#[path = "expr_evaluator/json_extraction.rs"]
+mod json_extraction;
+
 fn projection_expr(sql: &str) -> Expr {
     let stmts = compile(sql).expect("compile");
     let stmt = match stmts.into_iter().next().expect("at least one stmt") {

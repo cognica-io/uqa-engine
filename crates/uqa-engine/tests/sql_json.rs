@@ -28,6 +28,75 @@ fn jsonb(v: &str) -> Value {
     Value::JsonB(v.to_string())
 }
 
+#[test]
+fn jsonb_extraction_comparison_on_empty_and_populated_text_table() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE probe (basis TEXT)");
+    let query = "SELECT * FROM probe WHERE basis::jsonb->'query'='{}'::jsonb";
+    assert!(exec(&engine, query).rows.is_empty());
+    exec(
+        &engine,
+        r#"INSERT INTO probe VALUES ('{"query":{}}'), ('{"query":{"x":1}}'), ('{}'), ('{"query":null}'), (NULL)"#,
+    );
+    assert_eq!(exec(&engine, query).rows.len(), 1);
+    let parameterized = engine
+        .sql(
+            "SELECT * FROM probe WHERE basis::jsonb->'query'=$1::jsonb",
+            &[uqa_sql::SQLParam::scalar(Value::Str("{}".into()))],
+        )
+        .unwrap();
+    assert_eq!(parameterized.rows, exec(&engine, query).rows);
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT * FROM probe WHERE basis::jsonb#>'{query}'='{}'::jsonb"
+        )
+        .rows
+        .len(),
+        1
+    );
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT * FROM probe WHERE (basis::jsonb->'query') IS NULL"
+        )
+        .rows
+        .len(),
+        2
+    );
+    assert_eq!(
+        exec(
+            &engine,
+            "SELECT * FROM probe WHERE basis::jsonb->'query'='null'::jsonb"
+        )
+        .rows
+        .len(),
+        1
+    );
+}
+
+#[test]
+fn jsonb_extraction_generated_column_preserves_type() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TABLE extracted (basis JSONB, query JSONB GENERATED ALWAYS AS (basis->'query') STORED)");
+    exec(
+        &engine,
+        r#"INSERT INTO extracted (basis) VALUES ('{"query":{}}'), ('{"query":null}')"#,
+    );
+    assert_eq!(
+        exec(&engine, "SELECT * FROM extracted WHERE query='{}'::jsonb")
+            .rows
+            .len(),
+        1
+    );
+    assert_eq!(
+        exec(&engine, "SELECT * FROM extracted WHERE query='null'::jsonb")
+            .rows
+            .len(),
+        1
+    );
+}
+
 fn engine_with_json() -> Engine {
     let engine = Engine::new();
     exec(
