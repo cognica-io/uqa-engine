@@ -31,6 +31,10 @@ impl KeyValueStorageBackend {
 }
 
 impl PersistentStorageBackend for KeyValueStorageBackend {
+    fn serializable_session(&self) -> Option<&dyn crate::mvcc::SerializableSession> {
+        self.store.serializable_session()
+    }
+
     fn vacuum(&self) -> StorageBackendResult<()> {
         self.store.vacuum()
     }

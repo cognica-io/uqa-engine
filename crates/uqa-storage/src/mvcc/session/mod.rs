@@ -9,7 +9,7 @@
 mod batch;
 mod read;
 mod serializable;
-pub use serializable::SerializableReadContext;
+pub use serializable::{SerializableReadContext, SerializableSession};
 mod transaction;
 
 use std::sync::Arc;
@@ -333,6 +333,12 @@ impl super::IdentifierAllocator for VersionedKeyValueStore {
 }
 
 impl KeyValueStore for VersionedKeyValueStore {
+    fn serializable_session(&self) -> Option<&dyn SerializableSession> {
+        self.persistence
+            .serializable_coordinator()
+            .map(|_| self as &dyn SerializableSession)
+    }
+
     fn vacuum(&self) -> StorageBackendResult<()> {
         let active = self.active.lock();
         if active.is_some() {

@@ -13,17 +13,62 @@ use crate::mvcc::{
     SerializableTransactionId, VersionError, VersionResult, VersionedPersistence,
 };
 use crate::read_control::StorageReadControl;
+use crate::StorageBackendResult;
+
+/// Logical SSI capabilities of one original or retained storage session. Providers forward this boundary without deriving predicates from physical record keys. SQL must cover its access paths before enabling automatic admission.
+pub trait SerializableSession: Send + Sync {
+    fn establish_serializable_snapshot(&self) -> StorageBackendResult<SerializableReadContext>;
+    fn serializable_read_context(&self) -> StorageBackendResult<Option<SerializableReadContext>>;
+    fn observe_serializable_write(
+        &self,
+        predicate: SerializablePredicate<'_>,
+    ) -> StorageBackendResult<()>;
+}
+
+impl SerializableSession for super::VersionedKeyValueStore {
+    fn establish_serializable_snapshot(&self) -> StorageBackendResult<SerializableReadContext> {
+        Self::establish_serializable_snapshot(self)
+    }
+
+    fn serializable_read_context(&self) -> StorageBackendResult<Option<SerializableReadContext>> {
+        if let Some(view) = &self.retained {
+            return Ok(view.serializable().cloned());
+        }
+        let active = self.active.lock();
+        let Some(transaction) = active.as_ref() else {
+            return Ok(None);
+        };
+        transaction
+            .unsealed()
+            .map_err(VersionError::into_storage_error)?;
+        Ok(transaction.serializable_context().cloned())
+    }
+
+    fn observe_serializable_write(
+        &self,
+        predicate: SerializablePredicate<'_>,
+    ) -> StorageBackendResult<()> {
+        self.require_mutable_session()?;
+        Self::observe_serializable_write(self, predicate)
+    }
+}
 
 /// A retained reader attributes observations to its original transaction, even after session refresh or nested view cloning. This does not create another participant or give the reader ownership of transaction completion.
 #[derive(Clone)]
 pub struct SerializableReadContext {
     pub(super) persistence: Arc<dyn VersionedPersistence>,
     pub(super) participant: SerializableParticipant,
+    pub(super) memory: uqa_core::memory::MemoryBudget,
 }
 
 impl SerializableReadContext {
     pub fn id(&self) -> SerializableTransactionId {
         self.participant.id()
+    }
+
+    /// Retain the original session's allowance while observing cancellation from the invoking reader. Cloning a context or attaching a nested reader does not grant another observation budget.
+    pub fn read_control(&self, cancellation: &uqa_core::CancellationToken) -> StorageReadControl {
+        StorageReadControl::new(&self.memory, cancellation)
     }
 
     /// Register the logical predicate before exposing its result, including an empty, cached or index-only result. Physical record keys are not a substitute for logical object/row/index identities.

@@ -59,6 +59,7 @@ impl Transaction {
         let context = SerializableReadContext {
             persistence,
             participant,
+            memory: control.memory().clone(),
         };
         let mark = context.with_graph(control, |graph| graph.write_mark(context.id()))?;
         // The first fixed snapshot belongs to the outer transaction, including when acquired after a SQL savepoint.

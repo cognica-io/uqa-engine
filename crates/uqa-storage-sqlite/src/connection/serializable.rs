@@ -9,15 +9,49 @@
 use std::time::Duration;
 
 use uqa_storage::{
-    mvcc::{DatabaseId, VersionError, VersionResult},
+    mvcc::{
+        DatabaseId, SerializablePredicate, SerializableReadContext, SerializableSession,
+        VersionError, VersionResult,
+    },
     read_control::StorageReadControl,
-    PersistentStorageIdentity,
+    PersistentStorageIdentity, StorageBackendResult,
 };
 
 use super::ManagedConnection;
 use crate::SQLiteConnectionLease;
 
+impl SerializableSession for ManagedConnection {
+    fn establish_serializable_snapshot(&self) -> StorageBackendResult<SerializableReadContext> {
+        self.with_serializable_session(|session| session.establish_serializable_snapshot())
+    }
+
+    fn serializable_read_context(&self) -> StorageBackendResult<Option<SerializableReadContext>> {
+        self.with_serializable_session(|session| session.serializable_read_context())
+    }
+
+    fn observe_serializable_write(
+        &self,
+        predicate: SerializablePredicate<'_>,
+    ) -> StorageBackendResult<()> {
+        self.with_serializable_session(|session| session.observe_serializable_write(predicate))
+    }
+}
+
 impl ManagedConnection {
+    fn with_serializable_session<T>(
+        &self,
+        operation: impl FnOnce(&dyn SerializableSession) -> StorageBackendResult<T>,
+    ) -> StorageBackendResult<T> {
+        self.surface_cleanup_failure()?;
+        let _gate = self.session.gate.read();
+        let logical = self
+            .session
+            .logical
+            .get()
+            .ok_or(crate::SQLiteError::LogicalSessionRequired)?;
+        operation(logical.store.as_ref())
+    }
+
     pub(crate) fn serializable_local_leases(
         &self,
         control: &StorageReadControl,

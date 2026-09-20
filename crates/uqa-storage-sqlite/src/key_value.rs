@@ -87,6 +87,10 @@ impl uqa_storage::mvcc::IdentifierAllocator for SQLiteKeyValueStore {
 }
 
 impl KeyValueStore for SQLiteKeyValueStore {
+    fn serializable_session(&self) -> Option<&dyn uqa_storage::mvcc::SerializableSession> {
+        Some(&self.conn)
+    }
+
     fn vacuum(&self) -> StorageBackendResult<()> {
         self.conn.vacuum().map_err(Into::into)
     }

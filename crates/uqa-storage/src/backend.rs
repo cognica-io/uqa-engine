@@ -287,6 +287,11 @@ pub trait PersistentStorageProvider: Send + Sync {
 
 /// Factory plus transaction surface for persistent table/index storage.
 pub trait PersistentStorageBackend: Send + Sync {
+    /// Original participant admission and logical observations, shared with the paired catalog transaction. Retained readers preserve original attribution without owning completion. Wrappers must forward this capability; SQL access-path coverage remains the execution owner's responsibility.
+    fn serializable_session(&self) -> Option<&dyn crate::mvcc::SerializableSession> {
+        None
+    }
+
     /// Cancellation for this session's physical write admission and publication. Retained reads and rollback cleanup must remain usable after cancellation. Versioned wrappers must forward the underlying token.
     fn write_cancellation(&self) -> Option<uqa_core::CancellationToken> {
         None

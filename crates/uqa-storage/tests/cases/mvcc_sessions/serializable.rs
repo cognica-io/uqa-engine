@@ -142,6 +142,61 @@ fn write(session: &VersionedKeyValueStore, key: &[u8]) {
 }
 
 #[test]
+fn backend_capabilities_keep_original_attribution_budget_and_reader_cancellation() {
+    use uqa_storage::{KeyValueStorageBackend, PersistentStorageBackend};
+    let persistence = Persistence::new();
+    let store = Arc::new(persistence.session(1 << 20));
+    let backend = KeyValueStorageBackend::new(store.clone());
+    let session = backend.serializable_session().unwrap();
+    assert!(session.serializable_read_context().unwrap().is_none());
+    backend.begin_transaction().unwrap();
+    let actor = session.establish_serializable_snapshot().unwrap();
+    let cancellation = uqa_core::CancellationToken::new();
+    let reader = backend.open_retained_read_session(&cancellation).unwrap();
+    let reader_session = reader.backend.serializable_session().unwrap();
+    let retained = reader_session.serializable_read_context().unwrap().unwrap();
+    assert_eq!(retained.id(), actor.id());
+    let control = retained.read_control(&cancellation);
+    assert!(control
+        .memory()
+        .shares_allowance(store.retention_control().memory()));
+    assert!(reader_session.establish_serializable_snapshot().is_err());
+    assert!(reader_session
+        .observe_serializable_write(predicate(b"x"))
+        .is_err());
+    cancellation.cancel();
+    assert!(matches!(
+        retained
+            .observe_read(predicate(b"x"), &control)
+            .unwrap_err()
+            .into_storage_error(),
+        StorageBackendError::Cancelled(_)
+    ));
+    assert!(store.retention_control().check().is_ok());
+    cancellation.reset();
+    retained.observe_read(predicate(b"x"), &control).unwrap();
+    reader.backend.begin_read_transaction().unwrap();
+    reader.backend.commit_transaction().unwrap();
+    assert_eq!(
+        persistence.actor_status(actor.id()).unwrap(),
+        SerializableStatus::Active
+    );
+    backend.commit_transaction().unwrap();
+    backend.begin_transaction().unwrap();
+    let next = session.establish_serializable_snapshot().unwrap();
+    assert_ne!(next.id(), actor.id());
+    assert_eq!(
+        reader_session
+            .serializable_read_context()
+            .unwrap()
+            .unwrap()
+            .id(),
+        actor.id()
+    );
+    backend.rollback_transaction().unwrap();
+}
+
+#[test]
 fn empty_sessions_finish_without_a_physical_allocation_and_views_retain_the_original_actor() {
     for read_only in [false, true] {
         let persistence = Persistence::new();

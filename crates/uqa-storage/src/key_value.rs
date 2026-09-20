@@ -249,6 +249,11 @@ pub trait KeyValueBatch {
 
 /// Ordered byte-key storage used by Key/Value catalog and index backends.
 pub trait KeyValueStore: Send + Sync {
+    /// Original participant admission and logical observations. Wrappers must forward this capability, including original attribution on retained read-only sessions; capability presence does not establish complete SQL SSI support.
+    fn serializable_session(&self) -> Option<&dyn crate::mvcc::SerializableSession> {
+        None
+    }
+
     /// Reclaim committed history outside this session's transaction. Versioned wrappers must forward maintenance; serialized stores that eagerly remove obsolete values may keep the default.
     fn vacuum(&self) -> StorageBackendResult<()> {
         if self.transaction_model().is_versioned() {
