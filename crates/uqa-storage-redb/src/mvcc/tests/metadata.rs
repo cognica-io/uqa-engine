@@ -11,7 +11,7 @@ use uqa_storage::mvcc::{IdentifierRequest, RecordWrite};
 
 #[test]
 fn predecessor_format_upgrade_preserves_records_allocations_and_receipts() {
-    for predecessor in [29_u64, 30, 31, 32, 33, 34, 35, 36] {
+    for predecessor in [29_u64, 30, 31, 32, 33, 34, 35, 36, 37] {
         let database = Arc::new(
             Database::builder()
                 .create_with_backend(InMemoryBackend::new())
@@ -77,7 +77,7 @@ fn predecessor_format_upgrade_preserves_records_allocations_and_receipts() {
         let transaction = database.begin_read().unwrap();
         assert_eq!(
             read_u64(&transaction.open_table(METADATA).unwrap(), "format").unwrap(),
-            37
+            38
         );
     }
 }

@@ -114,62 +114,79 @@ fn untouched_domain_catalog_refresh_observes_committed_definitions() {
 #[test]
 fn domain_conversion_is_initial_only_and_later_failure_restores_the_legacy_catalog() {
     for provider in 0..3 {
-        let (_directory, first, second) = sessions(provider);
-        setup(&first);
-        let factory = Arc::clone(first.storage.provider.as_ref().unwrap());
-        let raw = factory.open_session().unwrap();
-        let original = raw
-            .catalog
-            .get_metadata(DOMAINS_METADATA_KEY)
-            .unwrap()
-            .unwrap();
-        let mut legacy =
-            serde_json::from_str::<serde_json::Value>(&original).unwrap()["domains"].clone();
-        legacy["public.owned_domain"]["owner"] = "domain_owner".into();
-        let legacy = legacy.to_string();
-        raw.catalog
-            .set_metadata(DOMAINS_METADATA_KEY, &legacy)
-            .unwrap();
-        let Err(failure) = first.new_session() else {
-            panic!("secondary session migrated domain names")
-        };
-        assert!(
-            failure.to_string().contains("initial catalog migration"),
-            "{failure}"
-        );
-        let before = first.durable.domains.snapshot();
-        assert!(first
-            .restore_domains_from_catalog(raw.catalog.as_ref(), false)
-            .is_err());
-        assert!(Arc::ptr_eq(&before, &first.durable.domains.snapshot()));
-        raw.catalog.set_metadata("sql_triggers_json", "{").unwrap();
-        drop(second);
-        drop(first);
-        let Err(failure) = Engine::from_persistent_provider(Arc::clone(&factory)) else {
-            panic!("invalid trigger catalog accepted")
-        };
-        assert!(failure.to_string().contains("EOF"), "{failure}");
-        assert_eq!(
-            raw.catalog
+        for format in [0, 1] {
+            let (_directory, first, second) = sessions(provider);
+            setup(&first);
+            let factory = Arc::clone(first.storage.provider.as_ref().unwrap());
+            let raw = factory.open_session().unwrap();
+            let original = raw
+                .catalog
                 .get_metadata(DOMAINS_METADATA_KEY)
                 .unwrap()
-                .unwrap(),
-            legacy
-        );
-        raw.catalog.delete_metadata("sql_triggers_json").unwrap();
-        let restored = Engine::from_persistent_provider(factory).unwrap();
-        assert_eq!(
+                .unwrap();
+            let records = raw.catalog.metadata_with_prefix("uqa.sql.domain").unwrap();
+            let mut domains = serde_json::to_value(&*first.durable.domains.read()).unwrap();
+            let legacy = if format == 0 {
+                domains["public.owned_domain"]["owner"] = "domain_owner".into();
+                domains.to_string()
+            } else {
+                serde_json::json!({"domain_catalog_format": 1, "domains": domains}).to_string()
+            };
+            for (key, _) in &records {
+                raw.catalog.delete_metadata(key).unwrap();
+            }
             raw.catalog
-                .get_metadata(DOMAINS_METADATA_KEY)
+                .set_metadata(DOMAINS_METADATA_KEY, &legacy)
+                .unwrap();
+            let Err(failure) = first.new_session() else {
+                panic!("secondary session migrated domain names")
+            };
+            assert!(
+                failure.to_string().contains("initial catalog migration"),
+                "{failure}"
+            );
+            let before = first.durable.domains.snapshot();
+            assert!(first
+                .restore_domains_from_catalog(raw.catalog.as_ref(), false)
+                .is_err());
+            assert!(Arc::ptr_eq(&before, &first.durable.domains.snapshot()));
+            raw.catalog.set_metadata("sql_triggers_json", "{").unwrap();
+            drop((first, second));
+            let Err(failure) = Engine::from_persistent_provider(Arc::clone(&factory)) else {
+                panic!("invalid trigger catalog accepted")
+            };
+            assert!(failure.to_string().contains("EOF"), "{failure}");
+            assert_eq!(
+                raw.catalog
+                    .get_metadata(DOMAINS_METADATA_KEY)
+                    .unwrap()
+                    .unwrap(),
+                legacy
+            );
+            assert!(raw
+                .catalog
+                .metadata_with_prefix("uqa.sql.domain")
                 .unwrap()
-                .unwrap(),
-            original
-        );
-        assert_eq!(
-            sql(&restored, "SELECT 7::owned_domain AS value").rows[0]["value"],
-            Value::Int(7)
-        );
-        error(&restored, "DROP ROLE domain_owner", "2BP01");
+                .is_empty());
+            raw.catalog.delete_metadata("sql_triggers_json").unwrap();
+            let restored = Engine::from_persistent_provider(factory).unwrap();
+            assert_eq!(
+                raw.catalog
+                    .get_metadata(DOMAINS_METADATA_KEY)
+                    .unwrap()
+                    .unwrap(),
+                original
+            );
+            assert_eq!(
+                raw.catalog.metadata_with_prefix("uqa.sql.domain").unwrap(),
+                records
+            );
+            assert_eq!(
+                sql(&restored, "SELECT 7::owned_domain AS value").rows[0]["value"],
+                Value::Int(7)
+            );
+            error(&restored, "DROP ROLE domain_owner", "2BP01");
+        }
     }
 }
 
@@ -182,15 +199,14 @@ fn current_domain_owner_corruption_never_rebinds_on_refresh_or_reopen() {
         let raw = factory.open_session().unwrap();
         let original = raw
             .catalog
-            .get_metadata(DOMAINS_METADATA_KEY)
+            .get_metadata("uqa.sql.domain.v1:public.owned_domain")
             .unwrap()
             .unwrap();
         let mut corrupt: serde_json::Value = serde_json::from_str(&original).unwrap();
-        corrupt["domains"]["public.owned_domain"]["owner"]["object_id"] =
-            serde_json::to_value([42_u8; 16]).unwrap();
+        corrupt["owner"]["object_id"] = serde_json::to_value([42_u8; 16]).unwrap();
         let corrupt = corrupt.to_string();
         raw.catalog
-            .set_metadata(DOMAINS_METADATA_KEY, &corrupt)
+            .set_metadata("uqa.sql.domain.v1:public.owned_domain", &corrupt)
             .unwrap();
         let before = first.durable.domains.snapshot();
         let failure = first
@@ -213,13 +229,13 @@ fn current_domain_owner_corruption_never_rebinds_on_refresh_or_reopen() {
         );
         assert_eq!(
             raw.catalog
-                .get_metadata(DOMAINS_METADATA_KEY)
+                .get_metadata("uqa.sql.domain.v1:public.owned_domain")
                 .unwrap()
                 .unwrap(),
             corrupt
         );
         raw.catalog
-            .set_metadata(DOMAINS_METADATA_KEY, &original)
+            .set_metadata("uqa.sql.domain.v1:public.owned_domain", &original)
             .unwrap();
         let restored = Engine::from_persistent_provider(factory).unwrap();
         error(&restored, "DROP ROLE domain_owner", "2BP01");

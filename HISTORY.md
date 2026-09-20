@@ -22,6 +22,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Persist independent domain definitions and OID claims so concurrent transactions creating or dropping different domains can commit without overwriting one shared registry. Preserve private changes and peer commits through catalog refresh, savepoint undo and reopen; convert earlier domain catalogs atomically and fence incompatible development writers.
 - Bind legacy unqualified foreign-key targets before converting their stored index identities. Resolve against the complete stored table catalog, reject ambiguous or dangling targets before conversion writes, and keep the canonical target after later same-name table creation.
 - Coordinate CHECK, NOT NULL, foreign-key, key and constraint-trigger names within their owning table across SQLite and redb. Preserve concurrent index renames through constraint and relation-name waits, distinguish pre-existing duplicates from conflicting commits, and avoid trigger constraint names when assigning automatic column and key names. Keep explicit PRIMARY KEY and UNIQUE declarations, including names and NULLS NOT DISTINCT, when adding a column.
 - Coordinate concurrent relation creation and rename through schema-local name reservations across SQLite and redb. A competitor waits for commit or rollback and reports PostgreSQL catalog uniqueness SQLSTATE `23505` after a conflicting commit, including for conditional creation and implicit indexes; fixed data snapshots remain unchanged.

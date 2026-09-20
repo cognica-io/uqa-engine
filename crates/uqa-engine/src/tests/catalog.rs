@@ -7,6 +7,7 @@
 //! Catalog publication, guards, and durable Engine state.
 
 mod alteration_authority;
+mod domains;
 mod events;
 mod foreign_tables;
 mod hierarchy_restoration;

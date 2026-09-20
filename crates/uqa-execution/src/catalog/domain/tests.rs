@@ -8,6 +8,14 @@ use super::*;
 use uqa_core::RelationIdentity;
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
+fn encode(
+    registry: &DomainRegistry,
+    roles: &BTreeMap<String, RoleDefinition>,
+) -> StorageBackendResult<String> {
+    validate_domain_registry(registry, roles).map_err(StorageBackendError::Other)?;
+    Ok(serde_json::json!({"domain_catalog_format": 1, "domains": registry}).to_string())
+}
+
 fn legacy() -> BTreeMap<String, StoredDomain<String>> {
     let uqa_sql::Statement::CreateDomain(definition) =
         uqa_sql::compile("CREATE DOMAIN public.positive AS integer CHECK (VALUE > 0)")
@@ -98,7 +106,7 @@ fn invalid_legacy_candidates_are_rejected_before_any_conversion_write() {
 }
 
 #[test]
-fn malformed_current_catalogs_never_fall_back_to_legacy_names() {
+fn malformed_aggregate_catalogs_never_fall_back_to_legacy_names() {
     let (catalog, roles) = fixture();
     let registry = legacy()
         .into_iter()
@@ -139,6 +147,8 @@ fn malformed_current_catalogs_never_fall_back_to_legacy_names() {
         }
     }
 }
+
+mod records;
 
 #[test]
 fn empty_catalog_conversion_is_initial_only_and_idempotent() {

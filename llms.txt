@@ -26,6 +26,8 @@ Stored index identity reservation, constraint-name normalization, complete const
 
 Borrowed constraint names and individual catalog identities live in `crates/uqa-sql/src/schema/constraint_changes/names.rs`. Execution's `schema/constraints/names.rs` coordinates destinations by the owning relation's immutable identity, including constraint triggers. Structural publication rebinds key names from current owned indexes after catalog waits.
 
+Domain persistence and private catalog merging live in `crates/uqa-execution/src/catalog/domain/`. Independent domain definitions and OID claims share the existing storage metadata transaction; Engine supplies registry and catalog adapters.
+
 Cypher default-label requirements and diagnostics live in `crates/uqa-graph/src/cypher/labels.rs`; Engine retains graph selection, statement gates, and graph read/write transaction boundaries.
 
 RPQ syntax is defined in `crates/uqa-core/src/rpq.rs` and consumed directly by planner cost estimation. Graph re-exports the same syntax and owns automata and traversal.

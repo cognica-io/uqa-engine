@@ -269,9 +269,10 @@ pub fn drop_domain_routine_checks(
     if checks.is_empty() {
         return Ok(());
     }
-    let mut registry = context.catalog.domain_definitions();
+    let before = context.catalog.domain_definitions();
+    let mut registry = before.clone();
     analysis::remove_domain_routine_checks(&mut registry, checks)?;
-    crate::catalog::domain::publish(context.publication, registry)?;
+    crate::catalog::domain::publish(context.publication, &before, registry)?;
     context.changes.catalog_registry_changed();
     Ok(())
 }
@@ -283,12 +284,13 @@ pub fn commit_domain_drop(
     if targets.is_empty() {
         return Ok(());
     }
-    let mut registry = context.catalog.domain_definitions();
+    let before = context.catalog.domain_definitions();
+    let mut registry = before.clone();
     let dependents = domain_drop_dependents(context, targets)?;
     drop_domain_view_dependents(context, targets, &dependents)?;
     drop_domain_schema_dependents(context, &dependents)?;
     analysis::remove_domain_references(context.types, &mut registry, targets)?;
-    crate::catalog::domain::publish(context.publication, registry)?;
+    crate::catalog::domain::publish(context.publication, &before, registry)?;
     context.changes.catalog_registry_changed();
     Ok(())
 }

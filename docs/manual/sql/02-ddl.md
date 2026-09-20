@@ -81,6 +81,8 @@ Domain ownership retains the owner role’s OID and incarnation. `DROP ROLE` rep
 
 Domain creation participates in the surrounding transaction. Definitions, defaults, constraint bindings, and type identities survive SQLite reopen and remain available to new sessions. A duplicate type name reports `42710`; invalid CHECK result types report `42804`, failed checks report `23514`, and a prohibited NULL conversion reports `23502`.
 
+Native SQLite, SQLite Key/Value and redb allow transactions changing distinct domains to commit independently. Catalog refresh preserves private domain replacements and deletions alongside independently committed definitions. Transaction or savepoint rollback undoes only its own changes, and REPEATABLE READ and SERIALIZABLE retain their ordinary data snapshots during current-catalog inspection.
+
 Constraints run when a value is converted into a domain. Assigning an already typed domain value preserves its identity without checking it again, including a typed NULL produced by an empty scalar subquery. Explicit casts follow the base type's explicit conversion rules; assignments enforce its declaration limits. For example, casting to a `varchar(5)` domain truncates an overlength string, while assigning an overlength string to its column reports `22001`.
 
 ```sql execute

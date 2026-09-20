@@ -40,7 +40,8 @@ pub fn create_domain(
     let object_id = (context.allocate_identity)()?;
     let oid = domain_object_oid(&object_id);
     context.creation.retain_owner(&owner)?;
-    let mut registry = context.publication.domain_registry().clone();
+    let before = context.publication.domain_registry().clone();
+    let mut registry = before.clone();
     registry.insert(
         identity.qualified_name(),
         StoredDomain {
@@ -51,7 +52,7 @@ pub fn create_domain(
             definition,
         },
     );
-    domain::publish(context.publication, registry)?;
+    domain::publish(context.publication, &before, registry)?;
     context.changes.catalog_registry_changed();
     Ok(())
 }
