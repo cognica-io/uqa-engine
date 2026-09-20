@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-09-20
+
+See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.3.8/docs/manual/reference/10-upgrading.md) for package updates and corrected JSON extraction behavior.
+
+### Fixed
+
+- Preserved JSON and JSONB input types through `->` and `#>` extraction, including comparisons on empty tables, bound parameters and generated columns. Text extraction with `->>` and `#>>` continues to return text, and JSON equality remains rejected.
+- Distinguished present JSON null from missing keys and SQL NULL, preserved text object-key versus integer array-index overloads, and decoded path operands as PostgreSQL text arrays, including quoted keys and NULL path elements. SQL rendering retains all four extraction operators and their result types.
+
 ## [0.3.7] - 2026-09-18
 
 See the [upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.3.7/docs/manual/reference/10-upgrading.md) for package updates, concurrent writer coordination and encrypted notification sidecar requirements.
