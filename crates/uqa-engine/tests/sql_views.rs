@@ -18,6 +18,8 @@ use uqa_storage_sqlite::ManagedConnection;
 
 #[path = "sql_views/automatic_updatability.rs"]
 mod automatic_updatability;
+#[path = "sql_views/catalog_function_dispatch.rs"]
+mod catalog_function_dispatch;
 #[path = "sql_views/column_aliases.rs"]
 mod column_aliases;
 #[path = "sql_views/definitions.rs"]

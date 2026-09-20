@@ -22,6 +22,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve selected user routines and registered callbacks when their names match catalog functions. Execute bound catalog calls by their retained identity and preserve binding errors before catalog interception.
 - Preserve numeric operator identity, declared operand widths, PostgreSQL errors and output labels through stored definitions and execution. Resolve ordinary numeric functions with the shared search-path-aware signature registry. Common record format 40 fences incompatible stored-expression writers.
 - Retain a separate durable incarnation and public OID for each domain CHECK and NOT NULL constraint. Reserve addresses against table, foreign-table and trigger constraints; finalize legacy conversion against the complete catalog and reject corrupt current identities. Domain format 3 and common record format 39 fence incompatible writers.
 - Reserve domain and relation row-type names across concurrent creation and rename, preserving PostgreSQL duplicate diagnostics, transaction/savepoint undo and independent sequence/index names.
