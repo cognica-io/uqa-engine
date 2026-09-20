@@ -15,6 +15,8 @@ use std::{
 
 use super::*;
 
+mod liveness;
+
 const PATH_ENV: &str = "UQA_SERIALIZABLE_TRANSPORT_TEST_PATH";
 const MODE_ENV: &str = "UQA_SERIALIZABLE_TRANSPORT_TEST_MODE";
 
@@ -25,12 +27,19 @@ struct Peer {
 
 impl Peer {
     fn start(path: &Path, mode: usize) -> Self {
-        let (_, test) = concat!(
-            module_path!(),
-            "::independent_processes_keep_dependencies_and_release_abandoned_admission"
+        Self::start_test(
+            path,
+            mode,
+            concat!(
+                module_path!(),
+                "::independent_processes_keep_dependencies_and_release_abandoned_admission"
+            ),
+            "read-retained",
         )
-        .split_once("::")
-        .unwrap();
+    }
+
+    fn start_test(path: &Path, mode: usize, test: &str, ready: &str) -> Self {
+        let (_, test) = test.split_once("::").unwrap();
         let mut child = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", test, "--nocapture"])
             .env(PATH_ENV, path)
@@ -50,8 +59,20 @@ impl Peer {
             }
         });
         let peer = Self { child, events };
-        peer.expect("read-retained");
+        peer.expect(ready);
         peer
+    }
+
+    fn expect_prefix(&self, prefix: &str) -> String {
+        loop {
+            let event = self
+                .events
+                .recv_timeout(Duration::from_secs(30))
+                .expect("serializable peer did not publish its participant identities");
+            if let Some(value) = event.strip_prefix(prefix) {
+                return value.to_owned();
+            }
+        }
     }
 
     fn expect(&self, expected: &str) {

@@ -18,6 +18,18 @@ use super::ManagedConnection;
 use crate::SQLiteConnectionLease;
 
 impl ManagedConnection {
+    pub(crate) fn serializable_local_leases(
+        &self,
+        control: &StorageReadControl,
+    ) -> std::sync::Arc<uqa_storage::mvcc::LocalSerializableLeases> {
+        let mut retained = self.pool.serializable_leases.lock();
+        std::sync::Arc::clone(retained.get_or_insert_with(|| {
+            std::sync::Arc::new(uqa_storage::mvcc::LocalSerializableLeases::new(
+                control.memory(),
+            ))
+        }))
+    }
+
     pub(crate) fn serializable_connection(
         &self,
         database: DatabaseId,

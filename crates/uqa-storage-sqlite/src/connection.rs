@@ -175,6 +175,7 @@ struct PoolState {
 }
 
 struct ConnectionPool {
+    serializable_leases: Mutex<Option<Arc<uqa_storage::mvcc::LocalSerializableLeases>>>,
     serializable_connection: Mutex<Option<(uqa_storage::mvcc::DatabaseId, ManagedConnection)>>,
     snapshot_registry: Mutex<
         Option<(
@@ -196,6 +197,7 @@ struct ConnectionPool {
 impl ConnectionPool {
     fn new(spec: ConnectionSpec, initial: Connection, max_connections: usize) -> Arc<Self> {
         Arc::new(Self {
+            serializable_leases: Mutex::new(None),
             serializable_connection: Mutex::new(None),
             snapshot_registry: Mutex::new(None),
             spec,

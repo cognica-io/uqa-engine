@@ -16,11 +16,11 @@ fn an_expired_registry_reuses_its_still_owned_native_descriptor() {
     let path = std::fs::canonicalize(path).unwrap();
     let identity = DatabaseId::from_bytes([7; 16]);
     let first = registry(&path, identity).unwrap();
-    let original = Arc::clone(&REGISTRIES.get().unwrap().lock()[&path].state);
+    let original = lease_file(&path, identity).unwrap();
     drop(first);
     let second = registry(&path, identity).unwrap();
-    let replacement = Arc::clone(&REGISTRIES.get().unwrap().lock()[&path].state);
-    assert!(Arc::ptr_eq(&original, &replacement));
+    let replacement = lease_file(&path, identity).unwrap();
+    assert!(original.shares_descriptor(&replacement));
     let control = StorageReadControl::with_limit(1 << 20);
     let snapshot = second
         .capture(&control, || Ok(CommitSequence::from_u64(2)))

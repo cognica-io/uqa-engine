@@ -16,6 +16,7 @@ use uqa_storage::mvcc::{
 use super::*;
 use crate::ManagedConnection;
 
+mod liveness;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod process;
 

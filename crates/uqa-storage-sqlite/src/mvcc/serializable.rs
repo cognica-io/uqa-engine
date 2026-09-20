@@ -6,6 +6,7 @@
 
 //! Atomic, encrypted transport for the common SSI graph across independent `SQLite` processes.
 
+mod liveness;
 mod schema;
 #[cfg(test)]
 mod tests;
