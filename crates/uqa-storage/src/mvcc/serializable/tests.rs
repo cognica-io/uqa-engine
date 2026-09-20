@@ -8,15 +8,19 @@
 
 use super::*;
 
+const COORDINATOR: [u8; 16] = [42; 16];
 const DATABASE: DatabaseId = DatabaseId::from_bytes([19; 16]);
 
-fn id(allocation: u64) -> StorageTransactionId {
-    StorageTransactionId::new(DATABASE, allocation).unwrap()
+fn id(allocation: u64) -> SerializableTransactionId {
+    SerializableTransactionId::new(DATABASE, COORDINATOR, allocation).unwrap()
 }
 
 fn setup() -> (SerializableGraph, StorageReadControl) {
     let control = StorageReadControl::with_limit(64 * 1024);
-    (SerializableGraph::new(DATABASE, control.memory()), control)
+    (
+        SerializableGraph::new(DATABASE, COORDINATOR, control.memory()).unwrap(),
+        control,
+    )
 }
 
 fn begin(graph: &mut SerializableGraph, control: &StorageReadControl, ids: &[u64]) {
@@ -411,7 +415,8 @@ fn wrong_incarnations_invalid_observers_and_read_only_writers_are_rejected() {
     let (mut graph, control) = setup();
     begin(&mut graph, &control, &[1, 2, 3]);
     graph.begin(id(4), true, &control).unwrap();
-    let other = StorageTransactionId::new(DatabaseId::from_bytes([20; 16]), 1).unwrap();
+    let other =
+        SerializableTransactionId::new(DatabaseId::from_bytes([20; 16]), COORDINATOR, 1).unwrap();
     assert!(matches!(
         graph.begin(other, false, &control),
         Err(VersionError::WrongDatabase)

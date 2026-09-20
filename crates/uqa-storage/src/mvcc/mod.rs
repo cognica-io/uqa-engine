@@ -57,7 +57,7 @@ pub use retention::{
 };
 pub use serializable::{
     SafeSnapshot, SerializableGraph, SerializableKeySpace, SerializablePredicate,
-    SerializableWriteMark,
+    SerializablePublication, SerializableTransactionId, SerializableWriteMark,
 };
 pub use session::{VersionedKeyValueStore, VersionedSessionOptions};
 pub use types::{CommitSequence, RecordWrite, VersionError, VersionResult};

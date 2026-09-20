@@ -8,7 +8,7 @@
 
 use super::{edge_range, insert_edge, Edge, SerializableGraph, Transaction};
 use crate::{
-    mvcc::{StorageTransactionId, VersionError, VersionResult},
+    mvcc::{SerializableTransactionId, VersionError, VersionResult},
     read_control::StorageReadControl,
 };
 
@@ -21,9 +21,9 @@ pub(super) struct DependencyAction {
 impl SerializableGraph {
     pub(super) fn plan_dependency(
         &self,
-        observer: StorageTransactionId,
-        reader: StorageTransactionId,
-        writer: StorageTransactionId,
+        observer: SerializableTransactionId,
+        reader: SerializableTransactionId,
+        writer: SerializableTransactionId,
         control: &StorageReadControl,
     ) -> VersionResult<Option<DependencyAction>> {
         control.check()?;

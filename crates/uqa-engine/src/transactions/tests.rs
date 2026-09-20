@@ -11,11 +11,18 @@ use super::*;
 
 #[test]
 fn serializable_dependency_errors_preserve_uncertain_commit_precedence() {
-    use uqa_storage::mvcc::{CommitFailure, DatabaseId, StorageTransactionId, VersionError};
+    use uqa_storage::mvcc::{
+        CommitFailure, DatabaseId, SerializableTransactionId, StorageTransactionId, VersionError,
+    };
 
-    let transaction = StorageTransactionId::new(DatabaseId::from_bytes([19; 16]), 1).unwrap();
+    let database = DatabaseId::from_bytes([19; 16]);
+    let participant = SerializableTransactionId::new(database, [20; 16], 1).unwrap();
+    let transaction = StorageTransactionId::new(database, 7).unwrap();
     for uncertain in [false, true] {
-        let error = VersionError::SerializationConflict { transaction }.into_storage_error();
+        let error = VersionError::SerializationConflict {
+            transaction: participant,
+        }
+        .into_storage_error();
         let error = if uncertain {
             StorageBackendError::backend(
                 "receipt",

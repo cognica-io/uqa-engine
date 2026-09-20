@@ -11,17 +11,18 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 use super::*;
 use crate::mvcc::{DatabaseId, SerializableKeySpace};
 
+const COORDINATOR: [u8; 16] = [42; 16];
 const DATABASE: DatabaseId = DatabaseId::from_bytes([31; 16]);
 const TABLE: [u8; 16] = [7; 16];
 const INDEX: SerializableKeySpace = SerializableKeySpace::Index([8; 16]);
 
-fn id(value: u64) -> StorageTransactionId {
-    StorageTransactionId::new(DATABASE, value).unwrap()
+fn id(value: u64) -> SerializableTransactionId {
+    SerializableTransactionId::new(DATABASE, COORDINATOR, value).unwrap()
 }
 
 fn setup(count: u64) -> (SerializableGraph, StorageReadControl) {
     let control = StorageReadControl::with_limit(64 * 1024);
-    let mut graph = SerializableGraph::new(DATABASE, control.memory());
+    let mut graph = SerializableGraph::new(DATABASE, COORDINATOR, control.memory()).unwrap();
     for value in 1..=count {
         graph.begin(id(value), false, &control).unwrap();
     }
@@ -413,7 +414,8 @@ fn observation_admission_rejects_invalid_identities_ranges_and_read_only_writes(
         graph.observe_write(id(2), point(b"x"), &control),
         Err(VersionError::InvalidEncoding(_))
     ));
-    let foreign = StorageTransactionId::new(DatabaseId::from_bytes([99; 16]), 1).unwrap();
+    let foreign =
+        SerializableTransactionId::new(DatabaseId::from_bytes([99; 16]), COORDINATOR, 1).unwrap();
     assert!(matches!(
         graph.observe_read(foreign, point(b"x"), &control),
         Err(VersionError::WrongDatabase)

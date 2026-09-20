@@ -87,8 +87,9 @@ mod tests {
                 ),
                 (
                     VersionError::SerializationConflict {
-                        transaction: uqa_storage::mvcc::StorageTransactionId::new(
+                        transaction: uqa_storage::mvcc::SerializableTransactionId::new(
                             uqa_storage::mvcc::DatabaseId::from_bytes([1; 16]),
+                            [2; 16],
                             1,
                         )
                         .unwrap(),

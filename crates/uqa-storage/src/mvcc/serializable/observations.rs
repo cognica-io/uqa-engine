@@ -13,14 +13,14 @@ use uqa_core::memory::{BudgetedVec, MemoryBudget};
 
 use super::{
     conflicts::DependencyAction, predicates::OwnedPredicate, SerializableGraph,
-    SerializablePredicate, StorageTransactionId, Transaction, VersionError, VersionResult,
+    SerializablePredicate, SerializableTransactionId, Transaction, VersionError, VersionResult,
 };
 use crate::read_control::StorageReadControl;
 
 /// A transaction-owned position in its successful write observations. Undo removes subsequent write intents while retaining every read observation and previously established dependency.
 #[derive(Debug, Clone, Copy)]
 pub struct SerializableWriteMark {
-    transaction: StorageTransactionId,
+    transaction: SerializableTransactionId,
     writes: u64,
 }
 
@@ -84,7 +84,7 @@ impl SerializableGraph {
     /// Register before a logical read can race with a write. This includes empty point/range results, index-only and cached reads. Check existing write intents as well as committed writers invisible to the reader's fixed snapshot; later writers inspect the retained read. The caller coordinates this boundary with snapshot capture and publication.
     pub fn observe_read(
         &mut self,
-        transaction: StorageTransactionId,
+        transaction: SerializableTransactionId,
         predicate: SerializablePredicate<'_>,
         control: &StorageReadControl,
     ) -> VersionResult<()> {
@@ -94,7 +94,7 @@ impl SerializableGraph {
     /// Register before staging a logical write. Supply the changed row and every affected old/new index key separately, or the entire object for an object-wide change. Physical posting clusters and counters are not logical keys. This checks existing readers and retains an intent for later reads. A failed observation publishes neither its intent nor any dependencies or peer victims.
     pub fn observe_write(
         &mut self,
-        transaction: StorageTransactionId,
+        transaction: SerializableTransactionId,
         predicate: SerializablePredicate<'_>,
         control: &StorageReadControl,
     ) -> VersionResult<()> {
@@ -103,7 +103,7 @@ impl SerializableGraph {
 
     pub fn write_mark(
         &self,
-        transaction: StorageTransactionId,
+        transaction: SerializableTransactionId,
     ) -> VersionResult<SerializableWriteMark> {
         self.check_active(transaction)?;
         Ok(SerializableWriteMark {
@@ -134,7 +134,7 @@ impl SerializableGraph {
 
     fn observe_predicate(
         &mut self,
-        transaction: StorageTransactionId,
+        transaction: SerializableTransactionId,
         predicate: SerializablePredicate<'_>,
         writing: bool,
         control: &StorageReadControl,
@@ -182,7 +182,8 @@ impl SerializableGraph {
             if !matches {
                 continue;
             }
-            let peer = StorageTransactionId::new(self.database, observed.owner)?;
+            let peer =
+                SerializableTransactionId::new(self.database, self.coordinator, observed.owner)?;
             let (reader, writer) = if writing {
                 (peer, transaction)
             } else {

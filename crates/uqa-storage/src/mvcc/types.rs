@@ -57,8 +57,10 @@ pub enum VersionError {
     },
     #[error("could not serialize access due to read/write dependencies for {transaction:?}")]
     SerializationConflict {
-        transaction: super::StorageTransactionId,
+        transaction: super::SerializableTransactionId,
     },
+    #[error("serializable participant belongs to another coordinator incarnation")]
+    WrongSerializableCoordinator,
     /// The provider verified a pending receipt under exclusive admission, but evaluated derived effects used an earlier committed snapshot. Only those pure effects may be prepared again.
     #[error("derived commit snapshot {expected:?} changed to {actual:?}")]
     CommitSnapshotChanged {

@@ -7,18 +7,22 @@
 //! Serializable read/write dependencies, commit ordering and retained conflict summaries.
 
 mod conflicts;
+mod identity;
 mod observations;
 mod predicates;
+mod publication;
 #[cfg(test)]
 mod tests;
 
 use uqa_core::memory::{BudgetedVec, MemoryBudget};
 
-use super::{DatabaseId, StorageTransactionId, VersionError, VersionResult};
+use super::{DatabaseId, VersionError, VersionResult};
 use crate::read_control::StorageReadControl;
 
+pub use identity::SerializableTransactionId;
 pub use observations::SerializableWriteMark;
 pub use predicates::{SerializableKeySpace, SerializablePredicate};
+pub use publication::SerializablePublication;
 
 /// Whether a read-only snapshot can execute without predicate observations. An unsafe snapshot must be discarded and captured again; waiting cannot repair it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +43,7 @@ struct Transaction {
     doomed: bool,
     summarized_out: Option<u64>,
     writes: u64,
+    publication: Option<publication::PreparedPublication>,
 }
 
 impl Transaction {
@@ -62,6 +67,8 @@ struct Edge(u64, u64);
 /// A prepared transaction has passed the final serialization check and cannot be selected as a victim. Keep it prepared across an uncertain physical outcome, and call `commit` or `rollback` only after authoritative completion. Savepoint undo must not discard the transaction's read dependencies.
 pub struct SerializableGraph {
     database: DatabaseId,
+    coordinator: [u8; 16],
+    last_allocation: u64,
     clock: u64,
     pending_finishes: u64,
     transactions: BudgetedVec<Transaction>,
@@ -71,27 +78,51 @@ pub struct SerializableGraph {
 }
 
 impl SerializableGraph {
-    pub fn new(database: DatabaseId, memory: &MemoryBudget) -> Self {
-        Self {
+    /// Create the graph for a nonzero provider-coordinated incarnation. A provider must retain this incarnation and its admission state for every overlapping participant, including across process handoff.
+    pub fn new(
+        database: DatabaseId,
+        coordinator: [u8; 16],
+        memory: &MemoryBudget,
+    ) -> VersionResult<Self> {
+        identity::validate_coordinator(coordinator)?;
+        Ok(Self {
             database,
+            coordinator,
+            last_allocation: 0,
             clock: 0,
             pending_finishes: 0,
             transactions: BudgetedVec::new(memory),
             outgoing: BudgetedVec::new(memory),
             incoming: BudgetedVec::new(memory),
             predicates: observations::Observations::new(memory),
-        }
+        })
     }
 
-    /// Admit a non-reused allocation at the same boundary as its fixed data snapshot. Event ordering is independent of physical record commit sequences and includes read-only transaction completion.
-    pub fn begin(
+    /// Allocate and admit a logical participant at the same boundary as its fixed data snapshot, without allocating a physical transaction or writing user data. The owner coordinates and retains admission across every provider process. Allocations survive graph reclamation and are never reused within the coordinator incarnation.
+    pub fn admit(
         &mut self,
-        transaction: StorageTransactionId,
+        read_only: bool,
+        control: &StorageReadControl,
+    ) -> VersionResult<SerializableTransactionId> {
+        control.check()?;
+        let allocation = self
+            .last_allocation
+            .checked_add(1)
+            .ok_or(VersionError::SequenceExhausted)?;
+        let transaction =
+            SerializableTransactionId::new(self.database, self.coordinator, allocation)?;
+        self.begin(transaction, read_only, control)?;
+        Ok(transaction)
+    }
+
+    fn begin(
+        &mut self,
+        transaction: SerializableTransactionId,
         read_only: bool,
         control: &StorageReadControl,
     ) -> VersionResult<()> {
         control.check()?;
-        self.validate_database(transaction)?;
+        self.validate_identity(transaction)?;
         let position = self
             .transactions
             .binary_search_by_key(&transaction.allocation(), |entry| entry.id)
@@ -110,14 +141,16 @@ impl SerializableGraph {
             doomed: false,
             summarized_out: None,
             writes: 0,
+            publication: None,
         })?;
         self.transactions[position..].rotate_right(1);
         self.clock += 1;
+        self.last_allocation = self.last_allocation.max(transaction.allocation());
         Ok(())
     }
 
     /// Fail a doomed transaction before another statement or commit. Prepared state is sealed, including while its durable outcome is unknown.
-    pub fn check_active(&self, transaction: StorageTransactionId) -> VersionResult<()> {
+    pub fn check_active(&self, transaction: SerializableTransactionId) -> VersionResult<()> {
         let entry = self.transactions[self.position(transaction)?];
         if entry.doomed {
             return Err(VersionError::SerializationConflict { transaction });
@@ -134,9 +167,9 @@ impl SerializableGraph {
     /// Register a dependency directed from reader to writer. The observing transaction must be one endpoint and still active. A peer may be marked doomed; its next active check or preparation then reports a serialization failure. A rejected local observation publishes no edge and does not doom its transaction: statement/savepoint recovery can undo that operation while retaining earlier reads. Nonoverlapping and duplicate edges are ignored.
     pub fn observe_rw(
         &mut self,
-        observer: StorageTransactionId,
-        reader: StorageTransactionId,
-        writer: StorageTransactionId,
+        observer: SerializableTransactionId,
+        reader: SerializableTransactionId,
+        writer: SerializableTransactionId,
         control: &StorageReadControl,
     ) -> VersionResult<()> {
         let Some(action) = self.plan_dependency(observer, reader, writer, control)? else {
@@ -150,7 +183,7 @@ impl SerializableGraph {
     /// Check incoming dangerous structures before durable publication, preferring an unprepared pivot as the victim. Preparation is idempotent and reserves ordering space for authoritative completion even if other transactions continue meanwhile.
     pub fn prepare_commit(
         &mut self,
-        transaction: StorageTransactionId,
+        transaction: SerializableTransactionId,
         control: &StorageReadControl,
     ) -> VersionResult<()> {
         control.check()?;
@@ -185,7 +218,7 @@ impl SerializableGraph {
     }
 
     /// Publish a confirmed committed outcome without allocation or cancellation. Never call this on a merely attempted or uncertain provider commit. Repeating the same confirmed outcome is harmless.
-    pub fn commit(&mut self, transaction: StorageTransactionId) -> VersionResult<()> {
+    pub fn commit(&mut self, transaction: SerializableTransactionId) -> VersionResult<()> {
         let position = self.position(transaction)?;
         let entry = self.transactions[position];
         if entry.committed.is_some() {
@@ -196,6 +229,14 @@ impl SerializableGraph {
                 "serializable completion requires a prepared transaction",
             ));
         }
+        if entry
+            .publication
+            .is_some_and(|publication| !publication.committed())
+        {
+            return Err(VersionError::InvalidEncoding(
+                "durable serializable publication requires a confirmed receipt",
+            ));
+        }
         // Each prepared transaction owns a completion slot; admission cannot consume it.
         self.clock += 1;
         self.pending_finishes -= 1;
@@ -204,11 +245,19 @@ impl SerializableGraph {
     }
 
     /// Remove a confirmed aborted participant from dependency decisions. This cleanup does not allocate or observe statement cancellation. Uncertain prepared outcomes must remain retained.
-    pub fn rollback(&mut self, transaction: StorageTransactionId) -> VersionResult<()> {
+    pub fn rollback(&mut self, transaction: SerializableTransactionId) -> VersionResult<()> {
         let position = self.position(transaction)?;
         let entry = &mut self.transactions[position];
         if entry.committed.is_some() {
             return Err(VersionError::TransactionFinished);
+        }
+        if entry
+            .publication
+            .is_some_and(|publication| !publication.aborted())
+        {
+            return Err(VersionError::InvalidEncoding(
+                "durable serializable publication requires a confirmed abort",
+            ));
         }
         if !entry.aborted {
             if entry.prepared.is_some() {
@@ -223,7 +272,7 @@ impl SerializableGraph {
     /// A deferrable reader waits only for read/write transactions overlapping its snapshot admission. A committed overlap with a conflict to an earlier prepared transaction makes this snapshot unsafe; the owner must capture a new snapshot before executing it.
     pub fn safe_snapshot(
         &self,
-        transaction: StorageTransactionId,
+        transaction: SerializableTransactionId,
         control: &StorageReadControl,
     ) -> VersionResult<SafeSnapshot> {
         control.check()?;
@@ -313,15 +362,18 @@ impl SerializableGraph {
         Ok(())
     }
 
-    fn validate_database(&self, transaction: StorageTransactionId) -> VersionResult<()> {
+    fn validate_identity(&self, transaction: SerializableTransactionId) -> VersionResult<()> {
         if transaction.database() != self.database {
             return Err(VersionError::WrongDatabase);
+        }
+        if transaction.coordinator() != self.coordinator {
+            return Err(VersionError::WrongSerializableCoordinator);
         }
         Ok(())
     }
 
-    fn position(&self, transaction: StorageTransactionId) -> VersionResult<usize> {
-        self.validate_database(transaction)?;
+    fn position(&self, transaction: SerializableTransactionId) -> VersionResult<usize> {
+        self.validate_identity(transaction)?;
         self.allocation_position(transaction.allocation())
     }
 
