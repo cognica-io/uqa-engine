@@ -44,6 +44,7 @@ impl ContainerFile {
             dirty_chunks: BTreeSet::new(),
             compression,
             keys,
+            initial_key: key.as_deref().map(uqa_storage::StorageEncryptionKey::new),
             salt,
             file_id,
             generation: 0,
@@ -78,6 +79,7 @@ impl ContainerFile {
             dirty_chunks: BTreeSet::new(),
             compression: header.compression,
             keys,
+            initial_key: None,
             salt: header.salt,
             file_id: header.file_id,
             generation: committed.generation,
@@ -134,6 +136,17 @@ impl ContainerFile {
             Err(error) => return Err(error),
         };
         if metadata.len() == 0 && self.generation == 0 {
+            return Ok(());
+        }
+        if self.committed_file_len == 0 {
+            // An opener of a missing/empty file has no durable identity yet. The first publisher chooses the identity and salt; authenticate its complete state with this handle's original credential before adopting it.
+            let committed = Self::load(
+                self.path.clone(),
+                self.initial_key
+                    .as_ref()
+                    .map(uqa_storage::StorageEncryptionKey::expose_secret),
+            )?;
+            *self = committed;
             return Ok(());
         }
         let mut file = File::open(&self.path)?;
@@ -274,6 +287,7 @@ impl ContainerFile {
         self.state_tag = next_state_tag;
         self.append_offset = append_offset;
         self.committed_file_len = append_offset;
+        self.initial_key = None;
         for record in pending_records {
             self.chunks.insert(record.entry.chunk_id, record.entry);
         }
