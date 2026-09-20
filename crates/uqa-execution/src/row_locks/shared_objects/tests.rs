@@ -69,3 +69,36 @@ fn shared_object_lock_addresses_are_typed_stable_and_savepoint_owned() {
         .try_acquire_relation(2, key, RelationLockMode::AccessExclusive, 0, &cancel)
         .unwrap());
 }
+
+#[test]
+fn member_names_separate_catalogs_owner_classes_incarnations_and_spelling() {
+    let manager = RowLockManager::new();
+    let peer = RowLockManager::new();
+    peer.table_key("unrelated first allocation");
+    let mut encodings = std::collections::BTreeSet::new();
+    for (class_id, owner_class_id, owner_object_id, name) in [
+        (2606, 1259, [1; 16], "same"),
+        (2606, 1247, [1; 16], "same"),
+        (2606, 1259, [2; 16], "same"),
+        (2606, 1259, [1; 16], "other"),
+        (2620, 1259, [1; 16], "same"),
+    ] {
+        let target = SharedCatalogLock::MemberName {
+            class_id,
+            owner_class_id,
+            owner_object_id,
+            name,
+        };
+        let bytes = manager.relation_bytes(manager.shared_catalog_key(target));
+        assert_eq!(bytes, peer.relation_bytes(peer.shared_catalog_key(target)));
+        assert!(encodings.insert(bytes));
+    }
+    assert!(
+        encodings.insert(manager.relation_bytes(manager.shared_catalog_key(
+            SharedCatalogLock::Name {
+                class_id: 2606,
+                name: "same"
+            }
+        )))
+    );
+}

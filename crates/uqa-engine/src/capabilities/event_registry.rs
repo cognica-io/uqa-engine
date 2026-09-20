@@ -36,7 +36,7 @@ impl Engine {
             writer: self,
             notices: &self.runtime.notices,
             views: self,
-            projection: self.catalog_execution(),
+            constraint_names: self.schema_publication_context().constraint_names(),
             pending: self,
         }
     }

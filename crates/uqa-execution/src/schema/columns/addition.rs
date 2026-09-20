@@ -48,6 +48,7 @@ pub fn add_column<S: Clone + 'static>(
     table: &str,
     qualifier: &str,
     mut column: ColumnDef,
+    key_constraints: &[uqa_sql::ast::TableKeyConstraint],
     if_not_exists: bool,
 ) -> Result<(), SQLError> {
     uqa_sql::schema::columns::validate_postgres_column_name(&column.name)?;
@@ -108,7 +109,13 @@ pub fn add_column<S: Clone + 'static>(
     context
         .transactions
         .with_schema_write(Box::new(|publication| {
-            super::super::publication::register_column(publication, table, column, None)
+            super::super::publication::register_column(
+                publication,
+                table,
+                column,
+                None,
+                key_constraints,
+            )
         }))
         .map_err(|e| ddl_storage_error("ALTER TABLE ADD COLUMN", e))?;
     initialize_column_rows(context, table, &col_name, generated_kind, column_not_null)?;

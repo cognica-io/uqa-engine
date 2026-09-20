@@ -7,8 +7,7 @@
 //! Rename local foreign keys and inheritable CHECK/NOT NULL constraints with their original identities.
 
 use super::{
-    constraint_error, ensure_constraint_name_available, publish_constraint_state,
-    table_constraint_state, ConstraintAlterContext,
+    constraint_error, publish_constraint_state, table_constraint_state, ConstraintAlterContext,
 };
 use std::collections::BTreeSet;
 use uqa_sql::{
@@ -40,6 +39,10 @@ pub fn rename_constraint(
         return Ok(true);
     }
     if rename_foreign_key(table, &mut columns, &mut constraints, from, to)? {
+        context
+            .publication
+            .constraint_names()
+            .ensure_available(table, Some(to))?;
         publish_constraint_state(context, table, columns, constraints)?;
         return Ok(true);
     }
@@ -97,7 +100,10 @@ pub fn rename_constraint(
                 expected,
             )?;
         }
-        ensure_constraint_name_available(&columns, &constraints, Some(to), target)?;
+        context
+            .publication
+            .constraint_names()
+            .ensure_available(target, Some(to))?;
     }
     for target in targets {
         let (mut columns, mut constraints) = table_constraint_state(context, &target)?;
@@ -115,7 +121,10 @@ fn rename_key_constraint(
     columns: Vec<uqa_sql::ast::ColumnDef>,
     mut constraints: uqa_sql::ast::TableConstraintSet,
 ) -> Result<(), SQLError> {
-    ensure_constraint_name_available(&columns, &constraints, Some(to), table)?;
+    context
+        .publication
+        .constraint_names()
+        .ensure_available(table, Some(to))?;
     let relation =
         uqa_core::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
     if !context.names.relation_name_available(
@@ -137,6 +146,8 @@ fn rename_key_constraint(
         },
     )?;
     let key = &mut constraints.key_constraints[position];
+    let names = context.publication.constraint_names();
+    names.reserve(names.bind(table)?, to)?;
     key.name = Some(to.into());
     let identity = key.catalog_identity;
     for inherited in &mut constraints.hierarchy.partition_inherited_key_constraints {

@@ -225,6 +225,18 @@ pub(super) fn after_shared_wait(
     target: SharedCatalogLock<'_>,
     release: &str,
 ) -> (Engine, Result<SQLResult, SQLError>) {
+    after_shared_wait_with_release(holder, worker, statement, target, || {
+        holder.sql(release, &[])
+    })
+}
+
+pub(super) fn after_shared_wait_with_release(
+    holder: &Engine,
+    worker: Engine,
+    statement: &str,
+    target: SharedCatalogLock<'_>,
+    release: impl FnOnce() -> Result<SQLResult, SQLError>,
+) -> (Engine, Result<SQLResult, SQLError>) {
     let key = holder.row_locks.shared_catalog_key(target);
     let session = worker.session_id;
     let cancel = worker.runtime.cancellation.clone();
@@ -243,7 +255,7 @@ pub(super) fn after_shared_wait(
         thread::yield_now();
     }
     let waited = holder.row_locks.waiting_for_relation(session, key);
-    let released = holder.sql(release, &[]);
+    let released = release();
     if released.is_err() {
         cancel.cancel();
     }
@@ -273,4 +285,27 @@ pub(super) fn reopen(provider: usize, path: &std::path::Path) -> Engine {
         .unwrap(),
         _ => unreachable!(),
     }
+}
+
+pub(super) fn before_commit(holder: &Engine, worker: Engine, statement: &str) -> Engine {
+    let label = statement.to_owned();
+    let statement = statement.to_owned();
+    let cancel = worker.runtime.cancellation.clone();
+    let (send, receive) = std::sync::mpsc::channel();
+    let task = std::thread::spawn(move || {
+        let result = worker.sql(&statement, &[]);
+        let _ = send.send(result);
+        worker
+    });
+    let result = receive.recv_timeout(std::time::Duration::from_secs(30));
+    if result.is_err() {
+        cancel.cancel();
+    }
+    let released = holder.sql("COMMIT", &[]);
+    let worker = task.join().unwrap();
+    result
+        .unwrap()
+        .unwrap_or_else(|error| panic!("independent worker {label}: {error}"));
+    released.unwrap_or_else(|error| panic!("holder commit after {label}: {error}"));
+    worker
 }

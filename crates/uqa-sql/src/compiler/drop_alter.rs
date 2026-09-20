@@ -6,6 +6,7 @@
 
 //! DROP, ALTER TABLE, and RENAME lowering.
 
+mod columns;
 mod domains;
 
 use super::relations::{
@@ -492,25 +493,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                     finalize: cmd.subtype() == AlterTableType::AtDetachPartitionFinalize,
                 }
             }
-            AlterTableType::AtAddColumn => {
-                let def_inner = cmd
-                    .def
-                    .as_ref()
-                    .and_then(|d| d.node.as_ref())
-                    .ok_or_else(|| SQLError::Internal("ADD COLUMN without ColumnDef".into()))?;
-                let col_def = match def_inner {
-                    NodeEnum::ColumnDef(c) => compile_column_def(c)?,
-                    other => {
-                        return Err(SQLError::Internal(format!(
-                            "ADD COLUMN expected ColumnDef, got {other:?}"
-                        )));
-                    }
-                };
-                AlterTableAction::AddColumn {
-                    column: col_def,
-                    if_not_exists: cmd.missing_ok,
-                }
-            }
+            AlterTableType::AtAddColumn => columns::add_column(cmd)?,
             AlterTableType::AtAddConstraint => {
                 let def_inner = cmd
                     .def

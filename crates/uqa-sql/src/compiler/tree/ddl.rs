@@ -70,32 +70,16 @@ pub(in crate::compiler) fn compile_create_table(
                         &cstr.conname,
                         &relation.relname,
                     )?;
-                    let kind = match cstr.contype() {
-                        pg_query::protobuf::ConstrType::ConstrPrimary => {
-                            if primary_key_seen {
-                                return Err(SQLError::TypeMismatch(
-                                    "multiple PRIMARY KEY constraints are not allowed".into(),
-                                ));
-                            }
-                            primary_key_seen = true;
-                            Some(TableKeyConstraintKind::PrimaryKey)
+                    if cstr.contype() == pg_query::protobuf::ConstrType::ConstrPrimary {
+                        if primary_key_seen {
+                            return Err(SQLError::TypeMismatch(
+                                "multiple PRIMARY KEY constraints are not allowed".into(),
+                            ));
                         }
-                        pg_query::protobuf::ConstrType::ConstrUnique => {
-                            Some(TableKeyConstraintKind::Unique)
-                        }
-                        _ => None,
-                    };
-                    if let Some(kind) = kind {
-                        key_constraints.push(TableKeyConstraint {
-                            catalog_identity: None,
-                            name: constraint_name(&cstr.conname),
-                            kind,
-                            columns: vec![col.colname.clone()],
-                            nulls_not_distinct: cstr.nulls_not_distinct,
-                            without_overlaps: cstr.without_overlaps,
-                        });
+                        primary_key_seen = true;
                     }
                 }
+                key_constraints.extend(compile_column_key_constraints(col)?);
                 columns.push(compile_column_def(col)?);
             }
             NodeEnum::Constraint(cstr) => {
@@ -400,6 +384,33 @@ pub(in crate::compiler) fn key_constraint_label(kind: TableKeyConstraintKind) ->
         TableKeyConstraintKind::PrimaryKey => "PRIMARY KEY",
         TableKeyConstraintKind::Unique => "UNIQUE",
     }
+}
+
+pub(in crate::compiler) fn compile_column_key_constraints(
+    column: &pg_query::protobuf::ColumnDef,
+) -> Result<Vec<TableKeyConstraint>> {
+    let mut keys = Vec::new();
+    for node in &column.constraints {
+        let Some(NodeEnum::Constraint(constraint)) = node.node.as_ref() else {
+            return Err(SQLError::Internal(
+                "column contains an invalid constraint".into(),
+            ));
+        };
+        let kind = match constraint.contype() {
+            pg_query::protobuf::ConstrType::ConstrPrimary => TableKeyConstraintKind::PrimaryKey,
+            pg_query::protobuf::ConstrType::ConstrUnique => TableKeyConstraintKind::Unique,
+            _ => continue,
+        };
+        keys.push(TableKeyConstraint {
+            catalog_identity: None,
+            name: constraint_name(&constraint.conname),
+            kind,
+            columns: vec![column.colname.clone()],
+            nulls_not_distinct: constraint.nulls_not_distinct,
+            without_overlaps: constraint.without_overlaps,
+        });
+    }
+    Ok(keys)
 }
 
 #[expect(

@@ -161,6 +161,8 @@ pub enum AlterTableAction {
     },
     AddColumn {
         column: ColumnDef,
+        #[serde(default)]
+        key_constraints: Vec<TableKeyConstraint>,
         if_not_exists: bool,
     },
     AddKeyConstraint {

@@ -12,7 +12,7 @@ use super::{
 };
 use crate::catalog::{CatalogReadSnapshot, CatalogReadView};
 use crate::schema::publication::{TableSchemaCatalog, TableSchemaState};
-use uqa_sql::schema::constraint_metadata::materialize_constraint_metadata;
+use uqa_sql::schema::constraint_metadata::materialize_constraint_metadata_with_names;
 
 pub(in crate::schema::indexes) struct OwnerChange {
     pub relation: RelationIdentity,
@@ -36,7 +36,57 @@ impl OwnerChange {
     }
 }
 
-pub(super) fn replace(
+pub(super) fn refresh_names(
+    catalog: &CatalogReadView,
+    root: &RelationIdentity,
+    constraints: &mut TableConstraintSet,
+    changes: &mut [OwnerChange],
+) -> StorageBackendResult<()> {
+    for (relation, constraints) in std::iter::once((root, constraints)).chain(
+        changes
+            .iter_mut()
+            .map(|change| (&change.relation, &mut change.constraints)),
+    ) {
+        let table = catalog
+            .snapshot()
+            .tables
+            .get(relation)
+            .ok_or_else(|| invalid("index owner disappeared during name refresh"))?;
+        crate::schema::indexes::constraint_names::rebind_current_key_names(
+            constraints.key_constraints.iter_mut().chain(
+                constraints
+                    .hierarchy
+                    .partition_inherited_key_constraints
+                    .iter_mut(),
+            ),
+            table,
+        );
+    }
+    Ok(())
+}
+
+pub(super) fn refreshed_candidate(
+    catalog: &CatalogReadView,
+    root: &RelationIdentity,
+    columns: &[ColumnDef],
+    constraints: &mut TableConstraintSet,
+    changes: &mut [OwnerChange],
+) -> StorageBackendResult<CatalogReadView> {
+    refresh_names(catalog, root, constraints, changes)?;
+    let mut candidate = catalog.snapshot().clone();
+    replace(&mut candidate, root, columns, constraints)?;
+    for change in changes {
+        replace(
+            &mut candidate,
+            &change.relation,
+            &change.columns,
+            &change.constraints,
+        )?;
+    }
+    Ok(CatalogReadView::new(candidate))
+}
+
+pub(in crate::schema::indexes) fn replace(
     snapshot: &mut CatalogReadSnapshot,
     relation: &RelationIdentity,
     columns: &[ColumnDef],
@@ -137,8 +187,15 @@ pub(in crate::schema::indexes) fn prepare_descendants(
                             .iter()
                             .cloned(),
                     );
-                materialize_constraint_metadata(&child, &mut columns, &mut constraints, allocator)
-                    .map_err(metadata_error)?;
+                let event_names = crate::schema::constraints::names::event_names(original, &child);
+                materialize_constraint_metadata_with_names(
+                    &child,
+                    &mut columns,
+                    &mut constraints,
+                    allocator,
+                    &event_names,
+                )
+                .map_err(metadata_error)?;
                 replace(candidate, &child, &columns, &constraints)?;
                 changes.push(OwnerChange {
                     relation: child.clone(),

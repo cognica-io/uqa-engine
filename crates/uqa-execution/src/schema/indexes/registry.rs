@@ -47,6 +47,25 @@ pub struct IndexRegistryContext<'a> {
     pub lock_catalog: &'a dyn crate::row_locks::binding::RelationLockCatalog,
 }
 
+impl IndexRegistryContext<'_> {
+    pub fn name_constraint_indexes(
+        &self,
+        table: &str,
+        keys: &mut [uqa_sql::ast::TableKeyConstraint],
+    ) -> StorageBackendResult<()> {
+        let catalog = self.identities.catalog.current_catalog_snapshot();
+        uqa_sql::schema::indexes::names::name_constraint_indexes(
+            &partitions::CandidateNames {
+                catalog: &catalog,
+                rows: &catalog.snapshot().definitions.catalog_indexes,
+            },
+            table,
+            keys,
+        )
+        .map_err(|error| StorageBackendError::backend("constraint index names", error))
+    }
+}
+
 #[derive(Default)]
 pub struct IndexRegistryChange {
     pub upserts: Vec<CatalogIndexRow>,
@@ -134,7 +153,11 @@ pub fn prepare_constraint_indexes(
             Ok((state.columns(), state.constraints(), state.object_id()))
         },
     )?;
-    let candidate = crate::catalog::CatalogReadView::new(candidate);
+    // Descendant identity and name reservations may refresh independently renamed indexes.
+    let catalog = recheck::validate(context, &catalog, &catalog, previous, &relation)?;
+    let previous = &catalog.snapshot().definitions.catalog_indexes;
+    let candidate =
+        schema::refreshed_candidate(&catalog, &relation, columns, constraints, &mut schema)?;
     let mut rows = previous.as_ref().clone();
     for (name, columns, constraints) in std::iter::once((&relation, &*columns, &*constraints))
         .chain(schema.iter().map(|change| {
@@ -173,7 +196,15 @@ pub fn prepare_constraint_indexes(
         return Err(invalid("index owner changed before preparation"));
     }
     names::reserve_new_names(context, previous, &rows)?;
-    recheck::validate(context, &catalog, &candidate, &rows, &relation)?;
+    names::reserve_constraints(
+        context,
+        table_object_id,
+        columns,
+        constraints,
+        &mut change.schema,
+    )?;
+    let current = recheck::validate(context, &catalog, &candidate, &rows, &relation)?;
+    schema::refresh_names(&current, &relation, constraints, &mut change.schema)?;
     Ok(change)
 }
 

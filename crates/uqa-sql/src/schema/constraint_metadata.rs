@@ -104,13 +104,30 @@ pub fn materialize_constraint_metadata(
     constraints: &mut crate::ast::TableConstraintSet,
     allocate: &mut CatalogIdentityAllocator<'_>,
 ) -> ConstraintMetadataResult<bool> {
+    materialize_constraint_metadata_with_names(
+        relation,
+        columns,
+        constraints,
+        allocate,
+        &BTreeSet::new(),
+    )
+}
+
+/// Event constraints occupy the same per-relation namespace as declared constraints.
+pub fn materialize_constraint_metadata_with_names(
+    relation: &RelationIdentity,
+    columns: &mut [crate::ast::ColumnDef],
+    constraints: &mut crate::ast::TableConstraintSet,
+    allocate: &mut CatalogIdentityAllocator<'_>,
+    event_names: &BTreeSet<String>,
+) -> ConstraintMetadataResult<bool> {
     identity::claims::validate_present_identities(columns, constraints)?;
     for identity in identity::claims::identities(columns, constraints) {
         allocate.include_catalog_identity(relation, CatalogOidClass::Constraint, identity)?;
     }
     // Releases predating typed table-key persistence stored column-level PRIMARY KEY and UNIQUE declarations only as ColumnDef flags. Promote those legacy flags before assigning names so catalog publication always sees named constraints.
-    let mut changed = promote_legacy_column_key_constraints(columns, constraints);
-    let mut used = existing_constraint_names(columns, constraints)?;
+    let mut changed = materialize_column_key_constraints(columns, constraints);
+    let mut used = existing_constraint_names(relation, columns, constraints, event_names)?;
 
     let mut column_object_ids = BTreeSet::new();
     for column in columns.iter_mut() {
@@ -209,8 +226,10 @@ pub fn materialize_constraint_metadata(
 }
 
 fn existing_constraint_names(
+    relation: &RelationIdentity,
     columns: &[crate::ast::ColumnDef],
     constraints: &crate::ast::TableConstraintSet,
+    event_names: &BTreeSet<String>,
 ) -> ConstraintMetadataResult<BTreeSet<String>> {
     let mut used = BTreeSet::new();
     for column in columns {
@@ -233,10 +252,23 @@ fn existing_constraint_names(
     for constraint in &constraints.foreign_keys {
         record_constraint_name(&mut used, constraint.name.as_deref())?;
     }
+    for name in event_names {
+        if !used.insert(name.clone()) {
+            return Err(ConstraintMetadataError::Execution(Box::new(
+                crate::schema::constraint_changes::constraint_error(
+                    "42710",
+                    format!(
+                        "constraint \"{name}\" for relation \"{}\" already exists",
+                        relation.name
+                    ),
+                ),
+            )));
+        }
+    }
     Ok(used)
 }
 
-fn promote_legacy_column_key_constraints(
+pub fn materialize_column_key_constraints(
     columns: &[crate::ast::ColumnDef],
     constraints: &mut crate::ast::TableConstraintSet,
 ) -> bool {

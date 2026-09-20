@@ -24,6 +24,30 @@ struct KeyName {
     name: String,
 }
 
+/// A structural DDL candidate must not restore an independently renamed index's old name.
+pub(crate) fn rebind_current_key_names<'a>(
+    candidate: impl Iterator<Item = &'a mut TableKeyConstraint>,
+    current: &crate::catalog::CatalogTableSnapshot,
+) {
+    for key in candidate {
+        let Some(identity) = key.catalog_identity else {
+            continue;
+        };
+        if let Some(retained) = current
+            .keys
+            .iter()
+            .chain(&current.hierarchy.partition_inherited_key_constraints)
+            .find(|other| {
+                other
+                    .catalog_identity
+                    .is_some_and(|other| other.object_id == identity.object_id)
+            })
+        {
+            key.name.clone_from(&retained.name);
+        }
+    }
+}
+
 impl KeyConstraintNames {
     pub fn load(catalog: &dyn CatalogFacade) -> StorageBackendResult<Self> {
         match catalog.get_metadata(REGISTRY_VERSION)?.as_deref() {

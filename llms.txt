@@ -24,6 +24,8 @@ Enforced unique-index selection and partition applicability live in `crates/uqa-
 
 Stored index identity reservation, constraint-name normalization, complete constraint/partition registry publication and restoration live in `crates/uqa-execution/src/schema/indexes/`; physical key binding, expression evaluation and rebuild projection live in `crates/uqa-execution/src/catalog/index/physical.rs`. Engine retains catalog generations, document guards and publication handles.
 
+Borrowed constraint names and individual catalog identities live in `crates/uqa-sql/src/schema/constraint_changes/names.rs`. Execution's `schema/constraints/names.rs` coordinates destinations by the owning relation's immutable identity, including constraint triggers. Structural publication rebinds key names from current owned indexes after catalog waits.
+
 Cypher default-label requirements and diagnostics live in `crates/uqa-graph/src/cypher/labels.rs`; Engine retains graph selection, statement gates, and graph read/write transaction boundaries.
 
 RPQ syntax is defined in `crates/uqa-core/src/rpq.rs` and consumed directly by planner cost estimation. Graph re-exports the same syntax and owns automata and traversal.

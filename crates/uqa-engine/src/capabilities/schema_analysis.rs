@@ -57,6 +57,14 @@ impl uqa_sql::schema::inheritance::InheritanceCatalog for Engine {
 }
 
 impl uqa_sql::schema::indexes::names::IndexNameCatalog for Engine {
+    fn existing_constraint_names(
+        &self,
+        table: &str,
+    ) -> Result<std::collections::BTreeSet<String>, SQLError> {
+        self.schema_publication_context()
+            .constraint_names()
+            .existing_names(table)
+    }
     fn existing_constraint_keys(
         &self,
         table: &str,

@@ -138,6 +138,16 @@ pub(super) struct CandidateNames<'a> {
 }
 
 impl IndexNameCatalog for CandidateNames<'_> {
+    fn existing_constraint_names(
+        &self,
+        table: &str,
+    ) -> Result<std::collections::BTreeSet<String>, SQLError> {
+        let relation = RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
+        Ok(crate::schema::constraints::names::existing_names(
+            self.catalog,
+            &relation,
+        ))
+    }
     fn existing_constraint_keys(&self, table: &str) -> Result<Vec<TableKeyConstraint>, SQLError> {
         let table = RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
         Ok(self

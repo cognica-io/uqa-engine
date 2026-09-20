@@ -368,6 +368,7 @@ impl crate::row_locks::shared_objects::SharedObjectLockSession for Catalog {
                 self.event("lock role");
                 self.catalog_locks.borrow_mut().push((class_id, None, mode));
             }
+            SharedCatalogLock::MemberName { .. } => panic!("roles have global catalog names"),
         }
         self.locks.acquire_scoped_relation(
             1,

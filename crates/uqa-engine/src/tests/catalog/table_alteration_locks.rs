@@ -11,6 +11,7 @@ use crate::Engine;
 use uqa_core::Value;
 
 mod catalog_addresses;
+mod constraint_names;
 mod constraint_rename;
 mod foreign_key_removal;
 mod foreign_key_rename;

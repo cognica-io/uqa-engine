@@ -22,6 +22,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Coordinate CHECK, NOT NULL, foreign-key, key and constraint-trigger names within their owning table across SQLite and redb. Preserve concurrent index renames through constraint and relation-name waits, distinguish pre-existing duplicates from conflicting commits, and avoid trigger constraint names when assigning automatic column and key names. Keep explicit PRIMARY KEY and UNIQUE declarations, including names and NULLS NOT DISTINCT, when adding a column.
 - Coordinate concurrent relation creation and rename through schema-local name reservations across SQLite and redb. A competitor waits for commit or rollback and reports PostgreSQL catalog uniqueness SQLSTATE `23505` after a conflicting commit, including for conditional creation and implicit indexes; fixed data snapshots remain unchanged.
 - Keep internal fixed snapshots, current-catalog readers and retrieval rechecks from registering automatic-statistics clients. Public sibling sessions retain their own maintenance client lease; internal readers no longer restart background work after application clients release it.
 

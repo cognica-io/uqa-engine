@@ -129,6 +129,17 @@ impl RowLockManager {
                 class_id,
                 name: Arc::from(name),
             },
+            SharedCatalogLock::MemberName {
+                class_id,
+                owner_class_id,
+                owner_object_id,
+                name,
+            } => LockRelationIdentity::SharedMemberName {
+                class_id,
+                owner_class_id,
+                owner_object_id,
+                name: Arc::from(name),
+            },
             SharedCatalogLock::Tuple { class_id, oid } => {
                 LockRelationIdentity::SharedObjectTuple { class_id, oid }
             }

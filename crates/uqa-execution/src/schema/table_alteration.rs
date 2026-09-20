@@ -41,6 +41,7 @@ pub fn run_alter_table<S: Clone + 'static>(
         if let AlterTableAction::AddColumn {
             column,
             if_not_exists: true,
+            ..
         } = &action
         {
             if context
@@ -191,6 +192,7 @@ fn run_alter_table_action<S: Clone + 'static>(
         }
         AlterTableAction::AddColumn {
             column,
+            key_constraints,
             if_not_exists,
         } => {
             crate::schema::columns::addition::add_column(
@@ -198,6 +200,7 @@ fn run_alter_table_action<S: Clone + 'static>(
                 &stmt.table,
                 &stmt.qualifier,
                 column,
+                &key_constraints,
                 if_not_exists,
             )?;
         }

@@ -289,6 +289,22 @@ fn alter_table_add_key_constraint_preserves_tuple_shape() {
 }
 
 #[test]
+fn added_column_keeps_its_named_key_and_null_semantics() {
+    let Statement::AlterTable(alter) = first(
+        "ALTER TABLE t ADD COLUMN IF NOT EXISTS v int CONSTRAINT named UNIQUE NULLS NOT DISTINCT",
+    ) else {
+        panic!("expected ALTER TABLE")
+    };
+    assert!(
+        matches!(alter.actions.as_slice(), [AlterTableAction::AddColumn {column, key_constraints, if_not_exists: true}]
+        if column.name == "v" && key_constraints.len() == 1
+            && key_constraints[0].name.as_deref() == Some("named")
+            && key_constraints[0].nulls_not_distinct
+            && key_constraints[0].columns == ["v"])
+    );
+}
+
+#[test]
 fn alter_table_hierarchy_preserves_every_parser_field_and_subcommand() {
     let Statement::AlterTable(alter) =
         first("ALTER TABLE ONLY child INHERIT parent_one, NO INHERIT parent_two")

@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use std::sync::Arc;
 
 fn fixture() -> (TableSchema, TableConstraintSet, KeyConstraintNames) {
     let key: TableKeyConstraint = serde_json::from_value(serde_json::json!({
@@ -73,5 +74,52 @@ fn a_legacy_declaration_keeps_its_name_until_registry_conversion() {
     assert_eq!(
         serde_json::to_value(names.decode(&schema).unwrap()).unwrap(),
         serde_json::to_value(constraints).unwrap(),
+    );
+}
+
+#[test]
+fn candidate_names_follow_catalog_identity_without_replacing_key_structure() {
+    let (_, mut candidate, _) = fixture();
+    let mut current_key = candidate.key_constraints[0].clone();
+    current_key.name = Some("renamed".into());
+    candidate.hierarchy.partition_inherited_key_constraints = candidate.key_constraints.clone();
+    let mut added = candidate.key_constraints[0].clone();
+    added.catalog_identity.as_mut().unwrap().object_id = [4; 16];
+    added.name = Some("new_key".into());
+    candidate.key_constraints.push(added.clone());
+    candidate.key_constraints[0].columns = vec!["new_column".into()];
+    let current = crate::catalog::CatalogTableSnapshot {
+        object_id: [1; 16],
+        security: std::sync::Arc::new(crate::catalog::security::BoundTableSecurity::owner(
+            uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
+        )),
+        columns: Arc::default(),
+        columns_declared: true,
+        checks: Arc::default(),
+        foreign_keys: Arc::default(),
+        keys: vec![current_key].into(),
+        hierarchy: Arc::default(),
+        persistence: uqa_sql::ast::RelationPersistence::Permanent,
+    };
+    rebind_current_key_names(
+        candidate.key_constraints.iter_mut().chain(
+            candidate
+                .hierarchy
+                .partition_inherited_key_constraints
+                .iter_mut(),
+        ),
+        &current,
+    );
+    assert_eq!(
+        candidate.key_constraints[0].name.as_deref(),
+        Some("renamed")
+    );
+    assert_eq!(candidate.key_constraints[0].columns, ["new_column"]);
+    assert_eq!(candidate.key_constraints[1], added);
+    assert_eq!(
+        candidate.hierarchy.partition_inherited_key_constraints[0]
+            .name
+            .as_deref(),
+        Some("renamed")
     );
 }

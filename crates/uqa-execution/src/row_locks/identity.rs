@@ -22,9 +22,24 @@ pub(super) enum LockRelationIdentity {
     BackendWriter,
     KeyReservation([u8; 32]),
     ScoringParameters(Arc<str>),
-    SharedObject { class_id: u32, oid: u32 },
-    SharedObjectName { class_id: u32, name: Arc<str> },
-    SharedObjectTuple { class_id: u32, oid: u32 },
+    SharedObject {
+        class_id: u32,
+        oid: u32,
+    },
+    SharedObjectName {
+        class_id: u32,
+        name: Arc<str>,
+    },
+    SharedMemberName {
+        class_id: u32,
+        owner_class_id: u32,
+        owner_object_id: [u8; 16],
+        name: Arc<str>,
+    },
+    SharedObjectTuple {
+        class_id: u32,
+        oid: u32,
+    },
 }
 
 impl LockRelationIdentity {
@@ -70,6 +85,19 @@ impl LockRelationIdentity {
                 let mut bytes = b"\xffshared-object-tuple".to_vec();
                 bytes.extend_from_slice(&class_id.to_be_bytes());
                 bytes.extend_from_slice(&oid.to_be_bytes());
+                bytes
+            }
+            Self::SharedMemberName {
+                class_id,
+                owner_class_id,
+                owner_object_id,
+                name,
+            } => {
+                let mut bytes = b"\xffshared-member-name".to_vec();
+                bytes.extend_from_slice(&class_id.to_be_bytes());
+                bytes.extend_from_slice(&owner_class_id.to_be_bytes());
+                bytes.extend_from_slice(owner_object_id);
+                bytes.extend_from_slice(name.as_bytes());
                 bytes
             }
         }

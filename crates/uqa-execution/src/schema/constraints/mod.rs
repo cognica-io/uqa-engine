@@ -12,8 +12,7 @@ use crate::schema::{
     publication::{SchemaPublicationContext, SchemaWriteTransaction},
 };
 pub use uqa_sql::schema::constraint_changes::{
-    constraint_error, ensure_constraint_name_available, ensure_not_null_inheritable,
-    find_constraint, ConstraintLocation,
+    constraint_error, ensure_not_null_inheritable, find_constraint, ConstraintLocation,
 };
 use uqa_sql::{
     ast::{ColumnDef, ForeignKey, TableHierarchy},
@@ -57,6 +56,7 @@ pub mod checks;
 pub mod drop;
 mod inheritance;
 mod lifecycle;
+pub mod names;
 pub mod renaming;
 pub mod restoration;
 mod validation;
@@ -106,11 +106,15 @@ fn materialize_constraint_candidate(
         &mut constraints.key_constraints,
     )?;
     let mut allocate = context.publication.identity_allocator();
-    uqa_sql::schema::constraint_metadata::materialize_constraint_metadata(
+    uqa_sql::schema::constraint_metadata::materialize_constraint_metadata_with_names(
         &relation,
         columns,
         constraints,
         &mut allocate,
+        &context
+            .publication
+            .constraint_names()
+            .trigger_names(&relation),
     )
     .map_err(|error| {
         ddl_storage_error(

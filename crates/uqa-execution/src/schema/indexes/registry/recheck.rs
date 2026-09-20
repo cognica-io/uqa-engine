@@ -18,8 +18,19 @@ pub(super) fn validate(
     candidate: &CatalogReadView,
     rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
     root: &RelationIdentity,
-) -> StorageBackendResult<()> {
+) -> StorageBackendResult<CatalogReadView> {
     let current = context.identities.catalog.current_catalog_snapshot();
+    validate_snapshots(before, candidate, rows, root, &current)?;
+    Ok(current)
+}
+
+fn validate_snapshots(
+    before: &CatalogReadView,
+    candidate: &CatalogReadView,
+    rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
+    root: &RelationIdentity,
+    current: &CatalogReadView,
+) -> StorageBackendResult<()> {
     let change = difference(&before.snapshot().definitions.catalog_indexes, rows)?;
     let mut affected = BTreeSet::from([root.clone()]);
     loop {
@@ -74,32 +85,25 @@ pub(super) fn validate(
             .tables
             .get(name)
             .ok_or_else(|| changed(name))?;
-        if old.object_id != now.object_id || declaration(old)? != declaration(now)? {
+        let mut previous = old.clone();
+        rebind_names(&mut previous, now);
+        if old.object_id != now.object_id || declaration(&previous)? != declaration(now)? {
             return Err(changed(name));
         }
-        let selected = |catalog: &CatalogReadView| {
-            catalog
-                .snapshot()
-                .definitions
-                .catalog_indexes
-                .values()
-                .filter(|row| row.table_name == name.qualified_name())
-                .cloned()
-                .collect::<Vec<_>>()
-        };
-        let old_indexes = selected(before);
-        let now_indexes = selected(&current);
+        let old_indexes = selected(before, name)?;
+        let now_indexes = selected(current, name)?;
         if old_indexes.len() != now_indexes.len()
-            || old_indexes
-                .iter()
-                .zip(&now_indexes)
-                .any(|(old, now)| !same_row(old, now))
+            || old_indexes.iter().any(|(id, old)| {
+                now_indexes
+                    .get(id)
+                    .is_none_or(|now| !same_definition(old, now))
+            })
         {
             return Err(changed(name));
         }
-        snapshot
-            .tables
-            .insert(name.clone(), candidate.snapshot().tables[name].clone());
+        let mut proposed = candidate.snapshot().tables[name].clone();
+        rebind_names(&mut proposed, now);
+        snapshot.tables.insert(name.clone(), proposed);
     }
     let mut rebased = current
         .snapshot()
@@ -114,6 +118,46 @@ pub(super) fn validate(
         rebased.insert(row.relation.clone(), row);
     }
     validation::validate(&CatalogReadView::new(snapshot), &rebased)
+}
+
+fn selected<'a>(
+    catalog: &'a CatalogReadView,
+    table: &RelationIdentity,
+) -> StorageBackendResult<BTreeMap<[u8; 16], &'a CatalogIndexRow>> {
+    catalog
+        .snapshot()
+        .definitions
+        .catalog_indexes
+        .values()
+        .filter(|row| row.table_name == table.qualified_name())
+        .map(|row| {
+            let identity = super::index_definition(row)?
+                .catalog
+                .ok_or_else(|| super::invalid("index has no catalog identity"))?;
+            Ok((identity.identity.object_id, row))
+        })
+        .collect()
+}
+
+fn same_definition(before: &CatalogIndexRow, current: &CatalogIndexRow) -> bool {
+    before.table_name == current.table_name
+        && before.index_type == current.index_type
+        && before.columns_json == current.columns_json
+        && before.parameters_json == current.parameters_json
+        && before.definition_json == current.definition_json
+}
+
+fn rebind_names(candidate: &mut CatalogTableSnapshot, current: &CatalogTableSnapshot) {
+    crate::schema::indexes::constraint_names::rebind_current_key_names(
+        std::sync::Arc::make_mut(&mut candidate.keys)
+            .iter_mut()
+            .chain(
+                std::sync::Arc::make_mut(&mut candidate.hierarchy)
+                    .partition_inherited_key_constraints
+                    .iter_mut(),
+            ),
+        current,
+    );
 }
 
 fn declaration(table: &CatalogTableSnapshot) -> StorageBackendResult<Vec<u8>> {
@@ -138,3 +182,6 @@ fn changed(name: &RelationIdentity) -> StorageBackendError {
         },
     )
 }
+
+#[cfg(test)]
+mod tests;

@@ -6,9 +6,9 @@
 
 //! State, transaction, and publication inputs for trigger and rule lifecycle execution.
 use super::EventCatalogContext;
-use crate::{
-    catalog::context::CatalogContext,
-    schema::{namespaces::SchemaStatementWriter, view_creation::context::ViewCreationTransactions},
+use crate::schema::{
+    constraints::names::ConstraintNameContext, namespaces::SchemaStatementWriter,
+    view_creation::context::ViewCreationTransactions,
 };
 use uqa_sql::catalog::{
     constraints::ConstraintIdentity, events::definition::lookup::EventLookupContext,
@@ -26,6 +26,6 @@ pub struct EventLifecycleContext<'a> {
     pub writer: &'a dyn SchemaStatementWriter,
     pub notices: &'a parking_lot::Mutex<Vec<(String, String)>>,
     pub views: &'a dyn ViewCreationTransactions,
-    pub projection: CatalogContext<'a>,
+    pub constraint_names: ConstraintNameContext<'a>,
     pub pending: &'a dyn ConstraintTriggerEvents,
 }

@@ -7,7 +7,7 @@
 //! Schedule schema analysis, durable candidate persistence, and in-memory publication.
 use uqa_core::RelationIdentity;
 use uqa_sql::ast::{ColumnDef, TableConstraintSet};
-use uqa_sql::schema::constraint_metadata::materialize_constraint_metadata;
+use uqa_sql::schema::constraint_metadata::materialize_constraint_metadata_with_names;
 use uqa_sql::schema::dependencies::{
     regclass,
     registration::{self, SchemaDependencyBindingContext},
@@ -66,6 +66,12 @@ pub struct SchemaPublicationContext<'a> {
 }
 
 impl<'a> SchemaPublicationContext<'a> {
+    pub fn constraint_names(&self) -> super::constraints::names::ConstraintNameContext<'a> {
+        super::constraints::names::ConstraintNameContext {
+            catalog: self.identities.catalog,
+            locks: self.identities.locks,
+        }
+    }
     pub fn identity_allocator(
         &self,
     ) -> crate::catalog::identity::ReservedCatalogIdentityAllocator<'a> {
@@ -116,8 +122,14 @@ fn materialize_metadata(
 ) -> StorageBackendResult<bool> {
     let relation = RelationIdentity::from_legacy_name(name).map_err(StorageBackendError::Other)?;
     let mut allocate = context.identity_allocator();
-    materialize_constraint_metadata(&relation, columns, constraints, &mut allocate)
-        .map_err(|error| StorageBackendError::backend("constraint identity", error))
+    materialize_constraint_metadata_with_names(
+        &relation,
+        columns,
+        constraints,
+        &mut allocate,
+        &context.constraint_names().trigger_names(&relation),
+    )
+    .map_err(|error| StorageBackendError::backend("constraint identity", error))
 }
 
 pub fn register_column(
@@ -125,6 +137,7 @@ pub fn register_column(
     table: &str,
     mut column: ColumnDef,
     check_columns: Option<&[ColumnDef]>,
+    key_constraints: &[uqa_sql::ast::TableKeyConstraint],
 ) -> StorageBackendResult<()> {
     column.ty = uqa_sql::type_resolution::resolve_declared_column_type(context.types, &column.ty)
         .map_err(|error| StorageBackendError::Other(error.to_string()))?;
@@ -173,6 +186,16 @@ pub fn register_column(
         .map_err(StorageBackendError::Other)?;
     }
     let mut constraints = state.constraints();
+    constraints
+        .key_constraints
+        .extend_from_slice(key_constraints);
+    uqa_sql::schema::constraint_metadata::materialize_column_key_constraints(
+        &columns,
+        &mut constraints,
+    );
+    context
+        .indexes
+        .name_constraint_indexes(&table_name, &mut constraints.key_constraints)?;
     constraints.columns_declared = Some(true);
     materialize_metadata(context, &table_name, &mut columns, &mut constraints)?;
     let indexes = super::indexes::registry::prepare_constraint_indexes(

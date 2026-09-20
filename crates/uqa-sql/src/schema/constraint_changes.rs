@@ -7,6 +7,7 @@
 //! Locate durable constraints and analyze changes to their type, identity, and enforcement metadata.
 pub mod foreign_key_target;
 pub mod inheritance;
+pub mod names;
 pub mod not_null_removal;
 pub mod renaming;
 pub mod validation;
@@ -38,51 +39,10 @@ pub fn find_constraint(
     constraints: &crate::ast::TableConstraintSet,
     name: &str,
 ) -> Option<ConstraintLocation> {
-    columns
-        .iter()
-        .position(|column| column.not_null && column.not_null_name.as_deref() == Some(name))
-        .map(ConstraintLocation::NotNull)
-        .or_else(|| {
-            columns
-                .iter()
-                .position(|column| {
-                    column.check.is_some() && column.check_name.as_deref() == Some(name)
-                })
-                .map(ConstraintLocation::ColumnCheck)
-        })
-        .or_else(|| {
-            columns
-                .iter()
-                .position(|column| {
-                    column
-                        .references
-                        .as_ref()
-                        .and_then(|reference| reference.name.as_deref())
-                        == Some(name)
-                })
-                .map(ConstraintLocation::ColumnForeignKey)
-        })
-        .or_else(|| {
-            constraints
-                .checks
-                .iter()
-                .position(|constraint| constraint.name.as_deref() == Some(name))
-                .map(ConstraintLocation::TableCheck)
-        })
-        .or_else(|| {
-            constraints
-                .foreign_keys
-                .iter()
-                .position(|constraint| constraint.name.as_deref() == Some(name))
-                .map(ConstraintLocation::TableForeignKey)
-        })
-        .or_else(|| {
-            constraints
-                .key_constraints
-                .iter()
-                .position(|constraint| constraint.name.as_deref() == Some(name))
-                .map(ConstraintLocation::Key)
-        })
+    names::ConstraintNames::from_definition(columns, constraints)
+        .entries()
+        .find(|constraint| constraint.name == name)
+        .map(|constraint| constraint.location)
 }
 
 pub fn ensure_constraint_name_available(

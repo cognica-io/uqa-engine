@@ -9,6 +9,33 @@
 use super::{BTreeMap, CatalogIndexRow, IndexRegistryContext, RelationIdentity};
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
+pub(super) fn reserve_constraints(
+    context: &IndexRegistryContext<'_>,
+    object_id: [u8; 16],
+    columns: &[uqa_sql::ast::ColumnDef],
+    constraints: &mut uqa_sql::ast::TableConstraintSet,
+    descendants: &mut [super::schema::OwnerChange],
+) -> StorageBackendResult<()> {
+    let names = crate::schema::constraints::names::ConstraintNameContext {
+        catalog: context.identities.catalog,
+        locks: context.identities.locks,
+    };
+    for (object_id, columns, constraints) in std::iter::once((object_id, columns, constraints))
+        .chain(descendants.iter_mut().map(|owner| {
+            (
+                owner.object_id,
+                owner.columns.as_slice(),
+                &mut owner.constraints,
+            )
+        }))
+    {
+        names
+            .reserve_changes(object_id, columns, constraints)
+            .map_err(|error| StorageBackendError::backend("constraint names", error))?;
+    }
+    Ok(())
+}
+
 pub(super) fn reserve_new_names(
     context: &IndexRegistryContext<'_>,
     previous: &BTreeMap<RelationIdentity, CatalogIndexRow>,
