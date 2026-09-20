@@ -68,6 +68,7 @@ pub fn restore(
     let mut schemas = Vec::new();
     let mut tables = super::tables::Tables::load(storage, &names)?;
     if legacy {
+        candidate = tables.bind_foreign_keys(&candidate)?;
         candidate = materialize_legacy(candidate, resolution, &mut rows, &stored, &mut tables)?;
     }
     validation::validate(&candidate, &rows)?;

@@ -10,7 +10,6 @@
 
 use uqa_core::Value;
 use uqa_engine::Engine;
-use uqa_storage_sqlite::ManagedConnection;
 
 #[test]
 fn insert_from_select_copies_rows() {
@@ -276,95 +275,8 @@ fn create_table_with_a_missing_foreign_key_target_is_atomic_across_reopen() {
     assert!(!reopened.has_table("orphan").unwrap());
 }
 
-#[test]
-fn legacy_unqualified_foreign_keys_ignore_search_path_and_fail_on_ambiguity() {
-    let directory = tempfile::tempdir().unwrap();
-    let database = directory.path().join("legacy-unqualified-fk.db");
-    {
-        let engine = crate::native_storage::legacy_engine(&database);
-        engine.sql("CREATE SCHEMA app", &[]).unwrap();
-        engine
-            .sql("CREATE TABLE app.parent (id INTEGER PRIMARY KEY)", &[])
-            .unwrap();
-        engine
-            .sql(
-                "CREATE TABLE app.child (\
-                     id INTEGER PRIMARY KEY, \
-                     parent_id INTEGER, \
-                     FOREIGN KEY (parent_id) REFERENCES app.parent(id)\
-                 )",
-                &[],
-            )
-            .unwrap();
-    }
-    let connection = ManagedConnection::open(&database).unwrap();
-    connection
-        .with(|connection| {
-            let constraints: String = connection.query_row(
-                "SELECT constraints FROM _tables \
-                 WHERE schema_name = 'app' AND relation_name = 'child'",
-                [],
-                |row| row.get(0),
-            )?;
-            assert!(constraints.contains("app.parent"), "{constraints}");
-            let legacy = constraints.replace("app.parent", "parent");
-            connection.execute(
-                "UPDATE _tables SET constraints = ?1 \
-                 WHERE schema_name = 'app' AND relation_name = 'child'",
-                [legacy],
-            )?;
-            Ok(())
-        })
-        .unwrap();
-
-    let reopened = Engine::open(&database).unwrap();
-    reopened.sql("SET search_path TO public", &[]).unwrap();
-    assert_eq!(
-        reopened.foreign_keys("app.child").unwrap()[0].ref_table,
-        "app.parent"
-    );
-    reopened
-        .sql("INSERT INTO app.parent (id) VALUES (1)", &[])
-        .unwrap();
-    reopened
-        .sql("INSERT INTO app.child (id, parent_id) VALUES (1, 1)", &[])
-        .unwrap();
-
-    reopened
-        .sql("CREATE TABLE public.parent (id INTEGER PRIMARY KEY)", &[])
-        .unwrap();
-    let snapshot_error = reopened.foreign_keys("app.child").unwrap_err();
-    assert!(
-        snapshot_error.to_string().contains("ambiguous persisted"),
-        "{snapshot_error}"
-    );
-    let insert_error = reopened
-        .sql("INSERT INTO app.child (id, parent_id) VALUES (2, 1)", &[])
-        .unwrap_err();
-    assert!(
-        insert_error.to_string().contains("ambiguous persisted"),
-        "{insert_error}"
-    );
-    drop(reopened);
-
-    let catalog = crate::native_storage::catalog(connection).unwrap();
-    let mut schema = catalog
-        .load_tables()
-        .unwrap()
-        .into_iter()
-        .find(|schema| schema.relation.qualified_name() == "app.child")
-        .unwrap();
-    schema.constraints_json = schema
-        .constraints_json
-        .replace("\"ref_table\":\"parent\"", "\"ref_table\":\"missing\"");
-    catalog.save_table(&schema).unwrap();
-    let dangling = Engine::open(&database).unwrap();
-    let dangling_error = dangling.foreign_keys("app.child").unwrap_err();
-    assert!(
-        dangling_error.to_string().contains("dangling persisted"),
-        "{dangling_error}"
-    );
-}
+#[path = "sql_extended_ddl/legacy_foreign_keys.rs"]
+mod legacy_foreign_keys;
 
 #[test]
 fn explain_runs_inner_statement_silently() {

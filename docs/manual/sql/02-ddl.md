@@ -283,6 +283,8 @@ Implemented match modes are `MATCH SIMPLE` and `MATCH FULL`. Referential actions
 
 When the referenced column list is omitted, as in `REFERENCES parent`, the referenced table's primary-key columns are inferred in declaration order. Column and table foreign-key declarations in `CREATE TABLE`, plus `ALTER TABLE ... ADD ... FOREIGN KEY`, resolve the referenced table through the active role's effective schema `USAGE` boundary once and store its canonical identity; a missing qualified schema reports `3F000`. A later non-null child-key write keeps that exact identity but checks the executing role's current `USAGE` on the referenced schema before reading the parent, matching PostgreSQL 18. Explicit or inferred referenced columns must form a primary-key or unique key, the referencing and referenced column counts must match, and each aligned type pair must support equality comparison. Mutations validate referential actions as part of the same transaction.
 
+Initial conversion of legacy foreign keys resolves an unqualified stored target against all stored tables before assigning its index incarnation. Exactly one table must match, independently of the session search path; missing or ambiguous targets fail the conversion before writes. The converted canonical target survives later same-name tables in other schemas. Current-format target or index corruption is rejected without reinterpreting the declaration as legacy metadata.
+
 ## Constraint lifecycle
 
 PostgreSQL 18 named `CHECK`, foreign-key, and `NOT NULL` constraints support creation with `NOT VALID`, later validation, catalog inspection, alteration where PostgreSQL permits it, and removal:

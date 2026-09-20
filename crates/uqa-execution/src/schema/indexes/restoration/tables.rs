@@ -48,6 +48,31 @@ impl Tables {
         })
     }
 
+    pub fn bind_foreign_keys(
+        &mut self,
+        catalog: &CatalogReadView,
+    ) -> StorageBackendResult<CatalogReadView> {
+        let mut candidate = catalog.snapshot().clone();
+        for (name, (columns, constraints)) in &mut self.declarations {
+            if uqa_sql::schema::constraint_views::bind_stored_foreign_key_declarations(
+                &StoredNames(&self.rows),
+                columns,
+                constraints,
+            )
+            .map_err(invalid)?
+            {
+                self.changed.insert(name.clone());
+                crate::schema::indexes::registry::schema::replace(
+                    &mut candidate,
+                    name,
+                    columns,
+                    constraints,
+                )?;
+            }
+        }
+        Ok(CatalogReadView::new(candidate))
+    }
+
     pub fn prepare(
         &mut self,
         catalog: &CatalogReadView,
@@ -96,5 +121,17 @@ impl Tables {
             }
         }
         Ok(CatalogReadView::new(candidate))
+    }
+}
+
+struct StoredNames<'a>(&'a BTreeMap<RelationIdentity, uqa_storage::TableSchema>);
+
+impl uqa_sql::schema::constraint_views::StoredTableNames for StoredNames<'_> {
+    fn stored_table_exists(&self, relation: &RelationIdentity) -> bool {
+        self.0.contains_key(relation)
+    }
+
+    fn stored_table_names(&self) -> Vec<RelationIdentity> {
+        self.0.keys().cloned().collect()
     }
 }
