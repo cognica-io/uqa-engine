@@ -549,7 +549,11 @@ impl Engine {
             }
             if matches!(
                 error.downcast_ref::<VersionError>(),
-                Some(VersionError::WriteConflict { .. } | VersionError::ReadConflict { .. })
+                Some(
+                    VersionError::WriteConflict { .. }
+                        | VersionError::ReadConflict { .. }
+                        | VersionError::SerializationConflict { .. }
+                )
             ) {
                 return SQLError::Routine {
                     sqlstate: "40001".into(),

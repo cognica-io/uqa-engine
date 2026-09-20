@@ -34,6 +34,7 @@ pub fn identifier_storage_error(
             Some(
                 uqa_storage::mvcc::VersionError::WriteConflict { .. }
                     | uqa_storage::mvcc::VersionError::ReadConflict { .. }
+                    | uqa_storage::mvcc::VersionError::SerializationConflict { .. }
             )
         ) {
             return SQLError::Routine {
@@ -80,6 +81,17 @@ mod tests {
                         dependency: 0,
                         expected: None,
                         actual: None,
+                    }
+                    .into_storage_error(),
+                    "40001",
+                ),
+                (
+                    VersionError::SerializationConflict {
+                        transaction: uqa_storage::mvcc::StorageTransactionId::new(
+                            uqa_storage::mvcc::DatabaseId::from_bytes([1; 16]),
+                            1,
+                        )
+                        .unwrap(),
                     }
                     .into_storage_error(),
                     "40001",

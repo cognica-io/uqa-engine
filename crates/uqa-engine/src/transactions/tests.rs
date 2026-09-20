@@ -9,6 +9,33 @@ use std::time::Duration;
 
 use super::*;
 
+#[test]
+fn serializable_dependency_errors_preserve_uncertain_commit_precedence() {
+    use uqa_storage::mvcc::{CommitFailure, DatabaseId, StorageTransactionId, VersionError};
+
+    let transaction = StorageTransactionId::new(DatabaseId::from_bytes([19; 16]), 1).unwrap();
+    for uncertain in [false, true] {
+        let error = VersionError::SerializationConflict { transaction }.into_storage_error();
+        let error = if uncertain {
+            StorageBackendError::backend(
+                "receipt",
+                CommitFailure::Indeterminate {
+                    transaction,
+                    source: error,
+                },
+            )
+        } else {
+            error
+        };
+        let error = StorageBackendError::backend("provider", error);
+        let actual = Engine::storage_tx_error("commit", &error);
+        assert_eq!(
+            actual.sqlstate(),
+            Some(if uncertain { "08007" } else { "40001" })
+        );
+    }
+}
+
 fn integer_column(result: &SQLResult, name: &str) -> Vec<i64> {
     result
         .rows

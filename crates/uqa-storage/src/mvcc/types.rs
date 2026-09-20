@@ -55,6 +55,10 @@ pub enum VersionError {
         expected: Option<CommitSequence>,
         actual: Option<CommitSequence>,
     },
+    #[error("could not serialize access due to read/write dependencies for {transaction:?}")]
+    SerializationConflict {
+        transaction: super::StorageTransactionId,
+    },
     /// The provider verified a pending receipt under exclusive admission, but evaluated derived effects used an earlier committed snapshot. Only those pure effects may be prepared again.
     #[error("derived commit snapshot {expected:?} changed to {actual:?}")]
     CommitSnapshotChanged {

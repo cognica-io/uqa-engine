@@ -24,6 +24,7 @@ mod persistence;
 mod projection;
 mod resolution;
 mod retention;
+mod serializable;
 mod session;
 mod types;
 mod vector;
@@ -54,6 +55,7 @@ pub use retention::{
     verify_version_reclamation, ReclamationHorizon, SnapshotLease, SnapshotLeaseTransport,
     SnapshotRegistry,
 };
+pub use serializable::{SafeSnapshot, SerializableGraph};
 pub use session::{VersionedKeyValueStore, VersionedSessionOptions};
 pub use types::{CommitSequence, RecordWrite, VersionError, VersionResult};
 pub use view::{
