@@ -10,6 +10,10 @@ The 0.3.0 release added native Korean Nori analysis, durable analyzer revisions 
 
 The 0.2 series includes SQL object and privilege lifecycle changes, durable expression and unique indexes, expanded sequences and PL/pgSQL, native cross-process notifications, and a Node.js HTTP client that runs without native addons. These changes were introduced in [0.2.0](../../../HISTORY.md#020---2026-09-05); the [compatibility guide](../sql/09-compatibility.md) defines the verified PostgreSQL 18 surface and the behavior still being implemented.
 
+## Unreleased MVCC writer compatibility
+
+Common record format 41 atomically upgrades formats 1–40 and rejects incompatible reopened and retained readers and writers. Format 40 was also used by development revisions that could not decode the JSON extraction dispatch added from main; its numeric-expression predecessor proof does not cover that change. The new boundary preserves existing records, identities, histories, identifier allocations and commit receipts. Native mapping 8, catalog version 49 and domain format 3 remain unchanged. Reverting requires a pre-upgrade backup.
+
 ## Unreleased stored index registry
 
 Key structure remains in each table declaration, while the name of a PRIMARY KEY or UNIQUE constraint is stored only in its owned index row. Stored `TableConstraintSet` key names are absent; execution restores them by the immutable constraint and table identities. Initial conversion removes the redundant names in the same transaction as the registry format marker. This permits renames of different owned indexes and document writes to commit independently without replacing a shared table declaration. Direct storage consumers must use the execution constraint-name decoder when interpreting structural table metadata.

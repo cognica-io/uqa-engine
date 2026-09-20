@@ -28,7 +28,7 @@ Borrowed constraint names and individual catalog identities live in `crates/uqa-
 
 Domain persistence and private catalog merging live in `crates/uqa-execution/src/catalog/domain/`. Independent domain definitions, domain OID claims and per-constraint identities share the existing storage metadata transaction; legacy constraint addresses finalize after complete catalog restoration; Engine supplies registry and catalog adapters.
 
-Typed PostgreSQL catalog expression nodes, Datum encoding and SQL reconstruction live in `crates/uqa-sql/src/catalog/node_tree.rs`. They reuse SQL operator and cast identities and accept borrowed column, routine and type metadata. Domain constraint projection and catalog-function integration remain tracked in the concurrent-storage implementation plan.
+Typed PostgreSQL catalog expression nodes, Datum encoding and SQL reconstruction live in `crates/uqa-sql/src/catalog/node_tree.rs`. They reuse SQL operator and cast identities and accept borrowed column, routine and type metadata. Independent domain constraint projection and catalog-function integration remain tracked in [issue #119](https://github.com/cognica-io/uqa-engine/issues/119).
 
 Cypher default-label requirements and diagnostics live in `crates/uqa-graph/src/cypher/labels.rs`; Engine retains graph selection, statement gates, and graph read/write transaction boundaries.
 
