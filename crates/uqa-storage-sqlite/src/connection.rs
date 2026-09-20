@@ -25,6 +25,7 @@ use crate::compressed_vfs::{self, SQLiteCompressedContainerAnchor, SQLiteCompres
 mod logical;
 mod native;
 mod native_restore;
+mod serializable;
 mod snapshot;
 use snapshot::PhysicalConnection;
 pub(crate) use snapshot::SnapshotIdentity;
@@ -174,6 +175,7 @@ struct PoolState {
 }
 
 struct ConnectionPool {
+    serializable_connection: Mutex<Option<(uqa_storage::mvcc::DatabaseId, ManagedConnection)>>,
     snapshot_registry: Mutex<
         Option<(
             uqa_storage::mvcc::DatabaseId,
@@ -194,6 +196,7 @@ struct ConnectionPool {
 impl ConnectionPool {
     fn new(spec: ConnectionSpec, initial: Connection, max_connections: usize) -> Arc<Self> {
         Arc::new(Self {
+            serializable_connection: Mutex::new(None),
             snapshot_registry: Mutex::new(None),
             spec,
             max_connections: max_connections.max(1),

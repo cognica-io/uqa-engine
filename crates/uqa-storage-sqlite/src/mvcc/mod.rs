@@ -16,11 +16,13 @@ mod reclamation;
 mod retention;
 mod runs;
 mod schema;
+mod serializable;
 #[cfg(test)]
 mod tests;
 mod write;
 
 pub(crate) use schema::WritePermit;
+pub use serializable::SQLiteSerializableAdmission;
 
 use std::sync::Arc;
 

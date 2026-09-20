@@ -23,7 +23,7 @@ pub(super) fn wait(control: &StorageReadControl) -> PhysicalResult<()> {
     Ok(())
 }
 
-fn retry<T>(
+pub(super) fn retry<T>(
     connection: &Connection,
     autocommit: bool,
     control: &StorageReadControl,
