@@ -61,8 +61,23 @@ pub fn validate_domain_registry(
     registry: &BTreeMap<String, StoredDomain>,
     roles: &BTreeMap<String, RoleDefinition>,
 ) -> Result<(), String> {
+    validate_domain_definitions(registry, roles)?;
+    for domain in registry.values() {
+        crate::schema::domains::constraints::validate(&domain.definition, false)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+/// Early restoration validates authority and supplied identities before any missing legacy constraint metadata is allocated.
+pub fn validate_domain_definitions(
+    registry: &BTreeMap<String, StoredDomain>,
+    roles: &BTreeMap<String, RoleDefinition>,
+) -> Result<(), String> {
     let mut identities = BTreeSet::new();
     let mut oids = BTreeSet::new();
+    let mut constraint_objects = BTreeSet::new();
+    let mut constraint_oids = BTreeSet::new();
     for (name, domain) in registry {
         if domain.object_id == [0; 16]
             || !identities.insert(domain.object_id)
@@ -84,6 +99,17 @@ pub fn validate_domain_registry(
                 "domain `{name}` references missing role incarnation {}",
                 domain.owner.oid
             ));
+        }
+        crate::schema::domains::constraints::validate(&domain.definition, true)
+            .map_err(|error| error.to_string())?;
+        for identity in crate::schema::domains::constraints::identities(&domain.definition) {
+            if !constraint_objects.insert(identity.object_id)
+                || !constraint_oids.insert(identity.oid)
+            {
+                return Err(format!(
+                    "duplicate domain constraint catalog identity for `{name}`"
+                ));
+            }
         }
     }
     Ok(())

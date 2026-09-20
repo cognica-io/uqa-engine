@@ -243,6 +243,96 @@ fn occupied(oid: i64) -> CatalogReadView {
     CatalogReadView::new(snapshot)
 }
 
+fn domain_occupied(oid: i64) -> CatalogReadView {
+    let mut snapshot = crate::catalog::test_support::empty_catalog()
+        .snapshot()
+        .clone();
+    let uqa_sql::Statement::CreateDomain(mut definition) = uqa_sql::compile(
+        "CREATE DOMAIN hidden_schema.peer AS int CONSTRAINT checked CHECK(VALUE>0)",
+    )
+    .unwrap()
+    .remove(0) else {
+        unreachable!()
+    };
+    definition.checks[0].catalog_identity = Some(ConstraintCatalogIdentity {
+        object_id: [91; 16],
+        oid,
+    });
+    snapshot.definitions.domains = std::collections::BTreeMap::from([(
+        "hidden_schema.peer".into(),
+        uqa_sql::catalog::domain::StoredDomain {
+            identity: uqa_core::RelationIdentity::new("hidden_schema", "peer"),
+            object_id: [90; 16],
+            oid: uqa_sql::catalog::domain::domain_object_oid(&[90; 16]),
+            owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+            definition,
+        },
+    )])
+    .into();
+    CatalogReadView::new(snapshot)
+}
+
+#[test]
+fn domain_constraints_exclude_colliding_addresses_before_and_after_catalog_refresh() {
+    let object = [12; 16];
+    let candidate = uqa_sql::catalog::oids::stable_object_oid("constraint", &object);
+    for after_refresh in [false, true] {
+        let session = Session::new();
+        if after_refresh {
+            *session.refresh.lock() = Some(domain_occupied(candidate));
+        } else {
+            *session.current.write() = domain_occupied(candidate);
+        }
+        let oid = session
+            .allocator()
+            .allocate_catalog_oid(CatalogOidClass::Constraint, &object)
+            .unwrap();
+        assert_ne!(oid, candidate);
+        assert!(session.available(candidate));
+        assert!(!session.available(oid));
+        session.locks.release_mark_above(1, 2);
+        assert!(session.available(oid));
+    }
+}
+
+#[test]
+fn supplied_constraint_addresses_cannot_claim_an_existing_domain_incarnation() {
+    use uqa_core::RelationIdentity;
+    let session = Session::new();
+    *session.current.write() = domain_occupied(50_001);
+    let identity = ConstraintCatalogIdentity {
+        object_id: [91; 16],
+        oid: 50_001,
+    };
+    let owner = RelationIdentity::new("hidden_schema", "peer");
+    session
+        .allocator()
+        .include_catalog_identity(&owner, CatalogOidClass::Constraint, identity)
+        .unwrap();
+    for (target, supplied) in [
+        (RelationIdentity::new("public", "other"), identity),
+        (
+            owner.clone(),
+            ConstraintCatalogIdentity {
+                object_id: [92; 16],
+                ..identity
+            },
+        ),
+        (
+            owner,
+            ConstraintCatalogIdentity {
+                oid: 50_002,
+                ..identity
+            },
+        ),
+    ] {
+        assert!(session
+            .allocator()
+            .include_catalog_identity(&target, CatalogOidClass::Constraint, supplied)
+            .is_err());
+    }
+}
+
 #[test]
 fn allocation_uses_current_authority_independent_metadata_before_and_after_refresh() {
     let object = [12; 16];

@@ -15,6 +15,7 @@ impl Engine {
     pub(crate) fn domain_creation_context(&self) -> DomainCreationContext<'_> {
         DomainCreationContext {
             creation: self.relation_creation_context(),
+            identities: self.catalog_identity_reservation_context(),
             writer: self,
             bindings: self,
             allocate_identity: || {

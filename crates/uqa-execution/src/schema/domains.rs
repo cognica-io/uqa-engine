@@ -19,6 +19,7 @@ pub trait DomainDeclarationBinding {
 }
 pub struct DomainCreationContext<'a> {
     pub creation: crate::schema::namespaces::relations::RelationCreationContext<'a>,
+    pub identities: crate::catalog::identity::CatalogIdentityReservationContext<'a>,
     pub writer: &'a dyn SchemaStatementWriter,
     pub bindings: &'a dyn DomainDeclarationBinding,
     pub allocate_identity: fn() -> Result<[u8; 16], SQLError>,
@@ -35,6 +36,12 @@ pub fn create_domain(
     definition.name = context.creation.persistent_name(&definition.name)?;
     let identity = context.creation.reserve_type_name(&definition.name)?;
     context.bindings.bind_domain_declaration(&mut definition)?;
+    let mut allocator = context
+        .identities
+        .allocator(crate::catalog::identity::allocate_catalog_object_id);
+    uqa_sql::schema::domains::constraints::materialize(&mut definition, &mut allocator).map_err(
+        |error| uqa_sql::catalog::errors::storage_error("domain constraint identity", &error),
+    )?;
     let object_id = (context.allocate_identity)()?;
     let oid = domain_object_oid(&object_id);
     context.creation.retain_owner(&owner)?;

@@ -53,6 +53,12 @@ pub fn catalog_oid_in_use(
                     return Ok(true);
                 }
             }
+            if snapshot.definitions.domains.values().any(|domain| {
+                uqa_sql::schema::domains::constraints::identities(&domain.definition)
+                    .any(|identity| identity.oid == oid)
+            }) {
+                return Ok(true);
+            }
             trigger_address_in_use(catalog, resolution, oid)
         }
     }
@@ -135,6 +141,15 @@ pub fn validate_catalog_identity_claim(
                 {
                     return Err(conflict());
                 }
+            }
+            for domain in snapshot.definitions.domains.values() {
+                validate_rows(
+                    &domain.identity,
+                    target,
+                    identity,
+                    uqa_sql::schema::domains::constraints::identities(&domain.definition),
+                    &mut found,
+                )?;
             }
             if trigger_address_in_use(catalog, resolution, identity.oid)? {
                 return Err(conflict());

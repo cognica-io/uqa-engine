@@ -7,13 +7,16 @@
 use super::*;
 
 fn registry() -> BTreeMap<String, StoredDomain> {
-    let crate::Statement::CreateDomain(definition) =
+    let crate::Statement::CreateDomain(mut definition) =
         crate::compile("CREATE DOMAIN public.positive AS integer CHECK (VALUE > 0)")
             .unwrap()
             .remove(0)
     else {
         unreachable!()
     };
+    crate::schema::domains::constraints::assign_names(&mut definition, &BTreeSet::new()).unwrap();
+    crate::schema::domains::constraints::materialize(&mut definition, &mut |_: &str| Ok([7; 16]))
+        .unwrap();
     BTreeMap::from([(
         "public.positive".into(),
         StoredDomain {
@@ -24,6 +27,33 @@ fn registry() -> BTreeMap<String, StoredDomain> {
             definition,
         },
     )])
+}
+
+#[test]
+fn domain_constraint_oids_and_incarnations_are_unique_across_the_registry() {
+    let original = registry();
+    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+    for duplicate_oid in [false, true] {
+        let mut registry = original.clone();
+        let mut domain = registry["public.positive"].clone();
+        domain.object_id = [2; 16];
+        domain.oid = domain_object_oid(&domain.object_id);
+        domain.identity.name = "other".into();
+        domain.definition.name = "public.other".into();
+        let identity = domain.definition.checks[0]
+            .catalog_identity
+            .as_mut()
+            .unwrap();
+        if duplicate_oid {
+            identity.object_id = [8; 16];
+        } else {
+            identity.oid += 1;
+        }
+        registry.insert("public.other".into(), domain);
+        assert!(validate_domain_registry(&registry, &roles)
+            .unwrap_err()
+            .contains("duplicate domain constraint"));
+    }
 }
 
 #[test]

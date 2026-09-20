@@ -18,7 +18,7 @@ pub(super) fn validate_metadata(
     table: &impl ReadableTable<&'static str, &'static [u8]>,
     expected: DatabaseId,
 ) -> VersionResult<()> {
-    if read_u64(table, "format")? != 38 {
+    if read_u64(table, "format")? != 39 {
         return Err(VersionError::InvalidEncoding("unknown record format"));
     }
     if database_id(table)? != expected {

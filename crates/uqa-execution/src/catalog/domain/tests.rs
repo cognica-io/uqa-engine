@@ -12,7 +12,8 @@ fn encode(
     registry: &DomainRegistry,
     roles: &BTreeMap<String, RoleDefinition>,
 ) -> StorageBackendResult<String> {
-    validate_domain_registry(registry, roles).map_err(StorageBackendError::Other)?;
+    uqa_sql::catalog::domain::validate_domain_definitions(registry, roles)
+        .map_err(StorageBackendError::Other)?;
     Ok(serde_json::json!({"domain_catalog_format": 1, "domains": registry}).to_string())
 }
 
@@ -40,6 +41,31 @@ fn fixture() -> (KeyValueCatalog, BTreeMap<String, RoleDefinition>) {
     (
         KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new())),
         BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]),
+    )
+}
+
+fn restore(
+    storage: &dyn CatalogFacade,
+    roles: &BTreeMap<String, RoleDefinition>,
+    allow_migration: bool,
+) -> StorageBackendResult<DomainRegistry> {
+    let loaded = super::restore(storage, roles, allow_migration)?;
+    let mut snapshot = crate::catalog::test_support::empty_catalog()
+        .snapshot()
+        .clone();
+    snapshot.definitions.roles = Arc::new(roles.clone());
+    snapshot.definitions.domains = Arc::new(loaded.registry);
+    let catalog = crate::catalog::CatalogReadView::new(snapshot);
+    let resolution = crate::catalog::RelationNameResolution {
+        search_path: vec!["public".into()],
+        temporary_schema: "pg_temp_fixture".into(),
+        temporary_namespace_allocated: false,
+        current_user: "uqa".into(),
+        lookup_mode: crate::catalog::RelationLookupMode::Bound,
+    };
+    Ok(
+        super::finish_restore(storage, &catalog, &resolution, loaded.state)?
+            .unwrap_or_else(|| (*catalog.snapshot().definitions.domains).clone()),
     )
 }
 
@@ -167,12 +193,10 @@ fn empty_catalog_conversion_is_initial_only_and_idempotent() {
 #[test]
 fn unchanged_domain_metadata_selects_the_committed_registry_and_validates_its_authority() {
     let (catalog, roles) = fixture();
-    let committed = Arc::new(
-        legacy()
-            .into_iter()
-            .map(|(name, domain)| (name, domain.bind_owner(&roles).unwrap()))
-            .collect(),
-    );
+    let committed = Arc::new(BTreeMap::from([(
+        "public.positive".into(),
+        records::domain("positive", 1),
+    )]));
     let current = Arc::default();
     let selected = merge_private(Some(&catalog), &current, Arc::clone(&committed), &roles).unwrap();
     assert!(Arc::ptr_eq(&selected, &committed));

@@ -9,6 +9,7 @@
 use crate::tests::relation_lock_support::{before_commit, error, reopen, sessions, sql};
 use uqa_core::Value;
 
+mod constraint_identities;
 mod type_names;
 
 #[test]

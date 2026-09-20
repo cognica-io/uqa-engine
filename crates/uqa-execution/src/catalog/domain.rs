@@ -14,6 +14,8 @@ use uqa_sql::catalog::{
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 mod records;
+mod restoration;
+pub use restoration::{finish_restore, restore, DomainRestoreState, RestoredDomains};
 
 pub const DOMAINS_METADATA_KEY: &str = "sql_domains_json";
 pub type DomainRegistry = BTreeMap<String, StoredDomain>;
@@ -84,19 +86,6 @@ pub fn publish(
     };
     publication.publish_domain_definitions(registry);
     Ok(())
-}
-
-pub fn restore(
-    catalog: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
-    allow_migration: bool,
-) -> StorageBackendResult<DomainRegistry> {
-    let (registry, current) = records::read(catalog, roles, allow_migration)?;
-    validate_domain_registry(&registry, roles).map_err(StorageBackendError::Other)?;
-    if !current {
-        records::migrate(catalog, &registry)?;
-    }
-    Ok(registry)
 }
 
 #[cfg(test)]

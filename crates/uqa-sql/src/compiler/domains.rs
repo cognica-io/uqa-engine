@@ -60,12 +60,16 @@ pub(super) fn compile_create_domain(statement: &CreateDomainStmt) -> Result<Crea
                 }
                 nullability = Some(not_null);
                 if not_null {
-                    definition.not_null = Some(DomainNotNull { name });
+                    definition.not_null = Some(DomainNotNull {
+                        name,
+                        catalog_identity: None,
+                    });
                 }
             }
             ConstrType::ConstrCheck => {
                 definition.checks.push(DomainCheck {
                     name,
+                    catalog_identity: None,
                     expression: compile_expr(constraint.raw_expr.as_ref().ok_or_else(|| {
                         SQLError::Internal("domain check has no expression".into())
                     })?)?,

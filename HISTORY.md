@@ -22,6 +22,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Retain a separate durable incarnation and public OID for each domain CHECK and NOT NULL constraint. Reserve addresses against table, foreign-table and trigger constraints; finalize legacy conversion against the complete catalog and reject corrupt current identities. Domain format 3 and common record format 39 fence incompatible writers.
 - Reserve domain and relation row-type names across concurrent creation and rename, preserving PostgreSQL duplicate diagnostics, transaction/savepoint undo and independent sequence/index names.
 - Keep automatic constraint and index names within PostgreSQL’s 63-byte identifier limit, including collision suffixes and UTF-8 boundaries. Preserve quoted case, spaces, punctuation and repeated key labels when assigning unnamed indexes.
 - Choose automatic constraint names from the complete schema namespace across ordinary/foreign tables, domains and constraint triggers while keeping explicit duplicate checks local to their owner. Carry parent-selected names through recursive CHECK and NOT NULL additions. Preserve every column CHECK declaration, including its name, enforcement and inheritance attributes, during CREATE TABLE and ADD COLUMN.

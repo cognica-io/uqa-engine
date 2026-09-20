@@ -21,7 +21,7 @@ impl Engine {
         mode: super::CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
         self.restore_sequences_from_catalog(catalog, mode.allows_migration())?;
-        self.restore_domains_from_catalog(catalog, mode.allows_migration())?;
+        let domains = self.restore_domains_from_catalog(catalog, mode.allows_migration())?;
         *self.durable.system_relation_security.write() =
             uqa_execution::catalog::security::system_relations::restore(
                 catalog,
@@ -49,6 +49,7 @@ impl Engine {
         self.event_restore_context()
             .restore_rules_from_metadata(catalog, mode.allows_migration())?;
         self.restore_catalog_indexes_from_catalog(catalog, mode)?;
+        self.finish_domain_restoration(catalog, domains)?;
         self.restore_path_indexes_from_catalog(catalog)?;
         Ok(())
     }

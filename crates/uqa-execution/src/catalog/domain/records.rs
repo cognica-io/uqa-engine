@@ -14,7 +14,7 @@ use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 pub(super) const PREFIX: &str = "uqa.sql.domain.v1:";
 const OID_PREFIX: &str = "uqa.sql.domain_oid.v1:";
-const FORMAT: &str = r#"{"domain_catalog_format":2}"#;
+const FORMAT: &str = r#"{"domain_catalog_format":3}"#;
 
 pub(super) fn key(name: &str) -> String {
     format!("{PREFIX}{name}")
@@ -46,21 +46,25 @@ pub(super) fn read(
         .get_metadata(DOMAINS_METADATA_KEY)?
         .map(|json| serde_json::from_str::<serde_json::Value>(&json))
         .transpose()?;
-    if value
+    let version = value
         .as_ref()
         .and_then(|value| value.get("domain_catalog_format"))
-        .and_then(serde_json::Value::as_u64)
-        == Some(2)
-    {
+        .and_then(serde_json::Value::as_u64);
+    if matches!(version, Some(2 | 3)) {
         let marker: RecordFormat = serde_json::from_value(value.expect("domain format marker"))?;
-        debug_assert_eq!(marker.domain_catalog_format, 2);
+        let current = marker.domain_catalog_format == 3;
+        if !current && !allow_migration {
+            return Err(StorageBackendError::Other(
+                "domain constraints require initial catalog migration".into(),
+            ));
+        }
         let mut registry = DomainRegistry::new();
         for (record, json) in catalog.metadata_with_prefix(PREFIX)? {
             let name = record.strip_prefix(PREFIX).expect("domain record prefix");
             registry.insert(name.to_owned(), serde_json::from_str(&json)?);
         }
         validate_oids(catalog, &registry)?;
-        return Ok((registry, true));
+        return Ok((registry, current));
     }
     if !catalog.metadata_with_prefix(PREFIX)?.is_empty()
         || !catalog.metadata_with_prefix(OID_PREFIX)?.is_empty()

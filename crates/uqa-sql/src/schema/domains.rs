@@ -15,7 +15,7 @@ use crate::{
     RowSchema, SQLError,
 };
 use std::collections::BTreeSet;
-use uqa_core::{RelationIdentity, Value};
+use uqa_core::Value;
 
 pub fn prepare_domain_definition(
     context: &SchemaBindingContext<'_, '_>,
@@ -23,8 +23,6 @@ pub fn prepare_domain_definition(
     definition: &mut CreateDomain,
     schema_names: &BTreeSet<String>,
 ) -> Result<(), SQLError> {
-    let identity =
-        RelationIdentity::from_legacy_name(&definition.name).map_err(SQLError::Internal)?;
     definition.base =
         crate::type_resolution::resolve_declared_column_type(context.catalog, &definition.base)?;
     if definition.default.is_none() {
@@ -63,42 +61,8 @@ pub fn prepare_domain_definition(
             )?;
         }
     }
-    let mut names = BTreeSet::new();
-    let mut automatic = schema_names.clone();
-    if let Some(not_null) = &mut definition.not_null {
-        super::constraint_metadata::assign_constraint_name(
-            &mut not_null.name,
-            (&identity.name, "", "not_null"),
-            &mut automatic,
-        )
-        .map_err(|error| crate::catalog::errors::storage_error("domain constraint name", &error))?;
-        let name = not_null.name.as_ref().expect("assigned NOT NULL name");
-        names.insert(name.clone());
-        automatic.insert(name.clone());
-    }
+    constraints::assign_names(definition, schema_names)?;
     for check in &mut definition.checks {
-        if let Some(name) = &check.name {
-            if !names.insert(name.clone()) {
-                return Err(domain_error(
-                    "42710",
-                    format!(
-                        "constraint \"{name}\" for domain \"{}\" already exists",
-                        identity.name
-                    ),
-                ));
-            }
-        } else {
-            super::constraint_metadata::assign_constraint_name(
-                &mut check.name,
-                (&identity.name, "", "check"),
-                &mut automatic,
-            )
-            .map_err(|error| {
-                crate::catalog::errors::storage_error("domain constraint name", &error)
-            })?;
-            names.insert(check.name.clone().expect("assigned CHECK name"));
-        }
-        automatic.extend(check.name.iter().cloned());
         bind_domain_check(context, &definition.base, &mut check.expression)?;
     }
     definition
@@ -187,5 +151,6 @@ fn bind_domain_check(
     Ok(())
 }
 
+pub mod constraints;
 pub mod dependencies;
 pub mod removal;

@@ -48,13 +48,29 @@ impl Engine {
         &self,
         catalog: &dyn CatalogFacade,
         allow_migration: bool,
-    ) -> StorageBackendResult<()> {
-        let registry = uqa_execution::catalog::domain::restore(
+    ) -> StorageBackendResult<uqa_execution::catalog::domain::DomainRestoreState> {
+        let restored = uqa_execution::catalog::domain::restore(
             catalog,
             &self.durable.roles.read(),
             allow_migration,
         )?;
-        *self.durable.domains.write() = registry;
+        *self.durable.domains.write() = restored.registry;
+        Ok(restored.state)
+    }
+
+    pub(crate) fn finish_domain_restoration(
+        &self,
+        catalog: &dyn CatalogFacade,
+        state: uqa_execution::catalog::domain::DomainRestoreState,
+    ) -> StorageBackendResult<()> {
+        if let Some(registry) = uqa_execution::catalog::domain::finish_restore(
+            catalog,
+            &self.restored_catalog_read_view(),
+            &self.session_execution_view().relation_name_resolution(),
+            state,
+        )? {
+            *self.durable.domains.write() = registry;
+        }
         Ok(())
     }
 }

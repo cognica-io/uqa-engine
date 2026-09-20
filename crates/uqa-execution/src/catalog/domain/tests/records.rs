@@ -7,7 +7,7 @@
 use super::*;
 use crate::catalog::domain::records as persistence;
 
-fn domain(name: &str, id: u8) -> StoredDomain {
+pub(super) fn domain(name: &str, id: u8) -> StoredDomain {
     let mut domain = legacy()
         .remove("public.positive")
         .unwrap()
@@ -17,6 +17,15 @@ fn domain(name: &str, id: u8) -> StoredDomain {
     domain.definition.name = domain.identity.qualified_name();
     domain.object_id = [id; 16];
     domain.oid = uqa_sql::catalog::domain::domain_object_oid(&domain.object_id);
+    uqa_sql::schema::domains::constraints::assign_names(
+        &mut domain.definition,
+        &std::collections::BTreeSet::new(),
+    )
+    .unwrap();
+    uqa_sql::schema::domains::constraints::materialize(&mut domain.definition, &mut |_: &str| {
+        Ok([id; 16])
+    })
+    .unwrap();
     domain
 }
 
@@ -44,7 +53,7 @@ fn authority_aggregate_conversion_is_initial_only_and_keeps_identities() {
             .get_metadata(DOMAINS_METADATA_KEY)
             .unwrap()
             .as_deref(),
-        Some(r#"{"domain_catalog_format":2}"#)
+        Some(r#"{"domain_catalog_format":3}"#)
     );
     assert_eq!(
         catalog
@@ -85,7 +94,7 @@ fn domain_deltas_do_not_rewrite_or_delete_independent_records() {
             .get_metadata(DOMAINS_METADATA_KEY)
             .unwrap()
             .as_deref(),
-        Some(r#"{"domain_catalog_format":2}"#)
+        Some(r#"{"domain_catalog_format":3}"#)
     );
 }
 
@@ -142,7 +151,7 @@ fn malformed_current_records_are_rejected_without_repair() {
                 catalog
                     .set_metadata(
                         DOMAINS_METADATA_KEY,
-                        r#"{"domain_catalog_format":2,"domains":{}}"#,
+                        r#"{"domain_catalog_format":3,"domains":{}}"#,
                     )
                     .unwrap();
             }
