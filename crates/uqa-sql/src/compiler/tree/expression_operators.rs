@@ -7,10 +7,7 @@
 //! SQL operator, boolean, and null-test lowering.
 
 use super::expression_core::{builtin_syntax_call, dispatched_call};
-use super::{
-    compile_expr, extract_strings, json_path_args, BinaryOp, Expr, NodeEnum, Result, SQLError,
-    Value,
-};
+use super::{compile_expr, extract_strings, BinaryOp, Expr, NodeEnum, Result, SQLError, Value};
 use crate::ast::FunctionDispatch;
 
 fn compile_pattern_operands(
@@ -238,45 +235,23 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                         filter: None,
                     })));
                 }
-                "->" => {
-                    return Ok(Expr::Func {
-                        binding: None,
-                        name: "json_extract_path".into(),
-                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    });
+                "->" | "->>" => {
+                    return Ok(dispatched_call(
+                        FunctionDispatch::JsonExtract {
+                            as_text: op_name == "->>",
+                            path: false,
+                        },
+                        vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                    ));
                 }
-                "->>" => {
-                    return Ok(Expr::Func {
-                        binding: None,
-                        name: "json_extract_path_text".into(),
-                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    });
-                }
-                "#>" => {
-                    return Ok(Expr::Func {
-                        binding: None,
-                        name: "json_extract_path".into(),
-                        args: json_path_args(compile_expr(lhs)?, compile_expr(rhs)?),
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    });
-                }
-                "#>>" => {
-                    return Ok(Expr::Func {
-                        binding: None,
-                        name: "json_extract_path_text".into(),
-                        args: json_path_args(compile_expr(lhs)?, compile_expr(rhs)?),
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    });
+                "#>" | "#>>" => {
+                    return Ok(dispatched_call(
+                        FunctionDispatch::JsonExtract {
+                            as_text: op_name == "#>>",
+                            path: true,
+                        },
+                        vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                    ));
                 }
                 "#-" => {
                     return Ok(Expr::Func {

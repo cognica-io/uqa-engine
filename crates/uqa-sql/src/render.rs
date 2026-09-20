@@ -332,6 +332,33 @@ fn render_expr(expression: &Expr) -> Result<String, SQLError> {
         Expr::TypedLiteral { value, ty } => format!("({})::{ty}", value_sql(value)),
         Expr::Param(index) => format!("${index}"),
         Expr::Func {
+            binding: Some(binding),
+            args,
+            ..
+        } if matches!(
+            binding.dispatch,
+            Some(crate::ast::FunctionDispatch::JsonExtract { .. })
+        ) =>
+        {
+            let Some(crate::ast::FunctionDispatch::JsonExtract { as_text, path }) =
+                binding.dispatch
+            else {
+                unreachable!()
+            };
+            let [lhs, rhs] = args.as_slice() else {
+                return Err(SQLError::Internal(
+                    "JSON extraction requires two operands".into(),
+                ));
+            };
+            let operator = match (path, as_text) {
+                (false, false) => "->",
+                (false, true) => "->>",
+                (true, false) => "#>",
+                (true, true) => "#>>",
+            };
+            format!("({} {operator} {})", render_expr(lhs)?, render_expr(rhs)?)
+        }
+        Expr::Func {
             name,
             args,
             distinct,
