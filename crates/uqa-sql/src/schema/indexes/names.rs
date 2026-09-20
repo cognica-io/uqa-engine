@@ -112,7 +112,7 @@ fn available(
 }
 
 /// `PostgreSQL` reserves the fixed suffix and balances truncation of the two varying name components before clipping at UTF-8 boundaries.
-fn object_name(table: &str, columns: &str, label: &str) -> String {
+pub(in crate::schema) fn object_name(table: &str, columns: &str, label: &str) -> String {
     let mut table_length = table.len();
     let mut column_length = columns.len();
     let overhead = label.len() + 1 + usize::from(!columns.is_empty());
@@ -145,46 +145,15 @@ pub fn allocate_default_index_name(
     table: &RelationIdentity,
     columns: &[crate::ast::IndexKey],
 ) -> Result<String, SQLError> {
-    fn component(raw: &str) -> String {
-        let mut out = String::with_capacity(raw.len());
-        let mut previous_was_separator = false;
-        for ch in raw.chars() {
-            if ch.is_alphanumeric() || ch == '_' {
-                out.extend(ch.to_lowercase());
-                previous_was_separator = false;
-            } else if !previous_was_separator && !out.is_empty() {
-                out.push('_');
-                previous_was_separator = true;
-            }
-        }
-        while out.ends_with('_') {
-            out.pop();
-        }
-        out
-    }
-
-    let mut parts = std::iter::once(component(&table.name))
-        .chain(
-            super::keys::key_names(columns)
-                .iter()
-                .map(|column| component(column)),
-        )
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    if parts.is_empty() {
-        parts.push("index".to_string());
-    }
-    let base = format!("{}_idx", parts.join("_"));
-    let available = |name: &str| -> Result<bool, SQLError> {
-        let candidate = RelationIdentity::new(&table.schema, name).qualified_name();
-        catalog.relation_name_available(&candidate)
-    };
-    if available(&base)? {
-        return Ok(base);
-    }
-    for suffix in 1_u64.. {
-        let candidate = format!("{base}{suffix}");
-        if available(&candidate)? {
+    let component = super::keys::key_names(columns).join("_");
+    for number in 0_u64.. {
+        let label = if number == 0 {
+            "idx".to_owned()
+        } else {
+            format!("idx{number}")
+        };
+        let candidate = object_name(&table.name, &component, &label);
+        if available(catalog, table, &candidate)? {
             return Ok(candidate);
         }
     }

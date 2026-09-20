@@ -8,6 +8,8 @@ use crate::tests::relation_lock_support::{reopen, sessions, sql};
 use crate::Engine;
 use uqa_core::Value;
 
+mod length;
+
 fn names(engine: &Engine, target: &str, domain: bool) -> Vec<String> {
     if domain {
         let identity = uqa_core::RelationIdentity::from_legacy_name(target).unwrap();

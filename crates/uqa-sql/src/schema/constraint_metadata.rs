@@ -151,7 +151,7 @@ pub fn materialize_constraint_metadata_with_names(
         if column.not_null {
             changed |= assign_constraint_name(
                 &mut column.not_null_name,
-                format!("{}_{}_not_null", relation.name, column.name),
+                (&relation.name, &column.name, "not_null"),
                 &mut used,
             )?;
             changed |= identity::materialize_not_null_identity(column, allocate)?;
@@ -159,7 +159,7 @@ pub fn materialize_constraint_metadata_with_names(
         if column.check.is_some() {
             changed |= assign_constraint_name(
                 &mut column.check_name,
-                format!("{}_{}_check", relation.name, column.name),
+                (&relation.name, &column.name, "check"),
                 &mut used,
             )?;
             changed |= assign_catalog_object_id(
@@ -176,7 +176,7 @@ pub fn materialize_constraint_metadata_with_names(
         if let Some(reference) = &mut column.references {
             changed |= assign_constraint_name(
                 &mut reference.name,
-                format!("{}_{}_fkey", relation.name, column.name),
+                (&relation.name, &column.name, "fkey"),
                 &mut used,
             )?;
             changed |= assign_constraint_object_id(&mut reference.object_id, allocate)?;
@@ -185,42 +185,27 @@ pub fn materialize_constraint_metadata_with_names(
         }
     }
     for constraint in &mut constraints.key_constraints {
-        let base = match constraint.kind {
-            crate::ast::TableKeyConstraintKind::PrimaryKey => {
-                format!("{}_pkey", relation.name)
-            }
-            crate::ast::TableKeyConstraintKind::Unique => format!(
-                "{}_{}_key",
-                relation.name,
-                constraint_column_component(&constraint.columns, relation)?
+        let (component, label) = match constraint.kind {
+            crate::ast::TableKeyConstraintKind::PrimaryKey => (String::new(), "pkey"),
+            crate::ast::TableKeyConstraintKind::Unique => (
+                constraint_column_component(&constraint.columns, relation)?,
+                "key",
             ),
         };
-        changed |= assign_constraint_name(&mut constraint.name, base, &mut used)?;
+        changed |= assign_constraint_name(
+            &mut constraint.name,
+            (&relation.name, &component, label),
+            &mut used,
+        )?;
         changed |= identity::materialize_key_identity(constraint, allocate)?;
     }
-    for constraint in &mut constraints.checks {
-        let mut referenced_columns = Vec::new();
-        collect_constraint_columns(&constraint.expr, &mut referenced_columns);
-        let base = if referenced_columns.len() == 1 {
-            format!("{}_{}_check", relation.name, referenced_columns[0])
-        } else {
-            format!("{}_check", relation.name)
-        };
-        changed |= assign_constraint_name(&mut constraint.name, base, &mut used)?;
-        changed |=
-            assign_catalog_object_id(&mut constraint.object_id, "CHECK constraint", allocate)?;
-        changed |= identity::materialize_check_oid(
-            constraint.object_id,
-            &mut constraint.catalog_oid,
-            allocate,
-        )?;
-    }
+    changed |= materialize_checks(relation, &mut constraints.checks, &mut used, allocate)?;
     changed |= synchronize_partition_inherited_foreign_key_ids(constraints);
     for constraint in &mut constraints.foreign_keys {
         let component = constraint_column_component(&constraint.local_columns, relation)?;
         changed |= assign_constraint_name(
             &mut constraint.name,
-            format!("{}_{}_fkey", relation.name, component),
+            (&relation.name, &component, "fkey"),
             &mut used,
         )?;
         changed |= assign_constraint_object_id(&mut constraint.object_id, allocate)?;
@@ -229,6 +214,37 @@ pub fn materialize_constraint_metadata_with_names(
     changed |= synchronize_partition_inherited_foreign_key_ids(constraints);
     changed |= identity::keys::synchronize_provenance(constraints);
     identity::claims::validate_constraint_identities(columns, constraints)?;
+    Ok(changed)
+}
+
+fn materialize_checks(
+    relation: &RelationIdentity,
+    checks: &mut [crate::ast::TableCheck],
+    used: &mut BTreeSet<String>,
+    allocate: &mut CatalogIdentityAllocator<'_>,
+) -> ConstraintMetadataResult<bool> {
+    let mut changed = false;
+    for constraint in checks {
+        let mut referenced_columns = Vec::new();
+        collect_constraint_columns(&constraint.expr, &mut referenced_columns);
+        let component = if referenced_columns.len() == 1 {
+            referenced_columns[0].as_str()
+        } else {
+            ""
+        };
+        changed |= assign_constraint_name(
+            &mut constraint.name,
+            (&relation.name, component, "check"),
+            used,
+        )?;
+        changed |=
+            assign_catalog_object_id(&mut constraint.object_id, "CHECK constraint", allocate)?;
+        changed |= identity::materialize_check_oid(
+            constraint.object_id,
+            &mut constraint.catalog_oid,
+            allocate,
+        )?;
+    }
     Ok(changed)
 }
 
@@ -420,18 +436,20 @@ fn record_constraint_name(
 
 pub(super) fn assign_constraint_name(
     target: &mut Option<String>,
-    base: String,
+    parts: (&str, &str, &str),
     used: &mut BTreeSet<String>,
 ) -> ConstraintMetadataResult<bool> {
     if target.is_some() {
         return Ok(false);
     }
+    let base = super::indexes::names::object_name(parts.0, parts.1, parts.2);
     if used.insert(base.clone()) {
         *target = Some(base);
         return Ok(true);
     }
     for suffix in 1_u64.. {
-        let candidate = format!("{base}{suffix}");
+        let label = format!("{}{suffix}", parts.2);
+        let candidate = super::indexes::names::object_name(parts.0, parts.1, &label);
         if used.insert(candidate.clone()) {
             *target = Some(candidate);
             return Ok(true);

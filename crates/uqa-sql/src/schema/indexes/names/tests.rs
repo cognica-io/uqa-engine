@@ -41,6 +41,57 @@ fn key() -> TableKeyConstraint {
 }
 
 #[test]
+fn default_index_names_preserve_quoted_components_and_expression_labels() {
+    let catalog = Catalog::default();
+    for (sql, expected) in [
+        (
+            "CREATE INDEX ON \"Mixed Table\"(\"Value!\")",
+            "Mixed Table_Value!_idx",
+        ),
+        (
+            "CREATE INDEX ON \"Mixed Table\"(lower(note))",
+            "Mixed Table_lower_idx",
+        ),
+        (
+            "CREATE INDEX ON \"Mixed Table\"(\"Value!\", \"Value!\")",
+            "Mixed Table_Value!_Value!1_idx",
+        ),
+    ] {
+        let crate::Statement::CreateIndex(index) = crate::compile(sql).unwrap().remove(0) else {
+            panic!("index declaration")
+        };
+        assert_eq!(
+            allocate_default_index_name(
+                &catalog,
+                &RelationIdentity::new("public", "Mixed Table"),
+                &index.columns
+            )
+            .unwrap(),
+            expected
+        );
+    }
+}
+
+#[test]
+fn default_index_names_reclip_components_when_a_suffix_is_needed() {
+    let table = RelationIdentity::new("public", "t".repeat(60));
+    let keys = [crate::ast::IndexKey::Column("c".repeat(60))];
+    let first = format!("{}_{}_idx", "t".repeat(29), "c".repeat(29));
+    let catalog = Catalog {
+        relations: [format!("public.{first}")].into(),
+        ..Default::default()
+    };
+    assert_eq!(
+        allocate_default_index_name(&Catalog::default(), &table, &keys).unwrap(),
+        first
+    );
+    assert_eq!(
+        allocate_default_index_name(&catalog, &table, &keys).unwrap(),
+        format!("{}_{}_idx1", "t".repeat(29), "c".repeat(28))
+    );
+}
+
+#[test]
 fn automatic_key_names_skip_both_constraint_and_relation_names() {
     let catalog = Catalog {
         names: ["t_v_key", "t_v_key1"].map(str::to_owned).into(),

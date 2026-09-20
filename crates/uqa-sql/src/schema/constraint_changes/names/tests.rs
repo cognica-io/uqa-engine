@@ -7,6 +7,86 @@
 use super::*;
 
 #[test]
+fn generated_constraint_names_clip_utf8_components_with_the_collision_suffix() {
+    for (table_letter, column_letter, length, plain, collision) in [
+        (
+            "t",
+            "c",
+            60,
+            [(27, 26), (28, 28), (29, 29)],
+            [(26, 26), (28, 27), (29, 28)],
+        ),
+        (
+            "한",
+            "글",
+            20,
+            [(9, 8), (9, 9), (9, 9)],
+            [(8, 8), (9, 9), (9, 9)],
+        ),
+    ] {
+        let table_name = table_letter.repeat(length);
+        let column_name = column_letter.repeat(length);
+        let expected = |parts: [(usize, usize); 3], suffix: &str| {
+            parts
+                .into_iter()
+                .zip(["not_null", "check", "key"])
+                .map(|((table, column), label)| {
+                    format!(
+                        "{}_{}_{label}{suffix}",
+                        table_letter.repeat(table),
+                        column_letter.repeat(column)
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let plain_names = expected(plain, "");
+        for occupied in [false, true] {
+            let crate::Statement::CreateTable(table) = crate::compile(&format!(
+                "CREATE TABLE \"{table_name}\"(\"{column_name}\" int NOT NULL CHECK(\"{column_name}\">0) UNIQUE)"
+            )).unwrap().remove(0) else { panic!("table declaration") };
+            let mut columns = table.columns;
+            let mut constraints = TableConstraintSet {
+                checks: table.checks,
+                key_constraints: table.key_constraints,
+                ..Default::default()
+            };
+            let mut next = 0_u8;
+            crate::schema::constraint_metadata::materialize_constraint_metadata_with_names(
+                &uqa_core::RelationIdentity::new("public", &table_name),
+                &mut columns,
+                &mut constraints,
+                &mut |_: &str| {
+                    next += 1;
+                    Ok([next; 16])
+                },
+                &crate::schema::constraint_metadata::ConstraintNameScope {
+                    schema: if occupied {
+                        plain_names.iter().cloned().collect()
+                    } else {
+                        std::collections::BTreeSet::new()
+                    },
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let names = ConstraintNames::from_definition(&columns, &constraints)
+                .entries()
+                .map(|entry| entry.name.to_owned())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                names,
+                if occupied {
+                    expected(collision, "1")
+                } else {
+                    plain_names.clone()
+                }
+            );
+            assert!(names.iter().all(|name| name.len() <= 63));
+        }
+    }
+}
+
+#[test]
 fn names_retain_each_catalog_row_identity_and_location() {
     let crate::Statement::CreateTable(table) = crate::compile("CREATE TABLE t(a int CONSTRAINT nn NOT NULL CONSTRAINT cc CHECK(a>0) CONSTRAINT cf REFERENCES parent(v), b int, CONSTRAINT tc CHECK(b>0), CONSTRAINT tf FOREIGN KEY(b) REFERENCES parent(v), CONSTRAINT uk UNIQUE(a))").unwrap().remove(0) else { panic!("table declaration") };
     let mut columns = table.columns;

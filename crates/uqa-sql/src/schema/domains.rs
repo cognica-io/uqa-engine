@@ -91,7 +91,7 @@ pub fn prepare_domain_definition(
     if let Some(not_null) = &mut definition.not_null {
         super::constraint_metadata::assign_constraint_name(
             &mut not_null.name,
-            format!("{}_not_null", identity.name),
+            (&identity.name, "", "not_null"),
             &mut automatic,
         )
         .map_err(|error| crate::catalog::errors::storage_error("domain constraint name", &error))?;
@@ -113,7 +113,7 @@ pub fn prepare_domain_definition(
         } else {
             super::constraint_metadata::assign_constraint_name(
                 &mut check.name,
-                format!("{}_check", identity.name),
+                (&identity.name, "", "check"),
                 &mut automatic,
             )
             .map_err(|error| {
