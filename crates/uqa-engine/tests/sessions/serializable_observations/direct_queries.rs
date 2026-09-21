@@ -491,8 +491,7 @@ fn direct_calibration_keeps_its_signal_name_and_obeys_read_only_defaults() {
             engine
                 .sql("SET default_transaction_read_only = on", &[])
                 .unwrap();
-            let error = query.run(&engine, provider, "docs").unwrap_err();
-            assert_eq!(error.sqlstate(), Some("25006"), "{query:?}: {error}");
+            query.run(&engine, provider, "docs").unwrap();
             assert_eq!(engine.transaction_depth(), 0);
             assert!(engine.load_scoring_params("docs.body").unwrap().is_none());
             engine
@@ -506,5 +505,79 @@ fn direct_calibration_keeps_its_signal_name_and_obeys_read_only_defaults() {
                 .unwrap()
                 .is_none());
         }
+    }
+}
+
+#[test]
+fn read_only_calibration_preserves_stale_parameters_and_rejects_explicit_publication() {
+    let (_directory, sessions) = fixtures();
+    for engine in sessions
+        .into_iter()
+        .map(|s| s.engine)
+        .chain(std::iter::once(Engine::new()))
+    {
+        prepare(&engine);
+        let stale = r#"{"alpha":77.0,"beta":11.0,"estimated_doc_count":16.0}"#;
+        engine.save_scoring_params("docs.body", stale).unwrap();
+        engine.sql("BEGIN READ ONLY", &[]).unwrap();
+        let params = engine.bayesian_params_for("docs", "body").unwrap();
+        assert_ne!(params.alpha, 77.0);
+        assert_eq!(
+            engine
+                .sql("SELECT id FROM docs WHERE fts_match(body, 'indexed')", &[])
+                .unwrap()
+                .rows
+                .len(),
+            1
+        );
+        assert_eq!(
+            engine.load_scoring_params("docs.body").unwrap().as_deref(),
+            Some(stale)
+        );
+        let error = engine.save_scoring_params("docs.body", "{}").unwrap_err();
+        assert_eq!(error.sqlstate(), Some("25006"));
+        engine.rollback().unwrap();
+        assert_eq!(
+            engine.load_scoring_params("docs.body").unwrap().as_deref(),
+            Some(stale)
+        );
+        engine.bayesian_params_for("docs", "body").unwrap();
+        assert_ne!(
+            engine.load_scoring_params("docs.body").unwrap().as_deref(),
+            Some(stale)
+        );
+    }
+}
+
+#[test]
+fn read_only_calibration_finishes_while_an_independent_parameter_writer_remains_open() {
+    let (_directory, sessions) = fixtures();
+    for session in sessions {
+        let writer = session.engine;
+        prepare(&writer);
+        writer.drop_scoring_params("docs.body").unwrap();
+        let reader = writer.new_session().unwrap();
+        writer.begin().unwrap();
+        writer
+            .save_scoring_params("docs.body", r#"{"alpha":77.0,"beta":11.0}"#)
+            .unwrap();
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+        let task = std::thread::spawn(move || {
+            let result = (|| {
+                reader.sql("BEGIN ISOLATION LEVEL SERIALIZABLE READ ONLY", &[])?;
+                let params = reader.bayesian_params_for("docs", "body")?;
+                reader.commit()?;
+                Ok::<_, SQLError>(params)
+            })();
+            finished_tx.send(result).unwrap();
+        });
+        let result = finished_rx.recv_timeout(std::time::Duration::from_secs(10));
+        writer.rollback().unwrap();
+        task.join().unwrap();
+        let params = result
+            .expect("read-only calibration waited for the parameter writer")
+            .unwrap();
+        assert_ne!(params.alpha, 77.0);
+        assert!(writer.load_scoring_params("docs.body").unwrap().is_none());
     }
 }

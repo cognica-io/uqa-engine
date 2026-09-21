@@ -71,13 +71,7 @@ impl Engine {
 
     /// Resolve the Bayesian BM25 calibration for `table.field`.
     ///
-    /// Saved parameters win. Absent or stale auto-estimated parameters
-    /// trigger a corpus-driven estimation
-    /// that is persisted for subsequent queries, so the raw-score
-    /// identity calibration (`alpha = 1, beta = 0`) never silently
-    /// ships a score for a populated field. Parameters written by the
-    /// online learner carry no `estimated_doc_count` stamp and are
-    /// never overwritten automatically.
+    /// Saved parameters win. Absent or stale auto-estimated parameters trigger a corpus-driven estimation. Writable transactions persist it for subsequent queries; read-only transactions use it without publication. The raw-score identity calibration (`alpha = 1, beta = 0`) never silently ships a score for a populated field. Parameters written by the online learner carry no `estimated_doc_count` stamp and are never overwritten automatically.
     pub fn bayesian_params_for(
         &self,
         table: &str,
@@ -97,6 +91,9 @@ impl Engine {
         self.validate_text_search_field(table, field)?;
         if let Some(params) = self.load_fresh_bayesian_params(table, signal_table, field)? {
             return Ok(params);
+        }
+        if self.current_transaction_is_read_only() {
+            return self.resolve_missing_bayesian_params_in_transaction(table, signal_table, field);
         }
 
         // Estimation is a read/modify/write operation: reserve the durable
@@ -150,10 +147,12 @@ impl Engine {
         }
         let params =
             self.resolve_missing_bayesian_params_in_transaction(table, signal_table, field)?;
-        self.runtime
-            .bayesian_params_cache
-            .write()
-            .insert(key, params);
+        if !self.current_transaction_is_read_only() {
+            self.runtime
+                .bayesian_params_cache
+                .write()
+                .insert(key, params);
+        }
         Ok(params)
     }
 
@@ -164,7 +163,9 @@ impl Engine {
         field: &str,
     ) -> Result<BayesianBM25Params, SQLError> {
         self.validate_text_search_field(table, field)?;
-        self.lock_scoring_parameter_write(&format!("{signal_table}.{field}"))?;
+        if !self.current_transaction_is_read_only() {
+            self.lock_scoring_parameter_write(&format!("{signal_table}.{field}"))?;
+        }
         if let Some(params) = self.load_fresh_bayesian_params(table, signal_table, field)? {
             return Ok(params);
         }
@@ -275,10 +276,7 @@ impl Engine {
         })
     }
 
-    /// Estimate unsupervised score-transform parameters from the field's indexed
-    /// vocabulary and persist them with a document-count stamp.
-    /// Returns `None` (without persisting) when the field has nothing
-    /// to sample, so an empty table estimates on first real use.
+    /// Estimate unsupervised score-transform parameters from the field's indexed vocabulary and, in writable transactions, persist them with a document-count stamp. Returns `None` (without persisting) when the field has nothing to sample, so an empty table estimates on first real use.
     pub(super) fn auto_estimate_params(
         &self,
         table: &str,
@@ -319,6 +317,9 @@ impl Engine {
                 .map_err(|error| storage_sql_error("read indexed document count", error))?;
             (params, doc_count)
         };
+        if self.current_transaction_is_read_only() {
+            return Ok(Some(params));
+        }
         let values = BTreeMap::from([
             ("alpha".to_string(), params.alpha),
             ("beta".to_string(), params.beta),
