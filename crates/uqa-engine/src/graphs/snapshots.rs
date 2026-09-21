@@ -208,7 +208,9 @@ impl Engine {
             .tempdir()
             .map_err(snapshot_error)?;
         let mut key = [0u8; 32];
-        getrandom::fill(&mut key).map_err(snapshot_error)?;
+        getrandom::fill(&mut key).map_err(|error| {
+            SQLError::Internal(format!("generate retained graph snapshot key: {error}"))
+        })?;
         let mut encoded_key = String::with_capacity(64);
         for byte in key {
             write!(&mut encoded_key, "{byte:02x}").map_err(snapshot_error)?;
