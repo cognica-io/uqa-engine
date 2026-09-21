@@ -639,6 +639,9 @@ impl Engine {
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
+        if let Some(read) = self.serializable_table_state_read(&t)? {
+            read.observe_row(doc_id)?;
+        }
         let Some(mut doc) = t
             .document_store
             .read()
@@ -707,6 +710,9 @@ impl Engine {
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
+        if let Some(read) = self.serializable_table_state_read(&t)? {
+            read.observe_row(doc_id)?;
+        }
         let Some(mut document) = t
             .document_store
             .read()
@@ -865,6 +871,9 @@ impl Engine {
             .try_table(&table_name)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?;
+        if let Some(read) = self.serializable_table_state_read(&t)? {
+            read.observe_row(doc_id)?;
+        }
         let existed = t
             .document_store
             .read()

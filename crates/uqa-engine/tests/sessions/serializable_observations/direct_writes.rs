@@ -52,6 +52,21 @@ impl Mutation {
             Self::Delete => engine.delete_document("left_t", id).unwrap(),
         }
     }
+
+    fn apply_to_missing(self, session: &Session, id: DocId) {
+        let engine = &session.engine;
+        let fields = BTreeMap::from([("v".into(), Value::Int(2))]);
+        match self {
+            Self::Update => assert!(!engine
+                .update_document_fields_with_vector_values("left_t", id, fields, BTreeMap::new())
+                .unwrap()),
+            Self::Patch => assert!(!engine
+                .patch_document_fields_with_vector_values("left_t", id, &fields, &BTreeMap::new())
+                .unwrap()),
+            Self::Delete => engine.delete_document("left_t", id).unwrap(),
+            _ => unreachable!("this mutation creates an absent target"),
+        }
+    }
 }
 
 fn crossed_reads(a: &Session, b: &Session, id: DocId) {
@@ -100,31 +115,77 @@ fn absent_direct_updates_and_deletes_do_not_manufacture_row_writes() {
             assert!(a.engine.get_document("left_t", 99).unwrap().is_none());
             b.sql("SELECT v FROM right_t");
             a.sql("UPDATE right_t SET v = 2 WHERE id = 1");
-            let fields = BTreeMap::from([("v".into(), Value::Int(2))]);
-            match mutation {
-                Mutation::Update => assert!(!b
-                    .engine
-                    .update_document_fields_with_vector_values(
-                        "left_t",
-                        99,
-                        fields,
-                        BTreeMap::new()
-                    )
-                    .unwrap()),
-                Mutation::Patch => assert!(!b
-                    .engine
-                    .patch_document_fields_with_vector_values(
-                        "left_t",
-                        99,
-                        &fields,
-                        &BTreeMap::new()
-                    )
-                    .unwrap()),
-                Mutation::Delete => b.engine.delete_document("left_t", 99).unwrap(),
-                _ => unreachable!(),
-            }
+            mutation.apply_to_missing(&b, 99);
             a.sql("COMMIT");
             b.sql("COMMIT");
+        }
+    }
+}
+
+fn insert_and_commit(session: &Session, id: DocId) -> Result<(), uqa_sql::SQLError> {
+    session.engine.add_document(
+        "left_t",
+        id,
+        Document::from([
+            ("id".into(), Value::Int(i64::try_from(id).unwrap())),
+            ("v".into(), Value::Int(2)),
+        ]),
+    )?;
+    session.engine.sql("COMMIT", &[]).map(|_| ())
+}
+
+#[test]
+fn absent_direct_mutation_reads_track_only_the_selected_row_across_savepoint_undo() {
+    for mutation in [Mutation::Update, Mutation::Patch, Mutation::Delete] {
+        for undo in [false, true] {
+            for inserted in [99, 100] {
+                let (_directory, sessions) = fixtures();
+                for (provider, a) in sessions.into_iter().enumerate() {
+                    let b = a.sibling();
+                    a.sql("BEGIN ISOLATION LEVEL SERIALIZABLE; SAVEPOINT before_probe");
+                    b.sql("BEGIN ISOLATION LEVEL SERIALIZABLE; SELECT v FROM right_t");
+                    mutation.apply_to_missing(&a, 99);
+                    if undo {
+                        a.sql("ROLLBACK TO before_probe");
+                    }
+                    a.sql("RELEASE before_probe; UPDATE right_t SET v = 2 WHERE id = 1");
+                    // Finish the reader before requesting its retained tuple lock for the insertion.
+                    a.sql("COMMIT");
+                    let result = insert_and_commit(&b, inserted);
+                    assert_eq!(
+                        result.is_err(),
+                        inserted == 99,
+                        "{mutation:?}, undo={undo}, inserted={inserted}, provider={provider}: {result:?}"
+                    );
+                    if inserted == 99 {
+                        assert_eq!(result.unwrap_err().sqlstate(), Some("40001"));
+                    }
+                    if b.engine.transaction_depth() != 0 {
+                        b.sql("ROLLBACK");
+                    }
+                    assert_eq!(
+                        a.engine.get_document("left_t", inserted).unwrap().is_some(),
+                        inserted != 99
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn whole_transaction_rollback_discards_direct_target_read_dependencies() {
+    for mutation in [Mutation::Update, Mutation::Patch, Mutation::Delete] {
+        let (_directory, sessions) = fixtures();
+        for a in sessions {
+            let b = a.sibling();
+            a.sql("BEGIN ISOLATION LEVEL SERIALIZABLE");
+            b.sql("BEGIN ISOLATION LEVEL SERIALIZABLE; SELECT v FROM right_t");
+            mutation.apply_to_missing(&a, 99);
+            a.sql("UPDATE right_t SET v = 2 WHERE id = 1; ROLLBACK");
+            insert_and_commit(&b, 99).unwrap();
+            assert!(a.engine.get_document("left_t", 99).unwrap().is_some());
+            assert_eq!(a.sql("SELECT v FROM right_t").rows[0]["v"], Value::Int(1));
         }
     }
 }

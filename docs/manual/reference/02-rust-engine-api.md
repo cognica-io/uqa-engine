@@ -218,7 +218,7 @@ The API also exposes typed operations that bypass SQL text:
 
 SQL and typed operations use the same durable state and indexes. Applications can mix them, but a single transaction boundary should use one clear ownership path.
 
-Direct document insertion, replacement, field updates and deletion register changed persistent row identities with the active SERIALIZABLE transaction, independently of text, value or vector index changes. An absent field-update or deletion target does not register a row write. Statement and savepoint rollback discard these write intents together with the private changes; read observations and dependencies already established with other transactions remain.
+Direct document insertion, replacement, field updates and deletion register changed persistent row identities with the active SERIALIZABLE transaction, independently of text, value or vector index changes. Field updates, patches and deletion observe their selected persistent row before fetching it, including an absent row. An absent target registers a point read without registering a row write, so it participates in serialization conflicts even when no document changes. Statement and savepoint rollback discard write intents together with the private changes; read observations and dependencies already established with other transactions remain. Whole-transaction rollback releases that transaction's read observations too.
 
 ## Analyzer APIs
 
