@@ -218,10 +218,11 @@ impl Engine {
     /// must return catalog and data handles bound to one session transaction
     /// so every durable mutation commits atomically.
     pub fn new_session(&self) -> StorageBackendResult<Self> {
+        let _statement = self.runtime.statement_gate.lock();
         self.new_sibling_session(false, None)
     }
 
-    /// Retain an internal read view without acquiring another automatic-maintenance client lease.
+    /// Restore an independent internal read view without entering the source statement or acquiring another automatic-maintenance client lease.
     pub(crate) fn new_internal_read_session(&self) -> StorageBackendResult<Self> {
         self.new_sibling_session(true, None)
     }
@@ -240,15 +241,15 @@ impl Engine {
         internal_read: bool,
         retained_session: Option<PersistentStorageSession>,
     ) -> StorageBackendResult<Self> {
-        let _statement = self.runtime.statement_gate.lock();
         let provider = self.storage.provider.as_ref().ok_or_else(|| {
             StorageBackendError::Other(
                 "independent sessions require a PersistentStorageProvider".into(),
             )
         })?;
-        // A retained pair supplies its own fixed catalog view. Other readers opened while the source transaction stack is locked must restore independent storage instead of sharing mutable transaction definitions or recursively locking that stack.
+        // Only the public factory owns the source statement gate. Internal readers can run on a worker of that statement and must restore their own catalog without borrowing the source transaction or temporary namespace. A retained pair supplies its own fixed catalog view.
         let retained = retained_session.is_some();
-        let share_catalog = !retained
+        let share_catalog = !internal_read
+            && !retained
             && self
                 .session
                 .transactions

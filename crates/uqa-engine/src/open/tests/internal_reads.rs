@@ -119,3 +119,57 @@ fn fixed_read_attachment_keeps_the_source_snapshot_while_latest_readers_advance(
         assert!(retained.try_table("later").unwrap().is_none());
     }
 }
+
+#[test]
+fn internal_read_workers_progress_while_the_source_statement_owns_its_transaction() {
+    for provider in 0..3 {
+        let directory = tempfile::tempdir().unwrap();
+        let root = persistent_engine(provider, &directory.path().join("worker-reads.db"));
+        root.sql("CREATE TABLE t(v integer); INSERT INTO t VALUES(1)", &[])
+            .unwrap();
+        root.release_automatic_statistics_client();
+        root.session
+            .statistics_worker
+            .store(true, Ordering::Release);
+        let peer = root.new_session().unwrap();
+        peer.release_automatic_statistics_client();
+        peer.session
+            .statistics_worker
+            .store(true, Ordering::Release);
+        let backend = root.storage.backend.as_ref().unwrap();
+        backend.begin_read_transaction().unwrap();
+        peer.sql("UPDATE t SET v = 2; CREATE TABLE later(v integer)", &[])
+            .unwrap();
+
+        for retained in [false, true] {
+            std::thread::scope(|scope| {
+                let statement = root.runtime.statement_gate.lock();
+                let transactions = root.session.transactions.lock();
+                let (sender, receiver) = mpsc::channel();
+                let source = &root;
+                let worker = scope.spawn(move || {
+                    let reader = if retained {
+                        source.new_internal_retained_read_session()
+                    } else {
+                        source.new_internal_read_session()
+                    }
+                    .unwrap();
+                    let value = reader.sql("SELECT v FROM t", &[]).unwrap().rows[0]["v"].clone();
+                    let has_later = reader.try_table("later").unwrap().is_some();
+                    assert!(!reader.session.statistics_client.load(Ordering::Acquire));
+                    sender.send((value, has_later)).unwrap();
+                });
+                let completed = receiver.recv_timeout(Duration::from_secs(10));
+                // Release the parent locks before joining even on failure, so a regression reports an error instead of hanging the test executable.
+                drop(transactions);
+                drop(statement);
+                worker.join().unwrap();
+                let (value, has_later) =
+                    completed.expect("internal reader waited for its parent statement");
+                assert_eq!(value, Value::Int(if retained { 1 } else { 2 }));
+                assert_eq!(has_later, !retained);
+            });
+        }
+        backend.rollback_transaction().unwrap();
+    }
+}
