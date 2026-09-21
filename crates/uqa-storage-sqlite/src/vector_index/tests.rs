@@ -14,6 +14,56 @@ fn idx() -> SQLiteVectorIndex {
 }
 
 #[test]
+fn canonical_membership_observes_native_snapshots_and_empty_replacement() {
+    for native in [false, true] {
+        let connection = ManagedConnection::open_in_memory().unwrap();
+        Catalog::open(connection.clone()).unwrap();
+        if native {
+            connection
+                .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
+                .unwrap();
+        }
+        let indexes: [Box<dyn VectorIndex>; 3] = [
+            Box::new(SQLiteVectorIndex::new(
+                connection.clone(),
+                "docs",
+                "exact",
+                2,
+            )),
+            Box::new(crate::SQLiteIVFIndex::new(
+                connection.clone(),
+                "docs",
+                "ivf",
+                2,
+            )),
+            Box::new(crate::SQLiteHNSWIndex::new(
+                connection.clone(),
+                "docs",
+                "hnsw",
+                2,
+            )),
+        ];
+        for mut index in indexes {
+            assert!(!index.contains_document(1).unwrap());
+            index
+                .add_many(1, vec![vec![1.0, 0.0], vec![0.0, 1.0]])
+                .unwrap();
+            let retained = native.then(|| index.snapshot().unwrap());
+            assert!(index.contains_document(1).unwrap());
+            assert!(!index.contains_document(2).unwrap());
+            index.add_many(1, Vec::new()).unwrap();
+            assert!(!index.contains_document(1).unwrap());
+            if let Some(retained) = retained {
+                assert!(retained.contains_document(1).unwrap());
+            }
+            index.add(1, vec![0.5, 0.5]).unwrap();
+            index.delete(1).unwrap();
+            assert!(!index.contains_document(1).unwrap());
+        }
+    }
+}
+
+#[test]
 fn add_search_round_trip() {
     let mut idx = idx();
     idx.add(1, vec![1.0, 0.0, 0.0]).unwrap();

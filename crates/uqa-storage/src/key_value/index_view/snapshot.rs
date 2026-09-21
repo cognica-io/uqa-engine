@@ -20,6 +20,10 @@ pub(in crate::key_value) fn read_only(index: Arc<dyn VectorIndex>) -> Arc<dyn Ve
 struct Snapshot(Arc<dyn VectorIndex>);
 
 impl VectorIndex for Snapshot {
+    fn contains_document(&self, doc_id: DocId) -> StorageBackendResult<bool> {
+        self.0.contains_document(doc_id)
+    }
+
     fn dimensions(&self) -> u32 {
         self.0.dimensions()
     }

@@ -130,6 +130,20 @@ impl SQLiteVectorIndex {
 }
 
 impl VectorIndex for SQLiteVectorIndex {
+    fn contains_document(&self, doc_id: DocId) -> StorageBackendResult<bool> {
+        let doc_id = encode_doc_id(doc_id)?;
+        if let Some(found) = self.read_native(|read| read.contains_document(doc_id))? {
+            return Ok(found);
+        }
+        Ok(self.conn.with(|connection| {
+            Ok(connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM _vectors WHERE table_name = ?1 AND field = ?2 AND doc_id = ?3 AND vector_ordinal = 0)",
+                params![self.table, self.field, doc_id],
+                |row| row.get(0),
+            )?)
+        })?)
+    }
+
     fn dimensions(&self) -> u32 {
         self.dimensions
     }

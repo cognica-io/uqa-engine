@@ -182,6 +182,21 @@ impl<'a> NativeVectorRead<'a> {
         Ok(count)
     }
 
+    pub(super) fn contains_document(&self, doc_id: i64) -> Result<bool> {
+        let Some(owner) = self.owner else {
+            return Ok(false);
+        };
+        self.snapshot.contains_row(
+            Family::Vectors,
+            owner,
+            &[
+                self.field(),
+                ValueRef::Integer(doc_id),
+                ValueRef::Integer(0),
+            ],
+        )
+    }
+
     pub(super) fn replace(
         &self,
         batch: &mut dyn KeyValueBatch,

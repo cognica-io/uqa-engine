@@ -206,6 +206,10 @@ impl KeyValueHNSWIndex {
 }
 
 impl VectorIndex for KeyValueHNSWIndex {
+    fn contains_document(&self, doc_id: DocId) -> StorageBackendResult<bool> {
+        self.raw.contains_document(doc_id)
+    }
+
     fn dimensions(&self) -> u32 {
         self.dimensions
     }

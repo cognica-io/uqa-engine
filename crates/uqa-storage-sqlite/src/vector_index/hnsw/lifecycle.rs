@@ -15,6 +15,10 @@ use uqa_storage::vector_index::VectorIndex;
 use uqa_storage::StorageBackendResult;
 
 impl VectorIndex for SQLiteHNSWIndex {
+    fn contains_document(&self, doc_id: DocId) -> StorageBackendResult<bool> {
+        self.persistent.contains_document(doc_id)
+    }
+
     fn dimensions(&self) -> u32 {
         self.persistent.dimensions
     }

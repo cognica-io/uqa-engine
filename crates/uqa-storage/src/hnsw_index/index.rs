@@ -19,6 +19,10 @@ use crate::vector_index::{
 use crate::{StorageBackendError, StorageBackendResult};
 
 impl VectorIndex for HNSWIndex {
+    fn contains_document(&self, doc_id: DocId) -> StorageBackendResult<bool> {
+        Ok(self.active.contains_key(&(doc_id, 0)))
+    }
+
     fn dimensions(&self) -> u32 {
         self.dimensions
     }

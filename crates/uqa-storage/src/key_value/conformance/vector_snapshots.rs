@@ -31,72 +31,106 @@ pub fn verify_vector_snapshots(store: &Arc<dyn KeyValueStore>) -> StorageBackend
         }),
         VectorIndexSpec::HNSW(HNSWIndexParams::default()),
     ] {
-        let field = spec.access_method();
-        let mut index = KeyValueStorageBackend::new(store.clone()).vector_index(
-            TABLE,
-            field,
-            2,
-            spec,
-            VectorIndexOpenMode::Create,
-        )?;
-        index.add_many(1, vec![vec![1.0, 0.0], vec![0.0, 1.0]])?;
-        index.initialize()?;
-        let baseline = index.snapshot()?;
-        store.begin_transaction()?;
-        index.add(2, vec![0.5, 0.5])?;
-        let private = index.snapshot()?;
-        expect_eq(
-            &baseline.count()?,
-            &2,
-            "retained tensor snapshot ignores private insertion",
-        )?;
-        store.rollback_transaction()?;
-        expect_eq(&index.count()?, &2, "live tensor index observes rollback")?;
-        expect_eq(
-            &private.count()?,
-            &3,
-            "private tensor snapshot survives rollback",
-        )?;
-
-        store.begin_transaction()?;
-        store.savepoint("vectors")?;
-        index.delete(1)?;
-        index.add(3, vec![0.25, 0.75])?;
-        let discarded = index.snapshot()?;
-        store.rollback_to_savepoint("vectors")?;
-        index.add(4, vec![0.75, 0.25])?;
-        store.commit_transaction()?;
-        expect_eq(
-            &index.count()?,
-            &3,
-            "tensor write after savepoint restoration",
-        )?;
-        expect_eq(
-            &discarded.count()?,
-            &1,
-            "discarded savepoint branch stays retained",
-        )?;
-        let scored = baseline.search_threshold(&[1.0, 0.0], 0.5)?;
-        expect_eq(
-            &scored.len(),
-            &1,
-            "tensor snapshot collapses per-document scores",
-        )?;
-        expect_eq(
-            &scored.iter().next().unwrap().doc_id,
-            &1,
-            "tensor snapshot retains original document",
-        )?;
-        drop(index);
-        read_only(baseline, 2)?;
-        read_only(private, 3)?;
-        read_only(discarded, 1)?;
-        expect_eq(
-            &KeyValueVectorIndex::new(store.clone(), TABLE, field, 2).count()?,
-            &3,
-            "snapshot mutation cannot modify canonical storage",
-        )?;
+        verify_vector_snapshot(store, spec)?;
     }
+    Ok(())
+}
+
+fn verify_vector_snapshot(
+    store: &Arc<dyn KeyValueStore>,
+    spec: VectorIndexSpec,
+) -> StorageBackendResult<()> {
+    let field = spec.access_method();
+    let mut index = KeyValueStorageBackend::new(store.clone()).vector_index(
+        TABLE,
+        field,
+        2,
+        spec,
+        VectorIndexOpenMode::Create,
+    )?;
+    index.add_many(1, vec![vec![1.0, 0.0], vec![0.0, 1.0]])?;
+    index.initialize()?;
+    let baseline = index.snapshot()?;
+    store.begin_transaction()?;
+    index.add(2, vec![0.5, 0.5])?;
+    let private = index.snapshot()?;
+    expect(index.contains_document(2)?, "private vector membership")?;
+    expect(
+        !baseline.contains_document(2)?,
+        "retained membership excludes later insertion",
+    )?;
+    expect_eq(
+        &baseline.count()?,
+        &2,
+        "retained tensor snapshot ignores private insertion",
+    )?;
+    store.rollback_transaction()?;
+    expect(
+        !index.contains_document(2)?,
+        "live membership observes rollback",
+    )?;
+    expect(
+        private.contains_document(2)?,
+        "private membership survives rollback",
+    )?;
+    expect_eq(&index.count()?, &2, "live tensor index observes rollback")?;
+    expect_eq(
+        &private.count()?,
+        &3,
+        "private tensor snapshot survives rollback",
+    )?;
+
+    store.begin_transaction()?;
+    store.savepoint("vectors")?;
+    index.delete(1)?;
+    index.add(3, vec![0.25, 0.75])?;
+    let discarded = index.snapshot()?;
+    expect(
+        !discarded.contains_document(1)?,
+        "retained membership observes deletion",
+    )?;
+    store.rollback_to_savepoint("vectors")?;
+    index.add(4, vec![0.75, 0.25])?;
+    store.commit_transaction()?;
+    expect(index.contains_document(1)?, "restored canonical membership")?;
+    expect(
+        !index.contains_document(3)?,
+        "discarded candidate remains absent",
+    )?;
+    expect(
+        discarded.contains_document(3)?,
+        "discarded snapshot keeps its candidate",
+    )?;
+    expect_eq(
+        &index.count()?,
+        &3,
+        "tensor write after savepoint restoration",
+    )?;
+    expect_eq(
+        &discarded.count()?,
+        &1,
+        "discarded savepoint branch stays retained",
+    )?;
+    let scored = baseline.search_threshold(&[1.0, 0.0], 0.5)?;
+    expect_eq(
+        &scored.len(),
+        &1,
+        "tensor snapshot collapses per-document scores",
+    )?;
+    expect_eq(
+        &scored.iter().next().unwrap().doc_id,
+        &1,
+        "tensor snapshot retains original document",
+    )?;
+    drop(index);
+    read_only(baseline, 2)?;
+    read_only(private, 3)?;
+    read_only(discarded, 1)?;
+    expect_eq(
+        &KeyValueVectorIndex::new(store.clone(), TABLE, field, 2).count()?,
+        &3,
+        "snapshot mutation cannot modify canonical storage",
+    )?;
     Ok(())
 }
 

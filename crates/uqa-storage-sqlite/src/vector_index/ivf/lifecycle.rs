@@ -88,6 +88,10 @@ impl SQLiteIVFIndex {
 }
 
 impl VectorIndex for SQLiteIVFIndex {
+    fn contains_document(&self, doc_id: DocId) -> StorageBackendResult<bool> {
+        self.persistent.contains_document(doc_id)
+    }
+
     fn dimensions(&self) -> u32 {
         self.persistent.dimensions
     }

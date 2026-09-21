@@ -151,6 +151,13 @@ pub trait VectorIndex: Send + Sync {
     fn search_threshold(&self, query: &[f32], threshold: f32) -> StorageBackendResult<PostingList>;
     fn count(&self) -> StorageBackendResult<usize>;
 
+    /// Test canonical membership at this handle's visibility boundary without searching or materializing the corpus. Empty tensor replacements have no membership. This is a maintenance probe, not a logical query observation.
+    fn contains_document(&self, _doc_id: DocId) -> StorageBackendResult<bool> {
+        Err(StorageBackendError::Other(
+            "canonical vector membership is not supported by this backend".into(),
+        ))
+    }
+
     /// Build any auxiliary physical metadata required by this index from its
     /// current vector contents. Brute-force indexes need no extra work;
     /// persistent IVF and HNSW implementations use this during explicit
@@ -192,6 +199,10 @@ impl MemoryVectorIndex {
 }
 
 impl VectorIndex for MemoryVectorIndex {
+    fn contains_document(&self, doc_id: DocId) -> StorageBackendResult<bool> {
+        Ok(self.vectors.contains_key(&doc_id))
+    }
+
     fn dimensions(&self) -> u32 {
         self.dimensions
     }
@@ -304,6 +315,30 @@ fn best_vector_score(query: &[f32], vectors: &[Vec<f32>]) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canonical_membership_tracks_tensor_replacement_and_retained_snapshots() {
+        let indexes: [Box<dyn VectorIndex>; 3] = [
+            Box::new(MemoryVectorIndex::new(2)),
+            Box::new(crate::IVFIndex::new(2)),
+            Box::new(crate::HNSWIndex::new(2)),
+        ];
+        for mut index in indexes {
+            assert!(!index.contains_document(1).unwrap());
+            index
+                .add_many(1, vec![vec![1.0, 0.0], vec![0.0, 1.0]])
+                .unwrap();
+            let retained = index.snapshot().unwrap();
+            assert!(index.contains_document(1).unwrap());
+            assert!(!index.contains_document(2).unwrap());
+            index.add_many(1, Vec::new()).unwrap();
+            assert!(!index.contains_document(1).unwrap());
+            assert!(retained.contains_document(1).unwrap());
+            index.add(1, vec![0.5, 0.5]).unwrap();
+            index.delete(1).unwrap();
+            assert!(!index.contains_document(1).unwrap());
+        }
+    }
 
     fn approx_eq(a: f32, b: f32, eps: f32) {
         assert!((a - b).abs() < eps, "expected {a} ~ {b} within {eps}");

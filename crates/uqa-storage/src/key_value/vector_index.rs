@@ -87,6 +87,28 @@ impl KeyValueVectorIndex {
 }
 
 impl VectorIndex for KeyValueVectorIndex {
+    fn contains_document(&self, doc_id: DocId) -> StorageBackendResult<bool> {
+        read_view(self.store.as_ref(), |read| {
+            read.control().check()?;
+            // The existing key encoder can hold both old and growing buffers; retain their allowance until the key is dropped.
+            let bytes = self
+                .table
+                .len()
+                .checked_add(self.field.len())
+                .and_then(|length| length.checked_add(25))
+                .and_then(|length| length.checked_mul(3))
+                .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+            let _key_memory = read.control().memory().reserve(bytes)?;
+            let key = vector_key(&self.table, &self.field, doc_id, 0)?;
+            let mut found = false;
+            read.visit_keys_after(&key, None, 1, read.control(), &mut |candidate| {
+                found = candidate == key;
+                Ok(())
+            })?;
+            Ok(found)
+        })
+    }
+
     fn dimensions(&self) -> u32 {
         self.dimensions
     }

@@ -80,6 +80,14 @@ impl CanonicalSnapshot {
 }
 
 impl VectorIndex for CanonicalSnapshot {
+    fn contains_document(&self, doc_id: DocId) -> StorageBackendResult<bool> {
+        self.control.check()?;
+        Ok(self
+            .entries
+            .binary_search_by_key(&doc_id, |entry| entry.0)
+            .is_ok())
+    }
+
     fn dimensions(&self) -> u32 {
         self.dimensions
     }
