@@ -29,6 +29,9 @@ mod catalog;
 #[path = "graph/catalog_scalars.rs"]
 mod catalog_scalars;
 
+#[path = "graph/search_path.rs"]
+mod search_path;
+
 fn prepare(session: &Session) {
     session.engine.create_graph("g").unwrap();
     for id in [1, 2] {

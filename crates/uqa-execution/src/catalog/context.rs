@@ -43,7 +43,16 @@ impl CatalogContext<'_> {
         self.session
     }
     pub fn current_schema_names(&self, implicit: bool) -> Result<Vec<String>, SQLError> {
-        self.namespaces.current_schema_names(implicit)
+        let catalog = self.catalog.refreshed_catalog_snapshot()?;
+        self.namespaces
+            .current_schema_names_with_catalog(&catalog, implicit)
+    }
+    pub fn current_schema_name(&self) -> Result<Option<String>, SQLError> {
+        super::namespaces::current_schema_name(
+            &self.catalog.refreshed_catalog_snapshot()?,
+            &self.session.relation_name_resolution(),
+            &self.current_role(),
+        )
     }
     pub fn current_role(&self) -> RoleReference {
         self.session.current_role()
@@ -129,22 +138,7 @@ impl CatalogContext<'_> {
         catalog: &CatalogReadView,
         schema: &str,
     ) -> Option<BoundSchemaSecurity> {
-        if let Some(security) = catalog.schema_security(schema) {
-            return Some(security.clone());
-        }
-        match schema {
-            "pg_catalog" | "information_schema" => {
-                Some(BoundSchemaSecurity::with_public_privileges(false))
-            }
-            "ag_catalog" => Some(BoundSchemaSecurity::bootstrap("ag_catalog")),
-            name if name == self.session.temporary_schema_name() => {
-                Some(BoundSchemaSecurity::with_public_privileges(true))
-            }
-            name if catalog.snapshot().definitions.graphs.contains_key(name) => {
-                Some(BoundSchemaSecurity::bootstrap(name))
-            }
-            _ => None,
-        }
+        super::namespaces::schema_security(catalog, &self.session.temporary_schema_name(), schema)
     }
     pub fn require_schema_privilege(
         &self,

@@ -208,6 +208,11 @@ pub trait EngineHook {
         Ok(None)
     }
 
+    /// Preserve typed query failures while retaining legacy schema hooks and their fallback contract.
+    fn current_schema_value(&self) -> Result<Option<String>> {
+        self.current_schema().map_err(SQLError::Internal)
+    }
+
     fn current_user(&self) -> std::result::Result<Option<String>, crate::SQLError> {
         Ok(None)
     }
@@ -229,6 +234,12 @@ pub trait EngineHook {
         _include_implicit: bool,
     ) -> std::result::Result<Option<Vec<String>>, String> {
         Ok(None)
+    }
+
+    /// Preserve typed query failures while resolving the effective search path.
+    fn current_schemas_value(&self, include_implicit: bool) -> Result<Option<Vec<String>>> {
+        self.current_schemas(include_implicit)
+            .map_err(SQLError::Internal)
     }
 
     /// Draw from an engine-owned logical-session PRNG. `None` keeps pure,

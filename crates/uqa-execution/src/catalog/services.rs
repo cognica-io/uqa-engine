@@ -42,6 +42,14 @@ pub trait ViewCatalogCapabilities: Sync {
 
 pub trait CatalogNamespace: Sync {
     fn current_schema_names(&self, include_implicit: bool) -> Result<Vec<String>, SQLError>;
+    /// Resolve visibility through a caller-selected catalog while preserving legacy namespace services.
+    fn current_schema_names_with_catalog(
+        &self,
+        _catalog: &super::CatalogReadView,
+        include_implicit: bool,
+    ) -> Result<Vec<String>, SQLError> {
+        self.current_schema_names(include_implicit)
+    }
 }
 
 pub trait CatalogSnapshotSource: Sync {

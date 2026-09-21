@@ -239,8 +239,17 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
 
     fn current_schema(&self) -> std::result::Result<Option<String>, String> {
         self.engine
+            .catalog_execution()
             .current_schema_name()
             .map_err(|error| error.to_string())
+    }
+
+    fn current_schema_value(&self) -> Result<Option<String>, SQLError> {
+        self.engine.catalog_execution().with_query_reads(
+            |catalog: &uqa_execution::catalog::context::CatalogContext<'_>| {
+                catalog.current_schema_name()
+            },
+        )
     }
 
     fn current_user(&self) -> std::result::Result<Option<String>, SQLError> {
@@ -270,9 +279,19 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         include_implicit: bool,
     ) -> std::result::Result<Option<Vec<String>>, String> {
         self.engine
+            .catalog_execution()
             .current_schema_names(include_implicit)
             .map(Some)
             .map_err(|error| error.to_string())
+    }
+
+    fn current_schemas_value(
+        &self,
+        include_implicit: bool,
+    ) -> Result<Option<Vec<String>>, SQLError> {
+        self.engine
+            .catalog_execution()
+            .with_query_reads(|catalog| catalog.current_schema_names(include_implicit).map(Some))
     }
 
     fn random_value(&self) -> std::result::Result<Option<f64>, String> {

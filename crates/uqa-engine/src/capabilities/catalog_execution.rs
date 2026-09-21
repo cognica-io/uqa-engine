@@ -99,6 +99,18 @@ impl CatalogNamespace for Engine {
         Engine::current_schema_names(self, implicit)
             .map_err(|error| SQLError::Internal(error.to_string()))
     }
+    fn current_schema_names_with_catalog(
+        &self,
+        catalog: &uqa_execution::catalog::CatalogReadView,
+        implicit: bool,
+    ) -> Result<Vec<String>, SQLError> {
+        uqa_execution::catalog::namespaces::current_schema_names(
+            catalog,
+            &self.session_execution_view().relation_name_resolution(),
+            &self.current_role(),
+            implicit,
+        )
+    }
 }
 
 impl uqa_execution::catalog::services::CatalogSnapshotSource for Engine {

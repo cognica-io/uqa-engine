@@ -32,39 +32,25 @@ impl Engine {
         })
     }
 
-    /// Whether `schema` is an explicit entry of the current `search_path`.
-    /// First existing namespace on this logical session's explicit search
-    /// path: a durable schema, a virtual system schema such as `ag_catalog`,
-    /// or a graph namespace.
+    /// First usable namespace on this logical session's explicit search path: a durable, virtual system or graph namespace.
     pub fn current_schema_name(&self) -> StorageBackendResult<Option<String>> {
-        Ok(self.current_schema_names(false)?.into_iter().next())
+        self.catalog_execution()
+            .with_query_reads(
+                |catalog: &uqa_execution::catalog::context::CatalogContext<'_>| {
+                    catalog.current_schema_name()
+                },
+            )
+            .map_err(|error| uqa_storage::StorageBackendError::backend("schema namespace", error))
     }
 
-    /// Existing schemas with USAGE privilege in this logical session's search path.
-    /// `PostgreSQL` implicitly searches `pg_catalog` unless it is already named explicitly.
+    /// Existing schemas with USAGE privilege in this logical session's search path. `PostgreSQL` implicitly searches `pg_catalog` unless it is already named explicitly.
     pub fn current_schema_names(
         &self,
         include_implicit: bool,
     ) -> StorageBackendResult<Vec<String>> {
-        self.synchronize_catalog_registries()?;
-        let path = self.session.state.read().search_path.clone();
-        let user = self.current_role();
-        let mut out = Vec::new();
-        if include_implicit && !path.iter().any(|name| name == "pg_catalog") {
-            out.push("pg_catalog".to_string());
-        }
-        for name in path {
-            if !out.contains(&name)
-                && self.schema_has_privilege_for_role(
-                    &name,
-                    &user,
-                    crate::schema_security::SchemaAclPrivilege::Usage,
-                )
-            {
-                out.push(name);
-            }
-        }
-        Ok(out)
+        self.catalog_execution()
+            .with_query_reads(|catalog| catalog.current_schema_names(include_implicit))
+            .map_err(|error| uqa_storage::StorageBackendError::backend("schema namespace", error))
     }
 
     /// Draw every bit of one word from this logical session's PRNG.

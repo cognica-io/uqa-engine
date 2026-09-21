@@ -97,9 +97,8 @@ fn eval_function_call_inner(
         }
         let schema = ctx
             .engine
-            .map(|engine| engine.current_schema())
-            .transpose()
-            .map_err(SQLError::Internal)?
+            .map(|engine| engine.current_schema_value())
+            .transpose()?
             .flatten()
             .unwrap_or_else(|| "public".to_string());
         return Ok(Value::Str(schema));
@@ -112,9 +111,8 @@ fn eval_function_call_inner(
         };
         let schemas = ctx
             .engine
-            .map(|engine| engine.current_schemas(*include_implicit))
-            .transpose()
-            .map_err(SQLError::Internal)?
+            .map(|engine| engine.current_schemas_value(*include_implicit))
+            .transpose()?
             .flatten()
             .unwrap_or_else(|| {
                 let mut schemas = Vec::new();

@@ -186,10 +186,7 @@ fn parsed_regtype_oid(
             parsed.array_dimensions,
         ));
     }
-    for schema in context
-        .current_schema_names(true)
-        .map_err(|error| SQLError::Internal(error.to_string()))?
-    {
+    for schema in context.current_schema_names(true)? {
         if let Some(oid) = type_oid_in_schema(catalog, &schema, local, parsed.array_dimensions) {
             return Ok(Some(oid));
         }
@@ -231,10 +228,7 @@ fn lookup_regproc_oid(context: &CatalogContext<'_>, name: &str) -> Result<Option
     }
 
     let mut visible = BTreeMap::<Vec<i64>, i64>::new();
-    for schema in context
-        .current_schema_names(true)
-        .map_err(|error| SQLError::Internal(error.to_string()))?
-    {
+    for schema in context.current_schema_names(true)? {
         let Some(namespace_oid) = catalog
             .namespaces
             .iter()
@@ -656,9 +650,7 @@ fn format_regproc(
     let Some(schema) = namespace_name(catalog, entry.namespace_oid) else {
         return Ok(None);
     };
-    let schemas = context
-        .current_schema_names(true)
-        .map_err(|error| SQLError::Internal(error.to_string()))?;
+    let schemas = context.current_schema_names(true)?;
     let visible_schema = schemas.into_iter().find(|candidate_schema| {
         let Some((&candidate_oid, _)) = catalog
             .namespaces
@@ -693,8 +685,7 @@ fn format_regprocedure(
         return Ok(None);
     };
     let visible_schema = context
-        .current_schema_names(true)
-        .map_err(|error| SQLError::Internal(error.to_string()))?
+        .current_schema_names(true)?
         .into_iter()
         .find(|candidate_schema| {
             let Some((&namespace_oid, _)) = catalog

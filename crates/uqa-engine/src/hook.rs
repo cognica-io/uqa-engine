@@ -152,7 +152,8 @@ impl uqa_sql::expr::EngineHook for Engine {
     }
 
     fn current_schema(&self) -> std::result::Result<Option<String>, String> {
-        self.current_schema_name()
+        self.catalog_execution()
+            .current_schema_name()
             .map_err(|error| error.to_string())
     }
 
@@ -180,7 +181,8 @@ impl uqa_sql::expr::EngineHook for Engine {
         &self,
         include_implicit: bool,
     ) -> std::result::Result<Option<Vec<String>>, String> {
-        self.current_schema_names(include_implicit)
+        self.catalog_execution()
+            .current_schema_names(include_implicit)
             .map(Some)
             .map_err(|error| error.to_string())
     }

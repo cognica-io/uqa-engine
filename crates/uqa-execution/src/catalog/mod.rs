@@ -25,6 +25,7 @@ use view::StoredView;
 mod analysis;
 pub mod graph;
 mod graph_reads;
+pub mod namespaces;
 mod read;
 pub mod schema;
 mod snapshot_read;

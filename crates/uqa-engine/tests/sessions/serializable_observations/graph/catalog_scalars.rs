@@ -38,7 +38,7 @@ fn write(b: &Session, operation: &str) {
     }
 }
 
-fn context<'a>(a: &'a Session, cache: &'a RegtypeOutputCache) -> CatalogContext<'a> {
+pub(super) fn context<'a>(a: &'a Session, cache: &'a RegtypeOutputCache) -> CatalogContext<'a> {
     CatalogContext {
         catalog: &a.engine,
         session: &a.engine,

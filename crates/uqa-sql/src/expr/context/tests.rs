@@ -25,6 +25,15 @@ impl EngineHook for TypedOutput {
             message: "catalog read failed".into(),
         })
     }
+
+    fn current_schema_value(&self) -> Result<Option<String>> {
+        self.resolve_regtype_output_value(&ColumnType::Regnamespace, 1)
+    }
+
+    fn current_schemas_value(&self, _: bool) -> Result<Option<Vec<String>>> {
+        self.current_schema_value()
+            .map(|name| name.map(|name| vec![name]))
+    }
 }
 
 struct LegacyOutput;
@@ -50,6 +59,55 @@ impl EngineHook for LegacyOutput {
         } else {
             Err("legacy failure".into())
         }
+    }
+
+    fn current_schema(&self) -> std::result::Result<Option<String>, String> {
+        Ok(Some("legacy_schema".into()))
+    }
+
+    fn current_schemas(&self, _: bool) -> std::result::Result<Option<Vec<String>>, String> {
+        Ok(Some(vec!["legacy_schema".into()]))
+    }
+}
+
+#[test]
+fn schema_calls_preserve_typed_observation_errors() {
+    for state in ["40001", "57014", "53200"] {
+        let hook = TypedOutput(state);
+        let context = EvalContext::new(None, &[]).with_engine(&hook);
+        for (function, args) in [
+            ("current_schema", vec![]),
+            ("current_schemas", vec![(None, Value::Bool(true))]),
+        ] {
+            let error = crate::expr::call_dispatch::eval_function_call(function, args, &context)
+                .unwrap_err();
+            assert_eq!(error.sqlstate(), Some(state));
+        }
+    }
+}
+
+#[test]
+fn schema_calls_keep_legacy_hooks_and_standalone_defaults() {
+    for (hook, name) in [
+        (None, "public"),
+        (Some(&LegacyOutput as &dyn EngineHook), "legacy_schema"),
+    ] {
+        let mut context = EvalContext::new(None, &[]);
+        context.engine = hook;
+        assert_eq!(
+            crate::expr::call_dispatch::eval_function_call("current_schema", vec![], &context)
+                .unwrap(),
+            Value::Str(name.into())
+        );
+        assert_eq!(
+            crate::expr::call_dispatch::eval_function_call(
+                "current_schemas",
+                vec![(None, Value::Bool(false))],
+                &context
+            )
+            .unwrap(),
+            Value::Array(ArrayValue::try_new(vec![Value::Str(name.into())]).unwrap())
+        );
     }
 }
 
