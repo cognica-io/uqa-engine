@@ -47,6 +47,7 @@ pub fn build_facet_output<'a, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'a, S>,
     table: &str,
     scored: ScoredInput,
+    pending: Option<crate::query::scored_input::ScoredEntriesProducer<'_>>,
     predicate: Option<ScalarExpr>,
     execution: FacetExecution<'a, S>,
 ) -> Result<QueryOutput, SQLError> {
@@ -82,8 +83,7 @@ pub fn build_facet_output<'a, S: Clone + Send + Sync + 'static>(
         &context.catalog,
         table,
     )?);
-    let mut source: Box<dyn PhysicalOperator + '_> =
-        Box::new(crate::TableScan::new(Box::new(source)));
+    let mut source = crate::query::scored_input::defer_entries(source, pending, None, None)?;
     if let Some(predicate) = predicate {
         source = Box::new(Filter::with_evaluator(
             source,

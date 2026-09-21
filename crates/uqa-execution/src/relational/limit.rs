@@ -361,6 +361,9 @@ impl PhysicalOperator for Limit<'_> {
         self.directional_state = DirectionalLimitState::Initial;
         self.directional_position = 0;
         self.directional_current = None;
+        if self.limit == Some(0) {
+            return Ok(());
+        }
         self.child.open()
     }
 

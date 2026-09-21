@@ -9,12 +9,14 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+mod source;
+#[cfg(test)]
+mod tests;
+
 use super::{retrieval::DirectVectorRetrieval, TableRetrievalContext};
 use crate::query::{
     local_table::{table_lock_origin, SharedLockOrigin},
-    scored_input::{
-        HierarchyScoredDocumentSource, ScoredDocumentSource, ScoredInput, ScoredSourceAttributes,
-    },
+    scored_input::{ScoredDocumentSource, ScoredInput, ScoredSourceAttributes},
     source_projection::qualify_source_operator_with_columns,
     CteScope,
 };
@@ -43,7 +45,7 @@ struct PhysicalRetrieval {
     reason = "preserves source schema and row identity"
 )]
 pub fn build_hierarchy_retrieval_operator<'a, S: Clone>(
-    context: TableRetrievalContext<'_>,
+    context: TableRetrievalContext<'a>,
     source: &SourcePlan,
     qualifier: &str,
     predicate: &ScalarExpr,
@@ -111,52 +113,12 @@ pub fn build_hierarchy_retrieval_operator<'a, S: Clone>(
             .and_then(|(origin_qualifier, storage_name)| {
                 ctes.recheck_docs_for_scan(origin_qualifier, storage_name)
             });
-        let entries = if let Some(DirectVectorRetrieval::Calibrated {
-            field,
-            query_vector,
-            top_k,
-            ..
-        }) = &direct_vector
-        {
-            context.retrieval.knn_entries(
-                &table_name,
-                field,
-                query_vector,
-                *top_k,
-                recheck_pins.is_some(),
-            )?
-        } else {
-            let entries = context.retrieval.retrieval_entries(
-                &table_name,
-                predicate,
-                params,
-                recheck_pins.is_some(),
-            )?;
-            entries.ok_or_else(|| {
-                SQLError::Unsupported(format!(
-                    "JOIN filter retrieval predicate for `{qualifier}` cannot be represented by the shared operator IR"
-                ))
-            })?
-        };
         physical.push(PhysicalRetrieval {
             table_name,
-            entries,
+            entries: Vec::new(),
             lock_origin,
             recheck_pins,
         });
-    }
-
-    match direct_vector {
-        Some(DirectVectorRetrieval::Knn { top_k }) => {
-            retain_global_top_k(&mut physical, top_k);
-        }
-        Some(DirectVectorRetrieval::Calibrated {
-            top_k, threshold, ..
-        }) => {
-            retain_global_top_k(&mut physical, top_k);
-            calibrate_global_vector_pool(&mut physical, threshold)?;
-        }
-        None => {}
     }
 
     let mut columns = physical_columns;
@@ -176,19 +138,15 @@ pub fn build_hierarchy_retrieval_operator<'a, S: Clone>(
         .and_then(|prune| prune.get(qualifier))
         .map(SourceProjection::metadata)
         .unwrap_or_default();
-    let estimated_cardinality = physical
-        .iter()
-        .map(|retrieval| retrieval.entries.len())
-        .sum();
     let score_column = uqa_sql::ast::InternalRelationId::allocate().column(0);
     let mut sources = Vec::with_capacity(physical.len());
-    for retrieval in physical {
+    for retrieval in &physical {
         let table = context.tables.table(&retrieval.table_name)?;
         sources.push(
             ScoredDocumentSource::new_configured(
                 &retrieval.table_name,
                 table,
-                ScoredInput::entries(retrieval.entries, true),
+                ScoredInput::entries(Vec::new(), true),
                 columns.clone(),
                 None,
                 None,
@@ -200,23 +158,25 @@ pub fn build_hierarchy_retrieval_operator<'a, S: Clone>(
                 &resolution,
                 &retrieval.table_name,
             )?)
-            .with_lock_origin(retrieval.lock_origin)
-            .with_recheck_pins(retrieval.recheck_pins),
+            .with_lock_origin(retrieval.lock_origin.clone()),
         );
     }
-    let source: Box<dyn crate::RowSource> = if sources.len() == 1 {
-        Box::new(
-            sources
-                .pop()
-                .ok_or_else(|| SQLError::Internal("single retrieval source was lost".into()))?,
-        )
-    } else {
-        Box::new(HierarchyScoredDocumentSource::new(
-            sources,
-            estimated_cardinality,
-        )?)
-    };
-    let scan: Box<dyn PhysicalOperator + 'a> = Box::new(crate::TableScan::new(source));
+    let schema = sources
+        .first()
+        .and_then(crate::RowSource::physical_schema)
+        .cloned()
+        .ok_or_else(|| {
+            SQLError::Internal("retrieval hierarchy has no physical row schema".into())
+        })?;
+    let scan: Box<dyn PhysicalOperator + 'a> = Box::new(source::deferred(
+        context.retrieval,
+        physical,
+        direct_vector,
+        physical_predicate,
+        params,
+        sources,
+        schema,
+    ));
     let source_columns = scan.schema().to_vec();
     Ok(qualify_source_operator_with_columns(
         scan,

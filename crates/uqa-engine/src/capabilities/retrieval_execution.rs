@@ -74,15 +74,16 @@ impl Engine {
 }
 
 impl uqa_execution::query::block::context::RelationRetrieval for Engine {
-    fn accelerated(
-        &self,
-        table: &str,
-        signal_table: &str,
+    fn prepare_accelerated<'a>(
+        &'a self,
+        table: &'a str,
+        signal_table: &'a str,
         predicate: Option<&ScalarExpr>,
-        params: &[SQLParam],
-    ) -> Result<Option<Vec<ScoredEntry>>, SQLError> {
+        params: &'a [SQLParam],
+    ) -> Result<Option<uqa_execution::query::scored_input::ScoredEntriesProducer<'a>>, SQLError>
+    {
         self.retrieval_query_context()
-            .accelerated(table, signal_table, predicate, params)
+            .prepare_accelerated(table, signal_table, predicate, params)
     }
     fn optimized(
         &self,

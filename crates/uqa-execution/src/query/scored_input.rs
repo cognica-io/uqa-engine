@@ -6,10 +6,16 @@
 
 //! Streaming scored-document input adapters.
 
+mod deferred;
 mod hierarchy;
 mod materialize;
 
+pub(in crate::query) use deferred::{defer_entries, DeferredTableScan};
 pub use hierarchy::HierarchyScoredDocumentSource;
+
+/// One execution of already-bound retrieval work under the retained statement inputs.
+pub type ScoredEntriesProducer<'a> =
+    Box<dyn FnOnce() -> Result<Vec<ScoredEntry>, SQLError> + Send + 'a>;
 
 use crate::{query::table_read::TableRead, row_locks::recheck::RecheckDoc, ExecResult};
 use std::sync::Arc;
@@ -518,6 +524,14 @@ impl ScoredDocumentSource {
             recheck_documents: std::collections::BTreeMap::new(),
             serializable: crate::serializable::SerializableScan::default(),
         }
+    }
+
+    /// Fill a prepared retrieval source before its first read, preserving its bound score attribute and row schema. Candidate ordering is determined only by the evaluated retrieval.
+    pub(in crate::query) fn with_retrieval_entries(mut self, entries: Vec<ScoredEntry>) -> Self {
+        self.input = ScoredInputCursor::Entries(entries.into_iter());
+        self.input_guarantees_presence = false;
+        self.ordering.clear();
+        self
     }
 
     pub fn with_serializable_read(
