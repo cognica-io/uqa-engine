@@ -217,6 +217,7 @@ impl Engine {
             table,
             &mut document,
         )?;
+        uqa_execution::serializable::observe_row_write(self, table, doc_id)?;
         self.add_prepared_document_impl(table, doc_id, document, known_new)
     }
 

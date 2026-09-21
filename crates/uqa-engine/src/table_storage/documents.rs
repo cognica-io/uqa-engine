@@ -871,6 +871,9 @@ impl Engine {
             .get(doc_id)
             .map_err(|err| document_store_write_error(&err))?
             .is_some();
+        if existed {
+            uqa_execution::serializable::observe_row_write(self, &table_name, doc_id)?;
+        }
         let old_indexed = Self::value_indexes_old_values(&t, doc_id);
         self.observe_value_index_write(
             &table_name,

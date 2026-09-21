@@ -218,6 +218,8 @@ The API also exposes typed operations that bypass SQL text:
 
 SQL and typed operations use the same durable state and indexes. Applications can mix them, but a single transaction boundary should use one clear ownership path.
 
+Direct document insertion, replacement, field updates and deletion register changed persistent row identities with the active SERIALIZABLE transaction, independently of text, value or vector index changes. An absent field-update or deletion target does not register a row write. Statement and savepoint rollback discard these write intents together with the private changes; read observations and dependencies already established with other transactions remain.
+
 ## Analyzer APIs
 
 Persistent custom analyzers are managed with `register_named_analyzer`, `list_named_analyzers`, `set_table_field_analyzer`, `table_field_analyzer`, `get_table_analyzer`, and `drop_named_analyzer`. Compatibility aliases use the shorter create, set, and drop names. An index-time or both-phase assignment rebuilds current postings; a search-only assignment changes query analysis without a rebuild.

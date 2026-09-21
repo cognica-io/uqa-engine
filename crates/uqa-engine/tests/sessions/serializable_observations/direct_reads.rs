@@ -109,7 +109,7 @@ fn direct_point_and_empty_reads_reject_either_second_committer_of_write_skew() {
     ] {
         for reverse in [false, true] {
             let (_directory, fixtures) = indexed_fixtures();
-            for a in fixtures {
+            for (provider, a) in fixtures.into_iter().enumerate() {
                 let b = a.sibling();
                 let table = if empty { "empty_t" } else { "left_t" };
                 let id = if empty {
@@ -149,14 +149,15 @@ fn direct_point_and_empty_reads_reject_either_second_committer_of_write_skew() {
                 }
                 let (winner, loser) = if reverse { (&b, &a) } else { (&a, &b) };
                 winner.sql("COMMIT");
+                let result = loser.engine.sql("COMMIT", &[]);
+                assert!(
+                    result.is_err(),
+                    "expected a serialization cycle: {read:?}, empty={empty}, reverse={reverse}, provider={provider}: {result:?}"
+                );
                 assert_eq!(
-                    loser
-                        .engine
-                        .sql("COMMIT", &[])
-                        .expect_err("crossed reads and writes must form a serialization cycle")
-                        .sqlstate(),
+                    result.unwrap_err().sqlstate(),
                     Some("40001"),
-                    "{read:?}, empty={empty}, reverse={reverse}"
+                    "{read:?}, empty={empty}, reverse={reverse}, provider={provider}"
                 );
                 assert_eq!(loser.engine.transaction_depth(), 0);
             }
