@@ -95,3 +95,5 @@ Persistent path indexes store reachability pairs in physical indexed pages. Cons
 | Shared graph values | [`crates/uqa-core/src/agtype.rs`](../../../crates/uqa-core/src/agtype.rs) |
 | SQL Cypher rules | [`crates/uqa-sql/src/semantics/age_cypher.rs`](../../../crates/uqa-sql/src/semantics/age_cypher.rs) |
 | SQL Cypher execution | [`crates/uqa-execution/src/query/cypher.rs`](../../../crates/uqa-execution/src/query/cypher.rs) |
+
+Durable path-index reads retain their selected backend's original serializable participant, cancellation and observation allowance. Cached reachability observes graph-scoped starting vertices and the requested edge labels, including empty results; it does not reconstruct paths or decode entity properties to record those reads. Invalidated-sequence evaluation and index construction bind the same graph observer. Escaped versioned handles open an independent read transaction over the selected retained view, preserving its data and participant rather than opening a newer snapshot. Path definitions and the remaining automatic SQL serializable lifecycle are still tracked in the concurrent-storage plan.

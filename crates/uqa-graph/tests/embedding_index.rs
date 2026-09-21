@@ -13,6 +13,9 @@ use uqa_graph::{
     LabelIndex, MemoryGraphStore, PathIndex, VertexPattern, VertexPredicate,
 };
 
+#[path = "embedding_index/paths.rs"]
+mod paths;
+
 fn corpus() -> MemoryGraphStore {
     // 1 -knows-> 2 -knows-> 3
     //  \-likes-> 4

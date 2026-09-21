@@ -39,6 +39,24 @@ impl GraphRead {
 }
 
 impl PersistentGraphStore {
+    /// A stored reachability result depends on its starting vertices and each selected edge label, including empty results. Register those logical selectors without reconstructing paths or observing entity properties.
+    pub(crate) fn observe_cached_paths(
+        &self,
+        graph: &str,
+        sequence: &[String],
+    ) -> GraphStoreResult<()> {
+        self.observe_selection(
+            GraphEntityFilter::new(GraphEntityKind::Vertex, Some(graph)),
+            None,
+        )?;
+        for label in sequence {
+            let mut filter = GraphEntityFilter::new(GraphEntityKind::Edge, Some(graph));
+            filter.label = Some(label);
+            self.observe_selection(filter, None)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn observe_selection(
         &self,
         filter: GraphEntityFilter<'_>,

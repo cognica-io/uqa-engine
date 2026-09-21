@@ -14,6 +14,9 @@ use uqa_graph::{Direction, GraphStore};
 #[path = "graph/topology.rs"]
 mod topology;
 
+#[path = "graph/paths.rs"]
+mod paths;
+
 fn prepare(session: &Session) {
     session.engine.create_graph("g").unwrap();
     for id in [1, 2] {
