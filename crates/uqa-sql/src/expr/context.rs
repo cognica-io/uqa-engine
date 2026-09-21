@@ -6,9 +6,6 @@
 
 //! Evaluation context, row lookup, and engine-backed type resolution.
 
-#[cfg(test)]
-mod tests;
-
 use std::borrow::Cow;
 
 use uqa_core::{ArrayValue, Value};
@@ -195,22 +192,11 @@ pub trait EngineHook {
         Ok(None)
     }
 
-    /// Preserve typed failures during catalog-backed output. The legacy hook remains the default for existing embedders.
-    fn resolve_regtype_output_value(&self, ty: &ColumnType, oid: i64) -> Result<Option<String>> {
-        self.resolve_regtype_output(ty, oid)
-            .map_err(SQLError::Internal)
-    }
-
     /// Resolve the first existing schema on the logical session's search
     /// path. `None` lets standalone expression evaluation use its `public`
     /// compatibility default.
     fn current_schema(&self) -> std::result::Result<Option<String>, String> {
         Ok(None)
-    }
-
-    /// Preserve typed query failures while retaining legacy schema hooks and their fallback contract.
-    fn current_schema_value(&self) -> Result<Option<String>> {
-        self.current_schema().map_err(SQLError::Internal)
     }
 
     fn current_user(&self) -> std::result::Result<Option<String>, crate::SQLError> {
@@ -234,12 +220,6 @@ pub trait EngineHook {
         _include_implicit: bool,
     ) -> std::result::Result<Option<Vec<String>>, String> {
         Ok(None)
-    }
-
-    /// Preserve typed query failures while resolving the effective search path.
-    fn current_schemas_value(&self, include_implicit: bool) -> Result<Option<Vec<String>>> {
-        self.current_schemas(include_implicit)
-            .map_err(SQLError::Internal)
     }
 
     /// Draw from an engine-owned logical-session PRNG. `None` keeps pure,
@@ -330,8 +310,9 @@ pub fn format_regtype_value(
         return Ok(Some("-".into()));
     }
     let resolved = engine
-        .map(|engine| engine.resolve_regtype_output_value(ty, *oid))
-        .transpose()?
+        .map(|engine| engine.resolve_regtype_output(ty, *oid))
+        .transpose()
+        .map_err(SQLError::Internal)?
         .flatten();
     Ok(Some(resolved.unwrap_or_else(|| oid.to_string())))
 }

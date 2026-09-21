@@ -34,6 +34,10 @@ pub fn build_info_schema_rows(
     let Some(relation) = catalog.virtual_relation_resolved(resolution, name)? else {
         return ag_catalog::build_age_label_relation_rows(catalog, resolution, name);
     };
+    let metadata = (!uqa_sql::catalog::SystemRelation::Projected(relation)
+        .tracks_serializable_reads())
+    .then(|| catalog.metadata_view());
+    let catalog = metadata.as_deref().unwrap_or(catalog);
     let mut catalog_resolution = resolution.clone();
     catalog_resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
     let resolution = &catalog_resolution;
@@ -299,8 +303,7 @@ pub use regtypes::{
     named_type_exists, resolve_bound_regclass_oid, resolve_catalog_column_type,
     resolve_catalog_domain_type_by_oid, resolve_regclass_kind_by_oid, resolve_regclass_oid,
     resolve_regnamespace_oid, resolve_regobject_oid, resolve_regprocedure_oid, resolve_regrole_oid,
-    resolve_regtype_oid, resolve_regtype_output, resolve_regtype_output_value,
-    RegtypeOutputCatalog,
+    resolve_regtype_oid, resolve_regtype_output, RegtypeOutputCatalog,
 };
 
 pub fn resolve_catalog_column_type_name(

@@ -14,7 +14,6 @@ use uqa_sql::catalog::{
         BoundSchemaSecurity,
     },
 };
-use uqa_sql::SQLError;
 
 pub(super) fn schema_security(
     catalog: &CatalogReadView,
@@ -42,18 +41,12 @@ fn usable_namespace(
     resolution: &RelationNameResolution,
     role: &(impl RoleSubject + ?Sized),
     name: &str,
-) -> Result<bool, SQLError> {
-    if catalog.schema_security(name).is_none()
-        && !uqa_sql::catalog::is_virtual_system_schema(name)
-        && name != resolution.temporary_schema
-    {
-        catalog.observe_graph_name(name)?;
-    }
+) -> bool {
     let Some(security) = schema_security(catalog, &resolution.temporary_schema, name) else {
-        return Ok(false);
+        return false;
     };
     let definitions = &catalog.snapshot().definitions;
-    Ok(security.resolve(&definitions.roles).is_ok_and(|security| {
+    security.resolve(&definitions.roles).is_ok_and(|security| {
         role_has_schema_privilege(
             &security,
             role,
@@ -61,20 +54,20 @@ fn usable_namespace(
             &definitions.roles,
             &definitions.role_memberships,
         )
-    }))
+    })
 }
 
 pub fn current_schema_name(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     role: &(impl RoleSubject + ?Sized),
-) -> Result<Option<String>, SQLError> {
+) -> Option<String> {
     for name in resolution.search_path() {
-        if usable_namespace(catalog, resolution, role, name)? {
-            return Ok(Some(name.clone()));
+        if usable_namespace(catalog, resolution, role, name) {
+            return Some(name.clone());
         }
     }
-    Ok(None)
+    None
 }
 
 pub fn current_schema_names(
@@ -82,18 +75,18 @@ pub fn current_schema_names(
     resolution: &RelationNameResolution,
     role: &(impl RoleSubject + ?Sized),
     include_implicit: bool,
-) -> Result<Vec<String>, SQLError> {
+) -> Vec<String> {
     let path = resolution.search_path();
     let mut out = Vec::new();
     if include_implicit && !path.iter().any(|name| name == "pg_catalog") {
         out.push("pg_catalog".to_owned());
     }
     for name in path {
-        if !out.contains(name) && usable_namespace(catalog, resolution, role, name)? {
+        if !out.contains(name) && usable_namespace(catalog, resolution, role, name) {
             out.push(name.clone());
         }
     }
-    Ok(out)
+    out
 }
 
 #[cfg(test)]

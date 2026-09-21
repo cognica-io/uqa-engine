@@ -85,6 +85,7 @@ pub fn resolve_regclass_kind_by_oid(
     oid: i64,
 ) -> Result<Option<(String, String)>, SQLError> {
     let catalog = context.catalog_read_view();
+    let catalog = catalog.metadata_view();
     let resolution = context.session_execution_view().relation_name_resolution();
     for row in build_pg_class(context, &catalog, &resolution)? {
         if row.get("oid") != Some(&Value::Int(oid)) {
@@ -186,7 +187,10 @@ fn parsed_regtype_oid(
             parsed.array_dimensions,
         ));
     }
-    for schema in context.current_schema_names(true)? {
+    for schema in context
+        .current_schema_names(true)
+        .map_err(|error| SQLError::Internal(error.to_string()))?
+    {
         if let Some(oid) = type_oid_in_schema(catalog, &schema, local, parsed.array_dimensions) {
             return Ok(Some(oid));
         }
@@ -228,7 +232,10 @@ fn lookup_regproc_oid(context: &CatalogContext<'_>, name: &str) -> Result<Option
     }
 
     let mut visible = BTreeMap::<Vec<i64>, i64>::new();
-    for schema in context.current_schema_names(true)? {
+    for schema in context
+        .current_schema_names(true)
+        .map_err(|error| SQLError::Internal(error.to_string()))?
+    {
         let Some(namespace_oid) = catalog
             .namespaces
             .iter()
@@ -262,7 +269,6 @@ fn lookup_regnamespace_oid(
     let [name] = names.as_slice() else {
         return Ok(None);
     };
-    context.catalog_read_view().observe_graph_name(name)?;
     let catalog = regtype_output_catalog(context)?;
     Ok(catalog
         .namespaces
@@ -300,7 +306,6 @@ pub fn resolve_regnamespace_oid(
             message: "invalid name syntax".into(),
         });
     };
-    context.catalog_read_view().observe_graph_name(name)?;
     let catalog = regtype_output_catalog(context)?;
     catalog
         .namespaces
@@ -462,11 +467,8 @@ pub struct RegtypeOutputCatalog {
 
 impl RegtypeOutputCatalog {
     fn build(context: &CatalogContext<'_>) -> Result<Self, SQLError> {
-        let catalog = context.catalog_read_view().without_query_reads();
-        let unobserved = CatalogContext {
-            catalog: &catalog,
-            ..*context
-        };
+        let catalog = context.catalog_read_view();
+        let catalog = catalog.metadata_view();
         let resolution = context.session_execution_view().relation_name_resolution();
         let namespaces = build_pg_namespace(&catalog, &resolution)?
             .into_iter()
@@ -477,7 +479,7 @@ impl RegtypeOutputCatalog {
                 ))
             })
             .collect();
-        let classes = build_pg_class(&unobserved, &catalog, &resolution)?
+        let classes = build_pg_class(context, &catalog, &resolution)?
             .into_iter()
             .filter_map(|row| {
                 Some((
@@ -650,7 +652,9 @@ fn format_regproc(
     let Some(schema) = namespace_name(catalog, entry.namespace_oid) else {
         return Ok(None);
     };
-    let schemas = context.current_schema_names(true)?;
+    let schemas = context
+        .current_schema_names(true)
+        .map_err(|error| SQLError::Internal(error.to_string()))?;
     let visible_schema = schemas.into_iter().find(|candidate_schema| {
         let Some((&candidate_oid, _)) = catalog
             .namespaces
@@ -685,7 +689,8 @@ fn format_regprocedure(
         return Ok(None);
     };
     let visible_schema = context
-        .current_schema_names(true)?
+        .current_schema_names(true)
+        .map_err(|error| SQLError::Internal(error.to_string()))?
         .into_iter()
         .find(|candidate_schema| {
             let Some((&namespace_oid, _)) = catalog
@@ -775,15 +780,6 @@ pub fn resolve_regtype_output(
     ty: &ColumnType,
     oid: i64,
 ) -> Result<Option<String>, String> {
-    resolve_regtype_output_value(context, ty, oid).map_err(|error| error.to_string())
-}
-
-/// Format a catalog-backed alias while preserving storage cancellation and transaction diagnostics.
-pub fn resolve_regtype_output_value(
-    context: &CatalogContext<'_>,
-    ty: &ColumnType,
-    oid: i64,
-) -> Result<Option<String>, SQLError> {
     if !matches!(
         ty,
         ColumnType::Regproc
@@ -795,23 +791,17 @@ pub fn resolve_regtype_output_value(
     ) {
         return Ok(None);
     }
-    let catalog = regtype_output_catalog(context)?;
-    match ty {
+    let catalog = regtype_output_catalog(context).map_err(|error| error.to_string())?;
+    let output = match ty {
         ColumnType::Regproc => format_regproc(context, &catalog, oid),
         ColumnType::Regprocedure => format_regprocedure(context, &catalog, oid),
         ColumnType::Regclass => format_regclass(context, &catalog, oid),
         ColumnType::Regnamespace => {
-            let view = context.catalog_read_view();
-            if let Some(name) = namespace_name(&catalog, oid) {
-                view.observe_graph_name(name)?;
-                Ok(Some(uqa_sql::expr::quote_ident(name)))
-            } else {
-                view.observe_graph_names()?;
-                Ok(None)
-            }
+            Ok(namespace_name(&catalog, oid).map(uqa_sql::expr::quote_ident))
         }
         ColumnType::Regrole => Ok(format_regrole(context, oid)),
         ColumnType::Regtype => format_regtype(context, &catalog, oid),
         _ => unreachable!(),
-    }
+    };
+    output.map_err(|error| error.to_string())
 }

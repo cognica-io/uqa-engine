@@ -26,14 +26,8 @@ mod labels;
 #[path = "graph/catalog.rs"]
 mod catalog;
 
-#[path = "graph/catalog_scalars.rs"]
-mod catalog_scalars;
-
-#[path = "graph/search_path.rs"]
-mod search_path;
-
-#[path = "graph/schema_privileges.rs"]
-mod schema_privileges;
+#[path = "graph/catalog_isolation.rs"]
+mod catalog_isolation;
 
 fn prepare(session: &Session) {
     session.engine.create_graph("g").unwrap();

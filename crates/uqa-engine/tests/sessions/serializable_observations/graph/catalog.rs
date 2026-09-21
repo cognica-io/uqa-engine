@@ -35,7 +35,7 @@ fn sql_graph_catalog_reads_track_definitions_only_when_consumed_across_the_three
         (
             "SELECT count(*) FROM pg_catalog.pg_namespace",
             "create",
-            true,
+            false,
         ),
         (
             "SELECT count(*) FROM pg_catalog.pg_namespace",
@@ -45,7 +45,7 @@ fn sql_graph_catalog_reads_track_definitions_only_when_consumed_across_the_three
         (
             "SELECT count(*) FROM information_schema.schemata",
             "create",
-            true,
+            false,
         ),
         ("SELECT id FROM g._ag_label_vertex", "vertex", true),
         ("SELECT id FROM g._ag_label_vertex LIMIT 0", "vertex", false),

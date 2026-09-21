@@ -94,18 +94,6 @@ impl uqa_sql::expr::EngineHook for Engine {
         )
     }
 
-    fn resolve_regtype_output_value(
-        &self,
-        ty: &uqa_sql::ast::ColumnType,
-        oid: i64,
-    ) -> Result<Option<String>, SQLError> {
-        uqa_execution::catalog::projection::resolve_regtype_output_value(
-            &self.catalog_execution(),
-            ty,
-            oid,
-        )
-    }
-
     fn nextval(&self, name: &str) -> std::result::Result<i64, SQLError> {
         self.nextval_sql(name)
     }
@@ -152,8 +140,7 @@ impl uqa_sql::expr::EngineHook for Engine {
     }
 
     fn current_schema(&self) -> std::result::Result<Option<String>, String> {
-        self.catalog_execution()
-            .current_schema_name()
+        self.current_schema_name()
             .map_err(|error| error.to_string())
     }
 
@@ -181,8 +168,7 @@ impl uqa_sql::expr::EngineHook for Engine {
         &self,
         include_implicit: bool,
     ) -> std::result::Result<Option<Vec<String>>, String> {
-        self.catalog_execution()
-            .current_schema_names(include_implicit)
+        self.current_schema_names(include_implicit)
             .map(Some)
             .map_err(|error| error.to_string())
     }

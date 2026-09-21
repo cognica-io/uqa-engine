@@ -35,11 +35,7 @@ impl Engine {
     /// First usable namespace on this logical session's explicit search path: a durable, virtual system or graph namespace.
     pub fn current_schema_name(&self) -> StorageBackendResult<Option<String>> {
         self.catalog_execution()
-            .with_query_reads(
-                |catalog: &uqa_execution::catalog::context::CatalogContext<'_>| {
-                    catalog.current_schema_name()
-                },
-            )
+            .current_schema_name()
             .map_err(|error| uqa_storage::StorageBackendError::backend("schema namespace", error))
     }
 
@@ -49,7 +45,7 @@ impl Engine {
         include_implicit: bool,
     ) -> StorageBackendResult<Vec<String>> {
         self.catalog_execution()
-            .with_query_reads(|catalog| catalog.current_schema_names(include_implicit))
+            .current_schema_names(include_implicit)
             .map_err(|error| uqa_storage::StorageBackendError::backend("schema namespace", error))
     }
 

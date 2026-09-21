@@ -11,14 +11,6 @@ use crate::catalog::{CatalogReadView, RelationNameResolution};
 use uqa_sql::ast::{ColumnDef as SQLColumnDef, ColumnType};
 use uqa_sql::SQLError;
 
-pub fn all_schema_names(
-    catalog: &CatalogReadView,
-    resolution: &RelationNameResolution,
-) -> Result<Vec<String>, SQLError> {
-    catalog.observe_graph_names()?;
-    Ok(catalog.all_schema_names(resolution))
-}
-
 pub fn view_columns_for(
     context: &CatalogContext<'_>,
     catalog: &CatalogReadView,

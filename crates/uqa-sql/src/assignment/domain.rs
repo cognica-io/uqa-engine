@@ -112,7 +112,8 @@ fn convert_domain_value(
 
 fn domain_display_name(context: &dyn AssignmentContext, oid: u32) -> Result<String, SQLError> {
     context
-        .resolve_regtype_output_value(&ColumnType::Regtype, i64::from(oid))?
+        .resolve_regtype_output(&ColumnType::Regtype, i64::from(oid))
+        .map_err(SQLError::Internal)?
         .ok_or_else(|| SQLError::Internal("domain type has no catalog display name".into()))
 }
 

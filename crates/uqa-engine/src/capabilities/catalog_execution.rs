@@ -104,12 +104,12 @@ impl CatalogNamespace for Engine {
         catalog: &uqa_execution::catalog::CatalogReadView,
         implicit: bool,
     ) -> Result<Vec<String>, SQLError> {
-        uqa_execution::catalog::namespaces::current_schema_names(
+        Ok(uqa_execution::catalog::namespaces::current_schema_names(
             catalog,
             &self.session_execution_view().relation_name_resolution(),
             &self.current_role(),
             implicit,
-        )
+        ))
     }
 }
 

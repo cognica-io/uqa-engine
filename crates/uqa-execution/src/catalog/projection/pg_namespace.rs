@@ -12,13 +12,13 @@ use uqa_sql::{ResultRow, SQLError};
 use super::helpers::acl::acl_identifier;
 use super::helpers::oids::{current_user_oid, namespace_oid};
 use super::helpers::rows::{catalog_array, int_value, row, str_value};
-use super::helpers::views::all_schema_names;
 
 pub fn build_pg_namespace(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
-    all_schema_names(catalog, resolution)?
+    catalog
+        .all_schema_names(resolution)
         .into_iter()
         .map(|schema| {
             let security = catalog.schema_security(&schema);

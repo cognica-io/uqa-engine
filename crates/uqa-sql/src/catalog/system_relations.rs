@@ -79,6 +79,14 @@ system_relations! {
 }
 
 impl SystemRelation {
+    /// `PostgreSQL`'s pinned system catalogs and their metadata views are outside SSI. AGE catalogs are ordinary extension tables and retain data predicates.
+    pub const fn tracks_serializable_reads(self) -> bool {
+        matches!(
+            self,
+            Self::Projected(VirtualRelation::AgGraph | VirtualRelation::AgLabel)
+        )
+    }
+
     pub fn qualified_name(self) -> String {
         format!("{}.{}", self.namespace(), self.name())
     }

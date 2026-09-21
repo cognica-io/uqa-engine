@@ -8,6 +8,33 @@ use super::*;
 use std::collections::BTreeSet;
 
 #[test]
+fn predicate_locking_distinguishes_pinned_metadata_from_extension_tables() {
+    // PostgreSQL 18 PredicateLockingNeededForRelation exempts pinned relations; extension tables remain ordinary data.
+    for name in [
+        "pg_catalog.pg_namespace",
+        "pg_catalog.pg_class",
+        "pg_catalog.pg_attribute",
+        "pg_catalog.pg_authid",
+        "information_schema.schemata",
+        "information_schema.tables",
+    ] {
+        let relation = SystemRelation::from_qualified_name(name).unwrap();
+        assert!(!relation.tracks_serializable_reads(), "{name}");
+        for source in relation.view_sources() {
+            assert!(!source.tracks_serializable_reads(), "{name}: {source:?}");
+        }
+    }
+    for name in ["ag_catalog.ag_graph", "ag_catalog.ag_label"] {
+        assert!(SystemRelation::from_qualified_name(name)
+            .unwrap()
+            .tracks_serializable_reads());
+    }
+    for name in ["public.pg_namespace", "public.ag_graph", "pg_namespace"] {
+        assert_eq!(SystemRelation::from_qualified_name(name), None);
+    }
+}
+
+#[test]
 fn cursor_catalog_has_postgresql_identity_and_typed_declaration_columns() {
     use crate::ColumnType;
     let relation = VirtualRelation::PgCursors;

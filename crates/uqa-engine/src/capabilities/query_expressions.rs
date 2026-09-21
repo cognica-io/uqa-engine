@@ -154,9 +154,10 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
     }
 
     fn resolve_regnamespace(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
-        self.engine.catalog_execution().with_query_reads(|catalog| {
-            uqa_execution::catalog::projection::resolve_regnamespace_oid(catalog, name)
-        })
+        uqa_execution::catalog::projection::resolve_regnamespace_oid(
+            &self.engine.catalog_execution(),
+            name,
+        )
     }
 
     fn resolve_regobject(
@@ -164,9 +165,11 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         ty: &uqa_sql::ast::ColumnType,
         name: &str,
     ) -> std::result::Result<Option<i64>, SQLError> {
-        self.engine.catalog_execution().with_query_reads(|catalog| {
-            uqa_execution::catalog::projection::resolve_regobject_oid(catalog, ty, name)
-        })
+        uqa_execution::catalog::projection::resolve_regobject_oid(
+            &self.engine.catalog_execution(),
+            ty,
+            name,
+        )
     }
 
     fn resolve_regtype_output(
@@ -179,16 +182,6 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
             ty,
             oid,
         )
-    }
-
-    fn resolve_regtype_output_value(
-        &self,
-        ty: &uqa_sql::ast::ColumnType,
-        oid: i64,
-    ) -> Result<Option<String>, SQLError> {
-        self.engine.catalog_execution().with_query_reads(|catalog| {
-            uqa_execution::catalog::projection::resolve_regtype_output_value(catalog, ty, oid)
-        })
     }
 
     fn nextval(&self, name: &str) -> std::result::Result<i64, SQLError> {
@@ -239,17 +232,8 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
 
     fn current_schema(&self) -> std::result::Result<Option<String>, String> {
         self.engine
-            .catalog_execution()
             .current_schema_name()
             .map_err(|error| error.to_string())
-    }
-
-    fn current_schema_value(&self) -> Result<Option<String>, SQLError> {
-        self.engine.catalog_execution().with_query_reads(
-            |catalog: &uqa_execution::catalog::context::CatalogContext<'_>| {
-                catalog.current_schema_name()
-            },
-        )
     }
 
     fn current_user(&self) -> std::result::Result<Option<String>, SQLError> {
@@ -279,19 +263,9 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         include_implicit: bool,
     ) -> std::result::Result<Option<Vec<String>>, String> {
         self.engine
-            .catalog_execution()
             .current_schema_names(include_implicit)
             .map(Some)
             .map_err(|error| error.to_string())
-    }
-
-    fn current_schemas_value(
-        &self,
-        include_implicit: bool,
-    ) -> Result<Option<Vec<String>>, SQLError> {
-        self.engine
-            .catalog_execution()
-            .with_query_reads(|catalog| catalog.current_schema_names(include_implicit).map(Some))
     }
 
     fn random_value(&self) -> std::result::Result<Option<f64>, String> {

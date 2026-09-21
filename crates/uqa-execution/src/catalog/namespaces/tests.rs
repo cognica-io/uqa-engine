@@ -54,20 +54,20 @@ fn effective_namespaces_preserve_order_implicit_catalog_and_duplicate_elision() 
     let catalog = catalog();
     let path = resolution(&["missing", "g", "public", "g", "public"]);
     assert_eq!(
-        current_schema_name(&catalog, &path, "uqa").unwrap(),
+        current_schema_name(&catalog, &path, "uqa"),
         Some("g".into())
     );
     assert_eq!(
-        current_schema_names(&catalog, &path, "uqa", false).unwrap(),
+        current_schema_names(&catalog, &path, "uqa", false),
         ["g", "public"]
     );
     assert_eq!(
-        current_schema_names(&catalog, &path, "uqa", true).unwrap(),
+        current_schema_names(&catalog, &path, "uqa", true),
         ["pg_catalog", "g", "public"]
     );
     let path = resolution(&["public", "pg_catalog", "g"]);
     assert_eq!(
-        current_schema_names(&catalog, &path, "uqa", true).unwrap(),
+        current_schema_names(&catalog, &path, "uqa", true),
         ["public", "pg_catalog", "g"]
     );
 }
@@ -77,29 +77,24 @@ fn namespace_selection_respects_usage_and_keeps_empty_and_temporary_results() {
     let catalog = catalog();
     let path = resolution(&["missing", "private", "public"]);
     assert_eq!(
-        current_schema_name(&catalog, &path, "reader").unwrap(),
+        current_schema_name(&catalog, &path, "reader"),
         Some("public".into())
     );
     assert_eq!(
-        current_schema_names(&catalog, &path, "reader", false).unwrap(),
+        current_schema_names(&catalog, &path, "reader", false),
         ["public"]
     );
     let path = resolution(&["missing", "private"]);
+    assert_eq!(current_schema_name(&catalog, &path, "reader"), None);
+    assert!(current_schema_names(&catalog, &path, "reader", false).is_empty());
     assert_eq!(
-        current_schema_name(&catalog, &path, "reader").unwrap(),
-        None
-    );
-    assert!(current_schema_names(&catalog, &path, "reader", false)
-        .unwrap()
-        .is_empty());
-    assert_eq!(
-        current_schema_names(&catalog, &path, "reader", true).unwrap(),
+        current_schema_names(&catalog, &path, "reader", true),
         ["pg_catalog"]
     );
     let mut temporary = resolution(&["pg_temp_1", "public"]);
     temporary.temporary_namespace_allocated = true;
     assert_eq!(
-        current_schema_name(&catalog, &temporary, "reader").unwrap(),
+        current_schema_name(&catalog, &temporary, "reader"),
         Some("pg_temp_1".into())
     );
 }

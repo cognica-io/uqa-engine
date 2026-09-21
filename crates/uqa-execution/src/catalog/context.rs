@@ -6,8 +6,6 @@
 
 //! Catalog projection inputs assembled at a statement boundary.
 
-mod query_reads;
-
 use super::cache::RegtypeOutputCache;
 use super::security::{
     schema::{role_has_schema_privilege, SchemaAclPrivilege},
@@ -48,11 +46,11 @@ impl CatalogContext<'_> {
             .current_schema_names_with_catalog(&catalog, implicit)
     }
     pub fn current_schema_name(&self) -> Result<Option<String>, SQLError> {
-        super::namespaces::current_schema_name(
+        Ok(super::namespaces::current_schema_name(
             &self.catalog.refreshed_catalog_snapshot()?,
             &self.session.relation_name_resolution(),
             &self.current_role(),
-        )
+        ))
     }
     pub fn current_role(&self) -> RoleReference {
         self.session.current_role()

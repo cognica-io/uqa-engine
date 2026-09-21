@@ -23,7 +23,7 @@ use super::helpers::information_schema_types::{
 use super::helpers::oids::{current_user_name, split_schema_name};
 use super::helpers::rows::{catalog_name, catalog_ordinal, int_value, row, str_value};
 use super::helpers::type_metadata::{catalog_regtype_name, catalog_type_name};
-use super::helpers::views::{all_schema_names, view_columns_for};
+use super::helpers::views::view_columns_for;
 use super::pg_proc::user_routine_catalog_oid;
 use crate::catalog::context::CatalogContext;
 use crate::catalog::{services::CatalogSession, CatalogReadView, RelationNameResolution};
@@ -44,7 +44,8 @@ pub fn build_info_schemata(
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let current_user = resolution.current_user();
-    all_schema_names(catalog, resolution)?
+    catalog
+        .all_schema_names(resolution)
         .into_iter()
         .filter(|schema| {
             catalog.schema_security(schema).is_none()

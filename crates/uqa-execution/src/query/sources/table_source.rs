@@ -329,7 +329,17 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     .map(|(column, ty)| (column, Some(ty)))
                     .unzip();
                 let schema = crate::RowSchema::with_types(columns.clone(), types);
-                let catalog = context.catalog.catalog.bind_query_reads(catalog)?;
+                let tracks_reads = catalog
+                    .virtual_relation_resolved(&resolution, name)?
+                    .is_none_or(|relation| {
+                        uqa_sql::catalog::SystemRelation::Projected(relation)
+                            .tracks_serializable_reads()
+                    });
+                let catalog = if tracks_reads {
+                    context.catalog.catalog.bind_query_reads(catalog)?
+                } else {
+                    catalog
+                };
                 let projection = context.catalog;
                 let name = name.clone();
                 let scan: Box<dyn PhysicalOperator + 'a> =
