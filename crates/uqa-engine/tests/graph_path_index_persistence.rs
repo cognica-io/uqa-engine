@@ -8,7 +8,7 @@
 //! indexes. A graph mutation invalidates its path-index catalog rows in the
 //! same storage transaction; failed mutation must roll both changes back.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, error::Error as _, sync::Arc};
 
 use tempfile::TempDir;
 use uqa_core::{Edge, Vertex};
@@ -107,9 +107,26 @@ fn run_cypher_rolls_back_catalog_failure_without_erasing_error_types() {
         .run_cypher("g", "CREATE (:P {name: 'lost'})", BTreeMap::default())
         .expect_err("the injected catalog failure must abort Cypher mutation");
     assert!(
-        matches!(storage_error, CypherError::Storage(ref message) if message.contains("injected graph membership failure")),
+        matches!(storage_error, CypherError::Backend(_)),
         "unexpected Cypher storage error: {storage_error}"
     );
+    let mut cause = storage_error.source();
+    let mut sqlite_cause = None;
+    while let Some(error) = cause {
+        if let Some(sqlite) = error.downcast_ref::<rusqlite::Error>() {
+            sqlite_cause = Some(sqlite);
+            break;
+        }
+        cause = error.source();
+    }
+    let sqlite = sqlite_cause.expect("the original SQLite failure must remain typed");
+    assert_eq!(
+        sqlite.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::ConstraintViolation)
+    );
+    assert!(sqlite
+        .to_string()
+        .contains("injected graph membership failure"));
     clear_membership_insert_failure(&connection);
 
     let vertices = engine
