@@ -34,6 +34,9 @@ pub fn decode_identifier_generation(value: Option<&str>) -> GraphStoreResult<[u8
 }
 
 impl<'a> GraphIdentifierScope<'a> {
+    pub(super) fn namespace(&self) -> GraphIdentifierNamespace {
+        self.namespace
+    }
     pub fn catalog(allocator: &'a dyn IdentifierAllocator, generation: [u8; 16]) -> Self {
         Self::new(allocator, None, generation)
     }

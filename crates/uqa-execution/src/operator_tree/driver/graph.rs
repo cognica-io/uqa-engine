@@ -371,7 +371,7 @@ impl PhysicalRetrievalDriver<'_> {
     ) -> DriverResult<std::sync::Arc<uqa_graph::GraphStoreHandle>> {
         self.context
             .graphs
-            .graph_handle(graph)
+            .graph_handle(graph)?
             .ok_or_else(|| SQLError::Unsupported(format!("unknown graph {graph:?}")))
     }
 }

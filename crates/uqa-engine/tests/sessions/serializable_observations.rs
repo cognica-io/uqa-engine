@@ -33,16 +33,25 @@ mod vector;
 #[path = "serializable_observations/text.rs"]
 mod text;
 
+#[path = "serializable_observations/graph.rs"]
+mod graph;
+
 struct Session {
     engine: Engine,
     backend: Arc<dyn PersistentStorageBackend>,
+    catalog: Arc<dyn uqa_storage::CatalogFacade>,
 }
 
 impl Session {
     fn new(pair: PersistentStorageSession) -> Self {
         let backend = pair.backend.clone();
+        let catalog = pair.catalog.clone();
         let engine = Engine::from_persistent_backends(pair.catalog, pair.backend).unwrap();
-        Self { engine, backend }
+        Self {
+            engine,
+            backend,
+            catalog,
+        }
     }
 
     fn sibling(&self) -> Self {

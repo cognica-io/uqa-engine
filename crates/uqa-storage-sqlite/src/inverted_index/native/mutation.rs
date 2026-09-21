@@ -145,6 +145,15 @@ impl<'a> ProjectionBatch<'a> {
 }
 
 impl KeyValueBatch for ProjectionBatch<'_> {
+    fn serializable_participant(&self) -> Option<uqa_storage::mvcc::SerializableTransactionId> {
+        self.native.serializable_participant()
+    }
+    fn observe_serializable_write(
+        &mut self,
+        predicate: uqa_storage::mvcc::SerializablePredicate<'_>,
+    ) -> StorageBackendResult<()> {
+        self.native.observe_serializable_write(predicate)
+    }
     fn observe_identifier(&mut self, namespace: &[u8], value: u64) -> StorageBackendResult<()> {
         self.native.observe_identifier(namespace, value)
     }

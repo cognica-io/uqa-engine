@@ -30,6 +30,7 @@ pub use coordinator::{
 pub use identity::SerializableTransactionId;
 pub use liveness::{LocalSerializableLeases, SerializableParticipant};
 pub use observations::SerializableWriteMark;
+pub(in crate::mvcc) use predicates::OwnedPredicate;
 pub use predicates::{SerializableKeySpace, SerializablePredicate};
 pub use publication::SerializablePublication;
 

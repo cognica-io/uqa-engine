@@ -188,6 +188,18 @@ impl Drop for OverlayCheckpoint {
 }
 
 impl GraphStorage for OverlayGraphStorage {
+    fn entity_observation_namespace(
+        &self,
+        kind: GraphEntityKind,
+        id: u64,
+    ) -> GraphStoreResult<Option<uqa_storage::catalog::graph_identifiers::GraphIdentifierNamespace>>
+    {
+        if self.changed(kind, id) {
+            self.write.storage.entity_observation_namespace(kind, id)
+        } else {
+            self.read.storage.entity_observation_namespace(kind, id)
+        }
+    }
     fn guard_definition(&self, graph: Option<&str>) -> GraphStoreResult<()> {
         self.write.storage.guard_definition(graph)
     }

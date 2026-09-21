@@ -411,7 +411,12 @@ impl KeyValueStore for VersionedKeyValueStore {
                 database: self.persistence.database_id(),
                 control: &self.control,
             };
-            let mut batch = batch::Batch::new(self);
+            let mut batch = batch::Batch::new(
+                self,
+                transaction
+                    .serializable_context()
+                    .map(SerializableReadContext::id),
+            );
             operation(&read, &mut batch)?;
             self.control.check()?;
             batch.apply(transaction)
@@ -559,7 +564,13 @@ impl KeyValueStore for VersionedKeyValueStore {
         self.write(|transaction| transaction.delete_prefix(prefix, &self.control))
     }
     fn batch(&self) -> Box<dyn KeyValueBatch + '_> {
-        Box::new(batch::Batch::new(self))
+        let participant = self
+            .active
+            .lock()
+            .as_ref()
+            .and_then(Transaction::serializable_context)
+            .map(SerializableReadContext::id);
+        Box::new(batch::Batch::new(self, participant))
     }
     fn begin_transaction(&self) -> StorageBackendResult<()> {
         self.begin(false)

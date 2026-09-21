@@ -116,7 +116,7 @@ pub trait PhysicalVectorRetrieval: Sync {
 }
 
 pub trait RetrievalGraphs: Sync {
-    fn graph_handle(&self, graph: &str) -> Option<Arc<GraphStoreHandle>>;
+    fn graph_handle(&self, graph: &str) -> Result<Option<Arc<GraphStoreHandle>>, SQLError>;
 }
 
 pub trait RetrievalModels: Sync {

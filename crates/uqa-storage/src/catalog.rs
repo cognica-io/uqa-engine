@@ -19,6 +19,7 @@ mod cache_revisions;
 mod graph_access;
 pub mod graph_guards;
 pub mod graph_identifiers;
+pub mod graph_observations;
 pub(crate) mod graph_snapshot;
 mod identity;
 mod relation;

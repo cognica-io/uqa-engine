@@ -9,6 +9,7 @@
 
 mod catalog;
 mod identifiers;
+mod observations;
 mod overlay;
 pub mod storage;
 mod trait_impl;
@@ -32,6 +33,7 @@ const ID_PAGE_SIZE: usize = 256;
 pub struct PersistentGraphStore {
     storage: Arc<dyn GraphStorage>,
     resource: Option<Arc<dyn Send + Sync>>,
+    read: Option<observations::GraphRead>,
 }
 
 impl Clone for PersistentGraphStore {
@@ -39,6 +41,7 @@ impl Clone for PersistentGraphStore {
         Self {
             storage: Arc::clone(&self.storage),
             resource: self.resource.clone(),
+            read: self.read.clone(),
         }
     }
 }
@@ -64,6 +67,7 @@ impl PersistentGraphStore {
         Self {
             storage,
             resource: None,
+            read: None,
         }
     }
 
@@ -77,10 +81,12 @@ impl PersistentGraphStore {
     /// Read from a pinned durable snapshot, with this transaction's writes
     /// overlaid by identity. No snapshot entities are copied into memory.
     pub fn with_read_snapshot(&self, snapshot: &Self) -> Self {
-        Self::from_storage(Arc::new(overlay::OverlayGraphStorage::new(
+        let mut store = Self::from_storage(Arc::new(overlay::OverlayGraphStorage::new(
             self.clone(),
             snapshot.clone(),
-        )))
+        )));
+        store.read.clone_from(&snapshot.read);
+        store
     }
 
     /// A mutation candidate copies only its changed-id sets. Previously
@@ -92,13 +98,19 @@ impl PersistentGraphStore {
                 .fork_overlay()
                 .unwrap_or_else(|| Arc::clone(&self.storage)),
             resource: self.resource.clone(),
+            read: self.read.clone(),
         }
     }
 
     /// Reuse a transaction's original pinned reader when it has no graph
     /// changes. A cursor can retain this owner independently of COMMIT.
     pub fn unmodified_read_snapshot(&self) -> Option<Self> {
-        self.storage.unmodified_read_snapshot()
+        self.storage.unmodified_read_snapshot().map(|mut snapshot| {
+            if self.read.is_some() {
+                snapshot.read.clone_from(&self.read);
+            }
+            snapshot
+        })
     }
 
     pub(crate) fn transaction_mapped<T, E>(

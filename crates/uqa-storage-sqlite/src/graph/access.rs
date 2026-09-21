@@ -51,9 +51,7 @@ impl SQLiteGraphStorage {
         &self,
         read: impl FnOnce(&rusqlite::Connection) -> Result<T, SQLiteError>,
     ) -> GraphStoreResult<T> {
-        self.conn
-            .with(read)
-            .map_err(|error| sqlite_graph_error(&error))
+        self.conn.with(read).map_err(sqlite_graph_error)
     }
 
     pub(super) fn metadata(&self, key: &str) -> Result<Option<String>, SQLiteError> {
@@ -202,7 +200,7 @@ impl SQLiteGraphStorage {
             if let Some(id) = id {
                 write!(from, " AND e.{column} = ?").expect("write endpoint predicate");
                 values.push(SQLValue::Integer(
-                    encode_graph_id("endpoint", id).map_err(|error| sqlite_graph_error(&error))?,
+                    encode_graph_id("endpoint", id).map_err(sqlite_graph_error)?,
                 ));
             }
         }
@@ -313,7 +311,7 @@ impl GraphStorage for SQLiteGraphStorage {
     }
     fn counter(&self, kind: GraphEntityKind) -> GraphStoreResult<Option<u64>> {
         self.metadata(&format!("next_{}_id", kind.as_str()))
-            .map_err(|error| sqlite_graph_error(&error))?
+            .map_err(sqlite_graph_error)?
             .map(|value| {
                 value.parse().map_err(|error| {
                     GraphStoreError::CorruptGraph(format!("invalid graph id counter: {error}"))
@@ -323,7 +321,7 @@ impl GraphStorage for SQLiteGraphStorage {
     }
     fn save_counter(&self, kind: GraphEntityKind, next: u64) -> GraphStoreResult<()> {
         self.save_metadata(&format!("next_{}_id", kind.as_str()), &next.to_string())
-            .map_err(|error| sqlite_graph_error(&error))
+            .map_err(sqlite_graph_error)
     }
     fn vertex(&self, id: u64) -> GraphStoreResult<Option<Vertex>> {
         self.sql(|conn| {
@@ -387,7 +385,7 @@ impl GraphStorage for SQLiteGraphStorage {
         if let Some(after) = after {
             write!(query.from, " AND {} > ?", query.id).expect("write graph cursor predicate");
             query.values.push(SQLValue::Integer(
-                encode_graph_id("cursor", after).map_err(|error| sqlite_graph_error(&error))?,
+                encode_graph_id("cursor", after).map_err(sqlite_graph_error)?,
             ));
         }
         query

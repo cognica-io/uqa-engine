@@ -264,6 +264,9 @@ impl GraphRead<'_> {
     ) -> StorageBackendResult<()> {
         self.guard_definition(batch, None)?;
         let previous = self.read.get(&vertex_key(id))?;
+        if previous.is_some() || row.is_some() {
+            self.observe_entity_write(batch, GraphEntityKind::Vertex, id)?;
+        }
         if previous.is_none() || row.is_none() {
             self.fence_entity_lifetime(batch, GraphEntityKind::Vertex, id)?;
         }
@@ -300,6 +303,9 @@ impl GraphRead<'_> {
             .get(&edge_key(id))?
             .map(|bytes| decode_value(&bytes))
             .transpose()?;
+        if previous.is_some() || row.is_some() {
+            self.observe_entity_write(batch, GraphEntityKind::Edge, id)?;
+        }
         if previous.as_ref().zip(row).is_none_or(|(old, new)| {
             old.source_id != new.source_id || old.target_id != new.target_id
         }) {

@@ -88,13 +88,18 @@ impl Engine {
         create: bool,
     ) -> StorageBackendResult<Option<GraphStoreHandle>> {
         if let Some(overlay) = &self.session.state.read().graph_overlay {
-            return Ok((create || overlay.names.contains(name))
-                .then(|| GraphStoreHandle::Persistent(overlay.store.fork_for_mutation())));
+            return (create || overlay.names.contains(name))
+                .then(|| {
+                    self.bind_graph_reader(GraphStoreHandle::Persistent(
+                        overlay.store.fork_for_mutation(),
+                    ))
+                })
+                .transpose();
         }
         let existing = self.durable.graphs.read().get(name).cloned();
         match existing {
-            Some(store) => Ok(Some(store.as_ref().clone())),
-            None if create => self.new_graph_store().map(Some),
+            Some(store) => self.bind_graph_reader(store.as_ref().clone()).map(Some),
+            None if create => self.bind_graph_reader(self.new_graph_store()?).map(Some),
             None => Ok(None),
         }
     }
@@ -105,6 +110,7 @@ impl Engine {
         &self,
         candidate: GraphStoreHandle,
     ) -> StorageBackendResult<Arc<GraphStoreHandle>> {
+        let candidate = candidate.without_serializable_read();
         if self.session.state.read().graph_overlay.is_some() {
             let names = Arc::new(
                 candidate

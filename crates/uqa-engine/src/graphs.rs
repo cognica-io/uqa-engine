@@ -77,7 +77,7 @@ impl Engine {
     /// Return `true` when a graph with `name` is registered.
     pub fn has_graph(&self, name: &str) -> StorageBackendResult<bool> {
         self.synchronize_catalog_registries()?;
-        Ok(self.graph_handle_in_execution(name).is_some())
+        Ok(self.graph_handle_in_execution(name)?.is_some())
     }
 
     /// Every named graph with its `ag_label` entries, read under one catalog
@@ -106,7 +106,7 @@ impl Engine {
         graph: &str,
     ) -> StorageBackendResult<Option<Vec<uqa_graph::GraphLabelInfo>>> {
         self.synchronize_catalog_registries()?;
-        let Some(store) = self.graph_handle_in_execution(graph) else {
+        let Some(store) = self.graph_handle_in_execution(graph)? else {
             return Ok(None);
         };
         store
@@ -397,10 +397,14 @@ impl Engine {
         name: &str,
         graph: &str,
     ) -> StorageBackendResult<Option<uqa_graph::PathIndex>> {
-        self.with_graph_read_snapshot(|engine| Ok(engine.path_index_in_execution(name, graph)))
+        self.with_graph_read_snapshot(|engine| engine.path_index_in_execution(name, graph))
     }
 
-    fn path_index_in_execution(&self, name: &str, graph: &str) -> Option<uqa_graph::PathIndex> {
+    fn path_index_in_execution(
+        &self,
+        name: &str,
+        graph: &str,
+    ) -> StorageBackendResult<Option<uqa_graph::PathIndex>> {
         let key = format!("{graph}::{name}");
         let index = self.query_catalog_snapshot.as_ref().map_or_else(
             || self.durable.path_indexes.read().get(&key).cloned(),
@@ -409,12 +413,14 @@ impl Engine {
         if self.query_catalog_snapshot.is_some()
             || self.session.state.read().graph_overlay.is_some()
         {
-            return index.and_then(|index| {
-                self.graph_handle_in_execution(graph)
-                    .map(|store| index.with_graph_read_view(store))
+            return Ok(match index {
+                Some(index) => self
+                    .graph_handle_in_execution(graph)?
+                    .map(|store| index.with_graph_read_view(store)),
+                None => None,
             });
         }
-        index
+        Ok(index)
     }
 
     /// Sorted list of registered path index keys. Each key has the
@@ -444,7 +450,7 @@ impl Engine {
         f: impl FnOnce(&std::sync::Arc<uqa_graph::GraphStoreHandle>) -> R,
     ) -> StorageBackendResult<Option<R>> {
         self.with_graph_read_snapshot(|engine| {
-            Ok(engine.graph_handle_in_execution(name).as_ref().map(f))
+            Ok(engine.graph_handle_in_execution(name)?.as_ref().map(f))
         })
     }
 
@@ -454,8 +460,8 @@ impl Engine {
     pub(crate) fn graph_handle_in_execution(
         &self,
         name: &str,
-    ) -> Option<std::sync::Arc<uqa_graph::GraphStoreHandle>> {
-        if let Some(snapshot) = &self.query_catalog_snapshot {
+    ) -> StorageBackendResult<Option<std::sync::Arc<uqa_graph::GraphStoreHandle>>> {
+        let store = if let Some(snapshot) = &self.query_catalog_snapshot {
             snapshot.graphs.get(name).cloned()
         } else if let Some(overlay) = &self.session.state.read().graph_overlay {
             overlay.names.contains(name).then(|| {
@@ -465,7 +471,41 @@ impl Engine {
             })
         } else {
             self.durable.graphs.read().get(name).cloned()
+        };
+        let Some(context) = self.graph_read_context()? else {
+            return Ok(store);
+        };
+        Ok(store.map(|store| {
+            std::sync::Arc::new(
+                store
+                    .as_ref()
+                    .clone()
+                    .with_serializable_read(context, &self.runtime.cancellation),
+            )
+        }))
+    }
+
+    pub(super) fn bind_graph_reader(
+        &self,
+        store: uqa_graph::GraphStoreHandle,
+    ) -> StorageBackendResult<uqa_graph::GraphStoreHandle> {
+        match self.graph_read_context()? {
+            None => Ok(store),
+            Some(context) => Ok(store.with_serializable_read(context, &self.runtime.cancellation)),
         }
+    }
+
+    fn graph_read_context(
+        &self,
+    ) -> StorageBackendResult<Option<uqa_storage::mvcc::SerializableReadContext>> {
+        Ok(self
+            .storage
+            .backend
+            .as_ref()
+            .and_then(|backend| backend.serializable_session())
+            .map(uqa_storage::mvcc::SerializableSession::serializable_read_context)
+            .transpose()?
+            .flatten())
     }
 
     pub(crate) fn with_graph_read_snapshot<R>(

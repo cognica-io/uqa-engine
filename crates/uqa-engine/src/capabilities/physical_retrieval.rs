@@ -165,8 +165,13 @@ impl PhysicalVectorRetrieval for Engine {
 }
 
 impl RetrievalGraphs for Engine {
-    fn graph_handle(&self, graph: &str) -> Option<Arc<uqa_graph::GraphStoreHandle>> {
-        self.graph_handle_in_execution(graph)
+    fn graph_handle(
+        &self,
+        graph: &str,
+    ) -> Result<Option<Arc<uqa_graph::GraphStoreHandle>>, SQLError> {
+        self.graph_handle_in_execution(graph).map_err(|error| {
+            uqa_execution::storage_errors::storage_error("retain graph reader", &error)
+        })
     }
 }
 

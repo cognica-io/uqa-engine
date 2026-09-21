@@ -307,6 +307,15 @@ struct SQLiteKeyValueBatch<'a> {
 }
 
 impl KeyValueBatch for SQLiteKeyValueBatch<'_> {
+    fn serializable_participant(&self) -> Option<uqa_storage::mvcc::SerializableTransactionId> {
+        self.batch.serializable_participant()
+    }
+    fn observe_serializable_write(
+        &mut self,
+        predicate: uqa_storage::mvcc::SerializablePredicate<'_>,
+    ) -> StorageBackendResult<()> {
+        self.batch.observe_serializable_write(predicate)
+    }
     fn require_unchanged(&mut self, key: &[u8]) -> StorageBackendResult<()> {
         self.batch.require_unchanged(key)
     }

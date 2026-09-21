@@ -21,6 +21,7 @@ impl NativeSnapshot {
         row: Option<&[ValueRef<'_>]>,
         cache: bool,
     ) -> Result<()> {
+        self.observe_graph_entity_write(batch, family, components, row.is_some())?;
         self.guard_graph_row_lifetimes(batch, family, components, row)?;
         let owner = NativeRecordOwner::Database(self.database);
         let old = self
@@ -73,6 +74,51 @@ impl NativeSnapshot {
                 batch.delete(&key)?;
             }
         }
+        Ok(())
+    }
+
+    fn observe_graph_entity_write(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        family: Family,
+        components: &[ValueRef<'_>],
+        replacing: bool,
+    ) -> Result<()> {
+        use uqa_storage::{catalog::graph_observations::GraphEntityKey, GraphEntityKind};
+        if batch.serializable_participant().is_none() {
+            return Ok(());
+        }
+        let kind = match family {
+            Family::GraphVertices | Family::StandaloneGraphVertices => GraphEntityKind::Vertex,
+            Family::GraphEdges | Family::StandaloneGraphEdges => GraphEntityKind::Edge,
+            _ => return Ok(()),
+        };
+        if !replacing
+            && !self.contains_row(
+                family,
+                NativeRecordOwner::Database(self.database),
+                components,
+            )?
+        {
+            return Ok(());
+        }
+        let offset = usize::from(family.is_standalone_graph());
+        let scope = if offset == 0 {
+            None
+        } else {
+            Some(components[0].as_str().map_err(|_| {
+                crate::SQLiteError::StorageBackend("invalid graph observation scope".into())
+            })?)
+        };
+        let id = components[offset]
+            .as_i64()
+            .ok()
+            .and_then(|id| u64::try_from(id).ok())
+            .ok_or_else(|| {
+                crate::SQLiteError::StorageBackend("invalid graph observation identity".into())
+            })?;
+        GraphEntityKey::new(self.graph_identifier_namespace(scope)?, kind, id)
+            .observe_write(batch)?;
         Ok(())
     }
 }

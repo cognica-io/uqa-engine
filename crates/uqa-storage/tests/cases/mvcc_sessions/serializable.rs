@@ -8,6 +8,9 @@
 
 use super::*;
 
+#[path = "serializable/batches.rs"]
+mod batches;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CheckpointFault {
     None,

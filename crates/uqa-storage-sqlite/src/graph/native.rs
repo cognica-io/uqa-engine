@@ -87,7 +87,7 @@ impl NativeGraphStorage {
     fn read<T>(&self, read: impl FnOnce(&NativeSnapshot) -> Result<T>) -> GraphStoreResult<T> {
         self.snapshot()
             .and_then(|snapshot| read(&snapshot))
-            .map_err(|error| sqlite_graph_error(&error))
+            .map_err(sqlite_graph_error)
     }
     fn write<T>(
         &self,
@@ -96,7 +96,7 @@ impl NativeGraphStorage {
         self.connection
             .with_native_write(write)
             .and_then(|result| result.ok_or(SQLiteError::SessionMappingMismatch))
-            .map_err(|error| sqlite_graph_error(&error))
+            .map_err(sqlite_graph_error)
     }
     pub(super) fn ensure_tables(&self) -> Result<()> {
         let snapshot = self.snapshot()?;
@@ -151,7 +151,7 @@ impl NativeGraphStorage {
             .ok_or(SQLiteError::SessionMappingMismatch)
     }
     fn delete_entity(&self, kind: GraphEntityKind, id: u64) -> GraphStoreResult<()> {
-        let id = encode_graph_id("entity", id).map_err(|error| sqlite_graph_error(&error))?;
+        let id = encode_graph_id("entity", id).map_err(sqlite_graph_error)?;
         self.write(|snapshot, batch| {
             snapshot.guard_graph_definition(batch, Some(&self.scope), None)?;
             snapshot.visit_paged_rows(
@@ -193,7 +193,7 @@ impl NativeGraphStorage {
         graph: &str,
         present: bool,
     ) -> GraphStoreResult<()> {
-        let id = encode_graph_id("entity", id).map_err(|error| sqlite_graph_error(&error))?;
+        let id = encode_graph_id("entity", id).map_err(sqlite_graph_error)?;
         self.write(|snapshot, batch| {
             snapshot.guard_graph_definition(batch, Some(&self.scope), Some(graph))?;
             let row = [
@@ -230,7 +230,7 @@ impl GraphStorage for NativeGraphStorage {
         };
         let generation = uqa_graph::decode_identifier_generation(
             self.metadata("identifier_generation")
-                .map_err(|error| sqlite_graph_error(&error))?
+                .map_err(sqlite_graph_error)?
                 .as_deref(),
         )?;
         Ok(Some(uqa_graph::GraphIdentifierScope::standalone(
@@ -244,7 +244,7 @@ impl GraphStorage for NativeGraphStorage {
         let value = serde_json::to_string(&generation)
             .map_err(|error| GraphStoreError::CorruptGraph(error.to_string()))?;
         self.save_metadata("identifier_generation", &value)
-            .map_err(|error| sqlite_graph_error(&error))
+            .map_err(sqlite_graph_error)
     }
     fn begin_write(&self) -> GraphStoreResult<Box<dyn GraphWriteTransaction>> {
         begin_graph_write(Arc::clone(&self.backend))
@@ -331,7 +331,7 @@ impl GraphStorage for NativeGraphStorage {
     }
     fn counter(&self, kind: GraphEntityKind) -> GraphStoreResult<Option<u64>> {
         self.metadata(&format!("next_{}_id", kind.as_str()))
-            .map_err(|error| sqlite_graph_error(&error))?
+            .map_err(sqlite_graph_error)?
             .map(|value| {
                 value.parse().map_err(|error| {
                     GraphStoreError::CorruptGraph(format!("invalid graph id counter: {error}"))
@@ -341,7 +341,7 @@ impl GraphStorage for NativeGraphStorage {
     }
     fn save_counter(&self, kind: GraphEntityKind, next: u64) -> GraphStoreResult<()> {
         self.save_metadata(&format!("next_{}_id", kind.as_str()), &next.to_string())
-            .map_err(|error| sqlite_graph_error(&error))
+            .map_err(sqlite_graph_error)
     }
     fn vertex(&self, id: u64) -> GraphStoreResult<Option<Vertex>> {
         self.read(|snapshot| {

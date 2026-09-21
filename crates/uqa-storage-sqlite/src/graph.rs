@@ -13,6 +13,8 @@
 
 mod access;
 mod native;
+#[cfg(test)]
+mod observations_tests;
 mod routing;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -36,11 +38,11 @@ pub struct SQLiteGraphStore {
 }
 
 fn graph_store_error(error: &GraphStoreError) -> SQLiteError {
-    SQLiteError::StorageBackend(error.to_string())
+    uqa_storage::StorageBackendError::backend("graph", error.clone()).into()
 }
 
-fn sqlite_graph_error(error: &SQLiteError) -> GraphStoreError {
-    GraphStoreError::Storage(error.to_string())
+fn sqlite_graph_error(error: SQLiteError) -> GraphStoreError {
+    uqa_storage::StorageBackendError::from(error).into()
 }
 
 impl SQLiteGraphStore {
@@ -138,7 +140,19 @@ impl SQLiteGraphStore {
         }
         let _operation = self.operation_gate.lock();
         if self.backend.in_transaction() {
-            return read(&self.inner);
+            let context = self
+                .backend
+                .serializable_session()
+                .map(uqa_storage::mvcc::SerializableSession::serializable_read_context)
+                .transpose()?
+                .flatten();
+            return match context {
+                Some(context) => {
+                    let cancellation = self.backend.write_cancellation().unwrap_or_default();
+                    read(&self.inner.with_serializable_read(context, &cancellation))
+                }
+                None => read(&self.inner),
+            };
         }
         self.backend.begin_read_transaction()?;
         let mut checkpoint = ReadCheckpoint(Some(Arc::clone(&self.backend)));

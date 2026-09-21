@@ -13,6 +13,22 @@ use crate::catalog::graph_identifiers::GraphIdentifierNamespace;
 use crate::{GraphEntityKind, KeyValueBatch, StorageBackendResult};
 
 impl GraphRead<'_> {
+    pub(super) fn observe_entity_write(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        kind: GraphEntityKind,
+        id: u64,
+    ) -> StorageBackendResult<()> {
+        if batch.serializable_participant().is_some() {
+            crate::catalog::graph_observations::GraphEntityKey::new(
+                self.identifier_namespace()?,
+                kind,
+                id,
+            )
+            .observe_write(batch)?;
+        }
+        Ok(())
+    }
     pub(super) fn guard_entity_reference(
         &self,
         batch: &mut dyn KeyValueBatch,

@@ -29,6 +29,25 @@ impl Default for GraphStoreHandle {
 }
 
 impl GraphStoreHandle {
+    pub fn with_serializable_read(
+        self,
+        context: uqa_storage::mvcc::SerializableReadContext,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> Self {
+        match self {
+            Self::Memory(_) => self,
+            Self::Persistent(store) => {
+                Self::Persistent(store.with_serializable_read(context, cancellation))
+            }
+        }
+    }
+
+    pub fn without_serializable_read(self) -> Self {
+        match self {
+            Self::Memory(_) => self,
+            Self::Persistent(store) => Self::Persistent(store.without_serializable_read()),
+        }
+    }
     pub fn from_catalog(
         catalog: Arc<dyn CatalogFacade>,
         backend: Arc<dyn PersistentStorageBackend>,

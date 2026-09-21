@@ -10,8 +10,9 @@ use uqa_core::memory::BudgetedVec;
 use crate::mvcc::commit::RecordWriteKind;
 use crate::mvcc::graph::OwnedGraphMutation;
 use crate::mvcc::key::RecordKey;
+use crate::mvcc::serializable::OwnedPredicate;
 use crate::mvcc::vector::{IndexKind, Key, OwnedVectorMutation};
-use crate::mvcc::{SharedRecordValue, VersionError};
+use crate::mvcc::{SerializableTransactionId, SharedRecordValue, VersionError};
 use crate::{KeyValueBatch, StorageBackendResult};
 
 use super::transaction::Transaction;
@@ -37,13 +38,20 @@ enum Operation {
 pub(super) struct Batch<'a> {
     store: &'a VersionedKeyValueStore,
     operations: BudgetedVec<Operation>,
+    participant: Option<SerializableTransactionId>,
+    writes: BudgetedVec<OwnedPredicate>,
 }
 
 impl<'a> Batch<'a> {
-    pub(super) fn new(store: &'a VersionedKeyValueStore) -> Self {
+    pub(super) fn new(
+        store: &'a VersionedKeyValueStore,
+        participant: Option<SerializableTransactionId>,
+    ) -> Self {
         Self {
             store,
             operations: BudgetedVec::new(store.control.memory()),
+            participant,
+            writes: BudgetedVec::new(store.control.memory()),
         }
     }
     fn copy(&self, bytes: &[u8]) -> StorageBackendResult<BudgetedVec<u8>> {
@@ -71,6 +79,15 @@ impl<'a> Batch<'a> {
     pub(super) fn apply(&self, transaction: &mut Transaction) -> Result<(), VersionError> {
         let control = &self.store.control;
         transaction.writable()?;
+        if self.participant
+            != transaction
+                .serializable_context()
+                .map(crate::mvcc::SerializableReadContext::id)
+        {
+            return Err(VersionError::InvalidEncoding(
+                "evaluated batch changed serializable participant",
+            ));
+        }
         for operation in self.operations.iter() {
             match operation {
                 Operation::Requirement(key) => {
@@ -154,11 +171,59 @@ impl<'a> Batch<'a> {
                 _ => {}
             }
         }
-        Ok(())
+        self.observe_writes(transaction)
+    }
+
+    fn observe_writes(&self, transaction: &Transaction) -> Result<(), VersionError> {
+        if self.writes.is_empty() {
+            return Ok(());
+        }
+        let context = transaction
+            .serializable_context()
+            .ok_or(VersionError::InvalidEncoding(
+                "evaluated observation lost its serializable participant",
+            ))?;
+        let control = self.store.write_control();
+        let mut mark = None;
+        let result = context.with_graph(&control, |graph| {
+            mark = Some(graph.write_mark(context.id())?);
+            for predicate in self.writes.iter() {
+                graph.observe_write(context.id(), predicate.borrowed(), &control)?;
+            }
+            Ok(())
+        });
+        if result.is_err() {
+            if let Some(mark) = mark {
+                // A checkpoint failure may be a lost reply after successful publication. Undo through a new admission with the original cleanup allowance, even when the invoking writer was cancelled.
+                context.with_graph(&self.store.control, |graph| graph.rollback_writes(mark))?;
+            }
+        }
+        result
     }
 }
 
 impl KeyValueBatch for Batch<'_> {
+    fn serializable_participant(&self) -> Option<SerializableTransactionId> {
+        self.participant
+    }
+    fn observe_serializable_write(
+        &mut self,
+        predicate: crate::mvcc::SerializablePredicate<'_>,
+    ) -> StorageBackendResult<()> {
+        if self.participant.is_none() {
+            return Err(
+                VersionError::InvalidEncoding("batch has no serializable participant")
+                    .into_storage_error(),
+            );
+        }
+        predicate
+            .validate(true)
+            .map_err(VersionError::into_storage_error)?;
+        let owned = OwnedPredicate::new(predicate, self.store.control.memory())
+            .map_err(VersionError::into_storage_error)?;
+        self.writes.push(owned)?;
+        Ok(())
+    }
     fn require_unchanged(&mut self, key: &[u8]) -> StorageBackendResult<()> {
         self.operations
             .push(Operation::Requirement(self.copy(key)?))?;

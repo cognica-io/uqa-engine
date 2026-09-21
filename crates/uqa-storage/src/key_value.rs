@@ -105,6 +105,19 @@ enum KeyValueBatchOperation {
 
 /// Atomic mutation buffer for a [`KeyValueStore`].
 pub trait KeyValueBatch {
+    /// Original SSI participant captured with this evaluated mutation. Wrappers must forward this capability; a batch cannot move to another participant before publication.
+    fn serializable_participant(&self) -> Option<crate::mvcc::SerializableTransactionId> {
+        None
+    }
+    /// Stage a logical write with the evaluated records. Failed application discards its new intents and records together while retaining already established dependencies. Providers without this capability reject the request.
+    fn observe_serializable_write(
+        &mut self,
+        _predicate: crate::mvcc::SerializablePredicate<'_>,
+    ) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "atomic serializable write observations are not supported".into(),
+        ))
+    }
     /// Require this record's original committed revision at publication without replacing it. This permits independent data writers to share a definition. Stores without commit-time read validation reject this operation; capable wrappers must forward it.
     fn require_unchanged(&mut self, _key: &[u8]) -> StorageBackendResult<()> {
         Err(StorageBackendError::Other(

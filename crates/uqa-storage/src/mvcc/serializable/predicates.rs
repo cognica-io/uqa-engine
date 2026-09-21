@@ -12,13 +12,14 @@ use uqa_core::memory::{BudgetedVec, MemoryBudget};
 
 use super::{VersionError, VersionResult};
 
-/// Rows, ordered index keys, canonical vector candidates and text data occupy separate logical address spaces. Index identities must describe immutable incarnations, not reusable names or catalog OIDs. Execution binds vector keys to fields and document identities, independently of approximate-index nodes or posting clusters.
+/// Rows, ordered index keys, canonical vector candidates, text and graph data occupy separate logical address spaces. Index identities must describe immutable incarnations, not reusable names or catalog OIDs. Access-path owners bind keys independently of approximate-index nodes, posting clusters or graph cache records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SerializableKeySpace {
     Rows,
     Index([u8; 16]),
     Vectors,
     Text,
+    Graph,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,7 +64,7 @@ impl<'a> SerializablePredicate<'a> {
         }
     }
 
-    pub(super) fn validate(self, writing: bool) -> VersionResult<()> {
+    pub(in crate::mvcc) fn validate(self, writing: bool) -> VersionResult<()> {
         if self.object == [0; 16] {
             return Err(VersionError::InvalidEncoding(
                 "serializable predicate requires an immutable object identity",
@@ -139,7 +140,7 @@ fn before_upper(key: &[u8], upper: Bound<&[u8]>) -> bool {
     }
 }
 
-pub(super) struct OwnedPredicate {
+pub(in crate::mvcc) struct OwnedPredicate {
     pub(super) object: [u8; 16],
     pub(super) space: Option<SerializableKeySpace>,
     pub(super) point: bool,
@@ -148,7 +149,7 @@ pub(super) struct OwnedPredicate {
 }
 
 impl OwnedPredicate {
-    pub(super) fn new(
+    pub(in crate::mvcc) fn new(
         predicate: SerializablePredicate<'_>,
         memory: &MemoryBudget,
     ) -> VersionResult<Self> {
@@ -168,7 +169,7 @@ impl OwnedPredicate {
         })
     }
 
-    pub(super) fn borrowed(&self) -> SerializablePredicate<'_> {
+    pub(in crate::mvcc) fn borrowed(&self) -> SerializablePredicate<'_> {
         let selection = match self.space {
             None => Selection::Object,
             Some(space) if self.point => {

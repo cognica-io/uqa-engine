@@ -82,6 +82,15 @@ pub trait GraphWriteTransaction {
 /// No entity, membership, or adjacency collection is retained by a handle.
 /// Multi-read operations run in the caller's pinned storage transaction.
 pub trait GraphStorage: Send + Sync {
+    /// Select the same physical identity generation as the entity read. An overlay may read untouched entities from its original snapshot and changed entities from its writer.
+    fn entity_observation_namespace(
+        &self,
+        _kind: GraphEntityKind,
+        _id: u64,
+    ) -> GraphStoreResult<Option<uqa_storage::catalog::graph_identifiers::GraphIdentifierNamespace>>
+    {
+        Ok(self.identifiers()?.map(|scope| scope.namespace()))
+    }
     /// Autonomous identifiers for this physical entity namespace and its current clear generation. Missing capability retains serialized counter updates.
     fn identifiers(&self) -> GraphStoreResult<Option<GraphIdentifierScope<'_>>> {
         Ok(None)
