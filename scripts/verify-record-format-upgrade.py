@@ -24,7 +24,7 @@ import tomllib
 ROOT = Path(__file__).resolve().parents[1]
 DRIVER = r'''
 use std::{io::{BufRead, Write}, path::Path, sync::Arc};
-use uqa_storage::mvcc::{CommitStatus, PreparedRecordCommit, RecordWrite, StorageTransactionId, VersionedPersistence, VersionedSessionOptions};
+use uqa_storage::mvcc::{CommitStatus, IdentifierRequest, PreparedRecordCommit, RecordWrite, StorageTransactionId, VersionedPersistence, VersionedSessionOptions};
 use uqa_storage::read_control::StorageReadControl;
 use uqa_storage_sqlite::{Catalog, ManagedConnection, SQLiteCompressionOptions, SQLiteKeyValueStore, SQLiteRecordStore};
 
@@ -83,6 +83,7 @@ fn report(records: &dyn VersionedPersistence, committed: u64, pending: u64) -> s
         "pending": pending,
         "receipt_sequence": receipt.sequence.as_u64(),
         "receipt_fingerprint": hex(&receipt.fingerprint),
+        "identifier_watermark": records.identifier_watermark(b"format-probe", &control).unwrap(),
         "rows": rows,
     })
 }
@@ -116,6 +117,7 @@ fn main() {
         };
         records.commit(id, &writes, &control).unwrap();
         let pending = records.allocate_transaction(&control).unwrap();
+        records.allocate_identifiers(b"format-probe", IdentifierRequest::Observe(77), &control).unwrap();
         std::fs::write(state, serde_json::to_vec(&report(&*records, id.allocation(), pending.allocation())).unwrap()).unwrap();
         return;
     }
@@ -135,8 +137,11 @@ fn main() {
         rejected(records.snapshot(&control), false);
         rejected(snapshot.get(b"fixture\0\xff", &control), false);
         rejected(records.allocate_transaction(&control), false);
+        rejected(records.identifier_watermark(b"format-probe", &control), false);
+        rejected(records.allocate_identifiers(b"format-probe", IdentifierRequest::Observe(78), &control), false);
         rejected(records.commit(pending_id, &empty, &control), false);
         rejected(records.abort(pending_id, &control), false);
+        rejected(records.reclaim_versions(&control), false);
         return;
     }
     assert_eq!(action, "verify");

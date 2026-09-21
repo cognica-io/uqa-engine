@@ -12,7 +12,7 @@ The 0.2 series includes SQL object and privilege lifecycle changes, durable expr
 
 ## Unreleased MVCC writer compatibility
 
-Common record format 41 atomically upgrades formats 1–40 and rejects incompatible reopened and retained readers and writers. Format 40 was also used by development revisions that could not decode the JSON extraction dispatch added from main; its numeric-expression predecessor proof does not cover that change. The new boundary preserves existing records, identities, histories, identifier allocations and commit receipts. Native mapping 8, catalog version 49 and domain format 3 remain unchanged. Reverting requires a pre-upgrade backup.
+Common record format 42 atomically upgrades formats 1–41 and rejects incompatible reopened and retained readers and writers. Format 41 includes development revisions without shared serializable admission and observations; they must not publish data into an SSI-enabled database. Every physical snapshot, allocation, publication, receipt, identifier and reclamation operation validates the current main format. The upgrade preserves existing records, identities, histories, identifier allocations and commit receipts. Native mapping 8, catalog version 49, domain format 3 and the separate SSI checkpoint formats remain unchanged. Reverting requires a pre-upgrade backup.
 
 ## Unreleased stored index registry
 
