@@ -90,6 +90,7 @@ impl Engine {
         Ok(document.map(uqa_storage::StoredDocument::into_fields))
     }
 
+    /// Count documents retained by the table's text index in the selected transaction view.
     pub fn document_count(&self, table: &str) -> Result<u64, SQLError> {
         self.with_direct_table_read(table, |engine, _, table| {
             let index = table.inverted_index.read();

@@ -16,8 +16,7 @@ use uqa_core::{DocId, Value};
 use uqa_storage::{
     CatalogFacade, DocumentStore, InvertedIndex, PersistentStorageBackend,
     PersistentStorageIdentity, PersistentStorageProvider, PersistentStorageSession,
-    StorageBackendError, StorageBackendResult, StorageSavepointId, VectorIndex,
-    VectorIndexOpenMode, VectorIndexSpec,
+    StorageBackendResult, StorageSavepointId, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
 };
 
 #[derive(Clone)]
@@ -102,17 +101,7 @@ impl PersistentStorageProvider for SQLiteStorageProvider {
     }
 
     fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {
-        let Some(path) = self.connection.database_path() else {
-            return Ok(None);
-        };
-        PersistentStorageIdentity::for_database_path(path)
-            .map(Some)
-            .map_err(|error| {
-                StorageBackendError::Other(format!(
-                    "resolve SQLite database identity `{}`: {error}",
-                    path.display()
-                ))
-            })
+        self.connection.storage_identity()
     }
 }
 
@@ -172,10 +161,7 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
     }
 
     fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {
-        let Some(path) = self.conn.database_path() else {
-            return Ok(None);
-        };
-        PersistentStorageIdentity::for_database_path(path).map(Some)
+        self.conn.storage_identity()
     }
 
     fn open_session(&self) -> StorageBackendResult<PersistentStorageSession> {
@@ -464,6 +450,7 @@ mod tests {
 
     use uqa_analysis::analyzer::standard_analyzer;
     use uqa_core::Value;
+    use uqa_storage::StorageBackendError;
 
     use super::*;
     use crate::{Catalog, SQLiteError};

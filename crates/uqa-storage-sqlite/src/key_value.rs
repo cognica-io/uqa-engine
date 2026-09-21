@@ -502,18 +502,7 @@ impl PersistentStorageProvider for SQLiteKeyValueStorage {
     fn storage_identity(
         &self,
     ) -> StorageBackendResult<Option<uqa_storage::PersistentStorageIdentity>> {
-        let connection = self.store.connection();
-        let Some(path) = connection.database_path() else {
-            return Ok(None);
-        };
-        uqa_storage::PersistentStorageIdentity::for_database_path(path)
-            .map(Some)
-            .map_err(|error| {
-                uqa_storage::StorageBackendError::Other(format!(
-                    "resolve SQLite key/value database identity `{}`: {error}",
-                    path.display()
-                ))
-            })
+        self.store.connection().storage_identity()
     }
 }
 

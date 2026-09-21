@@ -13,6 +13,18 @@ use uqa_engine::{SQLFunctionOptions, SQLFunctionVolatility};
 use uqa_sql::SQLError;
 use uqa_storage::mvcc::SerializableTransactionId;
 
+fn prepare_indexed_tables(session: &Session) {
+    session.sql("ALTER TABLE left_t ADD COLUMN body TEXT DEFAULT 'indexed'; ALTER TABLE right_t ADD COLUMN body TEXT DEFAULT 'indexed'; CREATE INDEX left_body ON left_t USING gin(body); CREATE INDEX right_body ON right_t USING gin(body)");
+}
+
+fn indexed_fixtures() -> (tempfile::TempDir, Vec<Session>) {
+    let fixtures = super::fixtures();
+    for session in &fixtures.1 {
+        prepare_indexed_tables(session);
+    }
+    fixtures
+}
+
 #[derive(Clone, Copy, Debug)]
 enum DirectRead {
     Document,
@@ -41,7 +53,7 @@ impl DirectRead {
 #[test]
 fn first_direct_read_keeps_its_snapshot_and_participant_across_savepoint_undo() {
     for first in DirectRead::ALL {
-        let (_directory, fixtures) = fixtures();
+        let (_directory, fixtures) = indexed_fixtures();
         for a in fixtures {
             let b = a.sibling();
             let id = a.engine.table_doc_ids("left_t").unwrap()[0];
@@ -59,7 +71,7 @@ fn first_direct_read_keeps_its_snapshot_and_participant_across_savepoint_undo() 
                 "{first:?}"
             );
             let original = participant(&a).unwrap();
-            b.sql("UPDATE left_t SET v = 3 WHERE id = 1; INSERT INTO left_t VALUES (2, 3)");
+            b.sql("UPDATE left_t SET v = 3 WHERE id = 1; INSERT INTO left_t (id, v) VALUES (2, 3)");
             a.sql("ROLLBACK TO before_read");
             assert_eq!(
                 a.engine.get_document("left_t", id).unwrap().unwrap()["v"],
@@ -96,12 +108,12 @@ fn direct_point_and_empty_reads_reject_either_second_committer_of_write_skew() {
         (DirectRead::Count, true),
     ] {
         for reverse in [false, true] {
-            let (_directory, fixtures) = fixtures();
+            let (_directory, fixtures) = indexed_fixtures();
             for a in fixtures {
                 let b = a.sibling();
                 let table = if empty { "empty_t" } else { "left_t" };
                 let id = if empty {
-                    a.sql("CREATE TABLE empty_t (id INTEGER PRIMARY KEY, v INTEGER)");
+                    a.sql("CREATE TABLE empty_t (id INTEGER PRIMARY KEY, v INTEGER, body TEXT); CREATE INDEX empty_body ON empty_t USING gin(body)");
                     99
                 } else {
                     a.engine.table_doc_ids(table).unwrap()[0]
@@ -123,9 +135,13 @@ fn direct_point_and_empty_reads_reject_either_second_committer_of_write_skew() {
                         .add_document(
                             table,
                             id,
-                            [("id".into(), Value::Int(99)), ("v".into(), Value::Int(2))]
-                                .into_iter()
-                                .collect(),
+                            [
+                                ("id".into(), Value::Int(99)),
+                                ("v".into(), Value::Int(2)),
+                                ("body".into(), Value::Str("indexed".into())),
+                            ]
+                            .into_iter()
+                            .collect(),
                         )
                         .unwrap();
                 } else {
@@ -134,7 +150,11 @@ fn direct_point_and_empty_reads_reject_either_second_committer_of_write_skew() {
                 let (winner, loser) = if reverse { (&b, &a) } else { (&a, &b) };
                 winner.sql("COMMIT");
                 assert_eq!(
-                    loser.engine.sql("COMMIT", &[]).unwrap_err().sqlstate(),
+                    loser
+                        .engine
+                        .sql("COMMIT", &[])
+                        .expect_err("crossed reads and writes must form a serialization cycle")
+                        .sqlstate(),
                     Some("40001"),
                     "{read:?}, empty={empty}, reverse={reverse}"
                 );
@@ -150,6 +170,7 @@ fn default_deferrable_read(cancel: bool) {
             let directory = tempfile::tempdir().unwrap();
             let (writer, records) =
                 observed_fixture(provider, &directory.path().join("direct-read.redb"));
+            prepare_indexed_tables(&writer);
             let reader = writer.sibling();
             let id = writer.engine.table_doc_ids("right_t").unwrap()[0];
             reader.sql("SET default_transaction_isolation = 'serializable'; SET default_transaction_read_only = on; SET default_transaction_deferrable = on");
@@ -170,7 +191,7 @@ fn default_deferrable_read(cancel: bool) {
                     assert_eq!(query.join().unwrap().unwrap_err().sqlstate(), Some("57014"));
                 } else {
                     let publication = writer.engine.sql(
-                        "UPDATE right_t SET v = 2 WHERE id = 1; INSERT INTO right_t VALUES (2, 2); COMMIT",
+                        "UPDATE right_t SET v = 2 WHERE id = 1; INSERT INTO right_t (id, v) VALUES (2, 2); COMMIT",
                         &[],
                     );
                     if publication.is_err() {
@@ -208,7 +229,7 @@ fn cancelled_implicit_direct_reads_release_admission_and_recover() {
 #[test]
 fn direct_read_errors_abort_the_active_frame_and_allow_savepoint_recovery() {
     for read in DirectRead::ALL {
-        let (_directory, fixtures) = fixtures();
+        let (_directory, fixtures) = indexed_fixtures();
         for a in fixtures {
             a.sql("BEGIN; UPDATE right_t SET v = 2; SAVEPOINT before_read");
             assert_eq!(
@@ -236,7 +257,7 @@ fn direct_read_errors_abort_the_active_frame_and_allow_savepoint_recovery() {
 #[test]
 fn direct_reads_retain_access_share_until_their_transaction_finishes() {
     for read in DirectRead::ALL {
-        let (_directory, fixtures) = fixtures();
+        let (_directory, fixtures) = indexed_fixtures();
         for a in fixtures {
             let b = a.sibling();
             let id = a.engine.table_doc_ids("left_t").unwrap()[0];
@@ -246,7 +267,7 @@ fn direct_reads_retain_access_share_until_their_transaction_finishes() {
             assert_eq!(
                 b.engine
                     .sql("LOCK TABLE left_t IN ACCESS EXCLUSIVE MODE NOWAIT", &[])
-                    .unwrap_err()
+                    .expect_err("direct read must retain AccessShare")
                     .sqlstate(),
                 Some("55P03")
             );
@@ -259,7 +280,7 @@ fn direct_reads_retain_access_share_until_their_transaction_finishes() {
 
 #[test]
 fn a_callback_direct_read_keeps_the_outer_read_committed_statement_snapshot() {
-    let (_directory, fixtures) = fixtures();
+    let (_directory, fixtures) = indexed_fixtures();
     for a in fixtures {
         let peer = a.sibling();
         let id = a.engine.table_doc_ids("left_t").unwrap()[0];

@@ -22,6 +22,7 @@ use uqa_storage::{mvcc::VersionedKeyValueStore, KeyValueStore, StorageEncryption
 
 use crate::compressed_vfs::{self, SQLiteCompressedContainerAnchor, SQLiteCompressionOptions};
 
+mod identity;
 mod logical;
 mod native;
 mod native_restore;
@@ -175,6 +176,7 @@ struct PoolState {
 }
 
 struct ConnectionPool {
+    memory_identity: Mutex<Option<String>>,
     serializable_leases: Mutex<Option<Arc<uqa_storage::mvcc::LocalSerializableLeases>>>,
     serializable_connection: Mutex<Option<(uqa_storage::mvcc::DatabaseId, ManagedConnection)>>,
     snapshot_registry: Mutex<
@@ -197,6 +199,7 @@ struct ConnectionPool {
 impl ConnectionPool {
     fn new(spec: ConnectionSpec, initial: Connection, max_connections: usize) -> Arc<Self> {
         Arc::new(Self {
+            memory_identity: Mutex::new(None),
             serializable_leases: Mutex::new(None),
             serializable_connection: Mutex::new(None),
             snapshot_registry: Mutex::new(None),
@@ -374,17 +377,6 @@ impl ManagedConnection {
             return Self::open_in_memory();
         }
         Self::open_with_optional_key(path, None)
-    }
-
-    /// Return the backing database path for a file-backed connection.
-    #[must_use]
-    pub fn database_path(&self) -> Option<&Path> {
-        match &self.pool.spec {
-            ConnectionSpec::File { path, .. }
-            | ConnectionSpec::Auxiliary { path, .. }
-            | ConnectionSpec::Compressed { path, .. } => Some(path),
-            ConnectionSpec::Memory => None,
-        }
     }
 
     /// Retain the database credential for encrypted auxiliary storage, including

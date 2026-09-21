@@ -8,7 +8,7 @@
 
 use uqa_storage::mvcc::{VersionError, VersionedPersistence, VersionedSessionOptions};
 use uqa_storage::read_control::StorageReadControl;
-use uqa_storage::{KeyValueBatch, PersistentStorageIdentity};
+use uqa_storage::KeyValueBatch;
 
 use super::logical::BoundRecordSession;
 use super::{Arc, KeyValueStore, ManagedConnection, Result, SQLiteError, VersionedKeyValueStore};
@@ -69,10 +69,7 @@ impl ManagedConnection {
         if self.session.transaction.lock().is_some() {
             return Err(SQLiteError::TransactionAlreadyActive);
         }
-        let identity = self
-            .database_path()
-            .map(PersistentStorageIdentity::for_database_path)
-            .transpose()?;
+        let identity = self.storage_identity()?;
         let records = crate::SQLiteRecordStore::for_native(
             &self.record_connection(),
             &StorageReadControl::with_limit(options.retained_bytes),
