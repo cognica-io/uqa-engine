@@ -130,6 +130,11 @@ impl KeyValueCatalog {
         let identifiers = self.store.identifier_allocator().is_some();
         if let Some(graph) = key.strip_prefix("graph_label_registry::") {
             return self.store.with_mutation(&mut |read, batch| {
+                super::graph_view::GraphRead { read, identifiers }.observe_label_registry_change(
+                    batch,
+                    graph,
+                    Some(value),
+                )?;
                 if identifiers {
                     let view = super::graph_view::GraphRead { read, identifiers };
                     view.fence_definition(batch, graph)?;
@@ -157,6 +162,8 @@ impl KeyValueCatalog {
         let identifiers = self.store.identifier_allocator().is_some();
         self.store.with_mutation(&mut |read, batch| {
             if let Some(graph) = key.strip_prefix("graph_label_registry::") {
+                super::graph_view::GraphRead { read, identifiers }
+                    .observe_label_registry_change(batch, graph, None)?;
                 if identifiers {
                     super::graph_view::GraphRead { read, identifiers }
                         .fence_definition(batch, graph)?;

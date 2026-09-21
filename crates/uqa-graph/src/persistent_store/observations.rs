@@ -8,8 +8,8 @@
 
 use uqa_core::CancellationToken;
 use uqa_storage::catalog::graph_observations::{
-    scope_lifetime, GraphDefinitionKey, GraphDefinitionKind, GraphEntityKey, GraphMembershipKey,
-    GraphSelectionKey,
+    scope_lifetime, GraphDefinitionKey, GraphDefinitionKind, GraphEntityKey,
+    GraphLabelDefinitionKey, GraphLabelName, GraphMembershipKey, GraphSelectionKey,
 };
 use uqa_storage::mvcc::{SerializablePredicate, SerializableReadContext, VersionError};
 use uqa_storage::{read_control::StorageReadControl, GraphEntityFilter, GraphEntityKind};
@@ -40,6 +40,33 @@ impl GraphRead {
 }
 
 impl PersistentGraphStore {
+    pub(crate) fn observe_labels(&self, graph: &str, label: Option<&str>) -> GraphStoreResult<()> {
+        let Some(read) = &self.read else {
+            return Ok(());
+        };
+        self.observe_definition(GraphDefinitionKind::NamedGraph, Some(graph))?;
+        let label = label.map(|label| {
+            for kind in [crate::LabelKind::Vertex, crate::LabelKind::Edge] {
+                if label == kind.default_label_name() {
+                    return GraphLabelName::Reserved(kind.default_label_id());
+                }
+            }
+            GraphLabelName::Named(label)
+        });
+        let mut previous = None;
+        self.storage.visit_selection_namespaces(&mut |namespace| {
+            let object = namespace.serializable_scope_object();
+            if previous != Some(object) {
+                previous = Some(object);
+                read.observe(
+                    namespace,
+                    GraphLabelDefinitionKey::new(namespace, graph, label).predicate(),
+                )?;
+            }
+            Ok(())
+        })
+    }
+
     /// Attribute a semantic catalog lookup even when its result comes from an immutable definition cache. Physical catalog restoration and planner estimates remain unobserved.
     pub fn observe_definition(
         &self,

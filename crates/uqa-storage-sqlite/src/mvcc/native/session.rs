@@ -8,6 +8,7 @@
 
 mod graph;
 mod graph_definitions;
+mod graph_labels;
 mod graph_observations;
 mod graph_selection;
 
@@ -249,6 +250,7 @@ impl NativeSnapshot {
     ) -> Result<()> {
         let record = NativeRecord::encode(family, owner, row, &self.control)?;
         self.observe_graph_definition_put(batch, family, owner, row)?;
+        self.observe_graph_labels_put(batch, family, owner, row)?;
         batch.put(record.key(), record.row())?;
         Ok(())
     }
@@ -261,6 +263,7 @@ impl NativeSnapshot {
         prefix: &[ValueRef<'_>],
     ) -> Result<()> {
         self.observe_graph_definition_delete(batch, family, owner, prefix)?;
+        self.observe_graph_labels_delete(batch, family, owner, prefix)?;
         batch.delete_prefix(
             &NativeRecordIdentity::new(family, owner)?.encode_prefix(prefix, &self.control)?,
         )?;

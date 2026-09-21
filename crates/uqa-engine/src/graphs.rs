@@ -95,11 +95,17 @@ impl Engine {
             uqa_storage::catalog::graph_observations::GraphDefinitionKind::NamedGraph,
             None,
         )?;
+        let context = self.graph_read_context()?;
         self.visible_graph_handles()
             .iter()
             .map(|(name, store)| {
-                store
-                    .graph_labels(name)
+                let labels = match (store.as_ref(), context.as_ref()) {
+                    (uqa_graph::GraphStoreHandle::Persistent(store), Some(context)) => store
+                        .with_serializable_read(context.clone(), &self.runtime.cancellation)
+                        .graph_labels(name),
+                    _ => store.graph_labels(name),
+                };
+                labels
                     .map(|labels| (name.clone(), labels))
                     .map_err(graph_store_error)
             })

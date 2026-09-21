@@ -283,7 +283,16 @@ impl PersistentGraphStore {
         self.transaction(|store| {
             store.require_graph(graph)?;
             store.storage.guard_definition(Some(graph))?;
-            let mut registry = store.label_registry(graph)?;
+            let mut registry = store.restored_registry(graph)?;
+            let selected = if label.is_empty() {
+                kind.default_label_name()
+            } else {
+                label
+            };
+            store.observe_labels(graph, Some(selected))?;
+            if registry.label_kind(selected).is_none() {
+                store.observe_labels(graph, Some(kind.default_label_name()))?;
+            }
             let label_id = store.resolve_label(&mut registry, label, kind)?;
             if let Some(identifiers) = store.storage.identifiers()? {
                 let id = store.allocate_durable_label(&identifiers, &registry, label_id, kind)?;
@@ -297,6 +306,18 @@ impl PersistentGraphStore {
     }
 
     pub fn label_registry(&self, graph: &str) -> GraphStoreResult<GraphLabelRegistry> {
+        self.observe_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::NamedGraph,
+            Some(graph),
+        )?;
+        self.observe_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::LabelRegistry,
+            Some(graph),
+        )?;
+        self.restored_registry(graph)
+    }
+
+    pub(crate) fn restored_registry(&self, graph: &str) -> GraphStoreResult<GraphLabelRegistry> {
         self.require_graph(graph)?;
         let mut registry = self.storage.registry(graph)?;
         if let Some(identifiers) = self.storage.identifiers()? {
@@ -306,7 +327,8 @@ impl PersistentGraphStore {
     }
 
     pub fn graph_labels(&self, graph: &str) -> GraphStoreResult<Vec<GraphLabelInfo>> {
-        Ok(self.label_registry(graph)?.labels())
+        self.observe_labels(graph, None)?;
+        Ok(self.restored_registry(graph)?.labels())
     }
 
     pub fn graph_label_kind(
@@ -314,7 +336,8 @@ impl PersistentGraphStore {
         graph: &str,
         label: &str,
     ) -> GraphStoreResult<Option<LabelKind>> {
-        Ok(self.label_registry(graph)?.label_kind(label))
+        self.observe_labels(graph, Some(label))?;
+        Ok(self.restored_registry(graph)?.label_kind(label))
     }
 
     pub fn import_label_registry(
@@ -333,7 +356,7 @@ impl PersistentGraphStore {
     /// retaining their properties or an entity map in the engine.
     pub fn rebuild_label_registry_from_ids(&mut self, graph: &str) -> GraphStoreResult<()> {
         self.transaction(|store| {
-            let mut registry = store.label_registry(graph)?;
+            let mut registry = store.restored_registry(graph)?;
             for kind in [GraphEntityKind::Vertex, GraphEntityKind::Edge] {
                 store.for_each_id(GraphEntityFilter::new(kind, Some(graph)), |id| {
                     match kind {
@@ -362,7 +385,11 @@ impl PersistentGraphStore {
         kind: LabelKind,
     ) -> GraphStoreResult<Option<u32>> {
         self.transaction(|store| {
-            let mut registry = store.label_registry(graph)?;
+            store.observe_labels(graph, Some(label))?;
+            let mut registry = store.restored_registry(graph)?;
+            if registry.label_kind(label).is_none() {
+                store.observe_labels(graph, Some(kind.default_label_name()))?;
+            }
             let result = registry
                 .register_label(label, kind)?
                 .map(|proposed| store.reserve_label_definition(&mut registry, label, proposed))
@@ -380,12 +407,14 @@ impl PersistentGraphStore {
         label: &str,
     ) -> GraphStoreResult<Option<(u32, LabelKind)>> {
         self.transaction(|store| {
-            let mut registry = store.label_registry(graph)?;
+            store.observe_labels(graph, Some(label))?;
+            let mut registry = store.restored_registry(graph)?;
             let Some(kind) = registry.label_kind(label) else {
                 return Ok(None);
             };
             let default = label == kind.default_label_name();
             let id = if default {
+                store.observe_labels(graph, None)?;
                 if let Some(dependent) = registry
                     .labels
                     .keys()

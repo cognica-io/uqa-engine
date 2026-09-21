@@ -259,6 +259,7 @@ impl KeyValueCatalog {
                     ),
                 )?;
             }
+            read.observe_label_registry_change(batch, graph, Some(&snapshot.label_registry_json))?;
             batch.put(
                 &single_str_key(TAG_METADATA, &format!("graph_label_registry::{graph}"))?,
                 &string_value(&snapshot.label_registry_json),
@@ -275,6 +276,7 @@ impl KeyValueCatalog {
             read.observe_definition_change(batch, GraphDefinitionKind::NamedGraph, graph, None)?;
             batch.delete(&single_str_key(TAG_NAMED_GRAPH, graph)?)?;
             read.delete_graph_memberships_into(batch, graph, |_, _| false)?;
+            read.observe_label_registry_change(batch, graph, None)?;
             batch.delete(&single_str_key(
                 TAG_METADATA,
                 &format!("graph_label_registry::{graph}"),

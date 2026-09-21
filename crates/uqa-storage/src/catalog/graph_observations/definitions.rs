@@ -17,6 +17,7 @@ use crate::mvcc::{SerializableKeySpace, SerializablePredicate};
 pub enum GraphDefinitionKind {
     NamedGraph,
     PathIndex,
+    LabelRegistry,
 }
 
 /// A point for one canonical catalog name, or a range for the complete name listing. Fixed size hashes bound retained observations without retaining arbitrary catalog strings.
@@ -35,6 +36,7 @@ impl GraphDefinitionKey {
         let tag = match kind {
             GraphDefinitionKind::NamedGraph => b'n',
             GraphDefinitionKind::PathIndex => b'i',
+            GraphDefinitionKind::LabelRegistry => b'r',
         };
         let mut lower = [0; 33];
         let mut upper = [u8::MAX; 33];

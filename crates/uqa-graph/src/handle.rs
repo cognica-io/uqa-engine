@@ -121,6 +121,35 @@ impl GraphStoreHandle {
             Self::Persistent(store) => store.graph_labels(graph),
         }
     }
+
+    /// Cypher validates the registry even for constant expressions, but only required default relations contribute semantic label dependencies.
+    pub(crate) fn default_label_relations(
+        &self,
+        graph: &str,
+        required: [bool; 2],
+    ) -> GraphStoreResult<[bool; 2]> {
+        let kinds = [crate::LabelKind::Vertex, crate::LabelKind::Edge];
+        let labels = match self {
+            Self::Memory(store) => store.graph_labels(graph)?,
+            Self::Persistent(store) => {
+                store.observe_definition(
+                    uqa_storage::catalog::graph_observations::GraphDefinitionKind::NamedGraph,
+                    Some(graph),
+                )?;
+                for (required, kind) in required.into_iter().zip(kinds) {
+                    if required {
+                        store.observe_labels(graph, Some(kind.default_label_name()))?;
+                    }
+                }
+                store.restored_registry(graph)?.labels()
+            }
+        };
+        Ok(kinds.map(|kind| {
+            labels
+                .iter()
+                .any(|label| label.id == kind.default_label_id())
+        }))
+    }
     pub fn graph_label_kind(
         &self,
         graph: &str,

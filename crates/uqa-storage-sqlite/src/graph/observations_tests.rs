@@ -12,6 +12,85 @@ use uqa_storage::mvcc::{SerializableKeySpace, SerializablePredicate, VersionedSe
 use uqa_storage::PersistentStorageBackend;
 
 #[test]
+fn standalone_graph_label_definitions_preserve_scope_and_counter_independence() {
+    for route in [
+        "create",
+        "drop",
+        "list",
+        "counter",
+        "other label",
+        "other scope",
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("graph-labels.db");
+        let first = ManagedConnection::open(&path).unwrap();
+        first
+            .bind_native_records(VersionedSessionOptions::default())
+            .unwrap();
+        let mut a = SQLiteGraphStore::open(first.clone(), None).unwrap();
+        a.create_graph("g").unwrap();
+        a.allocate_vertex_id("P", "g").unwrap();
+        let mut other = SQLiteGraphStore::open(first.clone(), Some("other")).unwrap();
+        other.create_graph("g").unwrap();
+        other.allocate_vertex_id("P", "g").unwrap();
+        let second = ManagedConnection::open(&path).unwrap();
+        second
+            .bind_native_records(VersionedSessionOptions::default())
+            .unwrap();
+        let mut b =
+            SQLiteGraphStore::open(second.clone(), (route == "other scope").then_some("other"))
+                .unwrap();
+        let backend_a = SQLiteStorageBackend::new(first);
+        let backend_b = SQLiteStorageBackend::new(second);
+        backend_a.begin_transaction().unwrap();
+        backend_b.begin_transaction().unwrap();
+        let sa = backend_a.serializable_session().unwrap();
+        let sb = backend_b.serializable_session().unwrap();
+        sa.establish_serializable_snapshot().unwrap();
+        let reader = sb.establish_serializable_snapshot().unwrap();
+        a.read_snapshot(|store| {
+            if route == "list" {
+                assert_eq!(store.graph_labels("g")?.len(), 3);
+            } else {
+                assert_eq!(
+                    store.graph_label_kind("g", if route == "create" { "new" } else { "P" })?,
+                    (route != "create").then_some(uqa_graph::LabelKind::Vertex)
+                );
+            }
+            Ok(())
+        })
+        .unwrap();
+        let key = SerializablePredicate::point([9; 16], SerializableKeySpace::Rows, b"pivot");
+        reader
+            .observe_read(
+                key,
+                &reader.read_control(&uqa_core::CancellationToken::new()),
+            )
+            .unwrap();
+        sa.observe_serializable_write(key).unwrap();
+        match route {
+            "drop" | "other scope" => {
+                b.with_graph_mutation(|store| store.drop_label("g", "P"))
+                    .unwrap();
+            }
+            "counter" => {
+                b.allocate_vertex_id("P", "g").unwrap();
+            }
+            _ => {
+                b.allocate_vertex_id("new", "g").unwrap();
+            }
+        }
+        backend_a.commit_transaction().unwrap();
+        if matches!(route, "counter" | "other label" | "other scope") {
+            backend_b.commit_transaction().unwrap();
+        } else {
+            backend_b.commit_transaction().expect_err(route);
+            backend_b.rollback_transaction().unwrap();
+        }
+    }
+}
+
+#[test]
 fn standalone_graph_definition_names_preserve_scope_and_ignore_registry_only_updates() {
     for route in ["create", "drop", "list", "registry", "other scope"] {
         let directory = tempfile::tempdir().unwrap();

@@ -20,6 +20,9 @@ mod paths;
 #[path = "graph/definitions.rs"]
 mod definitions;
 
+#[path = "graph/labels.rs"]
+mod labels;
+
 fn prepare(session: &Session) {
     session.engine.create_graph("g").unwrap();
     for id in [1, 2] {

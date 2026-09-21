@@ -9,7 +9,8 @@
 use super::graph_view::GraphRead;
 use super::{StoredEdge, StoredVertex};
 use crate::catalog::graph_observations::{
-    GraphDefinitionKey, GraphDefinitionKind, GraphEntityTopology, GraphMembershipKey,
+    observe_label_registry_change, GraphDefinitionKey, GraphDefinitionKind, GraphEntityTopology,
+    GraphMembershipKey,
 };
 use crate::{GraphEntityKind, KeyValueBatch, StorageBackendResult};
 
@@ -36,17 +37,51 @@ impl GraphRead<'_> {
         if batch.serializable_participant().is_none() {
             return Ok(());
         }
-        let tag = match kind {
-            GraphDefinitionKind::NamedGraph => super::TAG_NAMED_GRAPH,
-            GraphDefinitionKind::PathIndex => super::TAG_PATH_INDEX,
+        let key = match kind {
+            GraphDefinitionKind::NamedGraph => super::single_str_key(super::TAG_NAMED_GRAPH, name)?,
+            GraphDefinitionKind::PathIndex => super::single_str_key(super::TAG_PATH_INDEX, name)?,
+            GraphDefinitionKind::LabelRegistry => super::single_str_key(
+                super::TAG_METADATA,
+                &format!("graph_label_registry::{name}"),
+            )?,
         };
-        let old = self.read.get(&super::single_str_key(tag, name)?)?;
+        let old = self.read.get(&key)?;
         if old.as_deref() != new {
             batch.observe_serializable_write(
                 GraphDefinitionKey::new(self.identifier_namespace()?, kind, Some(name)).predicate(),
             )?;
         }
         Ok(())
+    }
+
+    pub(super) fn observe_label_registry_change(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        graph: &str,
+        new: Option<&str>,
+    ) -> StorageBackendResult<()> {
+        if batch.serializable_participant().is_none() {
+            return Ok(());
+        }
+        let old = self.read.get(&super::single_str_key(
+            super::TAG_METADATA,
+            &format!("graph_label_registry::{graph}"),
+        )?)?;
+        let old = old
+            .as_deref()
+            .map(std::str::from_utf8)
+            .transpose()
+            .map_err(|error| {
+                crate::StorageBackendError::Other(format!("invalid UTF-8 graph registry: {error}"))
+            })?;
+        observe_label_registry_change(
+            self.identifier_namespace()?,
+            graph,
+            old,
+            new,
+            batch,
+            self.read.control(),
+        )
     }
 
     pub(super) fn observe_topology_change(

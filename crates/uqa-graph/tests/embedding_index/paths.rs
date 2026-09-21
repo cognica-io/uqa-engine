@@ -12,6 +12,9 @@ mod session;
 #[path = "paths/definitions.rs"]
 mod definitions;
 
+#[path = "paths/labels.rs"]
+mod labels;
+
 use std::{collections::BTreeSet, error::Error};
 use uqa_core::{CancellationToken, Edge, Value, Vertex};
 use uqa_graph::{GraphStore, PathIndex, PersistentGraphStore};
