@@ -70,12 +70,23 @@ struct FaultPersistence {
     fault: AtomicU8,
     identifier_fault: AtomicU8,
     serializable_fault: AtomicU8,
+    serializable_commit: Mutex<Option<uqa_storage::mvcc::SerializableTransactionId>>,
     foreground: std::thread::ThreadId,
+    foreground_transaction_allocations: AtomicUsize,
+    foreground_record_commits: AtomicUsize,
     attempt: Mutex<Option<StorageTransactionId>>,
     aborts: AtomicUsize,
 }
 
 impl FaultPersistence {
+    fn foreground_record_writes(&self) -> (usize, usize) {
+        (
+            self.foreground_transaction_allocations
+                .load(Ordering::Acquire),
+            self.foreground_record_commits.load(Ordering::Acquire),
+        )
+    }
+
     fn fault_for(&self, transaction: StorageTransactionId) -> u8 {
         let fault = self.fault.load(Ordering::Acquire);
         if fault == HEALTHY {
@@ -134,6 +145,10 @@ impl VersionedPersistence for FaultPersistence {
         &self,
         control: &StorageReadControl,
     ) -> VersionResult<StorageTransactionId> {
+        if std::thread::current().id() == self.foreground {
+            self.foreground_transaction_allocations
+                .fetch_add(1, Ordering::AcqRel);
+        }
         self.inner.allocate_transaction(control)
     }
     fn reclaim_versions(&self, control: &StorageReadControl) -> VersionResult<u64> {
@@ -152,6 +167,10 @@ impl VersionedPersistence for FaultPersistence {
         prepared: &PreparedRecordCommit,
         control: &StorageReadControl,
     ) -> CommitResult {
+        if std::thread::current().id() == self.foreground {
+            self.foreground_record_commits
+                .fetch_add(1, Ordering::AcqRel);
+        }
         let fault = self.fault_for(transaction);
         if let Some(error) = rejected_commit_error(fault) {
             return Err(CommitFailure::Rejected(error));
@@ -248,7 +267,10 @@ fn fixtures() -> (tempfile::TempDir, Vec<Arc<FaultPersistence>>) {
                     fault: AtomicU8::new(HEALTHY),
                     identifier_fault: AtomicU8::new(HEALTHY),
                     serializable_fault: AtomicU8::new(HEALTHY),
+                    serializable_commit: Mutex::new(None),
                     foreground: std::thread::current().id(),
+                    foreground_transaction_allocations: AtomicUsize::new(0),
+                    foreground_record_commits: AtomicUsize::new(0),
                     attempt: Mutex::new(None),
                     aborts: AtomicUsize::new(0),
                 })
