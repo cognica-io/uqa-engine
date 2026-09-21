@@ -301,10 +301,6 @@ fn a_durable_allocation_cannot_be_bound_to_two_live_participants() {
 fn read_only_noop_and_invalid_database_paths_do_not_allocate_publication_state() {
     let (mut graph, writable, control) = setup();
     let read_only = graph.admit(true, &control).unwrap();
-    assert!(matches!(
-        graph.prepare_publication(read_only, transaction(7), [3; 32], &control),
-        Err(VersionError::InvalidEncoding(_))
-    ));
     let foreign = StorageTransactionId::new(DatabaseId::from_bytes([99; 16]), 7).unwrap();
     assert!(matches!(
         graph.prepare_publication(writable, foreign, [3; 32], &control),

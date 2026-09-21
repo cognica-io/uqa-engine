@@ -53,12 +53,19 @@ pub(super) fn restore(
     graph: &mut SerializableGraph,
     count: usize,
     supports_leases: bool,
+    supports_read_only_publication: bool,
     decoder: &mut Decoder<'_>,
 ) -> VersionResult<()> {
     graph.transactions.reserve(count)?;
     let mut pending = 0;
     for _ in 0..count {
-        let entry = read(decoder, graph.clock, graph.last_allocation, supports_leases)?;
+        let entry = read(
+            decoder,
+            graph.clock,
+            graph.last_allocation,
+            supports_leases,
+            supports_read_only_publication,
+        )?;
         if graph
             .transactions
             .last()
@@ -80,6 +87,7 @@ fn read(
     clock: u64,
     allocation: u64,
     supports_leases: bool,
+    supports_read_only_publication: bool,
 ) -> VersionResult<Transaction> {
     let id = decoder.number()?;
     let snapshot = decoder.number()?;
@@ -127,7 +135,7 @@ fn read(
     if tag == 0 {
         return Ok(entry);
     }
-    if tag > 3 || entry.read_only || entry.prepared.is_none() {
+    if tag > 3 || (entry.read_only && !supports_read_only_publication) || entry.prepared.is_none() {
         return Err(invalid());
     }
     let allocation = decoder.number()?;

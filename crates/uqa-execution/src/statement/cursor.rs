@@ -159,6 +159,12 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
     context
         .transactions
         .begin_implicit_statement_transaction(is_read_query)?;
+    if let Err(error) = context
+        .transactions
+        .prepare_explicit_statement_snapshot(true)
+    {
+        return rollback_after_statement_error(context.transactions, error);
+    }
     let mut plan = UnifiedPlan::lower_with(statement.clone(), context.aggregates);
     context.cache.cache_sql_statement(
         sql.to_string(),
@@ -183,6 +189,12 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
         context
             .transactions
             .begin_implicit_statement_transaction(false)?;
+        if let Err(error) = context
+            .transactions
+            .prepare_explicit_statement_snapshot(true)
+        {
+            return rollback_after_statement_error(context.transactions, error);
+        }
         plan = UnifiedPlan::lower_with(statement.clone(), context.aggregates);
         if let Err(error) = query_from_plan(&plan) {
             return rollback_after_statement_error(context.transactions, error);

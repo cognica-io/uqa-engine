@@ -61,6 +61,81 @@ fn finish(
 }
 
 #[test]
+fn read_only_maintenance_keeps_physical_receipts_without_allowing_logical_writes() {
+    let (mut graph, control) = setup();
+    let reader = graph.admit(true, &control).unwrap();
+    assert!(graph
+        .observe_write(reader, point(b"user_row"), &control)
+        .is_err());
+    let physical = StorageTransactionId::new(DATABASE, 1).unwrap();
+    let publication = graph
+        .prepare_publication(reader, physical, [8; 32], &control)
+        .unwrap();
+    let encoded = encode(&graph, &control);
+    for magic in [b"UQASER01", b"UQASER02"] {
+        let mut legacy = encoded.clone();
+        legacy[..8].copy_from_slice(magic);
+        let end = legacy.len() - 32;
+        let digest: [u8; 32] = Sha256::digest(&legacy[..end]).into();
+        legacy[end..].copy_from_slice(&digest);
+        assert!(SerializableGraph::read_checkpoint(
+            DATABASE,
+            COORDINATOR,
+            &mut legacy.as_slice(),
+            &control
+        )
+        .is_err());
+    }
+    let mut graph = handoff(graph, &control);
+    assert_eq!(graph.publication(reader).unwrap(), Some(publication));
+    let receipt = CommitReceipt {
+        transaction: physical,
+        sequence: CommitSequence::from_u64(1),
+        fingerprint: [8; 32],
+    };
+    graph
+        .reconcile_publications(&control, |_| Ok(CommitStatus::Committed(receipt)))
+        .unwrap();
+    let graph = handoff(graph, &control);
+    assert_eq!(
+        graph.status(reader).unwrap(),
+        crate::mvcc::SerializableStatus::Committed
+    );
+}
+
+#[test]
+fn earlier_checkpoint_versions_preserve_manual_and_leased_participants() {
+    for magic in [b"UQASER01", b"UQASER02"] {
+        let (mut graph, control) = setup();
+        let leases =
+            std::sync::Arc::new(crate::mvcc::LocalSerializableLeases::new(control.memory()));
+        let participant = (magic == b"UQASER02").then(|| {
+            graph
+                .admit_with_lease(true, &control, |id| leases.retain(id, &control))
+                .unwrap()
+        });
+        let id = participant.as_ref().map_or_else(
+            || graph.admit(true, &control).unwrap(),
+            crate::mvcc::SerializableParticipant::id,
+        );
+        let mut encoded = encode(&graph, &control);
+        encoded[..8].copy_from_slice(magic);
+        let end = encoded.len() - 32;
+        let digest: [u8; 32] = Sha256::digest(&encoded[..end]).into();
+        encoded[end..].copy_from_slice(&digest);
+        let restored = SerializableGraph::read_checkpoint(
+            DATABASE,
+            COORDINATOR,
+            &mut encoded.as_slice(),
+            &control,
+        )
+        .unwrap();
+        restored.check_active(id).unwrap();
+        assert_eq!(&encode(&restored, &control)[..8], b"UQASER03");
+    }
+}
+
+#[test]
 fn independent_owners_keep_phantom_dependencies_and_both_commit_orders() {
     for first_wins in [false, true] {
         let (mut graph, control) = setup();

@@ -50,6 +50,7 @@ impl Engine {
             self.begin_implicit_statement_transaction(false)?;
         }
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.prepare_serializable_transaction_snapshot()?;
             self.lock_relation(table, crate::row_locks::RelationLockMode::RowExclusive)?;
             match self.lock_row(
                 table,

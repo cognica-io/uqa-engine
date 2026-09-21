@@ -81,15 +81,6 @@ fn direct_text_errors_after_private_mutation_cannot_commit_incomplete_intents() 
                     .sql("BEGIN ISOLATION LEVEL SERIALIZABLE", &[])
                     .unwrap();
                 engine
-                    .storage
-                    .backend
-                    .as_ref()
-                    .unwrap()
-                    .serializable_session()
-                    .unwrap()
-                    .establish_serializable_snapshot()
-                    .unwrap();
-                engine
                     .sql("INSERT INTO texts VALUES (2, 'prior')", &[])
                     .unwrap();
                 if savepoint {

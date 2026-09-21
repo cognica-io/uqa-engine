@@ -67,7 +67,7 @@ impl SerializablePublication {
 }
 
 impl SerializableGraph {
-    /// Seal the participant against its caller's already allocated durable transaction. Repeated preparation must preserve both identities and the original fingerprint, including during physical candidate re-preparation. Read-only and no-op participants finish directly through the graph without allocating a durable transaction.
+    /// Seal the participant against its caller's already allocated durable transaction. Repeated preparation must preserve both identities and the original fingerprint, including during physical candidate re-preparation. A logically read-only participant can publish maintenance records outside logical predicate spaces; logical write observations remain forbidden. Participants without physical changes finish directly through the graph without allocating a durable transaction.
     pub fn prepare_publication(
         &mut self,
         participant: SerializableTransactionId,
@@ -79,11 +79,6 @@ impl SerializableGraph {
         let position = self.position(participant)?;
         if transaction.database() != self.database {
             return Err(VersionError::WrongDatabase);
-        }
-        if self.transactions[position].read_only {
-            return Err(VersionError::InvalidEncoding(
-                "read-only serializable participant cannot publish records",
-            ));
         }
         let publication = SerializablePublication {
             participant,

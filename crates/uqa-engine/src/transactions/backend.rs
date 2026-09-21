@@ -77,10 +77,6 @@ impl Engine {
         {
             return Ok(());
         }
-        self.release_backend_reader_before_lock_wait(&mut stack)?;
-        let snapshot_gate = self
-            .row_locks
-            .begin_change_snapshot(&self.runtime.cancellation)?;
         let establish_fixed_snapshot = !fixed_snapshot_already_set
             && sets_transaction_snapshot
             && stack.first().is_some_and(|frame| {
@@ -90,6 +86,27 @@ impl Engine {
                         | uqa_sql::ast::TransactionIsolationLevel::Serializable
                 )
             });
+        // Implicit BEGIN already selected the initial READ COMMITTED command view and matching baseline. Fixed isolation additionally retains its data view and, for SERIALIZABLE, admits the original participant.
+        if !establish_fixed_snapshot
+            && advance_statement_baseline
+            && stack
+                .first()
+                .is_some_and(|frame| frame.implicit_statement && !frame.first_snapshot_set)
+        {
+            return Ok(());
+        }
+        self.release_backend_reader_before_lock_wait(&mut stack)?;
+        if versioned
+            && establish_fixed_snapshot
+            && stack[0].characteristics.isolation
+                == uqa_sql::ast::TransactionIsolationLevel::Serializable
+        {
+            self.retain_serializable_transaction_snapshot(&mut stack, backend.as_ref())?;
+            return Ok(());
+        }
+        let snapshot_gate = self
+            .row_locks
+            .begin_change_snapshot(&self.runtime.cancellation)?;
         if versioned {
             backend
                 .refresh_transaction_snapshot(&self.runtime.cancellation)
@@ -123,14 +140,94 @@ impl Engine {
         Ok(())
     }
 
+    /// Bind the storage-selected participant and data view to the same Engine row-change baseline. Common storage owns deferrable waiting and candidate selection; the adapter scopes only individual captures.
+    fn retain_serializable_transaction_snapshot(
+        &self,
+        stack: &mut Vec<TransactionFrame>,
+        backend: &dyn uqa_storage::PersistentStorageBackend,
+    ) -> Result<(), SQLError> {
+        use uqa_storage::{mvcc::SerializableSnapshotOptions, StorageBackendError};
+        let session = backend.serializable_session().ok_or_else(|| {
+            SQLError::Internal("versioned backend has no serializable session".into())
+        })?;
+        let characteristics = stack[0].characteristics;
+        let mut baseline = None;
+        session
+            .establish_serializable_snapshot_with(
+                SerializableSnapshotOptions {
+                    read_only: characteristics.read_only,
+                    deferrable: characteristics.deferrable,
+                },
+                &mut |capture| {
+                    let gate = self
+                        .row_locks
+                        .begin_change_snapshot(&self.runtime.cancellation)
+                        .map_err(|error| StorageBackendError::backend("snapshot gate", error))?;
+                    capture()?;
+                    baseline = Some(gate.baseline().map_err(|error| {
+                        StorageBackendError::backend("snapshot baseline", error)
+                    })?);
+                    Ok(())
+                },
+            )
+            .map_err(|error| Self::storage_tx_error("admit serializable snapshot", &error))?;
+        let baseline = baseline.ok_or_else(|| {
+            SQLError::Internal(
+                "serializable participant was admitted outside the Engine snapshot boundary".into(),
+            )
+        })?;
+        let (snapshot, graph_snapshot) = self.capture_fixed_transaction_snapshot(stack, backend)?;
+        // A safe candidate may predate commits completed while admission waited. Retain that data view before advancing the command/catalog view used for binding and private writes.
+        let _snapshot_gate = self
+            .row_locks
+            .begin_change_snapshot(&self.runtime.cancellation)?;
+        backend
+            .refresh_transaction_snapshot(&self.runtime.cancellation)
+            .map_err(|error| Self::storage_tx_error("refresh serializable command view", &error))?;
+        self.refresh_pinned_transaction_snapshot()
+            .map_err(|error| Self::storage_tx_error("refresh serializable caches", &error))?;
+        self.install_fixed_transaction_snapshot(stack, snapshot, &graph_snapshot)?;
+        stack[0].snapshot_change_baseline = baseline;
+        stack[0].first_snapshot_set = true;
+        self.update_statement_row_lock_baseline(baseline);
+        Ok(())
+    }
+
+    /// Direct APIs enter the same first-snapshot boundary before taking mutation locks or staging private records. SQL statements already selected their snapshot before execution.
+    pub(crate) fn prepare_serializable_transaction_snapshot(&self) -> Result<(), SQLError> {
+        let needs_snapshot = self
+            .session
+            .transactions
+            .lock()
+            .first()
+            .is_some_and(|frame| {
+                frame.backend_mode == BackendTransactionMode::Versioned
+                    && frame.characteristics.isolation
+                        == uqa_sql::ast::TransactionIsolationLevel::Serializable
+                    && frame.fixed_snapshot.is_none()
+            });
+        if needs_snapshot {
+            self.prepare_explicit_statement_snapshot(true)?;
+        }
+        Ok(())
+    }
+
     /// Keep the fixed data view and its graph resources in the outer transaction and every existing savepoint.
     fn retain_fixed_transaction_snapshot(
         &self,
         stack: &mut Vec<TransactionFrame>,
         backend: &dyn uqa_storage::PersistentStorageBackend,
     ) -> Result<(), SQLError> {
-        let catalog_baseline = self.capture_fixed_transaction_catalog_baseline()?;
-        let (snapshot, graph_snapshot) = if backend.supports_concurrent_pinned_read_and_write() {
+        let (snapshot, graph_snapshot) = self.capture_fixed_transaction_snapshot(stack, backend)?;
+        self.install_fixed_transaction_snapshot(stack, snapshot, &graph_snapshot)
+    }
+
+    fn capture_fixed_transaction_snapshot(
+        &self,
+        stack: &mut Vec<TransactionFrame>,
+        backend: &dyn uqa_storage::PersistentStorageBackend,
+    ) -> Result<(FixedTransactionSnapshot, uqa_graph::PersistentGraphStore), SQLError> {
+        if backend.supports_concurrent_pinned_read_and_write() {
             let snapshot: std::sync::Arc<Engine> =
                 self.open_retained_pinned_read_snapshot()?.into();
             let uqa_graph::GraphStoreHandle::Persistent(graph_store) =
@@ -143,15 +240,24 @@ impl Engine {
                 ));
             };
             let graph_store = graph_store.retain_resource(snapshot.clone());
-            (FixedTransactionSnapshot::Pinned(snapshot), graph_store)
+            Ok((FixedTransactionSnapshot::Pinned(snapshot), graph_store))
         } else {
             let snapshot = self.capture_detached_fixed_transaction_snapshot()?;
             let graph_snapshot =
                 self.detach_graph_storage_snapshot(&self.visible_graph_handles())?;
             self.restart_unwritten_backend_reader(stack)?;
-            (FixedTransactionSnapshot::Detached(snapshot), graph_snapshot)
-        };
-        self.install_fixed_graph_snapshot(&graph_snapshot)?;
+            Ok((FixedTransactionSnapshot::Detached(snapshot), graph_snapshot))
+        }
+    }
+
+    fn install_fixed_transaction_snapshot(
+        &self,
+        stack: &mut [TransactionFrame],
+        snapshot: FixedTransactionSnapshot,
+        graph_snapshot: &uqa_graph::PersistentGraphStore,
+    ) -> Result<(), SQLError> {
+        let catalog_baseline = self.capture_fixed_transaction_catalog_baseline()?;
+        self.install_fixed_graph_snapshot(graph_snapshot)?;
         // FirstSnapshotSet belongs to the outer transaction even when
         // the first read occurs inside an existing SQL savepoint. Those
         // savepoints must restore the fixed graph view, not a live view.
@@ -319,6 +425,7 @@ impl Engine {
 
     pub(crate) fn prepare_explicit_transaction_writer(&self) -> Result<bool, SQLError> {
         let _statement = self.runtime.statement_gate.lock();
+        self.prepare_serializable_transaction_snapshot()?;
         self.prepare_transaction_writer()
     }
 

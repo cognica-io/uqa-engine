@@ -48,6 +48,7 @@ impl Engine {
         names: &[String],
         restart_identity: bool,
     ) -> Result<(), SQLError> {
+        self.prepare_serializable_transaction_snapshot()?;
         let mut ordered = Vec::new();
         let mut lock_order = std::collections::BTreeSet::new();
         for name in names {

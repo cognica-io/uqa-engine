@@ -17,6 +17,41 @@ const SAFE_READER: SerializableSnapshotOptions = SerializableSnapshotOptions {
 };
 
 #[test]
+fn logical_read_only_sessions_can_complete_private_maintenance_records() {
+    for deferrable in [false, true] {
+        let persistence = Persistence::new();
+        let session = persistence.session(1 << 20);
+        session.begin_upgradeable_transaction().unwrap();
+        let context = session
+            .establish_serializable_snapshot_with(
+                SerializableSnapshotOptions {
+                    read_only: true,
+                    deferrable,
+                },
+                &mut |capture| capture(),
+            )
+            .unwrap();
+        assert!(session
+            .observe_serializable_write(predicate(b"user_row"))
+            .is_err());
+        session.put(b"catalog/statistics", b"evaluated").unwrap();
+        session.commit_transaction().unwrap();
+        assert_eq!(
+            persistence.actor_status(context.id()).unwrap(),
+            SerializableStatus::Committed
+        );
+        assert_eq!(
+            persistence
+                .session(1 << 20)
+                .get(b"catalog/statistics")
+                .unwrap()
+                .unwrap(),
+            b"evaluated"
+        );
+    }
+}
+
+#[test]
 fn safe_snapshot_preserves_savepoints_retained_readers_and_original_lifetime() {
     let persistence = Persistence::new();
     let reader = persistence.session(1 << 20);

@@ -96,9 +96,18 @@ impl Engine {
         }
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()?;
-            self.run_existing_transaction_mutation(|| f(self), SQLError::Internal)
+            self.run_existing_transaction_mutation(
+                || {
+                    self.prepare_serializable_transaction_snapshot()?;
+                    f(self)
+                },
+                SQLError::Internal,
+            )
         } else {
-            self.transaction(f)
+            self.transaction(|engine| {
+                engine.prepare_serializable_transaction_snapshot()?;
+                f(engine)
+            })
         }
     }
 
@@ -223,15 +232,17 @@ impl Engine {
         let _statement = self.runtime.statement_gate.lock();
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+                .map_err(|error| StorageBackendError::backend("storage transaction", error))?;
             return self.run_existing_transaction_mutation(
                 || {
+                    self.prepare_serializable_transaction_snapshot()
+                        .map_err(|error| {
+                            StorageBackendError::backend("maintenance snapshot", error)
+                        })?;
                     if promote_writer {
                         self.prepare_explicit_transaction_writer()
                             .map_err(|error| {
-                                StorageBackendError::Other(format!(
-                                    "promote explicit engine transaction failed: {error}"
-                                ))
+                                StorageBackendError::backend("promote storage transaction", error)
                             })?;
                     }
                     f(self)
@@ -240,7 +251,7 @@ impl Engine {
             );
         }
         let mut scope = TransactionScope::begin(self).map_err(|error| {
-            StorageBackendError::Other(format!("begin implicit engine transaction failed: {error}"))
+            StorageBackendError::backend("begin implicit storage transaction", error)
         })?;
         if maintenance_can_override_default_read_only {
             if let Some(frame) = self.session.transactions.lock().last_mut() {
@@ -248,13 +259,16 @@ impl Engine {
                 frame.characteristics.read_only = false;
             }
         }
-        if let Err(error) = promote_writer
-            .then(|| self.prepare_explicit_transaction_writer())
-            .transpose()
-        {
-            let error = StorageBackendError::Other(format!(
-                "promote implicit engine transaction failed: {error}"
-            ));
+        let preparation = self
+            .prepare_serializable_transaction_snapshot()
+            .and_then(|()| {
+                promote_writer
+                    .then(|| self.prepare_explicit_transaction_writer())
+                    .transpose()
+                    .map(|_| ())
+            });
+        if let Err(error) = preparation {
+            let error = StorageBackendError::backend("prepare implicit storage transaction", error);
             return match scope.rollback() {
                 Ok(()) => Err(error),
                 Err(rollback_error) => Err(StorageBackendError::Other(format!(
@@ -266,9 +280,7 @@ impl Engine {
         match result {
             Ok(Ok(value)) => {
                 scope.commit().map_err(|error| {
-                    StorageBackendError::Other(format!(
-                        "commit implicit engine transaction failed: {error}"
-                    ))
+                    StorageBackendError::backend("commit implicit storage transaction", error)
                 })?;
                 Ok(value)
             }

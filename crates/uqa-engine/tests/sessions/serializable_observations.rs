@@ -36,6 +36,9 @@ mod text;
 #[path = "serializable_observations/graph.rs"]
 mod graph;
 
+#[path = "serializable_observations/admission.rs"]
+mod admission;
+
 struct Session {
     engine: Engine,
     backend: Arc<dyn PersistentStorageBackend>,
@@ -62,12 +65,8 @@ impl Session {
         self.engine
             .sql("BEGIN ISOLATION LEVEL SERIALIZABLE", &[])
             .unwrap();
-        // Admit explicitly while automatic SQL admission and other access paths remain unfinished.
-        self.backend
-            .serializable_session()
-            .unwrap()
-            .establish_serializable_snapshot()
-            .unwrap();
+        // These access-path schedules deliberately select their first snapshot before either session starts its tested access.
+        self.sql("SELECT 1");
     }
 
     fn sql(&self, sql: &str) -> uqa_sql::SQLResult {
