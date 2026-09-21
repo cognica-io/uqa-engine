@@ -7,6 +7,8 @@
 use super::temporal::{MICROS_PER_DAY, MICROS_PER_SECOND};
 use super::*;
 
+mod temporal_keys;
+
 #[test]
 fn dynamic_value_keeps_variable_width_payloads_indirect() {
     let pointer_bytes = std::mem::size_of::<usize>();

@@ -15,6 +15,9 @@ use uqa_storage_sqlite::{ManagedConnection, SQLiteKeyValueStorage, SQLiteStorage
 #[path = "serializable_observations/indexed.rs"]
 mod indexed;
 
+#[path = "serializable_observations/temporal.rs"]
+mod temporal;
+
 struct Session {
     engine: Engine,
     backend: Arc<dyn PersistentStorageBackend>,

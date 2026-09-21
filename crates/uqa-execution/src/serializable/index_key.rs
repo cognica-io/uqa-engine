@@ -16,6 +16,9 @@ use crate::storage_errors::storage_error;
 
 pub type IndexKey = BudgetedVec<u8>;
 
+mod temporal;
+pub use temporal::TemporalIndexDomain;
+
 /// The stored column's comparison domain determines its key order. Numeric predicate bounds are projected into that domain; heterogeneous numeric values do not share an assumed universal byte order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScalarIndexDomain {
@@ -27,6 +30,7 @@ pub enum ScalarIndexDomain {
     FixedChar,
     Bytes,
     JsonText,
+    Temporal(TemporalIndexDomain),
 }
 
 pub struct IndexKeyRange {
@@ -71,7 +75,7 @@ impl ScalarIndexDomain {
             ColumnType::Bpchar | ColumnType::Character(_) => Self::FixedChar,
             ColumnType::Bytea => Self::Bytes,
             ColumnType::Json => Self::JsonText,
-            _ => return None,
+            _ => return TemporalIndexDomain::from_column_type(ty).map(Self::Temporal),
         })
     }
 
@@ -85,6 +89,7 @@ impl ScalarIndexDomain {
             Self::FixedChar => 5,
             Self::Bytes => 6,
             Self::JsonText => 7,
+            Self::Temporal(_) => 8,
         }
     }
 
@@ -108,6 +113,11 @@ impl ScalarIndexDomain {
                 self.text_key(value.trim_end_matches(' ').as_bytes(), control)
             }
             (Self::Bytes, Value::Bytes(value)) => self.text_key(value, control),
+            (Self::Temporal(_), Value::Temporal(value)) => {
+                let mut key = self.start_key(control)?;
+                value.write_comparison_key(|part| extend(&mut key, part))?;
+                Ok(key)
+            }
             _ => Err(SQLError::Internal(
                 "stored index value does not match its comparison domain".into(),
             )),
@@ -298,6 +308,13 @@ impl ScalarIndexDomain {
         inclusive: bool,
         control: &StorageReadControl,
     ) -> Result<Bound<IndexKey>, SQLError> {
+        let parsed = match (self, value) {
+            (Self::Temporal(domain), Value::Str(text)) => {
+                domain.parse(text, control)?.map(Value::Temporal)
+            }
+            _ => None,
+        };
+        let value = parsed.as_ref().unwrap_or(value);
         let key = match (self, value) {
             (Self::Decimal, Value::Decimal(value)) => self.decimal_key(value, control)?,
             (Self::Decimal, Value::Int(_) | Value::Bool(_) | Value::Float(_)) => {
@@ -313,7 +330,8 @@ impl ScalarIndexDomain {
             (Self::Text, Value::Str(_))
             | (Self::FixedChar, Value::FixedChar(_))
             | (Self::Bytes, Value::Bytes(_))
-            | (Self::JsonText, Value::Json(_)) => self.encode(value, control)?,
+            | (Self::JsonText, Value::Json(_))
+            | (Self::Temporal(_), Value::Temporal(_)) => self.encode(value, control)?,
             _ => {
                 let sample = match self {
                     Self::Decimal => Value::Decimal(DecimalValue::from_i64(0)),
@@ -321,6 +339,7 @@ impl ScalarIndexDomain {
                     Self::FixedChar => Value::FixedChar(String::new()),
                     Self::Bytes => Value::Bytes(Vec::new()),
                     Self::JsonText => Value::Json(String::new()),
+                    Self::Temporal(domain) => Value::Temporal(domain.sample()),
                     _ => return Err(invalid_rank()),
                 };
                 return match sample.cmp(value) {

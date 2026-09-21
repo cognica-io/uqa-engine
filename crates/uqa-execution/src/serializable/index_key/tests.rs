@@ -10,6 +10,8 @@ use super::*;
 use crate::catalog::index::value::ColumnValueIndex;
 use proptest::prelude::*;
 
+mod temporal;
+
 fn decimal(text: &str) -> Value {
     Value::Decimal(DecimalValue::parse(text).unwrap())
 }

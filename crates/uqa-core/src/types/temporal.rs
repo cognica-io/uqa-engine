@@ -158,6 +158,16 @@ impl TemporalValue {
         }
     }
 
+    /// Append a key whose lexicographic order follows the native temporal comparator. The caller controls output allocation and errors; no intermediate key is allocated.
+    pub fn write_comparison_key<E>(
+        &self,
+        mut write: impl FnMut(&[u8]) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let (kind, rank) = self.sort_key();
+        write(&[kind])?;
+        write(&((rank as u128) ^ (1_u128 << 127)).to_be_bytes())
+    }
+
     fn sort_key(&self) -> (u8, i128) {
         match self {
             Self::Date { days } => (0, i128::from(*days)),
