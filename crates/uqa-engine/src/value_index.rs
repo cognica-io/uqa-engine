@@ -483,7 +483,7 @@ impl crate::Engine {
             pending: backend.btree_index_repairs()?.into_iter().collect(),
             ..PersistentValueIndexRepairPlan::default()
         };
-        for table in self.table_names()? {
+        for table in self.table_names_in_execution()? {
             let desired: BTreeSet<ValueIndexKey> =
                 self.value_indexable_fields(&table)?.into_iter().collect();
             let actual: BTreeSet<ValueIndexKey> =

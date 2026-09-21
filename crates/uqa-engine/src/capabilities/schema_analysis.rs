@@ -34,7 +34,7 @@ impl uqa_sql::schema::SchemaExpressionCatalog for Engine {
         Engine::registered_runtime_function_volatility(self, name)
     }
     fn schema_expression_columns(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, SQLError> {
-        self.try_describe_table(table)
+        self.describe_table_in_execution(table)
             .map_err(|error| SQLError::Internal(error.to_string()))
     }
 }

@@ -48,6 +48,9 @@ mod direct_writes;
 #[path = "serializable_observations/direct_queries.rs"]
 mod direct_queries;
 
+#[path = "serializable_observations/catalog_reads.rs"]
+mod catalog_reads;
+
 struct Session {
     engine: Engine,
     backend: Arc<dyn PersistentStorageBackend>,

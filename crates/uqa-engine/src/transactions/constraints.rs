@@ -443,7 +443,7 @@ impl Engine {
                 .map(|constraint| constraint.identity)
                 .collect::<Vec<_>>();
         let live_relations = self
-            .table_names()
+            .table_names_in_execution()
             .map_err(|error| SQLError::Internal(format!("read live constraint tables: {error}")))?
             .into_iter()
             .map(|table| {

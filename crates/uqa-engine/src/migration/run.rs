@@ -32,7 +32,7 @@ pub fn migrate_python_database(
     let specs = load_table_specs(&source_conn, &index_rows)?;
     let engine = Engine::open(destination)?;
 
-    if !engine.table_names()?.is_empty() || !engine.list_graphs()?.is_empty() {
+    if !engine.table_names_in_execution()?.is_empty() || !engine.list_graphs()?.is_empty() {
         return Err(PythonMigrationError::DestinationNotEmpty(
             destination.display().to_string(),
         ));

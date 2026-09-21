@@ -55,7 +55,7 @@ impl Engine {
             if let Some(canonical) =
                 engine.resolve_table_ddl_target(table, "ALTER TABLE DROP COLUMN")?
             {
-                if engine.try_table_has_column(&canonical, column)? {
+                if engine.table_has_column_in_execution(&canonical, column)? {
                     engine
                         .drop_column_routine_dependents(&canonical, column, false)
                         .map_err(|error| StorageBackendError::Other(error.to_string()))?;

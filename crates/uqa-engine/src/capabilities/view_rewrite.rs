@@ -30,10 +30,10 @@ impl ViewRewriteCatalog for Engine {
         Engine::try_resolve_view_name(self, name).map_err(|error| error.to_string())
     }
     fn try_describe_table(&self, name: &str) -> Result<Option<Vec<ColumnDef>>, String> {
-        Engine::try_describe_table(self, name).map_err(|error| error.to_string())
+        Engine::describe_table_in_execution(self, name).map_err(|error| error.to_string())
     }
     fn try_table_columns(&self, name: &str) -> Result<Vec<String>, String> {
-        Engine::try_table_columns(self, name).map_err(|error| error.to_string())
+        Engine::table_columns_in_execution(self, name).map_err(|error| error.to_string())
     }
     fn rules_for(&self, name: &str, event: RuleEvent) -> Result<Vec<StoredRule>, SQLError> {
         self.event_lookup_context().rules_for(name, event)

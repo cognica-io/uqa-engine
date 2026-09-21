@@ -53,7 +53,7 @@ impl uqa_sql::schema::constraint_changes::ConstraintTypeReferrers for Engine {
 }
 impl ConstraintRelations for Engine {
     fn table_names(&self) -> StorageBackendResult<Vec<String>> {
-        Engine::table_names(self)
+        Engine::table_names_in_execution(self)
     }
     fn table_hierarchy(&self, table: &str) -> StorageBackendResult<TableHierarchy> {
         self.try_table_hierarchy(table)

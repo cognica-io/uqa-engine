@@ -425,27 +425,29 @@ fn pinned_reader_defers_sibling_catalog_epochs_until_transaction_end() {
     let reader = root.new_session().unwrap();
     let writer = root.new_session().unwrap();
 
-    {
-        let characteristics = reader.default_transaction_characteristics();
-        let mut stack = reader.session.transactions.lock();
-        reader
-            .begin_transaction_frame(
-                &mut stack,
-                true,
-                true,
-                TransactionFrameKind::ExplicitBlock,
-                characteristics,
-            )
-            .unwrap();
-    }
+    let backend = reader.storage.backend.as_ref().unwrap();
+    backend.begin_read_transaction().unwrap();
+    assert_eq!(reader.transaction_depth(), 0);
     assert!(!reader.has_schema("later").unwrap());
-    writer.sql("CREATE SCHEMA later", &[]).unwrap();
+    assert!(!reader.has_table("later.items").unwrap());
+    writer
+        .sql(
+            "CREATE SCHEMA later; CREATE TABLE later.items(id INTEGER)",
+            &[],
+        )
+        .unwrap();
     writer.create_graph("later_graph").unwrap();
 
     assert!(!reader.has_schema("later").unwrap());
     assert!(!reader.has_graph("later_graph").unwrap());
-    reader.commit().unwrap();
+    assert!(!reader.has_table("later.items").unwrap());
+    assert!(reader.table_names().unwrap().is_empty());
+    assert!(reader.describe_table("later.items").unwrap().is_none());
+    assert_eq!(reader.transaction_depth(), 0);
+    backend.commit_transaction().unwrap();
 
     assert!(reader.has_schema("later").unwrap());
     assert!(reader.has_graph("later_graph").unwrap());
+    assert!(reader.has_table("later.items").unwrap());
+    assert_eq!(reader.table_columns("later.items").unwrap(), ["id"]);
 }

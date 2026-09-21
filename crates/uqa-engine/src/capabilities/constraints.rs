@@ -121,7 +121,7 @@ impl MutationNamespace for Engine {
 
 impl uqa_sql::semantics::conflict::ConflictCatalog for Engine {
     fn try_describe_table(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String> {
-        Engine::try_describe_table(self, table).map_err(|error| error.to_string())
+        Engine::describe_table_in_execution(self, table).map_err(|error| error.to_string())
     }
     fn enforced_keys(&self, table: &str) -> Result<Vec<EnforcedKey>, String> {
         Engine::enforced_keys(self, table).map_err(|error| error.to_string())

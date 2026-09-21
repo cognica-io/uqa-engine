@@ -64,7 +64,7 @@ impl LockingCatalog for Engine {
         Engine::referenceable_keys(self, table).map_err(|error| error.to_string())
     }
     fn table_columns(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String> {
-        self.try_describe_table(table)
+        self.describe_table_in_execution(table)
             .map_err(|error| error.to_string())
     }
 }

@@ -95,6 +95,12 @@ fn fixed_read_attachment_keeps_the_source_snapshot_while_latest_readers_advance(
         );
         assert!(retained.try_table("later").unwrap().is_none());
         assert!(latest.try_table("later").unwrap().is_some());
+        assert!(!retained.has_table("later").unwrap());
+        assert!(latest.has_table("later").unwrap());
+        assert!(retained.describe_table("later").unwrap().is_none());
+        assert_eq!(latest.table_columns("later").unwrap(), ["v"]);
+        assert_eq!(retained.table_names().unwrap(), ["public.t"]);
+        assert_eq!(latest.table_names().unwrap(), ["public.later", "public.t"]);
         assert_eq!(
             retained
                 .storage
@@ -117,6 +123,8 @@ fn fixed_read_attachment_keeps_the_source_snapshot_while_latest_readers_advance(
             Value::Int(1)
         );
         assert!(retained.try_table("later").unwrap().is_none());
+        assert!(!retained.has_table("later").unwrap());
+        assert_eq!(retained.table_columns("t").unwrap(), ["v"]);
     }
 }
 

@@ -52,7 +52,7 @@ impl RetrievalRelations for Engine {
         self.try_describe_query_table(table)
     }
     fn has_table(&self, table: &str) -> StorageBackendResult<bool> {
-        self.has_table(table)
+        self.has_table_in_execution(table)
     }
     fn column_type(&self, table: &str, field: &str) -> StorageBackendResult<Option<ColumnType>> {
         self.column_type(table, field)

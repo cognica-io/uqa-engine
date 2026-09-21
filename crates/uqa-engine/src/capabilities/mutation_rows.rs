@@ -19,11 +19,11 @@ use uqa_storage::DocumentMetadata;
 
 impl MutationRowCatalog for Engine {
     fn column_definitions(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String> {
-        self.try_describe_table(table)
+        self.describe_table_in_execution(table)
             .map_err(|error| error.to_string())
     }
     fn column_names(&self, table: &str) -> Result<Vec<String>, String> {
-        self.try_table_columns(table)
+        self.table_columns_in_execution(table)
             .map_err(|error| error.to_string())
     }
     fn view_schema(&self, name: &str) -> Result<RowSchema, SQLError> {

@@ -85,7 +85,8 @@ impl RetrievalStatisticsTable for TableStatistics {
 }
 impl RetrievalPlanningCatalog for Engine {
     fn has_table(&self, table: &str) -> Result<bool, String> {
-        self.has_table(table).map_err(|error| error.to_string())
+        self.has_table_in_execution(table)
+            .map_err(|error| error.to_string())
     }
     fn resolve_table_name(&self, table: &str) -> Result<Option<String>, String> {
         self.resolve_table_name(table)

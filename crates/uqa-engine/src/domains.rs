@@ -26,7 +26,7 @@ impl Engine {
         if let Some(default) = self.try_column_default_expr(table, column)? {
             return Ok(Some(default));
         }
-        let columns = self.try_describe_table(table)?.unwrap_or_default();
+        let columns = self.describe_table_in_execution(table)?.unwrap_or_default();
         let Some(column) = columns.iter().find(|definition| definition.name == column) else {
             return Ok(None);
         };

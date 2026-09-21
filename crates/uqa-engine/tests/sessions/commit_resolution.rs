@@ -368,6 +368,20 @@ fn retained_commit_resolves_without_replaying_preparation_and_publishes_once() {
             assert_unknown(&root.sql(sql, &[]).unwrap_err());
             assert_eq!(root.pending_commit(), Some(identity));
         }
+        for result in [
+            root.has_table("items").map(|_| ()),
+            root.table_columns("items").map(|_| ()),
+            root.table_has_column("items", "id").map(|_| ()),
+            root.table_names().map(|_| ()),
+            root.describe_table("items").map(|_| ()),
+        ] {
+            let error = result.expect_err("table metadata must not bypass unresolved completion");
+            assert_unknown(&uqa_execution::storage_errors::storage_error(
+                "metadata query",
+                &error,
+            ));
+            assert_eq!(root.pending_commit(), Some(identity));
+        }
         assert_eq!(calls.load(Ordering::Acquire), 2);
         assert_eq!(persistence.aborts.load(Ordering::Acquire), 0);
         persistence.fault.store(HEALTHY, Ordering::Release);

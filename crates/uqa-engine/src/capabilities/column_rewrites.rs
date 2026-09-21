@@ -64,7 +64,7 @@ impl ColumnBackfillState for Engine {
 }
 impl GeneratedRewriteState for Engine {
     fn table_names(&self) -> StorageBackendResult<Vec<String>> {
-        Engine::table_names(self)
+        Engine::table_names_in_execution(self)
     }
     fn advance_next_id(&self, table: &str, id: DocId) -> StorageBackendResult<()> {
         Engine::advance_next_id(self, table, id)
@@ -112,7 +112,7 @@ impl uqa_sql::schema::columns::addition::AddedColumnKeys for Engine {
 
 impl uqa_execution::schema::columns::addition::ColumnAdditionState for Engine {
     fn has_column(&self, table: &str, column: &str) -> StorageBackendResult<bool> {
-        self.try_table_has_column(table, column)
+        self.table_has_column_in_execution(table, column)
     }
     fn create_vector_field(
         &self,
@@ -180,7 +180,7 @@ impl uqa_sql::schema::columns::alteration::ColumnChangeCatalog for Engine {
         table: &str,
         column: &str,
     ) -> Result<bool, uqa_sql::assignment::columns::ColumnCatalogError> {
-        self.try_table_has_column(table, column)
+        self.table_has_column_in_execution(table, column)
             .map_err(|error| Box::new(error) as _)
     }
     fn column_type(

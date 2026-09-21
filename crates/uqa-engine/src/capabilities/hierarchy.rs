@@ -47,7 +47,7 @@ impl uqa_execution::schema::hierarchy::detachment::DetachedConstraintModes for E
 }
 impl HierarchyCatalog for Engine {
     fn try_describe_table(&self, table: &str) -> StorageBackendResult<Option<Vec<ColumnDef>>> {
-        Engine::try_describe_table(self, table)
+        Engine::describe_table_in_execution(self, table)
     }
     fn try_check_constraint_definitions(
         &self,
