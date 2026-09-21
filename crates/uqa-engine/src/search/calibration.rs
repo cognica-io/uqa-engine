@@ -6,6 +6,8 @@
 
 //! Bayesian BM25 parameter loading, staleness, sampling, and estimation.
 
+use uqa_storage::InvertedIndex;
+
 use super::{
     analyze_query_terms, storage_sql_error, BM25Params, BTreeMap, BayesianBM25Params, Engine,
     SQLError, TokenTermKey, UnsupervisedBm25ScoreEstimator,
@@ -213,9 +215,13 @@ impl Engine {
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
-        let current = table_state
-            .inverted_index
-            .read()
+        let index = table_state.inverted_index.read();
+        let index = uqa_execution::serializable::text::ObservedTextIndex::new(
+            index.as_ref(),
+            self.serializable_table_read(table)?,
+            table_state.columns.snapshot(),
+        );
+        let current = index
             .doc_count()
             .map_err(|error| storage_sql_error("read indexed document count", error))?
             as f64;
@@ -248,6 +254,9 @@ impl Engine {
             .search_analyzer_revision(field)
             .map_err(|error| storage_sql_error("resolve calibration analyzer revision", error))?;
         let store = table_state.document_store.read();
+        if let Some(read) = self.serializable_table_read(table)? {
+            read.observe_scan()?;
+        }
         let doc_ids = store
             .doc_ids()
             .map_err(|error| storage_sql_error("read calibration document ids", error))?;
@@ -279,6 +288,11 @@ impl Engine {
         let queries = self.sample_calibration_queries(table, field, &estimator)?;
         let (params, doc_count) = {
             let index = table_state.inverted_index.read();
+            let index = uqa_execution::serializable::text::ObservedTextIndex::new(
+                index.as_ref(),
+                self.serializable_table_read(table)?,
+                table_state.columns.snapshot(),
+            );
             if index
                 .doc_count()
                 .map_err(|error| storage_sql_error("read indexed document count", error))?
@@ -291,14 +305,9 @@ impl Engine {
                 return Ok(None);
             }
             let params = if queries.is_empty() {
-                estimator.estimate(index.as_ref(), field, BM25Params::default())
+                estimator.estimate(&index, field, BM25Params::default())
             } else {
-                estimator.estimate_with_query_keys(
-                    index.as_ref(),
-                    field,
-                    BM25Params::default(),
-                    &queries,
-                )
+                estimator.estimate_with_query_keys(&index, field, BM25Params::default(), &queries)
             }
             .map_err(|error| {
                 storage_sql_error("estimate BM25 score-transform parameters", error)

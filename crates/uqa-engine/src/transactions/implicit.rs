@@ -51,7 +51,7 @@ impl Engine {
         }
     }
 
-    /// Make a direct persistent-engine mutation atomic when the caller has not already opened a transaction. Memory stores validate fallible vector input before their infallible writes; explicit memory transactions retain writable snapshots whose document and inverted-index state is copied on mutation. Avoiding a whole-engine snapshot for each direct memory insert keeps bulk ingestion linear.
+    /// Make a direct persistent-engine mutation atomic. A failed mutation in an existing transaction aborts its current frame or user savepoint through the same recovery boundary as SQL. Memory stores validate fallible vector input before their infallible writes; explicit memory transactions retain writable snapshots whose document and inverted-index state is copied on mutation. Avoiding a whole-engine snapshot for each direct memory insert keeps bulk ingestion linear.
     pub(crate) fn with_implicit_transaction<R>(
         &self,
         f: impl FnOnce(&Self) -> Result<R, SQLError>,
@@ -65,8 +65,13 @@ impl Engine {
         }
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()?;
-            self.prepare_explicit_transaction_writer()?;
-            return f(self);
+            return self.run_existing_transaction_mutation(
+                || {
+                    self.prepare_explicit_transaction_writer()?;
+                    f(self)
+                },
+                SQLError::Internal,
+            );
         }
         if self.storage.backend.is_none() {
             return f(self);
@@ -91,7 +96,7 @@ impl Engine {
         }
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()?;
-            f(self)
+            self.run_existing_transaction_mutation(|| f(self), SQLError::Internal)
         } else {
             self.transaction(f)
         }
@@ -118,13 +123,18 @@ impl Engine {
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()
                 .map_err(|error| map_transaction_error(error.to_string()))?;
-            self.prepare_explicit_transaction_writer()
-                .map_err(|error| {
-                    map_transaction_error(format!(
-                        "promote explicit engine transaction failed: {error}"
-                    ))
-                })?;
-            return f(self);
+            return self.run_existing_transaction_mutation(
+                || {
+                    self.prepare_explicit_transaction_writer()
+                        .map_err(|error| {
+                            map_transaction_error(format!(
+                                "promote explicit engine transaction failed: {error}"
+                            ))
+                        })?;
+                    f(self)
+                },
+                &map_transaction_error,
+            );
         }
         if self.storage.backend.is_none() {
             return f(self);
@@ -225,15 +235,20 @@ impl Engine {
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-            if promote_writer {
-                self.prepare_explicit_transaction_writer()
-                    .map_err(|error| {
-                        StorageBackendError::Other(format!(
-                            "promote explicit engine transaction failed: {error}"
-                        ))
-                    })?;
-            }
-            return f(self);
+            return self.run_existing_transaction_mutation(
+                || {
+                    if promote_writer {
+                        self.prepare_explicit_transaction_writer()
+                            .map_err(|error| {
+                                StorageBackendError::Other(format!(
+                                    "promote explicit engine transaction failed: {error}"
+                                ))
+                            })?;
+                    }
+                    f(self)
+                },
+                StorageBackendError::Other,
+            );
         }
         let mut scope = TransactionScope::begin(self).map_err(|error| {
             StorageBackendError::Other(format!("begin implicit engine transaction failed: {error}"))
@@ -292,9 +307,16 @@ impl Engine {
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()
                 .map_err(|error| error.to_string())?;
-            self.prepare_explicit_transaction_writer()
-                .map_err(|error| format!("promote explicit engine transaction failed: {error}"))?;
-            return f(self);
+            return self.run_existing_transaction_mutation(
+                || {
+                    self.prepare_explicit_transaction_writer()
+                        .map_err(|error| {
+                            format!("promote explicit engine transaction failed: {error}")
+                        })?;
+                    f(self)
+                },
+                std::convert::identity,
+            );
         }
         let mut scope = TransactionScope::begin(self)
             .map_err(|error| format!("begin implicit engine transaction failed: {error}"))?;

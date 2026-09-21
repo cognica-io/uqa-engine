@@ -126,7 +126,7 @@ impl PhysicalRetrievalDriver<'_> {
         let source = static_operator(self.execute_posting_node(source)?);
         let op = ScoreOperator::new(scorer.clone(), source, query_terms.to_vec(), field);
         op.execute(&self.bridge_context()?)
-            .map_err(|error| operator_execution_error("Score", error))
+            .map_err(|error| crate::storage_errors::storage_error("Score", &error))
     }
 
     pub(super) fn execute_vector_similarity(

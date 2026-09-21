@@ -8,47 +8,16 @@
 
 use std::{ops::Bound::Included, sync::Arc};
 
-use uqa_core::{
-    memory::{Budgeted, BudgetedVec},
-    DocId, PostingList,
-};
+use uqa_core::{memory::Budgeted, DocId, PostingList};
 use uqa_sql::{ast::ColumnDef, SQLError};
 use uqa_storage::{
     mvcc::{SerializableKeySpace, SerializablePredicate},
-    read_control::StorageReadControl,
     vector_index::validate_vector_values,
     StorageBackendError, StorageBackendResult, VectorIndex,
 };
 
-use super::{SerializableRelationRead, SerializableWrites};
+use super::{field::prefix as field_prefix, SerializableRelationRead, SerializableWrites};
 use crate::storage_errors::storage_error;
-
-fn field_prefix(
-    columns: &[ColumnDef],
-    field: &str,
-    control: &StorageReadControl,
-) -> StorageBackendResult<BudgetedVec<u8>> {
-    control.check()?;
-    let mut key = BudgetedVec::new(control.memory());
-    if let Some(column) = columns.iter().find(|column| column.name == field) {
-        let identity = column
-            .object_id
-            .filter(|identity| *identity != [0; 16])
-            .ok_or_else(|| {
-                StorageBackendError::Other(format!(
-                    "vector field {field:?} has no immutable column identity"
-                ))
-            })?;
-        key.push(0)?;
-        key.extend_from_slice(&identity)?;
-    } else {
-        // Registered dynamic fields have no column incarnation, even when the table has other declared columns. Their length-delimited name is scoped by the immutable relation and cannot alias a declared column address.
-        key.push(1)?;
-        key.extend_from_slice(&(field.len() as u64).to_be_bytes())?;
-        key.extend_from_slice(field.as_bytes())?;
-    }
-    Ok(key)
-}
 
 /// Retain the original participant with the already-selected index snapshot. Metadata inspection and unused operator contexts do not register a read.
 pub fn observe_snapshot(

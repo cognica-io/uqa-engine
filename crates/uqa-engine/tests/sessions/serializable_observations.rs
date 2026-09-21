@@ -30,6 +30,9 @@ mod temporal;
 #[path = "serializable_observations/vector.rs"]
 mod vector;
 
+#[path = "serializable_observations/text.rs"]
+mod text;
+
 struct Session {
     engine: Engine,
     backend: Arc<dyn PersistentStorageBackend>,

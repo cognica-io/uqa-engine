@@ -10,7 +10,7 @@ use super::{
     document_store_read_error, document_store_write_error, Arc, BTreeMap, DocId, Document, Engine,
     FieldName, IndexConflictProbe, SQLError, TableState, Value,
 };
-use uqa_storage::{DocumentMetadata, StoredDocument};
+use uqa_storage::{DocumentMetadata, InvertedIndex, StoredDocument};
 
 enum CommandOverlayDocument {
     Present(uqa_storage::StoredDocument),
@@ -850,12 +850,14 @@ impl Engine {
                 .put_stored(doc_id, StoredDocument::with_metadata(document, metadata))
                 .map_err(|err| document_store_write_error(&err))?;
         }
-        {
-            let mut index = t.inverted_index.write();
-            index
-                .add_document(doc_id, text_fields)
-                .map_err(|error| SQLError::Internal(format!("index document: {error}")))?;
-        }
+        uqa_execution::serializable::text::add_document(
+            self,
+            &table_name,
+            t.columns.snapshot(),
+            t.inverted_index.write().as_mut(),
+            doc_id,
+            text_fields,
+        )?;
         for (field, index) in t.vector_indexes.write().iter_mut() {
             index
                 .add_many(doc_id, vectors.remove(field).unwrap_or_default())
@@ -920,10 +922,13 @@ impl Engine {
             Self::value_indexes_apply_write(&t, doc_id, Some(old), None);
         }
         drop(store);
-        t.inverted_index
-            .write()
-            .remove_document(doc_id)
-            .map_err(|error| SQLError::Internal(format!("remove indexed document: {error}")))?;
+        uqa_execution::serializable::text::remove_document(
+            self,
+            &table_name,
+            t.columns.snapshot(),
+            t.inverted_index.write().as_mut(),
+            doc_id,
+        )?;
         for idx in t.vector_indexes.write().values_mut() {
             idx.as_mut()
                 .delete(doc_id)
@@ -939,8 +944,15 @@ impl Engine {
 
     pub fn document_count(&self, table: &str) -> Result<u64, SQLError> {
         let t = self.require_table(table)?;
-        let result = t.inverted_index.read().doc_count();
-        result.map_err(|error| SQLError::Internal(format!("read indexed document count: {error}")))
+        let index = t.inverted_index.read();
+        let index = uqa_execution::serializable::text::ObservedTextIndex::new(
+            index.as_ref(),
+            self.serializable_table_read(table)?,
+            t.columns.snapshot(),
+        );
+        index.doc_count().map_err(|error| {
+            uqa_execution::storage_errors::storage_error("read indexed document count", &error)
+        })
     }
 }
 

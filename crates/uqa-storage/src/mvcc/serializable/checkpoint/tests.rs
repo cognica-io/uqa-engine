@@ -177,6 +177,56 @@ fn vector_candidate_ranges_and_intents_survive_handoff_without_aliasing_rows() {
 }
 
 #[test]
+fn text_ranges_and_points_survive_handoff_without_aliasing_other_access_paths() {
+    for other in [
+        SerializableKeySpace::Rows,
+        SerializableKeySpace::Index([64; 16]),
+        SerializableKeySpace::Vectors,
+    ] {
+        let (mut graph, control) = setup();
+        let first = graph.admit(false, &control).unwrap();
+        let second = graph.admit(false, &control).unwrap();
+        let range = SerializablePredicate::range(
+            TABLE,
+            SerializableKeySpace::Text,
+            Included(b"term"),
+            Excluded(b"tern"),
+        );
+        graph.observe_read(first, range, &control).unwrap();
+        graph
+            .observe_write(
+                second,
+                SerializablePredicate::point(TABLE, other, b"term/doc"),
+                &control,
+            )
+            .unwrap();
+        assert!(graph.outgoing.is_empty());
+        graph.observe_read(second, range, &control).unwrap();
+        graph
+            .observe_write(
+                first,
+                SerializablePredicate::point(TABLE, SerializableKeySpace::Text, b"term/doc"),
+                &control,
+            )
+            .unwrap();
+        let mut graph = handoff(graph, &control);
+        graph
+            .observe_write(
+                second,
+                SerializablePredicate::point(TABLE, SerializableKeySpace::Text, b"term/phantom"),
+                &control,
+            )
+            .unwrap();
+        let mut graph = handoff(graph, &control);
+        finish(&mut graph, first, &control);
+        assert!(matches!(
+            graph.prepare_commit(second, &control),
+            Err(VersionError::SerializationConflict { .. })
+        ));
+    }
+}
+
+#[test]
 fn prepared_receipts_and_terminal_precedence_survive_a_new_state_owner() {
     for committed in [false, true] {
         let (mut graph, control) = setup();

@@ -12,12 +12,13 @@ use uqa_core::memory::{BudgetedVec, MemoryBudget};
 
 use super::{VersionError, VersionResult};
 
-/// Rows, ordered index keys and canonical vector candidates occupy separate logical address spaces. Index identities must describe immutable incarnations, not reusable names or catalog OIDs. Execution binds vector keys to fields and document identities, independently of approximate-index nodes or posting clusters.
+/// Rows, ordered index keys, canonical vector candidates and text data occupy separate logical address spaces. Index identities must describe immutable incarnations, not reusable names or catalog OIDs. Execution binds vector keys to fields and document identities, independently of approximate-index nodes or posting clusters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SerializableKeySpace {
     Rows,
     Index([u8; 16]),
     Vectors,
+    Text,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

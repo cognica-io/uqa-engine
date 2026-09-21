@@ -70,10 +70,7 @@ impl Engine {
         }));
 
         if !started {
-            return match result {
-                Ok(result) => result,
-                Err(payload) => std::panic::resume_unwind(payload),
-            };
+            return self.finish_existing_transaction_mutation(result, SQLError::Internal);
         }
         match result {
             Ok(Ok(value)) => {

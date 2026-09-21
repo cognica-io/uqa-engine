@@ -9,6 +9,8 @@ use std::time::Duration;
 
 use super::*;
 
+mod mutation_failures;
+
 #[test]
 fn serializable_dependency_errors_preserve_uncertain_commit_precedence() {
     use uqa_storage::mvcc::{

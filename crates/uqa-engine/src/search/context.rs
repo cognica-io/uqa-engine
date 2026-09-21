@@ -49,12 +49,16 @@ impl Engine {
                 .map_err(|error| storage_sql_error("snapshot document store", error))?,
         };
 
-        let mut ctx = ExecutionContext::new()
-            .with_inverted_index(inv)
-            .with_document_store(documents);
-
         let read = self.serializable_table_read(table)?;
         let columns = t.columns.snapshot();
+        let mut ctx = ExecutionContext::new()
+            .with_inverted_index(uqa_execution::serializable::text::observe_snapshot(
+                read.as_ref(),
+                columns.clone(),
+                inv,
+            ))
+            .with_document_store(documents);
+
         for (field, idx) in t.vector_indexes.read().iter() {
             ctx = ctx.with_vector_index(
                 field.clone(),

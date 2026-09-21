@@ -6,6 +6,8 @@
 
 //! Public text search and calibration reporting.
 
+use uqa_storage::InvertedIndex;
+
 use super::{
     storage_sql_error, Arc, BayesianBM25Scorer, CalibrationMetrics, CalibrationReport, DocId,
     Engine, Instant, OperatorTree, RawBm25Score, SQLError, ScoredEntry, ScoringMode,
@@ -93,6 +95,11 @@ impl Engine {
         let params = self.bayesian_params_for(table, field)?;
         let (query_term_count, stats) = {
             let index = table_state.inverted_index.read();
+            let index = uqa_execution::serializable::text::ObservedTextIndex::new(
+                index.as_ref(),
+                self.serializable_table_read(table)?,
+                table_state.columns.snapshot(),
+            );
             let query_term_count = index
                 .search_analyzer_revision(field)
                 .map_err(|error| storage_sql_error("resolve calibration analyzer revision", error))?

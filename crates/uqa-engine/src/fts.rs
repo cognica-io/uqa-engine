@@ -8,6 +8,7 @@ use super::{
     analyzer_registry, Arc, BTreeMap, DocId, Document, Engine, FieldName, FtsIndexStat, SQLError,
     TableState, Value,
 };
+use uqa_storage::InvertedIndex;
 
 type TextIndexDocuments = Vec<(DocId, BTreeMap<FieldName, String>)>;
 
@@ -76,6 +77,11 @@ impl Engine {
             let mut fields = table.fts_fields();
             fields.sort();
             let index = table.inverted_index.read();
+            let index = uqa_execution::serializable::text::ObservedTextIndex::new(
+                index.as_ref(),
+                self.serializable_table_read(&table_name)?,
+                table.columns.snapshot(),
+            );
             for field in fields {
                 let analyzer = self
                     .table_field_analyzer(&table_name, &field)
@@ -85,22 +91,31 @@ impl Engine {
                         |(name, _)| name,
                     );
                 let doc_length_count = index.doc_length_count(Some(&field)).map_err(|error| {
-                    SQLError::Internal(format!("read FTS document-length count: {error}"))
+                    uqa_execution::storage_errors::storage_error(
+                        "read FTS document-length count",
+                        &error,
+                    )
                 })?;
                 out.push(FtsIndexStat {
                     table_name: table_name.clone(),
                     field: field.clone(),
                     analyzer,
                     posting_count: index.posting_count(Some(&field)).map_err(|error| {
-                        SQLError::Internal(format!("read FTS posting count: {error}"))
+                        uqa_execution::storage_errors::storage_error(
+                            "read FTS posting count",
+                            &error,
+                        )
                     })?,
                     doc_length_count,
                     indexed_doc_count: doc_length_count,
                     term_count: index.term_count(Some(&field)).map_err(|error| {
-                        SQLError::Internal(format!("read FTS term count: {error}"))
+                        uqa_execution::storage_errors::storage_error("read FTS term count", &error)
                     })?,
                     total_field_length: index.total_field_length(&field).map_err(|error| {
-                        SQLError::Internal(format!("read FTS field length: {error}"))
+                        uqa_execution::storage_errors::storage_error(
+                            "read FTS field length",
+                            &error,
+                        )
                     })?,
                 });
             }
@@ -274,11 +289,13 @@ impl Engine {
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
-        let result = t
-            .inverted_index
-            .write()
-            .try_add_documents(documents)
-            .map_err(|error| SQLError::Internal(format!("index documents: {error}")));
+        let result = uqa_execution::serializable::text::add_documents(
+            self,
+            table,
+            t.columns.snapshot(),
+            t.inverted_index.write().as_mut(),
+            documents,
+        );
         result
     }
 
@@ -351,10 +368,14 @@ impl Engine {
         if index_fts {
             let text_fields = self.prepared_document_text_fields(table, &document)?;
             // Replacement is one atomic inverted-index operation even when the new document has no indexed text. Skipping an empty field map would leave stale postings from the previous version; remove-then-add would expose a destructive failure window when analysis fails.
-            t.inverted_index
-                .write()
-                .add_document(doc_id, text_fields)
-                .map_err(|error| SQLError::Internal(format!("index document: {error}")))?;
+            uqa_execution::serializable::text::add_document(
+                self,
+                &table_name,
+                t.columns.snapshot(),
+                t.inverted_index.write().as_mut(),
+                doc_id,
+                text_fields,
+            )?;
         }
         let columns = t.columns.read().clone();
         crate::generated::strip_virtual_generated_columns(&columns, &mut document);

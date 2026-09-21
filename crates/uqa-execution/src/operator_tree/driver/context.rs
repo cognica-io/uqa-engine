@@ -27,6 +27,7 @@ pub type TextIndexRead<'a> = Box<dyn Deref<Target = Box<dyn InvertedIndex>> + 'a
 pub type VectorIndexRead<'a> = Box<dyn Deref<Target = BTreeMap<String, Box<dyn VectorIndex>>> + 'a>;
 
 pub trait RetrievalIndexState: Send + Sync {
+    fn columns(&self) -> Arc<Vec<ColumnDef>>;
     fn inverted_index(&self) -> TextIndexRead<'_>;
     fn vector_indexes(&self) -> VectorIndexRead<'_>;
 }

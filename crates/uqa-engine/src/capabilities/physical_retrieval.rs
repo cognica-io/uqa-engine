@@ -26,6 +26,9 @@ use uqa_storage::{document_store::Document, CatalogIndexRow, DocumentStore, Stor
 
 struct TableIndexState(Arc<TableState>);
 impl RetrievalIndexState for TableIndexState {
+    fn columns(&self) -> Arc<Vec<ColumnDef>> {
+        self.0.columns.snapshot()
+    }
     fn inverted_index(&self) -> TextIndexRead<'_> {
         Box::new(self.0.inverted_index.read())
     }

@@ -108,10 +108,13 @@ impl Engine {
                 .write()
                 .delete(doc_id)
                 .map_err(|err| document_store_write_error(&err))?;
-            t.inverted_index
-                .write()
-                .remove_document(doc_id)
-                .map_err(|error| SQLError::Internal(format!("remove indexed document: {error}")))?;
+            uqa_execution::serializable::text::remove_document(
+                self,
+                table_name,
+                t.columns.snapshot(),
+                t.inverted_index.write().as_mut(),
+                doc_id,
+            )?;
             for idx in t.vector_indexes.write().values_mut() {
                 idx.as_mut().delete(doc_id).map_err(|error| {
                     SQLError::Internal(format!("delete indexed vector: {error}"))

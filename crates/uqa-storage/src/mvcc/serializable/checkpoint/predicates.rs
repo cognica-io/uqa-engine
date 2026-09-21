@@ -34,6 +34,8 @@ pub(super) fn write(encoder: &mut Encoder<'_>, observation: &Observation) -> Ver
         (false, SerializableKeySpace::Index(_)) => 4,
         (true, SerializableKeySpace::Vectors) => 5,
         (false, SerializableKeySpace::Vectors) => 6,
+        (true, SerializableKeySpace::Text) => 7,
+        (false, SerializableKeySpace::Text) => 8,
     })?;
     if let SerializableKeySpace::Index(identity) = space {
         encoder.bytes(&identity)?;
@@ -55,9 +57,10 @@ pub(super) fn read(decoder: &mut Decoder<'_>, writing: bool) -> VersionResult<Ob
         1 | 3 => Some(SerializableKeySpace::Rows),
         2 | 4 => Some(SerializableKeySpace::Index(decoder.array()?)),
         5 | 6 => Some(SerializableKeySpace::Vectors),
+        7 | 8 => Some(SerializableKeySpace::Text),
         _ => return Err(invalid()),
     };
-    let point = matches!(tag, 1 | 2 | 5);
+    let point = matches!(tag, 1 | 2 | 5 | 7);
     let lower = if space.is_some() {
         read_bound(decoder)?
     } else {

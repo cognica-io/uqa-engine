@@ -83,13 +83,61 @@ fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot 
 
 impl Engine {
     pub(crate) fn abort_sql_transaction_after_error(&self, error: SQLError) -> SQLError {
+        transaction_abort_result(error, &self.abort_transaction_after_failure())
+    }
+
+    pub(super) fn run_existing_transaction_mutation<R, E: std::fmt::Display>(
+        &self,
+        operation: impl FnOnce() -> Result<R, E>,
+        map_cleanup_error: impl Fn(String) -> E,
+    ) -> Result<R, E> {
+        self.finish_existing_transaction_mutation(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation)),
+            map_cleanup_error,
+        )
+    }
+
+    pub(super) fn finish_existing_transaction_mutation<R, E: std::fmt::Display>(
+        &self,
+        result: std::thread::Result<Result<R, E>>,
+        map_cleanup_error: impl Fn(String) -> E,
+    ) -> Result<R, E> {
+        match result {
+            Ok(Ok(value)) => Ok(value),
+            Ok(Err(error)) => {
+                let cleanup_errors = self.abort_transaction_after_failure();
+                if cleanup_errors.is_empty() {
+                    Err(error)
+                } else {
+                    Err(map_cleanup_error(format!(
+                        "{error}; transaction abort cleanup failed: {}",
+                        cleanup_errors.join("; ")
+                    )))
+                }
+            }
+            Err(payload) => {
+                let cleanup_errors = self.abort_transaction_after_failure();
+                if cleanup_errors.is_empty() {
+                    std::panic::resume_unwind(payload)
+                } else {
+                    Err(map_cleanup_error(format!(
+                        "transaction abort after panic failed: {}; original panic: {}",
+                        cleanup_errors.join("; "),
+                        panic_description(payload.as_ref())
+                    )))
+                }
+            }
+        }
+    }
+
+    fn abort_transaction_after_failure(&self) -> Vec<String> {
         let _statement = self.runtime.statement_gate.lock();
         let mut stack = self.session.transactions.lock();
         let Some(frame) = stack.last() else {
-            return error;
+            return Vec::new();
         };
         if frame.status != TransactionStatus::Active {
-            return error;
+            return Vec::new();
         }
 
         let rollback_state = statement_abort_snapshot(frame);
@@ -165,7 +213,7 @@ impl Engine {
             frame.characteristics = rollback_state.characteristics;
             frame.first_snapshot_set = rollback_state.first_snapshot_set;
         }
-        transaction_abort_result(error, &cleanup_errors)
+        cleanup_errors
     }
 
     fn release_aborted_statement_locks(&self, keep_mark: Option<u32>) {

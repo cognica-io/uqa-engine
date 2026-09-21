@@ -140,6 +140,8 @@ An unresolved result must not be treated as proof of rollback or a reason to rep
 
 The development transaction adapter preserves typed storage diagnostics: a rejected MVCC row or definition conflict reports `40001`, cancellation reports `57014` as `SQLError::Cancelled`, and memory exhaustion reports `53200`. Embedded SQL diagnostics, including constraint errors, retain their SQLSTATE; an unrelated provider error is not classified as a serialization failure. An indeterminate outer commit remains `08007` even when its underlying diagnostic describes a conflict. A rejected commit restores the session after storage rollback, preserves independently committed data, and does not replay application callbacks. These diagnostics do not enable the unfinished concurrent SQL transaction model.
 
+An error or panic while applying a direct mutation inside an explicit transaction uses the same abort boundary as SQL: private data, index changes and logical write intents roll back to the active user savepoint or transaction frame. `transaction_failed()` remains true until recovery. `ROLLBACK TO SAVEPOINT` restores the usable savepoint while preserving earlier writes; COMMIT of an unrecovered failed frame performs rollback. The original error or panic is preserved when cleanup succeeds, and a cleanup failure reports both causes. Existing read dependencies remain retained according to the isolation contract.
+
 `Engine::sql_batch` executes a slice of SQL statement and parameter pairs in one transaction. A statement failure rolls the batch back; an indeterminate commit follows the resolution contract above.
 
 ```rust
@@ -172,7 +174,7 @@ Do not issue concurrent statements through the same session while an explicit tr
 
 `Engine::new_session_for_user(user)` opens an independent session for a role authenticated by the embedding host. It verifies that the role exists, has `LOGIN`, and has database `CONNECT`, then sets both `session_user` and `current_user` to that role. The host owns credential verification and connection limits. The [PostgreSQL TCP server](11-postgresql-server.md) uses this entry point after its configured authentication policy accepts a connection.
 
-Session creation is available for engines backed by one persistent provider. An engine assembled from separate persistent backends does not provide the single provider needed to create a new session.
+Session creation requires a persistent backend that can return an independent, transaction-affine catalog/data pair. Engine retains an explicit provider or adapts the backend's session factory when constructed through `from_persistent_backends`.
 
 When the parent has a stable committed catalog and no private transaction or temporary namespace, a new session shares immutable schema, constraint, and durable-registry allocations instead of reloading and decoding them. Each session retains its own mutable catalog owners and physical storage handles; a mutation detaches the affected catalog value. A parent with private state, a changed storage generation, or a provider without a usable commit monitor requires a load from the new session's committed storage view. Statement catalog snapshots also share these immutable values.
 
@@ -240,7 +242,7 @@ Runtime callbacks are not serialized to persistent storage. Register them each t
 
 Each session has its own cancellation token. `cancel()` requests cancellation, `is_cancelled()` observes it, and the reset API clears the request before later work. Long-running execution paths poll the token at safe boundaries.
 
-Cancellation is cooperative. The caller must still handle the returned error and decide whether an explicit transaction should be rolled back.
+Cancellation is cooperative. Handle the returned error, inspect `transaction_failed()` and recover an aborted explicit transaction through rollback or an available savepoint before continuing. Reset the session cancellation token before issuing subsequent work.
 
 ## QueryBuilder
 
