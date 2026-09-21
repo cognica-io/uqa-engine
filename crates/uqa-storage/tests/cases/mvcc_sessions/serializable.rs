@@ -8,6 +8,9 @@
 
 use super::*;
 
+#[path = "serializable/admission.rs"]
+mod admission;
+
 #[path = "serializable/batches.rs"]
 mod batches;
 

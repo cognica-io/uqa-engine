@@ -9,7 +9,10 @@
 mod batch;
 mod read;
 mod serializable;
-pub use serializable::{SerializableReadContext, SerializableSession};
+pub use serializable::{
+    SerializableReadContext, SerializableSession, SerializableSnapshotCapture,
+    SerializableSnapshotOptions,
+};
 mod transaction;
 
 use std::sync::Arc;
@@ -226,7 +229,7 @@ impl VersionedKeyValueStore {
             .lock()
             .as_mut()
             .ok_or_else(no_transaction)?
-            .establish_serializable(Arc::clone(&self.persistence), &self.write_control())
+            .establish_serializable(&self.persistence, &self.write_control())
             .map_err(VersionError::into_storage_error)
     }
 

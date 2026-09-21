@@ -6,7 +6,7 @@
 
 //! Session completion orders retained SSI preparation, physical publication and exact outcome resolution.
 
-use std::sync::Arc;
+mod admission;
 
 use super::Transaction;
 use crate::mvcc::{
@@ -31,45 +31,6 @@ impl Transaction {
         &self,
     ) -> Option<&SerializableReadContext> {
         self.serializable.as_ref()
-    }
-
-    pub(in crate::mvcc::session) fn establish_serializable(
-        &mut self,
-        persistence: Arc<dyn VersionedPersistence>,
-        control: &StorageReadControl,
-    ) -> VersionResult<SerializableReadContext> {
-        self.unsealed()?;
-        if let Some(context) = &self.serializable {
-            context.with_graph(control, |graph| graph.check_active(context.id()))?;
-            return Ok(context.clone());
-        }
-        if self.changes.has_written() || self.has_derived_changes() {
-            return Err(VersionError::InvalidEncoding(
-                "serializable snapshot must precede private writes",
-            ));
-        }
-        let coordinator =
-            persistence
-                .serializable_coordinator()
-                .ok_or(VersionError::InvalidEncoding(
-                    "persistence has no serializable coordinator",
-                ))?;
-        let (participant, committed) =
-            coordinator.admit_serializable_snapshot(self.read_only, control)?;
-        let context = SerializableReadContext {
-            persistence,
-            participant,
-            memory: control.memory().clone(),
-        };
-        let mark = context.with_graph(control, |graph| graph.write_mark(context.id()))?;
-        // The first fixed snapshot belongs to the outer transaction, including when acquired after a SQL savepoint.
-        for savepoint in &mut *self.savepoints {
-            savepoint.serializable = Some(mark);
-            savepoint.committed = Arc::clone(&committed);
-        }
-        self.committed = committed;
-        self.serializable = Some(context.clone());
-        Ok(context)
     }
 
     pub(super) fn serializable_mark(

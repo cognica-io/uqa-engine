@@ -15,9 +15,26 @@ use crate::mvcc::{
 use crate::read_control::StorageReadControl;
 use crate::StorageBackendResult;
 
+/// Logical transaction characteristics, independent of whether the physical session permits private writes. Deferrable waiting applies only to a read-only participant.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SerializableSnapshotOptions {
+    pub read_only: bool,
+    pub deferrable: bool,
+}
+
+/// Scope one candidate snapshot capture together with the caller's publication baseline. Invoke the supplied operation exactly once, without executing application work. Common storage may request another candidate before returning a safe deferrable snapshot; each call must release its guards before returning so overlapping writers can finish during the wait. An already admitted session retains its original participant without invoking this scope.
+pub type SerializableSnapshotCapture<'a> =
+    dyn FnMut(&mut dyn FnMut() -> VersionResult<()>) -> VersionResult<()> + 'a;
+
 /// Logical SSI capabilities of one original or retained storage session. Providers forward this boundary without deriving predicates from physical record keys. SQL must cover its access paths before enabling automatic admission.
 pub trait SerializableSession: Send + Sync {
     fn establish_serializable_snapshot(&self) -> StorageBackendResult<SerializableReadContext>;
+    /// Select the first snapshot using logical characteristics and a caller-scoped capture. Existing participants retain their original classification without another capture. Only read-only deferrable admission waits for a proven safe snapshot.
+    fn establish_serializable_snapshot_with(
+        &self,
+        options: SerializableSnapshotOptions,
+        capture: &mut SerializableSnapshotCapture<'_>,
+    ) -> StorageBackendResult<SerializableReadContext>;
     fn serializable_read_context(&self) -> StorageBackendResult<Option<SerializableReadContext>>;
     fn observe_serializable_write(
         &self,
@@ -28,6 +45,20 @@ pub trait SerializableSession: Send + Sync {
 impl SerializableSession for super::VersionedKeyValueStore {
     fn establish_serializable_snapshot(&self) -> StorageBackendResult<SerializableReadContext> {
         Self::establish_serializable_snapshot(self)
+    }
+
+    fn establish_serializable_snapshot_with(
+        &self,
+        options: SerializableSnapshotOptions,
+        capture: &mut SerializableSnapshotCapture<'_>,
+    ) -> StorageBackendResult<SerializableReadContext> {
+        self.require_mutable_session()?;
+        self.active
+            .lock()
+            .as_mut()
+            .ok_or_else(super::no_transaction)?
+            .establish_serializable_with(&self.persistence, options, capture, &self.write_control())
+            .map_err(VersionError::into_storage_error)
     }
 
     fn serializable_read_context(&self) -> StorageBackendResult<Option<SerializableReadContext>> {
@@ -59,6 +90,7 @@ pub struct SerializableReadContext {
     pub(super) persistence: Arc<dyn VersionedPersistence>,
     pub(super) participant: SerializableParticipant,
     pub(super) memory: uqa_core::memory::MemoryBudget,
+    pub(super) safe: bool,
 }
 
 impl SerializableReadContext {
@@ -71,14 +103,19 @@ impl SerializableReadContext {
         StorageReadControl::new(&self.memory, cancellation)
     }
 
-    /// Register the logical predicate before exposing its result, including an empty, cached or index-only result. Physical record keys are not a substitute for logical object/row/index identities.
+    /// Observe the logical predicate before exposing its result, including an empty, cached or index-only result. Proven safe snapshots need only the original participant's lifetime check. Physical record keys are not a substitute for logical object/row/index identities.
     pub fn observe_read(
         &self,
         predicate: SerializablePredicate<'_>,
         control: &StorageReadControl,
     ) -> VersionResult<()> {
         self.with_graph(control, |graph| {
-            graph.observe_read(self.id(), predicate, control)
+            if self.safe {
+                // A proven safe snapshot cannot contribute to a serialization anomaly. Retained readers still validate the original participant's lifetime.
+                graph.check_active(self.id())
+            } else {
+                graph.observe_read(self.id(), predicate, control)
+            }
         })
     }
 

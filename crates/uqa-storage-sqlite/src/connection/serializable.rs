@@ -11,7 +11,7 @@ use std::time::Duration;
 use uqa_storage::{
     mvcc::{
         DatabaseId, SerializablePredicate, SerializableReadContext, SerializableSession,
-        VersionError, VersionResult,
+        SerializableSnapshotCapture, SerializableSnapshotOptions, VersionError, VersionResult,
     },
     read_control::StorageReadControl,
     PersistentStorageIdentity, StorageBackendResult,
@@ -23,6 +23,16 @@ use crate::SQLiteConnectionLease;
 impl SerializableSession for ManagedConnection {
     fn establish_serializable_snapshot(&self) -> StorageBackendResult<SerializableReadContext> {
         self.with_serializable_session(|session| session.establish_serializable_snapshot())
+    }
+
+    fn establish_serializable_snapshot_with(
+        &self,
+        options: SerializableSnapshotOptions,
+        capture: &mut SerializableSnapshotCapture<'_>,
+    ) -> StorageBackendResult<SerializableReadContext> {
+        self.with_serializable_session(|session| {
+            session.establish_serializable_snapshot_with(options, capture)
+        })
     }
 
     fn serializable_read_context(&self) -> StorageBackendResult<Option<SerializableReadContext>> {

@@ -64,7 +64,8 @@ pub use serializable::{
     SerializableStatus, SerializableTransactionId, SerializableWriteMark,
 };
 pub use session::{
-    SerializableReadContext, SerializableSession, VersionedKeyValueStore, VersionedSessionOptions,
+    SerializableReadContext, SerializableSession, SerializableSnapshotCapture,
+    SerializableSnapshotOptions, VersionedKeyValueStore, VersionedSessionOptions,
 };
 pub use types::{CommitSequence, RecordWrite, VersionError, VersionResult};
 pub use view::{
