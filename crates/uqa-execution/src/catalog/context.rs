@@ -6,6 +6,8 @@
 
 //! Catalog projection inputs assembled at a statement boundary.
 
+mod query_reads;
+
 use super::cache::RegtypeOutputCache;
 use super::security::{
     schema::{role_has_schema_privilege, SchemaAclPrivilege},

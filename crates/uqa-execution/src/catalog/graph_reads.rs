@@ -46,11 +46,7 @@ impl CatalogReadView {
     }
 
     fn graph_read(&self, name: &str) -> Result<Option<Cow<'_, GraphStoreHandle>>, SQLError> {
-        if let Some(read) = &self.graph_reads {
-            read.template
-                .observe_definition(GraphDefinitionKind::NamedGraph, Some(name))
-                .map_err(graph_error)?;
-        }
+        self.observe_graph_name(name)?;
         Ok(self.snapshot.definitions.graphs.get(name).map(|store| {
             match (&self.graph_reads, store.as_ref()) {
                 (Some(read), GraphStoreHandle::Persistent(store)) => Cow::Owned(
@@ -60,6 +56,15 @@ impl CatalogReadView {
                 _ => Cow::Borrowed(store.as_ref()),
             }
         }))
+    }
+
+    pub(in crate::catalog) fn observe_graph_name(&self, name: &str) -> Result<(), SQLError> {
+        if let Some(read) = &self.graph_reads {
+            read.template
+                .observe_definition(GraphDefinitionKind::NamedGraph, Some(name))
+                .map_err(graph_error)?;
+        }
+        Ok(())
     }
 
     /// Catalog row consumption observes the complete name set, including an empty result.

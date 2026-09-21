@@ -268,6 +268,7 @@ fn lookup_regnamespace_oid(
     let [name] = names.as_slice() else {
         return Ok(None);
     };
+    context.catalog_read_view().observe_graph_name(name)?;
     let catalog = regtype_output_catalog(context)?;
     Ok(catalog
         .namespaces
@@ -305,6 +306,7 @@ pub fn resolve_regnamespace_oid(
             message: "invalid name syntax".into(),
         });
     };
+    context.catalog_read_view().observe_graph_name(name)?;
     let catalog = regtype_output_catalog(context)?;
     catalog
         .namespaces
@@ -466,7 +468,11 @@ pub struct RegtypeOutputCatalog {
 
 impl RegtypeOutputCatalog {
     fn build(context: &CatalogContext<'_>) -> Result<Self, SQLError> {
-        let catalog = context.catalog_read_view();
+        let catalog = context.catalog_read_view().without_query_reads();
+        let unobserved = CatalogContext {
+            catalog: &catalog,
+            ..*context
+        };
         let resolution = context.session_execution_view().relation_name_resolution();
         let namespaces = build_pg_namespace(&catalog, &resolution)?
             .into_iter()
@@ -477,7 +483,7 @@ impl RegtypeOutputCatalog {
                 ))
             })
             .collect();
-        let classes = build_pg_class(context, &catalog, &resolution)?
+        let classes = build_pg_class(&unobserved, &catalog, &resolution)?
             .into_iter()
             .filter_map(|row| {
                 Some((
@@ -778,6 +784,15 @@ pub fn resolve_regtype_output(
     ty: &ColumnType,
     oid: i64,
 ) -> Result<Option<String>, String> {
+    resolve_regtype_output_value(context, ty, oid).map_err(|error| error.to_string())
+}
+
+/// Format a catalog-backed alias while preserving storage cancellation and transaction diagnostics.
+pub fn resolve_regtype_output_value(
+    context: &CatalogContext<'_>,
+    ty: &ColumnType,
+    oid: i64,
+) -> Result<Option<String>, SQLError> {
     if !matches!(
         ty,
         ColumnType::Regproc
@@ -789,17 +804,23 @@ pub fn resolve_regtype_output(
     ) {
         return Ok(None);
     }
-    let catalog = regtype_output_catalog(context).map_err(|error| error.to_string())?;
-    let output = match ty {
+    let catalog = regtype_output_catalog(context)?;
+    match ty {
         ColumnType::Regproc => format_regproc(context, &catalog, oid),
         ColumnType::Regprocedure => format_regprocedure(context, &catalog, oid),
         ColumnType::Regclass => format_regclass(context, &catalog, oid),
         ColumnType::Regnamespace => {
-            Ok(namespace_name(&catalog, oid).map(uqa_sql::expr::quote_ident))
+            let view = context.catalog_read_view();
+            if let Some(name) = namespace_name(&catalog, oid) {
+                view.observe_graph_name(name)?;
+                Ok(Some(uqa_sql::expr::quote_ident(name)))
+            } else {
+                view.observe_graph_names()?;
+                Ok(None)
+            }
         }
         ColumnType::Regrole => Ok(format_regrole(context, oid)),
         ColumnType::Regtype => format_regtype(context, &catalog, oid),
         _ => unreachable!(),
-    };
-    output.map_err(|error| error.to_string())
+    }
 }

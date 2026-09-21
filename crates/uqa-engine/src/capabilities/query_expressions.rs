@@ -154,10 +154,9 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
     }
 
     fn resolve_regnamespace(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
-        uqa_execution::catalog::projection::resolve_regnamespace_oid(
-            &self.engine.catalog_execution(),
-            name,
-        )
+        self.engine.catalog_execution().with_query_reads(|catalog| {
+            uqa_execution::catalog::projection::resolve_regnamespace_oid(catalog, name)
+        })
     }
 
     fn resolve_regobject(
@@ -165,11 +164,9 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         ty: &uqa_sql::ast::ColumnType,
         name: &str,
     ) -> std::result::Result<Option<i64>, SQLError> {
-        uqa_execution::catalog::projection::resolve_regobject_oid(
-            &self.engine.catalog_execution(),
-            ty,
-            name,
-        )
+        self.engine.catalog_execution().with_query_reads(|catalog| {
+            uqa_execution::catalog::projection::resolve_regobject_oid(catalog, ty, name)
+        })
     }
 
     fn resolve_regtype_output(
@@ -182,6 +179,16 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
             ty,
             oid,
         )
+    }
+
+    fn resolve_regtype_output_value(
+        &self,
+        ty: &uqa_sql::ast::ColumnType,
+        oid: i64,
+    ) -> Result<Option<String>, SQLError> {
+        self.engine.catalog_execution().with_query_reads(|catalog| {
+            uqa_execution::catalog::projection::resolve_regtype_output_value(catalog, ty, oid)
+        })
     }
 
     fn nextval(&self, name: &str) -> std::result::Result<i64, SQLError> {

@@ -94,6 +94,18 @@ impl uqa_sql::expr::EngineHook for Engine {
         )
     }
 
+    fn resolve_regtype_output_value(
+        &self,
+        ty: &uqa_sql::ast::ColumnType,
+        oid: i64,
+    ) -> Result<Option<String>, SQLError> {
+        uqa_execution::catalog::projection::resolve_regtype_output_value(
+            &self.catalog_execution(),
+            ty,
+            oid,
+        )
+    }
+
     fn nextval(&self, name: &str) -> std::result::Result<i64, SQLError> {
         self.nextval_sql(name)
     }

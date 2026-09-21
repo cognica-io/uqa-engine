@@ -91,6 +91,8 @@ Execution attaches the original query participant to a retained `CatalogReadView
 
 Virtual catalog rows are produced on the first row pull through the existing deferred source. Binding and planner snapshots stay unobserved, and `LIMIT 0` or an unused child does not create catalog-read dependencies. Typed cancellation, resource exhaustion and serialization diagnostics survive catalog projection. These graph paths do not complete the remaining relational catalog observations or enable automatic public SQL serializable admission.
 
+Runtime `regnamespace` casts and `to_regnamespace` lookups observe the requested graph-derived namespace even when the shared catalog cache already contains the answer. OID-to-name output observes the resolved graph name or the complete graph-name set when no namespace matches. Cache construction does not turn unrelated graph names into semantic reads. Execution binds catalog scalar consumption to the original participant through snapshot refresh and nested calls; Engine only supplies the session adapter. SQL preserves typed transaction, cancellation and resource errors during scalar and array output while retaining the legacy string-error hook for embedders.
+
 Transaction recovery restores the saved graph overlay before rebuilding catalogs from the rolled-back provider. Transaction and savepoint rollback, statement abort and failed transaction completion therefore resolve names against the restored boundary, preserving the original error instead of failing again on a cancelled graph definition.
 
 ## Source entry points

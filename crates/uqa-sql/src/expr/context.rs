@@ -6,6 +6,9 @@
 
 //! Evaluation context, row lookup, and engine-backed type resolution.
 
+#[cfg(test)]
+mod tests;
+
 use std::borrow::Cow;
 
 use uqa_core::{ArrayValue, Value};
@@ -192,6 +195,12 @@ pub trait EngineHook {
         Ok(None)
     }
 
+    /// Preserve typed failures during catalog-backed output. The legacy hook remains the default for existing embedders.
+    fn resolve_regtype_output_value(&self, ty: &ColumnType, oid: i64) -> Result<Option<String>> {
+        self.resolve_regtype_output(ty, oid)
+            .map_err(SQLError::Internal)
+    }
+
     /// Resolve the first existing schema on the logical session's search
     /// path. `None` lets standalone expression evaluation use its `public`
     /// compatibility default.
@@ -310,9 +319,8 @@ pub fn format_regtype_value(
         return Ok(Some("-".into()));
     }
     let resolved = engine
-        .map(|engine| engine.resolve_regtype_output(ty, *oid))
-        .transpose()
-        .map_err(SQLError::Internal)?
+        .map(|engine| engine.resolve_regtype_output_value(ty, *oid))
+        .transpose()?
         .flatten();
     Ok(Some(resolved.unwrap_or_else(|| oid.to_string())))
 }

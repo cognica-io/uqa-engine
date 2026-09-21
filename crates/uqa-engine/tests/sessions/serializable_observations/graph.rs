@@ -26,6 +26,9 @@ mod labels;
 #[path = "graph/catalog.rs"]
 mod catalog;
 
+#[path = "graph/catalog_scalars.rs"]
+mod catalog_scalars;
+
 fn prepare(session: &Session) {
     session.engine.create_graph("g").unwrap();
     for id in [1, 2] {

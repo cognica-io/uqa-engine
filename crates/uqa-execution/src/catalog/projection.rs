@@ -299,7 +299,8 @@ pub use regtypes::{
     named_type_exists, resolve_bound_regclass_oid, resolve_catalog_column_type,
     resolve_catalog_domain_type_by_oid, resolve_regclass_kind_by_oid, resolve_regclass_oid,
     resolve_regnamespace_oid, resolve_regobject_oid, resolve_regprocedure_oid, resolve_regrole_oid,
-    resolve_regtype_oid, resolve_regtype_output, RegtypeOutputCatalog,
+    resolve_regtype_oid, resolve_regtype_output, resolve_regtype_output_value,
+    RegtypeOutputCatalog,
 };
 
 pub fn resolve_catalog_column_type_name(
