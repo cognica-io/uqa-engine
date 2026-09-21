@@ -113,7 +113,7 @@ flowchart LR
 
 Python exposes `run_cypher`, Node.js exposes `runCypher` and `runCypherSync`, and browser WASM exposes the corresponding asynchronous request path.
 
-`Engine::graph_with` scopes direct reads to one physical storage snapshot and passes a `GraphStoreHandle`. `Engine::new()` uses primary memory storage; persistent engines use `PersistentGraphStore` handles without loading a graph replica. `GraphStore::get_vertex` and `get_edge` return owned `Result<Option<Vertex>>` and `Result<Option<Edge>>`; callers must handle storage errors as well as missing entities. Label, adjacency, membership, count, and lifecycle methods are fallible too. Bounded `vertex_id_page` and `edge_id_page` methods accept an exclusive ID cursor and a page size from 1 through 4,096.
+`Engine::graph_with` scopes direct reads to the active transaction's selected snapshot, or owns one implicit transaction using the session defaults, and passes a `GraphStoreHandle`. `Engine::new()` uses primary memory storage; persistent engines use `PersistentGraphStore` handles without loading a graph replica. `GraphStore::get_vertex` and `get_edge` return owned `Result<Option<Vertex>>` and `Result<Option<Edge>>`; callers must handle storage errors as well as missing entities. Label, adjacency, membership, count, and lifecycle methods are fallible too. Bounded `vertex_id_page` and `edge_id_page` methods accept an exclusive ID cursor and a page size from 1 through 4,096. Graph and path-index lookup/listing and direct Cypher enter this same transaction boundary; see [direct query transaction behavior](02-rust-engine-api.md#transactions-and-batches).
 
 ```rust
 use uqa_graph::GraphStore;

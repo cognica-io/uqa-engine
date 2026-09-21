@@ -18,24 +18,31 @@ impl Engine {
     /// enters exactly once. Returns the top-`top_k` entries by descending
     /// posterior score.
     pub fn hybrid_search(&self, params: &HybridSearchParams) -> Result<Vec<ScoredEntry>, SQLError> {
-        let signals = self.build_hybrid_signals(
-            params.table,
-            params.text_field,
-            params.text_query,
-            params.vector_field,
-            &params.query_vector,
-            params.knn_pool,
-        )?;
-        let tree = uqa_operators::OperatorTree::BayesianEvidenceFusion {
-            signals,
-            base_rate: None,
-        };
-        let entries =
-            crate::operator_tree_bridge::execute_scored_tree(self, params.table, &[], &tree)?;
-        Ok(uqa_scoring::rank_scored_entries_top_k(
-            entries,
-            params.top_k,
-        ))
+        self.with_direct_table_query(params.table, false, |engine, name, _| {
+            let signals = engine.build_hybrid_signals(
+                name,
+                params.text_field,
+                params.text_query,
+                params.vector_field,
+                &params.query_vector,
+                params.knn_pool,
+            )?;
+            let tree = uqa_operators::OperatorTree::BayesianEvidenceFusion {
+                signals,
+                base_rate: None,
+            };
+            let entries = crate::operator_tree_bridge::execute_scored_tree(
+                engine,
+                name,
+                params.table,
+                &[],
+                &tree,
+            )?;
+            Ok(uqa_scoring::rank_scored_entries_top_k(
+                entries,
+                params.top_k,
+            ))
+        })
     }
 
     /// Explicit robust positive-evidence hybrid ranking. This method applies
@@ -46,29 +53,36 @@ impl Engine {
         &self,
         params: &RobustHybridSearchParams,
     ) -> Result<Vec<ScoredEntry>, SQLError> {
-        let signals = self.build_hybrid_signals(
-            params.table,
-            params.text_field,
-            params.text_query,
-            params.vector_field,
-            &params.query_vector,
-            params.knn_pool,
-        )?;
-        let tree = uqa_operators::OperatorTree::RobustPositiveEvidencePool {
-            signals,
-            alpha: params.alpha,
-            gating: uqa_operators::GatingSpec::Softplus,
-            weights: None,
-            logit_min: None,
-            logit_max: None,
-            adaptive_weights: true,
-        };
-        let entries =
-            crate::operator_tree_bridge::execute_scored_tree(self, params.table, &[], &tree)?;
-        Ok(uqa_scoring::rank_scored_entries_top_k(
-            entries,
-            params.top_k,
-        ))
+        self.with_direct_table_query(params.table, false, |engine, name, _| {
+            let signals = engine.build_hybrid_signals(
+                name,
+                params.text_field,
+                params.text_query,
+                params.vector_field,
+                &params.query_vector,
+                params.knn_pool,
+            )?;
+            let tree = uqa_operators::OperatorTree::RobustPositiveEvidencePool {
+                signals,
+                alpha: params.alpha,
+                gating: uqa_operators::GatingSpec::Softplus,
+                weights: None,
+                logit_min: None,
+                logit_max: None,
+                adaptive_weights: true,
+            };
+            let entries = crate::operator_tree_bridge::execute_scored_tree(
+                engine,
+                name,
+                params.table,
+                &[],
+                &tree,
+            )?;
+            Ok(uqa_scoring::rank_scored_entries_top_k(
+                entries,
+                params.top_k,
+            ))
+        })
     }
 
     fn build_hybrid_signals(

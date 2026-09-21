@@ -29,36 +29,20 @@ pub fn run_optimised(
 pub(crate) fn execute_operator_tree(
     engine: &Engine,
     table: &str,
+    signal_table: &str,
     params: &[SQLParam],
     tree: &OperatorTree,
 ) -> DriverResult<OperatorOutput> {
-    let _statement = engine.runtime.statement_gate.lock();
-    execute_operator_tree_gated(engine, table, params, tree)
-}
-
-fn execute_operator_tree_gated(
-    engine: &Engine,
-    table: &str,
-    params: &[SQLParam],
-    tree: &OperatorTree,
-) -> DriverResult<OperatorOutput> {
-    // Bayesian auto-calibration is a catalog write even though the enclosing
-    // operator is a retrieval node. Direct API calls have no SQL statement
-    // classifier to open a write transaction, and memory engines also need a
-    // writable snapshot so a later physical-node failure cannot leave the
-    // calibration behind. Existing SQL/user transactions already own the
-    // appropriate frame and must not be nested here.
-    if engine.transaction_depth() == 0 && tree_may_persist_calibration(tree) {
-        return engine
-            .transaction(|engine| execute_operator_tree_inner(engine, table, table, params, tree));
-    }
-    engine
-        .with_graph_read_snapshot(|engine| {
-            Ok(execute_operator_tree_inner(
-                engine, table, table, params, tree,
-            ))
-        })
-        .map_err(|error| operator_execution_error("pin operator snapshot", error))?
+    engine.with_direct_query_snapshot(
+        !tree_may_persist_calibration(tree),
+        |engine| {
+            engine
+                .synchronize_catalog_registries()
+                .map_err(|error| operator_execution_error("refresh operator catalog", error))?;
+            execute_operator_tree_inner(engine, table, signal_table, params, tree)
+        },
+        std::convert::identity,
+    )
 }
 
 /// A direct physical driver call owns one snapshot for the whole tree,
@@ -69,20 +53,19 @@ pub(super) fn execute_public_physical_node(
 ) -> DriverResult<OperatorOutput> {
     use super::OperatorTreeDriver as _;
     let engine = driver.engine;
-    let _statement = engine.runtime.statement_gate.lock();
-    let execute = |engine: &Engine| {
-        let scoped = engine
-            .physical_retrieval_driver(driver.table, driver.table, driver.params)
-            .with_parallel(driver.parallel.clone());
-        scoped.execute_node(tree)
-    };
-    if engine.transaction_depth() == 0 && tree_may_persist_calibration(tree) {
-        engine.transaction(execute)
-    } else {
-        engine
-            .with_graph_read_snapshot(|engine| Ok(execute(engine)))
-            .map_err(|error| operator_execution_error("pin physical operator snapshot", error))?
-    }
+    engine.with_direct_query_snapshot(
+        !tree_may_persist_calibration(tree),
+        |engine| {
+            engine
+                .synchronize_catalog_registries()
+                .map_err(|error| operator_execution_error("refresh physical catalog", error))?;
+            let scoped = engine
+                .physical_retrieval_driver(driver.table, driver.table, driver.params)
+                .with_parallel(driver.parallel.clone());
+            scoped.execute_node(tree)
+        },
+        std::convert::identity,
+    )
 }
 
 fn execute_operator_tree_inner(
@@ -106,10 +89,11 @@ fn execute_operator_tree_inner(
 pub(crate) fn execute_scored_tree(
     engine: &Engine,
     table: &str,
+    signal_table: &str,
     params: &[SQLParam],
     tree: &OperatorTree,
 ) -> DriverResult<Vec<ScoredEntry>> {
-    let output = execute_operator_tree(engine, table, params, tree)?;
+    let output = execute_operator_tree(engine, table, signal_table, params, tree)?;
     let posting = expect_posting_output(output, "retrieval API")?;
     Ok(posting_list_to_scored(&posting))
 }

@@ -83,10 +83,12 @@ impl Engine {
         table: &str,
         field: &str,
     ) -> Result<BayesianBM25Params, SQLError> {
-        self.bayesian_params_for_signal(table, table, field)
+        self.with_direct_table_query(table, false, |engine, name, _| {
+            engine.bayesian_params_for_signal(name, table, field)
+        })
     }
 
-    fn bayesian_params_for_signal(
+    pub(super) fn bayesian_params_for_signal(
         &self,
         table: &str,
         signal_table: &str,

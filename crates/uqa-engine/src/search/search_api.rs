@@ -24,15 +24,16 @@ impl Engine {
         mode: &ScoringMode,
         top_k: usize,
     ) -> Result<Vec<ScoredEntry>, SQLError> {
-        let scoring = match mode {
-            ScoringMode::BM25(params) => uqa_operators::TextScoringMode::CustomBM25(*params),
-            ScoringMode::BayesianBM25(params) => {
-                uqa_operators::TextScoringMode::CustomBayesianBM25(*params)
-            }
-        };
-        let tree = self.plan_text_top_k_tree(table, field, query, scoring, top_k)?;
-        let entries = crate::operator_tree_bridge::execute_scored_tree(self, table, &[], &tree)?;
-        Ok(uqa_scoring::rank_scored_entries_top_k(entries, top_k))
+        self.with_direct_table_read(table, |engine, name, _| {
+            let scoring = match mode {
+                ScoringMode::BM25(params) => TextScoringMode::CustomBM25(*params),
+                ScoringMode::BayesianBM25(params) => TextScoringMode::CustomBayesianBM25(*params),
+            };
+            let tree = engine.plan_text_top_k_tree(name, field, query, scoring, top_k)?;
+            let entries =
+                crate::operator_tree_bridge::execute_scored_tree(engine, name, table, &[], &tree)?;
+            Ok(uqa_scoring::rank_scored_entries_top_k(entries, top_k))
+        })
     }
 
     /// Run the same planner-selected physical text path as [`Self::search`]
@@ -47,17 +48,18 @@ impl Engine {
         top_k: usize,
     ) -> Result<TextSearchProfile, SQLError> {
         let started = Instant::now();
-        let scoring = match mode {
-            ScoringMode::BM25(params) => TextScoringMode::CustomBM25(*params),
-            ScoringMode::BayesianBM25(params) => TextScoringMode::CustomBayesianBM25(*params),
-        };
-        let tree = self.plan_text_top_k_tree(table, field, query, scoring, top_k)?;
-        let physical_top_k = match tree {
-            OperatorTree::Term { top_k, .. } => top_k,
-            _ => None,
-        };
-        let mut profile =
-            self.search_leaf_profiled(table, field, query, mode, top_k, physical_top_k)?;
+        let mut profile = self.with_direct_table_read(table, |engine, name, _| {
+            let scoring = match mode {
+                ScoringMode::BM25(params) => TextScoringMode::CustomBM25(*params),
+                ScoringMode::BayesianBM25(params) => TextScoringMode::CustomBayesianBM25(*params),
+            };
+            let tree = engine.plan_text_top_k_tree(name, field, query, scoring, top_k)?;
+            let physical_top_k = match tree {
+                OperatorTree::Term { top_k, .. } => top_k,
+                _ => None,
+            };
+            engine.search_leaf_profiled(name, field, query, mode, top_k, physical_top_k)
+        })?;
         profile.elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
         Ok(profile)
     }
@@ -72,12 +74,20 @@ impl Engine {
         query: &str,
         labels: &[u8],
     ) -> Result<CalibrationReport, SQLError> {
-        let Some(table_state) = self
-            .try_query_table(table)
-            .map_err(|error| storage_sql_error("resolve calibration table", error))?
-        else {
-            return Err(SQLError::UnknownTable(table.to_string()));
-        };
+        self.with_direct_table_query(table, false, |engine, name, _| {
+            engine.calibration_report_in_transaction(name, table, field, query, labels)
+        })
+    }
+
+    fn calibration_report_in_transaction(
+        &self,
+        table: &str,
+        signal_table: &str,
+        field: &str,
+        query: &str,
+        labels: &[u8],
+    ) -> Result<CalibrationReport, SQLError> {
+        let table_state = self.require_query_table(table)?;
         let doc_ids = self.query_table_doc_ids(table)?;
         if labels.len() != doc_ids.len() {
             return Err(SQLError::TypeMismatch(format!(
@@ -92,7 +102,7 @@ impl Engine {
             ));
         }
 
-        let params = self.bayesian_params_for(table, field)?;
+        let params = self.bayesian_params_for_signal(table, signal_table, field)?;
         let (query_term_count, stats) = {
             let index = table_state.inverted_index.read();
             let index = uqa_execution::serializable::text::ObservedTextIndex::new(

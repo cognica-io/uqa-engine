@@ -21,7 +21,7 @@ impl CypherTableRuntime for Engine {
     }
 
     fn has_graph(&self, name: &str) -> StorageBackendResult<bool> {
-        self.has_graph(name)
+        self.has_graph_in_execution(name)
     }
 
     fn run_cypher(

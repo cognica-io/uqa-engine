@@ -21,7 +21,7 @@ use uqa_storage::FtsIndexStat;
 
 impl GraphNameCatalog for Engine {
     fn list_graphs(&self) -> Result<Vec<String>, SQLError> {
-        self.list_graphs()
+        self.graph_names_in_execution()
             .map_err(|err| SQLError::Internal(format!("read graph catalog: {err}")))
     }
 }

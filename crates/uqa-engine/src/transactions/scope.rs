@@ -22,9 +22,12 @@ pub(super) struct TransactionScope<'engine> {
 }
 
 impl<'engine> TransactionScope<'engine> {
-    pub(super) fn begin_implicit_read(engine: &'engine Engine) -> Result<Self, SQLError> {
+    pub(super) fn begin_implicit_statement(
+        engine: &'engine Engine,
+        read_only: bool,
+    ) -> Result<Self, SQLError> {
         let depth_before = engine.transaction_depth();
-        engine.begin_implicit_statement_transaction(true)?;
+        engine.begin_implicit_statement_transaction(read_only)?;
         Ok(Self {
             engine,
             depth_before,

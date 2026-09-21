@@ -216,7 +216,8 @@ impl SchemaDropCatalog for Engine {
         Engine::current_user_has_role_privileges(self, role)
     }
     fn schema_is_graph(&self, name: &str) -> Result<bool, String> {
-        self.has_graph(name).map_err(|error| error.to_string())
+        self.has_graph_in_execution(name)
+            .map_err(|error| error.to_string())
     }
 }
 impl SchemaRemovalNames for Engine {

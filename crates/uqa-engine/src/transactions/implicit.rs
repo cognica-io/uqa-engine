@@ -60,44 +60,59 @@ impl Engine {
         }
     }
 
-    /// Admit an external read through the active transaction or an owned implicit read frame. Attached physical readers retain their existing view and completion owner.
-    pub(crate) fn with_read_transaction_snapshot<R>(
+    /// Admit a public query through the active transaction or an owned implicit frame. Queries that can persist calibration or create a graph need a writable snapshot, including on memory engines. Attached physical readers retain their existing view and completion owner.
+    pub(crate) fn with_query_transaction_snapshot<R, E: std::fmt::Display>(
         &self,
         select_snapshot: bool,
-        read: impl FnOnce(&Self) -> Result<R, SQLError>,
-    ) -> Result<R, SQLError> {
+        read_only: bool,
+        query: impl FnOnce(&Self) -> Result<R, E>,
+        map_transaction_error: impl Fn(SQLError) -> E,
+    ) -> Result<R, E> {
         if self.transaction_depth() != 0 {
-            self.ensure_transaction_usable()?;
+            self.ensure_transaction_usable()
+                .map_err(&map_transaction_error)?;
             return self.run_existing_transaction_operation(
                 || {
-                    self.runtime.cancellation.check()?;
+                    self.runtime
+                        .cancellation
+                        .check()
+                        .map_err(SQLError::from)
+                        .map_err(&map_transaction_error)?;
                     if select_snapshot {
-                        self.prepare_explicit_statement_snapshot(true)?;
+                        self.prepare_explicit_statement_snapshot(true)
+                            .map_err(&map_transaction_error)?;
                         self.mark_transaction_snapshot_set();
                     }
-                    read(self)
+                    query(self)
                 },
-                SQLError::Internal,
+                |error| map_transaction_error(SQLError::Internal(error)),
             );
         }
-        self.runtime.cancellation.check()?;
+        self.runtime
+            .cancellation
+            .check()
+            .map_err(SQLError::from)
+            .map_err(&map_transaction_error)?;
         if self
             .storage
             .backend
             .as_ref()
-            .is_none_or(|backend| backend.in_transaction())
+            .map_or(read_only, |backend| backend.in_transaction())
         {
-            return read(self);
+            return query(self);
         }
-        let scope = TransactionScope::begin_implicit_read(self)?;
+        let scope = TransactionScope::begin_implicit_statement(self, read_only)
+            .map_err(&map_transaction_error)?;
         self.run_transaction_scope(
             scope,
             |engine| {
-                engine.prepare_explicit_statement_snapshot(true)?;
+                engine
+                    .prepare_explicit_statement_snapshot(true)
+                    .map_err(&map_transaction_error)?;
                 engine.mark_transaction_snapshot_set();
-                read(engine)
+                query(engine)
             },
-            std::convert::identity,
+            &map_transaction_error,
         )
     }
 

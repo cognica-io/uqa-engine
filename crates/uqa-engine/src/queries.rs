@@ -58,9 +58,18 @@ impl Engine {
         &self,
         read: impl FnOnce(&Self) -> Result<R, SQLError>,
     ) -> Result<R, SQLError> {
+        self.with_direct_query_snapshot(true, read, std::convert::identity)
+    }
+
+    pub(crate) fn with_direct_query_snapshot<R, E: std::fmt::Display>(
+        &self,
+        read_only: bool,
+        query: impl FnOnce(&Self) -> Result<R, E>,
+        map_transaction_error: impl Fn(SQLError) -> E,
+    ) -> Result<R, E> {
         let _statement = self.runtime.statement_gate.lock();
         let (_execution, nested) = SQLExecutionScope::enter(self);
-        self.with_read_transaction_snapshot(!nested, read)
+        self.with_query_transaction_snapshot(!nested, read_only, query, map_transaction_error)
     }
 
     /// Execute a simple-query message, delivering each statement's result in order. The whole message is parsed before execution, and implicit transaction segments retain the same boundaries as [`Engine::sql`]. The final result is delivered only after its implicit transaction has committed. Earlier results may have been delivered when a later statement fails; such failure still rolls back its implicit segment. An empty message delivers one result with no command completion.

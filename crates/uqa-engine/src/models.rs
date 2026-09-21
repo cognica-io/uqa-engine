@@ -131,6 +131,13 @@ impl Engine {
         name: &str,
         params_json: &str,
     ) -> Result<(), SQLError> {
+        // Physical retrieval workers publish through this adapter without reentering the public mutation scope.
+        if self.current_transaction_is_read_only() {
+            return Err(SQLError::Routine {
+                sqlstate: "25006".into(),
+                message: "cannot save scoring parameters in a read-only transaction".into(),
+            });
+        }
         self.lock_scoring_parameter_write(name)?;
         let mut scoring_params = self.durable.scoring_params.write();
         if let Some(catalog) = self.storage.catalog.as_ref() {
@@ -257,19 +264,22 @@ impl Engine {
     /// plan executor. A missing model retains the public API's `None`
     /// contract; the physical driver only receives known models.
     pub fn deep_predict(&self, name: &str) -> Result<Option<Vec<(DocId, f64)>>, SQLError> {
-        if self.load_model(name)?.is_none() {
-            return Ok(None);
-        }
-        let tree = uqa_operators::OperatorTree::DeepPredict {
-            model: name.to_string(),
-        };
-        let entries = crate::operator_tree_bridge::execute_scored_tree(self, "", &[], &tree)?;
-        Ok(Some(
-            entries
-                .into_iter()
-                .map(|entry| (entry.doc_id, entry.score))
-                .collect(),
-        ))
+        self.with_direct_read_snapshot(|engine| {
+            if engine.load_model(name)?.is_none() {
+                return Ok(None);
+            }
+            let tree = uqa_operators::OperatorTree::DeepPredict {
+                model: name.to_string(),
+            };
+            let entries =
+                crate::operator_tree_bridge::execute_scored_tree(engine, "", "", &[], &tree)?;
+            Ok(Some(
+                entries
+                    .into_iter()
+                    .map(|entry| (entry.doc_id, entry.score))
+                    .collect(),
+            ))
+        })
     }
 
     pub fn deep_predict_features(
