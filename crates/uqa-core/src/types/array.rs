@@ -8,6 +8,9 @@
 
 use super::Value;
 
+mod elements;
+pub use elements::{ArrayTraversalError, BudgetedArrayElements};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArrayValue {
     storage: Box<ArrayStorage>,

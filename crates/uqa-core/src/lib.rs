@@ -32,10 +32,11 @@ pub use ranked_view::RankedView;
 pub use relation::{LogSemiring, Relation, RelationEntry, Semiring};
 pub use relation_identity::RelationIdentity;
 pub use types::{
-    jsonb_equality_key, write_jsonb_comparison_key, ArrayValue, DecimalValue, DocId, Edge, EdgeId,
-    FieldName, GeneralizedPayload, GeneralizedPostingEntry, IndexStats, JsonbKeyError, PathExpr,
-    PathSegment, Payload, PostingEntry, TemporalValue, TokenOccurrence, TokenOccurrenceError,
-    TokenOffsets, Value, Vertex, VertexId,
+    jsonb_equality_key, write_jsonb_comparison_key, ArrayTraversalError, ArrayValue,
+    BudgetedArrayElements, DecimalValue, DocId, Edge, EdgeId, FieldName, GeneralizedPayload,
+    GeneralizedPostingEntry, IndexStats, JsonbKeyError, PathExpr, PathSegment, Payload,
+    PostingEntry, TemporalValue, TokenOccurrence, TokenOccurrenceError, TokenOffsets, Value,
+    Vertex, VertexId,
 };
 
 mod scored_entry;

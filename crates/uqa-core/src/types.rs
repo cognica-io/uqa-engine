@@ -44,7 +44,7 @@ mod posting;
 mod temporal;
 mod value;
 
-pub use array::ArrayValue;
+pub use array::{ArrayTraversalError, ArrayValue, BudgetedArrayElements};
 pub use decimal::DecimalValue;
 pub use graph::{Edge, EdgeId, Vertex, VertexId};
 pub use graph_phi::{

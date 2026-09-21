@@ -523,40 +523,10 @@ fn compare_postgres_container_values(left: &[Value], right: &[Value]) -> std::cm
     left.len().cmp(&right.len())
 }
 
-struct FlattenedArrayValues<'a> {
-    stack: Vec<std::slice::Iter<'a, Value>>,
-}
-
-impl<'a> FlattenedArrayValues<'a> {
-    fn new(values: &'a [Value]) -> Self {
-        Self {
-            stack: vec![values.iter()],
-        }
-    }
-}
-
-impl<'a> Iterator for FlattenedArrayValues<'a> {
-    type Item = &'a Value;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let current = self.stack.last_mut()?;
-            match current.next() {
-                Some(Value::List(values)) => self.stack.push(values.iter()),
-                Some(Value::Array(array)) => self.stack.push(array.elements().iter()),
-                Some(value) => return Some(value),
-                None => {
-                    self.stack.pop();
-                }
-            }
-        }
-    }
-}
-
 fn compare_postgres_arrays(left: &ArrayValue, right: &ArrayValue) -> std::cmp::Ordering {
     use std::cmp::Ordering;
-    let mut left_values = FlattenedArrayValues::new(left.elements());
-    let mut right_values = FlattenedArrayValues::new(right.elements());
+    let mut left_values = left.flattened_elements();
+    let mut right_values = right.flattened_elements();
     loop {
         let ordering = match (left_values.next(), right_values.next()) {
             (Some(Value::Null), Some(Value::Null)) => Ordering::Equal,

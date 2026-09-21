@@ -8,9 +8,6 @@
 
 use super::*;
 use uqa_core::{Predicate, Value};
-use uqa_engine::operator_tree_bridge::EngineDriver;
-use uqa_execution::operator_tree::{OperatorOutput, OperatorTreeDriver};
-use uqa_operators::OperatorTree;
 
 fn tables(seed: &Session, populated: bool) {
     for table in ["left_docs", "right_docs"] {
@@ -23,29 +20,6 @@ fn tables(seed: &Session, populated: bool) {
                 "INSERT INTO {table} VALUES (1, '{{\"a\":1,\"long\":[2]}}'::jsonb, 0)"
             ));
         }
-    }
-}
-
-fn index_only(session: &Session, table: &str, predicate: &Predicate) -> usize {
-    let output = EngineDriver::new(&session.engine, table, &[])
-        .execute_node(&OperatorTree::IndexScan {
-            index_name: format!("{table}_k"),
-            field: "k".into(),
-            predicate: predicate.clone(),
-        })
-        .unwrap();
-    let OperatorOutput::Posting(posting) = output else {
-        panic!("expected index postings");
-    };
-    posting.len()
-}
-
-fn finish(a: &Session, b: &Session, conflict: bool) {
-    if conflict {
-        assert_cycle(a, b);
-    } else {
-        a.engine.commit().unwrap();
-        b.engine.commit().unwrap();
     }
 }
 

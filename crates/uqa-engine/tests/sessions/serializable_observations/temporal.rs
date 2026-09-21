@@ -8,9 +8,6 @@
 
 use super::*;
 use uqa_core::{Predicate, Value};
-use uqa_engine::operator_tree_bridge::EngineDriver;
-use uqa_execution::operator_tree::{OperatorOutput, OperatorTreeDriver};
-use uqa_operators::OperatorTree;
 
 fn tables(seed: &Session, ty: &str) {
     for table in ["left_clock", "right_clock"] {
@@ -18,29 +15,6 @@ fn tables(seed: &Session, ty: &str) {
             "CREATE TABLE {table} (id INTEGER PRIMARY KEY, k {ty} UNIQUE, payload INTEGER)"
         ));
         seed.sql(&format!("CREATE INDEX {table}_k ON {table} (k)"));
-    }
-}
-
-fn index_only(session: &Session, table: &str, predicate: &Predicate) -> usize {
-    let output = EngineDriver::new(&session.engine, table, &[])
-        .execute_node(&OperatorTree::IndexScan {
-            index_name: format!("{table}_k"),
-            field: "k".into(),
-            predicate: predicate.clone(),
-        })
-        .unwrap();
-    let OperatorOutput::Posting(posting) = output else {
-        panic!("expected index postings");
-    };
-    posting.len()
-}
-
-fn finish(a: &Session, b: &Session, conflict: bool) {
-    if conflict {
-        assert_cycle(a, b);
-    } else {
-        a.engine.commit().unwrap();
-        b.engine.commit().unwrap();
     }
 }
 

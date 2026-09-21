@@ -19,13 +19,13 @@ use uqa_storage::{
     PersistentStorageBackend, ValueIndexEntry, ValueIndexKey,
 };
 
-use super::{index_key::ScalarIndexDomain, SerializableRelationRead};
+use super::{index_key::IndexDomain, SerializableRelationRead};
 use crate::{
     catalog::index::physical::{rebuild::IndexDocuments, PhysicalIndexDefinitions},
     storage_errors::storage_error,
 };
 
-fn binding(columns: &[ColumnDef], name: &str) -> Result<([u8; 16], ScalarIndexDomain), SQLError> {
+fn binding(columns: &[ColumnDef], name: &str) -> Result<([u8; 16], IndexDomain), SQLError> {
     let column = columns
         .iter()
         .find(|column| column.name == name)
@@ -34,7 +34,7 @@ fn binding(columns: &[ColumnDef], name: &str) -> Result<([u8; 16], ScalarIndexDo
         .object_id
         .filter(|identity| *identity != [0; 16])
         .ok_or_else(|| SQLError::Internal("column index has no immutable identity".into()))?;
-    let domain = ScalarIndexDomain::from_column_type(&column.ty).ok_or_else(|| {
+    let domain = IndexDomain::from_column_type(&column.ty).ok_or_else(|| {
         SQLError::Unsupported(format!(
             "serializable column index keys for {:?}",
             column.ty
@@ -172,7 +172,7 @@ impl<'a> SerializableColumnWrites<'a> {
     fn observe_value(
         &self,
         identity: [u8; 16],
-        domain: ScalarIndexDomain,
+        domain: IndexDomain,
         value: &Value,
     ) -> Result<(), SQLError> {
         let key = domain.encode(value, &self.control)?;

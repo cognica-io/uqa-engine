@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Typed scalar index addresses and predicate boundaries, independent of physical posting keys.
+//! Typed index addresses and predicate boundaries, independent of physical posting keys.
 
 use std::{cmp::Ordering, ops::Bound};
 
@@ -16,7 +16,9 @@ use crate::storage_errors::storage_error;
 
 pub type IndexKey = BudgetedVec<u8>;
 
+mod container;
 mod temporal;
+pub use container::IndexDomain;
 pub use temporal::TemporalIndexDomain;
 
 /// The stored column's comparison domain determines its key order. Numeric predicate bounds are projected into that domain; heterogeneous numeric values do not share an assumed universal byte order.
@@ -146,46 +148,7 @@ impl ScalarIndexDomain {
         control: &StorageReadControl,
         visitor: &mut dyn FnMut(IndexKeyRange) -> Result<(), SQLError>,
     ) -> Result<(), SQLError> {
-        check(control)?;
-        match predicate {
-            Predicate::IsNull => visitor(IndexKeyRange {
-                lower: Bound::Included(bytes(control, &[0])?),
-                upper: Bound::Included(bytes(control, &[0])?),
-            }),
-            Predicate::IsNotNull => visitor(self.full_range(control)?),
-            Predicate::InSet(values) => {
-                for value in values {
-                    self.visit_comparison(
-                        Some((value, true)),
-                        Some((value, true)),
-                        control,
-                        visitor,
-                    )?;
-                }
-                Ok(())
-            }
-            Predicate::Equals(value) => {
-                self.visit_comparison(Some((value, true)), Some((value, true)), control, visitor)
-            }
-            Predicate::GreaterThan(value) => {
-                self.visit_comparison(Some((value, false)), None, control, visitor)
-            }
-            Predicate::GreaterThanOrEqual(value) => {
-                self.visit_comparison(Some((value, true)), None, control, visitor)
-            }
-            Predicate::LessThan(value) => {
-                self.visit_comparison(None, Some((value, false)), control, visitor)
-            }
-            Predicate::LessThanOrEqual(value) => {
-                self.visit_comparison(None, Some((value, true)), control, visitor)
-            }
-            Predicate::Between { low, high } => {
-                self.visit_comparison(Some((low, true)), Some((high, true)), control, visitor)
-            }
-            Predicate::NotEquals(_) => Err(SQLError::Internal(
-                "complement predicate was not selected as a value-index scan".into(),
-            )),
-        }
+        IndexDomain::Scalar(self).visit_predicate(predicate, control, visitor)
     }
 
     fn visit_comparison(
@@ -229,13 +192,6 @@ impl ScalarIndexDomain {
             visitor(IndexKeyRange { lower, upper })?;
         }
         Ok(())
-    }
-
-    fn full_range(self, control: &StorageReadControl) -> Result<IndexKeyRange, SQLError> {
-        Ok(IndexKeyRange {
-            lower: Bound::Included(self.start_key(control)?),
-            upper: Bound::Excluded(self.end_key(control)?),
-        })
     }
 
     fn start_key(self, control: &StorageReadControl) -> Result<IndexKey, SQLError> {
@@ -329,7 +285,17 @@ impl ScalarIndexDomain {
             }
             _ => None,
         };
-        let value = parsed.as_ref().unwrap_or(value);
+        self.native_bound(parsed.as_ref().unwrap_or(value), lower, inclusive, control)
+    }
+
+    // Container leaves use Value::cmp directly; scalar predicate text parsing does not apply.
+    fn native_bound(
+        self,
+        value: &Value,
+        lower: bool,
+        inclusive: bool,
+        control: &StorageReadControl,
+    ) -> Result<Bound<IndexKey>, SQLError> {
         let key = match (self, value) {
             (Self::Decimal, Value::Decimal(value)) => self.decimal_key(value, control)?,
             (Self::Decimal, Value::Int(_) | Value::Bool(_) | Value::Float(_)) => {

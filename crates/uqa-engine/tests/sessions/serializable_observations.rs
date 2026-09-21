@@ -7,10 +7,16 @@
 //! SQL access paths retain original participants through provider session adapters.
 
 use std::sync::Arc;
-use uqa_engine::Engine;
+use uqa_core::Predicate;
+use uqa_engine::{operator_tree_bridge::EngineDriver, Engine};
+use uqa_execution::operator_tree::{OperatorOutput, OperatorTreeDriver};
+use uqa_operators::OperatorTree;
 use uqa_storage::{PersistentStorageBackend, PersistentStorageProvider, PersistentStorageSession};
 use uqa_storage_redb::RedbStorage;
 use uqa_storage_sqlite::{ManagedConnection, SQLiteKeyValueStorage, SQLiteStorageProvider};
+
+#[path = "serializable_observations/container.rs"]
+mod container;
 
 #[path = "serializable_observations/indexed.rs"]
 mod indexed;
@@ -75,6 +81,29 @@ fn fixtures() -> (tempfile::TempDir, Vec<Session>) {
         })
         .collect();
     (directory, sessions)
+}
+
+fn index_only(session: &Session, table: &str, predicate: &Predicate) -> usize {
+    let output = EngineDriver::new(&session.engine, table, &[])
+        .execute_node(&OperatorTree::IndexScan {
+            index_name: format!("{table}_k"),
+            field: "k".into(),
+            predicate: predicate.clone(),
+        })
+        .unwrap();
+    let OperatorOutput::Posting(posting) = output else {
+        panic!("expected index postings");
+    };
+    posting.len()
+}
+
+fn finish(a: &Session, b: &Session, conflict: bool) {
+    if conflict {
+        assert_cycle(a, b);
+    } else {
+        a.engine.commit().unwrap();
+        b.engine.commit().unwrap();
+    }
 }
 
 fn assert_cycle(a: &Session, b: &Session) {

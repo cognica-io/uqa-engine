@@ -10,6 +10,7 @@ use super::*;
 use crate::catalog::index::value::ColumnValueIndex;
 use proptest::prelude::*;
 
+mod container;
 mod jsonb;
 mod temporal;
 
@@ -32,7 +33,8 @@ fn contains(range: &IndexKeyRange, key: &[u8]) -> bool {
     above && below
 }
 
-fn observed(domain: ScalarIndexDomain, predicate: &Predicate, value: &Value) -> bool {
+fn observed(domain: impl Into<IndexDomain>, predicate: &Predicate, value: &Value) -> bool {
+    let domain = domain.into();
     let control = StorageReadControl::with_limit(1 << 20);
     let key = domain.encode(value, &control).unwrap();
     let mut found = false;
@@ -45,7 +47,8 @@ fn observed(domain: ScalarIndexDomain, predicate: &Predicate, value: &Value) -> 
     found
 }
 
-fn verify(domain: ScalarIndexDomain, values: &[Value], targets: &[Value]) {
+fn verify(domain: impl Into<IndexDomain>, values: &[Value], targets: &[Value]) {
+    let domain = domain.into();
     let empty = ColumnValueIndex::build("key", std::iter::empty());
     let mut predicates = vec![Predicate::IsNull, Predicate::IsNotNull];
     for target in targets {
