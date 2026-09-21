@@ -268,6 +268,9 @@ impl Engine {
         let outer_notification_transaction = !stack.is_empty();
         stack.clear();
         self.row_locks.release_session(self.session_id);
+        if let Some(snapshot) = session_snapshot.as_ref() {
+            self.restore_graph_transaction_overlay(snapshot);
+        }
         self.restore_transaction_dirty_state(dirty_at_begin);
         if let Some(snapshot) = snapshot.as_ref() {
             if let Err(error) = self.restore_transaction_data(snapshot) {
@@ -451,6 +454,7 @@ impl Engine {
             SQLError::Internal("ROLLBACK lost its checked transaction frame".into())
         })?;
         let session_snapshot = frame.session_snapshot.clone();
+        self.restore_graph_transaction_overlay(&session_snapshot);
         let mut cleanup_errors = Vec::new();
         if let Some(snapshot) = frame.data_snapshot.as_ref() {
             if let Err(error) = self.restore_transaction_data(snapshot) {

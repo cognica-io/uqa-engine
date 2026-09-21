@@ -172,6 +172,7 @@ impl Engine {
             }
         }
 
+        self.restore_graph_transaction_overlay(&rollback_state.session);
         if let Some(snapshot) = rollback_state.data.as_ref() {
             if let Err(restore_error) = self.restore_transaction_data(snapshot) {
                 cleanup_errors.push(format!("memory restore: {restore_error}"));

@@ -502,6 +502,7 @@ impl Engine {
         if let Err(error) = backend.rollback_transaction() {
             cleanup_errors.push(format!("storage rollback: {error}"));
         } else {
+            self.restore_graph_transaction_overlay(session_snapshot);
             if let Err(error) = self.reload_persistent_value_indexes() {
                 cleanup_errors.push(format!("btree restore: {error}"));
             }

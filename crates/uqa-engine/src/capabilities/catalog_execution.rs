@@ -102,6 +102,22 @@ impl CatalogNamespace for Engine {
 }
 
 impl uqa_execution::catalog::services::CatalogSnapshotSource for Engine {
+    fn bind_query_reads(
+        &self,
+        snapshot: uqa_execution::catalog::CatalogReadView,
+    ) -> Result<uqa_execution::catalog::CatalogReadView, SQLError> {
+        let map_error =
+            |error| uqa_execution::storage_errors::storage_error("bind catalog reads", &error);
+        let Some(context) = self.graph_read_context().map_err(map_error)? else {
+            return Ok(snapshot);
+        };
+        Ok(snapshot.with_graph_reads(
+            self.new_graph_store().map_err(map_error)?,
+            context,
+            &self.runtime.cancellation,
+        ))
+    }
+
     fn refreshed_catalog_snapshot(
         &self,
     ) -> Result<uqa_execution::catalog::CatalogReadView, SQLError> {

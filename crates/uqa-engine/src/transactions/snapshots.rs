@@ -209,4 +209,13 @@ impl Engine {
             .lock()
             .retain(|name, _| snapshot.portal_names.contains(name));
     }
+
+    /// Registry restoration must resolve graph names against the same boundary as the already rolled-back provider, before the remaining session state is restored.
+    pub(super) fn restore_graph_transaction_overlay(&self, snapshot: &SessionStateSnapshot) {
+        self.session
+            .state
+            .write()
+            .graph_overlay
+            .clone_from(&snapshot.graph_overlay);
+    }
 }

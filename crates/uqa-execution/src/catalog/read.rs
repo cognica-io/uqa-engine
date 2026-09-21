@@ -19,7 +19,6 @@ use std::{
 use uqa_sql::catalog::roles::identity::RoleSubject;
 use uqa_sql::catalog::roles::RoleReference;
 
-use uqa_graph::GraphStore;
 use uqa_sql::SQLError;
 
 use super::{
@@ -581,81 +580,6 @@ impl CatalogReadView {
             .values()
             .flat_map(|functions| functions.iter().cloned())
             .collect()
-    }
-
-    pub fn graph_labels(
-        &self,
-        graph: &str,
-    ) -> Result<Option<Vec<uqa_graph::GraphLabelInfo>>, SQLError> {
-        let Some(store) = self.snapshot.definitions.graphs.get(graph) else {
-            return Ok(None);
-        };
-        store.graph_labels(graph).map(Some).map_err(|error| {
-            SQLError::Internal(format!("read graph `{graph}` catalog labels: {error}"))
-        })
-    }
-
-    pub fn graph_names(&self) -> Vec<String> {
-        self.snapshot.definitions.graphs.keys().cloned().collect()
-    }
-
-    pub fn graph_next_label_id(&self, graph: &str) -> Result<Option<u32>, SQLError> {
-        self.snapshot
-            .definitions
-            .graphs
-            .get(graph)
-            .map(|store| {
-                store
-                    .label_registry(graph)
-                    .map(|registry| registry.next_label_id)
-            })
-            .transpose()
-            .map_err(|error| {
-                SQLError::Internal(format!("read graph `{graph}` label sequence: {error}"))
-            })
-    }
-
-    pub fn graph_label_count(
-        &self,
-        graph: &str,
-        label: &str,
-        kind: uqa_graph::LabelKind,
-    ) -> Result<Option<usize>, SQLError> {
-        let Some(store) = self.snapshot.definitions.graphs.get(graph) else {
-            return Ok(None);
-        };
-        let count = match kind {
-            uqa_graph::LabelKind::Vertex => store
-                .vertex_ids_by_label(label, graph)
-                .map(|identities| identities.len()),
-            uqa_graph::LabelKind::Edge => store
-                .edge_ids_by_label(label, graph)
-                .map(|identities| identities.len()),
-        }
-        .map_err(|error| {
-            SQLError::Internal(format!("read graph `{graph}` label `{label}`: {error}"))
-        })?;
-        Ok(Some(count))
-    }
-
-    pub fn graph_vertices(&self, graph: &str) -> Result<Option<Vec<uqa_core::Vertex>>, SQLError> {
-        let Some(store) = self.snapshot.definitions.graphs.get(graph) else {
-            return Ok(None);
-        };
-        store
-            .vertices_in_graph(graph)
-            .map(Some)
-            .map_err(|error| SQLError::Internal(format!("read graph `{graph}` vertices: {error}")))
-    }
-
-    pub fn graph_edges(&self, graph: &str) -> Result<Option<Vec<uqa_core::Edge>>, SQLError> {
-        let Some(store) = self.snapshot.definitions.graphs.get(graph) else {
-            return Ok(None);
-        };
-        store
-            .edges_in_graph(graph)
-            .map(Some)
-            .map_err(|error| SQLError::Internal(format!("read graph `{graph}` edges: {error}")))
     }
 
     pub fn table(

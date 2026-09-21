@@ -321,27 +321,38 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 ));
             }
 
-            if let Some(rows) = crate::catalog::projection::build_info_schema_rows(
-                &context.catalog,
-                &catalog,
-                &resolution,
-                context.catalog.session,
-                name,
-            )? {
-                let schema =
-                    crate::catalog::schema::virtual_relation_schema(&catalog, &resolution, name)?
-                        .ok_or_else(|| {
-                        SQLError::Internal(format!(
-                            "virtual relation `{name}` has rows but no PostgreSQL 18 row type"
-                        ))
-                    })?;
+            if let Some(schema) =
+                crate::catalog::schema::virtual_relation_schema(&catalog, &resolution, name)?
+            {
                 let (columns, types): (Vec<_>, Vec<_>) = schema
                     .into_iter()
                     .map(|(column, ty)| (column, Some(ty)))
                     .unzip();
-                let scan: Box<dyn PhysicalOperator + 'a> = Box::new(
-                    crate::TableScan::from_typed_rows(columns.clone(), types, rows),
-                );
+                let schema = crate::RowSchema::with_types(columns.clone(), types);
+                let catalog = context.catalog.catalog.bind_query_reads(catalog)?;
+                let projection = context.catalog;
+                let name = name.clone();
+                let scan: Box<dyn PhysicalOperator + 'a> =
+                    Box::new(crate::query::scored_input::DeferredTableScan::new(
+                        schema.clone(),
+                        Box::new(move || {
+                            let rows = crate::catalog::projection::build_info_schema_rows(
+                                &projection,
+                                &catalog,
+                                &resolution,
+                                projection.session,
+                                &name,
+                            )?
+                            .ok_or_else(|| {
+                                SQLError::Internal(format!(
+                                    "virtual relation `{name}` disappeared from retained catalog"
+                                ))
+                            })?;
+                            Ok(Box::new(crate::scan::VecSource::with_row_schema(
+                                schema, rows,
+                            )))
+                        }),
+                    ));
                 let aliases = table_source_aliases(&columns, &[], column_aliases);
                 let operator = qualify_source_operator_with_columns(
                     scan,

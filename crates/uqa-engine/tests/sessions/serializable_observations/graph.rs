@@ -23,6 +23,9 @@ mod definitions;
 #[path = "graph/labels.rs"]
 mod labels;
 
+#[path = "graph/catalog.rs"]
+mod catalog;
+
 fn prepare(session: &Session) {
     session.engine.create_graph("g").unwrap();
     for id in [1, 2] {

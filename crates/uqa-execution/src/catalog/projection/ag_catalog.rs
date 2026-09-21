@@ -124,13 +124,14 @@ pub fn label_sequence_name(label: &str) -> String {
 }
 
 pub fn build_ag_graph(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
-    Ok(graph_catalog_entries(catalog)?
+    Ok(catalog
+        .read_graph_names()?
         .into_iter()
-        .map(|entry| {
+        .map(|name| {
             row([
-                ("graphid", int_value(graph_oid(&entry.name))),
-                ("name", str_value(entry.name.clone())),
-                ("namespace", str_value(entry.name)),
+                ("graphid", int_value(graph_oid(&name))),
+                ("name", str_value(name.clone())),
+                ("namespace", str_value(name)),
             ])
         })
         .collect())

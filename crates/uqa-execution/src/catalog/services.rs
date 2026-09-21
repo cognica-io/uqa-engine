@@ -47,6 +47,13 @@ pub trait CatalogNamespace: Sync {
 pub trait CatalogSnapshotSource: Sync {
     fn catalog_snapshot(&self) -> super::CatalogReadView;
     fn refreshed_catalog_snapshot(&self) -> Result<super::CatalogReadView, SQLError>;
+    /// Attach the original query participant without replacing the retained catalog or observing unused sources.
+    fn bind_query_reads(
+        &self,
+        snapshot: super::CatalogReadView,
+    ) -> Result<super::CatalogReadView, SQLError> {
+        Ok(snapshot)
+    }
     /// Definition coordination uses the refreshed session catalog, independently from an ordinary query's retained snapshot.
     fn current_catalog_snapshot(&self) -> super::CatalogReadView;
 }

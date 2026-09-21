@@ -134,6 +134,7 @@ impl Engine {
         }
         let mut cleanup_errors = Vec::new();
         let savepoint = &frame.savepoints[position];
+        self.restore_graph_transaction_overlay(&savepoint.session_snapshot);
         if let Some(snapshot) = savepoint.data_snapshot.as_ref() {
             if let Err(error) = self.restore_transaction_data(snapshot) {
                 cleanup_errors.push(format!("memory restore: {error}"));

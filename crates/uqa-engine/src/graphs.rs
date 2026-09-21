@@ -561,7 +561,7 @@ impl Engine {
         }
     }
 
-    fn graph_read_context(
+    pub(crate) fn graph_read_context(
         &self,
     ) -> StorageBackendResult<Option<uqa_storage::mvcc::SerializableReadContext>> {
         Ok(self

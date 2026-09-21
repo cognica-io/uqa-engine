@@ -4,12 +4,15 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Retained retrieval inputs execute once when their row consumer first pulls.
+//! Retained row inputs execute once when their consumer first pulls.
 
 use super::{RecheckDoc, ScoredDocumentSource, ScoredEntriesProducer, ScoredInput};
 use crate::{Batch, ExecResult, PhysicalOperator, RowSchema, RowSource, TableScan};
 use std::sync::Arc;
 use uqa_sql::SQLError;
+
+#[cfg(test)]
+mod tests;
 
 type SourceProducer<'a> = Box<dyn FnOnce() -> Result<Box<dyn RowSource>, SQLError> + Send + 'a>;
 
@@ -31,19 +34,19 @@ impl<'a> DeferredTableScan<'a> {
     fn input(&mut self) -> ExecResult<&mut TableScan> {
         if self.inner.is_none() {
             let pending = self.pending.take().ok_or_else(|| {
-                SQLError::Internal("retrieval source was already closed or failed".into())
+                SQLError::Internal("deferred source was already closed or failed".into())
             })?;
             let source = TableScan::new(pending()?);
             if source.row_schema() != &self.schema {
                 return Err(SQLError::Internal(
-                    "deferred retrieval changed its bound row schema".into(),
+                    "deferred source changed its bound row schema".into(),
                 )
                 .into());
             }
             self.inner = Some(source);
-            self.inner.as_mut().expect("initialized retrieval").open()?;
+            self.inner.as_mut().expect("initialized source").open()?;
         }
-        Ok(self.inner.as_mut().expect("initialized retrieval"))
+        Ok(self.inner.as_mut().expect("initialized source"))
     }
 }
 

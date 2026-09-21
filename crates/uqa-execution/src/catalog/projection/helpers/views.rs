@@ -15,6 +15,7 @@ pub fn all_schema_names(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<Vec<String>, SQLError> {
+    catalog.observe_graph_names()?;
     Ok(catalog.all_schema_names(resolution))
 }
 

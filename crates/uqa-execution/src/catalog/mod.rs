@@ -24,14 +24,16 @@ pub use uqa_sql::catalog::resolution::{RelationLookupMode, RelationNameResolutio
 use view::StoredView;
 mod analysis;
 pub mod graph;
+mod graph_reads;
 mod read;
 pub mod schema;
 mod snapshot_read;
 
-/// Read-only access to catalog-owned state. This view cannot mutate transactions, acquire locks, publish caches, or recover the enclosing engine.
+/// Immutable catalog inputs with optional query read attribution. This view cannot change definitions, coordinate DDL, publish caches, or recover the enclosing engine.
 #[derive(Clone)]
 pub struct CatalogReadView {
     snapshot: Arc<CatalogReadSnapshot>,
+    graph_reads: Option<Arc<graph_reads::GraphCatalogRead>>,
 }
 
 /// Immutable catalog names and durable registries captured at one statement boundary.
@@ -116,6 +118,7 @@ impl CatalogReadView {
     pub fn new(snapshot: CatalogReadSnapshot) -> Self {
         Self {
             snapshot: Arc::new(snapshot),
+            graph_reads: None,
         }
     }
     pub fn snapshot(&self) -> &CatalogReadSnapshot {
