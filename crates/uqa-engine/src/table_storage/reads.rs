@@ -29,35 +29,39 @@ impl Engine {
         self.with_direct_query_snapshot(
             read_only,
             |engine| {
-                let resolve = || {
-                    let Some(name) =
-                        engine.try_resolve_query_table_name(name).map_err(|error| {
-                            uqa_execution::storage_errors::storage_error(
-                                "resolve direct read table",
-                                &error,
-                            )
-                        })?
-                    else {
-                        return Ok(None);
-                    };
-                    let table = engine.require_query_table(&name)?;
-                    Ok(Some(uqa_execution::row_locks::binding::RelationBinding {
-                        name,
-                        object_id: Some(table.object_id()),
-                        value: table,
-                    }))
-                };
-                // Attached physical readers already retain their source view and have no logical frame whose locks this call could own.
-                let binding = if engine.transaction_depth() == 0 {
-                    resolve()?
-                } else {
-                    uqa_execution::query::table_read::bind_direct_table_read(engine, resolve)?
-                }
-                .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?;
+                let binding = engine.bind_query_table_read(name)?;
                 query(engine, &binding.name, &binding.value)
             },
             std::convert::identity,
         )
+    }
+
+    /// Bind retained table state and its relation lock within the caller's existing statement.
+    pub(crate) fn bind_query_table_read(
+        &self,
+        name: &str,
+    ) -> Result<uqa_execution::row_locks::binding::RelationBinding<Arc<TableState>>, SQLError> {
+        let resolve = || {
+            let Some(name) = self.try_resolve_query_table_name(name).map_err(|error| {
+                uqa_execution::storage_errors::storage_error("resolve direct read table", &error)
+            })?
+            else {
+                return Ok(None);
+            };
+            let table = self.require_query_table(&name)?;
+            Ok(Some(uqa_execution::row_locks::binding::RelationBinding {
+                name,
+                object_id: Some(table.object_id()),
+                value: table,
+            }))
+        };
+        // Attached physical readers already retain their source view and have no logical frame whose locks this call could own.
+        let binding = if self.transaction_depth() == 0 {
+            resolve()?
+        } else {
+            uqa_execution::query::table_read::bind_direct_table_read(self, resolve)?
+        };
+        binding.ok_or_else(|| SQLError::UnknownTable(name.to_string()))
     }
 
     pub fn get_document(

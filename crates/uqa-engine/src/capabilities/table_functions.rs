@@ -62,7 +62,7 @@ impl AnalyzerTableFunctions for Engine {
             })
     }
     fn fts_index_stats(&self, table: Option<&str>) -> Result<Vec<FtsIndexStat>, SQLError> {
-        self.fts_index_stats(table)
+        self.fts_index_stats_in_execution(table)
     }
 }
 impl OperatorJoinBinding for Engine {

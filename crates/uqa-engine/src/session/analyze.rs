@@ -402,11 +402,17 @@ impl Engine {
         &self,
         table: &str,
     ) -> StorageBackendResult<BTreeMap<String, uqa_planner::ColumnStats>> {
-        // Lazy analysis must be linearizable with direct table mutations. A
-        // stale scan must not publish `column_stats_dirty = false` after a
-        // concurrent writer marked the table dirty. The gate is re-entrant
-        // for optimizer calls already executing inside Engine::sql.
-        let _statement = self.runtime.statement_gate.lock();
+        self.with_direct_query_snapshot(
+            false,
+            |engine| engine.column_stats_in_execution(table),
+            |error| StorageBackendError::backend("column statistics query", error),
+        )
+    }
+
+    pub(crate) fn column_stats_in_execution(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<BTreeMap<String, uqa_planner::ColumnStats>> {
         self.synchronize_table_data()?;
         let canonical_name = self
             .try_resolve_table_name(table)?
@@ -439,7 +445,7 @@ impl Engine {
         // Memory-only engines have no durable independent sessions or blob
         // I/O. Retain their automatic lazy refresh at this boundary.
         if self.storage.provider.is_none() && self.query_table_snapshots.is_none() {
-            return self.try_column_stats(table);
+            return self.column_stats_in_execution(table);
         }
         let table = self
             .try_query_table(table)?

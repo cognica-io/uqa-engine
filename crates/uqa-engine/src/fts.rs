@@ -48,38 +48,36 @@ impl Engine {
         &self,
         table_filter: Option<&str>,
     ) -> Result<Vec<FtsIndexStat>, SQLError> {
-        self.synchronize_table_catalog()
-            .map_err(|err| SQLError::Internal(format!("refresh table catalog: {err}")))?;
-        let resolved_filter = match table_filter {
-            Some(name) => Some(
-                self.try_resolve_table_name(name)
-                    .map_err(|err| SQLError::Internal(format!("resolve table filter: {err}")))?
-                    .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?,
-            ),
-            None => None,
-        };
-        let mut tables: Vec<(String, Arc<TableState>)> = self
-            .storage
-            .tables
-            .read()
-            .iter()
-            .filter(|(name, _)| {
-                resolved_filter
-                    .as_ref()
-                    .is_none_or(|target| name.qualified_name() == *target)
+        self.with_direct_read_snapshot(|engine| {
+            engine.fts_index_stats_with_tables(table_filter, |name| {
+                engine
+                    .bind_query_table_read(name)
+                    .map(|binding| binding.value)
             })
-            .map(|(name, table)| (name.qualified_name(), table.clone()))
-            .collect();
-        tables.sort_by(|a, b| a.0.cmp(&b.0));
+        })
+    }
 
+    pub(crate) fn fts_index_stats_in_execution(
+        &self,
+        table_filter: Option<&str>,
+    ) -> Result<Vec<FtsIndexStat>, SQLError> {
+        self.fts_index_stats_with_tables(table_filter, |name| self.require_query_table(name))
+    }
+
+    fn fts_index_stats_with_tables(
+        &self,
+        table_filter: Option<&str>,
+        bind: impl Fn(&str) -> Result<Arc<TableState>, SQLError>,
+    ) -> Result<Vec<FtsIndexStat>, SQLError> {
         let mut out = Vec::new();
-        for (table_name, table) in tables {
+        for table_name in self.fts_stats_table_names(table_filter)? {
+            let table = bind(&table_name)?;
             let mut fields = table.fts_fields();
             fields.sort();
             let index = table.inverted_index.read();
             let index = uqa_execution::serializable::text::ObservedTextIndex::new(
                 index.as_ref(),
-                self.serializable_table_read(&table_name)?,
+                self.serializable_table_state_read(&table)?,
                 table.columns.snapshot(),
             );
             for field in fields {
@@ -121,6 +119,31 @@ impl Engine {
             }
         }
         Ok(out)
+    }
+
+    fn fts_stats_table_names(&self, table_filter: Option<&str>) -> Result<Vec<String>, SQLError> {
+        self.synchronize_table_catalog()
+            .map_err(|err| SQLError::Internal(format!("refresh table catalog: {err}")))?;
+        let mut names = if let Some(name) = table_filter {
+            vec![self
+                .try_resolve_query_table_name(name)
+                .map_err(|err| SQLError::Internal(format!("resolve table filter: {err}")))?
+                .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?]
+        } else if let Some(tables) = self.query_table_snapshots.as_ref() {
+            tables
+                .keys()
+                .map(uqa_core::RelationIdentity::qualified_name)
+                .collect()
+        } else {
+            self.storage
+                .tables
+                .read()
+                .keys()
+                .map(uqa_core::RelationIdentity::qualified_name)
+                .collect()
+        };
+        names.sort_unstable();
+        Ok(names)
     }
 
     pub(crate) fn project_fts_sources(t: &Arc<TableState>) -> Result<TextIndexDocuments, String> {

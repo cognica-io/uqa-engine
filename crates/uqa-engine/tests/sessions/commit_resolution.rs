@@ -377,6 +377,12 @@ fn retained_commit_resolves_without_replaying_preparation_and_publishes_once() {
             error.assert_transaction_error(&expected);
             assert_eq!(root.pending_commit(), Some(identity));
         }
+        for read in super::serializable_observations::statistics_reads::StatisticsRead::ALL {
+            read.read(&root)
+                .expect_err("statistics query must not bypass unresolved completion")
+                .assert_transaction_error(&expected);
+            assert_eq!(root.pending_commit(), Some(identity));
+        }
         assert_eq!(calls.load(Ordering::Acquire), 2);
         assert_eq!(persistence.aborts.load(Ordering::Acquire), 0);
         persistence.fault.store(HEALTHY, Ordering::Release);

@@ -478,3 +478,94 @@ fn catalog_workers_keep_the_parent_snapshot_without_reentering_its_statement() {
         root.sql("COMMIT", &[]).unwrap();
     }
 }
+
+#[test]
+fn statistics_workers_keep_the_parent_statement_and_memory_lazy_collection() {
+    use uqa_execution::query::table_functions::context::AnalyzerTableFunctions;
+    use uqa_planner::statement_planning::PlannerStatisticsCatalog;
+
+    for provider in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let root = if provider == 3 {
+            Engine::new()
+        } else {
+            persistent_engine(provider, &directory.path().join("statistics-workers.db"))
+        };
+        root.sql("CREATE TABLE t (id INTEGER PRIMARY KEY, body TEXT); CREATE INDEX t_body ON t USING gin(body); INSERT INTO t VALUES (1, 'token')", &[]).unwrap();
+        root.run_analyze(Some("t")).unwrap();
+        root.sql("BEGIN ISOLATION LEVEL SERIALIZABLE; SELECT id FROM t", &[])
+            .unwrap();
+        if provider == 3 {
+            root.require_table("t")
+                .unwrap()
+                .column_stats_dirty
+                .store(true, Ordering::Release);
+        }
+        std::thread::scope(|scope| {
+            let statement = root.runtime.statement_gate.lock();
+            let (sender, receiver) = mpsc::channel();
+            let source = &root;
+            let worker = scope.spawn(move || {
+                let stats = AnalyzerTableFunctions::fts_index_stats(source, Some("t")).unwrap();
+                assert_eq!(stats.len(), 1);
+                assert_eq!(stats[0].total_field_length, 1);
+                assert!(PlannerStatisticsCatalog::column_statistics(source, "t")
+                    .unwrap()
+                    .contains_key("id"));
+                sender.send(()).unwrap();
+            });
+            let completed = receiver.recv_timeout(Duration::from_secs(10));
+            drop(statement);
+            worker.join().unwrap();
+            completed.expect("statistics worker reentered its parent statement");
+        });
+        assert_eq!(root.transaction_depth(), 1);
+        root.sql("ROLLBACK", &[]).unwrap();
+    }
+}
+
+#[test]
+fn attached_text_statistics_keep_their_original_index_data_and_table_inventory() {
+    for provider in 0..3 {
+        let directory = tempfile::tempdir().unwrap();
+        let root = persistent_engine(provider, &directory.path().join("statistics-readers.db"));
+        root.sql("CREATE TABLE t (body TEXT); CREATE INDEX t_body ON t USING gin(body); INSERT INTO t VALUES ('token')", &[]).unwrap();
+        root.release_automatic_statistics_client();
+        root.session
+            .statistics_worker
+            .store(true, Ordering::Release);
+        let peer = root.new_session().unwrap();
+        peer.release_automatic_statistics_client();
+        peer.session
+            .statistics_worker
+            .store(true, Ordering::Release);
+        let backend = root.storage.backend.as_ref().unwrap().clone();
+        backend.begin_read_transaction().unwrap();
+        assert_eq!(
+            root.fts_index_stats(Some("t")).unwrap()[0].total_field_length,
+            1
+        );
+        peer.sql("UPDATE t SET body = 'token token token'; CREATE TABLE later (body TEXT); CREATE INDEX later_body ON later USING gin(body); INSERT INTO later VALUES ('later')", &[]).unwrap();
+        let retained = root.open_retained_pinned_read_snapshot().unwrap();
+        let latest = root.open_independent_pinned_read_snapshot().unwrap();
+        assert_eq!(retained.fts_index_stats(None).unwrap().len(), 1);
+        assert_eq!(latest.fts_index_stats(None).unwrap().len(), 2);
+        assert_eq!(
+            retained.fts_index_stats(Some("t")).unwrap()[0].total_field_length,
+            1
+        );
+        assert_eq!(
+            latest.fts_index_stats(Some("t")).unwrap()[0].total_field_length,
+            3
+        );
+        backend.rollback_transaction().unwrap();
+        drop((root, backend, latest));
+        peer.sql("UPDATE t SET body = 'token token token token'", &[])
+            .unwrap();
+        assert_eq!(retained.fts_index_stats(None).unwrap().len(), 1);
+        assert_eq!(
+            retained.fts_index_stats(Some("t")).unwrap()[0].total_field_length,
+            1
+        );
+    }
+}
