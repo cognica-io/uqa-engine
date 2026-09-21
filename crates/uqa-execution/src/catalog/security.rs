@@ -27,6 +27,7 @@ pub mod roles;
 pub mod database_lifecycle;
 
 pub mod routine_inquiry;
+pub mod schema_inquiry;
 pub mod sequence_inquiry;
 pub mod sequence_lifecycle;
 

@@ -37,6 +37,10 @@ pub trait SchemaPrivilegeCatalog {
     fn graphs(&self) -> Box<dyn GraphNamespaceRead + '_>;
     fn temporary_namespace_allocated(&self) -> bool;
     fn temporary_schema_name(&self) -> String;
+    /// Observe a consumed namespace lookup, including absence. `None` denotes an OID lookup with no matching namespace. Registry enumeration and authorization binding alone do not call this hook.
+    fn observe_namespace_lookup(&self, _name: Option<&str>) -> Result<(), SQLError> {
+        Ok(())
+    }
 }
 
 pub struct SchemaPrivilegeInquiry<'a> {
@@ -164,6 +168,7 @@ impl SchemaPrivilegeInquiry<'_> {
         let names = self.schema_privilege_namespace_names()?;
         match value {
             Value::Str(name) | Value::FixedChar(name) => {
+                self.catalog.observe_namespace_lookup(Some(name))?;
                 if names.contains(name) {
                     Ok(Some(name.clone()))
                 } else {
@@ -173,10 +178,14 @@ impl SchemaPrivilegeInquiry<'_> {
                     })
                 }
             }
-            Value::Int(oid) => Ok(names.into_iter().find(|name| {
-                self.schema_security_for_privilege(name)
-                    .is_some_and(|security| security.namespace_oid(name) == *oid)
-            })),
+            Value::Int(oid) => {
+                let name = names.into_iter().find(|name| {
+                    self.schema_security_for_privilege(name)
+                        .is_some_and(|security| security.namespace_oid(name) == *oid)
+                });
+                self.catalog.observe_namespace_lookup(name.as_deref())?;
+                Ok(name)
+            }
             other => Err(SQLError::TypeMismatch(format!(
                 "has_schema_privilege schema must be text or oid, got {other:?}"
             ))),
@@ -198,6 +207,9 @@ impl SchemaPrivilegeInquiry<'_> {
         Ok(names)
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 fn resolve_schema_privilege_role(
     value: &Value,

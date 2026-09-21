@@ -95,6 +95,8 @@ Runtime `regnamespace` casts and `to_regnamespace` lookups observe the requested
 
 Execution also owns effective search-path selection for `current_schema`, `current_schemas` and the corresponding direct Engine APIs. The first-schema lookup stops at the first usable namespace; the complete-list lookup retains every requested namespace decision. Missing graph names on the consumed path remain creation predicates, while later unused entries, unrelated graphs, graph labels and entity contents do not become reads. Namespace callbacks receive the original catalog through refresh, and SQL preserves typed observation failures without changing legacy embedder hooks. Unobserved binding and planner calls retain their separate catalog context.
 
+Schema privilege inquiry uses the same original graph participant. SQL reports the selected namespace name or an unmatched OID through its typed lookup observer; Execution attaches graph-presence observations after excluding durable, system and allocated session temporary namespaces. Namespace registry enumeration alone does not observe every graph. NULL arguments and authorization binding retain their existing short circuits, and catalog refresh or nested inquiry does not replace the participant.
+
 Transaction recovery restores the saved graph overlay before rebuilding catalogs from the rolled-back provider. Transaction and savepoint rollback, statement abort and failed transaction completion therefore resolve names against the restored boundary, preserving the original error instead of failing again on a cancelled graph definition.
 
 ## Source entry points

@@ -227,7 +227,13 @@ pub fn catalog_scalar_value(
         "has_table_privilege" => context.tables.has_table_privilege_value(arguments),
         "has_column_privilege" => context.tables.has_column_privilege_value(arguments),
         "has_database_privilege" => context.database.has_database_privilege_value(arguments),
-        "has_schema_privilege" => context.schemas.has_schema_privilege_value(arguments),
+        "has_schema_privilege" => {
+            crate::catalog::security::schema_inquiry::has_schema_privilege_value(
+                &context.catalog,
+                &context.schemas,
+                arguments,
+            )
+        }
         "has_function_privilege" => {
             crate::catalog::security::routine_inquiry::has_function_privilege_value(
                 &context.catalog,
