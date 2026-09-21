@@ -15,6 +15,9 @@ use uqa_core::{Edge, EdgeId, Vertex, VertexId};
 use crate::posting_list::GraphPostingListError;
 use crate::types::Direction;
 
+mod error;
+pub use error::GraphStorageError;
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum GraphStoreError {
     #[error("graph {0:?} does not exist")]
@@ -29,6 +32,8 @@ pub enum GraphStoreError {
     CorruptGraph(String),
     #[error("graph storage error: {0}")]
     Storage(String),
+    #[error("graph storage error: {0}")]
+    Backend(#[source] GraphStorageError),
     #[error("graph serialization failure: {0}")]
     SerializationFailure(String),
     #[error(transparent)]
@@ -257,6 +262,6 @@ pub trait GraphStore {
 
 impl From<uqa_storage::StorageBackendError> for GraphStoreError {
     fn from(error: uqa_storage::StorageBackendError) -> Self {
-        Self::Storage(error.to_string())
+        Self::Backend(error.into())
     }
 }

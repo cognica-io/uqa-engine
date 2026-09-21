@@ -43,7 +43,7 @@ pub fn build_rows(
     }
     if !runtime
         .has_graph(&graph)
-        .map_err(|err| SQLError::Internal(format!("read graph catalog: {err}")))?
+        .map_err(|error| crate::storage_errors::storage_error("read graph catalog", &error))?
     {
         return Err(SQLError::Unsupported(format!(
             "graph \"{graph}\" does not exist"
@@ -59,6 +59,10 @@ pub fn build_rows(
             .run_cypher(&graph, &query, params)
             .map_err(|error| match error {
                 CypherError::MissingLabelRelation(relation) => SQLError::UnknownTable(relation),
+                error @ CypherError::Backend(_) => crate::storage_errors::storage_error(
+                    "cypher",
+                    &uqa_storage::StorageBackendError::backend("graph", error),
+                ),
                 CypherError::SerializationFailure(message) => SQLError::Routine {
                     sqlstate: "40001".into(),
                     message,
@@ -88,3 +92,6 @@ pub fn build_rows(
     }
     Ok(out)
 }
+
+#[cfg(test)]
+mod tests;

@@ -16,7 +16,7 @@ use crate::Value;
 
 mod index;
 
-fn persistent_engine(provider: usize, path: &std::path::Path) -> Engine {
+pub(super) fn persistent_engine(provider: usize, path: &std::path::Path) -> Engine {
     let engine = match provider {
         0 => Engine::open(path).unwrap(),
         1 => Engine::from_persistent_provider(Arc::new(
@@ -219,7 +219,7 @@ fn direct_mutation_error_families_abort_only_their_active_nested_frame() {
                 "mapped" => engine
                     .with_implicit_mapped_transaction(
                         |e| reject_after_write(e, panic),
-                        SQLError::Internal,
+                        std::convert::identity,
                     )
                     .map_err(|error| {
                         assert_eq!(error.sqlstate(), Some("40001"));

@@ -80,6 +80,6 @@ pub fn migrate_python_database(
             report.path_indexes = migrate_path_indexes(&source_conn, engine)?;
             Ok(report)
         },
-        PythonMigrationError::Invalid,
+        |error| PythonMigrationError::Invalid(error.to_string()),
     )
 }

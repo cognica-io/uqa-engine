@@ -53,7 +53,7 @@ impl Engine {
                         Arc::clone(self.storage.catalog.as_ref().expect("persistent catalog")),
                         Arc::clone(self.storage.backend.as_ref().expect("persistent backend")),
                     )
-                    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+                    .map_err(|error| StorageBackendError::backend("graph catalog", error))?;
                 Ok((key.clone(), rebound))
             })
             .collect::<StorageBackendResult<BTreeMap<_, _>>>()?;
@@ -80,7 +80,7 @@ impl Engine {
             graph,
             sequences,
         )
-        .map_err(|error| StorageBackendError::Other(error.to_string()))
+        .map_err(|error| StorageBackendError::backend("graph catalog", error))
     }
 
     pub(super) fn restore_graphs_from_catalog(
@@ -102,7 +102,7 @@ impl Engine {
             // when a query reads the corresponding durable records.
             store
                 .label_registry(&name)
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+                .map_err(|error| StorageBackendError::backend("graph catalog", error))?;
             stores.insert(name, store);
         }
         let changed = existing.len() != stores.len() || existing.keys().ne(stores.keys());
@@ -131,7 +131,7 @@ impl Engine {
         for name in catalog.load_named_graphs()? {
             store
                 .rebuild_label_registry_from_ids(&name)
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+                .map_err(|error| StorageBackendError::backend("graph catalog", error))?;
         }
         catalog.set_metadata("graph_direct_storage_version", "1")
     }

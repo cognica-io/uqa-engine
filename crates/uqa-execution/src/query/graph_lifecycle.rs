@@ -6,6 +6,7 @@
 
 //! Native and AGE graph command scheduling and result values.
 
+use crate::storage_errors::storage_error;
 use crate::{eval_scalar, ScalarEvalContext};
 use uqa_core::{ScoredEntry, Value};
 use uqa_graph::{GraphLabelInfo, LabelKind};
@@ -19,7 +20,7 @@ use uqa_sql::{
     },
     SQLError, SQLParam, ScalarExpr,
 };
-use uqa_storage::StorageBackendResult;
+use uqa_storage::{StorageBackendError, StorageBackendResult};
 
 /// Graph catalog operations inside the public graph API's existing transaction boundary.
 pub trait GraphLifecycle {
@@ -62,7 +63,7 @@ pub fn run_graph_create_with_evaluator(
     let name = graph_create_name(args, evaluate)?;
     runtime
         .create_graph(name)
-        .map_err(|err| SQLError::Internal(format!("create graph: {err}")))
+        .map_err(|err| storage_error("create graph", &err))
 }
 
 pub fn run_graph_drop(
@@ -84,15 +85,15 @@ pub fn run_graph_drop_with_evaluator(
     let name = graph_drop_name(args, evaluate)?;
     let graph_exists = runtime
         .has_graph(&name)
-        .map_err(|err| SQLError::Internal(format!("read graph catalog: {err}")))?;
+        .map_err(|err| storage_error("read graph catalog", &err))?;
     validate_graph_drop_cascade(&name, graph_exists, args.get(1), evaluate)?;
     runtime
         .drop_graph(&name)
-        .map_err(|err| SQLError::Internal(format!("drop graph: {err}")))
+        .map_err(|err| storage_error("drop graph", &err))
 }
 
-fn age_graph_catalog_error(err: impl std::fmt::Display) -> SQLError {
-    SQLError::Internal(format!("read graph catalog: {err}"))
+fn age_graph_catalog_error(error: StorageBackendError) -> SQLError {
+    storage_error("read graph catalog", &error)
 }
 
 /// `SELECT create_graph('name')` with AGE semantics: validates the name,
@@ -128,7 +129,7 @@ pub fn run_age_create_graph_with_evaluator(
     }
     runtime
         .create_graph(name)
-        .map_err(|err| SQLError::Internal(format!("create graph: {err}")))?;
+        .map_err(|err| storage_error("create graph", &err))?;
     Ok(Value::Null)
 }
 
@@ -166,7 +167,7 @@ pub fn run_age_drop_graph_with_evaluator(
     }
     runtime
         .drop_graph(&name)
-        .map_err(|err| SQLError::Internal(format!("drop graph: {err}")))?;
+        .map_err(|err| storage_error("drop graph", &err))?;
     Ok(Value::Null)
 }
 
@@ -230,7 +231,7 @@ fn run_age_create_label_with_evaluator(
     }
     let created = runtime
         .create_graph_label(&graph, &label, kind)
-        .map_err(|err| SQLError::Internal(format!("create label: {err}")))?;
+        .map_err(|err| storage_error("create label", &err))?;
     if !created {
         return Err(age_error(
             AGE_UNDEFINED_SCHEMA,
@@ -310,7 +311,7 @@ pub fn run_age_drop_label_with_evaluator(
     }
     let dependent_views = runtime
         .graph_label_relation_dependents(&graph, &label)
-        .map_err(|error| SQLError::Internal(format!("inspect label dependencies: {error}")))?;
+        .map_err(|error| storage_error("inspect label dependencies", &error))?;
     if !dependent_views.is_empty() {
         return Err(age_error(
             AGE_DEPENDENT_OBJECTS_STILL_EXIST,
@@ -333,7 +334,7 @@ pub fn run_age_drop_label_with_evaluator(
     }
     runtime
         .drop_graph_label(&graph, &label)
-        .map_err(|err| SQLError::Internal(format!("drop label: {err}")))?;
+        .map_err(|err| storage_error("drop label", &err))?;
     Ok(Value::Null)
 }
 
@@ -379,6 +380,6 @@ pub fn run_age_alter_graph_with_evaluator(
     }
     runtime
         .rename_graph(&graph, &new_value)
-        .map_err(|err| SQLError::Internal(format!("rename graph: {err}")))?;
+        .map_err(|err| storage_error("rename graph", &err))?;
     Ok(Value::Null)
 }

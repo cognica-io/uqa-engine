@@ -126,6 +126,8 @@ let vertex = engine
 
 `graph_with_mut` callbacks return `GraphStoreResult<T>` and run inside a storage checkpoint. Errors and panics roll back the callback's writes. A standalone `uqa_storage_sqlite::SQLiteGraphStore` also reads indexed durable records directly; use its `read_snapshot` callback for a multi-read operation. Callers sharing a physical storage session must serialize transaction ownership. See the [Rust import migration](10-upgrading.md#sqlite-provider-ownership).
 
+Catalog-backed graph and Cypher errors retain provider failures through `std::error::Error::source`. Their SQL consumers preserve `40001` for serialization conflicts, `57014` for cancellation and `53200` for memory exhaustion. Direct Cypher also retains transaction errors reported during implicit completion. A failed explicit transaction continues to reject Cypher commands with `25P02` until transaction recovery.
+
 ## Regular path queries
 
 `rpq` evaluates a regular expression over edge labels. Its expression language supports:

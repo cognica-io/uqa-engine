@@ -109,72 +109,61 @@ impl Engine {
     pub(crate) fn with_implicit_mapped_transaction<R, E>(
         &self,
         f: impl FnOnce(&Self) -> Result<R, E>,
-        map_transaction_error: impl Fn(String) -> E,
+        map_transaction_error: impl Fn(SQLError) -> E,
     ) -> Result<R, E>
     where
         E: std::fmt::Display,
     {
         let _statement = self.runtime.statement_gate.lock();
         if self.current_transaction_is_read_only() {
-            return Err(map_transaction_error(
-                "cannot execute direct mutation in a read-only transaction".into(),
-            ));
+            return Err(map_transaction_error(SQLError::Routine {
+                sqlstate: "25006".into(),
+                message: "cannot execute direct mutation in a read-only transaction".into(),
+            }));
         }
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()
-                .map_err(|error| map_transaction_error(error.to_string()))?;
+                .map_err(&map_transaction_error)?;
             return self.run_existing_transaction_mutation(
                 || {
                     self.prepare_explicit_transaction_writer()
-                        .map_err(|error| {
-                            map_transaction_error(format!(
-                                "promote explicit engine transaction failed: {error}"
-                            ))
-                        })?;
+                        .map_err(&map_transaction_error)?;
                     f(self)
                 },
-                &map_transaction_error,
+                |message| map_transaction_error(SQLError::Internal(message)),
             );
         }
         if self.storage.backend.is_none() {
             return f(self);
         }
-        let mut scope = TransactionScope::begin(self).map_err(|error| {
-            map_transaction_error(format!("begin implicit engine transaction failed: {error}"))
-        })?;
+        let mut scope = TransactionScope::begin(self).map_err(&map_transaction_error)?;
         if let Err(error) = self.prepare_explicit_transaction_writer() {
-            let error = map_transaction_error(format!(
-                "promote implicit engine transaction failed: {error}"
-            ));
+            let error = map_transaction_error(error);
             return match scope.rollback() {
                 Ok(()) => Err(error),
-                Err(rollback_error) => Err(map_transaction_error(format!(
+                Err(rollback_error) => Err(map_transaction_error(SQLError::Internal(format!(
                     "rollback implicit engine transaction after promotion failure failed: {rollback_error}; original error: {error}"
-                ))),
+                )))),
             };
         }
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self)));
         match result {
             Ok(Ok(value)) => {
-                scope.commit().map_err(|error| {
-                    map_transaction_error(format!(
-                        "commit implicit engine transaction failed: {error}"
-                    ))
-                })?;
+                scope.commit().map_err(&map_transaction_error)?;
                 Ok(value)
             }
             Ok(Err(error)) => match scope.rollback() {
                 Ok(()) => Err(error),
-                Err(rollback_error) => Err(map_transaction_error(format!(
+                Err(rollback_error) => Err(map_transaction_error(SQLError::Internal(format!(
                     "rollback implicit engine transaction failed: {rollback_error}; original error: {error}"
-                ))),
+                )))),
             },
             Err(payload) => match scope.rollback() {
                 Ok(()) => std::panic::resume_unwind(payload),
-                Err(rollback_error) => Err(map_transaction_error(format!(
+                Err(rollback_error) => Err(map_transaction_error(SQLError::Internal(format!(
                     "rollback implicit engine transaction after panic failed: {rollback_error}; original panic: {}",
                     panic_description(payload.as_ref())
-                ))),
+                )))),
             },
         }
     }

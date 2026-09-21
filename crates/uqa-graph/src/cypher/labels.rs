@@ -13,9 +13,7 @@ pub fn validate_default_label_relations(
     query: &super::CypherQuery,
 ) -> Result<(), super::CypherError> {
     use super::CypherError;
-    let labels = store
-        .graph_labels(graph)
-        .map_err(|error| CypherError::Storage(error.to_string()))?;
+    let labels = store.graph_labels(graph).map_err(CypherError::from)?;
     let (requires_vertex, requires_edge) = label_requirements(query);
     for (required, kind) in [
         (requires_vertex, crate::LabelKind::Vertex),

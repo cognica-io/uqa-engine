@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use super::*;
 
+mod graph_diagnostics;
 mod mutation_failures;
 
 #[test]

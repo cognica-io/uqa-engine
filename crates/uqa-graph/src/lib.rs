@@ -70,7 +70,7 @@ pub use rpq::{
     NfaTransition, RPQBuildError, RPQParseError, RegularPathExpr, StateId, MAX_DFA_STATES,
     MAX_NFA_STATES, MAX_RPQ_AST_DEPTH,
 };
-pub use store::{GraphStore, GraphStoreError, GraphStoreResult};
+pub use store::{GraphStorageError, GraphStore, GraphStoreError, GraphStoreResult};
 pub use subgraph_index::SubgraphIndex;
 pub use temporal::{TemporalFilter, TemporalPatternMatch, TemporalTraverse};
 pub use types::Direction;

@@ -9,8 +9,10 @@ use uqa_graph::GraphStore as _;
 
 mod snapshots;
 
-fn graph_store_error(error: impl std::fmt::Display) -> super::StorageBackendError {
-    super::StorageBackendError::Other(error.to_string())
+fn graph_store_error(
+    error: impl std::error::Error + Send + Sync + 'static,
+) -> super::StorageBackendError {
+    super::StorageBackendError::backend("graph", error)
 }
 
 impl Engine {
@@ -355,8 +357,8 @@ impl Engine {
                 ),
                 (None, None) => uqa_graph::PathIndex::build(store.as_ref(), graph, label_sequences),
                 _ => {
-                    return Err(graph_store_error(
-                        "path-index catalog and backend must share a storage session",
+                    return Err(super::StorageBackendError::Other(
+                        "path-index catalog and backend must share a storage session".into(),
                     ))
                 }
             }
@@ -504,7 +506,7 @@ impl Engine {
             }
             Ok(Err(error)) => match cleanup {
                 Ok(()) => Err(error),
-                Err(cleanup) => Err(graph_store_error(format!(
+                Err(cleanup) => Err(super::StorageBackendError::Other(format!(
                     "graph read failed: {error}; snapshot cleanup failed: {cleanup}"
                 ))),
             },
@@ -577,17 +579,15 @@ impl Engine {
         let query = uqa_graph::cypher::parse_cypher(query)?;
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()
-                .map_err(|error| CypherError::Storage(error.to_string()))?;
+                .map_err(|error| CypherError::from(graph_store_error(error)))?;
             self.prepare_explicit_statement_snapshot(true)
-                .map_err(|error| CypherError::Storage(error.to_string()))?;
+                .map_err(|error| CypherError::from(graph_store_error(error)))?;
         }
-        let existed = self
-            .has_graph(graph)
-            .map_err(|error| CypherError::Storage(error.to_string()))?;
+        let existed = self.has_graph(graph).map_err(CypherError::from)?;
         if query.mutates_graph() || !existed {
             self.with_implicit_mapped_transaction(
                 |engine| engine.run_cypher_inner(graph, &query, params),
-                CypherError::Storage,
+                |error| CypherError::from(graph_store_error(error)),
             )
         } else {
             self.graph_with(graph, |store| {
@@ -596,7 +596,7 @@ impl Engine {
                     .with_params(params)
                     .execute(&query)
             })
-            .map_err(|error| CypherError::Storage(error.to_string()))?
+            .map_err(CypherError::from)?
             .ok_or_else(|| CypherError::Storage(format!("graph {graph:?} does not exist")))?
         }
     }
@@ -610,10 +610,10 @@ impl Engine {
     {
         use uqa_graph::cypher::{CypherError, CypherWriter};
         self.synchronize_catalog_registries()
-            .map_err(|error| CypherError::Storage(error.to_string()))?;
+            .map_err(CypherError::from)?;
         let mut candidate = self
             .graph_write_candidate(graph, true)
-            .map_err(|error| CypherError::Storage(error.to_string()))?
+            .map_err(CypherError::from)?
             .expect("create candidate");
         let result = candidate.transaction_mapped(
             |store| {
@@ -625,14 +625,14 @@ impl Engine {
                     .with_params(params)
                     .execute(query)?;
                 self.invalidate_graph_path_indexes(graph)
-                    .map_err(|error| CypherError::Storage(error.to_string()))?;
+                    .map_err(CypherError::from)?;
                 Ok(result)
             },
             CypherError::from,
         )?;
         let published = self
             .publish_graph_candidate(candidate)
-            .map_err(|error| CypherError::Storage(error.to_string()))?;
+            .map_err(CypherError::from)?;
         self.durable
             .graphs
             .write()

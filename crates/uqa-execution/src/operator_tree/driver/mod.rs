@@ -93,8 +93,14 @@ struct PositiveEvidencePoolExecution<'a> {
 fn operator_execution_error(operator: &str, error: impl std::fmt::Display) -> SQLError {
     SQLError::Internal(format!("execute {operator}: {error}"))
 }
-fn graph_execution_error(operator: &str, error: impl std::fmt::Display) -> SQLError {
-    SQLError::Internal(format!("execute {operator}: {error}"))
+fn graph_execution_error(
+    operator: &str,
+    error: impl std::error::Error + Send + Sync + 'static,
+) -> SQLError {
+    crate::storage_errors::storage_error(
+        &format!("execute {operator}"),
+        &StorageBackendError::backend("graph", error),
+    )
 }
 
 pub struct PhysicalRetrievalDriver<'a> {
