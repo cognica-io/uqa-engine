@@ -25,6 +25,7 @@ use crate::clustered_postings::{MaterializedPostingCursor, PostingCursor, Postin
 mod analysis;
 mod batch;
 mod bindings;
+mod changes;
 mod contract;
 pub mod defaults;
 mod memory;
@@ -40,6 +41,7 @@ pub use analysis::{
     IndexedFieldMetadata,
 };
 pub use bindings::AnalyzerBindings;
+pub use changes::{visit_field_replacement, InvertedIndexChange, InvertedIndexChangeVisitor};
 pub use contract::{AnalyzerPhase, InvertedIndex};
 pub use metadata::IndexedFieldRevision;
 

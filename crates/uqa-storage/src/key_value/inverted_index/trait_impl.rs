@@ -126,6 +126,14 @@ impl InvertedIndex for KeyValueInvertedIndex {
         self.add_documents(documents)
     }
 
+    fn try_add_documents_observed(
+        &mut self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        visit: &mut crate::inverted_index::InvertedIndexChangeVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.mutate(|view, batch| view.add_documents(batch, documents, Some(visit)))
+    }
+
     fn remove_document(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
         self.add_documents(vec![(doc_id, BTreeMap::new())])
     }

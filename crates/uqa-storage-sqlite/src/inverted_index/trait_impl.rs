@@ -99,6 +99,17 @@ impl InvertedIndex for SQLiteInvertedIndex {
         Ok(self.add_documents_inner(documents)?)
     }
 
+    fn try_add_documents_observed(
+        &mut self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        visit: &mut uqa_storage::inverted_index::InvertedIndexChangeVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        if let Some(mut index) = self.native_index() {
+            return index.try_add_documents_observed(documents, visit);
+        }
+        Ok(self.add_documents_observed(documents, Some(visit))?)
+    }
+
     fn remove_document(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
         if let Some(mut index) = self.native_index() {
             return index.remove_document(doc_id);

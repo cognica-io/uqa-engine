@@ -12,6 +12,42 @@ use super::{
     BTreeMap, ClusterChanges, DocId, DocumentFields, FieldName, FieldStats, KeyValueBatch,
     OccurrencePosting, OccurrenceRead, StorageBackendResult, TokenTermKey,
 };
+use crate::inverted_index::{
+    visit_field_replacement, InvertedIndexChange, InvertedIndexChangeVisitor,
+};
+
+fn visit_replacement(
+    visit: &mut InvertedIndexChangeVisitor<'_>,
+    doc_id: DocId,
+    previous: &DocumentFields,
+    replacement: &DocumentFields,
+) -> StorageBackendResult<()> {
+    for field in previous.keys().chain(
+        replacement
+            .keys()
+            .filter(|field| !previous.contains_key(*field)),
+    ) {
+        let old = previous.get(field);
+        let new = replacement.get(field);
+        visit_field_replacement(
+            visit,
+            doc_id,
+            field,
+            old.map(|snapshot| snapshot.metadata.length),
+            new.map(|snapshot| snapshot.metadata.length),
+        )?;
+        for snapshot in old.into_iter().chain(new) {
+            for term in snapshot.terms.keys() {
+                visit(InvertedIndexChange::Posting {
+                    doc_id,
+                    field,
+                    term,
+                })?;
+            }
+        }
+    }
+    Ok(())
+}
 
 fn merge_cluster_changes(
     entries: Vec<OccurrencePosting>,
@@ -131,6 +167,7 @@ impl OccurrenceRead<'_> {
         &self,
         batch: &mut dyn KeyValueBatch,
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        mut visit: Option<&mut InvertedIndexChangeVisitor<'_>>,
     ) -> StorageBackendResult<()> {
         self.require_graph_format()?;
         let mut staged = self.stage_documents(documents, false)?;
@@ -140,6 +177,9 @@ impl OccurrenceRead<'_> {
         for (doc_id, fields) in &staged {
             batch.occurrence_document(self.table, *doc_id)?;
             let old = self.old_document(*doc_id)?;
+            if let Some(visit) = visit.as_mut() {
+                visit_replacement(*visit, *doc_id, &old, fields)?;
+            }
             for field in old.keys().chain(fields.keys()) {
                 if !totals.contains_key(field) {
                     if let Some(stats) = self.stored_field_stats(field)? {

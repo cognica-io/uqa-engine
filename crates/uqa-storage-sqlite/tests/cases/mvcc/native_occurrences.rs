@@ -44,6 +44,25 @@ fn memory() -> ManagedConnection {
 }
 
 #[test]
+fn evaluated_text_changes_preserve_native_terms_and_atomicity_in_every_mode() {
+    for mode in MODES {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("observed-occurrences.db");
+        let connection = open(mode, &path);
+        Catalog::open(connection.clone()).unwrap();
+        bind(&connection);
+        connection.begin_transaction().unwrap();
+        uqa_storage::key_value::conformance::verify_inverted_index_changes(&mut index(
+            &connection,
+            "observed",
+        ))
+        .unwrap();
+        connection.rollback_transaction().unwrap();
+        assert_eq!(index(&connection, "observed").doc_count().unwrap(), 0);
+    }
+}
+
+#[test]
 fn independent_native_occurrence_writers_commit_while_another_index_stays_private() {
     for mode in MODES {
         for ending in ["commit", "rollback", "savepoint"] {

@@ -183,6 +183,14 @@ impl InvertedIndex for MemoryInvertedIndex {
         self.add_document_batch(documents)
     }
 
+    fn try_add_documents_observed(
+        &mut self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        visit: &mut super::InvertedIndexChangeVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.add_document_batch_observed(documents, Some(visit))
+    }
+
     fn clear(&mut self) -> StorageBackendResult<()> {
         // Clearing a shared snapshot must not copy the state it is discarding.
         if let Some(state) = Arc::get_mut(&mut self.state) {

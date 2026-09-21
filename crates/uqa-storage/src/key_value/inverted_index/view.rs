@@ -109,7 +109,7 @@ impl KeyValueInvertedIndex {
         &self,
         documents: Vec<(DocId, std::collections::BTreeMap<FieldName, String>)>,
     ) -> StorageBackendResult<()> {
-        self.mutate(|view, batch| view.add_documents(batch, documents))
+        self.mutate(|view, batch| view.add_documents(batch, documents, None))
     }
 
     pub(super) fn rebuild_documents(

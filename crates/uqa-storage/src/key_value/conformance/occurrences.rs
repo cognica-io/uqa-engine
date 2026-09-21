@@ -22,6 +22,11 @@ fn fields(text: &str) -> BTreeMap<String, String> {
 
 /// Verify retained committed/private occurrence snapshots, savepoint branches and mutation rejection. Requires a disposable store.
 pub fn verify_occurrence_snapshots(store: &Arc<dyn KeyValueStore>) -> StorageBackendResult<()> {
+    super::verify_inverted_index_changes(&mut KeyValueInvertedIndex::new(
+        store.clone(),
+        "occurrence_change_capture",
+        whitespace_analyzer(),
+    ))?;
     let mut index = KeyValueInvertedIndex::new(store.clone(), TABLE, whitespace_analyzer());
     index.add_document(1, fields("alpha alpha beta"))?;
     let baseline = index.snapshot()?;

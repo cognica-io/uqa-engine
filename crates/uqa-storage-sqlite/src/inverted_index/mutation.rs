@@ -13,10 +13,48 @@ use super::{
     SQLiteError, SQLiteInvertedIndex, SQLiteResult, StagedField, TokenTermKey,
 };
 use uqa_storage::clustered_postings::{cluster_id, encode_term_keys};
+use uqa_storage::inverted_index::{
+    visit_field_replacement, InvertedIndexChange, InvertedIndexChangeVisitor,
+};
 use uqa_storage::read_control::StorageReadControl;
 
-type Documents = BTreeMap<DocId, BTreeMap<FieldName, StagedField>>;
+type DocumentFields = BTreeMap<FieldName, StagedField>;
+type Documents = BTreeMap<DocId, DocumentFields>;
 type Changes = BTreeMap<(FieldName, TokenTermKey, u64), BTreeMap<DocId, Option<OccurrencePosting>>>;
+
+fn visit_replacement(
+    visit: &mut InvertedIndexChangeVisitor<'_>,
+    doc_id: DocId,
+    old: &DocumentFields,
+    fields: &DocumentFields,
+) -> SQLiteResult<()> {
+    for field in old
+        .keys()
+        .chain(fields.keys().filter(|field| !old.contains_key(*field)))
+    {
+        let before = old.get(field);
+        let after = fields.get(field);
+        visit_field_replacement(
+            visit,
+            doc_id,
+            field,
+            before.map(|snapshot| snapshot.metadata.length),
+            after.map(|snapshot| snapshot.metadata.length),
+        )
+        .map_err(SQLiteError::from)?;
+        for snapshot in before.into_iter().chain(after) {
+            for term in snapshot.postings.keys() {
+                visit(InvertedIndexChange::Posting {
+                    doc_id,
+                    field,
+                    term,
+                })
+                .map_err(SQLiteError::from)?;
+            }
+        }
+    }
+    Ok(())
+}
 
 fn invalid(message: &str) -> SQLiteError {
     SQLiteError::StorageBackend(message.into())
@@ -143,6 +181,14 @@ impl SQLiteInvertedIndex {
         &self,
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
     ) -> SQLiteResult<()> {
+        self.add_documents_observed(documents, None)
+    }
+
+    pub(super) fn add_documents_observed(
+        &self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        mut visit: Option<&mut InvertedIndexChangeVisitor<'_>>,
+    ) -> SQLiteResult<()> {
         let staged = self.stage_documents(documents)?;
         if staged.is_empty() {
             return self.require_graph_format();
@@ -154,6 +200,9 @@ impl SQLiteInvertedIndex {
             let mut changes = Changes::new();
             for (doc_id, fields) in &staged {
                 let old = self.old_document_on(&tx, encode_index_u64("document", *doc_id)?)?;
+                if let Some(visit) = visit.as_mut() {
+                    visit_replacement(*visit, *doc_id, &old, fields)?;
+                }
                 for field in old.keys().chain(fields.keys()) {
                     if !totals.contains_key(field) {
                         if let Some(stats) = self.stored_field_stats_on(&tx, field)? {

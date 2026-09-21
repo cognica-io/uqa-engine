@@ -11,6 +11,14 @@ use crate::InvertedIndex;
 use proptest::prelude::*;
 use uqa_analysis::whitespace_analyzer;
 
+#[test]
+fn evaluated_text_changes_preserve_logical_terms_and_atomicity() {
+    crate::key_value::conformance::verify_inverted_index_changes(&mut MemoryInvertedIndex::new(
+        whitespace_analyzer(),
+    ))
+    .unwrap();
+}
+
 fn fields(text: &str) -> BTreeMap<String, String> {
     BTreeMap::from([("body".into(), text.into())])
 }

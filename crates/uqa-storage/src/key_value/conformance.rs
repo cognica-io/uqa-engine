@@ -39,9 +39,11 @@ pub use vector_merging::{
 mod vector_snapshots;
 pub use vector_snapshots::{verify_exact_snapshot_concurrency, verify_vector_snapshots};
 mod occurrence_accelerators;
+mod occurrence_changes;
 mod occurrence_merging;
 mod occurrences;
 pub use occurrence_accelerators::verify_occurrence_accelerators;
+pub use occurrence_changes::verify_inverted_index_changes;
 pub use occurrences::{
     verify_occurrence_concurrency, verify_occurrence_reopen, verify_occurrence_snapshots,
 };

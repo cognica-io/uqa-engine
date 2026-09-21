@@ -82,6 +82,26 @@ pub trait InvertedIndex: Send + Sync {
         Ok(())
     }
 
+    /// Capture logical changes from the same analysis and original reverse entries used by the atomic replacement. The visitor must not reenter this provider. A transaction owner discards captured changes on error and registers successful intents before completing its statement; private writes and intents must share savepoint undo.
+    fn try_add_documents_observed(
+        &mut self,
+        _documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        _visit: &mut super::InvertedIndexChangeVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "evaluated text mutation observations are not supported by this backend".into(),
+        ))
+    }
+
+    /// Deletion captures the original analyzed terms without reconstructing the document or rerunning its analyzer. An absent document produces no logical change.
+    fn try_remove_document_observed(
+        &mut self,
+        doc_id: DocId,
+        visit: &mut super::InvertedIndexChangeVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.try_add_documents_observed(vec![(doc_id, BTreeMap::new())], visit)
+    }
+
     fn remove_document(&mut self, doc_id: DocId) -> StorageBackendResult<()>;
 
     fn try_remove_document(&mut self, doc_id: DocId) -> StorageBackendResult<()> {

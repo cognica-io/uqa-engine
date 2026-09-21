@@ -8,6 +8,14 @@ use super::*;
 use crate::catalog::Catalog;
 use uqa_analysis::{standard_analyzer, Analyzer, Tokenizer};
 
+#[test]
+fn evaluated_text_changes_preserve_logical_terms_and_atomicity() {
+    uqa_storage::key_value::conformance::verify_inverted_index_changes(&mut idx_with_analyzer(
+        uqa_analysis::whitespace_analyzer(),
+    ))
+    .unwrap();
+}
+
 fn fields<const N: usize>(pairs: [(&str, &str); N]) -> BTreeMap<FieldName, String> {
     pairs
         .into_iter()

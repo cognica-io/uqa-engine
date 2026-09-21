@@ -130,6 +130,14 @@ impl MemoryInvertedIndex {
         &mut self,
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
     ) -> StorageBackendResult<()> {
+        self.add_document_batch_observed(documents, None)
+    }
+
+    pub(super) fn add_document_batch_observed(
+        &mut self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        mut visit: Option<&mut super::InvertedIndexChangeVisitor<'_>>,
+    ) -> StorageBackendResult<()> {
         if documents.is_empty() {
             return Ok(());
         }
@@ -138,9 +146,56 @@ impl MemoryInvertedIndex {
         for (id, fields) in documents {
             let staged = self.stage_document(id, fields)?;
             let plan = batch.state.plan_replacement(id, &staged.fields)?;
+            if let Some(visit) = visit.as_mut() {
+                batch.state.visit_replacement(*visit, id, &staged)?;
+            }
             batch.state.apply_replacement(id, staged, plan)?;
         }
         batch.publish(self);
+        Ok(())
+    }
+}
+
+impl MemoryIndexState {
+    fn visit_replacement(
+        &self,
+        visit: &mut super::InvertedIndexChangeVisitor<'_>,
+        doc_id: DocId,
+        replacement: &super::StagedMemoryDocument,
+    ) -> StorageBackendResult<()> {
+        let previous = self.doc_fields.get(&doc_id);
+        for field in previous.into_iter().flat_map(BTreeMap::keys).chain(
+            replacement
+                .fields
+                .keys()
+                .filter(|field| !previous.is_some_and(|fields| fields.contains_key(*field))),
+        ) {
+            super::visit_field_replacement(
+                visit,
+                doc_id,
+                field,
+                previous
+                    .and_then(|fields| fields.get(field))
+                    .map(|metadata| metadata.length),
+                replacement
+                    .fields
+                    .get(field)
+                    .map(|metadata| metadata.length),
+            )?;
+        }
+        for (field, term) in self
+            .doc_terms
+            .get(&doc_id)
+            .into_iter()
+            .flatten()
+            .chain(&replacement.terms)
+        {
+            visit(super::InvertedIndexChange::Posting {
+                doc_id,
+                field,
+                term,
+            })?;
+        }
         Ok(())
     }
 }
