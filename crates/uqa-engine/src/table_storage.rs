@@ -11,17 +11,6 @@ use super::{
 };
 use crate::CatalogIndexRow;
 
-/// Answer of the value-index conflict probe in [`Engine::find_conflict`].
-enum IndexConflictProbe {
-    /// No conflict column has a usable value index; fall back to the
-    /// evaluated document scan.
-    Unanswerable,
-    /// The index answered: no existing row matches the conflict target.
-    NoConflict,
-    /// The index answered: this existing row matches the conflict target.
-    Conflict(DocId),
-}
-
 fn table_not_found(table: &str) -> StorageBackendError {
     StorageBackendError::Other(format!("table `{table}` does not exist"))
 }

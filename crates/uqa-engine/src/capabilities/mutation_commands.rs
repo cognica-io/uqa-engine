@@ -32,7 +32,7 @@ impl PointMutationStorage for Engine {
         field: &str,
         value: &Value,
     ) -> Result<Option<DocId>, SQLError> {
-        Engine::find_doc_id_by_field(self, table, field, value)
+        Engine::find_mutation_doc_id_by_field(self, table, field, value)
     }
     fn patch_document_fields_with_vector_values(
         &self,

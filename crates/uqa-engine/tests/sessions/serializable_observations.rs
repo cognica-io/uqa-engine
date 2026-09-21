@@ -54,6 +54,9 @@ pub(super) mod catalog_reads;
 #[path = "serializable_observations/statistics_reads.rs"]
 pub(super) mod statistics_reads;
 
+#[path = "serializable_observations/exact_reads.rs"]
+pub(super) mod exact_reads;
+
 struct Session {
     engine: Engine,
     backend: Arc<dyn PersistentStorageBackend>,

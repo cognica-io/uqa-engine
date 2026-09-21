@@ -569,3 +569,98 @@ fn attached_text_statistics_keep_their_original_index_data_and_table_inventory()
         );
     }
 }
+
+#[test]
+fn mutation_exact_probes_use_current_documents_and_indexes_without_reentering_the_statement() {
+    use uqa_execution::mutation::constraints::context::MutationIndexRead;
+    use uqa_execution::mutation::point_update::context::PointMutationStorage;
+    use uqa_storage::ValueIndexKey;
+
+    for provider in 0..3 {
+        let directory = tempfile::tempdir().unwrap();
+        let root = persistent_engine(provider, &directory.path().join("exact-workers.db"));
+        root.sql("CREATE TABLE t (id INTEGER PRIMARY KEY, k TEXT UNIQUE, v INTEGER); INSERT INTO t VALUES (1, 'old', 1)", &[]).unwrap();
+        let peer = root.new_session().unwrap();
+        let id = root.table_doc_ids("t").unwrap()[0];
+        root.sql(
+            "BEGIN ISOLATION LEVEL REPEATABLE READ; SELECT v FROM t",
+            &[],
+        )
+        .unwrap();
+        peer.sql("UPDATE t SET k = 'new', v = 2", &[]).unwrap();
+        root.sql("SHOW transaction_isolation", &[]).unwrap();
+        std::thread::scope(|scope| {
+            let statement = root.runtime.statement_gate.lock();
+            let (sender, receiver) = mpsc::channel();
+            let source = &root;
+            let worker = scope.spawn(move || {
+                assert_eq!(
+                    PointMutationStorage::find_doc_id_by_field(source, "t", "v", &Value::Int(2))
+                        .unwrap(),
+                    Some(id)
+                );
+                assert_eq!(
+                    MutationIndexRead::find_conflict(
+                        source,
+                        "t",
+                        &["k".into()],
+                        &[Value::Str("new".into())]
+                    )
+                    .unwrap(),
+                    Some(id)
+                );
+                assert_eq!(
+                    MutationIndexRead::find_conflict(
+                        source,
+                        "t",
+                        &["v".into(), "k".into()],
+                        &[Value::Int(2), Value::Str("new".into())]
+                    )
+                    .unwrap(),
+                    Some(id)
+                );
+                assert_eq!(
+                    MutationIndexRead::value_index_scan_key(
+                        source,
+                        "t",
+                        &ValueIndexKey::Column("k".into()),
+                        &uqa_core::Predicate::Equals(Value::Str("new".into()))
+                    )
+                    .unwrap()
+                    .unwrap()
+                    .len(),
+                    1
+                );
+                sender.send(()).unwrap();
+            });
+            let completed = receiver.recv_timeout(Duration::from_secs(10));
+            drop(statement);
+            worker.join().unwrap();
+            completed.expect("mutation lookup reentered its parent statement");
+        });
+        assert_eq!(
+            root.find_conflict("t", &["k".into()], &[Value::Str("old".into())])
+                .unwrap(),
+            Some(id)
+        );
+        assert_eq!(
+            root.find_conflict("t", &["k".into()], &[Value::Str("new".into())])
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            root.find_doc_id_by_field("t", "v", &Value::Int(1)).unwrap(),
+            Some(id)
+        );
+        root.sql("ROLLBACK", &[]).unwrap();
+        drop(peer);
+        drop(root);
+        let reopened = persistent_engine(provider, &directory.path().join("exact-workers.db"));
+        assert_eq!(
+            reopened
+                .find_conflict("t", &["k".into()], &[Value::Str("new".into())])
+                .unwrap(),
+            Some(id)
+        );
+    }
+}

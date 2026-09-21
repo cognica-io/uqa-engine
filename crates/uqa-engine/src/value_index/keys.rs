@@ -80,10 +80,19 @@ impl Engine {
         let Some(state) = self.try_table(&name)? else {
             return Ok(Vec::new());
         };
-        let columns = state.columns.snapshot();
-        let constraints = state.key_constraints.snapshot();
-        self.physical_index_definitions()?
-            .indexable_fields(&name, &columns, &constraints)
+        self.value_indexable_fields_in_state(&name, &state)
+    }
+
+    pub(super) fn value_indexable_fields_in_state(
+        &self,
+        name: &str,
+        state: &TableState,
+    ) -> StorageBackendResult<Vec<ValueIndexKey>> {
+        self.physical_index_definitions()?.indexable_fields(
+            name,
+            &state.columns.snapshot(),
+            &state.key_constraints.snapshot(),
+        )
     }
 
     pub(crate) fn value_index_document_values(

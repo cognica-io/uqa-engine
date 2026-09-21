@@ -87,25 +87,14 @@ impl crate::Engine {
             .ok_or_else(|| SQLError::UnknownTable(table.to_string()))
     }
 
-    /// Resolve a scalar predicate on `field` through a value index.
-    /// Returns `None` when the column has no index policy, the index
-    /// cannot reproduce scan semantics, or the table is unknown.
-    pub(crate) fn value_index_scan(
-        &self,
-        table: &str,
-        field: &str,
-        predicate: &Predicate,
-    ) -> Result<Option<PostingList>, SQLError> {
-        self.value_index_scan_key(table, &ValueIndexKey::Column(field.into()), predicate)
-    }
-
     pub(crate) fn value_index_scan_key(
         &self,
         table: &str,
         field: &ValueIndexKey,
         predicate: &Predicate,
     ) -> Result<Option<PostingList>, SQLError> {
-        self.value_index_scan_with_read(table, field, predicate, None)
+        let state = self.require_table(table)?;
+        self.value_index_scan_state(table, &state, field, predicate, None)
     }
 
     pub(crate) fn value_index_query_scan(
@@ -115,22 +104,24 @@ impl crate::Engine {
         predicate: &Predicate,
     ) -> Result<Option<PostingList>, SQLError> {
         let read = self.serializable_table_read(table)?;
-        self.value_index_scan_with_read(
+        let state = self.require_query_table(table)?;
+        self.value_index_scan_state(
             table,
+            &state,
             &ValueIndexKey::Column(field.into()),
             predicate,
             read.as_ref(),
         )
     }
 
-    fn value_index_scan_with_read(
+    pub(crate) fn value_index_scan_state(
         &self,
         table: &str,
+        t: &std::sync::Arc<TableState>,
         field: &ValueIndexKey,
         predicate: &Predicate,
         read: Option<&uqa_execution::serializable::SerializableRelationRead>,
     ) -> Result<Option<PostingList>, SQLError> {
-        let t = self.require_query_table(table)?;
         let observed = read.map(|read| (read, t.columns.snapshot()));
         let scan = |index: &ColumnValueIndex| {
             index.scan_observing(predicate, || {
@@ -147,8 +138,10 @@ impl crate::Engine {
             }
         }
         if !self
-            .ensure_query_value_index(table, &t, field)
-            .map_err(|error| SQLError::Internal(format!("build value index: {error}")))?
+            .ensure_query_value_index(table, t, field)
+            .map_err(|error| {
+                uqa_execution::storage_errors::storage_error("build value index", &error)
+            })?
         {
             return Ok(None);
         }
@@ -201,7 +194,7 @@ impl crate::Engine {
         predicate: &Predicate,
     ) -> StorageBackendResult<bool> {
         let field = &ValueIndexKey::Column(field.into());
-        let Some(table_name) = self.try_resolve_table_name(table)? else {
+        let Some(table_name) = self.try_resolve_query_table_name(table)? else {
             return Ok(false);
         };
         let Some(table) = self.try_query_table(&table_name)? else {
@@ -232,15 +225,18 @@ impl crate::Engine {
                 return self.ensure_value_index(table_name, field);
             }
         }
+        let Some(table_name) = self.try_resolve_query_table_name(table_name)? else {
+            return Ok(false);
+        };
         if !self
-            .value_indexable_fields(table_name)?
+            .value_indexable_fields_in_state(&table_name, table)?
             .iter()
             .any(|name| name == field)
         {
             return Ok(false);
         }
         let ids = table.document_store.read().doc_ids()?;
-        let values = self.project_value_index_rows(table, table_name, field, &ids)?;
+        let values = self.project_value_index_rows(table, &table_name, field, &ids)?;
         table.value_indexes.write().insert(
             field.clone(),
             ColumnValueIndex::build(field.name(), values.into_iter()),

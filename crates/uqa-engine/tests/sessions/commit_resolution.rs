@@ -377,6 +377,14 @@ fn retained_commit_resolves_without_replaying_preparation_and_publishes_once() {
             error.assert_transaction_error(&expected);
             assert_eq!(root.pending_commit(), Some(identity));
         }
+        for read in super::serializable_observations::exact_reads::ExactRead::ALL {
+            let error = read
+                .read(&root, "items", 1)
+                .expect_err("exact query bypassed unresolved completion");
+            assert_unknown(&error);
+            assert_eq!(error.to_string(), expected.to_string());
+            assert_eq!(root.pending_commit(), Some(identity));
+        }
         for read in super::serializable_observations::statistics_reads::StatisticsRead::ALL {
             read.read(&root)
                 .expect_err("statistics query must not bypass unresolved completion")

@@ -84,7 +84,7 @@ impl MutationIndexRead for Engine {
         columns: &[String],
         values: &[Value],
     ) -> Result<Option<DocId>, SQLError> {
-        Engine::find_conflict(self, table, columns, values)
+        Engine::find_mutation_conflict(self, table, columns, values)
     }
     fn value_index_scan_key(
         &self,

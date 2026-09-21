@@ -43,6 +43,7 @@ pub mod source_projection;
 pub mod locking;
 
 pub mod document_projection;
+pub mod exact_lookup;
 pub mod generated;
 pub mod local_table;
 pub mod scored_input;

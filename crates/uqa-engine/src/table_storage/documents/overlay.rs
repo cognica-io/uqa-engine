@@ -164,7 +164,11 @@ impl Engine {
         table: &str,
         fields: &[String],
         values: &[Value],
+        presence: uqa_execution::query::exact_lookup::FieldPresence,
     ) -> Result<Option<DocId>, SQLError> {
+        let matches = |document: &Document| {
+            uqa_execution::query::exact_lookup::matches_fields(document, fields, values, presence)
+        };
         let table = self.command_overlay_table_name(table)?;
         let (fields, key) = command_exact_lookup_parts(fields, values)?;
         let mut overlays = self.session.command_mutation_overlays.lock();
@@ -206,7 +210,7 @@ impl Engine {
                     .and_then(|documents| documents.get(&doc_id))
             });
             if let Some(Some(document)) = visible {
-                if command_exact_document_key(document.fields.as_ref(), &fields)? == key {
+                if matches(document.fields.as_ref()) {
                     return Ok(Some(doc_id));
                 }
             }
