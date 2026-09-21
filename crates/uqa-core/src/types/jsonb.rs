@@ -7,7 +7,13 @@
 //! `PostgreSQL` `jsonb` structural equality, ordering, and canonical hash keys.
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+
+mod key;
+mod parser;
+mod workspace;
+
+pub use key::{write_jsonb_comparison_key, JsonbKeyError};
+use parser::JsonbParser;
 
 #[derive(Debug, PartialEq, Eq)]
 struct JsonNumber {
@@ -71,13 +77,7 @@ impl JsonNumber {
     }
 
     fn cmp_magnitude(&self, other: &Self) -> Ordering {
-        let left_integer_digits = i128::try_from(self.digits.len())
-            .unwrap_or(i128::MAX)
-            .saturating_add(i128::from(self.power));
-        let right_integer_digits = i128::try_from(other.digits.len())
-            .unwrap_or(i128::MAX)
-            .saturating_add(i128::from(other.power));
-        let ordering = left_integer_digits.cmp(&right_integer_digits);
+        let ordering = self.integer_digits().cmp(&other.integer_digits());
         if ordering != Ordering::Equal {
             return ordering;
         }
@@ -93,192 +93,29 @@ impl JsonNumber {
             .find(|ordering| *ordering != Ordering::Equal)
             .unwrap_or(Ordering::Equal)
     }
+
+    fn integer_digits(&self) -> i128 {
+        i128::try_from(self.digits.len())
+            .unwrap_or(i128::MAX)
+            .saturating_add(i128::from(self.power))
+    }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 enum JsonbValue {
     Null,
     String(String),
     Number(JsonNumber),
     Bool(bool),
     Array(Vec<JsonbValue>),
-    Object(BTreeMap<String, JsonbValue>),
+    Object(Vec<JsonbField>),
 }
 
-struct JsonbParser<'a> {
-    input: &'a [u8],
+#[derive(Debug)]
+struct JsonbField {
+    name: String,
+    value: JsonbValue,
     position: usize,
-}
-
-impl<'a> JsonbParser<'a> {
-    fn parse(input: &'a str) -> Option<JsonbValue> {
-        let mut parser = Self {
-            input: input.as_bytes(),
-            position: 0,
-        };
-        parser.skip_whitespace();
-        let value = parser.parse_value()?;
-        parser.skip_whitespace();
-        (parser.position == parser.input.len()).then_some(value)
-    }
-
-    fn parse_value(&mut self) -> Option<JsonbValue> {
-        match self.peek()? {
-            b'n' => {
-                self.consume_keyword(b"null")?;
-                Some(JsonbValue::Null)
-            }
-            b't' => {
-                self.consume_keyword(b"true")?;
-                Some(JsonbValue::Bool(true))
-            }
-            b'f' => {
-                self.consume_keyword(b"false")?;
-                Some(JsonbValue::Bool(false))
-            }
-            b'"' => self.parse_string().map(JsonbValue::String),
-            b'[' => self.parse_array(),
-            b'{' => self.parse_object(),
-            b'-' | b'0'..=b'9' => self.parse_number().map(JsonbValue::Number),
-            _ => None,
-        }
-    }
-
-    fn parse_string(&mut self) -> Option<String> {
-        let start = self.position;
-        self.consume(b'"')?;
-        let mut escaped = false;
-        while let Some(byte) = self.peek() {
-            self.position = self.position.checked_add(1)?;
-            if escaped {
-                escaped = false;
-                continue;
-            }
-            match byte {
-                b'\\' => escaped = true,
-                b'"' => {
-                    return serde_json::from_slice::<String>(&self.input[start..self.position])
-                        .ok();
-                }
-                _ => {}
-            }
-        }
-        None
-    }
-
-    fn parse_number(&mut self) -> Option<JsonNumber> {
-        let start = self.position;
-        if self.peek() == Some(b'-') {
-            self.position = self.position.checked_add(1)?;
-        }
-        match self.peek()? {
-            b'0' => {
-                self.position = self.position.checked_add(1)?;
-                if self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
-                    return None;
-                }
-            }
-            b'1'..=b'9' => self.consume_digits()?,
-            _ => return None,
-        }
-        if self.peek() == Some(b'.') {
-            self.position = self.position.checked_add(1)?;
-            self.consume_digits()?;
-        }
-        if self.peek().is_some_and(|byte| matches!(byte, b'e' | b'E')) {
-            self.position = self.position.checked_add(1)?;
-            if self.peek().is_some_and(|byte| matches!(byte, b'+' | b'-')) {
-                self.position = self.position.checked_add(1)?;
-            }
-            self.consume_digits()?;
-        }
-        let text = std::str::from_utf8(&self.input[start..self.position]).ok()?;
-        JsonNumber::parse(text)
-    }
-
-    fn consume_digits(&mut self) -> Option<()> {
-        let start = self.position;
-        while self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
-            self.position = self.position.checked_add(1)?;
-        }
-        (self.position > start).then_some(())
-    }
-
-    fn parse_array(&mut self) -> Option<JsonbValue> {
-        self.consume(b'[')?;
-        self.skip_whitespace();
-        let mut values = Vec::new();
-        if self.peek() == Some(b']') {
-            self.position = self.position.checked_add(1)?;
-            return Some(JsonbValue::Array(values));
-        }
-        loop {
-            values.push(self.parse_value()?);
-            self.skip_whitespace();
-            match self.peek()? {
-                b',' => {
-                    self.position = self.position.checked_add(1)?;
-                    self.skip_whitespace();
-                }
-                b']' => {
-                    self.position = self.position.checked_add(1)?;
-                    return Some(JsonbValue::Array(values));
-                }
-                _ => return None,
-            }
-        }
-    }
-
-    fn parse_object(&mut self) -> Option<JsonbValue> {
-        self.consume(b'{')?;
-        self.skip_whitespace();
-        let mut values = BTreeMap::new();
-        if self.peek() == Some(b'}') {
-            self.position = self.position.checked_add(1)?;
-            return Some(JsonbValue::Object(values));
-        }
-        loop {
-            let key = self.parse_string()?;
-            self.skip_whitespace();
-            self.consume(b':')?;
-            self.skip_whitespace();
-            values.insert(key, self.parse_value()?);
-            self.skip_whitespace();
-            match self.peek()? {
-                b',' => {
-                    self.position = self.position.checked_add(1)?;
-                    self.skip_whitespace();
-                }
-                b'}' => {
-                    self.position = self.position.checked_add(1)?;
-                    return Some(JsonbValue::Object(values));
-                }
-                _ => return None,
-            }
-        }
-    }
-
-    fn consume_keyword(&mut self, keyword: &[u8]) -> Option<()> {
-        let end = self.position.checked_add(keyword.len())?;
-        (self.input.get(self.position..end)? == keyword).then(|| self.position = end)
-    }
-
-    fn consume(&mut self, expected: u8) -> Option<()> {
-        (self.peek()? == expected).then(|| self.position += 1)
-    }
-
-    fn skip_whitespace(&mut self) {
-        while self
-            .peek()
-            .is_some_and(|byte| matches!(byte, b' ' | b'\n' | b'\r' | b'\t'))
-        {
-            self.position += 1;
-        }
-    }
-
-    fn peek(&self) -> Option<u8> {
-        self.input.get(self.position).copied()
-    }
 }
 
 pub(super) fn compare_jsonb_text(left: &str, right: &str) -> Ordering {
@@ -351,22 +188,16 @@ fn compare_sequence<T>(
         .unwrap_or(Ordering::Equal)
 }
 
-fn compare_objects(
-    left: &BTreeMap<String, JsonbValue>,
-    right: &BTreeMap<String, JsonbValue>,
-) -> Ordering {
+fn compare_objects(left: &[JsonbField], right: &[JsonbField]) -> Ordering {
     let mut left = left.iter().collect::<Vec<_>>();
     let mut right = right.iter().collect::<Vec<_>>();
-    left.sort_unstable_by(|(left, _), (right, _)| jsonb_key_storage_order(left, right));
-    right.sort_unstable_by(|(left, _), (right, _)| jsonb_key_storage_order(left, right));
-    compare_sequence(
-        left.into_iter().zip(right),
-        |((left_key, left), (right_key, right))| {
-            left_key
-                .cmp(right_key)
-                .then_with(|| compare_value(left, right))
-        },
-    )
+    left.sort_unstable_by(|left, right| jsonb_key_storage_order(&left.name, &right.name));
+    right.sort_unstable_by(|left, right| jsonb_key_storage_order(&left.name, &right.name));
+    compare_sequence(left.into_iter().zip(right), |(left, right)| {
+        left.name
+            .cmp(&right.name)
+            .then_with(|| compare_value(&left.value, &right.value))
+    })
 }
 
 fn jsonb_key_storage_order(left: &str, right: &str) -> Ordering {
@@ -403,9 +234,9 @@ fn encode_equality_value(value: &JsonbValue, output: &mut Vec<u8>) -> Option<()>
         }
         JsonbValue::Object(values) => {
             encode_len(values.len(), output)?;
-            for (name, value) in values {
-                encode_bytes(name.as_bytes(), output)?;
-                encode_equality_value(value, output)?;
+            for field in values {
+                encode_bytes(field.name.as_bytes(), output)?;
+                encode_equality_value(&field.value, output)?;
             }
         }
     }

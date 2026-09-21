@@ -10,6 +10,7 @@ use super::*;
 use crate::catalog::index::value::ColumnValueIndex;
 use proptest::prelude::*;
 
+mod jsonb;
 mod temporal;
 
 fn decimal(text: &str) -> Value {

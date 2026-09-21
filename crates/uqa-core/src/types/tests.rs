@@ -7,6 +7,7 @@
 use super::temporal::{MICROS_PER_DAY, MICROS_PER_SECOND};
 use super::*;
 
+mod jsonb_keys;
 mod temporal_keys;
 
 #[test]

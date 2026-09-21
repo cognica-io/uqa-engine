@@ -31,6 +31,7 @@ pub enum ScalarIndexDomain {
     Bytes,
     JsonText,
     Temporal(TemporalIndexDomain),
+    JsonBinary,
 }
 
 pub struct IndexKeyRange {
@@ -75,6 +76,7 @@ impl ScalarIndexDomain {
             ColumnType::Bpchar | ColumnType::Character(_) => Self::FixedChar,
             ColumnType::Bytea => Self::Bytes,
             ColumnType::Json => Self::JsonText,
+            ColumnType::JsonB => Self::JsonBinary,
             _ => return TemporalIndexDomain::from_column_type(ty).map(Self::Temporal),
         })
     }
@@ -90,6 +92,7 @@ impl ScalarIndexDomain {
             Self::Bytes => 6,
             Self::JsonText => 7,
             Self::Temporal(_) => 8,
+            Self::JsonBinary => 9,
         }
     }
 
@@ -116,6 +119,18 @@ impl ScalarIndexDomain {
             (Self::Temporal(_), Value::Temporal(value)) => {
                 let mut key = self.start_key(control)?;
                 value.write_comparison_key(|part| extend(&mut key, part))?;
+                Ok(key)
+            }
+            (Self::JsonBinary, Value::JsonB(value)) => {
+                let mut key = self.start_key(control)?;
+                uqa_core::write_jsonb_comparison_key(value, &mut key, control.cancellation())
+                    .map_err(|error| match error {
+                        uqa_core::JsonbKeyError::Memory(error) => resource_error(error),
+                        uqa_core::JsonbKeyError::Cancelled(error) => SQLError::Cancelled(error),
+                        uqa_core::JsonbKeyError::InvalidJson => SQLError::Internal(
+                            "JSONB index value has no native comparison representation".into(),
+                        ),
+                    })?;
                 Ok(key)
             }
             _ => Err(SQLError::Internal(
@@ -331,6 +346,7 @@ impl ScalarIndexDomain {
             | (Self::FixedChar, Value::FixedChar(_))
             | (Self::Bytes, Value::Bytes(_))
             | (Self::JsonText, Value::Json(_))
+            | (Self::JsonBinary, Value::JsonB(_))
             | (Self::Temporal(_), Value::Temporal(_)) => self.encode(value, control)?,
             _ => {
                 let sample = match self {
@@ -339,6 +355,7 @@ impl ScalarIndexDomain {
                     Self::FixedChar => Value::FixedChar(String::new()),
                     Self::Bytes => Value::Bytes(Vec::new()),
                     Self::JsonText => Value::Json(String::new()),
+                    Self::JsonBinary => Value::JsonB(String::new()),
                     Self::Temporal(domain) => Value::Temporal(domain.sample()),
                     _ => return Err(invalid_rank()),
                 };
