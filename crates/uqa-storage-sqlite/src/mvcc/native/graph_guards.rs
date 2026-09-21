@@ -160,6 +160,13 @@ impl NativeSnapshot {
         batch: &mut dyn KeyValueBatch,
         scope: Option<&str>,
     ) -> Result<()> {
+        if batch.serializable_participant().is_some() {
+            batch.observe_serializable_write(
+                uqa_storage::catalog::graph_observations::scope_lifetime(
+                    GraphIdentifierNamespace::new(scope, [0; 16]),
+                ),
+            )?;
+        }
         batch.fence_record(
             self.graph_guard_metadata(scope, "graph_identifier_data_revision")?
                 .key(),

@@ -162,20 +162,39 @@ impl SQLiteGraphStore {
         result
     }
 
+    fn with_graph_mutation<T>(
+        &mut self,
+        operation: impl FnOnce(&mut PersistentGraphStore) -> GraphStoreResult<T>,
+    ) -> GraphStoreResult<T> {
+        let _operation = self.operation_gate.lock();
+        let context = self
+            .backend
+            .serializable_session()
+            .map(uqa_storage::mvcc::SerializableSession::serializable_read_context)
+            .transpose()?
+            .flatten();
+        let mut store = match context {
+            Some(context) => self.inner.with_serializable_read(
+                context,
+                &self.backend.write_cancellation().unwrap_or_default(),
+            ),
+            None => self.inner.clone(),
+        };
+        operation(&mut store)
+    }
+
     /// Borrow the durable handle within an existing storage transaction.
     pub fn as_graph_store(&self) -> &PersistentGraphStore {
         &self.inner
     }
 
     pub fn create_graph(&mut self, name: &str) -> Result<(), SQLiteError> {
-        self.inner
-            .create_graph(name)
+        self.with_graph_mutation(|store| store.create_graph(name))
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn drop_graph(&mut self, name: &str) -> Result<(), SQLiteError> {
-        self.inner
-            .drop_graph(name)
+        self.with_graph_mutation(|store| store.drop_graph(name))
             .map_err(|error| graph_store_error(&error))
     }
 
@@ -190,8 +209,7 @@ impl SQLiteGraphStore {
     }
 
     pub fn union_graphs(&mut self, g1: &str, g2: &str, target: &str) -> Result<(), SQLiteError> {
-        self.inner
-            .union_graphs(g1, g2, target)
+        self.with_graph_mutation(|store| store.union_graphs(g1, g2, target))
             .map_err(|error| graph_store_error(&error))
     }
 
@@ -201,8 +219,7 @@ impl SQLiteGraphStore {
         g2: &str,
         target: &str,
     ) -> Result<(), SQLiteError> {
-        self.inner
-            .intersect_graphs(g1, g2, target)
+        self.with_graph_mutation(|store| store.intersect_graphs(g1, g2, target))
             .map_err(|error| graph_store_error(&error))
     }
 
@@ -212,38 +229,32 @@ impl SQLiteGraphStore {
         g2: &str,
         target: &str,
     ) -> Result<(), SQLiteError> {
-        self.inner
-            .difference_graphs(g1, g2, target)
+        self.with_graph_mutation(|store| store.difference_graphs(g1, g2, target))
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn copy_graph(&mut self, source: &str, target: &str) -> Result<(), SQLiteError> {
-        self.inner
-            .copy_graph(source, target)
+        self.with_graph_mutation(|store| store.copy_graph(source, target))
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn add_vertex(&mut self, vertex: Vertex, graph: &str) -> Result<(), SQLiteError> {
-        self.inner
-            .add_vertex(vertex, graph)
+        self.with_graph_mutation(|store| store.add_vertex(vertex, graph))
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn add_edge(&mut self, edge: Edge, graph: &str) -> Result<(), SQLiteError> {
-        self.inner
-            .add_edge(edge, graph)
+        self.with_graph_mutation(|store| store.add_edge(edge, graph))
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn remove_vertex(&mut self, vertex_id: u64, graph: &str) -> Result<(), SQLiteError> {
-        self.inner
-            .remove_vertex(vertex_id, graph)
+        self.with_graph_mutation(|store| store.remove_vertex(vertex_id, graph))
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn remove_edge(&mut self, edge_id: u64, graph: &str) -> Result<(), SQLiteError> {
-        self.inner
-            .remove_edge(edge_id, graph)
+        self.with_graph_mutation(|store| store.remove_edge(edge_id, graph))
             .map_err(|error| graph_store_error(&error))
     }
 
@@ -338,32 +349,27 @@ impl SQLiteGraphStore {
     }
 
     pub fn next_vertex_id(&mut self) -> Result<u64, SQLiteError> {
-        self.inner
-            .next_vertex_id()
+        self.with_graph_mutation(GraphStore::next_vertex_id)
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn next_edge_id(&mut self) -> Result<u64, SQLiteError> {
-        self.inner
-            .next_edge_id()
+        self.with_graph_mutation(GraphStore::next_edge_id)
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn allocate_vertex_id(&mut self, label: &str, graph: &str) -> Result<u64, SQLiteError> {
-        self.inner
-            .allocate_vertex_id(label, graph)
+        self.with_graph_mutation(|store| store.allocate_vertex_id(label, graph))
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn allocate_edge_id(&mut self, label: &str, graph: &str) -> Result<u64, SQLiteError> {
-        self.inner
-            .allocate_edge_id(label, graph)
+        self.with_graph_mutation(|store| store.allocate_edge_id(label, graph))
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn clear(&mut self) -> Result<(), SQLiteError> {
-        self.inner
-            .clear()
+        self.with_graph_mutation(GraphStore::clear)
             .map_err(|error| graph_store_error(&error))
     }
 
@@ -404,11 +410,11 @@ impl GraphStore for SQLiteGraphStore {
     }
 
     fn create_graph(&mut self, name: &str) -> GraphStoreResult<()> {
-        self.inner.create_graph(name)
+        self.with_graph_mutation(|store| store.create_graph(name))
     }
 
     fn drop_graph(&mut self, name: &str) -> GraphStoreResult<()> {
-        self.inner.drop_graph(name)
+        self.with_graph_mutation(|store| store.drop_graph(name))
     }
 
     fn graph_names(&self) -> GraphStoreResult<Vec<String>> {
@@ -420,35 +426,35 @@ impl GraphStore for SQLiteGraphStore {
     }
 
     fn union_graphs(&mut self, g1: &str, g2: &str, target: &str) -> GraphStoreResult<()> {
-        self.inner.union_graphs(g1, g2, target)
+        self.with_graph_mutation(|store| store.union_graphs(g1, g2, target))
     }
 
     fn intersect_graphs(&mut self, g1: &str, g2: &str, target: &str) -> GraphStoreResult<()> {
-        self.inner.intersect_graphs(g1, g2, target)
+        self.with_graph_mutation(|store| store.intersect_graphs(g1, g2, target))
     }
 
     fn difference_graphs(&mut self, g1: &str, g2: &str, target: &str) -> GraphStoreResult<()> {
-        self.inner.difference_graphs(g1, g2, target)
+        self.with_graph_mutation(|store| store.difference_graphs(g1, g2, target))
     }
 
     fn copy_graph(&mut self, source: &str, target: &str) -> GraphStoreResult<()> {
-        self.inner.copy_graph(source, target)
+        self.with_graph_mutation(|store| store.copy_graph(source, target))
     }
 
     fn add_vertex(&mut self, vertex: Vertex, graph: &str) -> GraphStoreResult<()> {
-        self.inner.add_vertex(vertex, graph)
+        self.with_graph_mutation(|store| store.add_vertex(vertex, graph))
     }
 
     fn add_edge(&mut self, edge: Edge, graph: &str) -> GraphStoreResult<()> {
-        self.inner.add_edge(edge, graph)
+        self.with_graph_mutation(|store| store.add_edge(edge, graph))
     }
 
     fn remove_vertex(&mut self, vertex_id: u64, graph: &str) -> GraphStoreResult<()> {
-        self.inner.remove_vertex(vertex_id, graph)
+        self.with_graph_mutation(|store| store.remove_vertex(vertex_id, graph))
     }
 
     fn remove_edge(&mut self, edge_id: u64, graph: &str) -> GraphStoreResult<()> {
-        self.inner.remove_edge(edge_id, graph)
+        self.with_graph_mutation(|store| store.remove_edge(edge_id, graph))
     }
 
     fn neighbors(
@@ -528,23 +534,23 @@ impl GraphStore for SQLiteGraphStore {
     }
 
     fn next_vertex_id(&mut self) -> GraphStoreResult<u64> {
-        self.inner.next_vertex_id()
+        self.with_graph_mutation(GraphStore::next_vertex_id)
     }
 
     fn next_edge_id(&mut self) -> GraphStoreResult<u64> {
-        self.inner.next_edge_id()
+        self.with_graph_mutation(GraphStore::next_edge_id)
     }
 
     fn allocate_vertex_id(&mut self, label: &str, graph: &str) -> GraphStoreResult<u64> {
-        self.inner.allocate_vertex_id(label, graph)
+        self.with_graph_mutation(|store| store.allocate_vertex_id(label, graph))
     }
 
     fn allocate_edge_id(&mut self, label: &str, graph: &str) -> GraphStoreResult<u64> {
-        self.inner.allocate_edge_id(label, graph)
+        self.with_graph_mutation(|store| store.allocate_edge_id(label, graph))
     }
 
     fn clear(&mut self) -> GraphStoreResult<()> {
-        self.inner.clear()
+        self.with_graph_mutation(GraphStore::clear)
     }
 
     fn vertices(&self) -> GraphStoreResult<BTreeMap<u64, Vertex>> {

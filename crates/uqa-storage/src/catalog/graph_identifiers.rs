@@ -63,7 +63,20 @@ impl GraphIdentifierNamespace {
 
     /// Logical graph entity observations share the physical entity scope and clear generation, independently of named graph membership or table row identities.
     pub fn serializable_entity_object(&self) -> [u8; 16] {
-        let digest = Sha256::digest(self.key(b'r', GraphEntityKind::Vertex, 0, [0; 16]));
+        self.serializable_object(b'r')
+    }
+
+    /// Clearing a namespace invalidates even an absent read from any earlier generation of that physical scope.
+    pub fn serializable_scope_object(&self) -> [u8; 16] {
+        Self {
+            generation: [0; 16],
+            ..*self
+        }
+        .serializable_object(b'R')
+    }
+
+    fn serializable_object(&self, tag: u8) -> [u8; 16] {
+        let digest = Sha256::digest(self.key(tag, GraphEntityKind::Vertex, 0, [0; 16]));
         let mut identity = [0; 16];
         identity.copy_from_slice(&digest[..16]);
         if identity == [0; 16] {

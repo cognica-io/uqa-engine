@@ -188,6 +188,15 @@ impl Drop for OverlayCheckpoint {
 }
 
 impl GraphStorage for OverlayGraphStorage {
+    fn visit_selection_namespaces(
+        &self,
+        visit: &mut dyn FnMut(
+            uqa_storage::catalog::graph_identifiers::GraphIdentifierNamespace,
+        ) -> GraphStoreResult<()>,
+    ) -> GraphStoreResult<()> {
+        self.read.storage.visit_selection_namespaces(visit)?;
+        self.write.storage.visit_selection_namespaces(visit)
+    }
     fn entity_observation_namespace(
         &self,
         kind: GraphEntityKind,

@@ -11,6 +11,9 @@ use super::*;
 #[path = "serializable/batches.rs"]
 mod batches;
 
+#[path = "serializable/graph_topology.rs"]
+mod graph_topology;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CheckpointFault {
     None,

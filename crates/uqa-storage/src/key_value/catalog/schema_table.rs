@@ -24,6 +24,17 @@ use super::{
     TAG_SCHEMA,
 };
 
+fn observe_graph_scope_clear(batch: &mut dyn KeyValueBatch) -> StorageBackendResult<()> {
+    if batch.serializable_participant().is_some() {
+        let namespace =
+            crate::catalog::graph_identifiers::GraphIdentifierNamespace::new(None, [0; 16]);
+        batch.observe_serializable_write(crate::catalog::graph_observations::scope_lifetime(
+            namespace,
+        ))?;
+    }
+    Ok(())
+}
+
 fn rename_document_scoped_fts_fields(
     catalog: &KeyValueCatalog,
     batch: &mut dyn KeyValueBatch,
@@ -130,6 +141,7 @@ impl KeyValueCatalog {
         }
         if key == "graph_identifier_generation" && identifiers {
             return self.store.with_mutation(&mut |_, batch| {
+                observe_graph_scope_clear(batch)?;
                 batch.fence_record(&single_str_key(
                     TAG_METADATA,
                     "graph_identifier_data_revision",
@@ -152,6 +164,7 @@ impl KeyValueCatalog {
                 Self::invalidate_graph_path_data(read, batch, graph)?;
             }
             if key == "graph_identifier_generation" && identifiers {
+                observe_graph_scope_clear(batch)?;
                 batch.fence_record(&single_str_key(
                     TAG_METADATA,
                     "graph_identifier_data_revision",

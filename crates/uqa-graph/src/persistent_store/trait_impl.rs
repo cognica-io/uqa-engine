@@ -19,11 +19,9 @@ impl GraphStore for PersistentGraphStore {
         limit: usize,
     ) -> GraphStoreResult<Vec<u64>> {
         self.require_graph(graph)?;
-        self.storage.ids(
-            GraphEntityFilter::new(GraphEntityKind::Vertex, Some(graph)),
-            after,
-            limit,
-        )
+        let filter = GraphEntityFilter::new(GraphEntityKind::Vertex, Some(graph));
+        self.observe_selection(filter, after)?;
+        self.storage.ids(filter, after, limit)
     }
     fn edge_id_page(
         &self,
@@ -32,11 +30,9 @@ impl GraphStore for PersistentGraphStore {
         limit: usize,
     ) -> GraphStoreResult<Vec<u64>> {
         self.require_graph(graph)?;
-        self.storage.ids(
-            GraphEntityFilter::new(GraphEntityKind::Edge, Some(graph)),
-            after,
-            limit,
-        )
+        let filter = GraphEntityFilter::new(GraphEntityKind::Edge, Some(graph));
+        self.observe_selection(filter, after)?;
+        self.storage.ids(filter, after, limit)
     }
     fn transaction<T>(
         &mut self,
@@ -68,7 +64,7 @@ impl GraphStore for PersistentGraphStore {
                 return Ok(());
             }
             for kind in [GraphEntityKind::Edge, GraphEntityKind::Vertex] {
-                store.for_each_id(GraphEntityFilter::new(kind, Some(name)), |id| {
+                store.for_each_selected_id(GraphEntityFilter::new(kind, Some(name)), |id| {
                     store.detach_entity(kind, id, name)
                 })?;
             }
@@ -170,7 +166,7 @@ impl GraphStore for PersistentGraphStore {
                 } else {
                     filter.target = Some(vertex_id);
                 }
-                store.for_each_id(filter, |id| {
+                store.for_each_selected_id(filter, |id| {
                     store.detach_entity(GraphEntityKind::Edge, id, graph)
                 })?;
             }
@@ -206,7 +202,7 @@ impl GraphStore for PersistentGraphStore {
             } else {
                 filter.target = Some(vertex_id);
             }
-            self.for_each_id(filter, |id| {
+            self.for_each_selected_id(filter, |id| {
                 let edge = self.require_edge(id, graph)?;
                 neighbors.push(if outgoing {
                     edge.target_id
@@ -227,7 +223,7 @@ impl GraphStore for PersistentGraphStore {
         let mut filter = GraphEntityFilter::new(GraphEntityKind::Vertex, Some(graph));
         filter.label = Some(label);
         let mut result = Vec::new();
-        self.for_each_id(filter, |id| {
+        self.for_each_selected_id(filter, |id| {
             self.observe_entity(GraphEntityKind::Vertex, id)?;
             result.push(self.require_vertex(id)?);
             Ok(())
@@ -243,7 +239,7 @@ impl GraphStore for PersistentGraphStore {
     fn vertices_in_graph(&self, graph: &str) -> GraphStoreResult<Vec<Vertex>> {
         self.require_graph(graph)?;
         let mut result = Vec::new();
-        self.for_each_id(
+        self.for_each_selected_id(
             GraphEntityFilter::new(GraphEntityKind::Vertex, Some(graph)),
             |id| {
                 self.observe_entity(GraphEntityKind::Vertex, id)?;
@@ -256,7 +252,7 @@ impl GraphStore for PersistentGraphStore {
     fn edges_in_graph(&self, graph: &str) -> GraphStoreResult<Vec<Edge>> {
         self.require_graph(graph)?;
         let mut result = Vec::new();
-        self.for_each_id(
+        self.for_each_selected_id(
             GraphEntityFilter::new(GraphEntityKind::Edge, Some(graph)),
             |id| {
                 self.observe_entity(GraphEntityKind::Edge, id)?;
@@ -267,6 +263,7 @@ impl GraphStore for PersistentGraphStore {
         Ok(result)
     }
     fn vertex_graphs(&self, id: u64) -> GraphStoreResult<BTreeSet<String>> {
+        self.observe_membership(GraphEntityKind::Vertex, id, None)?;
         Ok(self
             .storage
             .memberships(GraphEntityKind::Vertex, id)?
@@ -278,7 +275,7 @@ impl GraphStore for PersistentGraphStore {
         let mut filter = GraphEntityFilter::new(GraphEntityKind::Edge, Some(graph));
         filter.label = Some(label);
         let mut edges = Vec::new();
-        self.for_each_id(filter, |id| {
+        self.for_each_selected_id(filter, |id| {
             self.observe_entity(GraphEntityKind::Edge, id)?;
             edges.push(self.require_edge(id, graph)?);
             Ok(())
@@ -287,6 +284,7 @@ impl GraphStore for PersistentGraphStore {
     }
 
     fn edge_graphs(&self, id: u64) -> GraphStoreResult<BTreeSet<String>> {
+        self.observe_membership(GraphEntityKind::Edge, id, None)?;
         Ok(self
             .storage
             .memberships(GraphEntityKind::Edge, id)?
@@ -329,6 +327,7 @@ impl GraphStore for PersistentGraphStore {
     }
     fn require_vertex_in_graph(&self, id: u64, graph: &str) -> GraphStoreResult<()> {
         self.require_graph(graph)?;
+        self.observe_membership(GraphEntityKind::Vertex, id, Some(graph))?;
         if !self
             .storage
             .has_membership(GraphEntityKind::Vertex, id, graph)?
@@ -344,11 +343,12 @@ impl GraphStore for PersistentGraphStore {
     fn degree_distribution(&self, graph: &str) -> GraphStoreResult<BTreeMap<u64, u64>> {
         self.require_graph(graph)?;
         let mut result = BTreeMap::new();
-        self.for_each_id(
+        self.for_each_selected_id(
             GraphEntityFilter::new(GraphEntityKind::Vertex, Some(graph)),
             |id| {
                 let mut filter = GraphEntityFilter::new(GraphEntityKind::Edge, Some(graph));
                 filter.source = Some(id);
+                self.observe_selection(filter, None)?;
                 result.insert(id, self.storage.count(filter)?);
                 Ok(())
             },
@@ -361,7 +361,7 @@ impl GraphStore for PersistentGraphStore {
         let mut count = 0_usize;
         let mut filter = GraphEntityFilter::new(GraphEntityKind::Edge, Some(graph));
         filter.label = Some(label);
-        self.for_each_id(filter, |id| {
+        self.for_each_selected_id(filter, |id| {
             sources.insert(self.require_edge(id, graph)?.source_id);
             count += 1;
             Ok(())
@@ -380,7 +380,7 @@ impl GraphStore for PersistentGraphStore {
     fn vertex_label_counts(&self, graph: &str) -> GraphStoreResult<BTreeMap<String, u64>> {
         self.require_graph(graph)?;
         let mut result = BTreeMap::new();
-        self.for_each_id(
+        self.for_each_selected_id(
             GraphEntityFilter::new(GraphEntityKind::Vertex, Some(graph)),
             |id| {
                 *result.entry(self.require_vertex(id)?.label).or_default() += 1;
@@ -416,10 +416,13 @@ impl GraphStore for PersistentGraphStore {
             }
             for kind in [GraphEntityKind::Vertex, GraphEntityKind::Edge] {
                 // Also release global records left without any membership.
-                store.for_each_id(GraphEntityFilter::new(kind, None), |id| match kind {
-                    GraphEntityKind::Vertex => store.storage.delete_vertex(id),
-                    GraphEntityKind::Edge => store.storage.delete_edge(id),
-                })?;
+                store.for_each_selected_id(
+                    GraphEntityFilter::new(kind, None),
+                    |id| match kind {
+                        GraphEntityKind::Vertex => store.storage.delete_vertex(id),
+                        GraphEntityKind::Edge => store.storage.delete_edge(id),
+                    },
+                )?;
                 store.storage.save_counter(kind, 1)?;
             }
             store.storage.reset_identifiers()?;
@@ -428,7 +431,7 @@ impl GraphStore for PersistentGraphStore {
     }
     fn vertices(&self) -> GraphStoreResult<BTreeMap<u64, Vertex>> {
         let mut result = BTreeMap::new();
-        self.for_each_id(
+        self.for_each_selected_id(
             GraphEntityFilter::new(GraphEntityKind::Vertex, None),
             |id| {
                 self.observe_entity(GraphEntityKind::Vertex, id)?;
@@ -440,7 +443,7 @@ impl GraphStore for PersistentGraphStore {
     }
     fn edges(&self) -> GraphStoreResult<BTreeMap<u64, Edge>> {
         let mut result = BTreeMap::new();
-        self.for_each_id(GraphEntityFilter::new(GraphEntityKind::Edge, None), |id| {
+        self.for_each_selected_id(GraphEntityFilter::new(GraphEntityKind::Edge, None), |id| {
             self.observe_entity(GraphEntityKind::Edge, id)?;
             let edge = self
                 .storage

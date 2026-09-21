@@ -104,6 +104,7 @@ impl GraphRead<'_> {
                     continue;
                 }
                 self.fence_membership_references(batch, &kind, id, graph)?;
+                self.observe_membership_change(batch, &kind, id, graph, None)?;
                 batch.delete(&reverse_membership_key(&kind, id, graph)?)?;
                 batch.delete(key)?;
             }
@@ -263,10 +264,17 @@ impl GraphRead<'_> {
         row: Option<&StoredVertex>,
     ) -> StorageBackendResult<()> {
         self.guard_definition(batch, None)?;
-        let previous = self.read.get(&vertex_key(id))?;
+        let previous: Option<StoredVertex> = self
+            .read
+            .get(&vertex_key(id))?
+            .map(|bytes| decode_value(&bytes))
+            .transpose()?;
         if previous.is_some() || row.is_some() {
             self.observe_entity_write(batch, GraphEntityKind::Vertex, id)?;
         }
+        let old_topology = previous.as_ref().map(super::graph_observations::vertex);
+        let new_topology = row.map(super::graph_observations::vertex);
+        self.observe_topology_change(batch, id, None, old_topology, new_topology)?;
         if previous.is_none() || row.is_none() {
             self.fence_entity_lifetime(batch, GraphEntityKind::Vertex, id)?;
         }
@@ -275,11 +283,12 @@ impl GraphRead<'_> {
             id,
         ))?;
         for graph in self.memberships(GraphEntityKind::Vertex, id)? {
+            self.observe_topology_change(batch, id, Some(&graph), old_topology, new_topology)?;
             self.guard_definition(batch, Some(&graph))?;
             KeyValueCatalog::invalidate_graph_path_data(self.read, batch, &graph)?;
         }
         if let Some(old) = previous {
-            for key in vertex_lookup_keys(id, &decode_value(&old)?)? {
+            for key in vertex_lookup_keys(id, &old)? {
                 batch.delete(&key)?;
             }
         }
@@ -306,6 +315,9 @@ impl GraphRead<'_> {
         if previous.is_some() || row.is_some() {
             self.observe_entity_write(batch, GraphEntityKind::Edge, id)?;
         }
+        let old_topology = previous.as_ref().map(super::graph_observations::edge);
+        let new_topology = row.map(super::graph_observations::edge);
+        self.observe_topology_change(batch, id, None, old_topology, new_topology)?;
         if previous.as_ref().zip(row).is_none_or(|(old, new)| {
             old.source_id != new.source_id || old.target_id != new.target_id
         }) {
@@ -321,6 +333,7 @@ impl GraphRead<'_> {
             id,
         ))?;
         for graph in self.memberships(GraphEntityKind::Edge, id)? {
+            self.observe_topology_change(batch, id, Some(&graph), old_topology, new_topology)?;
             self.guard_definition(batch, Some(&graph))?;
             if let Some(row) = row {
                 for endpoint in [row.source_id, row.target_id] {

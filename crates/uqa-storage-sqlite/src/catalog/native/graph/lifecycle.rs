@@ -179,7 +179,19 @@ pub(in crate::catalog) fn replace(
                 text(&row.properties_json),
             ]),
         )?;
-        write::membership(snapshot, batch, "vertex", id, graph, true)?;
+        write::membership_with_entity(
+            snapshot,
+            batch,
+            "vertex",
+            id,
+            graph,
+            true,
+            Some(
+                uqa_storage::catalog::graph_observations::GraphEntityTopology::Vertex {
+                    label: &row.label,
+                },
+            ),
+        )?;
     }
     for &(id, slot) in edges.iter() {
         let row = &replacement.edges[slot];
@@ -197,7 +209,21 @@ pub(in crate::catalog) fn replace(
                 text(&row.properties_json),
             ]),
         )?;
-        write::membership(snapshot, batch, "edge", id, graph, true)?;
+        write::membership_with_entity(
+            snapshot,
+            batch,
+            "edge",
+            id,
+            graph,
+            true,
+            Some(
+                uqa_storage::catalog::graph_observations::GraphEntityTopology::Edge {
+                    label: &row.label,
+                    source: row.source_id,
+                    target: row.target_id,
+                },
+            ),
+        )?;
     }
     let mut metadata = BudgetedVec::new(snapshot.control.memory());
     metadata.extend_from_slice(b"graph_label_registry::")?;

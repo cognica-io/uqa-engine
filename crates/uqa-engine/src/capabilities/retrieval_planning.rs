@@ -164,6 +164,7 @@ impl RetrievalPlanningCatalog for Engine {
     fn graph_snapshot(&self, graph: &str) -> Result<Option<GraphStatisticsSnapshot>, String> {
         self.graph_with(graph, |store| {
             use uqa_graph::GraphStore as _;
+            let store = store.for_statistics();
             let vertices = store.vertices_in_graph(graph)?;
             let edges = store.edges_in_graph(graph)?;
             let degree_distribution = store.degree_distribution(graph)?;

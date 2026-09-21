@@ -7,6 +7,7 @@
 //! Native row addressing over a retained common committed/private view.
 
 mod graph;
+mod graph_observations;
 mod graph_selection;
 
 use rusqlite::types::ValueRef;

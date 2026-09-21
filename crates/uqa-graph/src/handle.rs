@@ -48,6 +48,16 @@ impl GraphStoreHandle {
             Self::Persistent(store) => Self::Persistent(store.without_serializable_read()),
         }
     }
+
+    /// Cost estimation retains the same data without creating semantic query reads. The primary in-memory graph remains borrowed; persistent handles share their original storage and retained resources.
+    pub fn for_statistics(&self) -> std::borrow::Cow<'_, Self> {
+        match self {
+            Self::Memory(_) => std::borrow::Cow::Borrowed(self),
+            Self::Persistent(store) => {
+                std::borrow::Cow::Owned(Self::Persistent(store.clone().without_serializable_read()))
+            }
+        }
+    }
     pub fn from_catalog(
         catalog: Arc<dyn CatalogFacade>,
         backend: Arc<dyn PersistentStorageBackend>,

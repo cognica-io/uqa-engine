@@ -177,6 +177,7 @@ impl PersistentGraphStore {
     }
 
     fn collect_ids(&self, filter: GraphEntityFilter<'_>) -> GraphStoreResult<BTreeSet<u64>> {
+        self.observe_selection(filter, None)?;
         let mut ids = BTreeSet::new();
         self.for_each_id(filter, |id| {
             ids.insert(id);
@@ -412,7 +413,7 @@ impl PersistentGraphStore {
             }
             // AGE label removal intentionally preserves incident edge rows;
             // the tombstone distinguishes these from corrupt endpoints.
-            store.for_each_id(filter, |entity_id| {
+            store.for_each_selected_id(filter, |entity_id| {
                 if !default || graphid_label_id(entity_id) == id {
                     store.detach_entity(entity_kind, entity_id, graph)?;
                 }
@@ -438,7 +439,7 @@ impl PersistentGraphStore {
             store.storage.create_graph(to)?;
             store.save_registry(to, &store.label_registry(from)?)?;
             for kind in [GraphEntityKind::Vertex, GraphEntityKind::Edge] {
-                store.for_each_id(GraphEntityFilter::new(kind, Some(from)), |id| {
+                store.for_each_selected_id(GraphEntityFilter::new(kind, Some(from)), |id| {
                     store.storage.attach(kind, id, to)?;
                     store.storage.detach(kind, id, from)
                 })?;
@@ -462,9 +463,12 @@ impl PersistentGraphStore {
             }
             store.create_graph(target)?;
             for kind in [GraphEntityKind::Vertex, GraphEntityKind::Edge] {
-                store.for_each_id(GraphEntityFilter::new(kind, Some(first)), |id| {
+                store.for_each_selected_id(GraphEntityFilter::new(kind, Some(first)), |id| {
                     let common = match second {
-                        Some(second) => store.storage.has_membership(kind, id, second)?,
+                        Some(second) => {
+                            store.observe_membership(kind, id, Some(second))?;
+                            store.storage.has_membership(kind, id, second)?
+                        }
                         None => false,
                     };
                     if keep(common) {
@@ -473,9 +477,10 @@ impl PersistentGraphStore {
                     Ok(())
                 })?;
                 if let Some(second) = second.filter(|_| include_second) {
-                    store.for_each_id(GraphEntityFilter::new(kind, Some(second)), |id| {
-                        store.storage.attach(kind, id, target)
-                    })?;
+                    store
+                        .for_each_selected_id(GraphEntityFilter::new(kind, Some(second)), |id| {
+                            store.storage.attach(kind, id, target)
+                        })?;
                 }
             }
             let mut registry = store.label_registry(target)?;

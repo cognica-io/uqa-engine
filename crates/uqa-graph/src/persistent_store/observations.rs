@@ -7,9 +7,11 @@
 //! Retained participant attribution belongs to semantic graph access, not physical decoding or validation reads.
 
 use uqa_core::CancellationToken;
-use uqa_storage::catalog::graph_observations::GraphEntityKey;
-use uqa_storage::mvcc::{SerializableReadContext, VersionError};
-use uqa_storage::{read_control::StorageReadControl, GraphEntityKind};
+use uqa_storage::catalog::graph_observations::{
+    scope_lifetime, GraphEntityKey, GraphMembershipKey, GraphSelectionKey,
+};
+use uqa_storage::mvcc::{SerializablePredicate, SerializableReadContext, VersionError};
+use uqa_storage::{read_control::StorageReadControl, GraphEntityFilter, GraphEntityKind};
 
 use super::PersistentGraphStore;
 use crate::{GraphStoreError, GraphStoreResult};
@@ -20,7 +22,78 @@ pub(super) struct GraphRead {
     control: StorageReadControl,
 }
 
+impl GraphRead {
+    fn observe(
+        &self,
+        namespace: uqa_storage::catalog::graph_identifiers::GraphIdentifierNamespace,
+        predicate: SerializablePredicate<'_>,
+    ) -> GraphStoreResult<()> {
+        self.context
+            .observe_read(scope_lifetime(namespace), &self.control)
+            .map_err(VersionError::into_storage_error)?;
+        self.context
+            .observe_read(predicate, &self.control)
+            .map_err(VersionError::into_storage_error)?;
+        Ok(())
+    }
+}
+
 impl PersistentGraphStore {
+    pub(super) fn observe_selection(
+        &self,
+        filter: GraphEntityFilter<'_>,
+        after: Option<u64>,
+    ) -> GraphStoreResult<()> {
+        let Some(read) = &self.read else {
+            return Ok(());
+        };
+        read.control.check()?;
+        let mut previous = None;
+        self.storage.visit_selection_namespaces(&mut |namespace| {
+            let object = namespace.serializable_entity_object();
+            if previous == Some(object) {
+                return Ok(());
+            }
+            previous = Some(object);
+            let key = GraphSelectionKey::new(namespace, filter, after)?;
+            read.observe(namespace, key.predicate())?;
+            Ok(())
+        })
+    }
+
+    pub(super) fn observe_membership(
+        &self,
+        kind: GraphEntityKind,
+        id: u64,
+        graph: Option<&str>,
+    ) -> GraphStoreResult<()> {
+        let Some(read) = &self.read else {
+            return Ok(());
+        };
+        read.control.check()?;
+        let namespace = self
+            .storage
+            .entity_observation_namespace(kind, id)?
+            .ok_or_else(|| {
+                GraphStoreError::Storage(
+                    "serializable graph memberships require an immutable namespace".into(),
+                )
+            })?;
+        read.observe(
+            namespace,
+            GraphMembershipKey::new(namespace, kind, id, graph).predicate(),
+        )?;
+        Ok(())
+    }
+
+    pub(super) fn for_each_selected_id(
+        &self,
+        filter: GraphEntityFilter<'_>,
+        visit: impl FnMut(u64) -> GraphStoreResult<()>,
+    ) -> GraphStoreResult<()> {
+        self.observe_selection(filter, None)?;
+        self.for_each_id(filter, visit)
+    }
     /// Bind a query's original participant and allowance without observing data. Clones retain this binding; catalog caches should keep unbound handles and bind each executing reader explicitly.
     pub fn with_serializable_read(
         &self,
@@ -50,12 +123,10 @@ impl PersistentGraphStore {
                         "serializable graph reads require an immutable entity namespace".into(),
                     )
                 })?;
-            read.context
-                .observe_read(
-                    GraphEntityKey::new(namespace, kind, id).predicate(),
-                    &read.control,
-                )
-                .map_err(VersionError::into_storage_error)?;
+            read.observe(
+                namespace,
+                GraphEntityKey::new(namespace, kind, id).predicate(),
+            )?;
         }
         Ok(())
     }

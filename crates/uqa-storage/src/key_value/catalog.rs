@@ -40,6 +40,7 @@ mod analyzers;
 mod foreign;
 mod graph_access;
 mod graph_guards;
+mod graph_observations;
 mod graph_view;
 mod graphs;
 mod indexes;

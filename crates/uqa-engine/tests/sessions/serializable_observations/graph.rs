@@ -11,6 +11,9 @@ use std::collections::BTreeMap;
 use uqa_core::{Edge, Value, Vertex};
 use uqa_graph::{Direction, GraphStore};
 
+#[path = "graph/topology.rs"]
+mod topology;
+
 fn prepare(session: &Session) {
     session.engine.create_graph("g").unwrap();
     for id in [1, 2] {

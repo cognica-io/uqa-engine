@@ -144,7 +144,7 @@ impl KeyValueCatalog {
         id: u64,
         graph: &str,
     ) -> StorageBackendResult<()> {
-        self.with_graph_mutation(|read, batch| read.membership(batch, kind, id, graph, true))
+        self.with_graph_mutation(|read, batch| read.membership(batch, kind, id, graph, true, None))
     }
 
     pub(super) fn delete_graph_membership_impl(
@@ -153,7 +153,7 @@ impl KeyValueCatalog {
         id: u64,
         graph: &str,
     ) -> StorageBackendResult<()> {
-        self.with_graph_mutation(|read, batch| read.membership(batch, kind, id, graph, false))
+        self.with_graph_mutation(|read, batch| read.membership(batch, kind, id, graph, false, None))
     }
 
     pub(super) fn delete_graph_membership_for_graph_impl(
@@ -214,12 +214,36 @@ impl KeyValueCatalog {
             for &(id, slot) in vertices.iter() {
                 let row = &snapshot.vertices[slot];
                 read.save_vertex(batch, id, &row.label, &row.properties_json)?;
-                read.membership(batch, "vertex", id, graph, true)?;
+                read.membership(
+                    batch,
+                    "vertex",
+                    id,
+                    graph,
+                    true,
+                    Some(
+                        crate::catalog::graph_observations::GraphEntityTopology::Vertex {
+                            label: &row.label,
+                        },
+                    ),
+                )?;
             }
             for &(_, slot) in edges.iter() {
                 let row = &snapshot.edges[slot];
                 read.save_edge(batch, row)?;
-                read.membership(batch, "edge", row.edge_id, graph, true)?;
+                read.membership(
+                    batch,
+                    "edge",
+                    row.edge_id,
+                    graph,
+                    true,
+                    Some(
+                        crate::catalog::graph_observations::GraphEntityTopology::Edge {
+                            label: &row.label,
+                            source: row.source_id,
+                            target: row.target_id,
+                        },
+                    ),
+                )?;
             }
             batch.put(
                 &single_str_key(TAG_METADATA, &format!("graph_label_registry::{graph}"))?,
@@ -282,6 +306,7 @@ impl GraphRead<'_> {
         id: u64,
         graph: &str,
         present: bool,
+        evaluated: Option<crate::catalog::graph_observations::GraphEntityTopology<'_>>,
     ) -> StorageBackendResult<()> {
         self.guard_definition(batch, Some(graph))?;
         let forward = graph_membership_key(kind, id, graph)?;
@@ -313,6 +338,7 @@ impl GraphRead<'_> {
         if self.read.get(&forward)?.is_some() == present {
             return Ok(());
         }
+        self.observe_membership_change(batch, kind, id, graph, evaluated)?;
         if present {
             batch.put(&forward, &[])?;
             batch.put(&reverse, &[])?;

@@ -82,6 +82,20 @@ pub trait GraphWriteTransaction {
 /// No entity, membership, or adjacency collection is retained by a handle.
 /// Multi-read operations run in the caller's pinned storage transaction.
 pub trait GraphStorage: Send + Sync {
+    /// A selection can combine an original snapshot with private entities from another clear generation. Visit each physical namespace supplying that view without observing provider validation reads.
+    fn visit_selection_namespaces(
+        &self,
+        visit: &mut dyn FnMut(
+            uqa_storage::catalog::graph_identifiers::GraphIdentifierNamespace,
+        ) -> GraphStoreResult<()>,
+    ) -> GraphStoreResult<()> {
+        let namespace = self.identifiers()?.ok_or_else(|| {
+            crate::GraphStoreError::Storage(
+                "serializable graph selections require an immutable namespace".into(),
+            )
+        })?;
+        visit(namespace.namespace())
+    }
     /// Select the same physical identity generation as the entity read. An overlay may read untouched entities from its original snapshot and changed entities from its writer.
     fn entity_observation_namespace(
         &self,

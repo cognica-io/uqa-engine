@@ -21,16 +21,30 @@ impl NativeSnapshot {
         row: Option<&[ValueRef<'_>]>,
         cache: bool,
     ) -> Result<()> {
-        self.observe_graph_entity_write(batch, family, components, row.is_some())?;
+        self.replace_graph_row_with_entity(batch, family, components, row, cache, None)
+    }
+
+    pub(crate) fn replace_graph_row_with_entity(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        family: Family,
+        components: &[ValueRef<'_>],
+        row: Option<&[ValueRef<'_>]>,
+        cache: bool,
+        evaluated: Option<uqa_storage::catalog::graph_observations::GraphEntityTopology<'_>>,
+    ) -> Result<()> {
         self.guard_graph_row_lifetimes(batch, family, components, row)?;
         let owner = NativeRecordOwner::Database(self.database);
-        let old = self
-            .read_row(family, owner, components, |values| {
-                graph_lookup::records(self.database, family, values, &self.control)
-                    .map_err(Error::into_version)
-                    .map_err(Into::into)
-            })?
-            .unwrap_or([None, None, None]);
+        let old = self.read_row(family, owner, components, |values| {
+            self.observe_graph_row(batch, family, components, Some(values), row, evaluated)?;
+            graph_lookup::records(self.database, family, values, &self.control)
+                .map_err(Error::into_version)
+                .map_err(Into::into)
+        })?;
+        if old.is_none() {
+            self.observe_graph_row(batch, family, components, None, row, evaluated)?;
+        }
+        let old = old.unwrap_or([None, None, None]);
         let new = row
             .map(|values| {
                 graph_lookup::records(self.database, family, values, &self.control)
@@ -74,51 +88,6 @@ impl NativeSnapshot {
                 batch.delete(&key)?;
             }
         }
-        Ok(())
-    }
-
-    fn observe_graph_entity_write(
-        &self,
-        batch: &mut dyn KeyValueBatch,
-        family: Family,
-        components: &[ValueRef<'_>],
-        replacing: bool,
-    ) -> Result<()> {
-        use uqa_storage::{catalog::graph_observations::GraphEntityKey, GraphEntityKind};
-        if batch.serializable_participant().is_none() {
-            return Ok(());
-        }
-        let kind = match family {
-            Family::GraphVertices | Family::StandaloneGraphVertices => GraphEntityKind::Vertex,
-            Family::GraphEdges | Family::StandaloneGraphEdges => GraphEntityKind::Edge,
-            _ => return Ok(()),
-        };
-        if !replacing
-            && !self.contains_row(
-                family,
-                NativeRecordOwner::Database(self.database),
-                components,
-            )?
-        {
-            return Ok(());
-        }
-        let offset = usize::from(family.is_standalone_graph());
-        let scope = if offset == 0 {
-            None
-        } else {
-            Some(components[0].as_str().map_err(|_| {
-                crate::SQLiteError::StorageBackend("invalid graph observation scope".into())
-            })?)
-        };
-        let id = components[offset]
-            .as_i64()
-            .ok()
-            .and_then(|id| u64::try_from(id).ok())
-            .ok_or_else(|| {
-                crate::SQLiteError::StorageBackend("invalid graph observation identity".into())
-            })?;
-        GraphEntityKey::new(self.graph_identifier_namespace(scope)?, kind, id)
-            .observe_write(batch)?;
         Ok(())
     }
 }

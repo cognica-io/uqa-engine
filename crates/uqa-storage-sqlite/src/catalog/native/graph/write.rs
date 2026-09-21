@@ -68,18 +68,31 @@ pub(in crate::catalog) fn membership(
     graph: &str,
     present: bool,
 ) -> Result<()> {
+    membership_with_entity(snapshot, batch, kind, id, graph, present, None)
+}
+
+pub(super) fn membership_with_entity(
+    snapshot: &NativeSnapshot,
+    batch: &mut dyn KeyValueBatch,
+    kind: &str,
+    id: i64,
+    graph: &str,
+    present: bool,
+    evaluated: Option<uqa_storage::catalog::graph_observations::GraphEntityTopology<'_>>,
+) -> Result<()> {
     snapshot.guard_graph_definition(batch, None, Some(graph))?;
     let row = [text(kind), ValueRef::Integer(id), text(graph)];
     if snapshot.contains_row(Family::GraphMembership, owner(snapshot), &row)? == present {
         return Ok(());
     }
     paths::invalidate_graph(snapshot, batch, graph)?;
-    snapshot.replace_graph_row(
+    snapshot.replace_graph_row_with_entity(
         batch,
         Family::GraphMembership,
         &row,
         present.then_some(&row),
         false,
+        evaluated,
     )
 }
 
