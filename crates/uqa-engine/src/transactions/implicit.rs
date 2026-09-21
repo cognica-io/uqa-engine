@@ -63,6 +63,13 @@ impl Engine {
                 message: "cannot execute direct mutation in a read-only transaction".into(),
             });
         }
+        self.with_implicit_transaction_mutation(f)
+    }
+
+    pub(super) fn with_implicit_transaction_mutation<R>(
+        &self,
+        f: impl FnOnce(&Self) -> Result<R, SQLError>,
+    ) -> Result<R, SQLError> {
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()?;
             return self.run_existing_transaction_mutation(

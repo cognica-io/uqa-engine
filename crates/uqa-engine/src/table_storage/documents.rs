@@ -790,7 +790,7 @@ impl Engine {
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?;
         let vectors = Self::document_vector_values(&table_state, &document)?;
-        self.with_implicit_transaction(|engine| {
+        self.with_prepared_row_write_transaction(&table_name, |engine| {
             engine.add_prepared_document_with_vector_values_inner(
                 &table_name,
                 doc_id,

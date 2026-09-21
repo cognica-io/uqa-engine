@@ -70,7 +70,9 @@ impl Session {
     }
 
     fn sql(&self, sql: &str) -> uqa_sql::SQLResult {
-        self.engine.sql(sql, &[]).unwrap()
+        self.engine
+            .sql(sql, &[])
+            .unwrap_or_else(|error| panic!("{sql}: {error:?}"))
     }
 }
 

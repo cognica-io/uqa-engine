@@ -12,15 +12,7 @@ use super::{
 };
 
 impl Engine {
-    /// Run one typed row mutation with the same relation/tuple locking order as SQL DML: logical locks first, backend-writer promotion second. This prevents typed APIs from bypassing `SELECT ... FOR UPDATE` and avoids a writer/row-lock inversion while waiting for another transaction.
-    pub(crate) fn with_implicit_row_write_transaction<R>(
-        &self,
-        table: &str,
-        doc_id: uqa_core::DocId,
-        strength: uqa_sql::ast::LockStrength,
-        f: impl FnOnce(&Self) -> Result<R, SQLError>,
-    ) -> Result<R, SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+    fn ensure_row_mutation_allowed(&self, table: &str) -> Result<(), SQLError> {
         if self.current_transaction_is_read_only()
             && self
                 .table_persistence(table)
@@ -38,6 +30,30 @@ impl Engine {
                 message: "cannot execute row mutation in a read-only transaction".into(),
             });
         }
+        Ok(())
+    }
+
+    /// Keep the row mutation transaction boundary after SQL has acquired its chosen tuple-lock strength. Existing temporary rows retain their read-only transaction permission without taking a stronger lock.
+    pub(crate) fn with_prepared_row_write_transaction<R>(
+        &self,
+        table: &str,
+        f: impl FnOnce(&Self) -> Result<R, SQLError>,
+    ) -> Result<R, SQLError> {
+        let _statement = self.runtime.statement_gate.lock();
+        self.ensure_row_mutation_allowed(table)?;
+        self.with_implicit_transaction_mutation(f)
+    }
+
+    /// Run one typed row mutation with the same relation/tuple locking order as SQL DML: logical locks first, backend-writer promotion second. This prevents typed APIs from bypassing `SELECT ... FOR UPDATE` and avoids a writer/row-lock inversion while waiting for another transaction.
+    pub(crate) fn with_implicit_row_write_transaction<R>(
+        &self,
+        table: &str,
+        doc_id: uqa_core::DocId,
+        strength: uqa_sql::ast::LockStrength,
+        f: impl FnOnce(&Self) -> Result<R, SQLError>,
+    ) -> Result<R, SQLError> {
+        let _statement = self.runtime.statement_gate.lock();
+        self.ensure_row_mutation_allowed(table)?;
         if self.storage.backend.is_none() && self.transaction_depth() == 0 {
             return f(self);
         }
