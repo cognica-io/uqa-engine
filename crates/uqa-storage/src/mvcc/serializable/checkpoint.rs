@@ -9,6 +9,7 @@
 mod io;
 mod nodes;
 mod predicates;
+pub(super) mod records;
 #[cfg(test)]
 mod tests;
 
@@ -135,7 +136,10 @@ impl SerializableGraph {
             };
             entries.reserve(count)?;
             for _ in 0..count {
-                let observed = predicates::read(&mut decoder, writing)?;
+                let mut observed = predicates::read(&mut decoder, writing)?;
+                observed.fingerprint =
+                    records::SerializableCheckpointRecord::predicate(&graph, &observed, writing)
+                        .fingerprint(control)?;
                 let owner = lookup(&graph, observed.owner)?;
                 if owner.aborted
                     || (writing
@@ -161,6 +165,9 @@ impl SerializableGraph {
             }
         }
         decoder.finish()?;
+        for entries in [&mut graph.predicates.reads, &mut graph.predicates.writes] {
+            entries.sort_unstable_by_key(|entry| (entry.predicate.object, entry.fingerprint));
+        }
         graph.checkpoint_changed = false;
         Ok(graph)
     }

@@ -6,6 +6,7 @@
 
 //! Independent adapters retain conflicts, exact physical outcomes and original participant ownership.
 
+mod migration;
 mod persistence;
 mod process;
 mod recovery;

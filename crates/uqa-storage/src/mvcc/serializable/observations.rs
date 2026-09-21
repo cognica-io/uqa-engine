@@ -28,6 +28,7 @@ pub(super) struct Observation {
     pub(super) owner: u64,
     pub(super) write: u64,
     pub(super) predicate: OwnedPredicate,
+    pub(super) fingerprint: [u8; 32],
 }
 
 pub(super) struct Observations {
@@ -202,6 +203,26 @@ impl SerializableGraph {
                 }
             }
         }
+        let mut observed = Observation {
+            owner: entry.id,
+            write,
+            predicate: owned,
+            fingerprint: [0; 32],
+        };
+        observed.fingerprint = super::checkpoint::records::SerializableCheckpointRecord::predicate(
+            self, &observed, writing,
+        )
+        .fingerprint(control)?;
+        let index = self
+            .predicates
+            .selected(writing)
+            .binary_search_by_key(&(predicate.object, observed.fingerprint), |entry| {
+                (entry.predicate.object, entry.fingerprint)
+            })
+            .err()
+            .ok_or(VersionError::InvalidEncoding(
+                "serializable predicate fingerprint collision",
+            ))?;
         // Every action has the same reader or writer; new edges cannot change another action's incoming/outgoing checks. Validate and reserve the complete observation before publishing any action.
         self.predicates.selected_mut(writing).reserve(1)?;
         self.reserve_dependencies(
@@ -212,13 +233,7 @@ impl SerializableGraph {
         )?;
         control.check()?;
         let observations = self.predicates.selected_mut(writing);
-        let index =
-            observations.partition_point(|observed| observed.predicate.object <= predicate.object);
-        observations.push(Observation {
-            owner: entry.id,
-            write,
-            predicate: owned,
-        })?;
+        observations.push(observed)?;
         self.checkpoint_changed = true;
         observations[index..].rotate_right(1);
         for &action in &*actions {

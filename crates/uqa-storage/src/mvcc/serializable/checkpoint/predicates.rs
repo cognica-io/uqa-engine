@@ -92,6 +92,7 @@ pub(super) fn read(decoder: &mut Decoder<'_>, writing: bool) -> VersionResult<Ob
         owner,
         write,
         predicate,
+        fingerprint: [0; 32],
     })
 }
 

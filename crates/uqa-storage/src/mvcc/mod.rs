@@ -59,9 +59,10 @@ pub use retention::{
 };
 pub use serializable::{
     admit_serializable, LocalSerializableLeases, LocalSerializableState, SafeSnapshot,
-    SerializableCoordinator, SerializableGraph, SerializableKeySpace, SerializableLeases,
-    SerializableOperation, SerializableParticipant, SerializablePredicate, SerializablePublication,
-    SerializableStatus, SerializableTransactionId, SerializableWriteMark,
+    SerializableCheckpointKey, SerializableCheckpointRecord, SerializableCoordinator,
+    SerializableGraph, SerializableKeySpace, SerializableLeases, SerializableOperation,
+    SerializableParticipant, SerializablePredicate, SerializablePublication, SerializableStatus,
+    SerializableTransactionId, SerializableWriteMark,
 };
 pub use session::{
     SerializableReadContext, SerializableSession, SerializableSnapshotCapture,

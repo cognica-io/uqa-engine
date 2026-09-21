@@ -8,7 +8,9 @@
 
 use super::*;
 
-const CHECKPOINT: TableDefinition<u8, &[u8]> = TableDefinition::new("uqa_mvcc_serializable");
+const CHECKPOINT: TableDefinition<&[u8], &[u8]> =
+    TableDefinition::new("uqa_mvcc_serializable_records");
+const HEADER: &[u8] = &[0; 49];
 
 #[test]
 fn a_sole_participant_keeps_the_exclusive_database_owner_until_its_final_release() {
@@ -196,16 +198,18 @@ fn malformed_retained_state_is_rejected_before_callbacks_without_reinitializatio
                         .unwrap();
                 }
                 2 => {
-                    checkpoint.remove(0).unwrap();
+                    checkpoint.remove(HEADER).unwrap();
                 }
                 3 => {
-                    checkpoint.insert(1, b"extra".as_slice()).unwrap();
+                    checkpoint
+                        .insert(b"extra".as_slice(), b"extra".as_slice())
+                        .unwrap();
                 }
                 4 => {
-                    let mut bytes = checkpoint.get(0).unwrap().unwrap().value().to_vec();
+                    let mut bytes = checkpoint.get(HEADER).unwrap().unwrap().value().to_vec();
                     let end = bytes.len() - 1;
                     bytes[end] ^= 1;
-                    checkpoint.insert(0, bytes.as_slice()).unwrap();
+                    checkpoint.insert(HEADER, bytes.as_slice()).unwrap();
                 }
                 5 => {
                     let mut bytes = metadata

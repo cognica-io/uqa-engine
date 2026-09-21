@@ -52,7 +52,7 @@ fn empty_initialization_is_retained_but_repeated_observations_do_not_write() {
             .observe_read(actor, point(b"new"), &control)
             .unwrap();
         held.persist_in(&control).unwrap();
-        assert_eq!(held.connection.total_changes(), before + 1);
+        assert_eq!(held.connection.total_changes(), before + 2);
         drop(held);
         let mut held = store.serializable_admission(&control).unwrap();
         let writer = held.graph_mut().admit(false, &control).unwrap();

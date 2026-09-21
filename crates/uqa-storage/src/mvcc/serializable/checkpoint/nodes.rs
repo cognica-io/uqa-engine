@@ -82,7 +82,7 @@ pub(super) fn restore(
     Ok(())
 }
 
-fn read(
+pub(super) fn read(
     decoder: &mut Decoder<'_>,
     clock: u64,
     allocation: u64,

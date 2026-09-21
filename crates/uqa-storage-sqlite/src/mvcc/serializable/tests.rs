@@ -10,13 +10,14 @@ use std::path::Path;
 
 use uqa_storage::mvcc::{
     CommitStatus, PreparedRecordCommit, RecordWrite, SerializableKeySpace, SerializablePredicate,
-    SerializableTransactionId, VersionedPersistence,
+    SerializableTransactionId, VersionError, VersionedPersistence,
 };
 
 use super::*;
 use crate::ManagedConnection;
 
 mod liveness;
+mod migration;
 mod persistence;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod process;
@@ -220,10 +221,10 @@ fn encrypted_and_compressed_predicates_never_enter_plaintext_auxiliary_files() {
 fn malformed_auxiliary_state_is_rejected_without_recreation() {
     for sql in [
         "DROP TABLE _uqa_serializable_state",
-        "PRAGMA user_version = 2",
+        "PRAGMA user_version = 3",
         "CREATE TABLE sqliteextra (value TEXT)",
         "DELETE FROM _uqa_serializable_state",
-        "UPDATE _uqa_serializable_state SET checkpoint = x'00'",
+        "UPDATE _uqa_serializable_records SET value = x'00'",
         "UPDATE _uqa_serializable_state SET database_id = zeroblob(16)",
         "ALTER TABLE _uqa_serializable_state ADD COLUMN unexpected INTEGER",
     ] {

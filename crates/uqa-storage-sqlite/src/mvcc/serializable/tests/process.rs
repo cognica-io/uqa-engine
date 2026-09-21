@@ -132,7 +132,7 @@ fn child(path: &Path, mode: usize) {
                 held.graph_mut().admit(true, &control).unwrap();
                 // Modify the physical BLOB too; killing the process must recover its journal.
                 held.connection
-                    .execute("UPDATE _uqa_serializable_state SET checkpoint = x'00'", [])
+                    .execute("UPDATE _uqa_serializable_records SET value = x'00'", [])
                     .unwrap();
                 held.connection.cache_flush().unwrap();
                 unfinished = Some(held);
