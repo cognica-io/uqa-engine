@@ -26,7 +26,16 @@ impl Engine {
         map_transaction_error: impl Fn(SQLError) -> E,
     ) -> Result<R, E> {
         let _statement = self.runtime.statement_gate.lock();
-        let mut scope = TransactionScope::begin(self).map_err(&map_transaction_error)?;
+        let scope = TransactionScope::begin(self).map_err(&map_transaction_error)?;
+        self.run_transaction_scope(scope, f, map_transaction_error)
+    }
+
+    fn run_transaction_scope<R, E: std::fmt::Display>(
+        &self,
+        mut scope: TransactionScope<'_>,
+        f: impl FnOnce(&Self) -> Result<R, E>,
+        map_transaction_error: impl Fn(SQLError) -> E,
+    ) -> Result<R, E> {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self)));
         match result {
             Ok(Ok(value)) => {
@@ -51,6 +60,47 @@ impl Engine {
         }
     }
 
+    /// Admit an external read through the active transaction or an owned implicit read frame. Attached physical readers retain their existing view and completion owner.
+    pub(crate) fn with_read_transaction_snapshot<R>(
+        &self,
+        select_snapshot: bool,
+        read: impl FnOnce(&Self) -> Result<R, SQLError>,
+    ) -> Result<R, SQLError> {
+        if self.transaction_depth() != 0 {
+            self.ensure_transaction_usable()?;
+            return self.run_existing_transaction_operation(
+                || {
+                    self.runtime.cancellation.check()?;
+                    if select_snapshot {
+                        self.prepare_explicit_statement_snapshot(true)?;
+                        self.mark_transaction_snapshot_set();
+                    }
+                    read(self)
+                },
+                SQLError::Internal,
+            );
+        }
+        self.runtime.cancellation.check()?;
+        if self
+            .storage
+            .backend
+            .as_ref()
+            .is_none_or(|backend| backend.in_transaction())
+        {
+            return read(self);
+        }
+        let scope = TransactionScope::begin_implicit_read(self)?;
+        self.run_transaction_scope(
+            scope,
+            |engine| {
+                engine.prepare_explicit_statement_snapshot(true)?;
+                engine.mark_transaction_snapshot_set();
+                read(engine)
+            },
+            std::convert::identity,
+        )
+    }
+
     /// Make a direct persistent-engine mutation atomic. A failed mutation in an existing transaction aborts its current frame or user savepoint through the same recovery boundary as SQL. Memory stores validate fallible vector input before their infallible writes; explicit memory transactions retain writable snapshots whose document and inverted-index state is copied on mutation. Avoiding a whole-engine snapshot for each direct memory insert keeps bulk ingestion linear.
     pub(crate) fn with_implicit_transaction<R>(
         &self,
@@ -72,7 +122,7 @@ impl Engine {
     ) -> Result<R, SQLError> {
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()?;
-            return self.run_existing_transaction_mutation(
+            return self.run_existing_transaction_operation(
                 || {
                     self.prepare_explicit_transaction_writer()?;
                     f(self)
@@ -103,7 +153,7 @@ impl Engine {
         }
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()?;
-            self.run_existing_transaction_mutation(
+            self.run_existing_transaction_operation(
                 || {
                     self.prepare_serializable_transaction_snapshot()?;
                     f(self)
@@ -140,7 +190,7 @@ impl Engine {
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()
                 .map_err(&map_transaction_error)?;
-            return self.run_existing_transaction_mutation(
+            return self.run_existing_transaction_operation(
                 || {
                     self.prepare_explicit_transaction_writer()
                         .map_err(&map_transaction_error)?;
@@ -240,7 +290,7 @@ impl Engine {
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()
                 .map_err(|error| StorageBackendError::backend("storage transaction", error))?;
-            return self.run_existing_transaction_mutation(
+            return self.run_existing_transaction_operation(
                 || {
                     self.prepare_serializable_transaction_snapshot()
                         .map_err(|error| {
@@ -315,7 +365,7 @@ impl Engine {
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()
                 .map_err(|error| error.to_string())?;
-            return self.run_existing_transaction_mutation(
+            return self.run_existing_transaction_operation(
                 || {
                     self.prepare_explicit_transaction_writer()
                         .map_err(|error| {

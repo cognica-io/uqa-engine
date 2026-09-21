@@ -78,7 +78,7 @@ impl Engine {
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
-        let doc_ids = self.table_doc_ids(table)?;
+        let doc_ids = self.query_table_doc_ids(table)?;
         if labels.len() != doc_ids.len() {
             return Err(SQLError::TypeMismatch(format!(
                 "labels length ({}) must match document count ({})",

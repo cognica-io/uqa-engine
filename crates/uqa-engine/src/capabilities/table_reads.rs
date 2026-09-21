@@ -107,7 +107,7 @@ impl RetrievalAccess for Engine {
 
 impl uqa_execution::query::block::context::QueryDocumentRead for Engine {
     fn document_ids(&self, table: &str) -> Result<Vec<uqa_core::DocId>, SQLError> {
-        self.table_doc_ids(table)
+        self.query_table_doc_ids(table)
     }
     fn document(
         &self,
@@ -147,6 +147,20 @@ impl Engine {
         &self,
         table: &str,
     ) -> Result<Option<SerializableRelationRead>, SQLError> {
+        self.serializable_table_read_using(|| self.require_query_table(table))
+    }
+
+    pub(crate) fn serializable_table_state_read(
+        &self,
+        table: &std::sync::Arc<TableState>,
+    ) -> Result<Option<SerializableRelationRead>, SQLError> {
+        self.serializable_table_read_using(|| Ok(std::sync::Arc::clone(table)))
+    }
+
+    fn serializable_table_read_using(
+        &self,
+        table: impl FnOnce() -> Result<std::sync::Arc<TableState>, SQLError>,
+    ) -> Result<Option<SerializableRelationRead>, SQLError> {
         let Some(session) = self.serializable_session() else {
             return Ok(None);
         };
@@ -156,7 +170,7 @@ impl Engine {
         else {
             return Ok(None);
         };
-        let table = self.require_query_table(table)?;
+        let table = table()?;
         Ok(
             (table.persistence != RelationPersistence::Temporary).then(|| {
                 SerializableRelationRead::new(

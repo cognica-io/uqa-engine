@@ -87,7 +87,7 @@ impl Engine {
         }));
 
         if !started {
-            return self.finish_existing_transaction_mutation(result, SQLError::Internal);
+            return self.finish_existing_transaction_operation(result, SQLError::Internal);
         }
         match result {
             Ok(Ok(value)) => {

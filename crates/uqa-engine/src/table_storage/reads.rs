@@ -4,15 +4,120 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Read document identifiers and counts with the active command overlay.
+//! Bind public document reads to their transaction and retain unscoped query and mutation views.
 
-use crate::Engine;
+use crate::{Engine, TableState};
+use std::sync::Arc;
 use uqa_sql::SQLError;
+use uqa_storage::{document_store::Document, InvertedIndex};
 
 impl Engine {
-    /// All doc ids on a table, used by the SELECT path when there is no
-    /// WHERE clause.
+    fn with_direct_table_read<R>(
+        &self,
+        name: &str,
+        read: impl FnOnce(&Self, &str, &Arc<TableState>) -> Result<R, SQLError>,
+    ) -> Result<R, SQLError> {
+        self.with_direct_read_snapshot(|engine| {
+            let resolve = || {
+                let Some(name) = engine.try_resolve_query_table_name(name).map_err(|error| {
+                    uqa_execution::storage_errors::storage_error(
+                        "resolve direct read table",
+                        &error,
+                    )
+                })?
+                else {
+                    return Ok(None);
+                };
+                let table = engine.require_query_table(&name)?;
+                Ok(Some(uqa_execution::row_locks::binding::RelationBinding {
+                    name,
+                    object_id: Some(table.object_id()),
+                    value: table,
+                }))
+            };
+            // Attached physical readers already retain their source view and have no logical frame whose locks this call could own.
+            let binding = if engine.transaction_depth() == 0 {
+                resolve()?
+            } else {
+                uqa_execution::query::table_read::bind_direct_table_read(engine, resolve)?
+            }
+            .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?;
+            read(engine, &binding.name, &binding.value)
+        })
+    }
+
+    pub fn get_document(
+        &self,
+        table: &str,
+        doc_id: uqa_core::DocId,
+    ) -> Result<Option<Document>, SQLError> {
+        self.with_direct_table_read(table, |engine, name, table| {
+            if let Some(read) = engine.serializable_table_state_read(table)? {
+                read.observe_row(doc_id)?;
+            }
+            engine.materialized_document_from_state(name, table, doc_id)
+        })
+    }
+
+    pub(crate) fn get_live_document(
+        &self,
+        table: &str,
+        doc_id: uqa_core::DocId,
+    ) -> Result<Option<Document>, SQLError> {
+        let state = self.require_table(table)?;
+        self.materialized_document_from_state(table, &state, doc_id)
+    }
+
+    pub(crate) fn get_query_document(
+        &self,
+        table: &str,
+        doc_id: uqa_core::DocId,
+    ) -> Result<Option<Document>, SQLError> {
+        let state = self.require_query_table(table)?;
+        self.materialized_document_from_state(table, &state, doc_id)
+    }
+
+    fn materialized_document_from_state(
+        &self,
+        name: &str,
+        table: &TableState,
+        doc_id: uqa_core::DocId,
+    ) -> Result<Option<Document>, SQLError> {
+        let mut document = self.raw_command_visible_document(name, table, doc_id)?;
+        if let Some(document) = document.as_mut() {
+            Self::materialize_query_document(&table.columns.read(), document)?;
+        }
+        Ok(document.map(uqa_storage::StoredDocument::into_fields))
+    }
+
+    pub fn document_count(&self, table: &str) -> Result<u64, SQLError> {
+        self.with_direct_table_read(table, |engine, _, table| {
+            let index = table.inverted_index.read();
+            let index = uqa_execution::serializable::text::ObservedTextIndex::new(
+                index.as_ref(),
+                engine.serializable_table_state_read(table)?,
+                table.columns.snapshot(),
+            );
+            index.doc_count().map_err(|error| {
+                uqa_execution::storage_errors::storage_error("read indexed document count", &error)
+            })
+        })
+    }
+
+    /// All document ids in the caller's selected transaction view.
     pub fn table_doc_ids(&self, table: &str) -> Result<Vec<uqa_core::DocId>, SQLError> {
+        self.with_direct_table_read(table, |engine, name, table| {
+            if let Some(read) = engine.serializable_table_state_read(table)? {
+                read.observe_scan()?;
+            }
+            engine.table_doc_ids_from_state(name, table)
+        })
+    }
+
+    pub(crate) fn query_table_doc_ids(
+        &self,
+        table: &str,
+    ) -> Result<Vec<uqa_core::DocId>, SQLError> {
         let Some(t) = self
             .try_query_table(table)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?

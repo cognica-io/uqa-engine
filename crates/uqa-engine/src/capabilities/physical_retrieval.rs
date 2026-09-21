@@ -58,7 +58,7 @@ impl RetrievalRelations for Engine {
         self.column_type(table, field)
     }
     fn table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError> {
-        self.table_doc_ids(table)
+        self.query_table_doc_ids(table)
     }
     fn get_document_fields(
         &self,

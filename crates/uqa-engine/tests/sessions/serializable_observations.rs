@@ -39,6 +39,9 @@ mod graph;
 #[path = "serializable_observations/admission.rs"]
 mod admission;
 
+#[path = "serializable_observations/direct_reads.rs"]
+mod direct_reads;
+
 struct Session {
     engine: Engine,
     backend: Arc<dyn PersistentStorageBackend>,

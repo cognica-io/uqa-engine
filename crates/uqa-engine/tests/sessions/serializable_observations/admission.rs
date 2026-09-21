@@ -18,7 +18,7 @@ use uqa_storage::mvcc::{
 use uqa_storage::read_control::StorageReadControl;
 use uqa_storage_sqlite::SQLiteRecordStore;
 
-fn participant(session: &Session) -> Option<SerializableTransactionId> {
+pub(super) fn participant(session: &Session) -> Option<SerializableTransactionId> {
     session
         .backend
         .serializable_session()
@@ -28,7 +28,7 @@ fn participant(session: &Session) -> Option<SerializableTransactionId> {
         .map(|context| context.id())
 }
 
-fn pending_snapshot(
+pub(super) fn pending_snapshot(
     records: &dyn VersionedPersistence,
     id: SerializableTransactionId,
     cancellation: &uqa_core::CancellationToken,
@@ -70,7 +70,7 @@ fn pending_snapshot(
     }
 }
 
-fn observed_fixture(
+pub(super) fn observed_fixture(
     provider: usize,
     path: &std::path::Path,
 ) -> (Session, Arc<dyn VersionedPersistence>) {

@@ -22,6 +22,16 @@ pub(super) struct TransactionScope<'engine> {
 }
 
 impl<'engine> TransactionScope<'engine> {
+    pub(super) fn begin_implicit_read(engine: &'engine Engine) -> Result<Self, SQLError> {
+        let depth_before = engine.transaction_depth();
+        engine.begin_implicit_statement_transaction(true)?;
+        Ok(Self {
+            engine,
+            depth_before,
+            state: TransactionScopeState::Active,
+        })
+    }
+
     pub(super) fn begin(engine: &'engine Engine) -> Result<Self, SQLError> {
         let depth_before = engine.transaction_depth();
         engine.begin()?;

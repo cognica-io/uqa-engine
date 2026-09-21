@@ -10,7 +10,7 @@ use super::{
     document_store_read_error, document_store_write_error, Arc, BTreeMap, DocId, Document, Engine,
     FieldName, IndexConflictProbe, SQLError, TableState, Value,
 };
-use uqa_storage::{DocumentMetadata, InvertedIndex, StoredDocument};
+use uqa_storage::{DocumentMetadata, StoredDocument};
 
 enum CommandOverlayDocument {
     Present(uqa_storage::StoredDocument),
@@ -67,7 +67,7 @@ fn command_exact_document_key(document: &Document, fields: &[String]) -> Result<
 mod overlay;
 
 impl Engine {
-    fn raw_command_visible_document(
+    pub(super) fn raw_command_visible_document(
         &self,
         table: &str,
         state: &TableState,
@@ -84,7 +84,7 @@ impl Engine {
         }
     }
 
-    fn materialize_query_document(
+    pub(super) fn materialize_query_document(
         columns: &[uqa_sql::ast::ColumnDef],
         document: &mut StoredDocument,
     ) -> Result<(), SQLError> {
@@ -107,15 +107,6 @@ impl Engine {
         Ok(())
     }
 
-    pub fn get_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError> {
-        let t = self.require_table(table)?;
-        let mut document = self.raw_command_visible_document(table, &t, doc_id)?;
-        if let Some(document) = document.as_mut() {
-            Self::materialize_query_document(&t.columns.read(), document)?;
-        }
-        Ok(document.map(StoredDocument::into_fields))
-    }
-
     /// Read only user fields for a tuple rewrite. A successful rewrite receives fresh tuple metadata at the storage publication boundary.
     pub(crate) fn get_document_for_mutation(
         &self,
@@ -129,19 +120,6 @@ impl Engine {
                 &state.columns.read(),
                 document.fields_mut(),
             )?;
-        }
-        Ok(document.map(StoredDocument::into_fields))
-    }
-
-    pub(crate) fn get_query_document(
-        &self,
-        table: &str,
-        doc_id: DocId,
-    ) -> Result<Option<Document>, SQLError> {
-        let table_state = self.require_query_table(table)?;
-        let mut document = self.raw_command_visible_document(table, &table_state, doc_id)?;
-        if let Some(document) = document.as_mut() {
-            Self::materialize_query_document(&table_state.columns.read(), document)?;
         }
         Ok(document.map(StoredDocument::into_fields))
     }
@@ -940,19 +918,6 @@ impl Engine {
             self.note_row_deleted(&table_name, doc_id)?;
         }
         Ok(())
-    }
-
-    pub fn document_count(&self, table: &str) -> Result<u64, SQLError> {
-        let t = self.require_table(table)?;
-        let index = t.inverted_index.read();
-        let index = uqa_execution::serializable::text::ObservedTextIndex::new(
-            index.as_ref(),
-            self.serializable_table_read(table)?,
-            t.columns.snapshot(),
-        );
-        index.doc_count().map_err(|error| {
-            uqa_execution::storage_errors::storage_error("read indexed document count", &error)
-        })
     }
 }
 

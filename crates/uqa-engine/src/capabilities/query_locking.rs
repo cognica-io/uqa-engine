@@ -94,7 +94,7 @@ impl QueryRowLockSession for Engine {
 }
 impl RowLockReadSource for Engine {
     fn get_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError> {
-        Engine::get_document(self, table, doc_id)
+        Engine::get_live_document(self, table, doc_id)
     }
     fn get_document_for_mutation(
         &self,

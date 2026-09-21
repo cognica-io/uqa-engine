@@ -53,6 +53,16 @@ impl Drop for SQLExecutionScope<'_> {
 }
 
 impl Engine {
+    /// Public typed reads own a statement boundary; internal execution adapters retain their caller's existing scope instead.
+    pub(crate) fn with_direct_read_snapshot<R>(
+        &self,
+        read: impl FnOnce(&Self) -> Result<R, SQLError>,
+    ) -> Result<R, SQLError> {
+        let _statement = self.runtime.statement_gate.lock();
+        let (_execution, nested) = SQLExecutionScope::enter(self);
+        self.with_read_transaction_snapshot(!nested, read)
+    }
+
     /// Execute a simple-query message, delivering each statement's result in order. The whole message is parsed before execution, and implicit transaction segments retain the same boundaries as [`Engine::sql`]. The final result is delivered only after its implicit transaction has committed. Earlier results may have been delivered when a later statement fails; such failure still rolls back its implicit segment. An empty message delivers one result with no command completion.
     pub fn sql_simple_query(
         &self,

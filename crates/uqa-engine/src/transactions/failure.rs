@@ -86,18 +86,18 @@ impl Engine {
         transaction_abort_result(error, &self.abort_transaction_after_failure())
     }
 
-    pub(super) fn run_existing_transaction_mutation<R, E: std::fmt::Display>(
+    pub(super) fn run_existing_transaction_operation<R, E: std::fmt::Display>(
         &self,
         operation: impl FnOnce() -> Result<R, E>,
         map_cleanup_error: impl Fn(String) -> E,
     ) -> Result<R, E> {
-        self.finish_existing_transaction_mutation(
+        self.finish_existing_transaction_operation(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation)),
             map_cleanup_error,
         )
     }
 
-    pub(super) fn finish_existing_transaction_mutation<R, E: std::fmt::Display>(
+    pub(super) fn finish_existing_transaction_operation<R, E: std::fmt::Display>(
         &self,
         result: std::thread::Result<Result<R, E>>,
         map_cleanup_error: impl Fn(String) -> E,

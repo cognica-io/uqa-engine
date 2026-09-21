@@ -33,7 +33,7 @@ impl TextRetrieval for Engine {
 
 impl RetrievalDocuments for Engine {
     fn get_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError> {
-        self.get_document(table, doc_id)
+        self.get_query_document(table, doc_id)
     }
 }
 

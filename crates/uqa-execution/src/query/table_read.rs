@@ -10,6 +10,23 @@ use parking_lot::RwLockReadGuard;
 use uqa_sql::ast::ColumnDef;
 use uqa_storage::document_store::DocumentStore;
 
+/// A direct table read retains the same identity-checked access-share lock as a SQL source. The caller supplies its selected catalog and data handle; binding and wait revalidation stay in execution.
+pub fn bind_direct_table_read<T>(
+    session: &dyn crate::row_locks::binding::RelationLockSession,
+    resolve: impl FnMut() -> Result<
+        Option<crate::row_locks::binding::RelationBinding<T>>,
+        uqa_sql::SQLError,
+    >,
+) -> Result<Option<crate::row_locks::binding::RelationBinding<T>>, uqa_sql::SQLError> {
+    crate::row_locks::binding::bind_relation(
+        session,
+        crate::row_locks::RelationLockMode::AccessShare,
+        false,
+        resolve,
+        |_| Ok(()),
+    )
+}
+
 /// Only column definitions and shared document reads are exposed. A scan cannot mutate catalog state, obtain an engine, or acquire a storage write guard.
 pub trait TableRead: Send + Sync {
     fn column_definitions(&self) -> Vec<ColumnDef>;

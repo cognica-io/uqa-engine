@@ -66,7 +66,7 @@ impl<T: std::ops::Deref<Target = Engine>> ReferentialReadSnapshot for ReferenceS
         table: &str,
         doc_id: DocId,
     ) -> Result<Option<uqa_storage::document_store::Document>, SQLError> {
-        self.0.get_document(table, doc_id)
+        self.0.get_live_document(table, doc_id)
     }
     fn metadata(
         &self,

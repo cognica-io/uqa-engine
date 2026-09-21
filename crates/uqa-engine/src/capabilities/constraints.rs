@@ -60,13 +60,13 @@ impl ConstraintCatalog for Engine {
 }
 impl MutationRead for Engine {
     fn table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError> {
-        Engine::table_doc_ids(self, table)
+        Engine::query_table_doc_ids(self, table)
     }
     fn live_table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError> {
         Engine::live_table_doc_ids(self, table)
     }
     fn get_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError> {
-        Engine::get_document(self, table, doc_id)
+        Engine::get_live_document(self, table, doc_id)
     }
     fn command_overlay_changed_ids(
         &self,

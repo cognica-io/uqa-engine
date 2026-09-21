@@ -173,3 +173,83 @@ fn internal_read_workers_progress_while_the_source_statement_owns_its_transactio
         backend.rollback_transaction().unwrap();
     }
 }
+
+#[test]
+fn internal_document_adapters_keep_query_and_mutation_views_without_reentering_the_statement() {
+    use uqa_execution::mutation::constraints::context::MutationRead;
+    use uqa_execution::operator_tree::driver::context::RetrievalRelations;
+    use uqa_execution::query::block::context::QueryDocumentRead;
+    use uqa_execution::query::retrieval::context::RetrievalDocuments;
+    use uqa_execution::serializable::SerializableWrites;
+
+    for provider in 0..3 {
+        let directory = tempfile::tempdir().unwrap();
+        let root = persistent_engine(provider, &directory.path().join("document-adapters.db"));
+        root.sql("CREATE TABLE t(v integer); INSERT INTO t VALUES(1)", &[])
+            .unwrap();
+        root.release_automatic_statistics_client();
+        root.session
+            .statistics_worker
+            .store(true, Ordering::Release);
+        let peer = root.new_session().unwrap();
+        peer.release_automatic_statistics_client();
+        peer.session
+            .statistics_worker
+            .store(true, Ordering::Release);
+        let id = root.table_doc_ids("t").unwrap()[0];
+        root.sql("BEGIN ISOLATION LEVEL SERIALIZABLE; SELECT v FROM t", &[])
+            .unwrap();
+        let participant = root
+            .serializable_session()
+            .unwrap()
+            .serializable_read_context()
+            .unwrap()
+            .unwrap()
+            .id();
+        peer.sql("UPDATE t SET v = 2; INSERT INTO t VALUES(3)", &[])
+            .unwrap();
+        root.sql("SHOW transaction_isolation", &[]).unwrap();
+
+        std::thread::scope(|scope| {
+            let statement = root.runtime.statement_gate.lock();
+            let (sender, receiver) = mpsc::channel();
+            let source = &root;
+            let worker = scope.spawn(move || {
+                let query = <Engine as RetrievalDocuments>::get_document(source, "t", id)
+                    .unwrap()
+                    .unwrap()["v"]
+                    .clone();
+                let mutation = <Engine as MutationRead>::get_document(source, "t", id)
+                    .unwrap()
+                    .unwrap()["v"]
+                    .clone();
+                let query_ids = <Engine as QueryDocumentRead>::document_ids(source, "t").unwrap();
+                let retrieval_ids =
+                    <Engine as RetrievalRelations>::table_doc_ids(source, "t").unwrap();
+                sender
+                    .send((query, mutation, query_ids, retrieval_ids))
+                    .unwrap();
+            });
+            let completed = receiver.recv_timeout(Duration::from_secs(10));
+            // Release the parent gate before joining so accidental reentry fails without hanging the executable.
+            drop(statement);
+            worker.join().unwrap();
+            let (query, mutation, query_ids, retrieval_ids) =
+                completed.expect("internal document read reentered its parent statement");
+            assert_eq!(query, Value::Int(1));
+            assert_eq!(mutation, Value::Int(2));
+            assert_eq!(query_ids, vec![id]);
+            assert_eq!(retrieval_ids, vec![id]);
+        });
+        assert_eq!(
+            root.serializable_session()
+                .unwrap()
+                .serializable_read_context()
+                .unwrap()
+                .unwrap()
+                .id(),
+            participant
+        );
+        root.sql("ROLLBACK", &[]).unwrap();
+    }
+}
