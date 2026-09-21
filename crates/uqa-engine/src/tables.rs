@@ -569,6 +569,15 @@ impl Engine {
                 "vector field `{table}.{field}` is not registered"
             )));
         };
+        uqa_execution::serializable::vector::observe_write(
+            self,
+            table,
+            &t.columns.snapshot(),
+            field,
+            idx.as_ref(),
+            doc_id,
+            uqa_execution::serializable::vector::VectorChange::Single(&vector),
+        )?;
         idx.as_mut()
             .add(doc_id, vector)
             .map_err(|error| SQLError::Internal(format!("index document vector: {error}")))?;
@@ -612,6 +621,15 @@ impl Engine {
                 "vector field `{table}.{field}` is not registered"
             )));
         };
+        uqa_execution::serializable::vector::observe_write(
+            self,
+            table,
+            &t.columns.snapshot(),
+            field,
+            idx.as_ref(),
+            doc_id,
+            uqa_execution::serializable::vector::VectorChange::Tensor(&vectors),
+        )?;
         idx.as_mut()
             .add_many(doc_id, vectors)
             .map_err(|error| SQLError::Internal(format!("index document vectors: {error}")))?;

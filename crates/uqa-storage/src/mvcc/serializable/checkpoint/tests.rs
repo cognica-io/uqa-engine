@@ -139,6 +139,44 @@ fn savepoint_marks_remove_only_cancelled_intents_after_handoff() {
 }
 
 #[test]
+fn vector_candidate_ranges_and_intents_survive_handoff_without_aliasing_rows() {
+    let (mut graph, control) = setup();
+    let first = graph.admit(false, &control).unwrap();
+    let second = graph.admit(false, &control).unwrap();
+    let range = SerializablePredicate::range(
+        TABLE,
+        SerializableKeySpace::Vectors,
+        Included(b"a"),
+        Included(b"z"),
+    );
+    graph.observe_read(first, range, &control).unwrap();
+    graph.observe_write(second, point(b"b"), &control).unwrap();
+    assert!(graph.outgoing.is_empty());
+    graph.observe_read(second, range, &control).unwrap();
+    graph
+        .observe_write(
+            first,
+            SerializablePredicate::point(TABLE, SerializableKeySpace::Vectors, b"b"),
+            &control,
+        )
+        .unwrap();
+    let mut graph = handoff(graph, &control);
+    graph
+        .observe_write(
+            second,
+            SerializablePredicate::point(TABLE, SerializableKeySpace::Vectors, b"c"),
+            &control,
+        )
+        .unwrap();
+    let mut graph = handoff(graph, &control);
+    finish(&mut graph, first, &control);
+    assert!(matches!(
+        graph.prepare_commit(second, &control),
+        Err(VersionError::SerializationConflict { .. })
+    ));
+}
+
+#[test]
 fn prepared_receipts_and_terminal_precedence_survive_a_new_state_owner() {
     for committed in [false, true] {
         let (mut graph, control) = setup();

@@ -53,11 +53,19 @@ impl Engine {
             .with_inverted_index(inv)
             .with_document_store(documents);
 
+        let read = self.serializable_table_read(table)?;
+        let columns = t.columns.snapshot();
         for (field, idx) in t.vector_indexes.read().iter() {
             ctx = ctx.with_vector_index(
                 field.clone(),
-                idx.snapshot()
-                    .map_err(|error| storage_sql_error("snapshot vector index", error))?,
+                uqa_execution::serializable::vector::observe_snapshot(
+                    read.as_ref(),
+                    &columns,
+                    field,
+                    idx.snapshot()
+                        .map_err(|error| storage_sql_error("snapshot vector index", error))?,
+                )
+                .map_err(|error| storage_sql_error("retain vector search participant", error))?,
             );
         }
 

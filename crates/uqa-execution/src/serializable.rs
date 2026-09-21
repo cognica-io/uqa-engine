@@ -151,3 +151,4 @@ pub fn observe_row_write(
 
 pub mod column_index;
 pub mod index_key;
+pub mod vector;

@@ -27,6 +27,9 @@ mod jsonb;
 #[path = "serializable_observations/temporal.rs"]
 mod temporal;
 
+#[path = "serializable_observations/vector.rs"]
+mod vector;
+
 struct Session {
     engine: Engine,
     backend: Arc<dyn PersistentStorageBackend>,

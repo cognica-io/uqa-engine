@@ -900,6 +900,17 @@ impl Engine {
             old_indexed.as_ref(),
             None,
         )?;
+        for (field, index) in t.vector_indexes.read().iter() {
+            uqa_execution::serializable::vector::observe_write(
+                self,
+                &table_name,
+                &t.columns.snapshot(),
+                field,
+                index.as_ref(),
+                doc_id,
+                uqa_execution::serializable::vector::VectorChange::Delete,
+            )?;
+        }
         let mut store = t.document_store.write();
         store
             .delete(doc_id)

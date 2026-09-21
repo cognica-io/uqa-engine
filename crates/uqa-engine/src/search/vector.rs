@@ -30,9 +30,15 @@ impl Engine {
         let Some(index) = vector_indexes.get(field) else {
             return Err(SQLError::UnknownColumn(field.to_string()));
         };
-        let pl = index
-            .search_knn(query_vector.as_ref(), top_k)
-            .map_err(|error| storage_sql_error("execute KNN search", error))?;
+        let pl = uqa_execution::serializable::vector::search_knn(
+            index.as_ref(),
+            self.serializable_table_read(table)?.as_ref(),
+            &t.columns.snapshot(),
+            field,
+            query_vector.as_ref(),
+            top_k,
+        )
+        .map_err(|error| storage_sql_error("execute KNN search", error))?;
         Ok(uqa_scoring::rank_top_k(&pl, top_k))
     }
 
@@ -63,9 +69,15 @@ impl Engine {
         let index = indexes
             .get(field)
             .ok_or_else(|| SQLError::UnknownColumn(field.to_string()))?;
-        let raw = index
-            .search_knn(query_vector, top_k)
-            .map_err(|error| storage_sql_error("execute calibrated-vector KNN", error))?;
+        let raw = uqa_execution::serializable::vector::search_knn(
+            index.as_ref(),
+            self.serializable_table_read(table)?.as_ref(),
+            &table_state.columns.snapshot(),
+            field,
+            query_vector,
+            top_k,
+        )
+        .map_err(|error| storage_sql_error("execute calibrated-vector KNN", error))?;
         let calibrated = uqa_operators::calibrate_query_pool_postings(
             &raw,
             uqa_operators::RelevantSampleSplit::default(),
@@ -150,9 +162,15 @@ impl Engine {
                 actual: target.dimensions as usize,
             });
         }
-        let raw = index
-            .search_knn(query_vector.as_ref(), target.candidate_k)
-            .map_err(|error| storage_sql_error("execute calibrated-vector KNN", error))?;
+        let raw = uqa_execution::serializable::vector::search_knn(
+            index.as_ref(),
+            self.serializable_table_read(&table_name)?.as_ref(),
+            &table.columns.snapshot(),
+            field,
+            query_vector.as_ref(),
+            target.candidate_k,
+        )
+        .map_err(|error| storage_sql_error("execute calibrated-vector KNN", error))?;
         let mut calibrated = Vec::with_capacity(raw.len());
         for entry in &raw {
             if !entry.payload.score.is_finite() || !(-1.0..=1.0).contains(&entry.payload.score) {
