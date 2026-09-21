@@ -21,6 +21,11 @@ use io::{invalid, Decoder, Encoder};
 const MAGIC: &[u8; 8] = b"UQASER03";
 
 impl SerializableGraph {
+    /// Whether retained state needs a durable checkpoint. A new coordinator does; a fully restored checkpoint does not until an operation changes its contents, including changes preceding an error. Encoding alone cannot acknowledge provider durability, so it never clears this flag. Check only while holding the same exclusive admission that loaded this graph.
+    pub fn checkpoint_changed(&self) -> bool {
+        self.checkpoint_changed
+    }
+
     /// Stream one complete coordinator checkpoint, including predicates and prepared physical receipt bindings. The provider owns atomic replacement, encryption and shared admission. A checksum detects incomplete/corrupt state; it does not replace the provider's authentication or durability. No complete encoded-state buffer is allocated.
     pub fn write_checkpoint(
         &self,
@@ -156,6 +161,7 @@ impl SerializableGraph {
             }
         }
         decoder.finish()?;
+        graph.checkpoint_changed = false;
         Ok(graph)
     }
 }

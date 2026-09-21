@@ -79,6 +79,7 @@ impl SerializableGraph {
     }
 
     pub(super) fn publish_dependency(&mut self, action: DependencyAction) -> VersionResult<()> {
+        self.checkpoint_changed = true;
         if let Some(victim) = action.victim {
             self.transactions[victim].doomed = true;
         } else {

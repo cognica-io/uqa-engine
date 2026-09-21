@@ -107,6 +107,7 @@ pub struct SerializableGraph {
     outgoing: BudgetedVec<Edge>,
     incoming: BudgetedVec<Edge>,
     predicates: observations::Observations,
+    checkpoint_changed: bool,
 }
 
 impl SerializableGraph {
@@ -127,6 +128,7 @@ impl SerializableGraph {
             outgoing: BudgetedVec::new(memory),
             incoming: BudgetedVec::new(memory),
             predicates: observations::Observations::new(memory),
+            checkpoint_changed: true,
         })
     }
 
@@ -176,6 +178,7 @@ impl SerializableGraph {
             writes: 0,
             publication: None,
         })?;
+        self.checkpoint_changed = true;
         self.transactions[position..].rotate_right(1);
         self.clock += 1;
         self.last_allocation = self.last_allocation.max(transaction.allocation());
@@ -253,9 +256,11 @@ impl SerializableGraph {
             let pivot = self.node(self.incoming[index].1);
             if self.dangerous_pivot(entry.id, pivot, Some(control))? && pivot.prepared.is_some() {
                 self.transactions[position].doomed = true;
+                self.checkpoint_changed = true;
                 return Err(VersionError::SerializationConflict { transaction });
             }
         }
+        self.checkpoint_changed = true;
         for index in incoming {
             let pivot = self.node(self.incoming[index].1);
             if self.dangerous_pivot(entry.id, pivot, None)? {
@@ -290,6 +295,7 @@ impl SerializableGraph {
             ));
         }
         // Each prepared transaction owns a completion slot; admission cannot consume it.
+        self.checkpoint_changed = true;
         self.clock += 1;
         self.pending_finishes -= 1;
         self.transactions[position].committed = Some(self.clock);
@@ -316,8 +322,9 @@ impl SerializableGraph {
                 self.pending_finishes -= 1;
             }
             entry.aborted = true;
+            self.checkpoint_changed = true;
         }
-        self.predicates.forget(transaction.allocation());
+        self.checkpoint_changed |= self.predicates.forget(transaction.allocation());
         Ok(())
     }
 
@@ -370,15 +377,16 @@ impl SerializableGraph {
             .map(|entry| entry.snapshot)
             .min();
         let Some(oldest) = oldest else {
-            retain_copy(&mut self.transactions, |entry| {
+            self.checkpoint_changed |= retain_copy(&mut self.transactions, |entry| {
                 entry.owner == ParticipantOwner::Leased
             });
             if self.transactions.is_empty() {
                 self.transactions = BudgetedVec::new(self.transactions.budget());
             }
+            self.checkpoint_changed |= !self.outgoing.is_empty();
             self.outgoing = BudgetedVec::new(self.outgoing.budget());
             self.incoming = BudgetedVec::new(self.incoming.budget());
-            self.predicates.clear();
+            self.checkpoint_changed |= self.predicates.clear();
             return;
         };
         for index in 0..self.transactions.len() {
@@ -392,9 +400,10 @@ impl SerializableGraph {
                     }
                 }
             }
+            self.checkpoint_changed |= entry.summarized_out != earliest;
             self.transactions[index].summarized_out = earliest;
         }
-        retain_copy(&mut self.transactions, |entry| {
+        self.checkpoint_changed |= retain_copy(&mut self.transactions, |entry| {
             entry.owner == ParticipantOwner::Leased || entry.retains_history(oldest)
         });
         let retained = &self.transactions;
@@ -406,9 +415,9 @@ impl SerializableGraph {
                     .binary_search_by_key(&edge.1, |entry| entry.id)
                     .is_ok_and(|position| retained[position].retains_history(oldest))
         };
-        retain_copy(&mut self.outgoing, retain_edge);
+        self.checkpoint_changed |= retain_copy(&mut self.outgoing, retain_edge);
         retain_copy(&mut self.incoming, retain_edge);
-        self.predicates.reclaim(&self.transactions, oldest);
+        self.checkpoint_changed |= self.predicates.reclaim(&self.transactions, oldest);
     }
 
     fn reserve_order(&self, preparing: bool) -> VersionResult<()> {
@@ -460,7 +469,8 @@ fn insert_edge(edges: &mut BudgetedVec<Edge>, edge: Edge) -> VersionResult<()> {
     Ok(())
 }
 
-fn retain_copy<T: Copy>(values: &mut BudgetedVec<T>, mut retain: impl FnMut(T) -> bool) {
+fn retain_copy<T: Copy>(values: &mut BudgetedVec<T>, mut retain: impl FnMut(T) -> bool) -> bool {
+    let previous = values.len();
     let mut kept = 0;
     for index in 0..values.len() {
         if retain(values[index]) {
@@ -469,4 +479,5 @@ fn retain_copy<T: Copy>(values: &mut BudgetedVec<T>, mut retain: impl FnMut(T) -
         }
     }
     values.truncate(kept);
+    kept != previous
 }

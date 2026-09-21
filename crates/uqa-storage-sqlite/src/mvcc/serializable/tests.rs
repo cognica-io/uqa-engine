@@ -17,6 +17,7 @@ use super::*;
 use crate::ManagedConnection;
 
 mod liveness;
+mod persistence;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod process;
 

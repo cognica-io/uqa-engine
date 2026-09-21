@@ -7,7 +7,7 @@
 //! Native storage failures and fail-closed format metadata.
 
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use redb::{backends::InMemoryBackend, StorageBackend};
 
@@ -25,6 +25,8 @@ mod serializable;
 struct FaultBackend {
     storage: Arc<InMemoryBackend>,
     fail_sync: Arc<AtomicBool>,
+    writes: Arc<AtomicUsize>,
+    syncs: Arc<AtomicUsize>,
 }
 
 impl StorageBackend for FaultBackend {
@@ -38,9 +40,11 @@ impl StorageBackend for FaultBackend {
         self.storage.set_len(len)
     }
     fn write(&self, offset: u64, bytes: &[u8]) -> io::Result<()> {
+        self.writes.fetch_add(1, Ordering::Relaxed);
         self.storage.write(offset, bytes)
     }
     fn sync_data(&self) -> io::Result<()> {
+        self.syncs.fetch_add(1, Ordering::Relaxed);
         if self.fail_sync.swap(false, Ordering::Relaxed) {
             Err(io::Error::other("injected synchronization failure"))
         } else {

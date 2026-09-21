@@ -176,6 +176,7 @@ impl SerializableGraph {
             Ok(participant) => {
                 let position = self.position(id)?;
                 self.transactions[position].owner = ParticipantOwner::Leased;
+                self.checkpoint_changed = true;
                 Ok(participant)
             }
             Err(error) => {
@@ -205,11 +206,13 @@ impl SerializableGraph {
             }
             if !entry.live() {
                 self.transactions[index].owner = ParticipantOwner::Manual;
+                self.checkpoint_changed = true;
                 continue;
             }
             let Some(publication) = self.publication(participant)? else {
                 self.rollback(participant)?;
                 self.transactions[index].owner = ParticipantOwner::Manual;
+                self.checkpoint_changed = true;
                 continue;
             };
             let status = match finish(publication.transaction()) {
@@ -228,6 +231,7 @@ impl SerializableGraph {
             }
             if !self.transactions[index].live() {
                 self.transactions[index].owner = ParticipantOwner::Manual;
+                self.checkpoint_changed = true;
             }
         }
         Ok(())

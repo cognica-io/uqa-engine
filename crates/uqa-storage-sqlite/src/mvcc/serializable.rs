@@ -70,12 +70,15 @@ impl SQLiteSerializableAdmission {
         &mut self.graph
     }
 
-    /// Atomically replace the retained checkpoint and release admission. Cancellation or a failed BLOB write rolls back the auxiliary transaction. A failed COMMIT may be uncertain; callers must reconcile physical receipts before classifying a publication or admitting another data snapshot.
+    /// Atomically retain changes and release admission. An unchanged checkpoint needs no BLOB replacement. Cancellation or a failed BLOB write rolls back the auxiliary transaction. A failed COMMIT may be uncertain; callers must reconcile physical receipts before classifying a publication or admitting another data snapshot.
     pub fn persist(self, control: &StorageReadControl) -> VersionResult<()> {
         self.persist_in(control).map_err(Error::into_version)
     }
 
     fn persist_in(&self, control: &StorageReadControl) -> PhysicalResult<()> {
+        if !self.graph.checkpoint_changed() {
+            return retry(&self.connection, "COMMIT", false, control);
+        }
         let length = i32::try_from(self.graph.checkpoint_length(control)?).map_err(|_| {
             VersionError::InvalidEncoding("serializable checkpoint exceeds SQLite BLOB capacity")
         })?;

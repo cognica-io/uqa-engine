@@ -69,6 +69,10 @@ pub(super) fn persist(
     loaded: &Loaded,
     control: &StorageReadControl,
 ) -> VersionResult<()> {
+    control.check()?;
+    if !loaded.graph.checkpoint_changed() {
+        return Ok(());
+    }
     let length =
         usize::try_from(loaded.graph.checkpoint_length(control)?).map_err(|_| invalid())?;
     // redb 4.1 insert_reserve creates a temporary zero-filled value before returning a mutable page. Charge that allocation before entering the driver; encoding then streams into the page without a separate Vec.

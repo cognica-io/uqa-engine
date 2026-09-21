@@ -102,6 +102,7 @@ impl SerializableGraph {
             }
         }
         self.prepare_commit(participant, control)?;
+        self.checkpoint_changed |= self.transactions[position].publication.is_none();
         self.transactions[position].publication = Some(PreparedPublication {
             allocation: transaction.allocation(),
             fingerprint,
@@ -202,6 +203,7 @@ impl SerializableGraph {
                 {
                     return Err(VersionError::CommitMismatch);
                 }
+                self.checkpoint_changed = true;
                 self.transactions[position]
                     .publication
                     .as_mut()
@@ -210,6 +212,7 @@ impl SerializableGraph {
                 self.commit(publication.participant)?;
             }
             CommitStatus::Aborted => {
+                self.checkpoint_changed = true;
                 self.transactions[position]
                     .publication
                     .as_mut()

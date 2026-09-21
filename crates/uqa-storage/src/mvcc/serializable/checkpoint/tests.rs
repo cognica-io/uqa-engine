@@ -6,6 +6,8 @@
 
 //! Handoff preserves decisions and private observation marks; corrupt or incomplete state never escapes decoding.
 
+mod changes;
+
 use std::ops::Bound::{Excluded, Included};
 
 use sha2::{Digest, Sha256};

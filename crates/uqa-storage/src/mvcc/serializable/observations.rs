@@ -43,24 +43,28 @@ impl Observations {
         }
     }
 
-    pub(super) fn clear(&mut self) {
+    pub(super) fn clear(&mut self) -> bool {
+        let changed = !self.reads.is_empty() || !self.writes.is_empty();
         self.reads = BudgetedVec::new(self.reads.budget());
         self.writes = BudgetedVec::new(self.writes.budget());
+        changed
     }
 
-    pub(super) fn forget(&mut self, owner: u64) {
-        retain(&mut self.reads, |entry| entry.owner != owner);
-        retain(&mut self.writes, |entry| entry.owner != owner);
+    pub(super) fn forget(&mut self, owner: u64) -> bool {
+        let reads = retain(&mut self.reads, |entry| entry.owner != owner);
+        let writes = retain(&mut self.writes, |entry| entry.owner != owner);
+        reads || writes
     }
 
-    pub(super) fn reclaim(&mut self, transactions: &[Transaction], oldest: u64) {
+    pub(super) fn reclaim(&mut self, transactions: &[Transaction], oldest: u64) -> bool {
         let retained = |entry: &Observation| {
             transactions
                 .binary_search_by_key(&entry.owner, |transaction| transaction.id)
                 .is_ok_and(|position| transactions[position].retains_history(oldest))
         };
-        retain(&mut self.reads, retained);
-        retain(&mut self.writes, retained);
+        let reads = retain(&mut self.reads, retained);
+        let writes = retain(&mut self.writes, retained);
+        reads || writes
     }
 
     fn selected(&self, writing: bool) -> &BudgetedVec<Observation> {
@@ -126,7 +130,7 @@ impl SerializableGraph {
                 "invalid serializable write checkpoint",
             ));
         }
-        retain(&mut self.predicates.writes, |observed| {
+        self.checkpoint_changed |= retain(&mut self.predicates.writes, |observed| {
             observed.owner != entry.id || observed.write <= mark.writes
         });
         Ok(())
@@ -215,6 +219,7 @@ impl SerializableGraph {
             write,
             predicate: owned,
         })?;
+        self.checkpoint_changed = true;
         observations[index..].rotate_right(1);
         for &action in &*actions {
             self.publish_dependency(action)?;
@@ -232,7 +237,11 @@ fn object_entries(observations: &[Observation], object: [u8; 16]) -> &[Observati
     &observations[start..end]
 }
 
-fn retain(values: &mut BudgetedVec<Observation>, mut predicate: impl FnMut(&Observation) -> bool) {
+fn retain(
+    values: &mut BudgetedVec<Observation>,
+    mut predicate: impl FnMut(&Observation) -> bool,
+) -> bool {
+    let previous = values.len();
     let mut kept = 0;
     for index in 0..values.len() {
         if predicate(&values[index]) {
@@ -244,4 +253,5 @@ fn retain(values: &mut BudgetedVec<Observation>, mut predicate: impl FnMut(&Obse
     if values.is_empty() {
         *values = BudgetedVec::new(values.budget());
     }
+    kept != previous
 }
