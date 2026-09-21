@@ -17,6 +17,9 @@ mod topology;
 #[path = "graph/paths.rs"]
 mod paths;
 
+#[path = "graph/definitions.rs"]
+mod definitions;
+
 fn prepare(session: &Session) {
     session.engine.create_graph("g").unwrap();
     for id in [1, 2] {

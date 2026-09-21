@@ -8,7 +8,8 @@
 
 use uqa_core::CancellationToken;
 use uqa_storage::catalog::graph_observations::{
-    scope_lifetime, GraphEntityKey, GraphMembershipKey, GraphSelectionKey,
+    scope_lifetime, GraphDefinitionKey, GraphDefinitionKind, GraphEntityKey, GraphMembershipKey,
+    GraphSelectionKey,
 };
 use uqa_storage::mvcc::{SerializablePredicate, SerializableReadContext, VersionError};
 use uqa_storage::{read_control::StorageReadControl, GraphEntityFilter, GraphEntityKind};
@@ -39,6 +40,30 @@ impl GraphRead {
 }
 
 impl PersistentGraphStore {
+    /// Attribute a semantic catalog lookup even when its result comes from an immutable definition cache. Physical catalog restoration and planner estimates remain unobserved.
+    pub fn observe_definition(
+        &self,
+        kind: GraphDefinitionKind,
+        name: Option<&str>,
+    ) -> GraphStoreResult<()> {
+        let Some(read) = &self.read else {
+            return Ok(());
+        };
+        read.control.check()?;
+        let mut previous = None;
+        self.storage.visit_selection_namespaces(&mut |namespace| {
+            let object = namespace.serializable_scope_object();
+            if previous != Some(object) {
+                previous = Some(object);
+                read.observe(
+                    namespace,
+                    GraphDefinitionKey::new(namespace, kind, name).predicate(),
+                )?;
+            }
+            Ok(())
+        })
+    }
+
     /// A stored reachability result depends on its starting vertices and each selected edge label, including empty results. Register those logical selectors without reconstructing paths or observing entity properties.
     pub(crate) fn observe_cached_paths(
         &self,
@@ -73,6 +98,17 @@ impl PersistentGraphStore {
                 return Ok(());
             }
             previous = Some(object);
+            if let Some(graph) = filter.graph {
+                read.observe(
+                    namespace,
+                    GraphDefinitionKey::new(
+                        namespace,
+                        GraphDefinitionKind::NamedGraph,
+                        Some(graph),
+                    )
+                    .predicate(),
+                )?;
+            }
             let key = GraphSelectionKey::new(namespace, filter, after)?;
             read.observe(namespace, key.predicate())?;
             Ok(())

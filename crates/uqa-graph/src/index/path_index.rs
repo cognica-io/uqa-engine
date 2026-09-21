@@ -304,6 +304,10 @@ impl DurablePathIndex {
         sequence: &[String],
     ) -> GraphStoreResult<Pairs> {
         let store = observed_store(Arc::clone(catalog), backend)?;
+        store.observe_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::PathIndex,
+            Some(&self.key),
+        )?;
         let definition = catalog
             .load_path_indexes()?
             .into_iter()

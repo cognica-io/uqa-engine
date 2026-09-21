@@ -6,6 +6,8 @@
 
 //! Secondary indexes, path indexes, and column statistics.
 
+use crate::catalog::graph_observations::GraphDefinitionKind;
+
 use super::{
     column_stats_key, column_stats_prefix, decode_catalog_relation_key, decode_value, encode_value,
     key_with_tag, load_single_string_rows, read_str, relation_key, single_str_key, string_value,
@@ -105,18 +107,34 @@ impl KeyValueCatalog {
         graph_name: &str,
         label_sequences_json: &str,
     ) -> StorageBackendResult<()> {
-        let mut batch = self.store.batch();
-        Self::invalidate_path_index_data_into(batch.as_mut(), graph_name)?;
-        batch.put(
-            &single_str_key(TAG_PATH_INDEX, graph_name)?,
-            &string_value(label_sequences_json),
-        )?;
-        batch.commit()
+        let identifiers = self.store.identifier_allocator().is_some();
+        self.store.with_mutation(&mut |read, batch| {
+            let read = super::graph_view::GraphRead { read, identifiers };
+            read.observe_definition_change(
+                batch,
+                GraphDefinitionKind::PathIndex,
+                graph_name,
+                Some(label_sequences_json.as_bytes()),
+            )?;
+            Self::invalidate_path_index_data_into(batch, graph_name)?;
+            batch.put(
+                &single_str_key(TAG_PATH_INDEX, graph_name)?,
+                &string_value(label_sequences_json),
+            )
+        })
     }
 
     pub(super) fn drop_path_index_impl(&self, graph_name: &str) -> StorageBackendResult<()> {
+        let identifiers = self.store.identifier_allocator().is_some();
         self.store.with_mutation(&mut |read, batch| {
-            Self::clear_path_index_data_into(read, batch, graph_name)?;
+            let read = super::graph_view::GraphRead { read, identifiers };
+            read.observe_definition_change(
+                batch,
+                GraphDefinitionKind::PathIndex,
+                graph_name,
+                None,
+            )?;
+            Self::clear_path_index_data_into(read.read, batch, graph_name)?;
             batch.delete(&single_str_key(TAG_PATH_INDEX, graph_name)?)
         })
     }

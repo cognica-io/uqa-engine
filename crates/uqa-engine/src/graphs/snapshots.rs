@@ -87,6 +87,10 @@ impl Engine {
         name: &str,
         create: bool,
     ) -> StorageBackendResult<Option<GraphStoreHandle>> {
+        self.observe_graph_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::NamedGraph,
+            Some(name),
+        )?;
         if let Some(overlay) = &self.session.state.read().graph_overlay {
             return (create || overlay.names.contains(name))
                 .then(|| {

@@ -14,6 +14,7 @@ use super::{
     GraphSnapshot, KeyValueBatch, KeyValueCatalog, StorageBackendResult, StoredEdge, StoredVertex,
     TAG_EDGE, TAG_METADATA, TAG_NAMED_GRAPH, TAG_PATH_INDEX, TAG_VERTEX,
 };
+use crate::catalog::graph_observations::GraphDefinitionKind;
 use crate::key_value::view::for_each_key;
 use crate::GraphEntityKind;
 use uqa_core::memory::BudgetedVec;
@@ -31,6 +32,12 @@ impl KeyValueCatalog {
             read.guard_definition(batch, None)?;
             let key = single_str_key(TAG_NAMED_GRAPH, name)?;
             if read.read.get(&key)?.is_none() {
+                read.observe_definition_change(
+                    batch,
+                    GraphDefinitionKind::NamedGraph,
+                    name,
+                    Some(&[]),
+                )?;
                 batch.put(&key, &[])?;
             }
             Ok(())
@@ -40,6 +47,7 @@ impl KeyValueCatalog {
     pub(super) fn drop_named_graph_impl(&self, name: &str) -> StorageBackendResult<()> {
         self.with_graph_mutation(|read, batch| {
             read.fence_definition(batch, name)?;
+            read.observe_definition_change(batch, GraphDefinitionKind::NamedGraph, name, None)?;
             batch.delete(&single_str_key(TAG_NAMED_GRAPH, name)?)?;
             read.delete_graph_memberships_into(batch, name, |_, _| false)
         })
@@ -205,6 +213,12 @@ impl KeyValueCatalog {
                 selected.binary_search_by_key(&id, |entry| entry.0).is_ok()
             };
             read.fence_definition(batch, graph)?;
+            read.observe_definition_change(
+                batch,
+                GraphDefinitionKind::NamedGraph,
+                graph,
+                Some(&[]),
+            )?;
             batch.put(&single_str_key(TAG_NAMED_GRAPH, graph)?, &[])?;
             read.delete_graph_memberships_into(batch, graph, |kind, id| match kind {
                 "vertex" => keep(GraphEntityKind::Vertex, id),
@@ -258,6 +272,7 @@ impl KeyValueCatalog {
     pub(super) fn drop_named_graph_data_impl(&self, graph: &str) -> StorageBackendResult<()> {
         self.with_graph_mutation(|read, batch| {
             read.fence_definition(batch, graph)?;
+            read.observe_definition_change(batch, GraphDefinitionKind::NamedGraph, graph, None)?;
             batch.delete(&single_str_key(TAG_NAMED_GRAPH, graph)?)?;
             read.delete_graph_memberships_into(batch, graph, |_, _| false)?;
             batch.delete(&single_str_key(
@@ -409,6 +424,7 @@ impl GraphRead<'_> {
                 .is_some_and(|suffix| suffix.starts_with("::"))
             {
                 KeyValueCatalog::clear_path_index_data_into(self.read, batch, &name)?;
+                self.observe_definition_change(batch, GraphDefinitionKind::PathIndex, &name, None)?;
                 batch.delete(key)?;
             }
             Ok(true)

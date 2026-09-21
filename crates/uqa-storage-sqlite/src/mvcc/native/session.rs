@@ -7,6 +7,7 @@
 //! Native row addressing over a retained common committed/private view.
 
 mod graph;
+mod graph_definitions;
 mod graph_observations;
 mod graph_selection;
 
@@ -247,6 +248,7 @@ impl NativeSnapshot {
         row: &[ValueRef<'_>],
     ) -> Result<()> {
         let record = NativeRecord::encode(family, owner, row, &self.control)?;
+        self.observe_graph_definition_put(batch, family, owner, row)?;
         batch.put(record.key(), record.row())?;
         Ok(())
     }
@@ -258,6 +260,7 @@ impl NativeSnapshot {
         owner: NativeRecordOwner,
         prefix: &[ValueRef<'_>],
     ) -> Result<()> {
+        self.observe_graph_definition_delete(batch, family, owner, prefix)?;
         batch.delete_prefix(
             &NativeRecordIdentity::new(family, owner)?.encode_prefix(prefix, &self.control)?,
         )?;

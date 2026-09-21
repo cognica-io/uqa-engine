@@ -43,7 +43,7 @@ impl GraphStore for PersistentGraphStore {
 
     fn create_graph(&mut self, name: &str) -> GraphStoreResult<()> {
         self.transaction(|store| {
-            if !store.storage.has_graph(name)? {
+            if !store.has_graph(name)? {
                 store.storage.create_graph(name)?;
                 let registry = GraphLabelRegistry {
                     allocation_id: if store.storage.identifiers()?.is_some() {
@@ -60,7 +60,7 @@ impl GraphStore for PersistentGraphStore {
     }
     fn drop_graph(&mut self, name: &str) -> GraphStoreResult<()> {
         self.transaction(|store| {
-            if !store.storage.has_graph(name)? {
+            if !store.has_graph(name)? {
                 return Ok(());
             }
             for kind in [GraphEntityKind::Edge, GraphEntityKind::Vertex] {
@@ -72,9 +72,17 @@ impl GraphStore for PersistentGraphStore {
         })
     }
     fn graph_names(&self) -> GraphStoreResult<Vec<String>> {
+        self.observe_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::NamedGraph,
+            None,
+        )?;
         self.storage.graph_names()
     }
     fn has_graph(&self, name: &str) -> GraphStoreResult<bool> {
+        self.observe_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::NamedGraph,
+            Some(name),
+        )?;
         self.storage.has_graph(name)
     }
     fn union_graphs(&mut self, g1: &str, g2: &str, target: &str) -> GraphStoreResult<()> {

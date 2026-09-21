@@ -71,6 +71,10 @@ impl Engine {
     /// Return every named graph registered on this engine in sorted order.
     pub fn list_graphs(&self) -> StorageBackendResult<Vec<String>> {
         self.synchronize_catalog_registries()?;
+        self.observe_graph_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::NamedGraph,
+            None,
+        )?;
         Ok(self.visible_graph_handles().keys().cloned().collect())
     }
 
@@ -87,8 +91,11 @@ impl Engine {
         &self,
     ) -> StorageBackendResult<Vec<(String, Vec<uqa_graph::GraphLabelInfo>)>> {
         self.synchronize_catalog_registries()?;
-        let graphs = self.visible_graph_handles();
-        graphs
+        self.observe_graph_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::NamedGraph,
+            None,
+        )?;
+        self.visible_graph_handles()
             .iter()
             .map(|(name, store)| {
                 store
@@ -341,6 +348,10 @@ impl Engine {
         label_sequences: &[Vec<String>],
     ) -> StorageBackendResult<bool> {
         self.synchronize_catalog_registries()?;
+        self.observe_graph_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::NamedGraph,
+            Some(graph),
+        )?;
         let key = format!("{graph}::{name}");
         let idx = {
             let graphs = self.durable.graphs.read();
@@ -377,6 +388,10 @@ impl Engine {
     fn drop_path_index_inner(&self, name: &str, graph: &str) -> StorageBackendResult<bool> {
         self.synchronize_catalog_registries()?;
         let key = format!("{graph}::{name}");
+        self.observe_graph_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::PathIndex,
+            Some(&key),
+        )?;
         if !self.durable.path_indexes.read().contains_key(&key) {
             return Ok(false);
         }
@@ -406,6 +421,10 @@ impl Engine {
         graph: &str,
     ) -> StorageBackendResult<Option<uqa_graph::PathIndex>> {
         let key = format!("{graph}::{name}");
+        self.observe_graph_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::PathIndex,
+            Some(&key),
+        )?;
         let index = self.query_catalog_snapshot.as_ref().map_or_else(
             || self.durable.path_indexes.read().get(&key).cloned(),
             |snapshot| snapshot.path_indexes.get(&key).cloned(),
@@ -427,6 +446,10 @@ impl Engine {
     /// shape `<graph>::<name>` so the caller can split as needed.
     pub fn list_path_indexes(&self) -> StorageBackendResult<Vec<String>> {
         self.synchronize_catalog_registries()?;
+        self.observe_graph_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::PathIndex,
+            None,
+        )?;
         Ok(self.query_catalog_snapshot.as_ref().map_or_else(
             || self.durable.path_indexes.read().keys().cloned().collect(),
             |snapshot| snapshot.path_indexes.keys().cloned().collect(),
@@ -458,6 +481,43 @@ impl Engine {
     /// Parallel operators share that snapshot instead of reacquiring the
     /// coordinator's thread-affine statement gate from a worker thread.
     pub(crate) fn graph_handle_in_execution(
+        &self,
+        name: &str,
+    ) -> StorageBackendResult<Option<std::sync::Arc<uqa_graph::GraphStoreHandle>>> {
+        self.observe_graph_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::NamedGraph,
+            Some(name),
+        )?;
+        self.selected_graph_handle(name)
+    }
+
+    pub(crate) fn graph_statistics_with<R>(
+        &self,
+        name: &str,
+        f: impl FnOnce(&uqa_graph::GraphStoreHandle) -> R,
+    ) -> StorageBackendResult<Option<R>> {
+        self.with_graph_read_snapshot(|engine| {
+            Ok(engine
+                .selected_graph_handle(name)?
+                .map(|store| f(&store.for_statistics())))
+        })
+    }
+
+    fn observe_graph_definition(
+        &self,
+        kind: uqa_storage::catalog::graph_observations::GraphDefinitionKind,
+        name: Option<&str>,
+    ) -> StorageBackendResult<()> {
+        if let Some(context) = self.graph_read_context()? {
+            self.new_graph_store()?
+                .with_serializable_read(context, &self.runtime.cancellation)
+                .observe_definition(kind, name)
+                .map_err(graph_store_error)?;
+        }
+        Ok(())
+    }
+
+    fn selected_graph_handle(
         &self,
         name: &str,
     ) -> StorageBackendResult<Option<std::sync::Arc<uqa_graph::GraphStoreHandle>>> {

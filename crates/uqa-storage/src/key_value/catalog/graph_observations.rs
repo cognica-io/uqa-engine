@@ -8,7 +8,9 @@
 
 use super::graph_view::GraphRead;
 use super::{StoredEdge, StoredVertex};
-use crate::catalog::graph_observations::{GraphEntityTopology, GraphMembershipKey};
+use crate::catalog::graph_observations::{
+    GraphDefinitionKey, GraphDefinitionKind, GraphEntityTopology, GraphMembershipKey,
+};
 use crate::{GraphEntityKind, KeyValueBatch, StorageBackendResult};
 
 pub(super) fn vertex(row: &StoredVertex) -> GraphEntityTopology<'_> {
@@ -24,6 +26,29 @@ pub(super) fn edge(row: &StoredEdge) -> GraphEntityTopology<'_> {
 }
 
 impl GraphRead<'_> {
+    pub(super) fn observe_definition_change(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        kind: GraphDefinitionKind,
+        name: &str,
+        new: Option<&[u8]>,
+    ) -> StorageBackendResult<()> {
+        if batch.serializable_participant().is_none() {
+            return Ok(());
+        }
+        let tag = match kind {
+            GraphDefinitionKind::NamedGraph => super::TAG_NAMED_GRAPH,
+            GraphDefinitionKind::PathIndex => super::TAG_PATH_INDEX,
+        };
+        let old = self.read.get(&super::single_str_key(tag, name)?)?;
+        if old.as_deref() != new {
+            batch.observe_serializable_write(
+                GraphDefinitionKey::new(self.identifier_namespace()?, kind, Some(name)).predicate(),
+            )?;
+        }
+        Ok(())
+    }
+
     pub(super) fn observe_topology_change(
         &self,
         batch: &mut dyn KeyValueBatch,

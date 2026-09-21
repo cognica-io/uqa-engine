@@ -29,6 +29,18 @@ impl Default for GraphStoreHandle {
 }
 
 impl GraphStoreHandle {
+    /// Record a semantic definition read from a retained catalog cache without loading graph data.
+    pub fn observe_definition(
+        &self,
+        kind: uqa_storage::catalog::graph_observations::GraphDefinitionKind,
+        name: Option<&str>,
+    ) -> GraphStoreResult<()> {
+        match self {
+            Self::Memory(_) => Ok(()),
+            Self::Persistent(store) => store.observe_definition(kind, name),
+        }
+    }
+
     pub fn with_serializable_read(
         self,
         context: uqa_storage::mvcc::SerializableReadContext,

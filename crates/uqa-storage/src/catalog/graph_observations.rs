@@ -6,8 +6,10 @@
 
 //! Logical graph payload addresses shared by semantic readers and evaluated provider mutations.
 
+mod definitions;
 mod topology;
 
+pub use definitions::{GraphDefinitionKey, GraphDefinitionKind};
 pub use topology::{GraphEntityTopology, GraphMembershipKey, GraphSelectionKey};
 
 use super::graph_identifiers::GraphIdentifierNamespace;
