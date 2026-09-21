@@ -8,7 +8,6 @@ use super::{
     BTreeMap, Engine, RelationIdentity, SQLError, SequenceDataType, SequenceRestart, SequenceState,
     StorageBackendError, StorageBackendResult,
 };
-use uqa_execution::catalog::sequence::snapshot::SequenceSnapshotSource;
 
 impl Engine {
     /// Resolve a sequence reference at DDL binding time using the current
@@ -200,8 +199,9 @@ impl Engine {
 
     /// Snapshot of all registered sequences as `(name, state)` pairs.
     pub fn try_sequences_snapshot(&self) -> StorageBackendResult<BTreeMap<String, SequenceState>> {
-        let _statement = self.runtime.statement_gate.lock();
-        Ok(self.sequence_read_snapshot()?.named_states())
+        self.with_catalog_read_snapshot(|engine| {
+            Ok(engine.query_sequence_snapshot()?.named_states())
+        })
     }
 
     pub fn sequences_snapshot(&self) -> StorageBackendResult<BTreeMap<String, SequenceState>> {
@@ -214,8 +214,9 @@ impl Engine {
         &self,
         name: &str,
     ) -> StorageBackendResult<Option<(String, SequenceState)>> {
-        let _statement = self.runtime.statement_gate.lock();
-        let snapshot = self.sequence_read_snapshot()?;
-        Ok(snapshot.first_state(&self.relation_lookup_candidates(name)?))
+        self.with_catalog_read_snapshot(|engine| {
+            let snapshot = engine.query_sequence_snapshot()?;
+            Ok(snapshot.first_state(&engine.relation_lookup_candidates(name)?))
+        })
     }
 }

@@ -353,7 +353,7 @@ impl Engine {
                     "decode deferred foreign-key firing relation '{table}': {error}"
                 ))
             })?;
-        let foreign_keys = self.try_foreign_keys(table).map_err(|error| {
+        let foreign_keys = self.foreign_keys_in_execution(table).map_err(|error| {
             SQLError::Internal(format!(
                 "read deferred foreign keys for table `{table}`: {error}"
             ))

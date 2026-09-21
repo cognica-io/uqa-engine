@@ -61,6 +61,15 @@ impl Engine {
         self.with_direct_query_snapshot(true, read, std::convert::identity)
     }
 
+    pub(crate) fn with_catalog_read_snapshot<R>(
+        &self,
+        read: impl FnOnce(&Self) -> uqa_storage::StorageBackendResult<R>,
+    ) -> uqa_storage::StorageBackendResult<R> {
+        self.with_direct_query_snapshot(true, read, |error| {
+            uqa_storage::StorageBackendError::backend("catalog query", error)
+        })
+    }
+
     pub(crate) fn with_direct_query_snapshot<R, E: std::fmt::Display>(
         &self,
         read_only: bool,

@@ -113,7 +113,7 @@ impl ReferentialCatalog for Engine {
         Engine::hierarchy_ancestor_tables(self, table)
     }
     fn try_referrers_to(&self, table: &str) -> Result<Vec<(String, ForeignKey)>, String> {
-        Engine::try_referrers_to(self, table).map_err(|error| error.to_string())
+        Engine::referrers_in_execution(self, table).map_err(|error| error.to_string())
     }
     fn partition_hierarchy_root(&self, table: &str) -> Result<Option<String>, SQLError> {
         Engine::partition_hierarchy_root(self, table)

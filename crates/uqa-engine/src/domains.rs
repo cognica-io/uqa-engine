@@ -23,7 +23,7 @@ impl Engine {
         table: &str,
         column: &str,
     ) -> StorageBackendResult<Option<uqa_sql::ast::Expr>> {
-        if let Some(default) = self.try_column_default_expr(table, column)? {
+        if let Some(default) = self.column_default_expr_in_execution(table, column)? {
             return Ok(Some(default));
         }
         let columns = self.describe_table_in_execution(table)?.unwrap_or_default();

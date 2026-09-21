@@ -113,23 +113,43 @@ impl Engine {
     }
 
     pub fn foreign_server(&self, name: &str) -> Result<Option<uqa_fdw::ForeignServer>, String> {
-        self.foreign_lookup_context().foreign_server(name)
+        self.with_direct_query_snapshot(
+            true,
+            |engine| engine.foreign_lookup_context().foreign_server(name),
+            |error| error.to_string(),
+        )
     }
 
     pub fn foreign_table(&self, name: &str) -> Result<Option<uqa_fdw::ForeignTable>, String> {
-        self.foreign_lookup_context().foreign_table(name)
+        self.with_direct_query_snapshot(
+            true,
+            |engine| engine.foreign_lookup_context().foreign_table(name),
+            |error| error.to_string(),
+        )
     }
 
     pub fn list_foreign_servers(&self) -> Result<Vec<String>, String> {
-        self.foreign_lookup_context().list_foreign_servers()
+        self.with_direct_query_snapshot(
+            true,
+            |engine| engine.foreign_lookup_context().list_foreign_servers(),
+            |error| error.to_string(),
+        )
     }
 
     pub fn list_foreign_tables(&self) -> Result<Vec<String>, String> {
-        self.foreign_lookup_context().list_foreign_tables()
+        self.with_direct_query_snapshot(
+            true,
+            |engine| engine.foreign_lookup_context().list_foreign_tables(),
+            |error| error.to_string(),
+        )
     }
 
     pub fn foreign_table_columns(&self, table: &str) -> Result<Vec<String>, String> {
-        self.foreign_lookup_context().foreign_table_columns(table)
+        self.with_direct_query_snapshot(
+            true,
+            |engine| engine.foreign_lookup_context().foreign_table_columns(table),
+            |error| error.to_string(),
+        )
     }
 
     pub fn load_memory_foreign_table(
@@ -145,9 +165,11 @@ impl Engine {
             .ok_or_else(|| format!("Foreign table `{table_name}` does not exist"))?;
         let relation = RelationIdentity::from_legacy_name(&table_name)?;
         let table = self
+            .foreign_lookup_context()
             .foreign_table(&table_name)?
             .ok_or_else(|| format!("Foreign table `{table_name}` does not exist"))?;
         let server = self
+            .foreign_lookup_context()
             .foreign_server(&table.server_name)?
             .ok_or_else(|| format!("Foreign server `{}` does not exist", table.server_name))?;
         if server.fdw_type != "memory_fdw" {
@@ -187,9 +209,11 @@ impl Engine {
         use uqa_fdw::FDWHandler as _;
 
         let table = self
+            .foreign_lookup_context()
             .foreign_table(table_name)?
             .ok_or_else(|| format!("Foreign table `{table_name}` does not exist"))?;
         let server = self
+            .foreign_lookup_context()
             .foreign_server(&table.server_name)?
             .ok_or_else(|| format!("Foreign server `{}` does not exist", table.server_name))?;
         let array_columns = table

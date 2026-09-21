@@ -109,7 +109,7 @@ impl RetrievalIndexes for Engine {
             .map(|state| Box::new(TableIndexState(state)) as Box<dyn RetrievalIndexState>))
     }
     fn catalog_index(&self, name: &str) -> StorageBackendResult<Option<CatalogIndexRow>> {
-        self.catalog_index(name)
+        self.catalog_index_in_execution(name)
     }
     fn resolve_table_name(&self, table: &str) -> StorageBackendResult<Option<String>> {
         self.resolve_table_name(table)
@@ -177,7 +177,7 @@ impl RetrievalGraphs for Engine {
 
 impl RetrievalModels for Engine {
     fn load_model(&self, name: &str) -> Result<Option<uqa_ml::DeepModel>, SQLError> {
-        self.load_model(name)
+        self.load_model_in_execution(name)
     }
 }
 

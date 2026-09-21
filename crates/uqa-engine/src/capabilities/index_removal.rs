@@ -50,7 +50,7 @@ impl IndexRemovalCatalog for Engine {
         self.catalog_read_view().has_constraint_index(relation)
     }
     fn list_catalog_indexes(&self) -> StorageBackendResult<Vec<CatalogIndexRow>> {
-        Engine::list_catalog_indexes(self)
+        Engine::catalog_indexes_in_execution(self)
     }
     fn column_type(&self, table: &str, column: &str) -> StorageBackendResult<Option<ColumnType>> {
         Engine::column_type(self, table, column)
@@ -63,7 +63,7 @@ impl IndexRemovalPrivileges for Engine {
 }
 impl IndexRemovalReferrers for Engine {
     fn referrers_to(&self, table: &str) -> StorageBackendResult<Vec<(String, ForeignKey)>> {
-        self.try_referrers_to(table)
+        self.referrers_in_execution(table)
     }
 }
 impl IndexRemovalPublication for Engine {

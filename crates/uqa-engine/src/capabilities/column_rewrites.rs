@@ -99,14 +99,14 @@ impl uqa_sql::schema::columns::addition::AddedColumnKeys for Engine {
         Vec<uqa_sql::ast::TableKeyConstraint>,
         uqa_sql::assignment::columns::ColumnCatalogError,
     > {
-        Engine::try_key_constraints(self, table).map_err(|error| Box::new(error) as _)
+        Engine::key_constraints_in_execution(self, table).map_err(|error| Box::new(error) as _)
     }
     fn try_foreign_keys(
         &self,
         table: &str,
     ) -> Result<Vec<uqa_sql::ast::ForeignKey>, uqa_sql::assignment::columns::ColumnCatalogError>
     {
-        Engine::try_foreign_keys(self, table).map_err(|error| Box::new(error) as _)
+        Engine::foreign_keys_in_execution(self, table).map_err(|error| Box::new(error) as _)
     }
 }
 

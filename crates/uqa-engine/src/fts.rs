@@ -84,7 +84,7 @@ impl Engine {
             );
             for field in fields {
                 let analyzer = self
-                    .table_field_analyzer(&table_name, &field)
+                    .table_field_analyzer_in_execution(&table_name, &field)
                     .map_err(SQLError::Internal)?
                     .map_or_else(
                         || analyzer_registry::DEFAULT_ANALYZER_NAME.to_string(),

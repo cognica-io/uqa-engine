@@ -258,7 +258,7 @@ impl SchemaRemovalNames for Engine {
             .collect()
     }
     fn graph_tables(&self, schema: &str) -> StorageBackendResult<Vec<String>> {
-        self.tables_in_schema(schema)
+        self.schema_tables_in_execution(schema)
     }
 }
 impl SchemaTypeRoutineRemoval for Engine {

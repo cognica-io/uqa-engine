@@ -93,7 +93,7 @@ impl RetrievalPlanningCatalog for Engine {
             .map_err(|error| error.to_string())
     }
     fn list_catalog_indexes(&self) -> Result<Vec<CatalogIndexRow>, String> {
-        self.list_catalog_indexes()
+        self.catalog_indexes_in_execution()
             .map_err(|error| error.to_string())
     }
     fn value_index_cardinality(

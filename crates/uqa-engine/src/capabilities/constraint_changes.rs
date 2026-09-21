@@ -48,7 +48,7 @@ impl uqa_sql::schema::constraint_changes::ConstraintTypeReferrers for Engine {
         &self,
         table: &str,
     ) -> Result<Vec<(String, ForeignKey)>, uqa_sql::assignment::columns::ColumnCatalogError> {
-        Engine::try_referrers_to(self, table).map_err(|error| Box::new(error) as _)
+        Engine::referrers_in_execution(self, table).map_err(|error| Box::new(error) as _)
     }
 }
 impl ConstraintRelations for Engine {

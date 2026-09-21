@@ -51,7 +51,7 @@ impl uqa_sql::schema::inheritance::InheritanceCatalog for Engine {
             .map_err(|error| error.to_string())
     }
     fn check_definitions(&self, table: &str) -> Result<Vec<uqa_sql::ast::TableCheck>, String> {
-        self.try_check_constraint_definitions(table)
+        self.check_constraint_definitions_in_execution(table)
             .map_err(|error| error.to_string())
     }
 }
@@ -78,7 +78,7 @@ impl uqa_sql::schema::indexes::names::IndexNameCatalog for Engine {
         table: &str,
     ) -> Result<Vec<uqa_sql::ast::TableKeyConstraint>, SQLError> {
         if self.try_resolve_bound_table_name(table)?.is_some() {
-            self.try_key_constraints(table)
+            self.key_constraints_in_execution(table)
                 .map_err(|error| SQLError::Internal(error.to_string()))
         } else {
             Ok(Vec::new())

@@ -158,6 +158,13 @@ impl Engine {
     }
 
     pub fn catalog_index(&self, name: &str) -> StorageBackendResult<Option<CatalogIndexRow>> {
+        self.with_catalog_read_snapshot(|engine| engine.catalog_index_in_execution(name))
+    }
+
+    pub(crate) fn catalog_index_in_execution(
+        &self,
+        name: &str,
+    ) -> StorageBackendResult<Option<CatalogIndexRow>> {
         let Some(relation) = self.try_resolve_catalog_index_relation(name)? else {
             return Ok(None);
         };
@@ -165,7 +172,9 @@ impl Engine {
     }
 
     pub fn has_catalog_index(&self, name: &str) -> StorageBackendResult<bool> {
-        Ok(self.try_resolve_catalog_index_relation(name)?.is_some())
+        self.with_catalog_read_snapshot(|engine| {
+            Ok(engine.try_resolve_catalog_index_relation(name)?.is_some())
+        })
     }
 
     pub(crate) fn try_resolve_catalog_index_relation(

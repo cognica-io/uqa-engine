@@ -96,7 +96,7 @@ impl RelationCounts for Engine {
 }
 impl CatalogNamespace for Engine {
     fn current_schema_names(&self, implicit: bool) -> Result<Vec<String>, SQLError> {
-        Engine::current_schema_names(self, implicit)
+        Engine::current_schema_names_in_execution(self, implicit)
             .map_err(|error| SQLError::Internal(error.to_string()))
     }
     fn current_schema_names_with_catalog(

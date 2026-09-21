@@ -232,7 +232,7 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
 
     fn current_schema(&self) -> std::result::Result<Option<String>, String> {
         self.engine
-            .current_schema_name()
+            .current_schema_name_in_execution()
             .map_err(|error| error.to_string())
     }
 
@@ -263,7 +263,7 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         include_implicit: bool,
     ) -> std::result::Result<Option<Vec<String>>, String> {
         self.engine
-            .current_schema_names(include_implicit)
+            .current_schema_names_in_execution(include_implicit)
             .map(Some)
             .map_err(|error| error.to_string())
     }

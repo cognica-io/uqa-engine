@@ -7,12 +7,17 @@
 //! Schema/catalog enumeration and schema lifecycle.
 
 use super::{CatalogIndexRow, Engine, StorageBackendResult};
-use uqa_execution::catalog::sequence::snapshot::SequenceSnapshotSource;
 
 pub(crate) use uqa_sql::catalog::is_virtual_system_schema;
 
 impl Engine {
     pub fn list_catalog_indexes(&self) -> StorageBackendResult<Vec<CatalogIndexRow>> {
+        self.with_catalog_read_snapshot(Self::catalog_indexes_in_execution)
+    }
+
+    pub(crate) fn catalog_indexes_in_execution(
+        &self,
+    ) -> StorageBackendResult<Vec<CatalogIndexRow>> {
         if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
             let mut out = snapshot
                 .catalog_indexes
@@ -58,14 +63,20 @@ impl Engine {
     }
 
     pub fn has_schema(&self, name: &str) -> StorageBackendResult<bool> {
-        self.synchronize_catalog_registries()?;
-        Ok(self.durable.schemas.read().contains_key(name))
+        self.with_catalog_read_snapshot(|engine| {
+            engine.synchronize_catalog_registries()?;
+            Ok(engine.durable.schemas.read().contains_key(name))
+        })
     }
 
     /// Whether `name` resolves as a namespace: a durable schema, a virtual
     /// system schema (`pg_catalog`, `information_schema`, `ag_catalog`), or
     /// the namespace a named graph owns.
     pub fn has_namespace(&self, name: &str) -> StorageBackendResult<bool> {
+        self.with_catalog_read_snapshot(|engine| engine.has_namespace_in_execution(name))
+    }
+
+    pub(crate) fn has_namespace_in_execution(&self, name: &str) -> StorageBackendResult<bool> {
         self.synchronize_catalog_registries()?;
         Ok(is_virtual_system_schema(name)
             || self.durable.schemas.read().contains_key(name)
@@ -120,16 +131,25 @@ impl Engine {
 
     /// Return every registered schema in sorted order.
     pub fn list_schemas(&self) -> StorageBackendResult<Vec<String>> {
-        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
-            return Ok(snapshot.schemas.keys().cloned().collect());
-        }
-        self.synchronize_catalog_registries()?;
-        Ok(self.durable.schemas.read().keys().cloned().collect())
+        self.with_catalog_read_snapshot(|engine| {
+            if let Some(snapshot) = engine.query_catalog_snapshot.as_ref() {
+                return Ok(snapshot.schemas.keys().cloned().collect());
+            }
+            engine.synchronize_catalog_registries()?;
+            Ok(engine.durable.schemas.read().keys().cloned().collect())
+        })
     }
 
     /// Local names of tables whose structural relation identity is owned by
     /// `schema`. No string-prefix inference participates in this lookup.
     pub fn tables_in_schema(&self, schema: &str) -> StorageBackendResult<Vec<String>> {
+        self.with_catalog_read_snapshot(|engine| engine.schema_tables_in_execution(schema))
+    }
+
+    pub(crate) fn schema_tables_in_execution(
+        &self,
+        schema: &str,
+    ) -> StorageBackendResult<Vec<String>> {
         self.synchronize_table_catalog()?;
         let mut out: Vec<String> = Vec::new();
         for relation in self.storage.tables.read().keys() {
@@ -142,10 +162,6 @@ impl Engine {
     }
 
     pub fn list_sequences(&self) -> StorageBackendResult<Vec<String>> {
-        let _statement = self.runtime.statement_gate.lock();
-        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
-            return Ok(snapshot.sequence_read_snapshot().names());
-        }
-        Ok(self.sequence_read_snapshot()?.names())
+        self.with_catalog_read_snapshot(|engine| Ok(engine.query_sequence_snapshot()?.names()))
     }
 }

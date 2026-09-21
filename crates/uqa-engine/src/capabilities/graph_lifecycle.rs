@@ -16,7 +16,7 @@ impl GraphLifecycle for Engine {
         self.has_graph_in_execution(name)
     }
     fn has_namespace(&self, name: &str) -> StorageBackendResult<bool> {
-        self.has_namespace(name)
+        self.has_namespace_in_execution(name)
     }
     fn create_graph(&self, name: String) -> StorageBackendResult<bool> {
         self.create_graph(name)

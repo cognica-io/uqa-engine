@@ -39,13 +39,14 @@ impl Engine {
 }
 impl ConstraintCatalog for Engine {
     fn try_unique_columns(&self, table: &str) -> Result<Vec<String>, String> {
-        Engine::try_unique_columns(self, table).map_err(|error| error.to_string())
+        Engine::unique_columns_in_execution(self, table).map_err(|error| error.to_string())
     }
     fn try_check_constraint_definitions(&self, table: &str) -> Result<Vec<TableCheck>, String> {
-        Engine::try_check_constraint_definitions(self, table).map_err(|error| error.to_string())
+        Engine::check_constraint_definitions_in_execution(self, table)
+            .map_err(|error| error.to_string())
     }
     fn try_foreign_keys(&self, table: &str) -> Result<Vec<ForeignKey>, String> {
-        Engine::try_foreign_keys(self, table).map_err(|error| error.to_string())
+        Engine::foreign_keys_in_execution(self, table).map_err(|error| error.to_string())
     }
     fn column_type(&self, table: &str, column: &str) -> Result<Option<ColumnType>, String> {
         Engine::column_type(self, table, column).map_err(|error| error.to_string())

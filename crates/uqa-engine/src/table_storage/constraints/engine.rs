@@ -134,16 +134,27 @@ impl Engine {
         &self,
         table: &str,
     ) -> StorageBackendResult<Vec<(Option<String>, uqa_sql::ast::Expr)>> {
-        Ok(self
-            .try_check_constraint_definitions(table)?
-            .into_iter()
-            .map(|constraint| (constraint.name, constraint.expr))
-            .collect())
+        self.with_catalog_read_snapshot(|engine| {
+            Ok(engine
+                .check_constraint_definitions_in_execution(table)?
+                .into_iter()
+                .map(|constraint| (constraint.name, constraint.expr))
+                .collect())
+        })
     }
 
     /// Snapshot of every CHECK constraint, including `PostgreSQL` 18 enforcement
     /// metadata.
     pub fn try_check_constraint_definitions(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Vec<uqa_sql::ast::TableCheck>> {
+        self.with_catalog_read_snapshot(|engine| {
+            engine.check_constraint_definitions_in_execution(table)
+        })
+    }
+
+    pub(crate) fn check_constraint_definitions_in_execution(
         &self,
         table: &str,
     ) -> StorageBackendResult<Vec<uqa_sql::ast::TableCheck>> {
@@ -193,6 +204,13 @@ impl Engine {
         &self,
         table: &str,
     ) -> StorageBackendResult<Vec<uqa_sql::ast::ForeignKey>> {
+        self.with_catalog_read_snapshot(|engine| engine.foreign_keys_in_execution(table))
+    }
+
+    pub(crate) fn foreign_keys_in_execution(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Vec<uqa_sql::ast::ForeignKey>> {
         let t = self
             .try_table(table)?
             .ok_or_else(|| table_not_found(table))?;
@@ -217,6 +235,13 @@ impl Engine {
         &self,
         table: &str,
     ) -> StorageBackendResult<Vec<(String, uqa_sql::ast::ForeignKey)>> {
+        self.with_catalog_read_snapshot(|engine| engine.referrers_in_execution(table))
+    }
+
+    pub(crate) fn referrers_in_execution(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Vec<(String, uqa_sql::ast::ForeignKey)>> {
         let table = self
             .try_resolve_table_name(table)?
             .ok_or_else(|| table_not_found(table))?;
@@ -232,7 +257,7 @@ impl Engine {
             .map(RelationIdentity::qualified_name)
             .collect();
         for other in names {
-            for fk in self.try_foreign_keys(&other)? {
+            for fk in self.foreign_keys_in_execution(&other)? {
                 if fk.enforced && Self::foreign_key_targets(&fk, &target) {
                     out.push((other.clone(), fk));
                 }
@@ -250,13 +275,20 @@ impl Engine {
     }
 
     pub fn try_unique_columns(&self, table: &str) -> StorageBackendResult<Vec<String>> {
+        self.with_catalog_read_snapshot(|engine| engine.unique_columns_in_execution(table))
+    }
+
+    pub(crate) fn unique_columns_in_execution(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Vec<String>> {
         let t = self
             .try_table(table)?
             .ok_or_else(|| table_not_found(table))?;
         let auto_increment =
             uqa_sql::schema::constraint_views::auto_increment_columns(&t.columns.read());
         Ok(uqa_sql::schema::constraint_views::unique_scalar_columns(
-            self.try_key_constraints(table)?,
+            self.key_constraints_in_execution(table)?,
             &auto_increment,
         ))
     }
@@ -272,6 +304,13 @@ impl Engine {
     }
 
     pub fn try_key_constraints(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Vec<uqa_sql::ast::TableKeyConstraint>> {
+        self.with_catalog_read_snapshot(|engine| engine.key_constraints_in_execution(table))
+    }
+
+    pub(crate) fn key_constraints_in_execution(
         &self,
         table: &str,
     ) -> StorageBackendResult<Vec<uqa_sql::ast::TableKeyConstraint>> {

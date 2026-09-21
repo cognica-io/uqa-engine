@@ -73,11 +73,46 @@ impl uqa_execution::catalog::sequence::snapshot::SequenceSnapshotSource for Engi
     ) -> uqa_storage::StorageBackendResult<
         uqa_execution::catalog::sequence::snapshot::SequenceReadSnapshot,
     > {
+        let session = self.open_independent_catalog_session(None)?;
+        self.sequence_snapshot_from_catalog(session.as_ref())
+    }
+}
+
+impl Engine {
+    /// Public sequence metadata retains an attached or query-owned catalog; ordinary value operations use the independent sequence source.
+    pub(crate) fn query_sequence_snapshot(
+        &self,
+    ) -> uqa_storage::StorageBackendResult<
+        uqa_execution::catalog::sequence::snapshot::SequenceReadSnapshot,
+    > {
+        if let Some(snapshot) = self.query_catalog_snapshot.as_ref() {
+            return Ok(snapshot.sequence_read_snapshot());
+        }
+        let attached = self.transaction_depth() == 0
+            && self
+                .storage
+                .backend
+                .as_ref()
+                .is_some_and(|backend| backend.in_transaction());
+        let independent = if attached {
+            self.synchronize_catalog_registries()?;
+            None
+        } else {
+            self.open_independent_catalog_session(None)?
+        };
+        self.sequence_snapshot_from_catalog(independent.as_ref())
+    }
+
+    fn sequence_snapshot_from_catalog(
+        &self,
+        independent: Option<&uqa_storage::PersistentStorageSession>,
+    ) -> uqa_storage::StorageBackendResult<
+        uqa_execution::catalog::sequence::snapshot::SequenceReadSnapshot,
+    > {
         use uqa_execution::catalog::{
             security::roles::persistence::RoleCatalogSnapshot,
             sequence::snapshot::{read_sequence_snapshot, SequenceReadSnapshot},
         };
-        let session = self.open_independent_catalog_session(None)?;
         read_sequence_snapshot(
             SequenceReadSnapshot {
                 sequences: self.durable.sequences.snapshot(),
@@ -90,7 +125,7 @@ impl uqa_execution::catalog::sequence::snapshot::SequenceSnapshotSource for Engi
                 },
             },
             self.storage.catalog.as_deref(),
-            session.as_ref(),
+            independent,
             self.versioned_backend_transactions(),
         )
     }

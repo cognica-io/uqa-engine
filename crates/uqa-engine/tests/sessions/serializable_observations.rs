@@ -49,7 +49,7 @@ mod direct_writes;
 mod direct_queries;
 
 #[path = "serializable_observations/catalog_reads.rs"]
-mod catalog_reads;
+pub(super) mod catalog_reads;
 
 struct Session {
     engine: Engine,

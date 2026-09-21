@@ -52,7 +52,8 @@ impl SequenceGrantNamespace for Engine {
         self.temporary_namespace_allocated()
     }
     fn has_namespace(&self, name: &str) -> Result<bool, String> {
-        self.has_namespace(name).map_err(|error| error.to_string())
+        self.has_namespace_in_execution(name)
+            .map_err(|error| error.to_string())
     }
 }
 impl SequencePrivilegePublication for Engine {

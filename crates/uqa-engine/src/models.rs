@@ -38,6 +38,13 @@ impl Engine {
     }
 
     pub fn load_model(&self, name: &str) -> Result<Option<DeepModel>, SQLError> {
+        self.with_direct_read_snapshot(|engine| engine.load_model_in_execution(name))
+    }
+
+    pub(crate) fn load_model_in_execution(
+        &self,
+        name: &str,
+    ) -> Result<Option<DeepModel>, SQLError> {
         let Some(catalog) = self.storage.catalog.as_ref() else {
             return Ok(self.durable.models.read().get(name).cloned());
         };
@@ -66,7 +73,7 @@ impl Engine {
     }
 
     fn drop_model_inner(&self, name: &str) -> Result<bool, SQLError> {
-        if self.load_model(name)?.is_none() {
+        if self.load_model_in_execution(name)?.is_none() {
             return Ok(false);
         }
         let mut models = self.durable.models.write();
@@ -265,7 +272,7 @@ impl Engine {
     /// contract; the physical driver only receives known models.
     pub fn deep_predict(&self, name: &str) -> Result<Option<Vec<(DocId, f64)>>, SQLError> {
         self.with_direct_read_snapshot(|engine| {
-            if engine.load_model(name)?.is_none() {
+            if engine.load_model_in_execution(name)?.is_none() {
                 return Ok(None);
             }
             let tree = uqa_operators::OperatorTree::DeepPredict {
@@ -287,12 +294,14 @@ impl Engine {
         name: &str,
         examples: &[(DocId, Vec<f64>)],
     ) -> Result<Vec<(DocId, f64)>, SQLError> {
-        let model = self
-            .load_model(name)?
-            .ok_or_else(|| SQLError::Unsupported(format!("unknown model {name:?}")))?;
-        let (scores, _) = model
-            .predict_features(examples)
-            .map_err(|e| SQLError::Unsupported(format!("deep_predict: {e}")))?;
-        Ok(scores)
+        self.with_direct_read_snapshot(|engine| {
+            let model = engine
+                .load_model_in_execution(name)?
+                .ok_or_else(|| SQLError::Unsupported(format!("unknown model {name:?}")))?;
+            let (scores, _) = model
+                .predict_features(examples)
+                .map_err(|e| SQLError::Unsupported(format!("deep_predict: {e}")))?;
+            Ok(scores)
+        })
     }
 }

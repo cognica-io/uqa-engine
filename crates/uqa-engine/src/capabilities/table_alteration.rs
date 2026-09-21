@@ -150,7 +150,7 @@ impl ColumnRemovalCatalog for Engine {
         Engine::table_names_in_execution(self).map_err(|error| Box::new(error) as _)
     }
     fn try_foreign_keys(&self, table: &str) -> Result<Vec<ForeignKey>, ColumnCatalogError> {
-        Engine::try_foreign_keys(self, table).map_err(|error| Box::new(error) as _)
+        Engine::foreign_keys_in_execution(self, table).map_err(|error| Box::new(error) as _)
     }
 }
 impl ColumnRemovalRoutines for Engine {

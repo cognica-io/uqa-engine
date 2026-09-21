@@ -53,13 +53,13 @@ impl HierarchyCatalog for Engine {
         &self,
         table: &str,
     ) -> StorageBackendResult<Vec<TableCheck>> {
-        Engine::try_check_constraint_definitions(self, table)
+        Engine::check_constraint_definitions_in_execution(self, table)
     }
     fn try_key_constraints(&self, table: &str) -> StorageBackendResult<Vec<TableKeyConstraint>> {
-        Engine::try_key_constraints(self, table)
+        Engine::key_constraints_in_execution(self, table)
     }
     fn try_foreign_keys(&self, table: &str) -> StorageBackendResult<Vec<ForeignKey>> {
-        Engine::try_foreign_keys(self, table)
+        Engine::foreign_keys_in_execution(self, table)
     }
     fn try_declared_table_constraints(
         &self,

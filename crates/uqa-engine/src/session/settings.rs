@@ -34,6 +34,10 @@ impl Engine {
 
     /// First usable namespace on this logical session's explicit search path: a durable, virtual system or graph namespace.
     pub fn current_schema_name(&self) -> StorageBackendResult<Option<String>> {
+        self.with_catalog_read_snapshot(Self::current_schema_name_in_execution)
+    }
+
+    pub(crate) fn current_schema_name_in_execution(&self) -> StorageBackendResult<Option<String>> {
         self.catalog_execution()
             .current_schema_name()
             .map_err(|error| uqa_storage::StorageBackendError::backend("schema namespace", error))
@@ -41,6 +45,15 @@ impl Engine {
 
     /// Existing schemas with USAGE privilege in this logical session's search path. `PostgreSQL` implicitly searches `pg_catalog` unless it is already named explicitly.
     pub fn current_schema_names(
+        &self,
+        include_implicit: bool,
+    ) -> StorageBackendResult<Vec<String>> {
+        self.with_catalog_read_snapshot(|engine| {
+            engine.current_schema_names_in_execution(include_implicit)
+        })
+    }
+
+    pub(crate) fn current_schema_names_in_execution(
         &self,
         include_implicit: bool,
     ) -> StorageBackendResult<Vec<String>> {

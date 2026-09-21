@@ -293,6 +293,16 @@ impl Engine {
         table: &str,
         column: &str,
     ) -> StorageBackendResult<Option<uqa_sql::ast::Expr>> {
+        self.with_catalog_read_snapshot(|engine| {
+            engine.column_default_expr_in_execution(table, column)
+        })
+    }
+
+    pub(crate) fn column_default_expr_in_execution(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> StorageBackendResult<Option<uqa_sql::ast::Expr>> {
         let t = self
             .try_table(table)?
             .ok_or_else(|| table_not_found(table))?;

@@ -368,18 +368,13 @@ fn retained_commit_resolves_without_replaying_preparation_and_publishes_once() {
             assert_unknown(&root.sql(sql, &[]).unwrap_err());
             assert_eq!(root.pending_commit(), Some(identity));
         }
-        for result in [
-            root.has_table("items").map(|_| ()),
-            root.table_columns("items").map(|_| ()),
-            root.table_has_column("items", "id").map(|_| ()),
-            root.table_names().map(|_| ()),
-            root.describe_table("items").map(|_| ()),
-        ] {
-            let error = result.expect_err("table metadata must not bypass unresolved completion");
-            assert_unknown(&uqa_execution::storage_errors::storage_error(
-                "metadata query",
-                &error,
-            ));
+        let expected = root.sql("SELECT 1", &[]).unwrap_err();
+        assert_unknown(&expected);
+        for read in super::serializable_observations::catalog_reads::CatalogRead::ALL {
+            let error = read
+                .read(&root)
+                .expect_err("catalog query must not bypass unresolved completion");
+            error.assert_transaction_error(&expected);
             assert_eq!(root.pending_commit(), Some(identity));
         }
         assert_eq!(calls.load(Ordering::Acquire), 2);

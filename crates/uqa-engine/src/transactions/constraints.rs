@@ -52,7 +52,7 @@ impl Engine {
         if schema == self.temporary_schema_name() {
             return Ok(self.temporary_namespace_allocated());
         }
-        self.has_namespace(schema)
+        self.has_namespace_in_execution(schema)
             .map_err(|error| SQLError::Internal(format!("resolve constraint schema: {error}")))
     }
 

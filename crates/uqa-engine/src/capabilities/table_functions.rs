@@ -46,7 +46,7 @@ impl AnalyzerTableFunctions for Engine {
         self.drop_named_analyzer(name)
     }
     fn list_named_analyzers(&self) -> Result<Vec<String>, String> {
-        self.list_named_analyzers()
+        self.named_analyzers_in_execution()
     }
     fn set_table_field_analyzer(
         &self,

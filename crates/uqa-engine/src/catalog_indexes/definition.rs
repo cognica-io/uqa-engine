@@ -17,7 +17,7 @@ pub(crate) use uqa_execution::catalog::index::index_definition;
 impl Engine {
     /// Key descriptors used by row validation, key reservations, and conflict arbitration. Standalone unique indexes remain independent catalog objects and do not create SQL constraints.
     pub(crate) fn enforced_keys(&self, table: &str) -> StorageBackendResult<Vec<EnforcedKey>> {
-        let constraints = self.try_key_constraints(table)?;
+        let constraints = self.key_constraints_in_execution(table)?;
         let table = self
             .try_resolve_table_name(table)?
             .ok_or_else(|| StorageBackendError::Other(format!("table `{table}` does not exist")))?;
