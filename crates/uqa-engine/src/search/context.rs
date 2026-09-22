@@ -50,6 +50,7 @@ impl Engine {
         };
 
         let read = self.serializable_table_read(table)?;
+        let control = self.query_retention_control()?;
         let columns = t.columns.snapshot();
         let mut ctx = ExecutionContext::new()
             .with_inverted_index(uqa_execution::serializable::text::observe_snapshot(
@@ -66,7 +67,7 @@ impl Engine {
                     read.as_ref(),
                     &columns,
                     field,
-                    idx.snapshot()
+                    idx.snapshot_with_control(&control)
                         .map_err(|error| storage_sql_error("snapshot vector index", error))?,
                 )
                 .map_err(|error| storage_sql_error("retain vector search participant", error))?,

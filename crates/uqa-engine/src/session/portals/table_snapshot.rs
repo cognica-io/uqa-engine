@@ -86,6 +86,7 @@ impl Engine {
 
     pub(super) fn retain_query_table(
         data: &std::sync::Arc<TableState>,
+        control: &uqa_storage::read_control::StorageReadControl,
     ) -> Result<std::sync::Arc<TableState>, SQLError> {
         let document_store = data
             .document_store
@@ -103,7 +104,7 @@ impl Engine {
             .iter()
             .map(|(field, index)| {
                 index
-                    .snapshot()
+                    .snapshot_with_control(control)
                     .map(|index| {
                         (
                             field.clone(),

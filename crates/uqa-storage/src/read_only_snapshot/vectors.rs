@@ -60,4 +60,14 @@ impl VectorIndex for ReadOnlySnapshot<dyn VectorIndex> {
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
         Ok(Arc::new(self.clone()))
     }
+
+    fn snapshot_with_control(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Arc<dyn VectorIndex>> {
+        Ok(Arc::new(Self(
+            self.0.snapshot_with_control(control)?,
+            self.1.as_ref().map(Arc::clone),
+        )))
+    }
 }

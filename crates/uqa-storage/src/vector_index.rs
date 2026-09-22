@@ -18,6 +18,7 @@ use uqa_core::{DocId, Payload, PostingEntry, PostingList};
 use crate::{StorageBackendError, StorageBackendResult};
 
 mod config;
+mod memory_snapshot;
 pub(crate) mod retained;
 
 pub use config::{HNSWIndexParams, IVFIndexParams, VectorIndexOpenMode, VectorIndexSpec};
@@ -171,6 +172,15 @@ pub trait VectorIndex: Send + Sync {
     /// Read-only handle suitable for an `ExecutionContext`.
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>>;
 
+    /// Capture using the caller's retention allowance and cancellation. Owners that copy index data override this method to reserve construction before allocation. The default preserves the provider's existing snapshot and its independently retained control.
+    fn snapshot_with_control(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Arc<dyn VectorIndex>> {
+        control.check()?;
+        self.snapshot()
+    }
+
     /// Independent writable copy used by in-memory engine rollback. The
     /// default keeps third-party and persistent implementations source
     /// compatible; only indexes hosted by a memory engine need to support it.
@@ -294,6 +304,13 @@ impl VectorIndex for MemoryVectorIndex {
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
         Ok(Arc::new(self.clone()))
+    }
+
+    fn snapshot_with_control(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Arc<dyn VectorIndex>> {
+        memory_snapshot::capture(self, control)
     }
 
     fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn VectorIndex>> {

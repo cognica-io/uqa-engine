@@ -27,6 +27,51 @@ fn engines() -> (tempfile::TempDir, Vec<Engine>) {
 }
 
 #[test]
+fn current_memory_vector_capture_uses_the_session_allowance_and_preserves_old_readers() {
+    let engine = Engine::new();
+    engine.sql("CREATE TABLE memory_vectors (id INTEGER PRIMARY KEY, v VECTOR(2)); INSERT INTO memory_vectors VALUES (1, ARRAY[1.0, 0.0])", &[]).unwrap();
+    let live = engine.require_table("memory_vectors").unwrap();
+    let id = engine.table_doc_ids("memory_vectors").unwrap()[0];
+    let control = engine.query_retention_control().unwrap();
+    let view = engine.detach_query_table(&live, &live, None).unwrap();
+    assert_eq!(
+        view.vector_indexes.read()["v"].index_kind(),
+        "memory-bruteforce"
+    );
+    assert!(control.memory().used() > 0);
+    let full = control
+        .memory()
+        .reserve(control.memory().limit() - control.memory().used())
+        .unwrap();
+    for error in [
+        engine.detach_query_table(&live, &live, None).err().unwrap(),
+        engine.snapshot_context("memory_vectors").err().unwrap(),
+    ] {
+        assert_eq!(error.sqlstate(), Some("53200"), "{error}");
+    }
+    drop(full);
+    engine
+        .sql("UPDATE memory_vectors SET v = ARRAY[0.0, 1.0]", &[])
+        .unwrap();
+    engine.close().unwrap();
+    drop(live);
+    drop(engine);
+    let nested = view.vector_indexes.read()["v"].snapshot().unwrap();
+    drop(view);
+    assert_eq!(
+        nested
+            .search_threshold(&[1.0, 0.0], 0.9)
+            .unwrap()
+            .doc_ids()
+            .collect::<Vec<_>>(),
+        [id]
+    );
+    assert!(control.memory().used() > 0);
+    drop(nested);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn reconstructed_vector_capture_keeps_session_quota_and_the_prior_view_after_rejection() {
     use uqa_execution::query::document_changes::DocumentChanges;
     let (_directory, engines) = engines();

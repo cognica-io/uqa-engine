@@ -395,15 +395,15 @@ impl Engine {
         metadata: &std::sync::Arc<TableState>,
         changes: Option<DocumentChanges>,
     ) -> Result<std::sync::Arc<TableState>, SQLError> {
+        let control = self.query_retention_control()?;
         if std::sync::Arc::ptr_eq(data, metadata)
             && changes
                 .as_ref()
                 .is_none_or(|changes| !changes.has_changes())
             && (self.storage.backend.is_none() || self.versioned_backend_transactions())
         {
-            return Self::retain_query_table(data);
+            return Self::retain_query_table(data, &control);
         }
-        let control = self.query_retention_control()?;
         let source_columns = data.columns.snapshot();
         let source = data.document_store.read();
         let storage = Self::with_query_snapshot_schema(metadata, |schema| {

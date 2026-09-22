@@ -61,7 +61,7 @@ impl RetainedVectorIndex {
             for (_, _, vector) in &vectors[1..] {
                 self.control.check()?;
                 let score = cosine_similarity(query, vector);
-                if score > best {
+                if score.total_cmp(&best).is_gt() {
                     best = score;
                 }
             }
