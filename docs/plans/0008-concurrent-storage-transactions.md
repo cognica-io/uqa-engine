@@ -440,6 +440,17 @@ Document-allocation verification passes `cargo test -p uqa-storage` (222 unit, 1
 
 The actual published 0.3.6 compatibility verifiers also pass after the record-format-5 change: SQLite covers native, Key/Value and standalone graph conversion/reopen in all four file modes, and redb verifies creation, migration, prior-writer rejection and reopened values. The SQLite crate checksum is recorded above; the published redb crate checksum is `b20b61d2f69be5f39186f220599576ad28afe82d12740592c316c018ee721fc4`. Generated probe projects and logs remain outside the repository.
 
+## Retained table capture
+
+| Path | Implementation | Remaining acceptance |
+| --- | --- | --- |
+| Current statement/cursor and first fixed snapshot | Retain storage-owned document, text and vector snapshots; preserve physical index kind, analyzer revisions and selected table metadata. The common read-only adapter forwards projection, borrowed-cursor and controlled-read capabilities. | Ten common-storage cases, 32 Engine unit/internal integration cases and 97 Engine SQL integration cases pass; see the coverage below. |
+| Private writes already present in the selected source | Avoid recapturing and reapplying the same transaction rows; collect overlays only for referenced fixed-data sources that need them. | Fixed-data overlays and changed-schema adaptation still materialize documents and require further work within this PR. |
+
+Verification passes all 139 selected cases. Storage cases cover shared projections, tuple metadata, read-only enforcement after source handles close, original analyzer revisions and occurrences, borrowed cursor allowances, cancellation and exact/IVF/HNSW membership. Engine cases prove that current-source capture performs no document enumeration or private-row reread, then retain rows, physical index kind and field metadata through replacement, DROP and source close on memory, native SQLite, SQLite Key/Value and redb. They preserve private changes through rollback, added defaults and virtual generated columns. Existing regressions cover parent-gate workers, fixed/private/savepoint views, exact and indexed observations, text/vector SSI, trigger statement snapshots, directional/holdable cursors, independent process inserts and encrypted/compressed concurrent commits. Strict storage/Engine all-target Clippy with warnings denied, formatting, staged dependency/ownership checks, harness registration, headers, file-size limits and repository hygiene pass.
+
+These changes remove Engine's eager whole-table reconstruction for a source whose data and metadata are already selected. They do not establish complete bounded-state acceptance: fixed-view/schema adaptation, retained decoded index costs, private-overlay sharing and the remaining reclamation/spill matrix stay open. No timing or allocation workload is part of this unit.
+
 ## Acceptance matrix
 
 Use named synchronization events and channels/barriers. Start A, receive proof that A staged a change, start B, receive B's successful commit before allowing A to finish, and verify both session views and reopened state. Timeouts only detect a hung schedule. Where PostgreSQL permits multiple victims, fixtures specify allowed outcomes and serial histories instead of requiring one scheduler-dependent winner.

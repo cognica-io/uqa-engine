@@ -35,6 +35,8 @@ pub mod mvcc;
 // Narrow OS file calls; callers retain descriptor ownership and local arbitration.
 pub mod native_file;
 pub mod read_control;
+mod read_only_snapshot;
+pub use read_only_snapshot::ReadOnlySnapshot;
 pub mod spatial_index;
 pub mod statistics_maintenance;
 pub mod term_key;

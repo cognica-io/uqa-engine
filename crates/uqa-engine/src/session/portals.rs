@@ -8,6 +8,7 @@
 
 mod fetch;
 mod statement_snapshot;
+mod table_snapshot;
 mod worker;
 pub(crate) use statement_snapshot::StatementReadSnapshot;
 
@@ -66,9 +67,6 @@ impl Engine {
         let snapshot_gate = self
             .row_locks
             .begin_change_snapshot(&self.runtime.cancellation)?;
-        let transaction_overlay = self.capture_session_portal_transaction_overlay()?;
-        snapshot_gate.baseline()?;
-        drop(snapshot_gate);
         let table_sources = {
             let stack = self.session.transactions.lock();
             let fixed_snapshot = stack
@@ -76,10 +74,12 @@ impl Engine {
                 .and_then(|frame| frame.fixed_snapshot.as_ref());
             self.capture_session_portal_table_sources(fixed_snapshot, &table_dependencies)
         };
-        let table_snapshots = Self::detach_session_portal_table_snapshots(
-            table_sources,
-            transaction_overlay.as_ref(),
-        )?;
+        let transaction_overlay =
+            self.capture_session_portal_transaction_overlay(&table_sources)?;
+        snapshot_gate.baseline()?;
+        drop(snapshot_gate);
+        let table_snapshots = self
+            .detach_session_portal_table_snapshots(table_sources, transaction_overlay.as_ref())?;
         let mut catalog_snapshot = self.durable.snapshot();
         catalog_snapshot.graphs = self.freeze_graph_read_handles(
             table_dependencies.graphs.as_ref(),
@@ -350,6 +350,7 @@ impl Engine {
     }
 
     fn detach_session_portal_table_snapshots(
+        &self,
         sources: Vec<SessionPortalTableSource>,
         transaction_overlay: &std::collections::BTreeMap<
             String,
@@ -359,10 +360,15 @@ impl Engine {
         let mut snapshots = std::collections::BTreeMap::new();
         for (relation, data, metadata) in sources {
             let canonical = relation.qualified_name();
-            let changes = transaction_overlay.get(&canonical);
+            // A live source already includes this session's evaluated private writes.
+            let changes = if std::sync::Arc::ptr_eq(&data, &metadata) {
+                None
+            } else {
+                transaction_overlay.get(&canonical)
+            };
             snapshots.insert(
                 relation,
-                Self::detach_query_table(&data, &metadata, changes)?,
+                self.detach_query_table(&data, &metadata, changes)?,
             );
         }
         Ok(std::sync::Arc::new(snapshots))
@@ -381,7 +387,7 @@ impl Engine {
             .map(|(relation, table)| (relation.clone(), std::sync::Arc::clone(table)))
             .collect::<Vec<_>>();
         for (relation, table) in live_tables {
-            snapshots.insert(relation, Self::detach_query_table(&table, &table, None)?);
+            snapshots.insert(relation, self.detach_query_table(&table, &table, None)?);
         }
         Ok(std::sync::Arc::new(snapshots))
     }
@@ -486,10 +492,17 @@ impl Engine {
     }
 
     pub(crate) fn detach_query_table(
+        &self,
         data: &std::sync::Arc<TableState>,
         metadata: &std::sync::Arc<TableState>,
         changes: Option<&std::collections::BTreeMap<crate::DocId, Option<StoredDocument>>>,
     ) -> Result<std::sync::Arc<TableState>, SQLError> {
+        if std::sync::Arc::ptr_eq(data, metadata)
+            && changes.is_none_or(std::collections::BTreeMap::is_empty)
+            && (self.storage.backend.is_none() || self.versioned_backend_transactions())
+        {
+            return Self::retain_query_table(data);
+        }
         let documents = Self::detached_documents(data, changes)?;
         Self::detached_query_table_from_documents(data, metadata, &documents)
     }
@@ -562,64 +575,30 @@ impl Engine {
             Self::detached_inverted_index(metadata, &analyzer, &fts_fields, &adapted_documents)?;
         let vector_indexes = Self::detached_vector_indexes(metadata, &adapted_documents)?;
 
-        Ok(std::sync::Arc::new(TableState {
-            lifecycle_id: std::sync::atomic::AtomicU64::new(metadata.lifecycle_id()),
-            object_id: metadata.object_id(),
-            security: crate::state::CatalogCell::new(metadata.security()),
-            storage_generation: parking_lot::RwLock::new(metadata.storage_generation()),
-            document_store: parking_lot::RwLock::new(Box::new(document_store)),
-            inverted_index: parking_lot::RwLock::new(Box::new(inverted_index)),
-            vector_indexes: parking_lot::RwLock::new(vector_indexes),
-            fts_fields: crate::state::CatalogCell::new(fts_fields),
-            columns: crate::state::CatalogCell::new(metadata_columns),
-            columns_declared: crate::state::CatalogCell::from_snapshot(
-                metadata.columns_declared.snapshot(),
-            ),
-            next_id: parking_lot::Mutex::new(*metadata.next_id.lock()),
-            analyzer: crate::state::CatalogCell::new(analyzer),
-            column_stats: crate::state::CatalogCell::from_snapshot(
-                metadata.column_stats.snapshot(),
-            ),
-            column_stats_loaded: std::sync::atomic::AtomicBool::new(
-                metadata
-                    .column_stats_loaded
-                    .load(std::sync::atomic::Ordering::Acquire),
-            ),
-            column_stats_dirty: std::sync::atomic::AtomicBool::new(
-                metadata
-                    .column_stats_dirty
-                    .load(std::sync::atomic::Ordering::Acquire),
-            ),
-            table_checks: crate::state::CatalogCell::from_snapshot(
-                metadata.table_checks.snapshot(),
-            ),
-            foreign_keys: crate::state::CatalogCell::from_snapshot(
-                metadata.foreign_keys.snapshot(),
-            ),
-            key_constraints: crate::state::CatalogCell::from_snapshot(
-                metadata.key_constraints.snapshot(),
-            ),
-            hierarchy: crate::state::CatalogCell::from_snapshot(metadata.hierarchy.snapshot()),
-            value_indexes: parking_lot::RwLock::new(std::collections::BTreeMap::new()),
-            doc_count_cache: std::sync::atomic::AtomicU64::new(
-                u64::try_from(adapted_documents.len()).unwrap_or(u64::MAX),
-            ),
-            doc_count_dirty: std::sync::atomic::AtomicBool::new(false),
-            persistence: metadata.persistence,
-            on_commit: metadata.on_commit,
-        }))
+        Ok(Self::query_table_with_storage(
+            metadata,
+            Box::new(document_store),
+            Box::new(inverted_index),
+            vector_indexes,
+            u64::try_from(adapted_documents.len()).unwrap_or(u64::MAX),
+            false,
+        ))
     }
 
     fn capture_session_portal_transaction_overlay(
         &self,
+        sources: &[SessionPortalTableSource],
     ) -> Result<SessionPortalTransactionOverlay, SQLError> {
-        let relation_names = self
-            .storage
-            .tables
-            .read()
+        let relation_names = sources
             .iter()
-            .map(|(relation, table)| (table.storage_generation(), relation.qualified_name()))
+            .filter(|(_, data, metadata)| !std::sync::Arc::ptr_eq(data, metadata))
+            .map(|(relation, _, metadata)| {
+                (metadata.storage_generation(), relation.qualified_name())
+            })
             .collect::<std::collections::BTreeMap<_, _>>();
+        if relation_names.is_empty() {
+            return Ok(std::sync::Arc::default());
+        }
         let desired = {
             let stack = self.session.transactions.lock();
             let mut desired = std::collections::BTreeMap::<
@@ -660,7 +639,7 @@ impl Engine {
                 .iter()
                 .filter_map(|(doc_id, present)| present.then_some(*doc_id))
                 .collect::<Vec<_>>();
-            let documents = table
+            let mut documents = table
                 .document_store
                 .read()
                 .get_stored_many(&present)
@@ -670,7 +649,7 @@ impl Engine {
                 desired_documents
                     .into_iter()
                     .map(|(doc_id, present)| {
-                        let document = present.then(|| documents.get(&doc_id).cloned()).flatten();
+                        let document = present.then(|| documents.remove(&doc_id)).flatten();
                         (doc_id, document)
                     })
                     .collect(),

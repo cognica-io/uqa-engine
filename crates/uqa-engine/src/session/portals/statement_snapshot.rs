@@ -28,9 +28,6 @@ impl Engine {
         let snapshot_gate = self
             .row_locks
             .begin_change_snapshot(&self.runtime.cancellation)?;
-        let transaction_overlay = self.capture_session_portal_transaction_overlay()?;
-        snapshot_gate.baseline()?;
-        drop(snapshot_gate);
         let table_sources = {
             let stack = self.session.transactions.lock();
             let fixed_snapshot = stack
@@ -38,10 +35,12 @@ impl Engine {
                 .and_then(|frame| frame.fixed_snapshot.as_ref());
             self.capture_session_portal_table_sources(fixed_snapshot, &dependencies)
         };
-        let table_snapshots = Self::detach_session_portal_table_snapshots(
-            table_sources,
-            transaction_overlay.as_ref(),
-        )?;
+        let transaction_overlay =
+            self.capture_session_portal_transaction_overlay(&table_sources)?;
+        snapshot_gate.baseline()?;
+        drop(snapshot_gate);
+        let table_snapshots = self
+            .detach_session_portal_table_snapshots(table_sources, transaction_overlay.as_ref())?;
         let mut catalog_snapshot = self.durable.snapshot();
         catalog_snapshot.graphs = self.freeze_graph_read_handles(None, true)?;
         let catalog_snapshot = std::sync::Arc::new(catalog_snapshot);

@@ -273,11 +273,10 @@ impl Engine {
                     .fixed_transaction_row_changes(&resolved)
                     .map_err(|error| StorageBackendError::Other(error.to_string()))?;
                 return match changes.as_ref() {
-                    Some(changes) if !changes.is_empty() => {
-                        Self::detach_query_table(&table, &table, Some(changes))
-                            .map(Some)
-                            .map_err(|error| StorageBackendError::Other(error.to_string()))
-                    }
+                    Some(changes) if !changes.is_empty() => self
+                        .detach_query_table(&table, &table, Some(changes))
+                        .map(Some)
+                        .map_err(|error| StorageBackendError::Other(error.to_string())),
                     _ => Ok(Some(table)),
                 };
             }
@@ -332,12 +331,12 @@ impl Engine {
         let metadata_changed = Self::table_catalog_metadata_fingerprint(&snapshot_table)?
             != Self::table_catalog_metadata_fingerprint(metadata)?;
         match (changes.as_ref(), metadata_changed) {
-            (Some(changes), _) if !changes.is_empty() => {
-                Self::detach_query_table(&snapshot_table, metadata, Some(changes))
-                    .map(Some)
-                    .map_err(|error| StorageBackendError::Other(error.to_string()))
-            }
-            (_, true) => Self::detach_query_table(&snapshot_table, metadata, None)
+            (Some(changes), _) if !changes.is_empty() => self
+                .detach_query_table(&snapshot_table, metadata, Some(changes))
+                .map(Some)
+                .map_err(|error| StorageBackendError::Other(error.to_string())),
+            (_, true) => self
+                .detach_query_table(&snapshot_table, metadata, None)
                 .map(Some)
                 .map_err(|error| StorageBackendError::Other(error.to_string())),
             _ => Ok(Some(snapshot_table)),
