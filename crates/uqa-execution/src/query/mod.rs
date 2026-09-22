@@ -42,6 +42,7 @@ pub mod source_projection;
 
 pub mod locking;
 
+pub mod document_changes;
 pub mod document_projection;
 pub mod exact_lookup;
 pub mod generated;

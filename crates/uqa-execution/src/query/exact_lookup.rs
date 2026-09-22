@@ -11,7 +11,7 @@ use crate::{serializable::SerializableRelationRead, storage_errors::storage_erro
 use std::collections::BTreeMap;
 use uqa_core::{DocId, PostingList, Predicate, Value};
 use uqa_sql::{ast::ColumnDef, SQLError};
-use uqa_storage::{document_store::Document, StoredDocument};
+use uqa_storage::{document_store::Document, DocumentStore, StoredDocument};
 
 #[derive(Clone, Copy)]
 pub enum FieldPresence {
@@ -69,6 +69,43 @@ impl ExactLookupOverlay for BTreeMap<DocId, Option<StoredDocument>> {
                 .filter(|document| matches_fields(document.fields(), columns, values, presence))
                 .map(|_| *id)
         }))
+    }
+}
+
+impl ExactLookupOverlay for super::document_changes::DocumentChanges {
+    fn is_empty(&self) -> Result<bool, SQLError> {
+        Ok(!self.has_changes())
+    }
+
+    fn masks(&self, id: DocId) -> Result<bool, SQLError> {
+        Ok(self.contains_change(id))
+    }
+
+    fn find_match(
+        &self,
+        columns: &[String],
+        values: &[Value],
+        presence: FieldPresence,
+    ) -> Result<Option<DocId>, SQLError> {
+        for (id, present) in self.changes() {
+            if !present {
+                continue;
+            }
+            let mut matches = true;
+            for (column, expected) in columns.iter().zip(values) {
+                let actual = self
+                    .get_field(id, column)
+                    .map_err(|error| storage_error("read private exact key", &error))?;
+                if !matches_value(actual.as_ref(), expected, presence) {
+                    matches = false;
+                    break;
+                }
+            }
+            if matches {
+                return Ok(Some(id));
+            }
+        }
+        Ok(None)
     }
 }
 
