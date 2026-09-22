@@ -6,5 +6,7 @@
 
 #[path = "server/client.rs"]
 mod client;
+#[path = "server/concurrent_transactions.rs"]
+mod concurrent_transactions;
 #[path = "server/simple_query.rs"]
 mod simple_query;
