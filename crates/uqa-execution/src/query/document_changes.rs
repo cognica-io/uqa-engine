@@ -11,8 +11,8 @@ use std::sync::Arc;
 use uqa_core::{DocId, Value};
 use uqa_storage::read_control::StorageReadControl;
 use uqa_storage::{
-    document_store::Document, DocumentMetadata, DocumentStore, StorageBackendError,
-    StorageBackendResult, StoredDocument,
+    document_store::Document, DocumentMetadata, DocumentStore, RetainedDocumentFields,
+    StorageBackendError, StorageBackendResult, StoredDocument,
 };
 
 mod desired;
@@ -27,8 +27,7 @@ mod tests;
 #[derive(Clone)]
 enum Change {
     Deleted,
-    Owned(Arc<StoredDocument>),
-    Shared(Arc<Document>, DocumentMetadata),
+    Fields(RetainedDocumentFields, DocumentMetadata),
     Retained(Arc<dyn DocumentStore>),
 }
 
@@ -39,8 +38,7 @@ impl Change {
 
     fn fields(&self) -> Option<&Document> {
         match self {
-            Self::Owned(row) => Some(row.fields()),
-            Self::Shared(fields, _) => Some(fields),
+            Self::Fields(fields, _) => Some(fields),
             Self::Deleted | Self::Retained(_) => None,
         }
     }
@@ -48,9 +46,8 @@ impl Change {
     fn into_stored(self, id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
         Ok(match self {
             Self::Deleted => None,
-            Self::Owned(row) => Some(Arc::unwrap_or_clone(row)),
-            Self::Shared(fields, metadata) => Some(StoredDocument::with_metadata(
-                Arc::unwrap_or_clone(fields),
+            Self::Fields(fields, metadata) => Some(StoredDocument::with_metadata(
+                fields.into_document(),
                 metadata,
             )),
             Self::Retained(source) => return source.get_stored(id),
@@ -89,12 +86,9 @@ impl DocumentChanges {
             }
             let mut documents = source.get_stored_many(&ids)?;
             for (id, present) in page.iter().copied() {
-                result.insert(
+                result.insert_owned(
                     id,
-                    present
-                        .then(|| documents.remove(&id))
-                        .flatten()
-                        .map_or(Change::Deleted, |row| Change::Owned(Arc::new(row))),
+                    present.then(|| documents.remove(&id)).flatten(),
                     control,
                 )?;
             }
@@ -157,13 +151,55 @@ impl DocumentChanges {
         document: Option<(Arc<Document>, DocumentMetadata)>,
         control: &StorageReadControl,
     ) -> StorageBackendResult<()> {
+        let control = self.retention_control(control);
+        let document = document
+            .map(|(fields, metadata)| {
+                RetainedDocumentFields::new(fields, &control).map(|fields| (fields, metadata))
+            })
+            .transpose()?;
         self.insert(
             id,
             document.map_or(Change::Deleted, |(fields, metadata)| {
-                Change::Shared(fields, metadata)
+                Change::Fields(fields, metadata)
+            }),
+            &control,
+        )
+    }
+
+    fn insert_owned(
+        &mut self,
+        id: DocId,
+        row: Option<StoredDocument>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<()> {
+        self.insert_shared(
+            id,
+            row.map(|row| {
+                let (fields, metadata) = row.into_parts();
+                (Arc::new(fields), metadata)
             }),
             control,
         )
+    }
+
+    /// Capture already charged immutable fields without copying or reserving their payload again.
+    pub fn from_retained(
+        rows: impl IntoIterator<Item = (DocId, Option<(RetainedDocumentFields, DocumentMetadata)>)>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        control.check()?;
+        let mut selected = Self::default();
+        for (id, row) in rows {
+            selected.insert(
+                id,
+                row.map_or(Change::Deleted, |(fields, metadata)| {
+                    Change::Fields(fields, metadata)
+                }),
+                control,
+            )?;
+        }
+        control.check()?;
+        Ok(selected)
     }
 
     /// Capture evaluated fields without copying their payloads, then merge the complete selection with an older view.
@@ -187,11 +223,7 @@ impl DocumentChanges {
         control.check()?;
         let mut selected = Self::default();
         for (id, row) in rows {
-            selected.insert(
-                id,
-                row.map_or(Change::Deleted, |row| Change::Owned(Arc::new(row))),
-                control,
-            )?;
+            selected.insert_owned(id, row, control)?;
         }
         control.check()?;
         Ok(selected)
@@ -301,8 +333,7 @@ impl DocumentStore for DocumentChanges {
 
     fn get_metadata(&self, id: DocId) -> StorageBackendResult<Option<DocumentMetadata>> {
         Ok(match self.get(id) {
-            Some(Change::Owned(row)) => Some(row.metadata()),
-            Some(Change::Shared(_, metadata)) => Some(*metadata),
+            Some(Change::Fields(_, metadata)) => Some(*metadata),
             Some(Change::Retained(source)) => return source.get_metadata(id),
             Some(Change::Deleted) | None => None,
         })

@@ -51,12 +51,15 @@ impl Engine {
         document: Option<Arc<Document>>,
     ) -> Result<(), SQLError> {
         let table = self.command_overlay_table_name(table)?;
+        let control = self.query_retention_control()?;
         let document = document
             .map(|fields| -> Result<_, SQLError> {
-                Ok(crate::CommandStoredDocument {
+                crate::CommandStoredDocument::new(
                     fields,
-                    metadata: DocumentMetadata::with_tuple_xmin(self.tuple_version_xid()?),
-                })
+                    DocumentMetadata::with_tuple_xmin(self.tuple_version_xid()?),
+                    &control,
+                )
+                .map_err(|error| storage_error("retain command document", &error))
             })
             .transpose()?;
         let mut overlays = self.session.command_mutation_overlays.lock();
@@ -235,13 +238,13 @@ impl Engine {
         let control = self.query_retention_control()?;
         for overlay in overlays.iter() {
             if let Some(documents) = overlay.documents.get(&canonical) {
-                let additions = DocumentChanges::from_shared(
+                let additions = DocumentChanges::from_retained(
                     documents.iter().map(|(id, document)| {
                         (
                             *id,
                             document
                                 .as_ref()
-                                .map(|document| (Arc::clone(&document.fields), document.metadata)),
+                                .map(|document| (document.fields.clone(), document.metadata)),
                         )
                     }),
                     &control,

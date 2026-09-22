@@ -11,6 +11,9 @@ use super::{
     Serialize, Serializer, TemporalValue,
 };
 
+mod retention;
+pub use retention::ValueRetentionError;
+
 /// Dynamic value type for document fields and posting payload extras.
 ///
 /// Covers the JSON-like values the engine round-trips through a posting

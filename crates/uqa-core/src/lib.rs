@@ -36,7 +36,7 @@ pub use types::{
     BudgetedArrayElements, DecimalValue, DocId, Edge, EdgeId, FieldName, GeneralizedPayload,
     GeneralizedPostingEntry, IndexStats, JsonbKeyError, PathExpr, PathSegment, Payload,
     PostingEntry, TemporalValue, TokenOccurrence, TokenOccurrenceError, TokenOffsets, Value,
-    Vertex, VertexId,
+    ValueRetentionError, Vertex, VertexId,
 };
 
 mod scored_entry;

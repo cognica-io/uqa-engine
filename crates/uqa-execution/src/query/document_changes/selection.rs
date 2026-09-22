@@ -31,6 +31,14 @@ impl Selection {
 }
 
 impl DocumentChanges {
+    pub(super) fn retention_control(&self, control: &StorageReadControl) -> StorageReadControl {
+        let memory = self
+            .0
+            .as_ref()
+            .map_or(control.memory(), |selection| selection.rows.budget());
+        StorageReadControl::new(memory, control.cancellation())
+    }
+
     pub(super) fn rows(&self) -> &[(DocId, Change)] {
         self.0.as_ref().map_or(&[], |selection| &selection.rows)
     }

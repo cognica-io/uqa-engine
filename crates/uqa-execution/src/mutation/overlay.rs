@@ -9,12 +9,26 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use uqa_core::DocId;
-use uqa_storage::document_store::{Document, DocumentMetadata};
+use uqa_storage::document_store::{Document, DocumentMetadata, RetainedDocumentFields};
+use uqa_storage::{read_control::StorageReadControl, StorageBackendResult};
 
 #[derive(Clone)]
 pub struct CommandStoredDocument {
-    pub fields: Arc<Document>,
+    pub fields: RetainedDocumentFields,
     pub metadata: DocumentMetadata,
+}
+
+impl CommandStoredDocument {
+    pub fn new(
+        fields: Arc<Document>,
+        metadata: DocumentMetadata,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        Ok(Self {
+            fields: RetainedDocumentFields::new(fields, control)?,
+            metadata,
+        })
+    }
 }
 
 #[derive(Clone, Default)]

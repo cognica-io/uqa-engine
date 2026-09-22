@@ -135,7 +135,93 @@ fn owning_iteration_moves_payloads_and_keeps_capacity_charged_until_iterator_dro
         panic!()
     };
     assert_eq!(payload.as_ptr(), address);
-    assert_eq!(control.memory().used(), retained);
+    assert!(control.memory().used() > 0);
+    assert!(control.memory().used() < retained);
     drop(rows);
     assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn separate_captures_share_the_command_payload_charge_until_the_last_view_drops() {
+    let control = control();
+    let fields =
+        RetainedDocumentFields::new(Arc::new(document(42).into_fields()), &control).unwrap();
+    let payload = control.memory().used();
+    let capture = || {
+        DocumentChanges::from_retained(
+            [(
+                1,
+                Some((fields.clone(), DocumentMetadata::with_tuple_xmin(41))),
+            )],
+            &control,
+        )
+        .unwrap()
+    };
+    let first = capture();
+    let selection = control.memory().used() - payload;
+    let second = capture();
+    assert_eq!(control.memory().used(), payload + selection * 2);
+    let reader = first.snapshot().unwrap().snapshot().unwrap();
+    drop(fields);
+    drop(first);
+    assert_eq!(control.memory().used(), payload + selection * 2);
+    drop(second);
+    assert_eq!(control.memory().used(), payload + selection);
+    assert_eq!(reader.get_field(1, "key").unwrap(), Some(Value::Int(42)));
+    assert_eq!(
+        reader.get_metadata(1).unwrap().unwrap().tuple_xmin(),
+        Some(41)
+    );
+    drop(reader);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn oversized_replacement_keeps_the_original_fields_and_cannot_switch_allowances() {
+    let control = control();
+    let mut changes =
+        DocumentChanges::from_rows([(1, Some(document(42)))].into(), &control).unwrap();
+    let original = changes.snapshot().unwrap();
+    let retained = control.memory().used();
+    let full = control
+        .memory()
+        .reserve(control.memory().limit() - retained - 4096)
+        .unwrap();
+    let other = StorageReadControl::with_limit(usize::MAX);
+    let error = changes
+        .insert_shared(
+            1,
+            Some((
+                Arc::new(document(99).into_fields()),
+                DocumentMetadata::default(),
+            )),
+            &other,
+        )
+        .unwrap_err();
+    assert_eq!(
+        crate::storage_errors::storage_error("payload", &error).sqlstate(),
+        Some("53200")
+    );
+    assert_eq!(other.memory().used(), 0);
+    drop(full);
+    assert_eq!(control.memory().used(), retained);
+    assert_eq!(changes.get_field(1, "key").unwrap(), Some(Value::Int(42)));
+    assert_eq!(original.get_field(1, "key").unwrap(), Some(Value::Int(42)));
+}
+
+#[test]
+fn copied_private_payloads_reject_quota_overflow_and_release_capture_scratch() {
+    let mut probe = Probe::new(&source());
+    probe.allow_copy = true;
+    let control = StorageReadControl::with_limit(4096);
+    let desired = selected(&control, &[(1, true)]);
+    assert!(matches!(
+        DocumentChanges::capture_owned(&probe, desired, &control),
+        Err(StorageBackendError::Memory(_))
+    ));
+    assert_eq!(control.memory().used(), 0);
+    assert_eq!(
+        probe.source.get_field(1, "key").unwrap(),
+        Some(Value::Int(10))
+    );
 }

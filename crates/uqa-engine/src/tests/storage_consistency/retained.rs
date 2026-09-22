@@ -27,6 +27,50 @@ fn engines() -> (tempfile::TempDir, Vec<Engine>) {
 }
 
 #[test]
+fn private_payload_quota_failure_rolls_back_the_statement_and_savepoint_remains_usable() {
+    let (_directory, engines) = engines();
+    for engine in engines {
+        engine.sql("CREATE TABLE payload_quota (id INTEGER PRIMARY KEY, body TEXT); INSERT INTO payload_quota VALUES (1, 'original'); BEGIN; SAVEPOINT before_payload", &[]).unwrap();
+        let control = engine.query_retention_control().unwrap();
+        let full = control
+            .memory()
+            .reserve(control.memory().limit() - control.memory().used() - 128 * 1024)
+            .unwrap();
+        let error = engine
+            .sql(
+                "INSERT INTO payload_quota VALUES (2, 'small'), (3, $1)",
+                &[uqa_sql::SQLParam::Scalar(Value::Str(
+                    "x".repeat(512 * 1024),
+                ))],
+            )
+            .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("53200"), "{error}");
+        drop(full);
+        engine.sql("ROLLBACK TO before_payload", &[]).unwrap();
+        let rows = engine
+            .sql("SELECT id, body FROM payload_quota ORDER BY id", &[])
+            .unwrap();
+        assert_eq!(rows.rows.len(), 1);
+        assert_eq!(rows.value_at(0, 0), Some(&Value::Int(1)));
+        assert_eq!(rows.value_at(0, 1), Some(&s("original")));
+        engine
+            .sql(
+                "INSERT INTO payload_quota VALUES (4, 'after recovery'); COMMIT",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .sql("SELECT id FROM payload_quota ORDER BY id", &[])
+                .unwrap()
+                .rows
+                .len(),
+            2
+        );
+    }
+}
+
+#[test]
 fn retained_query_selection_shares_provider_memory_and_survives_budget_rejection() {
     use uqa_execution::query::document_changes::DocumentSelection;
     let (_directory, engines) = engines();

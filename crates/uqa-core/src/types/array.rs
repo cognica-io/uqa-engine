@@ -86,6 +86,22 @@ impl ArrayValue {
     pub fn retained_header_bytes(&self) -> usize {
         std::mem::size_of::<ArrayStorage>()
     }
+
+    pub(super) fn retained_buffer_bytes(&self) -> Result<usize, crate::memory::MemoryError> {
+        let buffers = [
+            (self.storage.elements.capacity(), size_of::<Value>()),
+            (self.storage.dimensions.capacity(), size_of::<usize>()),
+            (self.storage.lower_bounds.capacity(), size_of::<i32>()),
+        ];
+        buffers
+            .into_iter()
+            .try_fold(self.retained_header_bytes(), |bytes, (capacity, width)| {
+                capacity
+                    .checked_mul(width)
+                    .and_then(|buffer| bytes.checked_add(buffer))
+                    .ok_or(crate::memory::MemoryError::SizeOverflow)
+            })
+    }
 }
 
 fn normalize_nested_arrays(elements: Vec<Value>) -> Vec<Value> {
