@@ -80,6 +80,11 @@ impl CancellationToken {
         self.flag.load(Ordering::Acquire)
     }
 
+    /// Whether both handles observe the same signal, independently of its current cancelled state.
+    pub fn shares_signal(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.flag, &other.flag)
+    }
+
     /// Return [`QueryCancelled`] if cancellation was signalled.
     /// `Ok(())` otherwise.
     ///
@@ -113,6 +118,21 @@ mod tests {
         tok.cancel();
         assert!(observer.is_cancelled());
         assert_eq!(observer.check(), Err(QueryCancelled));
+    }
+
+    #[test]
+    fn signal_identity_distinguishes_independent_tokens_with_equal_states() {
+        let first = CancellationToken::new();
+        let retained = first.clone();
+        let independent = CancellationToken::new();
+        assert!(first.shares_signal(&retained));
+        assert!(!first.shares_signal(&independent));
+        first.cancel();
+        independent.cancel();
+        assert!(first.shares_signal(&retained));
+        assert!(!first.shares_signal(&independent));
+        first.reset();
+        assert!(first.shares_signal(&retained));
     }
 
     #[test]

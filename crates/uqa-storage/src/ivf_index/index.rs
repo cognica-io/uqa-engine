@@ -45,11 +45,29 @@ impl VectorIndex for IVFIndex {
     }
 
     fn search_knn(&self, query: &[f32], k: usize) -> StorageBackendResult<PostingList> {
-        self.search_top_k(query, k)
+        self.search_top_k(query, k, None)
     }
 
     fn search_threshold(&self, query: &[f32], threshold: f32) -> StorageBackendResult<PostingList> {
-        self.search_above_threshold(query, threshold)
+        self.search_above_threshold(query, threshold, None)
+    }
+
+    fn search_knn_with_control(
+        &self,
+        query: &[f32],
+        k: usize,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<PostingList> {
+        self.search_top_k(query, k, Some(control))
+    }
+
+    fn search_threshold_with_control(
+        &self,
+        query: &[f32],
+        threshold: f32,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<PostingList> {
+        self.search_above_threshold(query, threshold, Some(control))
     }
 
     fn count(&self) -> StorageBackendResult<usize> {
@@ -68,7 +86,9 @@ impl VectorIndex for IVFIndex {
         &self,
         control: &crate::read_control::StorageReadControl,
     ) -> StorageBackendResult<Arc<dyn VectorIndex>> {
-        crate::ReadOnlySnapshot::from_budgeted(self.snapshot_controlled(control)?)?.snapshot()
+        crate::ReadOnlySnapshot::from_budgeted(self.snapshot_controlled(control)?)?
+            .with_vector_read_control(control)?
+            .snapshot()
     }
 
     fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn VectorIndex>> {

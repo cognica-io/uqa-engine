@@ -7,11 +7,11 @@
 //! Greedy hierarchy traversal and bounded layer search.
 
 use std::cmp::{Ordering, Reverse};
-use std::collections::{BinaryHeap, HashSet};
 
 use super::metric::distance;
 use super::prepare::{check, Control};
 use super::types::{HNSWIndex, NodeId};
+use crate::vector_index::query::{QueryHeap, QuerySet, VectorQueryBuffer};
 use crate::StorageBackendResult;
 
 #[derive(Debug, Clone, Copy)]
@@ -95,26 +95,28 @@ impl HNSWIndex {
         ef: usize,
         layer: usize,
         control: Control<'_>,
-    ) -> StorageBackendResult<Vec<Candidate>> {
+        workspace: Control<'_>,
+    ) -> StorageBackendResult<VectorQueryBuffer<Candidate>> {
         check(control)?;
         let ef = ef.max(1);
-        let mut visited = HashSet::with_capacity(ef.saturating_mul(2).min(self.nodes.len()));
-        let mut candidates = BinaryHeap::<Reverse<Candidate>>::new();
-        let mut nearest = BinaryHeap::<Candidate>::new();
+        let mut visited =
+            QuerySet::with_capacity(ef.saturating_mul(2).min(self.nodes.len()), workspace)?;
+        let mut candidates = QueryHeap::<Reverse<Candidate>>::new(workspace);
+        let mut nearest = QueryHeap::<Candidate>::new(workspace);
         for entry in entries {
             check(control)?;
             let Some(node) = self.nodes.get(entry) else {
                 continue;
             };
-            if !visited.insert(*entry) {
+            if !visited.insert(*entry)? {
                 continue;
             }
             let candidate = Candidate {
                 distance: distance(query, &node.normalized_vector),
                 node_id: *entry,
             };
-            candidates.push(Reverse(candidate));
-            nearest.push(candidate);
+            candidates.push(Reverse(candidate))?;
+            nearest.push(candidate)?;
         }
         while let Some(Reverse(current)) = candidates.pop() {
             check(control)?;
@@ -130,7 +132,7 @@ impl HNSWIndex {
             };
             for &neighbor_id in neighbors {
                 check(control)?;
-                if !visited.insert(neighbor_id) {
+                if !visited.insert(neighbor_id)? {
                     continue;
                 }
                 let Some(neighbor) = self.nodes.get(&neighbor_id) else {
@@ -141,8 +143,8 @@ impl HNSWIndex {
                     node_id: neighbor_id,
                 };
                 if nearest.len() < ef || nearest.peek().is_some_and(|worst| candidate < *worst) {
-                    candidates.push(Reverse(candidate));
-                    nearest.push(candidate);
+                    candidates.push(Reverse(candidate))?;
+                    nearest.push(candidate)?;
                     if nearest.len() > ef {
                         nearest.pop();
                     }
@@ -150,7 +152,7 @@ impl HNSWIndex {
             }
         }
         let mut result = nearest.into_vec();
-        result.sort();
+        result.sort_unstable();
         check(control)?;
         Ok(result)
     }
@@ -160,14 +162,14 @@ impl HNSWIndex {
         query: &[f32],
         ef: usize,
         control: Control<'_>,
-    ) -> StorageBackendResult<Vec<Candidate>> {
+    ) -> StorageBackendResult<VectorQueryBuffer<Candidate>> {
         check(control)?;
         let Some(mut entry) = self.entry_point else {
-            return Ok(Vec::new());
+            return Ok(VectorQueryBuffer::new(control));
         };
         for layer in (1..=self.max_level).rev() {
             entry = self.greedy_search_layer(query, entry, layer, control)?;
         }
-        self.search_layer(query, &[entry], ef, 0, control)
+        self.search_layer(query, &[entry], ef, 0, control, control)
     }
 }

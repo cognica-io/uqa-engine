@@ -271,7 +271,9 @@ impl VectorIndex for KeyValueIVFIndex {
                 return Ok(cached.snapshot);
             }
             let candidate = cached.value.trained_snapshot_controlled(read.control())?;
-            ReadOnlySnapshot::from_budgeted(candidate)?.snapshot()
+            ReadOnlySnapshot::from_budgeted(candidate)?
+                .with_vector_read_control(read.control())?
+                .snapshot()
         })
     }
 }

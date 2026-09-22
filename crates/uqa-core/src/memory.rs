@@ -12,11 +12,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 mod deque;
+mod hash_set;
+mod heap;
 mod map;
 mod string;
 mod vec;
 
 pub use deque::BudgetedDeque;
+pub use hash_set::BudgetedHashSet;
+pub use heap::BudgetedBinaryHeap;
 pub use map::{BudgetedMap, BudgetedMapIter, PreparedMapEntry};
 pub use string::BudgetedString;
 pub use vec::BudgetedVec;

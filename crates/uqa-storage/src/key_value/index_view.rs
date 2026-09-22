@@ -18,11 +18,15 @@ use super::{codec::other_error, KeyValueBatch, KeyValueRead, KeyValueReadRevisio
 use crate::vector_index::VectorIndex;
 use crate::{ReadOnlySnapshot, StorageBackendResult};
 
+#[cfg(test)]
+mod tests;
+
 pub(super) struct IndexState<T> {
     pub(super) value: ReadOnlySnapshot<T>,
     pub(super) snapshot: Arc<dyn VectorIndex>,
     pub(super) revision: Option<u64>,
     pub(super) definition_candidate: bool,
+    control: Option<crate::read_control::StorageReadControl>,
 }
 
 impl<T> Clone for IndexState<T> {
@@ -32,7 +36,30 @@ impl<T> Clone for IndexState<T> {
             snapshot: Arc::clone(&self.snapshot),
             revision: self.revision,
             definition_candidate: self.definition_candidate,
+            control: self.control.clone(),
         }
+    }
+}
+
+impl<T: VectorIndex + 'static> IndexState<T> {
+    fn for_read(
+        &mut self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        // Keep the physical cache value unbound. Reuse a reader only when its allowance and cancellation signal match, so an independent caller never inherits another reader's cancellation.
+        let mut reader = self.clone();
+        reader.value = reader.value.with_vector_read_control(control)?;
+        if !self
+            .control
+            .as_ref()
+            .is_some_and(|cached| cached.shares_context(control))
+        {
+            self.snapshot = reader.value.snapshot()?;
+            self.control = Some(control.clone());
+        }
+        reader.snapshot = Arc::clone(&self.snapshot);
+        reader.control = self.control.clone();
+        Ok(reader)
     }
 }
 
@@ -57,22 +84,24 @@ impl<T: VectorIndex + 'static> IndexView<T> {
     ) -> StorageBackendResult<IndexState<T>> {
         read.control().check()?;
         let identity = read.revision(prefixes)?;
-        if let Some((cached_identity, state)) = self.cached.lock().as_ref() {
+        if let Some((cached_identity, state)) = self.cached.lock().as_mut() {
             if *cached_identity == identity {
-                return Ok(state.clone());
+                return state.for_read(read.control());
             }
         }
         let definition_candidate = self.preparing_definition.load(Ordering::Acquire);
         let (value, revision) = load(definition_candidate)?;
         let value = ReadOnlySnapshot::from_budgeted(value)?;
-        let state = IndexState {
+        let mut state = IndexState {
             snapshot: value.snapshot()?,
             value,
             revision,
             definition_candidate,
+            control: None,
         };
-        *self.cached.lock() = Some((identity, state.clone()));
-        Ok(state)
+        let reader = state.for_read(read.control())?;
+        *self.cached.lock() = Some((identity, state));
+        Ok(reader)
     }
 
     pub(super) fn evaluate(

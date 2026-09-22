@@ -38,6 +38,10 @@ impl StorageReadControl {
     pub fn cancellation(&self) -> &CancellationToken {
         &self.cancellation
     }
+    pub(crate) fn shares_context(&self, other: &Self) -> bool {
+        self.memory.shares_allowance(&other.memory)
+            && self.cancellation.shares_signal(&other.cancellation)
+    }
     pub fn check(&self) -> StorageBackendResult<()> {
         self.cancellation.check()?;
         Ok(())

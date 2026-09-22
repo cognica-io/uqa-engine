@@ -47,11 +47,15 @@ fn failed_native_cache_replacement_preserves_the_previous_retained_generation() 
         .reserve(control.memory().limit() - used)
         .unwrap();
     assert!(index.snapshot().is_err());
-    assert_eq!(nearest(&old, &[1.0, 0.0]), vec![1]);
+    assert!(matches!(
+        old.search_knn(&[1.0, 0.0], 1),
+        Err(uqa_storage::StorageBackendError::Memory(_))
+    ));
     assert_eq!(old.count().unwrap(), 2);
     assert_eq!(control.memory().used(), control.memory().limit());
     drop(full);
     assert_eq!(control.memory().used(), used);
+    assert_eq!(nearest(&old, &[1.0, 0.0]), vec![1]);
     let current = graph(&index);
     assert_eq!(current.count().unwrap(), 3);
     drop((other, writer, current, index, connection, old));

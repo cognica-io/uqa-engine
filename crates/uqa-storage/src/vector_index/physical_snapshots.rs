@@ -109,3 +109,72 @@ fn rejected_physical_captures_release_partial_reservations_and_preserve_existing
         assert_eq!(control.memory().used(), 0);
     }
 }
+
+#[test]
+fn physical_queries_release_failed_workspace_and_keep_the_captured_control() {
+    for source in sources() {
+        let control = StorageReadControl::with_limit(1 << 20);
+        let snapshot = source.snapshot_with_control(&control).unwrap();
+        let other = StorageReadControl::with_limit(1 << 20);
+        let nested = snapshot.snapshot_with_control(&other).unwrap();
+        let expected = snapshot.search_knn(&[1.0, 0.0], 8).unwrap();
+        let used = control.memory().used();
+        for remaining in [0, 64] {
+            let held = control
+                .memory()
+                .reserve(control.memory().limit() - used - remaining)
+                .unwrap();
+            for reader in [&snapshot, &nested] {
+                assert!(matches!(
+                    reader.search_knn(&[1.0, 0.0], 8),
+                    Err(StorageBackendError::Memory(_))
+                ));
+                assert!(matches!(
+                    reader.search_threshold(&[1.0, 0.0], -1.0),
+                    Err(StorageBackendError::Memory(_))
+                ));
+                assert!(matches!(
+                    reader.search_knn_with_control(&[1.0, 0.0], 8, &other),
+                    Err(StorageBackendError::Memory(_))
+                ));
+                assert!(matches!(
+                    reader.search_threshold_with_control(&[1.0, 0.0], -1.0, &other),
+                    Err(StorageBackendError::Memory(_))
+                ));
+                assert_eq!(reader.count().unwrap(), source.count().unwrap());
+                assert!(reader.search_knn(&[1.0, 0.0], 0).unwrap().is_empty());
+                assert_eq!(
+                    control.memory().used(),
+                    control.memory().limit() - remaining
+                );
+                assert_eq!(other.memory().used(), 0);
+            }
+            drop(held);
+            assert_eq!(snapshot.search_knn(&[1.0, 0.0], 8).unwrap(), expected);
+            assert_eq!(control.memory().used(), used);
+        }
+        control.cancellation().cancel();
+        for reader in [&snapshot, &nested] {
+            assert!(matches!(
+                reader.search_knn_with_control(&[1.0, 0.0], 8, &other),
+                Err(StorageBackendError::Cancelled(_))
+            ));
+            assert!(matches!(
+                reader.search_threshold(&[1.0, 0.0], -1.0),
+                Err(StorageBackendError::Cancelled(_))
+            ));
+            assert!(matches!(
+                reader.count(),
+                Err(StorageBackendError::Cancelled(_))
+            ));
+            assert!(matches!(
+                reader.contains_document(1),
+                Err(StorageBackendError::Cancelled(_))
+            ));
+        }
+        control.cancellation().reset();
+        assert_eq!(nested.search_knn(&[1.0, 0.0], 8).unwrap(), expected);
+        drop((snapshot, nested));
+        assert_eq!(control.memory().used(), 0);
+    }
+}

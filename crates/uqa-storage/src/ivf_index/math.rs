@@ -20,10 +20,6 @@ pub(super) fn l2_normalize(vector: &mut [f32]) -> f32 {
     magnitude
 }
 
-pub(super) fn dot(left: &[f32], right: &[f32]) -> f32 {
-    left.iter().zip(right).map(|(x, y)| x * y).sum()
-}
-
 pub(super) fn nearest_centroid_controlled(
     vector: &[f32],
     centroids: &[Vec<f32>],

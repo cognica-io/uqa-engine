@@ -16,7 +16,11 @@ mod inverted;
 mod vectors;
 
 /// Adapt an already captured snapshot to an owned read-only handle without copying its contents. The caller must supply the snapshot selected for its visibility boundary; this adapter does not capture or advance that boundary.
-pub struct ReadOnlySnapshot<T: ?Sized>(Arc<T>, Option<Arc<MemoryReservation>>);
+pub struct ReadOnlySnapshot<T: ?Sized>(
+    Arc<T>,
+    Option<Arc<MemoryReservation>>,
+    Option<crate::read_control::StorageReadControl>,
+);
 
 impl<T> ReadOnlySnapshot<T> {
     /// Share a captured value without separating its allocations from their original allowance.
@@ -31,7 +35,7 @@ impl<T> ReadOnlySnapshot<T> {
 impl<T: ?Sized> ReadOnlySnapshot<T> {
     #[must_use]
     pub fn new(snapshot: Arc<T>) -> Self {
-        Self(snapshot, None)
+        Self(snapshot, None, None)
     }
 
     pub(crate) fn with_retention(
@@ -42,13 +46,17 @@ impl<T: ?Sized> ReadOnlySnapshot<T> {
         let mut pending = (snapshot, memory);
         let shared = pending.1.budget().reserve(size_of::<MemoryReservation>())?;
         pending.1.absorb(shared);
-        Ok(Self(pending.0, Some(Arc::new(pending.1))))
+        Ok(Self(pending.0, Some(Arc::new(pending.1)), None))
     }
 }
 
 impl<T: ?Sized> Clone for ReadOnlySnapshot<T> {
     fn clone(&self) -> Self {
-        Self(Arc::clone(&self.0), self.1.as_ref().map(Arc::clone))
+        Self(
+            Arc::clone(&self.0),
+            self.1.as_ref().map(Arc::clone),
+            self.2.clone(),
+        )
     }
 }
 

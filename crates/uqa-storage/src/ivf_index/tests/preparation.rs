@@ -264,3 +264,49 @@ fn controlled_training_retains_a_detached_snapshot_and_preserves_stale_source_on
     drop(candidate);
     assert_eq!(control.memory().used(), 0);
 }
+
+#[test]
+fn stale_query_training_uses_its_own_workspace_and_preserves_the_source_on_rejection() {
+    let mut source = trained();
+    for document in 1..=3 {
+        source.delete(document).unwrap();
+    }
+    let before = source.metadata_snapshot();
+    assert_eq!(before.state, IVFState::Stale);
+    let control = StorageReadControl::with_limit(1 << 20);
+    let snapshot = source.snapshot_controlled(&control).unwrap();
+    let retained = control.memory().used();
+    // Normalization fits, but the per-query training workspace must be separately reserved.
+    let held = control
+        .memory()
+        .reserve(control.memory().limit() - retained - 64)
+        .unwrap();
+    assert!(matches!(
+        snapshot.search_knn_with_control(&[1.0, 0.0, 0.0], 2, &control),
+        Err(StorageBackendError::Memory(_))
+    ));
+    assert_eq!(snapshot.metadata_snapshot(), before);
+    assert_eq!(source.metadata_snapshot(), before);
+    assert_eq!(control.memory().used(), control.memory().limit() - 64);
+    drop(held);
+    control.cancellation().cancel();
+    assert!(matches!(
+        snapshot.search_knn_with_control(&[1.0, 0.0, 0.0], 2, &control),
+        Err(StorageBackendError::Cancelled(_))
+    ));
+    assert_eq!(snapshot.metadata_snapshot(), before);
+    assert_eq!(control.memory().used(), retained);
+    control.cancellation().reset();
+    let expected = source.detached_clone();
+    assert_eq!(
+        snapshot
+            .search_knn_with_control(&[1.0, 0.0, 0.0], 2, &control)
+            .unwrap(),
+        expected.search_knn(&[1.0, 0.0, 0.0], 2).unwrap()
+    );
+    assert_eq!(snapshot.metadata_snapshot(), expected.metadata_snapshot());
+    assert_eq!(source.metadata_snapshot(), before);
+    assert_eq!(control.memory().used(), retained);
+    drop(snapshot);
+    assert_eq!(control.memory().used(), 0);
+}

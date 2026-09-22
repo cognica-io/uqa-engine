@@ -57,6 +57,14 @@ fn current_memory_vector_capture_uses_the_session_allowance_and_preserves_old_re
         ] {
             assert_eq!(error.sqlstate(), Some("53200"), "{error}");
         }
+        assert!(matches!(
+            view.vector_indexes.read()["v"].search_knn(&[1.0, 0.0], 1),
+            Err(uqa_storage::StorageBackendError::Memory(_))
+        ));
+        assert!(matches!(
+            view.vector_indexes.read()["v"].search_threshold(&[1.0, 0.0], 0.9),
+            Err(uqa_storage::StorageBackendError::Memory(_))
+        ));
         drop(full);
         engine
             .sql("UPDATE memory_vectors SET v = ARRAY[0.0, 1.0]", &[])
@@ -66,6 +74,12 @@ fn current_memory_vector_capture_uses_the_session_allowance_and_preserves_old_re
         drop(engine);
         let nested = view.vector_indexes.read()["v"].snapshot().unwrap();
         drop(view);
+        control.cancellation().cancel();
+        assert!(matches!(
+            nested.search_threshold(&[1.0, 0.0], 0.9),
+            Err(uqa_storage::StorageBackendError::Cancelled(_))
+        ));
+        control.cancellation().reset();
         assert_eq!(
             nested
                 .search_threshold(&[1.0, 0.0], 0.9)

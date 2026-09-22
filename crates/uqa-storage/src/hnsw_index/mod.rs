@@ -13,6 +13,7 @@ mod mutation;
 mod neighbors;
 mod persistence;
 mod prepare;
+mod query;
 mod restore;
 mod search;
 mod types;

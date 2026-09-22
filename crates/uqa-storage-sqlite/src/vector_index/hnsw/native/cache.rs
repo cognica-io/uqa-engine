@@ -42,16 +42,24 @@ impl SQLiteHNSWIndex {
         };
         if let Some(cached) = self.graph.read().as_ref() {
             if matches!(&cached.identity, CacheIdentity::Native(view) if view == &identity) {
-                return Ok(Some(cached.graph.clone()));
+                return Ok(Some(
+                    cached
+                        .graph
+                        .clone()
+                        .with_vector_read_control(&read.snapshot.control)?,
+                ));
             }
         }
         let graph = ReadOnlySnapshot::from_budgeted(loading::load_graph(read, meta)?)?;
+        let reader = graph
+            .clone()
+            .with_vector_read_control(&read.snapshot.control)?;
         *self.graph.write() = Some(CachedGraph {
             revision: meta.3,
             identity: CacheIdentity::Native(identity),
-            graph: graph.clone(),
+            graph,
         });
-        Ok(Some(graph))
+        Ok(Some(reader))
     }
 }
 

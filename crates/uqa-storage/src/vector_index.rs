@@ -19,6 +19,7 @@ use crate::{StorageBackendError, StorageBackendResult};
 
 mod config;
 mod memory_snapshot;
+pub mod query;
 pub(crate) mod retained;
 
 pub use config::{HNSWIndexParams, IVFIndexParams, VectorIndexOpenMode, VectorIndexSpec};
@@ -80,9 +81,9 @@ pub fn select_top_k_scored(scored: &mut Vec<(DocId, f32)>, k: usize) {
 /// Collapse tensor-vector scores to the best score for each document without
 /// allocating one tree node per candidate. The final sort performed by each
 /// caller restores the posting-list invariant after top-k selection.
-pub(crate) fn deduplicate_scored_by_doc(scored: &mut Vec<(DocId, f32)>) {
+pub(crate) fn deduplicate_scored_values(scored: &mut [(DocId, f32)]) -> usize {
     if scored.len() < 2 {
-        return;
+        return scored.len();
     }
     scored.sort_unstable_by_key(|(doc_id, _)| *doc_id);
     let mut write = 1;
@@ -95,7 +96,7 @@ pub(crate) fn deduplicate_scored_by_doc(scored: &mut Vec<(DocId, f32)>) {
             write += 1;
         }
     }
-    scored.truncate(write);
+    write
 }
 
 pub(crate) fn vector_norm(vector: &[f32]) -> f32 {
@@ -155,6 +156,26 @@ pub trait VectorIndex: Send + Sync {
     fn clear(&mut self) -> StorageBackendResult<()>;
     fn search_knn(&self, query: &[f32], k: usize) -> StorageBackendResult<PostingList>;
     fn search_threshold(&self, query: &[f32], threshold: f32) -> StorageBackendResult<PostingList>;
+    /// Request a controlled search. The default checks cancellation and delegates to the provider's existing read boundary; in-memory physical algorithms override it to charge query workspace to the supplied allowance.
+    fn search_knn_with_control(
+        &self,
+        query: &[f32],
+        k: usize,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<PostingList> {
+        control.check()?;
+        self.search_knn(query, k)
+    }
+    /// Controlled threshold search keeps the same result and caller-owned posting boundary as ordinary search.
+    fn search_threshold_with_control(
+        &self,
+        query: &[f32],
+        threshold: f32,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<PostingList> {
+        control.check()?;
+        self.search_threshold(query, threshold)
+    }
     fn count(&self) -> StorageBackendResult<usize>;
 
     /// Test canonical membership at this handle's visibility boundary without searching or materializing the corpus. Empty tensor replacements have no membership. This is a maintenance probe, not a logical query observation.
@@ -427,7 +448,8 @@ mod tests {
     #[test]
     fn score_deduplication_keeps_best_tensor_vector() {
         let mut scored = vec![(7, 0.3), (2, 0.8), (7, 0.9), (2, 0.4), (9, -0.2)];
-        deduplicate_scored_by_doc(&mut scored);
+        let count = deduplicate_scored_values(&mut scored);
+        scored.truncate(count);
         assert_eq!(scored, vec![(2, 0.8), (7, 0.9), (9, -0.2)]);
     }
 

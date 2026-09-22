@@ -61,12 +61,14 @@ impl HNSWIndex {
         }
         for layer in (0..=level.min(previous_max_level)).rev() {
             check(control)?;
+            // Controlled construction already retains the candidate workspace allowance, including these traversal buffers.
             let candidates = self.search_layer(
                 &normalized_vector,
                 &[entry],
                 self.params.ef_construction,
                 layer,
                 control,
+                None,
             )?;
             let mut selected = self.select_neighbors(
                 &normalized_vector,

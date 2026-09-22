@@ -8,9 +8,9 @@
 
 use uqa_core::PostingList;
 
-use super::math::{nearest_centroids, scored_posting_list};
 use super::SQLiteIVFIndex;
 use uqa_storage::ivf_index::IVFState;
+use uqa_storage::vector_index::query::{nearest_centroids, scored_posting_list};
 use uqa_storage::vector_index::VectorIndex;
 use uqa_storage::StorageBackendResult;
 
@@ -40,17 +40,18 @@ impl SQLiteIVFIndex {
         if centroids.is_empty() {
             return self.persistent.search_knn(query, k);
         }
-        let probes = nearest_centroids(query, &centroids, self.params.nprobe);
+        let probes = nearest_centroids(query, &centroids, self.params.nprobe, None)?;
         let candidates = self.load_candidates(&probes)?;
         if candidates.is_empty() {
             return Ok(PostingList::new());
         }
-        Ok(scored_posting_list(
+        scored_posting_list(
             query,
             candidates
                 .iter()
                 .map(|(doc, vector)| (*doc, vector.as_slice())),
             k,
-        ))
+            None,
+        )
     }
 }

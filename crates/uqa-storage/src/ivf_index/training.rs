@@ -7,7 +7,7 @@
 //! IVF state transitions, centroid training, and posting-list maintenance.
 
 use super::math::{kmeans, nearest_centroid_controlled};
-use super::prepare::check;
+use super::prepare::{check, workspace_bytes};
 use super::state::{IVFIndex, IVFState, VectorKey};
 use crate::read_control::StorageReadControl;
 use crate::{StorageBackendError, StorageBackendResult};
@@ -15,6 +15,26 @@ use crate::{StorageBackendError, StorageBackendResult};
 pub(super) const STALE_DENOMINATOR: usize = 5;
 
 impl IVFIndex {
+    pub(super) fn train_for_query(
+        &self,
+        control: Option<&StorageReadControl>,
+    ) -> StorageBackendResult<()> {
+        // Every reader retains its own training workspace. The cached generation's construction lease cannot cover scratch used by concurrent queries.
+        let _workspace = if let Some(control) = control {
+            control.check()?;
+            let count = self.vectors.lock().len();
+            let clusters = self.centroids.lock().len().max(self.nlist.min(count));
+            Some(
+                control
+                    .memory()
+                    .reserve(workspace_bytes(self.dimensions, count, clusters)?)?,
+            )
+        } else {
+            None
+        };
+        self.train_controlled(control)
+    }
+
     pub fn train(&self) -> StorageBackendResult<()> {
         self.train_controlled(None)
     }
@@ -53,10 +73,16 @@ impl IVFIndex {
         )?;
         let mut vectors = self.vectors.lock();
         let mut inverted_lists = vec![Vec::new(); centroids.len()];
-        for vector in vectors.values_mut() {
+        let mut assignments = Vec::with_capacity(vectors.len());
+        for vector in vectors.values() {
             let centroid = nearest_centroid_controlled(&vector.vector, &centroids, control)?;
-            vector.centroid = Some(centroid);
+            assignments.push(centroid);
             inverted_lists[centroid].push(vector.key);
+        }
+        check(control)?;
+        // Publish only after all allocation, numerical evaluation and cancellation checks succeed.
+        for (vector, centroid) in vectors.values_mut().zip(assignments) {
+            vector.centroid = Some(centroid);
         }
         *self.centroids.lock() = centroids;
         *self.inverted_lists.lock() = inverted_lists;
@@ -71,8 +97,10 @@ impl IVFIndex {
         control: Option<&StorageReadControl>,
     ) -> StorageBackendResult<()> {
         let mut vectors = self.vectors.lock();
-        for vector in vectors.values_mut() {
+        for _ in vectors.values() {
             check(control)?;
+        }
+        for vector in vectors.values_mut() {
             vector.centroid = None;
         }
         self.centroids.lock().clear();

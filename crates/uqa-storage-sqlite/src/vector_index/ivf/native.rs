@@ -9,18 +9,20 @@
 use uqa_core::{memory::Budgeted, DocId, PostingList};
 use uqa_storage::{
     ivf_index::{IVFMutation, IVFState},
+    vector_index::query::{nearest_centroids, scored_posting_list},
     KeyValueBatch,
 };
 
 mod publication;
 mod records;
 mod state;
+#[cfg(test)]
+mod tests;
 pub(super) use publication::{drop_metadata, write_metadata};
 pub(crate) use records::NativeIVFRecords;
 pub(super) use state::{encode_controlled, load_state};
 
 use super::{
-    math::{nearest_centroids, scored_posting_list},
     metadata::{decode_metadata, SQLiteIVFMeta},
     SQLiteIVFIndex,
 };
@@ -135,7 +137,12 @@ impl SQLiteIVFIndex {
                 "trained native IVF index has no centroids".into(),
             ));
         }
-        let probes = nearest_centroids(query, &centroids, self.params.nprobe);
+        let probes = nearest_centroids(
+            query,
+            &centroids,
+            self.params.nprobe,
+            Some(&read.snapshot.control),
+        )?;
         let candidates = load_candidates(read, &probes, centroids.len(), meta.vector_count)?;
         Ok(scored_posting_list(
             query,
@@ -143,7 +150,8 @@ impl SQLiteIVFIndex {
                 .iter()
                 .map(|(doc, vector)| (*doc, vector.as_slice())),
             k,
-        ))
+            Some(&read.snapshot.control),
+        )?)
     }
 }
 
@@ -155,7 +163,8 @@ fn exact(read: &NativeVectorRead<'_>, query: &[f32], k: usize) -> Result<Posting
             .iter()
             .map(|(doc, _, vector)| (*doc, vector.as_slice())),
         k,
-    ))
+        Some(&read.snapshot.control),
+    )?)
 }
 
 fn load_centroids(read: &NativeVectorRead<'_>) -> Result<Budgeted<Vec<Vec<f32>>>> {
