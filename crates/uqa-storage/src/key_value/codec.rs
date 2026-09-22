@@ -14,6 +14,9 @@ use super::{
 };
 use crate::document_store::{DocumentMetadata, StoredDocument};
 
+mod retained;
+pub(super) use retained::decode_retained_stored_document_value;
+
 const LEGACY_SYSTEM_XMIN: &str = "\0uqa.system.xmin";
 const LEGACY_USER_XMIN_MARKER: &str = "\0uqa.user.xmin";
 

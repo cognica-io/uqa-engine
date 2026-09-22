@@ -19,7 +19,7 @@ use crate::backend::{StorageBackendError, StorageBackendResult};
 
 pub mod identifiers;
 mod retained;
-pub use retained::RetainedDocumentFields;
+pub use retained::{RetainedDocumentFields, RetainedStoredDocument};
 
 /// Document field map. Keys are field names; values are dynamic.
 pub type Document = BTreeMap<FieldName, Value>;

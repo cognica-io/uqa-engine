@@ -8,11 +8,11 @@
 
 use crate::document_store::Document;
 use crate::key_value::codec::{
-    decode_stored_document_value, document_key, document_key_prefix, other_error,
+    decode_retained_stored_document_value, document_key, document_key_prefix, other_error,
 };
 use crate::key_value::view::for_each_key;
 use crate::key_value::KeyValueRead;
-use crate::{StorageBackendResult, StoredDocument};
+use crate::{RetainedStoredDocument, StorageBackendResult, StoredDocument};
 use std::collections::BTreeMap;
 use uqa_core::{DocId, Value};
 
@@ -31,10 +31,20 @@ fn decode_id(prefix: &[u8], key: &[u8]) -> StorageBackendResult<DocId> {
 
 impl Documents<'_> {
     pub(super) fn get(&self, id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
+        self.get_retained(id)
+            .map(|document| document.map(RetainedStoredDocument::into_stored))
+    }
+
+    pub(super) fn get_retained(
+        &self,
+        id: DocId,
+    ) -> StorageBackendResult<Option<RetainedStoredDocument>> {
         let mut result = None;
         self.read
             .visit_value(&document_key(self.table, id)?, &mut |value| {
-                result = value.map(decode_stored_document_value).transpose()?;
+                result = value
+                    .map(|value| decode_retained_stored_document_value(value, self.read.control()))
+                    .transpose()?;
                 Ok(())
             })?;
         Ok(result)
@@ -153,7 +163,9 @@ impl Documents<'_> {
         self.read.visit_prefix(&prefix, &mut |key, value| {
             result.push((
                 decode_id(&prefix, key)?,
-                decode_stored_document_value(value)?.into_fields(),
+                decode_retained_stored_document_value(value, self.read.control())?
+                    .into_stored()
+                    .into_fields(),
             ));
             Ok(())
         })?;

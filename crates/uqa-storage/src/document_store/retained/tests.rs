@@ -75,3 +75,55 @@ fn unique_output_moves_fields_while_shared_output_keeps_its_sibling_charged() {
     drop(retained);
     assert_eq!(control.memory().used(), 0);
 }
+
+#[test]
+fn budgeted_adoption_transfers_its_payload_once_and_keeps_field_addresses() {
+    let control = StorageReadControl::with_limit(11_000);
+    let mut text = String::with_capacity(8192);
+    text.push_str("kept");
+    let address = text.as_ptr();
+    let fields = Value::Map([("body".into(), Value::Str(text))].into());
+    let memory = fields
+        .reserve_retained_payload(control.memory(), control.cancellation())
+        .unwrap();
+    let Value::Map(fields) = fields else { panic!() };
+    let retained =
+        RetainedDocumentFields::from_budgeted(Budgeted::new(fields, memory), &control).unwrap();
+    assert!(control.memory().used() >= 8192);
+    assert!(control.memory().used() < 11_000);
+    let Value::Str(text) = &retained["body"] else {
+        panic!()
+    };
+    assert_eq!(text.as_ptr(), address);
+    let shared = retained.clone();
+    let used = control.memory().used();
+    drop(retained);
+    assert_eq!(control.memory().used(), used);
+    drop(shared);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn budgeted_adoption_rejects_foreign_or_incomplete_leases_without_leaking_payloads() {
+    let control = StorageReadControl::with_limit(4096);
+    let foreign = StorageReadControl::with_limit(4096);
+    let fields = Value::Map([("body".into(), Value::Str("text".into()))].into());
+    let memory = fields
+        .reserve_retained_payload(foreign.memory(), foreign.cancellation())
+        .unwrap();
+    let Value::Map(fields) = fields else { panic!() };
+    assert!(matches!(
+        RetainedDocumentFields::from_budgeted(Budgeted::new(fields, memory), &control),
+        Err(StorageBackendError::Other(_))
+    ));
+    assert_eq!(control.memory().used(), 0);
+    assert_eq!(foreign.memory().used(), 0);
+
+    let fields = [("body".into(), Value::Str("text".into()))].into();
+    let memory = control.memory().reserve(1).unwrap();
+    assert!(matches!(
+        RetainedDocumentFields::from_budgeted(Budgeted::new(fields, memory), &control),
+        Err(StorageBackendError::Other(_))
+    ));
+    assert_eq!(control.memory().used(), 0);
+}

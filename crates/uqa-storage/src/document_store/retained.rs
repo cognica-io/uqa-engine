@@ -6,7 +6,7 @@
 
 //! Immutable decoded fields keep their payload reservation through every retained reader.
 
-use super::{Arc, Document};
+use super::{Arc, Document, DocumentMetadata, StoredDocument};
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 use uqa_core::{
     memory::{Budgeted, MemoryError},
@@ -18,6 +18,40 @@ use uqa_core::{
 pub struct RetainedDocumentFields(Arc<Budgeted<Arc<Document>>>);
 
 impl RetainedDocumentFields {
+    /// Move already charged decoded fields into shared immutable storage. The input reservation covers live entries, key capacities and value payloads, excluding the map's inline layout. Foreign or incomplete leases are rejected; shared wrappers are reserved before allocation.
+    pub fn from_budgeted(
+        fields: Budgeted<Document>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        control.check()?;
+        let (fields, mut memory) = fields.into_parts();
+        if !memory.budget().shares_allowance(control.memory()) {
+            drop(fields);
+            return Err(StorageBackendError::Other(
+                "decoded document reservation belongs to a different allowance".into(),
+            ));
+        }
+        let value = Value::Map(fields);
+        let required = value
+            .retained_payload_bytes(control.memory(), control.cancellation())
+            .map_err(retention_error)?;
+        if memory.bytes() < required {
+            return Err(StorageBackendError::Other(
+                "decoded document reservation does not cover its payload".into(),
+            ));
+        }
+        // Removed migration fields and other discarded payloads need no continuing reservation.
+        let surplus = memory.bytes() - required;
+        drop(memory.split(surplus));
+        memory.grow(size_of::<Document>())?;
+        let Value::Map(fields) = value else {
+            unreachable!("document field map");
+        };
+        let fields = Arc::new(fields);
+        control.check()?;
+        Ok(Self(Budgeted::new(fields, memory).into_shared()?))
+    }
+
     pub fn new(fields: Arc<Document>, control: &StorageReadControl) -> StorageBackendResult<Self> {
         control.check()?;
         let entries = fields
@@ -31,10 +65,7 @@ impl RetainedDocumentFields {
             memory.grow(name.capacity())?;
             let payload = value
                 .reserve_retained_payload(control.memory(), control.cancellation())
-                .map_err(|error| match error {
-                    ValueRetentionError::Memory(error) => StorageBackendError::Memory(error),
-                    ValueRetentionError::Cancelled(error) => StorageBackendError::Cancelled(error),
-                })?;
+                .map_err(retention_error)?;
             memory.absorb(payload);
         }
         control.check()?;
@@ -50,6 +81,47 @@ impl RetainedDocumentFields {
             }
             Err(fields) => (**fields).as_ref().clone(),
         }
+    }
+}
+
+fn retention_error(error: ValueRetentionError) -> StorageBackendError {
+    match error {
+        ValueRetentionError::Memory(error) => StorageBackendError::Memory(error),
+        ValueRetentionError::Cancelled(error) => StorageBackendError::Cancelled(error),
+    }
+}
+
+/// An immutable decoded tuple keeps its public fields charged through the last shared reader; tuple metadata remains outside the public field namespace.
+#[derive(Clone, Debug)]
+pub struct RetainedStoredDocument {
+    fields: RetainedDocumentFields,
+    metadata: DocumentMetadata,
+}
+
+impl RetainedStoredDocument {
+    pub fn with_metadata(fields: RetainedDocumentFields, metadata: DocumentMetadata) -> Self {
+        Self { fields, metadata }
+    }
+
+    pub fn fields(&self) -> &Document {
+        &self.fields
+    }
+
+    pub fn retained_fields(&self) -> &RetainedDocumentFields {
+        &self.fields
+    }
+
+    pub fn metadata(&self) -> DocumentMetadata {
+        self.metadata
+    }
+
+    pub fn into_parts(self) -> (RetainedDocumentFields, DocumentMetadata) {
+        (self.fields, self.metadata)
+    }
+
+    /// Produce a caller-owned mutable tuple, ending this reader's retained ownership. Unique fields move without copying; retained siblings keep their original payload and lease.
+    pub fn into_stored(self) -> StoredDocument {
+        StoredDocument::with_metadata(self.fields.into_document(), self.metadata)
     }
 }
 
