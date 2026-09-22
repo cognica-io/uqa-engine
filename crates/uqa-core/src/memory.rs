@@ -12,10 +12,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 mod deque;
+mod map;
 mod string;
 mod vec;
 
 pub use deque::BudgetedDeque;
+pub use map::{BudgetedMap, BudgetedMapIter, PreparedMapEntry};
 pub use string::BudgetedString;
 pub use vec::BudgetedVec;
 

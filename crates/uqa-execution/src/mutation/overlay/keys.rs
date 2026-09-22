@@ -12,7 +12,7 @@ use uqa_core::memory::{BudgetedString, BudgetedVec, MemoryReservation};
 
 pub(super) struct FieldSet {
     values: Vec<String>,
-    memory: MemoryReservation,
+    _memory: MemoryReservation,
 }
 
 impl FieldSet {
@@ -32,17 +32,14 @@ impl FieldSet {
         }
         let (values, retained) = values.into_parts();
         memory.absorb(retained);
-        Ok(Self { values, memory })
+        Ok(Self {
+            values,
+            _memory: memory,
+        })
     }
 
     pub(super) fn values(&self) -> &[String] {
         &self.values
-    }
-
-    pub(super) fn reserve_index_entry(&mut self) -> Result<(), SQLError> {
-        self.memory
-            .grow(size_of::<(Self, super::exact::CommandExactIndex)>())
-            .map_err(resource_error)
     }
 }
 

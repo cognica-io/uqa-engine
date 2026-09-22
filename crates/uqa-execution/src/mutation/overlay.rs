@@ -6,10 +6,9 @@
 
 //! Statement-local row overlays and exact index state.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use uqa_core::{
-    memory::{BudgetedString, BudgetedVec, MemoryReservation},
+    memory::{BudgetedMap, BudgetedString, BudgetedVec, MemoryReservation},
     DocId, Value,
 };
 use uqa_sql::SQLError;
@@ -42,36 +41,40 @@ impl CommandStoredDocument {
 
 #[derive(Default)]
 pub struct CommandMutationOverlay {
-    tables: BTreeMap<String, CommandTableOverlay>,
-    memory: Option<MemoryReservation>,
+    tables: Option<BudgetedMap<String, CommandTableOverlay>>,
 }
 
 struct CommandTableOverlay {
-    documents: BTreeMap<DocId, Option<CommandStoredDocument>>,
-    exact_indexes: BTreeMap<FieldSet, CommandExactIndex>,
-    document_memory: MemoryReservation,
+    documents: BudgetedMap<DocId, Option<CommandStoredDocument>>,
+    exact_indexes: BudgetedMap<FieldSet, CommandExactIndex>,
+    _name_memory: MemoryReservation,
 }
 
 impl CommandMutationOverlay {
     pub fn documents(
         &self,
         table: &str,
-    ) -> Option<&BTreeMap<DocId, Option<CommandStoredDocument>>> {
-        self.tables.get(table).map(|table| &table.documents)
+    ) -> Option<&BudgetedMap<DocId, Option<CommandStoredDocument>>> {
+        self.tables
+            .as_ref()?
+            .get(table)
+            .map(|table| &table.documents)
     }
 
-    fn bind(&mut self, control: &StorageReadControl) -> Result<(), SQLError> {
+    fn bind(
+        &mut self,
+        control: &StorageReadControl,
+    ) -> Result<&mut BudgetedMap<String, CommandTableOverlay>, SQLError> {
         control.check().map_err(resource_error)?;
-        match &self.memory {
-            Some(memory) if !memory.budget().shares_allowance(control.memory()) => Err(
-                SQLError::Internal("command overlay received a different memory allowance".into()),
-            ),
-            Some(_) => Ok(()),
-            None => {
-                self.memory = Some(control.memory().empty_reservation());
-                Ok(())
-            }
+        let tables = self
+            .tables
+            .get_or_insert_with(|| BudgetedMap::new(control.memory()));
+        if !tables.budget().shares_allowance(control.memory()) {
+            return Err(SQLError::Internal(
+                "command overlay received a different memory allowance".into(),
+            ));
         }
+        Ok(tables)
     }
 
     /// Retain an evaluated row and prepare every cached-key change before publishing any row or index mutation.
@@ -82,31 +85,27 @@ impl CommandMutationOverlay {
         document: Option<(Arc<Document>, DocumentMetadata)>,
         control: &StorageReadControl,
     ) -> Result<(), SQLError> {
-        self.bind(control)?;
+        let tables = self.bind(control)?;
         let document = document
             .map(|(fields, metadata)| {
                 CommandStoredDocument::new(fields, metadata, control).map_err(resource_error)
             })
             .transpose()?;
-        if let Some(table) = self.tables.get_mut(table) {
+        if let Some(table) = tables.get_mut(table) {
             return table.stage(id, document, control);
         }
         let mut name = BudgetedString::new(control.memory());
         name.push_str(table).map_err(resource_error)?;
-        let mut entry = control
-            .memory()
-            .reserve(size_of::<(String, CommandTableOverlay)>())
-            .map_err(resource_error)?;
+        let (name, names) = name.into_parts();
         let mut rows = CommandTableOverlay {
-            documents: BTreeMap::new(),
-            exact_indexes: BTreeMap::new(),
-            document_memory: control.memory().empty_reservation(),
+            documents: BudgetedMap::new(control.memory()),
+            exact_indexes: BudgetedMap::new(control.memory()),
+            _name_memory: names,
         };
         rows.stage(id, document, control)?;
-        let (name, names) = name.into_parts();
-        entry.absorb(names);
-        self.tables.insert(name, rows);
-        self.memory.as_mut().expect("bound overlay").absorb(entry);
+        let entry = tables.prepare_entry(name, rows).map_err(resource_error)?;
+        control.check().map_err(resource_error)?;
+        tables.insert_prepared(entry);
         Ok(())
     }
 
@@ -134,22 +133,23 @@ impl CommandMutationOverlay {
         }
         let (fields, key) = keys::lookup_parts(fields, values, control)?;
         for overlay in overlays.iter_mut() {
-            overlay.bind(control)?;
-            let Some(table) = overlay.tables.get_mut(table) else {
+            let Some(table) = overlay.bind(control)?.get_mut(table) else {
                 continue;
             };
             if !table.exact_indexes.contains_key(fields.values()) {
-                let mut names =
-                    FieldSet::copy(fields.values().iter().map(String::as_str), control)?;
-                names.reserve_index_entry()?;
+                let names = FieldSet::copy(fields.values().iter().map(String::as_str), control)?;
                 let index = CommandExactIndex::build(&table.documents, &names, control)?;
+                let entry = table
+                    .exact_indexes
+                    .prepare_entry(names, index)
+                    .map_err(resource_error)?;
                 control.check().map_err(resource_error)?;
-                table.exact_indexes.insert(names, index);
+                table.exact_indexes.insert_prepared(entry);
             }
         }
         let mut found = None;
         for (position, overlay) in overlays.iter().enumerate().rev() {
-            let Some(rows) = overlay.tables.get(table) else {
+            let Some(rows) = overlay.tables.as_ref().and_then(|tables| tables.get(table)) else {
                 continue;
             };
             let index = rows
@@ -159,7 +159,7 @@ impl CommandMutationOverlay {
             let Some(candidates) = index.candidates(key.bytes()) else {
                 continue;
             };
-            for &id in candidates {
+            for (&id, ()) in candidates {
                 control.check().map_err(resource_error)?;
                 if found.is_some_and(|found| id >= found) {
                     break;
@@ -197,7 +197,7 @@ impl CommandTableOverlay {
     fn stage(
         &mut self,
         id: DocId,
-        document: Option<CommandStoredDocument>,
+        mut document: Option<CommandStoredDocument>,
         control: &StorageReadControl,
     ) -> Result<(), SQLError> {
         let previous = self.documents.get(&id).and_then(Option::as_ref);
@@ -207,21 +207,26 @@ impl CommandTableOverlay {
             let change = index.prepare(id, previous, document.as_ref(), fields, control)?;
             updates.push(change).map_err(resource_error)?;
         }
-        let retained = control
-            .memory()
-            .reserve(if self.documents.contains_key(&id) {
-                0
-            } else {
-                size_of::<(DocId, Option<CommandStoredDocument>)>()
-            })
-            .map_err(resource_error)?;
+        let insertion = if self.documents.contains_key(&id) {
+            None
+        } else {
+            Some(
+                self.documents
+                    .prepare_entry(id, document.take())
+                    .map_err(resource_error)?,
+            )
+        };
         control.check().map_err(resource_error)?;
         // Every fallible operation precedes publication. Borrow each prepared update in the same immutable field-set order used above; no field-name copies or lookup allocations are needed here.
-        for (index, update) in self.exact_indexes.values_mut().zip(updates.iter_mut()) {
-            index.apply(id, update.take());
+        let mut changes = updates.iter_mut();
+        self.exact_indexes.for_each_mut(|_, index| {
+            index.apply(id, changes.next().expect("prepared index change").take());
+        });
+        if let Some(entry) = insertion {
+            self.documents.insert_prepared(entry);
+        } else {
+            *self.documents.get_mut(&id).expect("existing command row") = document;
         }
-        self.documents.insert(id, document);
-        self.document_memory.absorb(retained);
         Ok(())
     }
 }

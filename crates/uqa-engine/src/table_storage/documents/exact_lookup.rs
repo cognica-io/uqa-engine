@@ -32,7 +32,7 @@ impl ExactLookupOverlay for CommandOverlay<'_> {
             .all(|overlay| {
                 overlay
                     .documents(&self.table)
-                    .is_none_or(std::collections::BTreeMap::is_empty)
+                    .is_none_or(uqa_core::memory::BudgetedMap::is_empty)
             }))
     }
 

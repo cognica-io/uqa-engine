@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::query::exact_lookup::FieldPresence;
+use std::collections::BTreeMap;
 
 fn stage(
     overlay: &mut CommandMutationOverlay,
@@ -45,6 +46,20 @@ fn find(
         presence,
         control,
     )
+}
+
+#[test]
+fn command_nodes_are_reserved_before_publishing_the_first_tombstone() {
+    // An allowance for only live keys and values misses the containers' links and alignment.
+    let entries = size_of::<(String, CommandTableOverlay)>()
+        + size_of::<(DocId, Option<CommandStoredDocument>)>()
+        + "items".len();
+    let control = StorageReadControl::with_limit(entries);
+    let mut overlay = CommandMutationOverlay::default();
+    let error = overlay.stage("items", 1, None, &control).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("53200"));
+    assert!(overlay.documents("items").is_none());
+    assert_eq!(control.memory().used(), 0);
 }
 
 #[test]
@@ -306,7 +321,9 @@ fn failed_index_construction_drops_only_its_unpublished_keys() {
     assert_eq!(error.sqlstate(), Some("53200"));
     drop(blocker);
     assert_eq!(control.memory().used(), before);
-    assert!(overlays[0].tables["items"].exact_indexes.is_empty());
+    assert!(overlays[0].tables.as_ref().unwrap()["items"]
+        .exact_indexes
+        .is_empty());
     assert_eq!(
         find(
             &mut overlays,
