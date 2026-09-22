@@ -13,13 +13,12 @@ mod worker;
 pub(crate) use statement_snapshot::StatementReadSnapshot;
 
 use crate::{
-    AnalyzerPhase, DocumentStore, Engine, EpochCoordinator, InvertedIndex, MemoryDocumentStore,
-    MemoryInvertedIndex, MemoryVectorIndex, PinnedPortalTransactionControl, QueryRuntime,
-    RelationIdentity, RuntimeExtensions, SQLError, SQLResult, SessionPortalCatalogSnapshot,
-    SessionPortalCommandDeclaration, SessionPortalData, SessionPortalDeclaration,
-    SessionPortalMaterialization, SessionPortalPosition, SessionPortalRestart,
-    SessionPortalSQLFunctionSnapshots, SessionPortalState, SessionPortalTableSnapshots,
-    SessionPortalTransactionOverlay, SessionPortalViewSnapshots, StorageContext, StoredDocument,
+    DocumentStore, Engine, EpochCoordinator, InvertedIndex, PinnedPortalTransactionControl,
+    QueryRuntime, RelationIdentity, RuntimeExtensions, SQLError, SQLResult,
+    SessionPortalCatalogSnapshot, SessionPortalCommandDeclaration, SessionPortalData,
+    SessionPortalDeclaration, SessionPortalMaterialization, SessionPortalPosition,
+    SessionPortalRestart, SessionPortalSQLFunctionSnapshots, SessionPortalState,
+    SessionPortalTableSnapshots, SessionPortalViewSnapshots, StorageContext, StoredDocument,
     TableState, Value, VectorIndex,
 };
 use fetch::{
@@ -78,8 +77,8 @@ impl Engine {
             self.capture_session_portal_transaction_overlay(&table_sources)?;
         snapshot_gate.baseline()?;
         drop(snapshot_gate);
-        let table_snapshots = self
-            .detach_session_portal_table_snapshots(table_sources, transaction_overlay.as_ref())?;
+        let table_snapshots =
+            self.detach_session_portal_table_snapshots(table_sources, transaction_overlay)?;
         let mut catalog_snapshot = self.durable.snapshot();
         catalog_snapshot.graphs = self.freeze_graph_read_handles(
             table_dependencies.graphs.as_ref(),
@@ -352,7 +351,7 @@ impl Engine {
     fn detach_session_portal_table_snapshots(
         &self,
         sources: Vec<SessionPortalTableSource>,
-        transaction_overlay: &std::collections::BTreeMap<
+        mut transaction_overlay: std::collections::BTreeMap<
             String,
             std::collections::BTreeMap<crate::DocId, Option<StoredDocument>>,
         >,
@@ -364,7 +363,7 @@ impl Engine {
             let changes = if std::sync::Arc::ptr_eq(&data, &metadata) {
                 None
             } else {
-                transaction_overlay.get(&canonical)
+                transaction_overlay.remove(&canonical)
             };
             snapshots.insert(
                 relation,
@@ -392,195 +391,54 @@ impl Engine {
         Ok(std::sync::Arc::new(snapshots))
     }
 
-    fn detached_documents(
-        data: &std::sync::Arc<TableState>,
-        changes: Option<&std::collections::BTreeMap<crate::DocId, Option<StoredDocument>>>,
-    ) -> Result<std::collections::BTreeMap<crate::DocId, StoredDocument>, SQLError> {
-        let source_store = data.document_store.read();
-        let doc_ids = source_store
-            .doc_ids()
-            .map_err(|error| portal_snapshot_error("document ids", &error))?;
-        let mut documents = source_store
-            .get_stored_many(&doc_ids)
-            .map_err(|error| portal_snapshot_error("documents", &error))?;
-        drop(source_store);
-        if let Some(changes) = changes {
-            for (doc_id, document) in changes {
-                match document {
-                    Some(document) => {
-                        documents.insert(*doc_id, document.clone());
-                    }
-                    None => {
-                        documents.remove(doc_id);
-                    }
-                }
-            }
-        }
-        Ok(documents)
-    }
-
-    fn detached_inverted_index(
-        data: &std::sync::Arc<TableState>,
-        analyzer: &crate::Analyzer,
-        fts_fields: &[crate::FieldName],
-        documents: &std::collections::BTreeMap<crate::DocId, StoredDocument>,
-    ) -> Result<MemoryInvertedIndex, SQLError> {
-        let mut inverted_index = MemoryInvertedIndex::new(analyzer.clone());
-        {
-            let source_index = data.inverted_index.read();
-            for field in fts_fields {
-                inverted_index
-                    .set_field_analyzer_revision(
-                        field,
-                        source_index
-                            .index_analyzer_revision(field)
-                            .map_err(|error| {
-                                portal_snapshot_error("index analyzer revision", &error)
-                            })?,
-                        AnalyzerPhase::Index,
-                    )
-                    .map_err(|error| portal_snapshot_error("index analyzer", &error))?;
-                inverted_index
-                    .set_field_analyzer_revision(
-                        field,
-                        source_index
-                            .search_analyzer_revision(field)
-                            .map_err(|error| {
-                                portal_snapshot_error("search analyzer revision", &error)
-                            })?,
-                        AnalyzerPhase::Search,
-                    )
-                    .map_err(|error| portal_snapshot_error("search analyzer", &error))?;
-            }
-        }
-        for (doc_id, document) in documents {
-            let fields = fts_fields
-                .iter()
-                .filter_map(|field| match document.fields().get(field) {
-                    Some(Value::Str(value)) => Some((field.clone(), value.clone())),
-                    _ => None,
-                })
-                .collect();
-            inverted_index
-                .add_document(*doc_id, fields)
-                .map_err(|error| portal_snapshot_error("inverted index", &error))?;
-        }
-        Ok(inverted_index)
-    }
-
-    fn detached_vector_indexes(
-        metadata: &std::sync::Arc<TableState>,
-        documents: &std::collections::BTreeMap<crate::DocId, StoredDocument>,
-    ) -> Result<std::collections::BTreeMap<crate::FieldName, Box<dyn VectorIndex>>, SQLError> {
-        let mut vector_indexes: std::collections::BTreeMap<crate::FieldName, Box<dyn VectorIndex>> =
-            std::collections::BTreeMap::new();
-        for (field, source_index) in metadata.vector_indexes.read().iter() {
-            let mut index = MemoryVectorIndex::new(source_index.dimensions());
-            for (doc_id, document) in documents {
-                let Some(value) = document.fields().get(field) else {
-                    continue;
-                };
-                if let Some(vectors) = Self::field_index_vectors(metadata, field, value)? {
-                    index
-                        .add_many(*doc_id, vectors)
-                        .map_err(|error| portal_snapshot_error("vector index", &error))?;
-                }
-            }
-            vector_indexes.insert(field.clone(), Box::new(index));
-        }
-        Ok(vector_indexes)
-    }
-
     pub(crate) fn detach_query_table(
         &self,
         data: &std::sync::Arc<TableState>,
         metadata: &std::sync::Arc<TableState>,
-        changes: Option<&std::collections::BTreeMap<crate::DocId, Option<StoredDocument>>>,
+        changes: Option<std::collections::BTreeMap<crate::DocId, Option<StoredDocument>>>,
     ) -> Result<std::sync::Arc<TableState>, SQLError> {
         if std::sync::Arc::ptr_eq(data, metadata)
-            && changes.is_none_or(std::collections::BTreeMap::is_empty)
+            && changes
+                .as_ref()
+                .is_none_or(std::collections::BTreeMap::is_empty)
             && (self.storage.backend.is_none() || self.versioned_backend_transactions())
         {
             return Self::retain_query_table(data);
         }
-        let documents = Self::detached_documents(data, changes)?;
-        Self::detached_query_table_from_documents(data, metadata, &documents)
+        let source_columns = data.columns.snapshot();
+        let source = data.document_store.read();
+        let storage = Self::with_query_snapshot_schema(metadata, |schema| {
+            uqa_execution::query::table_snapshot::materialize(
+                source.as_ref(),
+                &source_columns,
+                schema,
+                changes.unwrap_or_default(),
+                &self.runtime.cancellation,
+            )
+        })?;
+        Ok(Self::query_table_with_storage(
+            metadata,
+            storage.documents,
+            storage.text,
+            storage.vectors,
+            storage.document_count,
+            false,
+        ))
     }
 
     pub(crate) fn detach_empty_query_table(
         metadata: &std::sync::Arc<TableState>,
     ) -> Result<std::sync::Arc<TableState>, SQLError> {
-        Self::detached_query_table_from_documents(
+        let storage = Self::with_query_snapshot_schema(
             metadata,
-            metadata,
-            &std::collections::BTreeMap::new(),
-        )
-    }
-
-    fn detached_query_table_from_documents(
-        data: &std::sync::Arc<TableState>,
-        metadata: &std::sync::Arc<TableState>,
-        documents: &std::collections::BTreeMap<crate::DocId, StoredDocument>,
-    ) -> Result<std::sync::Arc<TableState>, SQLError> {
-        let data_columns = data.columns.read().clone();
-        let metadata_columns = metadata.columns.read().clone();
-        let metadata_by_id = metadata_columns
-            .iter()
-            .filter_map(|column| column.object_id.map(|object_id| (object_id, column)))
-            .collect::<std::collections::BTreeMap<_, _>>();
-        let mut adapted_documents = std::collections::BTreeMap::new();
-        for (doc_id, source_document) in documents {
-            let mut document = source_document.clone();
-            let fields = document.fields_mut();
-            for source_column in &data_columns {
-                let target = source_column
-                    .object_id
-                    .and_then(|object_id| metadata_by_id.get(&object_id).copied())
-                    .or_else(|| {
-                        metadata_columns.iter().find(|target| {
-                            target.name == source_column.name
-                                && (source_column.object_id.is_none() || target.object_id.is_none())
-                        })
-                    });
-                let Some(target) = target else {
-                    fields.remove(&source_column.name);
-                    continue;
-                };
-                if target.name != source_column.name {
-                    if let Some(value) = fields.remove(&source_column.name) {
-                        fields.entry(target.name.clone()).or_insert(value);
-                    }
-                }
-            }
-            for target in &metadata_columns {
-                if target.generated.is_none() && !fields.contains_key(&target.name) {
-                    fields.insert(
-                        target.name.clone(),
-                        target.missing_value.clone().unwrap_or(Value::Null),
-                    );
-                }
-            }
-            crate::generated::materialize_missing_generated_columns(&metadata_columns, fields)?;
-            adapted_documents.insert(*doc_id, document);
-        }
-        let mut document_store = MemoryDocumentStore::new();
-        for (doc_id, document) in &adapted_documents {
-            document_store
-                .put_stored(*doc_id, document.clone())
-                .map_err(|error| portal_snapshot_error("memory document", &error))?;
-        }
-        let analyzer = metadata.analyzer.read().clone();
-        let fts_fields = metadata.fts_fields.read().clone();
-        let inverted_index =
-            Self::detached_inverted_index(metadata, &analyzer, &fts_fields, &adapted_documents)?;
-        let vector_indexes = Self::detached_vector_indexes(metadata, &adapted_documents)?;
-
+            uqa_execution::query::table_snapshot::empty,
+        )?;
         Ok(Self::query_table_with_storage(
             metadata,
-            Box::new(document_store),
-            Box::new(inverted_index),
-            vector_indexes,
-            u64::try_from(adapted_documents.len()).unwrap_or(u64::MAX),
+            storage.documents,
+            storage.text,
+            storage.vectors,
+            0,
             false,
         ))
     }
@@ -588,7 +446,13 @@ impl Engine {
     fn capture_session_portal_transaction_overlay(
         &self,
         sources: &[SessionPortalTableSource],
-    ) -> Result<SessionPortalTransactionOverlay, SQLError> {
+    ) -> Result<
+        std::collections::BTreeMap<
+            String,
+            std::collections::BTreeMap<crate::DocId, Option<StoredDocument>>,
+        >,
+        SQLError,
+    > {
         let relation_names = sources
             .iter()
             .filter(|(_, data, metadata)| !std::sync::Arc::ptr_eq(data, metadata))
@@ -597,7 +461,7 @@ impl Engine {
             })
             .collect::<std::collections::BTreeMap<_, _>>();
         if relation_names.is_empty() {
-            return Ok(std::sync::Arc::default());
+            return Ok(std::collections::BTreeMap::new());
         }
         let desired = {
             let stack = self.session.transactions.lock();
@@ -655,7 +519,7 @@ impl Engine {
                     .collect(),
             );
         }
-        Ok(std::sync::Arc::new(overlay))
+        Ok(overlay)
     }
 }
 

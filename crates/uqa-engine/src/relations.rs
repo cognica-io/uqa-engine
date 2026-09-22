@@ -272,7 +272,7 @@ impl Engine {
                 let changes = self
                     .fixed_transaction_row_changes(&resolved)
                     .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-                return match changes.as_ref() {
+                return match changes {
                     Some(changes) if !changes.is_empty() => self
                         .detach_query_table(&table, &table, Some(changes))
                         .map(Some)
@@ -330,7 +330,7 @@ impl Engine {
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         let metadata_changed = Self::table_catalog_metadata_fingerprint(&snapshot_table)?
             != Self::table_catalog_metadata_fingerprint(metadata)?;
-        match (changes.as_ref(), metadata_changed) {
+        match (changes, metadata_changed) {
             (Some(changes), _) if !changes.is_empty() => self
                 .detach_query_table(&snapshot_table, metadata, Some(changes))
                 .map(Some)

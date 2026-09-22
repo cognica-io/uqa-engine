@@ -39,8 +39,8 @@ impl Engine {
             self.capture_session_portal_transaction_overlay(&table_sources)?;
         snapshot_gate.baseline()?;
         drop(snapshot_gate);
-        let table_snapshots = self
-            .detach_session_portal_table_snapshots(table_sources, transaction_overlay.as_ref())?;
+        let table_snapshots =
+            self.detach_session_portal_table_snapshots(table_sources, transaction_overlay)?;
         let mut catalog_snapshot = self.durable.snapshot();
         catalog_snapshot.graphs = self.freeze_graph_read_handles(None, true)?;
         let catalog_snapshot = std::sync::Arc::new(catalog_snapshot);

@@ -169,3 +169,28 @@ fn cursor_snapshot_preserves_added_defaults_and_virtual_generated_values() {
         engine.rollback().unwrap();
     }
 }
+
+#[test]
+fn fixed_snapshot_keeps_private_values_after_column_rename_and_name_reuse() {
+    let (_directory, engines) = engines();
+    for engine in engines {
+        engine.sql("CREATE TABLE renamed (id INTEGER PRIMARY KEY, a INTEGER, b INTEGER); INSERT INTO renamed VALUES (1, 10, 20), (2, 11, 21)", &[]).unwrap();
+        engine.sql("BEGIN ISOLATION LEVEL REPEATABLE READ; SELECT * FROM renamed; ALTER TABLE renamed RENAME COLUMN a TO old_a; ALTER TABLE renamed ADD COLUMN a INTEGER DEFAULT 17; UPDATE renamed SET a = 99, old_a = 33 WHERE id = 1", &[]).unwrap();
+        let rows = engine
+            .sql("SELECT id, old_a, a, b FROM renamed ORDER BY id", &[])
+            .unwrap()
+            .rows;
+        assert_eq!(rows[0]["old_a"], Value::Int(33));
+        assert_eq!(rows[0]["a"], Value::Int(99));
+        assert_eq!(rows[1]["old_a"], Value::Int(11));
+        assert_eq!(rows[1]["a"], Value::Int(17));
+        engine.sql("SAVEPOINT private_row; UPDATE renamed SET a = 100 WHERE id = 1; ROLLBACK TO private_row; DECLARE renamed_cursor CURSOR FOR SELECT old_a, a FROM renamed WHERE id = 1; UPDATE renamed SET a = 101 WHERE id = 1", &[]).unwrap();
+        let row = &engine
+            .sql("FETCH ALL FROM renamed_cursor", &[])
+            .unwrap()
+            .rows[0];
+        assert_eq!(row["old_a"], Value::Int(33));
+        assert_eq!(row["a"], Value::Int(99));
+        engine.rollback().unwrap();
+    }
+}

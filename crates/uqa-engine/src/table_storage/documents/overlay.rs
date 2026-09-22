@@ -328,7 +328,7 @@ impl Engine {
             .iter()
             .filter_map(|(doc_id, present)| present.then_some(*doc_id))
             .collect::<Vec<_>>();
-        let documents = live
+        let mut documents = live
             .document_store
             .read()
             .get_stored_many(&present)
@@ -336,7 +336,7 @@ impl Engine {
                 document_store_read_error("read fixed-snapshot transaction changes", &error)
             })?;
         changes.extend(desired.into_iter().map(|(doc_id, present)| {
-            let document = present.then(|| documents.get(&doc_id).cloned()).flatten();
+            let document = present.then(|| documents.remove(&doc_id)).flatten();
             (doc_id, document)
         }));
         Ok(Some(changes))

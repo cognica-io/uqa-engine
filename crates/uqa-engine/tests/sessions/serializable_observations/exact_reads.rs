@@ -254,7 +254,26 @@ fn exact_lookup_errors_respect_failed_frames_and_table_lock_lifetime() {
             );
             b.sql("ROLLBACK");
             a.sql("ROLLBACK");
-            b.sql("BEGIN; LOCK TABLE lookup_t IN ACCESS EXCLUSIVE MODE NOWAIT; COMMIT");
+            // Background ANALYZE may hold its own lock after A rolls back; allow it to finish while bounding a leaked transaction lock.
+            let cancellation = b.engine.cancellation_token();
+            std::thread::scope(|scope| {
+                let (done, completed) = std::sync::mpsc::channel::<()>();
+                let watchdog = scope.spawn(move || {
+                    if matches!(
+                        completed.recv_timeout(std::time::Duration::from_secs(15)),
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                    ) {
+                        cancellation.cancel();
+                    }
+                });
+                let result = b.engine.sql(
+                    "BEGIN; LOCK TABLE lookup_t IN ACCESS EXCLUSIVE MODE; COMMIT",
+                    &[],
+                );
+                drop(done);
+                watchdog.join().unwrap();
+                result.unwrap();
+            });
         }
     }
 }

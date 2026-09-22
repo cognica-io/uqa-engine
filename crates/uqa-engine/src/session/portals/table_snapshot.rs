@@ -10,6 +10,31 @@ use super::{DocumentStore, Engine, InvertedIndex, SQLError, TableState, VectorIn
 use uqa_storage::ReadOnlySnapshot;
 
 impl Engine {
+    pub(super) fn with_query_snapshot_schema<T>(
+        metadata: &TableState,
+        operation: impl FnOnce(
+            &uqa_execution::query::table_snapshot::SnapshotSchema<'_>,
+        ) -> Result<T, SQLError>,
+    ) -> Result<T, SQLError> {
+        let columns = metadata.columns.snapshot();
+        let analyzer = metadata.analyzer.snapshot();
+        let text_fields = metadata.fts_fields.snapshot();
+        let text_revisions = metadata.inverted_index.read();
+        let vector_dimensions = metadata
+            .vector_indexes
+            .read()
+            .iter()
+            .map(|(field, index)| (field.clone(), index.dimensions()))
+            .collect();
+        operation(&uqa_execution::query::table_snapshot::SnapshotSchema {
+            columns: &columns,
+            analyzer: &analyzer,
+            text_fields: &text_fields,
+            text_revisions: text_revisions.as_ref(),
+            vector_dimensions,
+        })
+    }
+
     pub(super) fn retain_query_table(
         data: &std::sync::Arc<TableState>,
     ) -> Result<std::sync::Arc<TableState>, SQLError> {
