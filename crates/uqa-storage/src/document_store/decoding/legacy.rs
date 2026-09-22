@@ -36,6 +36,14 @@ pub(super) fn fields(
     document(input, control)
 }
 
+pub(super) fn single_value(
+    input: &str,
+    control: &StorageReadControl,
+) -> StorageBackendResult<Budgeted<Value>> {
+    normalized::validate(input, control)?;
+    value(input, Mode::Legacy, control)
+}
+
 fn document(input: &str, control: &StorageReadControl) -> StorageBackendResult<Budgeted<Document>> {
     let mut reader = JsonReader::new(input, control.memory(), control.cancellation());
     if !matches!(

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! The legacy intermediate JSON value recognizes serde's two private object envelopes before UQA value conversion.
+//! Historical JSON normalization recognizes serde's two private object envelopes before UQA value conversion.
 
 use uqa_core::{
     json::{decode_json_string, JsonReader, JsonToken},

@@ -17,6 +17,7 @@ use uqa_core::{DocId, FieldName, PathSegment, Value};
 
 use crate::backend::{StorageBackendError, StorageBackendResult};
 
+pub mod decoding;
 pub mod identifiers;
 mod retained;
 pub use retained::{RetainedDocumentFields, RetainedStoredDocument};

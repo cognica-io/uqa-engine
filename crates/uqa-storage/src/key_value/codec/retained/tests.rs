@@ -7,6 +7,7 @@
 use super::super::{decode_stored_document_value, encode_stored_document_value};
 use super::*;
 use crate::document_store::StoredDocument;
+use crate::StorageBackendError;
 use uqa_core::{memory::MemoryError, Value};
 
 fn encoded(prefix: &[u8], body: &str) -> Vec<u8> {

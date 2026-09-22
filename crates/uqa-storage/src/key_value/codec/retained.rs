@@ -7,24 +7,24 @@
 //! Controlled document decoding preserves each durable format's value semantics and transfers its field lease to immutable readers.
 
 use uqa_core::{
-    json::{JsonReadError, JsonReader, JsonToken},
+    json::{JsonReader, JsonToken},
     memory::Budgeted,
-    JsonValueDecoder,
 };
 
 use super::{
-    migrate_legacy_stored_document, other_error, Document, DocumentMetadata, StorageBackendError,
-    StorageBackendResult, DOCUMENT_VALUE_V1_PREFIX, DOCUMENT_VALUE_V2_PREFIX,
+    migrate_legacy_stored_document, Document, DocumentMetadata, StorageBackendResult,
+    DOCUMENT_VALUE_V1_PREFIX, DOCUMENT_VALUE_V2_PREFIX,
 };
 use crate::{
-    document_store::{RetainedDocumentFields, RetainedStoredDocument},
+    document_store::{
+        decoding::{
+            decode_legacy_document_fields_budgeted, decoder, invalid_json, read_error,
+            spans::ContainerSpans, text,
+        },
+        RetainedDocumentFields, RetainedStoredDocument,
+    },
     read_control::StorageReadControl,
 };
-
-mod legacy;
-mod spans;
-
-use spans::ContainerSpans;
 
 pub(in crate::key_value) fn decode_retained_stored_document_value(
     bytes: &[u8],
@@ -37,7 +37,7 @@ pub(in crate::key_value) fn decode_retained_stored_document_value(
         let fields = if let Some(body) = bytes.strip_prefix(DOCUMENT_VALUE_V1_PREFIX) {
             decoder(control).fields(text(body)?).map_err(read_error)?
         } else {
-            legacy::fields(text(bytes)?, control)?
+            decode_legacy_document_fields_budgeted(bytes, control)?
         };
         migrate(fields)?
     };
@@ -122,26 +122,6 @@ fn migrate(
     let (fields, memory) = fields.into_parts();
     let (fields, metadata) = migrate_legacy_stored_document(fields, true)?.into_parts();
     Ok((Budgeted::new(fields, memory), metadata))
-}
-
-fn decoder(control: &StorageReadControl) -> JsonValueDecoder<'_> {
-    JsonValueDecoder::new(control.memory(), control.cancellation())
-}
-
-fn text(bytes: &[u8]) -> StorageBackendResult<&str> {
-    std::str::from_utf8(bytes).map_err(|_| invalid_json("document is not valid UTF-8"))
-}
-
-fn invalid_json(message: &'static str) -> StorageBackendError {
-    StorageBackendError::Serde(<serde_json::Error as serde::de::Error>::custom(message))
-}
-
-fn read_error(error: JsonReadError) -> StorageBackendError {
-    match error {
-        JsonReadError::InvalidJson => invalid_json("invalid persisted document JSON"),
-        JsonReadError::Memory(error) => StorageBackendError::Memory(error),
-        JsonReadError::Cancelled(error) => StorageBackendError::Cancelled(error),
-    }
 }
 
 #[cfg(test)]

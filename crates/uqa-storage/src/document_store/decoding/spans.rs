@@ -13,20 +13,20 @@ use uqa_core::{
 
 use super::{invalid_json, read_error, StorageBackendResult, StorageReadControl};
 
-pub(super) struct Member<'a> {
-    pub(super) name: Budgeted<String>,
+pub(crate) struct Member<'a> {
+    pub(crate) name: Budgeted<String>,
     pub(super) encoded_name: &'a [u8],
-    pub(super) value: &'a [u8],
+    pub(crate) value: &'a [u8],
     pub(super) position: usize,
 }
 
-pub(super) enum ContainerSpans<'a> {
+pub(crate) enum ContainerSpans<'a> {
     Object(BudgetedVec<Member<'a>>),
     Array(BudgetedVec<&'a [u8]>),
 }
 
 impl<'a> ContainerSpans<'a> {
-    pub(super) fn read(
+    pub(crate) fn read(
         input: &'a [u8],
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
@@ -35,7 +35,7 @@ impl<'a> ContainerSpans<'a> {
         Self::collect(input, control, &mut reader)
     }
 
-    pub(super) fn read_envelope(
+    pub(crate) fn read_envelope(
         input: &'a [u8],
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
