@@ -314,3 +314,144 @@ fn read_only_noop_and_invalid_database_paths_do_not_allocate_publication_state()
     graph.reclaim();
     assert_eq!(control.memory().used(), 0);
 }
+
+fn restored_publication(
+    committed: bool,
+) -> (
+    SerializableGraph,
+    SerializablePublication,
+    CommitStatus,
+    StorageReadControl,
+    Vec<u8>,
+) {
+    let (mut graph, participant, control) = setup();
+    let publication = graph
+        .prepare_publication(participant, transaction(7), [3; 32], &control)
+        .unwrap();
+    let outcome = if committed {
+        CommitStatus::Committed(receipt(publication))
+    } else {
+        CommitStatus::Aborted
+    };
+    graph.resolve_publication(publication, outcome).unwrap();
+    let mut encoded = Vec::new();
+    graph.write_checkpoint(&mut encoded, &control).unwrap();
+    let restored = SerializableGraph::read_checkpoint(
+        graph.database(),
+        graph.coordinator(),
+        &mut encoded.as_slice(),
+        &control,
+    )
+    .unwrap();
+    (restored, publication, outcome, control, encoded)
+}
+
+#[test]
+fn restored_terminal_publications_require_their_exact_durable_receipts() {
+    for committed in [false, true] {
+        let (mut graph, publication, expected, control, original) = restored_publication(committed);
+        let committed_receipt = receipt(publication);
+        let alternatives = [
+            CommitStatus::Unknown,
+            CommitStatus::Pending,
+            if committed {
+                CommitStatus::Aborted
+            } else {
+                CommitStatus::Committed(committed_receipt)
+            },
+            CommitStatus::Committed(CommitReceipt {
+                transaction: transaction(8),
+                ..committed_receipt
+            }),
+            CommitStatus::Committed(CommitReceipt {
+                sequence: CommitSequence::from_u64(10),
+                ..committed_receipt
+            }),
+            CommitStatus::Committed(CommitReceipt {
+                fingerprint: [4; 32],
+                ..committed_receipt
+            }),
+        ];
+        for authoritative in alternatives {
+            let error = graph
+                .validate_persisted_publications(&control, |queried| {
+                    assert_eq!(queried, publication.transaction());
+                    Ok(authoritative)
+                })
+                .unwrap_err();
+            assert!(
+                if authoritative == CommitStatus::Unknown {
+                    matches!(error, VersionError::UnknownTransaction)
+                } else {
+                    matches!(error, VersionError::CommitMismatch)
+                },
+                "accepted {authoritative:?} for persisted {expected:?}"
+            );
+            assert!(!graph.checkpoint_changed());
+            let mut encoded = Vec::new();
+            graph.write_checkpoint(&mut encoded, &control).unwrap();
+            assert_eq!(encoded, original);
+            // Persisted-state validation cannot downgrade a retained live completion result.
+            assert_eq!(
+                graph
+                    .resolve_publication(publication, CommitStatus::Unknown)
+                    .unwrap(),
+                expected
+            );
+        }
+        let occupied = control
+            .memory()
+            .reserve(control.memory().limit() - control.memory().used())
+            .unwrap();
+        graph
+            .validate_persisted_publications(&control, |queried| {
+                assert_eq!(queried, publication.transaction());
+                Ok(expected)
+            })
+            .unwrap();
+        drop(occupied);
+        assert!(!graph.checkpoint_changed());
+    }
+}
+
+#[test]
+fn persisted_publication_validation_preserves_cancellation_and_lookup_errors() {
+    let (graph, _, expected, control, original) = restored_publication(true);
+    control.cancellation().cancel();
+    assert!(matches!(
+        graph.validate_persisted_publications(&control, |_| panic!("cancelled receipt lookup")),
+        Err(VersionError::Cancelled(_))
+    ));
+    control.cancellation().reset();
+    assert!(matches!(
+        graph.validate_persisted_publications(&control, |_| Err(VersionError::SequenceExhausted)),
+        Err(VersionError::SequenceExhausted)
+    ));
+    let mut encoded = Vec::new();
+    graph.write_checkpoint(&mut encoded, &control).unwrap();
+    assert_eq!(encoded, original);
+    graph
+        .validate_persisted_publications(&control, |_| Ok(expected))
+        .unwrap();
+}
+
+#[test]
+fn persisted_validation_leaves_unresolved_publications_to_receipt_reconciliation() {
+    let (mut graph, participant, control) = setup();
+    let publication = graph
+        .prepare_publication(participant, transaction(7), [3; 32], &control)
+        .unwrap();
+    graph
+        .validate_persisted_publications(&control, |_| panic!("prepared receipt validation"))
+        .unwrap();
+    graph
+        .reconcile_publications(&control, |_| {
+            Ok(CommitStatus::Committed(receipt(publication)))
+        })
+        .unwrap();
+    graph
+        .validate_persisted_publications(&control, |_| {
+            Ok(CommitStatus::Committed(receipt(publication)))
+        })
+        .unwrap();
+}

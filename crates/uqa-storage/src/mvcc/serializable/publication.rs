@@ -67,6 +67,37 @@ impl SerializablePublication {
 }
 
 impl SerializableGraph {
+    /// Validate terminal outcomes restored from a provider checkpoint before exposing its graph or invoking admission. Every retained committed or aborted publication must still have the same authoritative physical receipt; these receipts outlive record-history reclamation. A missing receipt rejects the persisted checkpoint rather than letting a stale backup branch borrow its confirmed outcome. Prepared publications keep their ordinary reconciliation path. This read-only check borrows retained entries, allocates no payload and leaves live-session terminal outcome precedence unchanged.
+    pub fn validate_persisted_publications(
+        &self,
+        control: &StorageReadControl,
+        mut lookup: impl FnMut(StorageTransactionId) -> VersionResult<CommitStatus>,
+    ) -> VersionResult<()> {
+        control.cancellation().check()?;
+        for entry in &*self.transactions {
+            control.cancellation().check()?;
+            let Some(publication) = entry.publication else {
+                continue;
+            };
+            let transaction = StorageTransactionId::new(self.database, publication.allocation)?;
+            let expected = match publication.outcome {
+                PublicationOutcome::Committed(sequence) => CommitStatus::Committed(CommitReceipt {
+                    transaction,
+                    sequence,
+                    fingerprint: publication.fingerprint,
+                }),
+                PublicationOutcome::Aborted => CommitStatus::Aborted,
+                PublicationOutcome::Prepared => continue,
+            };
+            match lookup(transaction)? {
+                CommitStatus::Unknown => return Err(VersionError::UnknownTransaction),
+                actual if actual != expected => return Err(VersionError::CommitMismatch),
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     /// Seal the participant against its caller's already allocated durable transaction. Repeated preparation must preserve both identities and the original fingerprint, including during physical candidate re-preparation. A logically read-only participant can publish maintenance records outside logical predicate spaces; logical write observations remain forbidden. Participants without physical changes finish directly through the graph without allocating a durable transaction.
     pub fn prepare_publication(
         &mut self,

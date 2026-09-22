@@ -17,7 +17,7 @@ use redb::Database;
 use uqa_storage::{
     mvcc::{
         DatabaseId, LocalSerializableState, SerializableCoordinator, SerializableOperation,
-        VersionError, VersionResult,
+        VersionError, VersionResult, VersionedPersistence,
     },
     read_control::{CancellationToken, StorageReadControl},
 };
@@ -61,6 +61,11 @@ impl SerializableCoordinator for RedbRecordStore {
             .with_admission(&self.database, control, |leases| {
                 let mut loaded = schema::load(self, control)?;
                 // Loading closes its physical read before receipt recovery, snapshot capture or publication. No physical writer spans the operation.
+                loaded
+                    .graph
+                    .validate_persisted_publications(control, |transaction| {
+                        self.commit_status(transaction, control)
+                    })?;
                 let result = operation(&mut loaded.graph, leases);
                 let finish = StorageReadControl::new(control.memory(), &CancellationToken::new());
                 schema::persist(self, &loaded, &finish)?;

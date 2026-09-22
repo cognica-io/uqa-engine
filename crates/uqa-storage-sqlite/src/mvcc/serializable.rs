@@ -13,7 +13,7 @@ mod tests;
 
 use rusqlite::Connection;
 use uqa_storage::{
-    mvcc::{SerializableGraph, VersionResult},
+    mvcc::{SerializableGraph, VersionResult, VersionedPersistence},
     read_control::StorageReadControl,
 };
 
@@ -46,6 +46,9 @@ impl SQLiteRecordStore {
         begin(&connection, control).map_err(Error::into_version)?;
         let graph =
             schema::load(&connection, self.identity, control).map_err(Error::into_version)?;
+        graph.validate_persisted_publications(control, |transaction| {
+            self.commit_status(transaction, control)
+        })?;
         drop(timeout);
         let milliseconds: u32 = connection
             .pragma_query_value(None, "busy_timeout", |row| row.get(0))

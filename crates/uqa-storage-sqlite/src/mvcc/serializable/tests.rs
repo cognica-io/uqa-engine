@@ -21,6 +21,7 @@ mod migration;
 mod persistence;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod process;
+mod restore;
 
 fn control() -> StorageReadControl {
     StorageReadControl::with_limit(1 << 20)

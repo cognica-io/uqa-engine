@@ -242,3 +242,102 @@ fn malformed_retained_state_is_rejected_before_callbacks_without_reinitializatio
         assert_eq!(control.memory().used(), 0);
     }
 }
+
+#[test]
+fn persisted_terminal_outcomes_reject_missing_or_changed_authoritative_receipts() {
+    for committed in [false, true] {
+        for corruption in 0..5 {
+            let store = memory();
+            let control = StorageReadControl::with_limit(1 << 20);
+            let participant = actor(&store, &control);
+            let (publication, prepared) = prepare(&store, &participant, b"retained", &control);
+            let outcome = graph(&store, &control, |graph| {
+                let outcome = if committed {
+                    CommitStatus::Committed(
+                        store
+                            .commit(publication.transaction(), &prepared, &control)
+                            .unwrap(),
+                    )
+                } else {
+                    store.abort(publication.transaction(), &control).unwrap()
+                };
+                graph.resolve_publication(publication, outcome)?;
+                Ok(outcome)
+            })
+            .unwrap();
+            let original = {
+                let transaction = physical_writer(&store.database).unwrap();
+                let original = {
+                    let mut receipts = transaction.open_table(TRANSACTIONS).unwrap();
+                    let original = receipts
+                        .get(publication.transaction().allocation())
+                        .unwrap()
+                        .unwrap()
+                        .value()
+                        .to_vec();
+                    if corruption == 0 {
+                        receipts
+                            .remove(publication.transaction().allocation())
+                            .unwrap();
+                    } else {
+                        let altered = match corruption {
+                            1 => vec![0],
+                            2 if committed => vec![1],
+                            _ => {
+                                let mut receipt = match outcome {
+                                    CommitStatus::Committed(receipt) => receipt,
+                                    _ => CommitReceipt {
+                                        transaction: publication.transaction(),
+                                        sequence: CommitSequence::from_u64(1),
+                                        fingerprint: publication.fingerprint(),
+                                    },
+                                };
+                                if corruption == 3 {
+                                    receipt.sequence =
+                                        CommitSequence::from_u64(receipt.sequence.as_u64() + 1);
+                                } else if corruption == 4 {
+                                    receipt.fingerprint[0] ^= 1;
+                                }
+                                receipt_bytes(receipt).to_vec()
+                            }
+                        };
+                        receipts
+                            .insert(publication.transaction().allocation(), altered.as_slice())
+                            .unwrap();
+                    }
+                    original
+                };
+                transaction.commit().unwrap();
+                original
+            };
+            let result = store.with_serializable_admission(&control, &mut |_, _| {
+                panic!("checkpoint whose terminal receipt changed was admitted")
+            });
+            assert!(
+                if corruption == 0 {
+                    matches!(result, Err(VersionError::UnknownTransaction))
+                } else {
+                    matches!(result, Err(VersionError::CommitMismatch))
+                },
+                "committed {committed}, corruption {corruption}: {result:?}"
+            );
+            let transaction = physical_writer(&store.database).unwrap();
+            transaction
+                .open_table(TRANSACTIONS)
+                .unwrap()
+                .insert(publication.transaction().allocation(), original.as_slice())
+                .unwrap();
+            transaction.commit().unwrap();
+            graph(&store, &control, |graph| {
+                assert_eq!(
+                    graph.resolve_publication(publication, CommitStatus::Unknown)?,
+                    outcome
+                );
+                Ok(())
+            })
+            .unwrap();
+            drop((participant, prepared, store));
+            assert_eq!(control.memory().used(), 0);
+        }
+    }
+}
