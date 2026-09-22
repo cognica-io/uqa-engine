@@ -84,7 +84,7 @@ impl RetainedDocumentFields {
     }
 }
 
-fn retention_error(error: ValueRetentionError) -> StorageBackendError {
+pub(super) fn retention_error(error: ValueRetentionError) -> StorageBackendError {
     match error {
         ValueRetentionError::Memory(error) => StorageBackendError::Memory(error),
         ValueRetentionError::Cancelled(error) => StorageBackendError::Cancelled(error),

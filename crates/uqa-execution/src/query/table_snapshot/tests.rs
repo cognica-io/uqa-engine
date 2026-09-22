@@ -8,9 +8,12 @@ use super::*;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use uqa_core::CancellationToken;
-use uqa_storage::{DocumentMetadata, MemoryInvertedIndex, StorageBackendResult};
+use uqa_storage::{
+    DocumentMetadata, MemoryDocumentStore, MemoryInvertedIndex, StorageBackendResult,
+};
 
 mod budgets;
+mod copied;
 mod retained;
 
 fn columns(sql: &str) -> Vec<ColumnDef> {

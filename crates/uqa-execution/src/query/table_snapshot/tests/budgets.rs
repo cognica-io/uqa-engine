@@ -53,6 +53,7 @@ fn rebuilt_vectors_keep_the_original_allowance_and_survive_failed_recapture() {
         assert_eq!(control.memory().used(), retained);
         let nested = view.vectors["v"].snapshot().unwrap().snapshot().unwrap();
         let text = view.text.snapshot().unwrap();
+        let documents = view.documents.snapshot().unwrap();
         assert_eq!(control.memory().used(), retained);
         source.clear().unwrap();
         drop(view);
@@ -67,6 +68,7 @@ fn rebuilt_vectors_keep_the_original_allowance_and_survive_failed_recapture() {
         assert_eq!(control.memory().used(), retained);
         drop(nested);
         drop(text);
+        drop(documents);
         assert_eq!(control.memory().used(), 0);
     }
 }
@@ -139,6 +141,7 @@ fn reconstructed_text_keeps_its_allowance_and_original_occurrences_after_rejecti
         drop(full);
         assert_eq!(control.memory().used(), retained);
         let nested = view.text.snapshot().unwrap().snapshot().unwrap();
+        let documents = view.documents.snapshot().unwrap();
         source.clear().unwrap();
         drop(view);
         assert_eq!(control.memory().used(), retained);
@@ -148,6 +151,7 @@ fn reconstructed_text_keeps_its_allowance_and_original_occurrences_after_rejecti
         );
         assert_eq!(nested.total_field_length("body").unwrap(), 512);
         drop(nested);
+        drop(documents);
         assert_eq!(control.memory().used(), 0);
     }
 }

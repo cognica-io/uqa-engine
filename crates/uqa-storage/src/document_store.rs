@@ -21,6 +21,8 @@ pub mod decoding;
 pub mod identifiers;
 mod retained;
 pub use retained::{RetainedDocumentFields, RetainedStoredDocument};
+mod retained_store;
+pub use retained_store::{RetainedDocumentStore, RetainedDocumentStoreBuilder};
 
 /// Document field map. Keys are field names; values are dynamic.
 pub type Document = BTreeMap<FieldName, Value>;

@@ -14,8 +14,8 @@ use uqa_sql::{ast::ColumnDef, ColumnType, SQLError};
 use uqa_storage::inverted_index::{AnalyzerBindings, RetainedInvertedIndexBuilder};
 use uqa_storage::{read_control::StorageReadControl, vector_index::RetainedVectorIndexBuilder};
 use uqa_storage::{
-    DocumentStore, InvertedIndex, MemoryDocumentStore, StorageBackendError, StoredDocument,
-    VectorIndex,
+    DocumentStore, InvertedIndex, RetainedDocumentStoreBuilder, StorageBackendError,
+    StoredDocument, VectorIndex,
 };
 
 mod documents;
@@ -43,10 +43,8 @@ pub struct MaterializedTable {
 }
 
 struct SnapshotBuilder {
-    documents: Box<dyn DocumentStore>,
     text: RetainedInvertedIndexBuilder,
     vectors: BTreeMap<FieldName, RetainedVectorIndexBuilder>,
-    document_count: u64,
     control: StorageReadControl,
 }
 
@@ -69,13 +67,12 @@ pub fn retain(
     )
     .map_err(|error| snapshot_error("retained documents", &error))?;
     let mut result = SnapshotBuilder::new(schema, control)?;
-    result.document_count = u64::try_from(
+    let document_count = u64::try_from(
         documents
             .len()
             .map_err(|error| snapshot_error("document count", &error))?,
     )
     .map_err(|_| SQLError::Internal("query snapshot document count overflow".into()))?;
-    result.documents = Box::new(documents);
     let fields = schema
         .text_fields
         .iter()
@@ -85,21 +82,19 @@ pub fn retain(
         .into_iter()
         .collect::<Vec<_>>();
     if fields.is_empty() {
-        return result.finish();
+        return result.finish(Box::new(documents), document_count);
     }
     let mut after = None;
     loop {
         cancellation.check()?;
-        let ids = result
-            .documents
+        let ids = documents
             .next_doc_ids(after, crate::DEFAULT_BATCH_SIZE)
             .map_err(|error| snapshot_error("document ids", &error))?;
         let Some(last) = ids.last().copied() else {
             break;
         };
         after = Some(last);
-        let rows = result
-            .documents
+        let rows = documents
             .get_fields_multi(&ids, &fields)
             .map_err(|error| snapshot_error("index fields", &error))?;
         for (id, values) in rows {
@@ -113,10 +108,10 @@ pub fn retain(
         }
     }
     cancellation.check()?;
-    result.finish()
+    result.finish(Box::new(documents), document_count)
 }
 
-/// Reconstruct a selected query view without keeping intermediate corpus-sized document maps. Base rows use their original column identities; evaluated private rows already use the selected schema. Each row moves into its final store after its index inputs are extracted. The resulting memory stores still retain the complete selected view.
+/// Reconstruct a selected query view without keeping intermediate corpus-sized document maps. Base rows use their original column identities; evaluated private rows already use the selected schema. Each row moves into an immutable Storage corpus that retains its payload and entry-capacity reservation through the last reader. Source decoding, row adaptation and caller-owned read outputs retain their separate allocation boundaries.
 pub fn materialize(
     source: &dyn DocumentStore,
     source_columns: &[ColumnDef],
@@ -128,6 +123,7 @@ pub fn materialize(
     cancellation.check()?;
     let layout = RowLayout::new(source_columns, Arc::clone(&schema.columns));
     let mut result = SnapshotBuilder::new(schema, control)?;
+    let mut retained = RetainedDocumentStoreBuilder::new(control);
     let mut after = None;
     loop {
         cancellation.check()?;
@@ -145,10 +141,15 @@ pub fn materialize(
             ));
         }
         after = Some(last);
-        let selected = ids
-            .into_iter()
-            .filter(|id| !changes.contains_change(*id))
-            .collect::<Vec<_>>();
+        let mut selected = uqa_core::memory::BudgetedVec::new(control.memory());
+        for id in ids {
+            cancellation.check()?;
+            if !changes.contains_change(id) {
+                selected
+                    .push(id)
+                    .map_err(|error| snapshot_error("document selection", &error.into()))?;
+            }
+        }
         if selected.is_empty() {
             continue;
         }
@@ -158,32 +159,42 @@ pub fn materialize(
         for (id, document) in documents {
             cancellation.check()?;
             let document = layout.adapt_base(document)?;
-            result.insert(id, document, schema)?;
+            result.insert(&mut retained, id, document, schema)?;
         }
     }
     for change in changes.into_rows() {
         cancellation.check()?;
         let (id, document) = change.map_err(|error| snapshot_error("private documents", &error))?;
         if let Some(document) = document {
-            result.insert(id, layout.complete_private(document)?, schema)?;
+            result.insert(
+                &mut retained,
+                id,
+                layout.complete_private(document)?,
+                schema,
+            )?;
         }
     }
     cancellation.check()?;
-    result.document_count = u64::try_from(
-        result
-            .documents
+    let documents = retained
+        .finish()
+        .map_err(|error| snapshot_error("documents", &error))?;
+    let document_count = u64::try_from(
+        documents
             .len()
             .map_err(|error| snapshot_error("document count", &error))?,
     )
     .map_err(|_| SQLError::Internal("query snapshot document count overflow".into()))?;
-    result.finish()
+    result.finish(Box::new(documents), document_count)
 }
 
 pub fn empty(
     schema: &SnapshotSchema<'_>,
     control: &StorageReadControl,
 ) -> Result<MaterializedTable, SQLError> {
-    SnapshotBuilder::new(schema, control)?.finish()
+    let documents = RetainedDocumentStoreBuilder::new(control)
+        .finish()
+        .map_err(|error| snapshot_error("documents", &error))?;
+    SnapshotBuilder::new(schema, control)?.finish(Box::new(documents), 0)
 }
 
 impl SnapshotBuilder {
@@ -218,15 +229,17 @@ impl SnapshotBuilder {
             })
             .collect();
         Ok(Self {
-            documents: Box::new(MemoryDocumentStore::new()),
             text,
             vectors,
-            document_count: 0,
             control: control.clone(),
         })
     }
 
-    fn finish(self) -> Result<MaterializedTable, SQLError> {
+    fn finish(
+        self,
+        documents: Box<dyn DocumentStore>,
+        document_count: u64,
+    ) -> Result<MaterializedTable, SQLError> {
         let vectors = self
             .vectors
             .into_iter()
@@ -238,26 +251,27 @@ impl SnapshotBuilder {
             })
             .collect::<Result<_, SQLError>>()?;
         Ok(MaterializedTable {
-            documents: self.documents,
+            documents,
             text: Box::new(
                 self.text
                     .finish()
                     .map_err(|error| snapshot_error("inverted index", &error))?,
             ),
             vectors,
-            document_count: self.document_count,
+            document_count,
         })
     }
 
     fn insert(
         &mut self,
+        documents: &mut RetainedDocumentStoreBuilder,
         id: DocId,
         document: StoredDocument,
         schema: &SnapshotSchema<'_>,
     ) -> Result<(), SQLError> {
         self.index_fields(id, document.fields(), schema)?;
-        self.documents
-            .put_stored(id, document)
+        documents
+            .add_document(id, document)
             .map_err(|error| snapshot_error("document", &error))
     }
 
