@@ -6,7 +6,11 @@
 
 //! Tagged value recognition validates borrowed shapes before moving decoded buffers.
 
-use super::{ArrayValue, BTreeMap, DecimalValue, TemporalValue, Value};
+use super::{ArrayValue, BTreeMap, TemporalValue, Value};
+use crate::{memory::Budgeted, CancellationToken, ValueRetentionError};
+
+mod allocation;
+use allocation::Workspace;
 
 fn int_field<T: TryFrom<i64>>(map: &BTreeMap<String, Value>, key: &str) -> Option<T> {
     match map.get(key)? {
@@ -43,7 +47,27 @@ fn tagged_temporal_value(tag: &str, map: &BTreeMap<String, Value>) -> Option<Tem
 }
 
 /// Consume a recognized tagged map without cloning its decoded payload. Invalid tags retain every original field and value.
-pub(super) fn value_from_tagged_map(mut map: BTreeMap<String, Value>) -> Result<Value, String> {
+pub(super) fn value_from_tagged_map(map: BTreeMap<String, Value>) -> Result<Value, String> {
+    convert(map, &mut Workspace::unbounded()).map_err(|error| error.to_string())
+}
+
+/// The input lease includes live map entries, key capacities and nested value payloads. Reserve new tag representations before allocation, then retain only the resulting value's payload.
+pub(super) fn value_from_tagged_map_budgeted(
+    map: Budgeted<BTreeMap<String, Value>>,
+    cancellation: &CancellationToken,
+) -> Result<Budgeted<Value>, ValueRetentionError> {
+    let (map, memory) = map.into_parts();
+    let mut workspace = Workspace::bounded(memory, cancellation);
+    let value = convert(map, &mut workspace)?;
+    let retained = workspace.retained(&value)?;
+    Ok(Budgeted::new(value, retained))
+}
+
+fn convert(
+    mut map: BTreeMap<String, Value>,
+    workspace: &mut Workspace<'_>,
+) -> Result<Value, ValueRetentionError> {
+    workspace.check()?;
     let Some(Value::Str(tag)) = map.get("$uqa_type") else {
         return Ok(Value::Map(map));
     };
@@ -54,7 +78,7 @@ pub(super) fn value_from_tagged_map(mut map: BTreeMap<String, Value>) -> Result<
         "void" if map.len() == 1 => return Ok(Value::Void),
         "decimal" => {
             if let Some(Value::Str(text)) = map.get("value") {
-                if let Some(value) = DecimalValue::parse(text) {
+                if let Some(value) = workspace.decimal(text)? {
                     return Ok(Value::Decimal(value));
                 }
             }
@@ -74,33 +98,14 @@ pub(super) fn value_from_tagged_map(mut map: BTreeMap<String, Value>) -> Result<
         }
         "bytes" if map.len() == 2 => {
             if let Some(Value::Str(hex)) = map.get("hex") {
-                if let Some(bytes) = decode_hex_bytes(hex)? {
+                if let Some(bytes) = decode_hex_bytes(hex, workspace)? {
                     return Ok(Value::Bytes(bytes));
                 }
             }
         }
         "array" if map.len() == 3 => {
-            let (Some(Value::List(bounds)), Some(Value::List(values))) =
-                (map.get("lower_bounds"), map.get("values"))
-            else {
-                return Ok(Value::Map(map));
-            };
-            let bounds = bounds
-                .iter()
-                .map(|value| match value {
-                    Value::Int(value) => i32::try_from(*value).ok(),
-                    _ => None,
-                })
-                .collect::<Option<Vec<_>>>();
-            if let Some(bounds) = bounds {
-                if let Some(dimensions) = ArrayValue::decoded_shape(values) {
-                    if dimensions.len() == bounds.len() {
-                        let values = take_list(&mut map, "values");
-                        return Ok(Value::Array(ArrayValue::from_decoded_parts(
-                            values, dimensions, bounds,
-                        )));
-                    }
-                }
+            if let Some(array) = decoded_array(&mut map, workspace)? {
+                return Ok(Value::Array(array));
             }
         }
         "row" if map.len() == 2 => {
@@ -112,16 +117,16 @@ pub(super) fn value_from_tagged_map(mut map: BTreeMap<String, Value>) -> Result<
             let Some(Value::List(encoded_fields)) = map.get("fields") else {
                 return Ok(Value::Map(map));
             };
-            if !encoded_fields.iter().all(|encoded| {
-                matches!(encoded, Value::List(pair) if matches!(pair.as_slice(), [Value::Str(_), _]))
-            }) {
-                return Ok(Value::Map(map));
+            for encoded in encoded_fields {
+                workspace.check()?;
+                if !matches!(encoded, Value::List(pair) if matches!(pair.as_slice(), [Value::Str(_), _]))
+                {
+                    return Ok(Value::Map(map));
+                }
             }
-            let mut fields = Vec::new();
-            fields
-                .try_reserve_exact(encoded_fields.len())
-                .map_err(|error| format!("cannot allocate decoded record fields: {error}"))?;
+            let mut fields = workspace.vector(encoded_fields.len())?;
             for encoded in take_list(&mut map, "fields") {
+                workspace.check()?;
                 let Value::List(mut pair) = encoded else {
                     unreachable!("record pair was validated");
                 };
@@ -138,6 +143,44 @@ pub(super) fn value_from_tagged_map(mut map: BTreeMap<String, Value>) -> Result<
     Ok(Value::Map(map))
 }
 
+fn decoded_array(
+    map: &mut BTreeMap<String, Value>,
+    workspace: &mut Workspace<'_>,
+) -> Result<Option<ArrayValue>, ValueRetentionError> {
+    let (Some(Value::List(bounds)), Some(Value::List(values))) =
+        (map.get("lower_bounds"), map.get("values"))
+    else {
+        return Ok(None);
+    };
+    for bound in bounds {
+        workspace.check()?;
+        if !matches!(bound, Value::Int(value) if i32::try_from(*value).is_ok()) {
+            return Ok(None);
+        }
+    }
+    let Some(dimensions) = workspace.shape(values)? else {
+        return Ok(None);
+    };
+    if dimensions.len() != bounds.len() {
+        return Ok(None);
+    }
+    let mut decoded_bounds = workspace.vector(bounds.len())?;
+    for bound in bounds {
+        workspace.check()?;
+        let Value::Int(bound) = bound else {
+            unreachable!("array lower bound was validated");
+        };
+        decoded_bounds.push(i32::try_from(*bound).expect("validated lower bound"));
+    }
+    workspace.reserve(ArrayValue::decoded_header_bytes())?;
+    let values = take_list(map, "values");
+    Ok(Some(ArrayValue::from_decoded_parts(
+        values,
+        dimensions,
+        decoded_bounds,
+    )))
+}
+
 fn take_list(map: &mut BTreeMap<String, Value>, key: &str) -> Vec<Value> {
     let Some(Value::List(values)) = map.remove(key) else {
         unreachable!("list tag was validated");
@@ -145,7 +188,10 @@ fn take_list(map: &mut BTreeMap<String, Value>, key: &str) -> Vec<Value> {
     values
 }
 
-fn decode_hex_bytes(hex: &str) -> Result<Option<Vec<u8>>, String> {
+fn decode_hex_bytes(
+    hex: &str,
+    workspace: &mut Workspace<'_>,
+) -> Result<Option<Vec<u8>>, ValueRetentionError> {
     fn nibble(byte: u8) -> Option<u8> {
         match byte {
             b'0'..=b'9' => Some(byte - b'0'),
@@ -159,14 +205,19 @@ fn decode_hex_bytes(hex: &str) -> Result<Option<Vec<u8>>, String> {
     if !encoded.len().is_multiple_of(2) {
         return Ok(None);
     }
-    let mut bytes = Vec::new();
-    bytes
-        .try_reserve_exact(encoded.len() / 2)
-        .map_err(|error| format!("cannot allocate decoded byte value: {error}"))?;
-    for pair in encoded.chunks_exact(2) {
-        let (Some(high), Some(low)) = (nibble(pair[0]), nibble(pair[1])) else {
+    for chunk in encoded.chunks(4096) {
+        workspace.check()?;
+        if chunk.iter().any(|byte| nibble(*byte).is_none()) {
             return Ok(None);
-        };
+        }
+    }
+    let mut bytes = workspace.vector(encoded.len() / 2)?;
+    for (index, pair) in encoded.chunks_exact(2).enumerate() {
+        if index.is_multiple_of(4096) {
+            workspace.check()?;
+        }
+        let high = nibble(pair[0]).expect("validated hexadecimal digit");
+        let low = nibble(pair[1]).expect("validated hexadecimal digit");
         bytes.push((high << 4) | low);
     }
     Ok(Some(bytes))
@@ -174,3 +225,6 @@ fn decode_hex_bytes(hex: &str) -> Result<Option<Vec<u8>>, String> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod controlled_tests;

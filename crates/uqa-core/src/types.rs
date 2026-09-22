@@ -56,7 +56,7 @@ pub use jsonb::{jsonb_equality_key, write_jsonb_comparison_key, JsonbKeyError};
 pub use occurrence::{TokenOccurrence, TokenOccurrenceError, TokenOffsets};
 pub use posting::{GeneralizedPayload, GeneralizedPostingEntry, Payload, PostingEntry};
 pub use temporal::TemporalValue;
-pub use value::{Value, ValueRetentionError};
+pub use value::{JsonValueDecoder, Value, ValueRetentionError};
 
 #[cfg(test)]
 mod tests;

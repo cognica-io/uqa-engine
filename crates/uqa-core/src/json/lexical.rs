@@ -10,7 +10,7 @@ use super::{JsonReadError, JsonReader};
 
 impl<'a> JsonReader<'a, '_> {
     pub(super) fn peek(&self) -> Option<u8> {
-        self.input.as_bytes().get(self.position).copied()
+        self.input.get(self.position).copied()
     }
 
     pub(super) fn advance(&mut self) -> Result<(), JsonReadError> {
@@ -45,18 +45,28 @@ impl<'a> JsonReader<'a, '_> {
         Ok(())
     }
 
-    pub(super) fn string(&mut self) -> Result<&'a str, JsonReadError> {
+    pub(super) fn string(&mut self) -> Result<&'a [u8], JsonReadError> {
         let start = self.position;
         self.consume(b'"')?;
         while let Some(byte) = self.peek() {
             self.advance()?;
             match byte {
-                b'"' => return Ok(&self.input[start..self.position]),
+                b'"' => {
+                    let encoded = &self.input[start..self.position];
+                    if !self.ignored_string_escapes {
+                        std::str::from_utf8(encoded).map_err(|_| JsonReadError::InvalidJson)?;
+                    }
+                    return Ok(encoded);
+                }
                 b'\\' => match self.peek().ok_or(JsonReadError::InvalidJson)? {
                     b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't' => self.advance()?,
                     b'u' => {
                         self.advance()?;
-                        match self.hex_quad()? {
+                        let unit = self.hex_quad()?;
+                        if self.ignored_string_escapes {
+                            continue;
+                        }
+                        match unit {
                             0xD800..=0xDBFF => {
                                 self.consume(b'\\')?;
                                 self.consume(b'u')?;
@@ -118,7 +128,8 @@ impl<'a> JsonReader<'a, '_> {
             }
             self.digits()?;
         }
-        Ok(&self.input[start..self.position])
+        std::str::from_utf8(&self.input[start..self.position])
+            .map_err(|_| JsonReadError::InvalidJson)
     }
 
     fn digits(&mut self) -> Result<(), JsonReadError> {

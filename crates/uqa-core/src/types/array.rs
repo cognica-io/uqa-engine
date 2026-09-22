@@ -9,6 +9,7 @@
 use super::Value;
 
 mod elements;
+mod shape;
 pub use elements::{ArrayTraversalError, BudgetedArrayElements};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +42,19 @@ impl ArrayValue {
     /// Validate borrowed input before a tagged decoder transfers its values. Rejected tags must preserve the complete original map.
     pub(super) fn decoded_shape(elements: &[Value]) -> Option<Vec<usize>> {
         normalized_shape(elements)
+    }
+
+    pub(super) fn decoded_shape_budgeted(
+        elements: &[Value],
+        memory: &crate::memory::MemoryBudget,
+        cancellation: &crate::CancellationToken,
+    ) -> Result<Option<crate::memory::Budgeted<Vec<usize>>>, super::ValueRetentionError> {
+        shape::budgeted(elements, memory, cancellation)
+    }
+
+    /// Reserve this exact boxed layout before consuming validated decoded buffers.
+    pub(super) const fn decoded_header_bytes() -> usize {
+        size_of::<ArrayStorage>()
     }
 
     /// Consume the values and dimensions validated by this owner, preserving their existing buffers.
@@ -92,7 +106,7 @@ impl ArrayValue {
 
     /// Heap bytes used by the boxed array headers. Element buffers are accounted for by callers together with their recursively retained values.
     pub fn retained_header_bytes(&self) -> usize {
-        std::mem::size_of::<ArrayStorage>()
+        Self::decoded_header_bytes()
     }
 
     pub(super) fn retained_buffer_bytes(&self) -> Result<usize, crate::memory::MemoryError> {
@@ -127,45 +141,7 @@ fn normalize_nested_arrays(elements: &mut [Value]) {
 }
 
 fn normalized_shape(elements: &[Value]) -> Option<Vec<usize>> {
-    let shape = array_shape(elements)?;
-    if shape.first() == Some(&0) {
-        Some(Vec::new())
-    } else {
-        Some(shape)
-    }
-}
-
-fn array_shape(elements: &[Value]) -> Option<Vec<usize>> {
-    let mut dimensions = vec![elements.len()];
-    let mut nested_shape: Option<Vec<usize>> = None;
-    let mut has_scalar = false;
-    for element in elements {
-        let nested = match element {
-            Value::List(values) => Some(values.as_slice()),
-            Value::Array(array) => Some(array.elements()),
-            _ => None,
-        };
-        if let Some(nested) = nested {
-            let shape = array_shape(nested)?;
-            if has_scalar
-                || nested_shape
-                    .as_ref()
-                    .is_some_and(|expected| *expected != shape)
-            {
-                return None;
-            }
-            nested_shape = Some(shape);
-        } else {
-            if nested_shape.is_some() {
-                return None;
-            }
-            has_scalar = true;
-        }
-    }
-    if let Some(shape) = nested_shape {
-        dimensions.extend(shape);
-    }
-    Some(dimensions)
+    shape::unbounded(elements)
 }
 
 impl serde::Serialize for ArrayValue {

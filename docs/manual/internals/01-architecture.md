@@ -116,6 +116,8 @@ SQL's [catalog expression codec](../../../crates/uqa-sql/src/catalog/node_tree.r
 
 Core's `json` reader owns the shared JSON token and container grammar. Its borrowed events preserve numeric text, escaped string tokens, field order and source offsets; each consumer owns its value representation and duplicate-field policy. Controlled readers reserve an explicit nesting stack and string-token decoding workspace under the original allowance. JSONB comparison construction reuses these events with its existing numeric representation and last-key-wins semantics. Storage continues to own document roots, durable envelopes, tuple metadata and provider-specific binary payloads.
 
+`JsonValueDecoder` constructs values and document field maps under the shared allowance. Field-map roots preserve ordinary user keys; nested objects reuse the canonical private-number and tagged-value rules. Replaced fields release their old payloads, recognized tags move existing buffers, and new record, byte, array and decimal representations reserve before allocation. Payload counting and reservation share one iterative traversal, so immutable owners can transfer validated leases without reserving the same payload twice. Durable-envelope consumers may scan ignored string bytes with serde's historical validation rules, then strictly decode their selected fields and keys.
+
 ## Carrier boundaries
 
 | Representation | Identity and combination contract |

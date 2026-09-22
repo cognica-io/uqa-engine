@@ -32,8 +32,8 @@ pub enum JsonToken<'a> {
     Bool(bool),
     Number(&'a str),
     /// The validated token includes its quotes and escapes.
-    String(&'a str),
-    Key(&'a str),
+    String(&'a [u8]),
+    Key(&'a [u8]),
     StartArray,
     EndArray,
     StartObject,
@@ -93,16 +93,25 @@ impl Stack {
 
 /// Iterative structural decoding charges its nesting stack before allocation. Event payloads borrow the input; consumers own and charge their chosen value representation separately.
 pub struct JsonReader<'a, 'c> {
-    input: &'a str,
+    input: &'a [u8],
     position: usize,
     stack: Stack,
     cancellation: Option<&'c CancellationToken>,
     root_started: bool,
     depth_limit: Option<usize>,
+    ignored_string_escapes: bool,
 }
 
 impl<'a, 'c> JsonReader<'a, 'c> {
     pub fn new(input: &'a str, memory: &MemoryBudget, cancellation: &'c CancellationToken) -> Self {
+        Self::from_slice(input.as_bytes(), memory, cancellation)
+    }
+
+    pub fn from_slice(
+        input: &'a [u8],
+        memory: &MemoryBudget,
+        cancellation: &'c CancellationToken,
+    ) -> Self {
         Self {
             input,
             position: 0,
@@ -110,17 +119,19 @@ impl<'a, 'c> JsonReader<'a, 'c> {
             cancellation: Some(cancellation),
             root_started: false,
             depth_limit: None,
+            ignored_string_escapes: false,
         }
     }
 
     pub(crate) fn unbounded(input: &'a str) -> Self {
         Self {
-            input,
+            input: input.as_bytes(),
             position: 0,
             stack: Stack::Unbounded(Vec::new()),
             cancellation: None,
             root_started: false,
             depth_limit: None,
+            ignored_string_escapes: false,
         }
     }
 
@@ -128,6 +139,13 @@ impl<'a, 'c> JsonReader<'a, 'c> {
     #[must_use]
     pub fn with_depth_limit(mut self, limit: usize) -> Self {
         self.depth_limit = Some(limit);
+        self
+    }
+
+    /// Match serde's ignored-value byte validation when locating fields in a durable envelope: require four hexadecimal digits after each Unicode escape, without decoding UTF-8 or requiring surrogate pairs in discarded strings. Consumers must decode retained keys and string values with their ordinary strict decoder.
+    #[must_use]
+    pub fn with_ignored_string_escapes(mut self) -> Self {
+        self.ignored_string_escapes = true;
         self
     }
 

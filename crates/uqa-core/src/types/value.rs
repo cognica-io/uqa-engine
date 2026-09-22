@@ -11,7 +11,9 @@ use super::{
     Serialize, Serializer, TemporalValue,
 };
 
+mod decoding;
 mod retention;
+pub use decoding::JsonValueDecoder;
 mod tagged;
 pub use retention::ValueRetentionError;
 use tagged::value_from_tagged_map;
@@ -275,13 +277,8 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
         }
         if map.len() == 1 {
             if let Some(Value::Str(number)) = map.get("$serde_json::private::Number") {
-                if let Ok(integer) = number.parse::<i64>() {
-                    return Ok(Value::Int(integer));
-                }
-                if let Ok(float) = number.parse::<f64>() {
-                    if float.is_finite() {
-                        return Ok(Value::Float(float));
-                    }
+                if let Some(value) = decoding::primitive_number(number) {
+                    return Ok(value);
                 }
                 if let Some(decimal) = DecimalValue::parse(number) {
                     return Ok(Value::Decimal(decimal));

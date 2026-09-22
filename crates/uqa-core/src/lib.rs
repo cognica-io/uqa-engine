@@ -35,9 +35,9 @@ pub use relation_identity::RelationIdentity;
 pub use types::{
     jsonb_equality_key, write_jsonb_comparison_key, ArrayTraversalError, ArrayValue,
     BudgetedArrayElements, DecimalValue, DocId, Edge, EdgeId, FieldName, GeneralizedPayload,
-    GeneralizedPostingEntry, IndexStats, JsonbKeyError, PathExpr, PathSegment, Payload,
-    PostingEntry, TemporalValue, TokenOccurrence, TokenOccurrenceError, TokenOffsets, Value,
-    ValueRetentionError, Vertex, VertexId,
+    GeneralizedPostingEntry, IndexStats, JsonValueDecoder, JsonbKeyError, PathExpr, PathSegment,
+    Payload, PostingEntry, TemporalValue, TokenOccurrence, TokenOccurrenceError, TokenOffsets,
+    Value, ValueRetentionError, Vertex, VertexId,
 };
 
 mod scored_entry;

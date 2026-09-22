@@ -78,7 +78,7 @@ impl<'a> Workspace<'a> {
         }
     }
 
-    pub(super) fn string(&mut self, encoded: &str) -> Result<String, JsonbKeyError> {
+    pub(super) fn string(&mut self, encoded: &[u8]) -> Result<String, JsonbKeyError> {
         match (&self.memory, self.cancellation) {
             (Some(memory), Some(cancellation)) => {
                 let (value, retained) =
@@ -86,7 +86,7 @@ impl<'a> Workspace<'a> {
                 self.retain(retained);
                 Ok(value)
             }
-            _ => serde_json::from_str(encoded).map_err(|_| JsonbKeyError::InvalidJson),
+            _ => serde_json::from_slice(encoded).map_err(|_| JsonbKeyError::InvalidJson),
         }
     }
 

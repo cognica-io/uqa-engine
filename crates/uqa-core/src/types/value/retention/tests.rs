@@ -135,3 +135,57 @@ fn rejected_deep_values_release_partial_charges_and_honor_cancellation() {
         value = nested.pop().unwrap();
     }
 }
+
+#[test]
+fn counting_retained_payload_does_not_reserve_the_payload_again() {
+    let cancellation = CancellationToken::new();
+    let value = Value::Str(text(8192));
+    let no_workspace = MemoryBudget::new(0);
+    assert_eq!(
+        value
+            .retained_payload_bytes(&no_workspace, &cancellation)
+            .unwrap(),
+        8192
+    );
+    assert_eq!(no_workspace.peak(), 0);
+
+    let value = Value::Record(vec![(
+        text(256),
+        Value::List(vec![Value::Map(
+            [(text(128), Value::Bytes(Vec::with_capacity(8192)))].into(),
+        )]),
+    )]);
+    let original = MemoryBudget::new(1 << 20);
+    let charge = value
+        .reserve_retained_payload(&original, &cancellation)
+        .unwrap();
+    let workspace = MemoryBudget::new(4096);
+    assert_eq!(
+        value
+            .retained_payload_bytes(&workspace, &cancellation)
+            .unwrap(),
+        charge.bytes()
+    );
+    assert!(charge.bytes() > workspace.limit());
+    assert_eq!(workspace.used(), 0);
+    assert_eq!(original.used(), charge.bytes());
+}
+
+#[test]
+fn counting_errors_release_only_the_traversal_workspace() {
+    let cancellation = CancellationToken::new();
+    let memory = MemoryBudget::new(17);
+    let previous = memory.reserve(17).unwrap();
+    let value = Value::List(vec![Value::Str(text(1024))]);
+    assert!(matches!(
+        value.retained_payload_bytes(&memory, &cancellation),
+        Err(ValueRetentionError::Memory(MemoryError::Limit { .. }))
+    ));
+    assert_eq!(memory.used(), previous.bytes());
+    cancellation.cancel();
+    assert!(matches!(
+        value.retained_payload_bytes(&memory, &cancellation),
+        Err(ValueRetentionError::Cancelled(_))
+    ));
+    assert_eq!(memory.used(), previous.bytes());
+}

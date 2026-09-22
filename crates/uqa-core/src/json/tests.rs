@@ -95,9 +95,13 @@ fn borrowed_events_preserve_token_offsets_and_duplicate_key_order() {
     while let Some(event) = reader.next_event().unwrap() {
         let raw = &input[event.range.clone()];
         match event.token {
-            JsonToken::Number(text) | JsonToken::String(text) | JsonToken::Key(text) => {
+            JsonToken::Number(text) => {
                 assert_eq!(text.as_ptr(), raw.as_ptr());
                 assert_eq!(text, raw);
+            }
+            JsonToken::String(encoded) | JsonToken::Key(encoded) => {
+                assert_eq!(encoded.as_ptr(), raw.as_ptr());
+                assert_eq!(encoded, raw.as_bytes());
             }
             _ => {}
         }
@@ -107,12 +111,12 @@ fn borrowed_events_preserve_token_offsets_and_duplicate_key_order() {
         events,
         vec![
             JsonToken::StartObject,
-            JsonToken::Key(r#""a""#),
+            JsonToken::Key(br#""a""#),
             JsonToken::StartArray,
             JsonToken::Bool(true),
-            JsonToken::String(r#""\u0062""#),
+            JsonToken::String(br#""\u0062""#),
             JsonToken::EndArray,
-            JsonToken::Key(r#""a""#),
+            JsonToken::Key(br#""a""#),
             JsonToken::Number("-1e+2"),
             JsonToken::EndObject
         ]
@@ -202,6 +206,97 @@ fn string_quota_precedes_decoding_and_final_lease_charges_owned_capacity() {
     let memory = MemoryBudget::new(4096);
     assert!(matches!(
         decode_json_string(r#""\uD800""#, &memory, &cancellation),
+        Err(JsonReadError::InvalidJson)
+    ));
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn ignored_escape_scanning_matches_serde_without_weakening_owned_strings() {
+    use serde::Deserialize;
+
+    let cancellation = CancellationToken::new();
+    for input in [
+        r#"{"unused":"\uD800"}"#,
+        r#"{"unused":{"\uDC00":["\uD800\u0041"]}}"#,
+        r#"{"unused":"\uD800\uDC00"}"#,
+        r#"{"unused":"\uZZZZ"}"#,
+        r#"{"unused":"\q"}"#,
+        "{\"unused\":\"\n\"}",
+    ] {
+        let memory = MemoryBudget::new(4096);
+        let result = {
+            let mut reader =
+                JsonReader::new(input, &memory, &cancellation).with_ignored_string_escapes();
+            loop {
+                match reader.next_event() {
+                    Ok(Some(_)) => {}
+                    Ok(None) => break true,
+                    Err(JsonReadError::InvalidJson) => break false,
+                    Err(error) => panic!("unexpected control failure: {error}"),
+                }
+            }
+        };
+        let mut reference = serde_json::Deserializer::from_str(input);
+        let expected = serde::de::IgnoredAny::deserialize(&mut reference)
+            .and_then(|_| reference.end())
+            .is_ok();
+        assert_eq!(result, expected, "{input}");
+        assert_eq!(memory.used(), 0);
+    }
+    assert!(!valid(r#""\uD800""#, None));
+    assert!(matches!(
+        decode_json_string(r#""\uD800""#, &MemoryBudget::new(4096), &cancellation),
+        Err(JsonReadError::InvalidJson)
+    ));
+}
+
+#[test]
+fn borrowed_byte_tokens_preserve_ignored_input_without_lossy_utf8_conversion() {
+    use serde::Deserialize;
+
+    let cancellation = CancellationToken::new();
+    for input in [
+        b"{\"unused\":\"\xff\"}".as_slice(),
+        b"{\"unused\":{\"\xff\":1}}",
+        b"{\"unused\":\"\xc0\xaf\"}",
+        b"{\"unused\":\"\xff\\q\"}",
+        b"{\"unused\":\"\xff\n\"}",
+        b"{\"unused\":\xff}",
+    ] {
+        let memory = MemoryBudget::new(4096);
+        let result = {
+            let mut reader =
+                JsonReader::from_slice(input, &memory, &cancellation).with_ignored_string_escapes();
+            loop {
+                match reader.next_event() {
+                    Ok(Some(event)) => {
+                        if let JsonToken::String(bytes) | JsonToken::Key(bytes) = event.token {
+                            assert_eq!(bytes.as_ptr(), input[event.range.clone()].as_ptr());
+                            assert_eq!(bytes, &input[event.range]);
+                        }
+                    }
+                    Ok(None) => break true,
+                    Err(JsonReadError::InvalidJson) => break false,
+                    Err(error) => panic!("unexpected control failure: {error}"),
+                }
+            }
+        };
+        let mut reference = serde_json::Deserializer::from_slice(input);
+        let expected = serde::de::IgnoredAny::deserialize(&mut reference)
+            .and_then(|_| reference.end())
+            .is_ok();
+        assert_eq!(result, expected, "{input:?}");
+        assert_eq!(memory.used(), 0);
+    }
+    let memory = MemoryBudget::new(4096);
+    let mut strict = JsonReader::from_slice(b"\"\xff\"", &memory, &cancellation);
+    assert!(matches!(
+        strict.next_event(),
+        Err(JsonReadError::InvalidJson)
+    ));
+    assert!(matches!(
+        decode_json_string(b"\"\xff\"", &memory, &cancellation),
         Err(JsonReadError::InvalidJson)
     ));
     assert_eq!(memory.used(), 0);

@@ -50,12 +50,36 @@ impl Value {
         cancellation: &CancellationToken,
     ) -> Result<MemoryReservation, ValueRetentionError> {
         let mut memory = budget.empty_reservation();
+        self.visit_retained_payload(budget, cancellation, |bytes| memory.grow(bytes))?;
+        Ok(memory)
+    }
+
+    /// Count the same owned payload as `reserve_retained_payload` without reserving that payload again. Only the temporary traversal stack uses the supplied allowance.
+    pub fn retained_payload_bytes(
+        &self,
+        budget: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<usize, ValueRetentionError> {
+        let mut total = 0_usize;
+        self.visit_retained_payload(budget, cancellation, |bytes| {
+            total = total.checked_add(bytes).ok_or(MemoryError::SizeOverflow)?;
+            Ok(())
+        })?;
+        Ok(total)
+    }
+
+    fn visit_retained_payload(
+        &self,
+        budget: &MemoryBudget,
+        cancellation: &CancellationToken,
+        mut visit: impl FnMut(usize) -> Result<(), MemoryError>,
+    ) -> Result<(), ValueRetentionError> {
         let mut stack = BudgetedVec::new(budget);
         let mut current = Some((self, 0));
         loop {
             cancellation.check()?;
             if let Some((value, name_bytes)) = current.take() {
-                memory.grow(name_bytes)?;
+                visit(name_bytes)?;
                 let (bytes, children) = match value {
                     Self::Null
                     | Self::Void
@@ -87,7 +111,7 @@ impl Value {
                         (!fields.is_empty()).then(|| Children::Map(fields.iter())),
                     ),
                 };
-                memory.grow(bytes)?;
+                visit(bytes)?;
                 if let Some(children) = children {
                     stack.push(children)?;
                 }
@@ -101,7 +125,7 @@ impl Value {
                 stack.pop();
             }
             if current.is_none() {
-                return Ok(memory);
+                return Ok(());
             }
         }
     }
