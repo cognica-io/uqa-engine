@@ -25,31 +25,39 @@ struct ArrayStorage {
 
 impl ArrayValue {
     pub fn try_new(elements: Vec<Value>) -> Option<Self> {
-        let elements = normalize_nested_arrays(elements);
         let dimensions = normalized_shape(&elements)?;
         let lower_bounds = vec![1; dimensions.len()];
-        Some(Self {
-            storage: Box::new(ArrayStorage {
-                elements,
-                dimensions,
-                lower_bounds,
-            }),
-        })
+        Some(Self::from_decoded_parts(elements, dimensions, lower_bounds))
     }
 
     pub fn with_lower_bounds(elements: Vec<Value>, lower_bounds: Vec<i32>) -> Option<Self> {
-        let elements = normalize_nested_arrays(elements);
         let dimensions = normalized_shape(&elements)?;
         if dimensions.len() != lower_bounds.len() {
             return None;
         }
-        Some(Self {
+        Some(Self::from_decoded_parts(elements, dimensions, lower_bounds))
+    }
+
+    /// Validate borrowed input before a tagged decoder transfers its values. Rejected tags must preserve the complete original map.
+    pub(super) fn decoded_shape(elements: &[Value]) -> Option<Vec<usize>> {
+        normalized_shape(elements)
+    }
+
+    /// Consume the values and dimensions validated by this owner, preserving their existing buffers.
+    pub(super) fn from_decoded_parts(
+        mut elements: Vec<Value>,
+        dimensions: Vec<usize>,
+        lower_bounds: Vec<i32>,
+    ) -> Self {
+        debug_assert_eq!(dimensions.len(), lower_bounds.len());
+        normalize_nested_arrays(&mut elements);
+        Self {
             storage: Box::new(ArrayStorage {
                 elements,
                 dimensions,
                 lower_bounds,
             }),
-        })
+        }
     }
 
     pub fn elements(&self) -> &[Value] {
@@ -104,15 +112,18 @@ impl ArrayValue {
     }
 }
 
-fn normalize_nested_arrays(elements: Vec<Value>) -> Vec<Value> {
-    elements
-        .into_iter()
-        .map(|value| match value {
-            Value::Array(array) => Value::List(normalize_nested_arrays(array.into_elements())),
-            Value::List(values) => Value::List(normalize_nested_arrays(values)),
-            other => other,
-        })
-        .collect()
+fn normalize_nested_arrays(elements: &mut [Value]) {
+    for value in elements {
+        if matches!(value, Value::Array(_)) {
+            let Value::Array(array) = std::mem::take(value) else {
+                unreachable!("array variant was checked");
+            };
+            *value = Value::List(array.into_elements());
+        }
+        if let Value::List(values) = value {
+            normalize_nested_arrays(values);
+        }
+    }
 }
 
 fn normalized_shape(elements: &[Value]) -> Option<Vec<usize>> {
@@ -129,7 +140,12 @@ fn array_shape(elements: &[Value]) -> Option<Vec<usize>> {
     let mut nested_shape: Option<Vec<usize>> = None;
     let mut has_scalar = false;
     for element in elements {
-        if let Value::List(nested) = element {
+        let nested = match element {
+            Value::List(values) => Some(values.as_slice()),
+            Value::Array(array) => Some(array.elements()),
+            _ => None,
+        };
+        if let Some(nested) = nested {
             let shape = array_shape(nested)?;
             if has_scalar
                 || nested_shape
