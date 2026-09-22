@@ -114,6 +114,8 @@ SQL binding receives immutable `BindingContext` inputs, `AnalysisCatalog` relati
 
 SQL's [catalog expression codec](../../../crates/uqa-sql/src/catalog/node_tree.rs) owns typed PostgreSQL node-tree parsing, CHECK expression binding, Datum representation and SQL reconstruction. It reuses SQL's operator and cast catalogs and receives column schemas and routine/type identities through borrowed interfaces; reconstruction does not execute user routines. Its expression coverage and integration with domain constraint projection and catalog SQL functions remain in progress in the [concurrent-storage implementation plan](../../plans/0008-concurrent-storage-transactions.md). Runtime catalog projection remains execution's responsibility.
 
+Core's `json` reader owns the shared JSON token and container grammar. Its borrowed events preserve numeric text, escaped string tokens, field order and source offsets; each consumer owns its value representation and duplicate-field policy. Controlled readers reserve an explicit nesting stack and string-token decoding workspace under the original allowance. JSONB comparison construction reuses these events with its existing numeric representation and last-key-wins semantics. Storage continues to own document roots, durable envelopes, tuple metadata and provider-specific binary payloads.
+
 ## Carrier boundaries
 
 | Representation | Identity and combination contract |

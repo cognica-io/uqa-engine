@@ -26,6 +26,16 @@ pub enum JsonbKeyError {
     Cancelled(#[from] QueryCancelled),
 }
 
+impl From<crate::json::JsonReadError> for JsonbKeyError {
+    fn from(error: crate::json::JsonReadError) -> Self {
+        match error {
+            crate::json::JsonReadError::InvalidJson => Self::InvalidJson,
+            crate::json::JsonReadError::Memory(error) => Self::Memory(error),
+            crate::json::JsonReadError::Cancelled(error) => Self::Cancelled(error),
+        }
+    }
+}
+
 /// Append an order-preserving key for text accepted by the native JSONB comparator. Parsing, sorting and output buffers share the output's allowance; failure restores its original length. Text outside the native parser's representation is reported explicitly instead of receiving an incompatible lexical key.
 pub fn write_jsonb_comparison_key(
     text: &str,

@@ -7,6 +7,7 @@
 //! Native JSONB parsing can retain its allocations under a caller's shared allowance.
 
 use crate::{
+    json::{decode_json_string, JsonReader},
     memory::{BudgetedVec, MemoryBudget, MemoryError, MemoryReservation},
     CancellationToken,
 };
@@ -68,18 +69,25 @@ impl<'a> Workspace<'a> {
         Ok(())
     }
 
-    pub(super) fn string(&mut self, encoded: &[u8]) -> Result<String, JsonbKeyError> {
-        // Native string decoding can hold its geometrically grown escape scratch and the final UTF-8 string together. Decoded bytes cannot exceed the encoded input length; retain only the resulting string capacity after decoding.
-        let bytes = encoded
-            .len()
-            .checked_mul(4)
-            .and_then(|bytes| bytes.checked_add(16))
-            .ok_or(MemoryError::SizeOverflow)?;
-        let mut memory = self.reserve(bytes)?;
-        let value =
-            serde_json::from_slice::<String>(encoded).map_err(|_| JsonbKeyError::InvalidJson)?;
-        self.retain_capacity(&mut memory, value.capacity())?;
-        Ok(value)
+    pub(super) fn reader<'input>(&self, input: &'input str) -> JsonReader<'input, 'a> {
+        match (&self.memory, self.cancellation) {
+            (Some(memory), Some(cancellation)) => {
+                JsonReader::new(input, memory.budget(), cancellation)
+            }
+            _ => JsonReader::unbounded(input),
+        }
+    }
+
+    pub(super) fn string(&mut self, encoded: &str) -> Result<String, JsonbKeyError> {
+        match (&self.memory, self.cancellation) {
+            (Some(memory), Some(cancellation)) => {
+                let (value, retained) =
+                    decode_json_string(encoded, memory.budget(), cancellation)?.into_parts();
+                self.retain(retained);
+                Ok(value)
+            }
+            _ => serde_json::from_str(encoded).map_err(|_| JsonbKeyError::InvalidJson),
+        }
     }
 
     pub(super) fn number(&mut self, text: &str) -> Result<JsonNumber, JsonbKeyError> {
@@ -109,6 +117,20 @@ pub(super) enum ParseBuffer<T> {
 }
 
 impl<T> ParseBuffer<T> {
+    pub(super) fn last_mut(&mut self) -> Option<&mut T> {
+        match self {
+            Self::Unbounded(values) => values.last_mut(),
+            Self::Bounded(values) => values.last_mut(),
+        }
+    }
+
+    pub(super) fn pop(&mut self) -> Option<T> {
+        match self {
+            Self::Unbounded(values) => values.pop(),
+            Self::Bounded(values) => values.pop(),
+        }
+    }
+
     pub(super) fn push(&mut self, value: T) -> Result<(), JsonbKeyError> {
         match self {
             Self::Unbounded(values) => values.push(value),
