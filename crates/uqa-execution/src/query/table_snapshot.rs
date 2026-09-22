@@ -11,10 +11,11 @@ use std::sync::Arc;
 use uqa_analysis::Analyzer;
 use uqa_core::{DocId, FieldName, Value};
 use uqa_sql::{ast::ColumnDef, ColumnType, SQLError};
+use uqa_storage::inverted_index::{AnalyzerBindings, RetainedInvertedIndexBuilder};
 use uqa_storage::{read_control::StorageReadControl, vector_index::RetainedVectorIndexBuilder};
 use uqa_storage::{
-    DocumentStore, InvertedIndex, MemoryDocumentStore, MemoryInvertedIndex, StorageBackendError,
-    StoredDocument, VectorIndex,
+    DocumentStore, InvertedIndex, MemoryDocumentStore, StorageBackendError, StoredDocument,
+    VectorIndex,
 };
 
 mod documents;
@@ -43,7 +44,7 @@ pub struct MaterializedTable {
 
 struct SnapshotBuilder {
     documents: Box<dyn DocumentStore>,
-    text: Box<dyn InvertedIndex>,
+    text: RetainedInvertedIndexBuilder,
     vectors: BTreeMap<FieldName, RetainedVectorIndexBuilder>,
     document_count: u64,
     control: StorageReadControl,
@@ -188,25 +189,24 @@ pub fn empty(
 impl SnapshotBuilder {
     fn new(schema: &SnapshotSchema<'_>, control: &StorageReadControl) -> Result<Self, SQLError> {
         control.cancellation().check()?;
-        let mut text = MemoryInvertedIndex::new(schema.analyzer.clone());
+        let mut bindings = AnalyzerBindings::new(schema.analyzer.clone());
         for field in schema.text_fields {
-            text.set_field_analyzer_revisions(
-                field,
-                schema
-                    .text_revisions
-                    .index_analyzer_revision(field)
-                    .map_err(|error| snapshot_error("index analyzer revision", &error))?,
-                schema
-                    .text_revisions
-                    .search_analyzer_revision(field)
-                    .map_err(|error| snapshot_error("search analyzer revision", &error))?,
-            )
-            .map_err(|error| {
-                SQLError::Internal(format!(
-                    "construct query field analyzer revisions snapshot: {error}"
-                ))
-            })?;
+            bindings
+                .bind_revisions(
+                    field,
+                    schema
+                        .text_revisions
+                        .index_analyzer_revision(field)
+                        .map_err(|error| snapshot_error("index analyzer revision", &error))?,
+                    schema
+                        .text_revisions
+                        .search_analyzer_revision(field)
+                        .map_err(|error| snapshot_error("search analyzer revision", &error))?,
+                )
+                .map_err(|error| snapshot_error("field analyzer revisions", &error.into()))?;
         }
+        let text = RetainedInvertedIndexBuilder::new(bindings, control)
+            .map_err(|error| snapshot_error("inverted index", &error))?;
         let vectors = schema
             .vector_dimensions
             .iter()
@@ -219,7 +219,7 @@ impl SnapshotBuilder {
             .collect();
         Ok(Self {
             documents: Box::new(MemoryDocumentStore::new()),
-            text: Box::new(text),
+            text,
             vectors,
             document_count: 0,
             control: control.clone(),
@@ -239,7 +239,11 @@ impl SnapshotBuilder {
             .collect::<Result<_, SQLError>>()?;
         Ok(MaterializedTable {
             documents: self.documents,
-            text: self.text,
+            text: Box::new(
+                self.text
+                    .finish()
+                    .map_err(|error| snapshot_error("inverted index", &error))?,
+            ),
             vectors,
             document_count: self.document_count,
         })
@@ -267,10 +271,9 @@ impl SnapshotBuilder {
             .text_fields
             .iter()
             .filter_map(|field| match document.get(field) {
-                Some(Value::Str(value)) => Some((field.clone(), value.clone())),
+                Some(Value::Str(value)) => Some((field.as_str(), value.as_str())),
                 _ => None,
-            })
-            .collect();
+            });
         self.text
             .add_document(id, fields)
             .map_err(|error| snapshot_error("inverted index", &error))?;

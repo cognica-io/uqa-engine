@@ -8,7 +8,7 @@ use super::*;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use uqa_core::CancellationToken;
-use uqa_storage::{DocumentMetadata, StorageBackendResult};
+use uqa_storage::{DocumentMetadata, MemoryInvertedIndex, StorageBackendResult};
 
 mod budgets;
 mod retained;

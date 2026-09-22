@@ -53,6 +53,10 @@ impl TokenTermKey {
         &self.0
     }
 
+    pub(crate) fn allocated_bytes(&self) -> usize {
+        self.0.capacity()
+    }
+
     pub fn into_bytes(self) -> Vec<u8> {
         self.0
     }

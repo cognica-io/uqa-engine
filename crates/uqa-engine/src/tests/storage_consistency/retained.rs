@@ -79,6 +79,87 @@ fn reconstructed_vector_capture_keeps_session_quota_and_the_prior_view_after_rej
 }
 
 #[test]
+fn reconstructed_text_capture_keeps_session_quota_and_the_prior_view_after_rejection() {
+    use uqa_execution::query::document_changes::DocumentChanges;
+    let (_directory, engines) = engines();
+    for engine in engines {
+        engine.sql("CREATE TABLE text_quota (id INTEGER PRIMARY KEY, body TEXT); CREATE INDEX text_quota_index ON text_quota USING gin (body); INSERT INTO text_quota VALUES (1, 'original original')", &[]).unwrap();
+        let live = engine.require_table("text_quota").unwrap();
+        let id = engine.table_doc_ids("text_quota").unwrap()[0];
+        let vocabulary = live.inverted_index.read().vocabulary_keys("body").unwrap();
+        assert_eq!(vocabulary.len(), 1);
+        let key = vocabulary[0].clone();
+        let occurrences = live
+            .inverted_index
+            .read()
+            .get_occurrences(id, "body", &key)
+            .unwrap();
+        let metadata = live
+            .inverted_index
+            .read()
+            .indexed_field_metadata(id, "body")
+            .unwrap();
+        assert_eq!(occurrences.len(), 2);
+        let control = engine.query_retention_control().unwrap();
+        let changes =
+            DocumentChanges::from_shared([(id.checked_add(1).unwrap(), None)], &control).unwrap();
+        let view = engine
+            .detach_query_table(&live, &live, Some(changes.clone()))
+            .unwrap();
+        assert_eq!(
+            view.inverted_index
+                .read()
+                .get_occurrences(id, "body", &key)
+                .unwrap(),
+            occurrences
+        );
+        assert_eq!(
+            view.inverted_index
+                .read()
+                .indexed_field_metadata(id, "body")
+                .unwrap(),
+            metadata
+        );
+        let full = control
+            .memory()
+            .reserve(control.memory().limit() - control.memory().used())
+            .unwrap();
+        let error = engine
+            .detach_query_table(&live, &live, Some(changes.clone()))
+            .err()
+            .unwrap();
+        assert_eq!(error.sqlstate(), Some("53200"), "{error}");
+        drop(full);
+        engine.sql("BEGIN; UPDATE text_quota SET body = 'rolled back'; ROLLBACK; UPDATE text_quota SET body = 'replacement'", &[]).unwrap();
+        let replacement = live.inverted_index.read().vocabulary_keys("body").unwrap();
+        assert_eq!(replacement.len(), 1);
+        assert_ne!(replacement[0], key);
+        engine.close().unwrap();
+        drop(changes);
+        drop(live);
+        drop(engine);
+        let nested = view
+            .inverted_index
+            .read()
+            .snapshot()
+            .unwrap()
+            .snapshot()
+            .unwrap();
+        assert!(view.inverted_index.write().clear().is_err());
+        drop(view);
+        assert_eq!(
+            nested.get_occurrences(id, "body", &key).unwrap(),
+            occurrences
+        );
+        assert_eq!(nested.indexed_field_metadata(id, "body").unwrap(), metadata);
+        assert_eq!(nested.doc_freq_key("body", &replacement[0]).unwrap(), 0);
+        assert!(control.memory().used() > 0);
+        drop(nested);
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
 fn private_payload_quota_failure_rolls_back_the_statement_and_savepoint_remains_usable() {
     let (_directory, engines) = engines();
     for engine in engines {

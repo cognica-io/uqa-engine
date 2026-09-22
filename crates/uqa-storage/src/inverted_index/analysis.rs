@@ -9,11 +9,15 @@
 use std::collections::BTreeMap;
 
 use uqa_analysis::{
-    AnalysisError, AnalyzerFingerprint, CompiledAnalyzer, SourceOffsets, TokenLengthPolicy,
+    AnalysisError, AnalyzedText, AnalyzerFingerprint, CompiledAnalyzer, SourceOffsets,
+    TokenLengthPolicy, TokenTerm,
 };
 use uqa_core::{TokenOccurrence, TokenOffsets};
 
 use crate::{StorageBackendError, StorageBackendResult, TokenTermKey};
+
+mod budgeted;
+pub use budgeted::analyze_index_field_budgeted;
 
 /// Metadata published with a complete document field's occurrences. The field's retained index revision owns the matching descriptor and resources.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,9 +101,33 @@ fn analyze_index_field_with_poll(
         )?
         .into_parts()
         .0;
-    let mut staged = AnalyzedField {
+    let mut terms = BTreeMap::<TokenTermKey, Vec<TokenOccurrence>>::new();
+    let metadata = project_index_tokens(analyzer, &output, &mut poll, |term, occurrence, _| {
+        terms
+            .entry(TokenTermKey::from_term(term))
+            .or_default()
+            .push(occurrence);
+        Ok(())
+    })?;
+    Ok(AnalyzedField {
+        length: metadata.length,
+        terms,
+        final_offsets: metadata.final_offsets,
+        final_position_increment: metadata.final_position_increment,
+    })
+}
+
+fn project_index_tokens<P: FnMut() -> Result<(), AnalysisError>>(
+    analyzer: &CompiledAnalyzer,
+    output: &AnalyzedText,
+    poll: &mut P,
+    mut push: impl FnMut(&TokenTerm, TokenOccurrence, &mut P) -> StorageBackendResult<()>,
+) -> StorageBackendResult<IndexedFieldMetadata> {
+    let mut metadata = IndexedFieldMetadata {
+        analyzer_fingerprint: analyzer.descriptor().fingerprint(),
+        occurrence_format_version: crate::clustered_postings::OCCURRENCE_FORMAT_VERSION,
+        length_policy: analyzer.descriptor().length_policy(),
         length: 0,
-        terms: BTreeMap::new(),
         final_offsets: source_offsets(output.final_offsets())?,
         final_position_increment: output.final_position_increment(),
     };
@@ -112,8 +140,8 @@ fn analyze_index_field_with_poll(
         let position = u32::try_from(position).map_err(|_| AnalysisError::TokenPositionOverflow)?;
         let offsets = token.offsets().map(source_offsets).transpose()?;
         if offsets.is_some_and(|offsets| {
-            offsets.end_utf8 > staged.final_offsets.end_utf8
-                || offsets.end_utf16 > staged.final_offsets.end_utf16
+            offsets.end_utf8 > metadata.final_offsets.end_utf8
+                || offsets.end_utf16 > metadata.final_offsets.end_utf16
         }) {
             return Err(StorageBackendError::Other(
                 "token occurrence exceeds original source".into(),
@@ -127,22 +155,18 @@ fn analyze_index_field_with_poll(
         occurrence
             .validate()
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-        staged
-            .terms
-            .entry(TokenTermKey::from_term(token.term()))
-            .or_default()
-            .push(occurrence);
-        if analyzer.descriptor().length_policy() == TokenLengthPolicy::EmittedTokens
+        push(token.term(), occurrence, poll)?;
+        if metadata.length_policy == TokenLengthPolicy::EmittedTokens
             || token.position_increment() > 0
         {
-            staged.length = staged
+            metadata.length = metadata
                 .length
                 .checked_add(1)
                 .ok_or_else(|| super::counter_error("document token count"))?;
         }
     }
     poll()?;
-    Ok(staged)
+    Ok(metadata)
 }
 
 mod query;
