@@ -41,6 +41,8 @@ The repository provides the same five complete scenarios for every public bindin
 
 CI executes all five scenarios through each built binding artifact. The Browser WASM directory also provides an HTML runner for interactive use; its modules execute against the generated Emscripten package in CI.
 
+The binding transaction tests also exercise an independent session's commit while the first session retains private writes, then verify commit, rollback or savepoint undo and closed reopen. Python and Node.js cover ordinary, compressed, encrypted and compressed-encrypted native SQLite files; WASM covers ordinary and compressed files. Each target checks READ UNCOMMITTED/READ COMMITTED command refresh and REPEATABLE READ/SERIALIZABLE fixed visibility against the shared PostgreSQL reference fixture. `scripts/verify-concurrent-transactions-browser.py` additionally runs the browser cases in real Chrome and verifies committed state after an IndexedDB checkpoint and a fresh page/module load. These schedules exercise the providers exposed by each binding; redb remains covered through its Rust provider APIs.
+
 ## Rust QueryBuilder
 
 `uqa_api::QueryBuilder` builds SQL-shaped plans fluently:

@@ -11,9 +11,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { bindingFeatures, noriEnabled, runBindings } from "../parity/bindings.mjs";
+import { concurrentIsolationLevels, runConcurrentWriterCase } from "../parity/concurrent_transactions.mjs";
 
 const {
   Engine,
@@ -26,6 +28,7 @@ const {
 } = await import(process.env.UQA_TEST_PACKAGE
   ? pathToFileURL(resolve(process.env.UQA_TEST_PACKAGE)).href
   : "../../crates/uqa-wasm/js/index.mjs");
+const concurrentWriterOracle = JSON.parse(readFileSync(new URL("../parity/pg18/concurrent_writes.expected.json", import.meta.url), "utf8"));
 
 test("HTTP engine executes SQL, atomic batches, and streams", async (context) => {
   const originalFetch = globalThis.fetch;
@@ -386,6 +389,20 @@ test("persistent open, format detection, and encryption rejection", async () => 
   await compressedEngine.close();
   assert.equal(await UQA.detectDatabaseFile(compressed), "compressed");
 });
+
+for (const [mode, open] of [
+  ["sqlite", (path) => Engine.open(path)],
+  ["compressed", (path) => Engine.openCompressed(path)],
+]) {
+  for (const [index, isolation] of concurrentIsolationLevels.entries()) {
+    for (const schedule of concurrentWriterOracle.cases) {
+      test(`concurrent writer progress and isolation: ${mode}, ${isolation}, ${schedule.name}`, { timeout: 90_000 }, async () => {
+        const path = `${UQA.persistDir}/concurrent-${mode}-${index}-${schedule.name}.db`;
+        await runConcurrentWriterCase(open, path, concurrentWriterOracle, schedule, isolation, assert.deepEqual);
+      });
+    }
+  }
+}
 
 test("scoring params calibration workflow", async () => {
   const engine = await Engine.inMemory();

@@ -108,6 +108,13 @@ jobs:
         run: bash scripts/build-wasm.sh
       - name: Test browser WASM bundle
         run: node --test tests/wasm/test_uqa_wasm.mjs
+      - name: Verify concurrent transactions and IndexedDB restore in real Chrome
+        run: python3 scripts/verify-concurrent-transactions-browser.py --output output/playwright/concurrent-transactions/report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: concurrent-transactions-browser-${{ github.sha }}
+          path: output/playwright/concurrent-transactions/
       - name: Verify both analyzers in real Chrome and IndexedDB
         run: |
           set -euo pipefail
