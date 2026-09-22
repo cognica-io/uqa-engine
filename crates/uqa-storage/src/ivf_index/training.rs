@@ -70,7 +70,8 @@ impl IVFIndex {
         &self,
         control: Option<&StorageReadControl>,
     ) -> StorageBackendResult<()> {
-        for vector in self.vectors.lock().values_mut() {
+        let mut vectors = self.vectors.lock();
+        for vector in vectors.values_mut() {
             check(control)?;
             vector.centroid = None;
         }

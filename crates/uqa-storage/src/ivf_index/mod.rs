@@ -19,6 +19,7 @@ mod mutation;
 mod prepare;
 mod restore;
 mod search;
+mod snapshot;
 mod state;
 mod training;
 

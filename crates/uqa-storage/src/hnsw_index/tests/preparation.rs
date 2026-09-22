@@ -28,6 +28,31 @@ fn source() -> HNSWIndex {
     index
 }
 
+#[test]
+fn controlled_capture_preserves_graph_topology_tombstones_and_pending_persistence() {
+    let mut source = source();
+    source
+        .add_many(2, vec![vector(90, 4), vector(91, 4)])
+        .unwrap();
+    source.delete(1).unwrap();
+    let control = StorageReadControl::with_limit(1 << 20);
+    let snapshot = source.snapshot_controlled(&control).unwrap();
+    assert_eq!(
+        snapshot.persistence_snapshot(),
+        source.persistence_snapshot()
+    );
+    assert_eq!(snapshot.dirty_nodes, source.dirty_nodes);
+    assert_eq!(snapshot.full_rewrite, source.full_rewrite);
+    snapshot.validate_invariants().unwrap();
+    let before = snapshot.persistence_snapshot();
+    source.clear().unwrap();
+    drop(source);
+    assert_eq!(snapshot.persistence_snapshot(), before);
+    assert_eq!(control.memory().used(), snapshot.reserved_bytes());
+    drop(snapshot);
+    assert_eq!(control.memory().used(), 0);
+}
+
 fn apply(index: &mut HNSWIndex, mutation: HNSWMutation<'_>) {
     match mutation {
         HNSWMutation::Replace { document, vectors } => {

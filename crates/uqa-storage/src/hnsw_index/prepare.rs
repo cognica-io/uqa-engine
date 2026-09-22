@@ -26,6 +26,15 @@ pub enum HNSWMutation<'a> {
 }
 
 impl HNSWIndex {
+    pub(super) fn snapshot_controlled(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Budgeted<Self>> {
+        control.check()?;
+        let memory = workspace::candidate(self, 0, control)?;
+        Ok(Budgeted::new(self.clone_controlled(control)?, memory))
+    }
+
     /// Prepare an immutable graph delta. Failure or cancellation leaves the source and its dirty-node state intact.
     pub fn prepare_delta(
         &self,

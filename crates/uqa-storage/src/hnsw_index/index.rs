@@ -138,6 +138,13 @@ impl VectorIndex for HNSWIndex {
         Ok(Arc::new(self.clone()))
     }
 
+    fn snapshot_with_control(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Arc<dyn VectorIndex>> {
+        crate::ReadOnlySnapshot::from_budgeted(self.snapshot_controlled(control)?)?.snapshot()
+    }
+
     fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn VectorIndex>> {
         Ok(Box::new(self.clone()))
     }

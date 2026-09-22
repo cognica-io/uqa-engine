@@ -22,6 +22,40 @@ fn trained() -> IVFIndex {
 }
 
 #[test]
+fn controlled_capture_preserves_training_metadata_and_defers_stale_retraining_to_search() {
+    let mut untrained = IVFIndex::with_params(3, 2, 1, 4);
+    untrained.add(1, vec![1.0, 0.0, 0.0]).unwrap();
+    let mut stale = trained();
+    for document in 1..=3 {
+        stale.delete(document).unwrap();
+    }
+    assert_eq!(stale.state(), IVFState::Stale);
+    for source in [untrained, trained(), stale] {
+        source.set_nprobe(1);
+        let before = source.metadata_snapshot();
+        let control = StorageReadControl::with_limit(1 << 20);
+        let snapshot = source.snapshot_controlled(&control).unwrap();
+        assert_eq!(snapshot.metadata_snapshot(), before);
+        assert_eq!(snapshot.nprobe(), 1);
+        assert_eq!(
+            *snapshot.inverted_lists.lock(),
+            *source.inverted_lists.lock()
+        );
+        let expected = source.detached_clone();
+        assert_eq!(
+            snapshot.search_knn(&[1.0, 0.0, 0.0], 2).unwrap(),
+            expected.search_knn(&[1.0, 0.0, 0.0], 2).unwrap()
+        );
+        assert_eq!(snapshot.metadata_snapshot(), expected.metadata_snapshot());
+        assert_eq!(source.metadata_snapshot(), before);
+        drop(source);
+        assert_eq!(control.memory().used(), snapshot.reserved_bytes());
+        drop(snapshot);
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
 fn candidates_preserve_centroids_counters_and_the_source_generation() {
     let source = trained();
     let before = source.metadata_snapshot();

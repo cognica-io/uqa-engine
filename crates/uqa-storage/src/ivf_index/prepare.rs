@@ -149,37 +149,6 @@ impl IVFIndex {
         candidate.metadata_controlled(control)
     }
 
-    fn clone_controlled(&self, control: &StorageReadControl) -> StorageBackendResult<Self> {
-        let candidate = Self::with_params(
-            self.dimensions,
-            self.nlist,
-            self.nprobe(),
-            self.train_threshold,
-        );
-        for (key, vector) in self.vectors.lock().iter() {
-            control.check()?;
-            candidate.vectors.lock().insert(*key, vector.clone());
-        }
-        let centroids = self.centroids.lock();
-        *candidate.centroids.lock() = Vec::with_capacity(centroids.len());
-        for centroid in centroids.iter() {
-            control.check()?;
-            candidate.centroids.lock().push(centroid.clone());
-        }
-        drop(centroids);
-        let lists = self.inverted_lists.lock();
-        *candidate.inverted_lists.lock() = Vec::with_capacity(lists.len());
-        for list in lists.iter() {
-            control.check()?;
-            candidate.inverted_lists.lock().push(list.clone());
-        }
-        drop(lists);
-        *candidate.state.lock() = self.state();
-        *candidate.trained_size.lock() = *self.trained_size.lock();
-        *candidate.deletes_since_train.lock() = *self.deletes_since_train.lock();
-        Ok(candidate)
-    }
-
     pub(crate) fn centroids_match(&self, snapshot: &IVFMetadataSnapshot) -> bool {
         *self.centroids.lock() == snapshot.centroids
     }
@@ -235,7 +204,11 @@ impl IVFIndex {
 }
 
 // Charge logical B-tree entries and every simultaneously live vector buffer. Allocator node bookkeeping is outside the payload allowance, as in common record preparation. Capacity growth is bounded separately from vector payloads.
-fn workspace_bytes(dimensions: u32, count: usize, clusters: usize) -> Result<usize, MemoryError> {
+pub(super) fn workspace_bytes(
+    dimensions: u32,
+    count: usize,
+    clusters: usize,
+) -> Result<usize, MemoryError> {
     let coordinates = checked_product(
         usize::try_from(dimensions).map_err(|_| MemoryError::SizeOverflow)?,
         size_of::<f32>(),

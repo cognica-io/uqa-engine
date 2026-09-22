@@ -69,18 +69,11 @@ impl IVFIndex {
         &self,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Budgeted<Self>> {
-        control.check()?;
-        let count = self.vectors.lock().len();
-        let clusters = self.centroids.lock().len().max(self.nlist.min(count));
-        let memory =
-            control
-                .memory()
-                .reserve(workspace_bytes(self.dimensions, count, clusters)?)?;
-        let candidate = self.clone_controlled(control)?;
+        let candidate = self.snapshot_controlled(control)?;
         if candidate.state() == IVFState::Stale {
             candidate.train_controlled(Some(control))?;
         }
-        Ok(Budgeted::new(candidate, memory))
+        Ok(candidate)
     }
 }
 
