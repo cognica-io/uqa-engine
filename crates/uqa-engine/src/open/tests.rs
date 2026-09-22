@@ -266,6 +266,13 @@ fn initial_restore_promotes_legacy_column_keys_to_named_constraints() {
         table.constraints_json =
             serde_json::to_string(&uqa_sql::ast::TableConstraintSet::default()).unwrap();
         catalog.save_table(&table).unwrap();
+        // Historical column-only keys predate the owned-index registry as well. Retaining current owner identities would construct a corrupt current catalog instead of the legacy input.
+        catalog
+            .drop_catalog_indexes_for_table(&table.relation.qualified_name())
+            .unwrap();
+        catalog
+            .delete_metadata("sql_index_registry_version")
+            .unwrap();
     }
 
     {

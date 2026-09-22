@@ -67,8 +67,12 @@ fn nori_graph_sources_survive_engine_mutation_rollback_rename_and_reopen() {
         .sql("DELETE FROM renamed WHERE id = 1", &[])
         .unwrap();
     drop(reopened);
+    let connection = ManagedConnection::open(&path).unwrap();
+    connection
+        .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
+        .unwrap();
     let index = SQLiteInvertedIndex::new(
-        ManagedConnection::open(&path).unwrap(),
+        connection,
         "public.renamed",
         uqa_analysis::whitespace_analyzer(),
     );
