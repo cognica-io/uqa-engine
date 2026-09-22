@@ -12,7 +12,7 @@ use crate::{StorageBackendResult, VectorIndex};
 
 use super::{read_only_error, ReadOnlySnapshot};
 
-impl VectorIndex for ReadOnlySnapshot<dyn VectorIndex> {
+impl<T: VectorIndex + ?Sized + 'static> VectorIndex for ReadOnlySnapshot<T> {
     fn dimensions(&self) -> u32 {
         self.0.dimensions()
     }
@@ -65,9 +65,12 @@ impl VectorIndex for ReadOnlySnapshot<dyn VectorIndex> {
         &self,
         control: &crate::read_control::StorageReadControl,
     ) -> StorageBackendResult<Arc<dyn VectorIndex>> {
-        Ok(Arc::new(Self(
+        control.check()?;
+        if self.1.is_some() {
+            return self.snapshot();
+        }
+        Ok(Arc::new(ReadOnlySnapshot::new(
             self.0.snapshot_with_control(control)?,
-            self.1.as_ref().map(Arc::clone),
         )))
     }
 }

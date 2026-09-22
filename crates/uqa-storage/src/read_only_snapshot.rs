@@ -7,7 +7,7 @@
 //! Read-only adapters retain storage-owned snapshots and forward every read capability.
 
 use std::sync::Arc;
-use uqa_core::memory::MemoryReservation;
+use uqa_core::memory::{Budgeted, MemoryReservation};
 
 use crate::StorageBackendError;
 
@@ -17,6 +17,16 @@ mod vectors;
 
 /// Adapt an already captured snapshot to an owned read-only handle without copying its contents. The caller must supply the snapshot selected for its visibility boundary; this adapter does not capture or advance that boundary.
 pub struct ReadOnlySnapshot<T: ?Sized>(Arc<T>, Option<Arc<MemoryReservation>>);
+
+impl<T> ReadOnlySnapshot<T> {
+    /// Share a captured value without separating its allocations from their original allowance.
+    pub fn from_budgeted(snapshot: Budgeted<T>) -> crate::StorageBackendResult<Self> {
+        let mut pending = snapshot.into_parts();
+        let shared = pending.1.budget().reserve(size_of::<T>())?;
+        pending.1.absorb(shared);
+        Self::with_retention(Arc::new(pending.0), pending.1)
+    }
+}
 
 impl<T: ?Sized> ReadOnlySnapshot<T> {
     #[must_use]
@@ -39,6 +49,14 @@ impl<T: ?Sized> ReadOnlySnapshot<T> {
 impl<T: ?Sized> Clone for ReadOnlySnapshot<T> {
     fn clone(&self) -> Self {
         Self(Arc::clone(&self.0), self.1.as_ref().map(Arc::clone))
+    }
+}
+
+impl<T: ?Sized> std::ops::Deref for ReadOnlySnapshot<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.0
     }
 }
 

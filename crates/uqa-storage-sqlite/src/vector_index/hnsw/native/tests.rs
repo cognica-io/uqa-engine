@@ -4,12 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use std::sync::Arc;
-
 use super::*;
 use crate::{Catalog, ManagedConnection, SQLiteVectorIndex};
-use uqa_storage::VectorIndex;
 use uqa_storage::{mvcc::VersionedSessionOptions, vector_index::HNSWIndexParams};
+use uqa_storage::{ReadOnlySnapshot, VectorIndex};
+
+mod retention;
 
 fn fixture() -> (ManagedConnection, SQLiteHNSWIndex) {
     let connection = ManagedConnection::open_in_memory().unwrap();
@@ -24,7 +24,7 @@ fn fixture() -> (ManagedConnection, SQLiteHNSWIndex) {
     (connection, index)
 }
 
-fn graph(index: &SQLiteHNSWIndex) -> Arc<HNSWIndex> {
+fn graph(index: &SQLiteHNSWIndex) -> ReadOnlySnapshot<HNSWIndex> {
     index
         .persistent
         .read_native(|read| index.cached_native_graph(read))
@@ -41,10 +41,10 @@ fn nearest(index: &dyn VectorIndex, query: &[f32]) -> Vec<u64> {
 fn private_hnsw_cache_identities_distinguish_equal_revision_rollback_branches() {
     let (connection, mut index) = fixture();
     let stable = graph(&index);
-    assert!(Arc::ptr_eq(&stable, &graph(&index)));
+    assert!(std::ptr::eq(&raw const *stable, &raw const *graph(&index)));
     let mut unrelated = SQLiteVectorIndex::new(connection.new_session(), "other", "embedding", 2);
     unrelated.add(1, vec![1.0, 0.0]).unwrap();
-    assert!(Arc::ptr_eq(&stable, &graph(&index)));
+    assert!(std::ptr::eq(&raw const *stable, &raw const *graph(&index)));
     connection.begin_transaction().unwrap();
     connection.savepoint("before").unwrap();
     index.add(3, vec![-1.0, 0.0]).unwrap();

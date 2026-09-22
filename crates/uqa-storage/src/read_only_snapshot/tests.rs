@@ -14,6 +14,8 @@ use crate::{
 };
 use uqa_core::Value;
 
+mod retention;
+
 #[test]
 fn document_adapter_preserves_shared_projections_and_rejects_writes() {
     let mut live = MemoryDocumentStore::new();

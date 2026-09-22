@@ -8,19 +8,19 @@
 
 use std::sync::Arc;
 
-use uqa_core::{DocId, PostingList};
+use uqa_core::{memory::Budgeted, DocId, PostingList};
 
 use super::codec::{other_error, vector_field_prefix};
 use super::index_keys::{
     hnsw_metadata_key, hnsw_node_prefix, ivf_assignment_prefix, ivf_centroid_prefix,
     ivf_metadata_key,
 };
-use super::index_view::{read_only, read_view, IndexState, IndexView};
+use super::index_view::{read_view, IndexState, IndexView};
 use super::ivf_persistence;
 use super::{KeyValueBatch, KeyValueRead, KeyValueStore, KeyValueVectorIndex};
 use crate::ivf_index::{IVFIndex, IVFMetadataSnapshot, IVFMutation, IVFState};
 use crate::vector_index::{IVFIndexParams, VectorIndex};
-use crate::{StorageBackendError, StorageBackendResult};
+use crate::{ReadOnlySnapshot, StorageBackendError, StorageBackendResult};
 
 pub struct KeyValueIVFIndex {
     store: Arc<dyn KeyValueStore>,
@@ -162,25 +162,12 @@ impl KeyValueIVFIndex {
         })
     }
 
-    fn build_from_canonical(&self, read: &dyn KeyValueRead) -> StorageBackendResult<IVFIndex> {
+    fn build_from_canonical(
+        &self,
+        read: &dyn KeyValueRead,
+    ) -> StorageBackendResult<Budgeted<IVFIndex>> {
         let entries = self.raw.load_all_from(read)?;
-        let mut index = IVFIndex::with_params(
-            self.dimensions,
-            self.params.nlist,
-            self.params.nprobe,
-            self.params.train_threshold,
-        );
-        for vectors in entries.chunk_by(|a, b| a.0 == b.0) {
-            read.control().check()?;
-            index.add_many(
-                vectors[0].0,
-                vectors
-                    .iter()
-                    .map(|(_, _, vector)| vector.clone())
-                    .collect(),
-            )?;
-        }
-        Ok(index)
+        IVFIndex::from_canonical_controlled(self.dimensions, self.params, &entries, read.control())
     }
 
     fn rebuild(&self) -> StorageBackendResult<()> {
@@ -192,11 +179,16 @@ impl KeyValueIVFIndex {
                     self.table, self.field
                 )));
             }
-            let mut candidate = self.build_from_canonical(read)?;
-            candidate.initialize()?;
+            let vectors = self.raw.load_all_from(read)?;
+            let candidate = IVFIndex::prepare_canonical(
+                self.dimensions,
+                self.params,
+                &vectors,
+                read.control(),
+            )?;
             self.stage_snapshot(
                 batch,
-                &candidate.metadata_snapshot(),
+                &candidate,
                 next_revision(revision)?,
                 true,
                 None,
@@ -261,13 +253,7 @@ impl VectorIndex for KeyValueIVFIndex {
         self.mutate(IVFMutation::Clear, |batch| self.raw.stage_clear(batch))
     }
     fn search_knn(&self, query: &[f32], k: usize) -> StorageBackendResult<PostingList> {
-        let cached = self.read_index()?;
-        if cached.value.state() != IVFState::Stale {
-            return cached.value.search_knn(query, k);
-        }
-        let candidate = cached.value.detached_clone();
-        candidate.train()?;
-        candidate.search_knn(query, k)
+        self.snapshot()?.search_knn(query, k)
     }
     fn search_threshold(&self, query: &[f32], threshold: f32) -> StorageBackendResult<PostingList> {
         self.read_index()?.value.search_threshold(query, threshold)
@@ -279,13 +265,14 @@ impl VectorIndex for KeyValueIVFIndex {
         self.rebuild()
     }
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
-        let cached = self.read_index()?;
-        if cached.value.state() != IVFState::Stale {
-            return Ok(cached.snapshot);
-        }
-        let candidate = cached.value.detached_clone();
-        candidate.train()?;
-        Ok(read_only(Arc::new(candidate)))
+        read_view(self.store.as_ref(), |read| {
+            let cached = self.index_at(read)?;
+            if cached.value.state() != IVFState::Stale {
+                return Ok(cached.snapshot);
+            }
+            let candidate = cached.value.trained_snapshot_controlled(read.control())?;
+            ReadOnlySnapshot::from_budgeted(candidate)?.snapshot()
+        })
     }
 }
 

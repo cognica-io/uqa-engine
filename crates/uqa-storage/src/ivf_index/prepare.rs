@@ -6,6 +6,8 @@
 
 //! Bounded preparation of evaluated IVF changes, independent of provider row encodings.
 
+mod canonical;
+
 use uqa_core::{
     memory::{Budgeted, MemoryError},
     DocId,

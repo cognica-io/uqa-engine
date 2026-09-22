@@ -75,9 +75,20 @@ impl HNSWIndex {
         vectors: &[(DocId, u32, Vec<f32>)],
         control: &StorageReadControl,
     ) -> StorageBackendResult<Budgeted<HNSWPersistenceDelta>> {
+        Self::from_canonical_controlled(dimensions, params, vectors, control)?
+            .delta_controlled(control)
+    }
+
+    /// Build an immutable graph from ordered canonical tensors, retaining the construction allowance with the graph.
+    pub(crate) fn from_canonical_controlled(
+        dimensions: u32,
+        params: HNSWIndexParams,
+        vectors: &[(DocId, u32, Vec<f32>)],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Budgeted<Self>> {
         control.check()?;
         let source = Self::with_params(dimensions, params)?;
-        let _workspace = workspace::candidate(&source, vectors.len(), control)?;
+        let memory = workspace::candidate(&source, vectors.len(), control)?;
         let mut candidate = source;
         let mut previous: Option<(DocId, u32)> = None;
         for (document, ordinal, vector) in vectors {
@@ -98,7 +109,7 @@ impl HNSWIndex {
             candidate.insert_vector(*document, *ordinal, vector.clone(), Some(control))?;
             previous = Some((*document, *ordinal));
         }
-        candidate.delta_controlled(control)
+        Ok(Budgeted::new(candidate, memory))
     }
 
     fn clone_controlled(&self, control: &StorageReadControl) -> StorageBackendResult<Self> {

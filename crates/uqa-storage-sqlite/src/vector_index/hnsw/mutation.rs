@@ -147,7 +147,7 @@ impl SQLiteHNSWIndex {
                     return Ok(None);
                 };
                 let cached = self.cached_graph_at(connection, identity, revision)?;
-                let mut graph = cached.graph.as_ref().clone();
+                let mut graph = (*cached.graph).clone();
                 mutate(&mut graph)?;
                 let delta = graph.take_persistence_delta();
                 let next = next_revision(Some(revision))?;

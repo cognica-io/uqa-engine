@@ -12,16 +12,14 @@ use std::sync::{
 };
 
 use parking_lot::Mutex;
+use uqa_core::memory::Budgeted;
 
 use super::{codec::other_error, KeyValueBatch, KeyValueRead, KeyValueReadRevision, KeyValueStore};
 use crate::vector_index::VectorIndex;
-use crate::StorageBackendResult;
-
-mod snapshot;
-pub(super) use snapshot::read_only;
+use crate::{ReadOnlySnapshot, StorageBackendResult};
 
 pub(super) struct IndexState<T> {
-    pub(super) value: Arc<T>,
+    pub(super) value: ReadOnlySnapshot<T>,
     pub(super) snapshot: Arc<dyn VectorIndex>,
     pub(super) revision: Option<u64>,
     pub(super) definition_candidate: bool,
@@ -30,7 +28,7 @@ pub(super) struct IndexState<T> {
 impl<T> Clone for IndexState<T> {
     fn clone(&self) -> Self {
         Self {
-            value: Arc::clone(&self.value),
+            value: self.value.clone(),
             snapshot: Arc::clone(&self.snapshot),
             revision: self.revision,
             definition_candidate: self.definition_candidate,
@@ -55,8 +53,9 @@ impl<T: VectorIndex + 'static> IndexView<T> {
         &self,
         read: &dyn KeyValueRead,
         prefixes: &[&[u8]],
-        load: impl FnOnce(bool) -> StorageBackendResult<(T, Option<u64>)>,
+        load: impl FnOnce(bool) -> StorageBackendResult<(Budgeted<T>, Option<u64>)>,
     ) -> StorageBackendResult<IndexState<T>> {
+        read.control().check()?;
         let identity = read.revision(prefixes)?;
         if let Some((cached_identity, state)) = self.cached.lock().as_ref() {
             if *cached_identity == identity {
@@ -65,9 +64,9 @@ impl<T: VectorIndex + 'static> IndexView<T> {
         }
         let definition_candidate = self.preparing_definition.load(Ordering::Acquire);
         let (value, revision) = load(definition_candidate)?;
-        let value = Arc::new(value);
+        let value = ReadOnlySnapshot::from_budgeted(value)?;
         let state = IndexState {
-            snapshot: read_only(value.clone()),
+            snapshot: value.snapshot()?,
             value,
             revision,
             definition_candidate,

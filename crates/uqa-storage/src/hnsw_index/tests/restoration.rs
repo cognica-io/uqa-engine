@@ -96,3 +96,69 @@ fn reconstruction_rejects_a_missing_live_tensor_ordinal() {
         assert_eq!(control.memory().used(), 0);
     }
 }
+
+#[test]
+fn restoration_charges_transferred_vector_and_adjacency_capacity() {
+    let source = fixture();
+    let mut snapshot = source.persistence_snapshot();
+    let control = StorageReadControl::with_limit(1 << 20);
+    let compact = HNSWIndex::from_persistence_controlled(
+        4,
+        source.params(),
+        snapshot.meta,
+        snapshot.nodes.clone(),
+        &control,
+    )
+    .unwrap();
+    let compact_bytes = compact.reserved_bytes();
+    drop(compact);
+    let node = &mut snapshot.nodes[0];
+    node.raw_vector.reserve_exact(4096);
+    node.neighbors.reserve_exact(64);
+    for layer in &mut node.neighbors {
+        layer.reserve_exact(128);
+    }
+    let raw_capacity = node.raw_vector.capacity();
+    let node_id = node.node_id;
+    let limited = StorageReadControl::with_limit(compact_bytes);
+    let rejected = HNSWIndex::from_persistence_controlled(
+        4,
+        source.params(),
+        snapshot.meta,
+        snapshot.nodes,
+        &limited,
+    );
+    assert!(matches!(
+        rejected,
+        Err(crate::StorageBackendError::Memory(_))
+    ));
+    assert_eq!(limited.memory().used(), 0);
+
+    let mut snapshot = source.persistence_snapshot();
+    let node = snapshot
+        .nodes
+        .iter_mut()
+        .find(|node| node.node_id == node_id)
+        .unwrap();
+    node.raw_vector.reserve_exact(4096);
+    node.neighbors.reserve_exact(64);
+    for layer in &mut node.neighbors {
+        layer.reserve_exact(128);
+    }
+    let restored = HNSWIndex::from_persistence_controlled(
+        4,
+        source.params(),
+        snapshot.meta,
+        snapshot.nodes,
+        &control,
+    )
+    .unwrap();
+    assert!(restored.reserved_bytes() > compact_bytes);
+    assert_eq!(restored.nodes[&node_id].raw_vector.capacity(), raw_capacity);
+    assert_eq!(
+        restored.persistence_snapshot(),
+        source.persistence_snapshot()
+    );
+    drop(restored);
+    assert_eq!(control.memory().used(), 0);
+}

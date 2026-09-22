@@ -9,13 +9,17 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use uqa_core::DocId;
+use uqa_core::{
+    memory::{Budgeted, BudgetedVec},
+    DocId,
+};
 
-use super::codec::{decode_value, other_error, read_u64, usize_to_u64};
+use super::codec::{decode_value, other_error, usize_to_u64};
+use super::hnsw_records::KeyValueHNSWRecords;
 use super::index_keys::{hnsw_metadata_key, hnsw_node_prefix};
 use super::{KeyValueRead, KeyValueVectorIndex};
 use crate::hnsw_index::{HNSWGraphMeta, HNSWIndex, HNSWNodeSnapshot, MAX_HNSW_LEVEL};
-use crate::mvcc::HNSWRecordHeader;
+use crate::mvcc::{HNSWRecordHeader, HNSWRecordLayout, VersionError};
 use crate::vector_index::HNSWIndexParams;
 use crate::{StorageBackendError, StorageBackendResult};
 
@@ -56,7 +60,7 @@ pub(super) fn restore_graph(
     field: &str,
     dimensions: u32,
     params: HNSWIndexParams,
-) -> StorageBackendResult<(HNSWIndex, u64)> {
+) -> StorageBackendResult<(Budgeted<HNSWIndex>, u64)> {
     let metadata = load_metadata(store, table, field)?.ok_or_else(|| {
         other_error(format!(
             "missing persisted HNSW metadata for {table}.{field}"
@@ -66,7 +70,14 @@ pub(super) fn restore_graph(
     let nodes = load_nodes(store, table, field)?;
     validate_canonical_vectors(&raw.load_all_from(store)?, &nodes)?;
     let header = metadata_header(&metadata)?;
-    let graph = HNSWIndex::from_persistence(dimensions, params, header.meta, nodes)?;
+    let (nodes, _decoded) = nodes.into_parts();
+    let graph = HNSWIndex::from_persistence_controlled(
+        dimensions,
+        params,
+        header.meta,
+        nodes,
+        store.control(),
+    )?;
     Ok((graph, metadata.revision))
 }
 
@@ -93,26 +104,25 @@ fn load_nodes(
     store: &dyn KeyValueRead,
     table: &str,
     field: &str,
-) -> StorageBackendResult<Vec<HNSWNodeSnapshot>> {
+) -> StorageBackendResult<Budgeted<Vec<HNSWNodeSnapshot>>> {
     let prefix = hnsw_node_prefix(table, field)?;
-    let mut nodes = Vec::new();
+    let mut output = (
+        BudgetedVec::new(store.control().memory()),
+        store.control().memory().empty_reservation(),
+    );
     store.visit_prefix(&prefix, &mut |key, value| {
-        let mut offset = prefix.len();
-        let node_id = read_u64(key, &mut offset)?;
-        if offset != key.len() {
-            return Err(other_error("persisted HNSW node key has trailing bytes"));
-        }
-        let persisted: PersistedHNSWNode = decode_value(value)?;
-        if persisted.node_id != node_id {
-            return Err(other_error(format!(
-                "persisted HNSW node key {node_id} disagrees with its payload {}",
-                persisted.node_id
-            )));
-        }
-        nodes.push(persisted.try_into()?);
+        output.0.reserve(1)?;
+        let node = KeyValueHNSWRecords
+            .node(key, value, store.control())
+            .map_err(VersionError::into_storage_error)?;
+        let (node, memory) = node.into_parts();
+        output.1.absorb(memory);
+        output.0.push(node)?;
         Ok(())
     })?;
-    Ok(nodes)
+    let (nodes, memory) = output.0.into_parts();
+    output.1.absorb(memory);
+    Ok(Budgeted::new(nodes, output.1))
 }
 
 pub(super) fn metadata_from_graph(

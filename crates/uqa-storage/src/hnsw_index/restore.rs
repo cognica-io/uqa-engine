@@ -46,12 +46,13 @@ impl HNSWIndex {
             control.check()?;
             let vectors = node
                 .raw_vector
-                .len()
-                .checked_mul(2 * size_of::<f32>())
+                .capacity()
+                .checked_add(node.raw_vector.len())
+                .and_then(|n| n.checked_mul(size_of::<f32>()))
                 .ok_or(MemoryError::SizeOverflow)?;
             let layers = node
                 .neighbors
-                .len()
+                .capacity()
                 .checked_mul(size_of::<Vec<u64>>())
                 .ok_or(MemoryError::SizeOverflow)?;
             bytes = bytes
@@ -63,8 +64,9 @@ impl HNSWIndex {
                 bytes = bytes
                     .checked_add(
                         layer
-                            .len()
-                            .checked_mul(2 * size_of::<u64>())
+                            .capacity()
+                            .checked_add(layer.len())
+                            .and_then(|n| n.checked_mul(size_of::<u64>()))
                             .ok_or(MemoryError::SizeOverflow)?,
                     )
                     .ok_or(MemoryError::SizeOverflow)?;

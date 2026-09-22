@@ -7,7 +7,7 @@
 //! HNSW readers and evaluated mutations use one logical Key/Value visibility boundary.
 
 use std::sync::Arc;
-use uqa_core::{DocId, PostingList};
+use uqa_core::{memory::Budgeted, DocId, PostingList};
 
 use super::codec::encode_value;
 use super::codec::{other_error, vector_field_prefix};
@@ -148,20 +148,12 @@ impl KeyValueHNSWIndex {
         })
     }
 
-    fn build_from_canonical(&self, read: &dyn KeyValueRead) -> StorageBackendResult<HNSWIndex> {
+    fn build_from_canonical(
+        &self,
+        read: &dyn KeyValueRead,
+    ) -> StorageBackendResult<Budgeted<HNSWIndex>> {
         let entries = self.raw.load_all_from(read)?;
-        let mut graph = HNSWIndex::with_params(self.dimensions, self.params)?;
-        for vectors in entries.chunk_by(|a, b| a.0 == b.0) {
-            read.control().check()?;
-            graph.add_many(
-                vectors[0].0,
-                vectors
-                    .iter()
-                    .map(|(_, _, vector)| vector.clone())
-                    .collect(),
-            )?;
-        }
-        Ok(graph)
+        HNSWIndex::from_canonical_controlled(self.dimensions, self.params, &entries, read.control())
     }
 
     fn stage_delta(

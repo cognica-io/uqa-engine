@@ -6,13 +6,12 @@
 
 //! Cache identities combine durable data revisions with non-reusable private batch identities.
 
-use std::sync::Arc;
-
 use rusqlite::types::ValueRef;
 use uqa_core::memory::BudgetedVec;
 use uqa_storage::{
     hnsw_index::HNSWIndex,
     mvcc::{CommitSequence, PrivateRecordRevision},
+    ReadOnlySnapshot,
 };
 
 use super::super::{CachedGraph, GraphIdentity as CacheIdentity};
@@ -32,7 +31,8 @@ impl SQLiteHNSWIndex {
     pub(in crate::vector_index::hnsw) fn cached_native_graph(
         &self,
         read: &NativeVectorRead<'_>,
-    ) -> Result<Option<Arc<HNSWIndex>>> {
+    ) -> Result<Option<ReadOnlySnapshot<HNSWIndex>>> {
+        read.snapshot.control.check()?;
         let Some(meta) = load_meta(read)? else {
             return Ok(None);
         };
@@ -42,14 +42,14 @@ impl SQLiteHNSWIndex {
         };
         if let Some(cached) = self.graph.read().as_ref() {
             if matches!(&cached.identity, CacheIdentity::Native(view) if view == &identity) {
-                return Ok(Some(Arc::clone(&cached.graph)));
+                return Ok(Some(cached.graph.clone()));
             }
         }
-        let graph = Arc::new(loading::load_graph(read, meta)?);
+        let graph = ReadOnlySnapshot::from_budgeted(loading::load_graph(read, meta)?)?;
         *self.graph.write() = Some(CachedGraph {
             revision: meta.3,
             identity: CacheIdentity::Native(identity),
-            graph: Arc::clone(&graph),
+            graph: graph.clone(),
         });
         Ok(Some(graph))
     }

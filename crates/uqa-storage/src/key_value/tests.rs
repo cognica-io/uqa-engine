@@ -30,6 +30,7 @@ mod compound;
 mod controlled;
 mod controlled_index;
 mod hnsw_records;
+mod index_retention;
 mod indexes;
 mod occurrences;
 mod tuple_metadata;

@@ -148,3 +148,85 @@ fn restoration_rejects_missing_tensor_ordinals_and_accepts_unsorted_complete_ten
         assert_eq!(restored.is_ok(), ordinals == [1, 0]);
     }
 }
+
+#[test]
+fn controlled_canonical_build_preserves_incremental_training_and_explicit_rebuild() {
+    let vectors = vec![
+        (1, 0, vec![1.0, 0.0]),
+        (1, 1, vec![0.0, 1.0]),
+        (2, 0, vec![0.5, 0.5]),
+        (3, 0, vec![-1.0, 0.0]),
+    ];
+    for threshold in [2, 100] {
+        let params = crate::vector_index::IVFIndexParams {
+            nlist: 2,
+            nprobe: 2,
+            train_threshold: threshold,
+        };
+        let mut expected = IVFIndex::with_params(2, 2, 2, threshold);
+        for document in vectors.chunk_by(|left, right| left.0 == right.0) {
+            expected
+                .add_many(
+                    document[0].0,
+                    document
+                        .iter()
+                        .map(|(_, _, vector)| vector.clone())
+                        .collect(),
+                )
+                .unwrap();
+        }
+        let control = StorageReadControl::with_limit(1 << 20);
+        let captured = IVFIndex::from_canonical_controlled(2, params, &vectors, &control).unwrap();
+        assert_eq!(captured.metadata_snapshot(), expected.metadata_snapshot());
+        assert!(control.memory().used() > 0);
+        expected.initialize().unwrap();
+        let rebuilt = IVFIndex::prepare_canonical(2, params, &vectors, &control).unwrap();
+        assert_eq!(*rebuilt, expected.metadata_snapshot());
+        drop((captured, rebuilt));
+        assert_eq!(control.memory().used(), 0);
+        assert!(matches!(
+            IVFIndex::from_canonical_controlled(
+                2,
+                params,
+                &vectors,
+                &StorageReadControl::with_limit(0)
+            ),
+            Err(StorageBackendError::Memory(_))
+        ));
+        control.cancellation().cancel();
+        assert!(matches!(
+            IVFIndex::from_canonical_controlled(2, params, &vectors, &control),
+            Err(StorageBackendError::Cancelled(_))
+        ));
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
+fn controlled_training_retains_a_detached_snapshot_and_preserves_stale_source_on_failure() {
+    let mut source = trained();
+    for document in 1..=3 {
+        source.delete(document).unwrap();
+    }
+    assert_eq!(source.state(), IVFState::Stale);
+    let before = source.metadata_snapshot();
+    assert!(matches!(
+        source.trained_snapshot_controlled(&StorageReadControl::with_limit(0)),
+        Err(StorageBackendError::Memory(_))
+    ));
+    assert_eq!(source.metadata_snapshot(), before);
+    let control = StorageReadControl::with_limit(1 << 20);
+    let candidate = source.trained_snapshot_controlled(&control).unwrap();
+    let expected = source.detached_clone();
+    expected.train().unwrap();
+    assert_eq!(candidate.metadata_snapshot(), expected.metadata_snapshot());
+    assert_eq!(source.metadata_snapshot(), before);
+    assert_eq!(control.memory().used(), candidate.reserved_bytes());
+    drop(source);
+    assert_eq!(
+        candidate.search_knn(&[1.0, 0.0, 0.0], 2).unwrap(),
+        expected.search_knn(&[1.0, 0.0, 0.0], 2).unwrap()
+    );
+    drop(candidate);
+    assert_eq!(control.memory().used(), 0);
+}

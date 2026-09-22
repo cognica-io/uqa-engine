@@ -56,7 +56,7 @@ pub(super) fn restore_state(
     field: &str,
     dimensions: u32,
     params: IVFIndexParams,
-) -> StorageBackendResult<(IVFIndex, u64)> {
+) -> StorageBackendResult<(Budgeted<IVFIndex>, u64)> {
     let metadata = load_metadata(store, table, field)?.ok_or_else(|| {
         other_error(format!(
             "missing persisted IVF metadata for {table}.{field}"
@@ -82,14 +82,8 @@ pub(super) fn restore_state(
         deletes_since_train,
         vector_count,
     };
-    let index = IVFIndex::from_persistence(
-        dimensions,
-        params.nlist,
-        params.nprobe,
-        params.train_threshold,
-        vectors,
-        snapshot,
-    )?;
+    let index =
+        IVFIndex::restore_controlled(dimensions, params, vectors, snapshot, store.control())?;
     Ok((index, metadata.revision))
 }
 

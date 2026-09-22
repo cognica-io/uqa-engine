@@ -289,7 +289,10 @@ fn stable_views_reuse_graphs_and_retained_readers_survive_external_recreation() 
     index.initialize().unwrap();
     let before = index.graph_snapshot().unwrap().unwrap();
     let again = index.graph_snapshot().unwrap().unwrap();
-    assert!(std::sync::Arc::ptr_eq(&before.graph, &again.graph));
+    assert!(std::ptr::eq(
+        &raw const *before.graph,
+        &raw const *again.graph
+    ));
     first.begin_deferred_transaction().unwrap();
     assert_eq!(nearest(&index), vec![2]);
     let second = open_mode(0, &path);

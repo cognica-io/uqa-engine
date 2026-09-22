@@ -12,7 +12,7 @@ use super::{loading::load_meta_from, CachedGraph, GraphIdentity, SQLiteHNSWIndex
 use crate::connection::SnapshotIdentity;
 use crate::Result;
 use uqa_storage::hnsw_index::HNSWIndex;
-use uqa_storage::StorageBackendResult;
+use uqa_storage::{ReadOnlySnapshot, StorageBackendResult};
 
 impl SQLiteHNSWIndex {
     pub(super) fn graph_snapshot(&self) -> StorageBackendResult<Option<CachedGraph>> {
@@ -46,7 +46,7 @@ impl SQLiteHNSWIndex {
         let loaded = CachedGraph {
             revision,
             identity: GraphIdentity::Physical(identity.clone()),
-            graph: Arc::new(graph),
+            graph: ReadOnlySnapshot::new(Arc::new(graph)),
         };
         *self.graph.write() = Some(loaded.clone());
         Ok(loaded)
@@ -61,7 +61,7 @@ impl SQLiteHNSWIndex {
         *self.graph.write() = Some(CachedGraph {
             revision,
             identity: GraphIdentity::Physical(identity),
-            graph: Arc::new(graph),
+            graph: ReadOnlySnapshot::new(Arc::new(graph)),
         });
     }
 

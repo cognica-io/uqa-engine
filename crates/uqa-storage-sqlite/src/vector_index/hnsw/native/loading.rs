@@ -56,13 +56,19 @@ pub(in crate::vector_index::hnsw) fn load_meta(
         })
 }
 
-pub(super) fn load_graph(read: &NativeVectorRead<'_>, meta: Meta) -> Result<HNSWIndex> {
+pub(super) fn load_graph(read: &NativeVectorRead<'_>, meta: Meta) -> Result<Budgeted<HNSWIndex>> {
     let nodes = load_nodes(read)?;
     let canonical = read.vectors()?;
     validate_canonical_vectors(&canonical, &nodes)?;
     // Keep decoded-buffer reservations until common reconstruction has consumed their allocations.
     let (nodes, _decoded) = nodes.into_parts();
-    Ok(HNSWIndex::from_persistence(meta.0, meta.1, meta.2, nodes)?)
+    Ok(HNSWIndex::from_persistence_controlled(
+        meta.0,
+        meta.1,
+        meta.2,
+        nodes,
+        &read.snapshot.control,
+    )?)
 }
 
 fn load_nodes(read: &NativeVectorRead<'_>) -> Result<Budgeted<Vec<HNSWNodeSnapshot>>> {

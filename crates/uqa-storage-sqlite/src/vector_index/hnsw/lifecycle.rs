@@ -71,7 +71,7 @@ impl VectorIndex for SQLiteHNSWIndex {
             return Ok(Arc::new(snapshot));
         }
         if let Some(cached) = self.graph_snapshot()? {
-            Ok(cached.graph)
+            cached.graph.snapshot()
         } else if self.require_persisted_graph {
             Err(super::mutation::missing_metadata(self))
         } else {
