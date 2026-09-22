@@ -14,6 +14,7 @@ use uqa_storage::{
 
 mod budgets;
 mod copied;
+mod index_projection;
 mod retained;
 
 fn columns(sql: &str) -> Vec<ColumnDef> {

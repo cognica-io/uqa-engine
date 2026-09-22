@@ -94,18 +94,7 @@ pub fn retain(
             break;
         };
         after = Some(last);
-        let rows = documents
-            .get_fields_multi(&ids, &fields)
-            .map_err(|error| snapshot_error("index fields", &error))?;
-        for (id, values) in rows {
-            cancellation.check()?;
-            let values = fields
-                .iter()
-                .zip(values)
-                .map(|(field, value)| ((*field).to_string(), value))
-                .collect();
-            result.index_fields(id, &values, schema)?;
-        }
+        result.index_projection(&documents, &ids, &fields, schema)?;
     }
     cancellation.check()?;
     result.finish(Box::new(documents), document_count)
@@ -269,22 +258,56 @@ impl SnapshotBuilder {
         document: StoredDocument,
         schema: &SnapshotSchema<'_>,
     ) -> Result<(), SQLError> {
-        self.index_fields(id, document.fields(), schema)?;
+        self.index_fields(id, |field| document.fields().get(field), schema)?;
         documents
             .add_document(id, document)
             .map_err(|error| snapshot_error("document", &error))
     }
 
-    fn index_fields(
+    fn index_projection(
+        &mut self,
+        documents: &dyn DocumentStore,
+        ids: &[DocId],
+        fields: &[&str],
+        schema: &SnapshotSchema<'_>,
+    ) -> Result<(), SQLError> {
+        let mut failure = None;
+        let visited = documents.for_each_fields_multi_ref_with_presence(
+            ids,
+            fields,
+            &mut |id, present, values| {
+                if !present {
+                    return true;
+                }
+                let indexed = self.index_fields(
+                    id,
+                    |field| fields.binary_search(&field).ok().map(|slot| values[slot]),
+                    schema,
+                );
+                if let Err(error) = indexed {
+                    failure = Some(error);
+                    return false;
+                }
+                true
+            },
+        );
+        // Keep the first consumer failure when a provider notices cancellation while unwinding its borrowed projection.
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        visited.map_err(|error| snapshot_error("index fields", &error))
+    }
+
+    fn index_fields<'a>(
         &mut self,
         id: DocId,
-        document: &uqa_storage::document_store::Document,
+        mut value_for: impl FnMut(&str) -> Option<&'a Value>,
         schema: &SnapshotSchema<'_>,
     ) -> Result<(), SQLError> {
         let fields = schema
             .text_fields
             .iter()
-            .filter_map(|field| match document.get(field) {
+            .filter_map(|field| match value_for(field) {
                 Some(Value::Str(value)) => Some((field.as_str(), value.as_str())),
                 _ => None,
             });
@@ -292,7 +315,7 @@ impl SnapshotBuilder {
             .add_document(id, fields)
             .map_err(|error| snapshot_error("inverted index", &error))?;
         for (field, index) in &mut self.vectors {
-            let Some(value) = document.get(field) else {
+            let Some(value) = value_for(field) else {
                 continue;
             };
             let fallback = ColumnType::Vector(index.dimensions());
