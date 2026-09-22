@@ -31,8 +31,7 @@ impl ExactLookupOverlay for CommandOverlay<'_> {
             .iter()
             .all(|overlay| {
                 overlay
-                    .documents
-                    .get(&self.table)
+                    .documents(&self.table)
                     .is_none_or(std::collections::BTreeMap::is_empty)
             }))
     }
@@ -46,8 +45,7 @@ impl ExactLookupOverlay for CommandOverlay<'_> {
             .iter()
             .any(|overlay| {
                 overlay
-                    .documents
-                    .get(&self.table)
+                    .documents(&self.table)
                     .is_some_and(|documents| documents.contains_key(&doc_id))
             }))
     }

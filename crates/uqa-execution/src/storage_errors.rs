@@ -6,6 +6,7 @@
 
 //! Typed transaction and resource diagnostics across execution storage capabilities.
 
+use uqa_core::{JsonbKeyError, ValueRetentionError};
 use uqa_sql::SQLError;
 
 /// Keep cancellation, memory limits and serialization conflicts typed across storage reads, observations and mutations.
@@ -33,10 +34,19 @@ pub fn storage_error(action: &str, error: &uqa_storage::StorageBackendError) -> 
     }
     let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(error);
     while let Some(source) = cause {
+        // Transparent Core wrappers forward their inner source and may terminate the error chain themselves.
         let cancelled = match source.downcast_ref::<uqa_storage::StorageBackendError>() {
             Some(uqa_storage::StorageBackendError::Cancelled(cancelled)) => Some(cancelled),
             _ => source.downcast_ref::<uqa_core::QueryCancelled>(),
-        };
+        }
+        .or_else(|| match source.downcast_ref::<ValueRetentionError>() {
+            Some(ValueRetentionError::Cancelled(cancelled)) => Some(cancelled),
+            _ => None,
+        })
+        .or_else(|| match source.downcast_ref::<JsonbKeyError>() {
+            Some(JsonbKeyError::Cancelled(cancelled)) => Some(cancelled),
+            _ => None,
+        });
         if let Some(cancelled) = cancelled {
             return SQLError::Cancelled(*cancelled);
         }
@@ -44,6 +54,14 @@ pub fn storage_error(action: &str, error: &uqa_storage::StorageBackendError) -> 
             source.downcast_ref::<uqa_storage::StorageBackendError>(),
             Some(uqa_storage::StorageBackendError::Memory(_))
         ) || source.is::<uqa_core::memory::MemoryError>()
+            || matches!(
+                source.downcast_ref::<ValueRetentionError>(),
+                Some(ValueRetentionError::Memory(_))
+            )
+            || matches!(
+                source.downcast_ref::<JsonbKeyError>(),
+                Some(JsonbKeyError::Memory(_))
+            )
         {
             return SQLError::Routine {
                 sqlstate: "53200".into(),
@@ -84,6 +102,83 @@ pub fn storage_error(action: &str, error: &uqa_storage::StorageBackendError) -> 
 mod tests {
     use super::*;
     use uqa_storage::{mvcc::VersionError, StorageBackendError};
+
+    #[test]
+    fn core_normalization_diagnostics_survive_provider_error_wrappers() {
+        use uqa_core::{memory::MemoryError, QueryCancelled};
+
+        for wrapped in [false, true] {
+            for (error, state) in [
+                (
+                    StorageBackendError::backend(
+                        "decimal",
+                        ValueRetentionError::Memory(MemoryError::SizeOverflow),
+                    ),
+                    "53200",
+                ),
+                (
+                    StorageBackendError::backend(
+                        "decimal",
+                        ValueRetentionError::Cancelled(QueryCancelled),
+                    ),
+                    "57014",
+                ),
+                (
+                    StorageBackendError::backend(
+                        "jsonb",
+                        JsonbKeyError::Memory(MemoryError::SizeOverflow),
+                    ),
+                    "53200",
+                ),
+                (
+                    StorageBackendError::backend("jsonb", JsonbKeyError::Cancelled(QueryCancelled)),
+                    "57014",
+                ),
+                (
+                    StorageBackendError::backend("jsonb", JsonbKeyError::InvalidJson),
+                    "XX000",
+                ),
+            ] {
+                let error = if wrapped {
+                    StorageBackendError::backend("provider", error)
+                } else {
+                    error
+                };
+                let actual = storage_error("normalize key", &error);
+                assert_eq!(actual.sqlstate(), Some(state), "{actual}");
+                if state == "57014" {
+                    assert!(matches!(actual, SQLError::Cancelled(_)));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn completion_evidence_precedes_core_normalization_failures() {
+        use uqa_core::{memory::MemoryError, QueryCancelled};
+        use uqa_storage::mvcc::{CommitFailure, DatabaseId, StorageTransactionId};
+
+        let transaction = StorageTransactionId::new(DatabaseId::from_bytes([1; 16]), 7).unwrap();
+        for source in [
+            StorageBackendError::backend(
+                "decimal",
+                ValueRetentionError::Memory(MemoryError::SizeOverflow),
+            ),
+            StorageBackendError::backend("jsonb", JsonbKeyError::Cancelled(QueryCancelled)),
+        ] {
+            let error = StorageBackendError::backend(
+                "receipt",
+                CommitFailure::Indeterminate {
+                    transaction,
+                    source,
+                },
+            );
+            assert_eq!(
+                storage_error("complete transaction", &error).sqlstate(),
+                Some("08007")
+            );
+        }
+    }
 
     #[test]
     fn graph_diagnostics_keep_completion_evidence_ahead_of_nested_conflicts() {

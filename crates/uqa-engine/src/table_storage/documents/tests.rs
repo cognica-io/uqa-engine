@@ -60,12 +60,14 @@ fn command_payload_rejection_preserves_the_previous_row_and_cached_exact_key() {
         .command_overlay_changes("charged_command")
         .unwrap()
         .unwrap();
+    let with_cache = control.memory().used();
     engine.mutation_coordinator().end_command_mutation_overlay();
     assert_eq!(
         retained.get_field(1, "value").unwrap(),
         Some(Value::Int(10))
     );
-    assert!(control.memory().used() >= before);
+    assert!(control.memory().used() > 0);
+    assert!(control.memory().used() < with_cache);
     drop(retained);
     assert_eq!(control.memory().used(), 0);
 }

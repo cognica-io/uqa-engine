@@ -5,9 +5,8 @@
 //
 
 use super::{
-    AnalyzerPhase, Arc, BTreeMap, CommandExactIndex, DocId, Document, Engine, FieldName,
-    IVFIndexParams, RelationIdentity, SQLError, StorageBackendError, StorageBackendResult,
-    TableState, Value,
+    AnalyzerPhase, Arc, BTreeMap, DocId, Document, Engine, FieldName, IVFIndexParams,
+    RelationIdentity, SQLError, StorageBackendError, StorageBackendResult, TableState, Value,
 };
 use crate::CatalogIndexRow;
 

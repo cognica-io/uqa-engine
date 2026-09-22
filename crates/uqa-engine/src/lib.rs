@@ -118,8 +118,7 @@ mod user_functions;
 mod value_index;
 
 pub(crate) use uqa_execution::mutation::{
-    deferred::DeferredForeignKeyCheck,
-    overlay::{CommandExactIndex, CommandMutationOverlay, CommandStoredDocument},
+    deferred::DeferredForeignKeyCheck, overlay::CommandMutationOverlay,
 };
 pub(crate) use uqa_execution::row_locks::publication::TransactionRowChange;
 

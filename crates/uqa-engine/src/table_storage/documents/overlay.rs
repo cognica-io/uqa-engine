@@ -4,10 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{
-    command_exact_document_key, command_exact_lookup_parts, Arc, CommandOverlayDocument, DocId,
-    Document, Engine, SQLError, Value,
-};
+use super::{Arc, CommandOverlayDocument, DocId, Document, Engine, SQLError, Value};
 use uqa_execution::query::document_changes::{DocumentChanges, DocumentSelection};
 use uqa_execution::storage_errors::storage_error;
 use uqa_storage::{DocumentMetadata, StoredDocument};
@@ -54,85 +51,17 @@ impl Engine {
         let control = self.query_retention_control()?;
         let document = document
             .map(|fields| -> Result<_, SQLError> {
-                crate::CommandStoredDocument::new(
+                Ok((
                     fields,
                     DocumentMetadata::with_tuple_xmin(self.tuple_version_xid()?),
-                    &control,
-                )
-                .map_err(|error| storage_error("retain command document", &error))
+                ))
             })
             .transpose()?;
         let mut overlays = self.session.command_mutation_overlays.lock();
         let overlay = overlays.last_mut().ok_or_else(|| {
             SQLError::Internal("stage document without an active command overlay".into())
         })?;
-        let previous = overlay
-            .documents
-            .get(&table)
-            .and_then(|documents| documents.get(&doc_id))
-            .cloned();
-        let index_updates = overlay
-            .exact_indexes
-            .get(&table)
-            .map(|indexes| {
-                indexes
-                    .keys()
-                    .map(|fields| {
-                        Ok((
-                            fields.clone(),
-                            previous
-                                .as_ref()
-                                .and_then(Option::as_ref)
-                                .map(|document| {
-                                    command_exact_document_key(document.fields.as_ref(), fields)
-                                })
-                                .transpose()?,
-                            document
-                                .as_ref()
-                                .map(|document| {
-                                    command_exact_document_key(document.fields.as_ref(), fields)
-                                })
-                                .transpose()?,
-                        ))
-                    })
-                    .collect::<Result<Vec<_>, SQLError>>()
-            })
-            .transpose()?
-            .unwrap_or_default();
-        for (fields, previous_key, new_key) in index_updates {
-            let index = overlay
-                .exact_indexes
-                .get_mut(&table)
-                .and_then(|indexes| indexes.get_mut(&fields))
-                .ok_or_else(|| {
-                    SQLError::Internal("command-overlay exact index disappeared".into())
-                })?;
-            if let Some(previous_key) = previous_key {
-                let empty = index
-                    .doc_ids_by_key
-                    .get_mut(&previous_key)
-                    .is_some_and(|doc_ids| {
-                        doc_ids.remove(&doc_id);
-                        doc_ids.is_empty()
-                    });
-                if empty {
-                    index.doc_ids_by_key.remove(&previous_key);
-                }
-            }
-            if let Some(new_key) = new_key {
-                index
-                    .doc_ids_by_key
-                    .entry(new_key)
-                    .or_default()
-                    .insert(doc_id);
-            }
-        }
-        overlay
-            .documents
-            .entry(table)
-            .or_default()
-            .insert(doc_id, document);
-        Ok(())
+        overlay.stage(&table, doc_id, document, &control)
     }
 
     pub(super) fn command_overlay_document(
@@ -149,8 +78,7 @@ impl Engine {
             .rev()
             .find_map(|overlay| {
                 overlay
-                    .documents
-                    .get(&table)
+                    .documents(&table)
                     .and_then(|documents| documents.get(&doc_id))
                     .map(|document| match document {
                         Some(document) => {
@@ -171,56 +99,16 @@ impl Engine {
         values: &[Value],
         presence: uqa_execution::query::exact_lookup::FieldPresence,
     ) -> Result<Option<DocId>, SQLError> {
-        let matches = |document: &Document| {
-            uqa_execution::query::exact_lookup::matches_fields(document, fields, values, presence)
-        };
         let table = self.command_overlay_table_name(table)?;
-        let (fields, key) = command_exact_lookup_parts(fields, values)?;
-        let mut overlays = self.session.command_mutation_overlays.lock();
-        for overlay in overlays.iter_mut() {
-            let indexes = overlay.exact_indexes.entry(table.clone()).or_default();
-            if !indexes.contains_key(&fields) {
-                let mut index = super::super::CommandExactIndex::default();
-                if let Some(documents) = overlay.documents.get(&table) {
-                    for (doc_id, document) in documents {
-                        let Some(document) = document else {
-                            continue;
-                        };
-                        index
-                            .doc_ids_by_key
-                            .entry(command_exact_document_key(
-                                document.fields.as_ref(),
-                                &fields,
-                            )?)
-                            .or_default()
-                            .insert(*doc_id);
-                    }
-                }
-                indexes.insert(fields.clone(), index);
-            }
-        }
-        let candidates = overlays
-            .iter()
-            .filter_map(|overlay| overlay.exact_indexes.get(&table))
-            .filter_map(|indexes| indexes.get(&fields))
-            .filter_map(|index| index.doc_ids_by_key.get(&key))
-            .flatten()
-            .copied()
-            .collect::<std::collections::BTreeSet<_>>();
-        for doc_id in candidates {
-            let visible = overlays.iter().rev().find_map(|overlay| {
-                overlay
-                    .documents
-                    .get(&table)
-                    .and_then(|documents| documents.get(&doc_id))
-            });
-            if let Some(Some(document)) = visible {
-                if matches(document.fields.as_ref()) {
-                    return Ok(Some(doc_id));
-                }
-            }
-        }
-        Ok(None)
+        let control = self.query_retention_control()?;
+        uqa_execution::mutation::overlay::CommandMutationOverlay::find_match(
+            &mut self.session.command_mutation_overlays.lock(),
+            &table,
+            fields,
+            values,
+            presence,
+            &control,
+        )
     }
 
     pub(crate) fn command_overlay_changes(
@@ -237,7 +125,7 @@ impl Engine {
         }
         let control = self.query_retention_control()?;
         for overlay in overlays.iter() {
-            if let Some(documents) = overlay.documents.get(&canonical) {
+            if let Some(documents) = overlay.documents(&canonical) {
                 let additions = DocumentChanges::from_retained(
                     documents.iter().map(|(id, document)| {
                         (

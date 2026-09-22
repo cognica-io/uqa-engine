@@ -17,38 +17,6 @@ enum CommandOverlayDocument {
     Deleted,
 }
 
-fn command_exact_lookup_parts(
-    fields: &[String],
-    values: &[Value],
-) -> Result<(Vec<String>, Vec<u8>), SQLError> {
-    if fields.len() != values.len() {
-        return Err(SQLError::Internal(
-            "command-overlay exact lookup has mismatched fields and values".into(),
-        ));
-    }
-    let mut pairs = fields
-        .iter()
-        .cloned()
-        .zip(values.iter().cloned())
-        .collect::<Vec<_>>();
-    pairs.sort_by(|left, right| left.0.cmp(&right.0));
-    let (fields, values): (Vec<_>, Vec<_>) = pairs.into_iter().unzip();
-    let key = uqa_execution::canonical_row_key(&values).map_err(|error| {
-        SQLError::Internal(format!("encode command-overlay exact lookup key: {error}"))
-    })?;
-    Ok((fields, key))
-}
-
-fn command_exact_document_key(document: &Document, fields: &[String]) -> Result<Vec<u8>, SQLError> {
-    let values = fields
-        .iter()
-        .map(|field| document.get(field).cloned().unwrap_or(Value::Null))
-        .collect::<Vec<_>>();
-    uqa_execution::canonical_row_key(&values).map_err(|error| {
-        SQLError::Internal(format!("encode command-overlay document key: {error}"))
-    })
-}
-
 mod exact_lookup;
 mod overlay;
 

@@ -96,7 +96,8 @@ regex = "1.11"
 regex-automata = { version = "=0.4.14", default-features = false, features = ["std", "syntax", "unicode", "dfa"] }
 regex-syntax = "0.8"
 unicode-normalization = "0.1"
-num-bigint = "0.4"
+# Controlled decimal conversion audits this implementation's allocation strategy.
+num-bigint = "=0.4.6"
 num-traits = "0.2"
 rusqlite = { version = "0.39", default-features = false, features = ["bundled-sqlcipher-vendored-openssl", "blob", "cache"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

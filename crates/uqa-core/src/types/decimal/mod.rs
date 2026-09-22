@@ -9,6 +9,7 @@
 mod arithmetic;
 mod comparison;
 mod conversion;
+mod format_budgeted;
 mod parse;
 mod parse_format;
 mod power;

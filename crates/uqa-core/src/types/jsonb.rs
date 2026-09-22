@@ -8,10 +8,12 @@
 
 use std::cmp::Ordering;
 
+mod equality;
 mod key;
 mod parser;
 mod workspace;
 
+pub use equality::{jsonb_equality_key, write_jsonb_equality_key};
 pub use key::{write_jsonb_comparison_key, JsonbKeyError};
 use parser::JsonbParser;
 
@@ -204,52 +206,4 @@ fn jsonb_key_storage_order(left: &str, right: &str) -> Ordering {
     left.len()
         .cmp(&right.len())
         .then_with(|| left.as_bytes().cmp(right.as_bytes()))
-}
-
-/// Return a semantic equality key for validated `jsonb` text.
-#[must_use]
-pub fn jsonb_equality_key(text: &str) -> Option<Vec<u8>> {
-    let value = JsonbParser::parse(text)?;
-    let mut output = Vec::with_capacity(text.len());
-    encode_equality_value(&value, &mut output)?;
-    Some(output)
-}
-
-fn encode_equality_value(value: &JsonbValue, output: &mut Vec<u8>) -> Option<()> {
-    output.push(type_rank(value));
-    match value {
-        JsonbValue::Null => {}
-        JsonbValue::Bool(value) => output.push(u8::from(*value)),
-        JsonbValue::Number(value) => {
-            output.push(u8::from(value.negative));
-            output.extend_from_slice(&value.power.to_be_bytes());
-            encode_bytes(&value.digits, output)?;
-        }
-        JsonbValue::String(value) => encode_bytes(value.as_bytes(), output)?,
-        JsonbValue::Array(values) => {
-            encode_len(values.len(), output)?;
-            for value in values {
-                encode_equality_value(value, output)?;
-            }
-        }
-        JsonbValue::Object(values) => {
-            encode_len(values.len(), output)?;
-            for field in values {
-                encode_bytes(field.name.as_bytes(), output)?;
-                encode_equality_value(&field.value, output)?;
-            }
-        }
-    }
-    Some(())
-}
-
-fn encode_len(length: usize, output: &mut Vec<u8>) -> Option<()> {
-    output.extend_from_slice(&u64::try_from(length).ok()?.to_be_bytes());
-    Some(())
-}
-
-fn encode_bytes(bytes: &[u8], output: &mut Vec<u8>) -> Option<()> {
-    encode_len(bytes.len(), output)?;
-    output.extend_from_slice(bytes);
-    Some(())
 }
