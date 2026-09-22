@@ -403,6 +403,7 @@ impl Engine {
         {
             return Self::retain_query_table(data);
         }
+        let control = self.query_retention_control()?;
         let source_columns = data.columns.snapshot();
         let source = data.document_store.read();
         let storage = Self::with_query_snapshot_schema(metadata, |schema| {
@@ -414,7 +415,7 @@ impl Engine {
                     &source_columns,
                     schema,
                     changes.unwrap_or_default(),
-                    &self.runtime.cancellation,
+                    &control,
                 );
             }
             uqa_execution::query::table_snapshot::materialize(
@@ -422,7 +423,7 @@ impl Engine {
                 &source_columns,
                 schema,
                 changes.unwrap_or_default(),
-                &self.runtime.cancellation,
+                &control,
             )
         })?;
         Ok(Self::query_table_with_storage(
@@ -436,12 +437,13 @@ impl Engine {
     }
 
     pub(crate) fn detach_empty_query_table(
+        &self,
         metadata: &std::sync::Arc<TableState>,
     ) -> Result<std::sync::Arc<TableState>, SQLError> {
-        let storage = Self::with_query_snapshot_schema(
-            metadata,
-            uqa_execution::query::table_snapshot::empty,
-        )?;
+        let control = self.query_retention_control()?;
+        let storage = Self::with_query_snapshot_schema(metadata, |schema| {
+            uqa_execution::query::table_snapshot::empty(schema, &control)
+        })?;
         Ok(Self::query_table_with_storage(
             metadata,
             storage.documents,
@@ -596,6 +598,9 @@ fn cursor_error(name: &str, message: &str, sqlstate: &str) -> SQLError {
     }
 }
 
-fn portal_snapshot_error(component: &str, error: &impl std::fmt::Display) -> SQLError {
-    SQLError::Internal(format!("capture cursor {component} snapshot: {error}"))
+fn portal_snapshot_error(component: &str, error: &uqa_storage::StorageBackendError) -> SQLError {
+    uqa_execution::storage_errors::storage_error(
+        &format!("capture cursor {component} snapshot"),
+        error,
+    )
 }

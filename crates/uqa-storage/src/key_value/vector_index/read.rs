@@ -18,7 +18,7 @@ use super::super::{
 use super::KeyValueVectorIndex;
 use crate::StorageBackendResult;
 
-pub(super) type Entries = Vec<(DocId, u32, Vec<f32>)>;
+pub(super) use crate::vector_index::retained::VectorEntries as Entries;
 
 impl KeyValueVectorIndex {
     pub(in crate::key_value) fn load_all_from(
@@ -37,7 +37,14 @@ impl KeyValueVectorIndex {
             &mut |key, value| {
                 payload.grow(value.len())?;
                 vectors.reserve(1)?;
-                vectors.push(decoder.decode(key, value)?)?;
+                let entry = decoder.decode(key, value)?;
+                let capacity = entry
+                    .2
+                    .capacity()
+                    .checked_mul(size_of::<f32>())
+                    .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+                payload.grow(capacity.saturating_sub(value.len()))?;
+                vectors.push(entry)?;
                 Ok(())
             },
         )?;

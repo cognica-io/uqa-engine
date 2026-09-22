@@ -43,7 +43,7 @@ fn private_source_uses_current_column_layout_and_survives_source_mutation() {
         &columns,
         &schema(&target, &index),
         changes,
-        &CancellationToken::new(),
+        &control(),
     )
     .unwrap();
     assert_eq!(projections.load(Ordering::Relaxed), 0);
@@ -107,7 +107,7 @@ fn stored_generated_private_fields_need_no_unrelated_payload_reads() {
         &columns,
         &schema(&columns, &index),
         changes,
-        &CancellationToken::new(),
+        &control(),
     )
     .unwrap();
     assert_eq!(
@@ -143,7 +143,7 @@ fn missing_generated_private_values_are_completed_from_the_selected_source() {
         &columns,
         &schema(&columns, &index),
         changes,
-        &CancellationToken::new(),
+        &control(),
     )
     .unwrap();
     assert_eq!(

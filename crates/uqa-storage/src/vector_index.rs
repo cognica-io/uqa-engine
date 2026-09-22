@@ -18,8 +18,10 @@ use uqa_core::{DocId, Payload, PostingEntry, PostingList};
 use crate::{StorageBackendError, StorageBackendResult};
 
 mod config;
+pub(crate) mod retained;
 
 pub use config::{HNSWIndexParams, IVFIndexParams, VectorIndexOpenMode, VectorIndexSpec};
+pub use retained::{RetainedVectorIndex, RetainedVectorIndexBuilder};
 
 pub fn validate_vector_values(dimensions: u32, vector: &[f32]) -> StorageBackendResult<()> {
     let dimensions = usize::try_from(dimensions).map_err(|_| {

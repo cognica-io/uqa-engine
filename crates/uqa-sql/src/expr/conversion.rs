@@ -270,42 +270,41 @@ pub(super) fn coerce_i64(v: &Value) -> Option<i64> {
 /// list (used to read vector literals from `ARRAY[...]` or `$N` Vector
 /// params).
 pub fn value_to_vector(v: &Value) -> Result<Vec<f32>> {
-    let items = match v {
-        Value::List(items) => items.as_slice(),
-        Value::Array(array) if array.dimensions().len() <= 1 => array.elements(),
-        Value::Array(array) => {
-            return Err(SQLError::TypeMismatch(format!(
-                "expected one-dimensional vector input, got {} dimensions",
-                array.dimensions().len()
-            )))
-        }
-        other => {
-            return Err(SQLError::TypeMismatch(format!(
-                "expected vector (numeric array), got {other:?}"
-            )))
-        }
-    };
-    {
-        let mut out = Vec::with_capacity(items.len());
-        for item in items {
-            let x = match item {
-                Value::Float(f) => numeric_f64_to_f32(*f, item)?,
-                Value::Int(i) => *i as f32,
-                Value::Decimal(d) => numeric_f64_to_f32(
-                    d.to_f64().ok_or_else(|| {
-                        SQLError::TypeMismatch(format!("vector element must fit f32, got {item:?}"))
-                    })?,
-                    item,
-                )?,
-                other => {
-                    return Err(SQLError::TypeMismatch(format!(
-                        "vector element must be numeric, got {other:?}"
-                    )))
-                }
-            };
-            out.push(x);
-        }
-        Ok(out)
+    let items = vector_items(v)?;
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        out.push(vector_element(item)?);
+    }
+    Ok(out)
+}
+
+pub(crate) fn vector_items(v: &Value) -> Result<&[Value]> {
+    match v {
+        Value::List(items) => Ok(items.as_slice()),
+        Value::Array(array) if array.dimensions().len() <= 1 => Ok(array.elements()),
+        Value::Array(array) => Err(SQLError::TypeMismatch(format!(
+            "expected one-dimensional vector input, got {} dimensions",
+            array.dimensions().len()
+        ))),
+        other => Err(SQLError::TypeMismatch(format!(
+            "expected vector (numeric array), got {other:?}"
+        ))),
+    }
+}
+
+pub(crate) fn vector_element(item: &Value) -> Result<f32> {
+    match item {
+        Value::Float(f) => numeric_f64_to_f32(*f, item),
+        Value::Int(i) => Ok(*i as f32),
+        Value::Decimal(d) => numeric_f64_to_f32(
+            d.to_f64().ok_or_else(|| {
+                SQLError::TypeMismatch(format!("vector element must fit f32, got {item:?}"))
+            })?,
+            item,
+        ),
+        other => Err(SQLError::TypeMismatch(format!(
+            "vector element must be numeric, got {other:?}"
+        ))),
     }
 }
 
@@ -322,28 +321,26 @@ pub(super) fn numeric_f64_to_f32(value: f64, source: &Value) -> Result<f32> {
 /// vectors. Used by `TENSOR(N)` columns to store chunk embeddings for one
 /// row while still indexing each vector element.
 pub fn value_to_tensor(v: &Value) -> Result<Vec<Vec<f32>>> {
-    let items = match v {
-        Value::List(items) => items.as_slice(),
+    let items = tensor_items(v)?;
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        out.push(value_to_vector(item)?);
+    }
+    Ok(out)
+}
+
+pub(crate) fn tensor_items(v: &Value) -> Result<&[Value]> {
+    match v {
+        Value::List(items) => Ok(items.as_slice()),
         Value::Array(array) if array.dimensions().is_empty() || array.dimensions().len() == 2 => {
-            array.elements()
+            Ok(array.elements())
         }
-        Value::Array(array) => {
-            return Err(SQLError::TypeMismatch(format!(
-                "expected two-dimensional tensor input, got {} dimensions",
-                array.dimensions().len()
-            )))
-        }
-        other => {
-            return Err(SQLError::TypeMismatch(format!(
-                "expected tensor (array of numeric arrays), got {other:?}"
-            )))
-        }
-    };
-    {
-        let mut out = Vec::with_capacity(items.len());
-        for item in items {
-            out.push(value_to_vector(item)?);
-        }
-        Ok(out)
+        Value::Array(array) => Err(SQLError::TypeMismatch(format!(
+            "expected two-dimensional tensor input, got {} dimensions",
+            array.dimensions().len()
+        ))),
+        other => Err(SQLError::TypeMismatch(format!(
+            "expected tensor (array of numeric arrays), got {other:?}"
+        ))),
     }
 }

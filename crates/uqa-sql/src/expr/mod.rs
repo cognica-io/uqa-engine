@@ -78,6 +78,7 @@ use conversion::{
     gcd_i64, initcap_str, nonnegative_usize, string1, to_decimal, to_i64,
 };
 pub use conversion::{array_value_to_string, value_to_string, vector_value_to_string};
+pub(crate) use conversion::{tensor_items, vector_element, vector_items};
 pub use conversion::{value_to_tensor, value_to_vector};
 pub use current_time::clock_timestamp_micros;
 pub use floating::{eval_float_arithmetic, format_real, FloatWidth};

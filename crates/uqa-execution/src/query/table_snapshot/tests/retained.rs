@@ -158,7 +158,7 @@ fn retained_private_views_capture_no_base_rows_and_project_in_requested_order() 
         &columns,
         &schema(&target, &index),
         DocumentChanges::from_rows(changes, &control()).unwrap(),
-        &CancellationToken::new(),
+        &control(),
     )
     .unwrap();
     assert_eq!(pages.load(Ordering::Relaxed), 0);
@@ -293,7 +293,7 @@ fn retained_projection_preserves_absent_defaults_explicit_nulls_and_generated_va
         &columns,
         &selected,
         DocumentChanges::from_rows(BTreeMap::clone(&changes), &control()).unwrap(),
-        &CancellationToken::new(),
+        &control(),
     )
     .unwrap();
     let actual = retain(
@@ -301,7 +301,7 @@ fn retained_projection_preserves_absent_defaults_explicit_nulls_and_generated_va
         &columns,
         &selected,
         DocumentChanges::from_rows(changes, &control()).unwrap(),
-        &CancellationToken::new(),
+        &control(),
     )
     .unwrap();
     for id in [1, 2, 3, 4, 5, 6, 9] {
@@ -344,7 +344,7 @@ fn retained_projection_preserves_absent_defaults_explicit_nulls_and_generated_va
         &columns,
         &selected,
         DocumentChanges::default(),
-        &CancellationToken::new(),
+        &control(),
     )
     .unwrap();
     assert_eq!(
@@ -368,7 +368,7 @@ fn retained_renamed_projection_resolves_missing_fields_after_releasing_source() 
         &columns,
         &schema(&target, &index),
         DocumentChanges::default(),
-        &CancellationToken::new(),
+        &control(),
     )
     .unwrap();
     assert!(view
@@ -453,7 +453,7 @@ fn retained_index_reconstruction_reads_only_indexed_fields() {
         &columns,
         &selected,
         DocumentChanges::from_rows(changes, &control()).unwrap(),
-        &CancellationToken::new(),
+        &control(),
     )
     .unwrap();
     assert_eq!(view.document_count, 2);
@@ -508,7 +508,7 @@ fn retained_renamed_rows_keep_shared_projections() {
         &columns,
         &schema(&target, &index),
         DocumentChanges::default(),
-        &CancellationToken::new(),
+        &control(),
     )
     .unwrap();
     let shared = view
@@ -559,7 +559,7 @@ fn retained_identity_pages_cross_deleted_ranges_without_reading_rows() {
         &[],
         &schema(&[], &index),
         DocumentChanges::from_rows(changes, &control()).unwrap(),
-        &CancellationToken::new(),
+        &control(),
     )
     .unwrap();
     assert_eq!(view.document_count, 3);

@@ -13,31 +13,39 @@ use uqa_core::{
     DocId, Payload, PostingEntry, PostingList,
 };
 
-use crate::key_value::{codec::other_error, KeyValueRead};
 use crate::read_control::StorageReadControl;
 use crate::vector_index::{
     cosine_similarity, select_top_k_scored, validate_vector_values, VectorIndex,
 };
 use crate::{StorageBackendError, StorageBackendResult};
 
-use super::{read::Entries, KeyValueVectorIndex};
+mod builder;
+pub use builder::RetainedVectorIndexBuilder;
 
+pub(crate) type VectorEntries = Vec<(DocId, u32, Vec<f32>)>;
+
+/// An immutable exact index whose vector buffers and read workspace share the original retention allowance.
 #[derive(Clone)]
-pub(super) struct CanonicalSnapshot {
-    entries: Arc<Budgeted<Entries>>,
+pub struct RetainedVectorIndex {
+    entries: Arc<Budgeted<VectorEntries>>,
     dimensions: u32,
+    index_kind: &'static str,
     control: StorageReadControl,
 }
 
-impl CanonicalSnapshot {
-    pub(super) fn load(
-        index: &KeyValueVectorIndex,
-        read: &dyn KeyValueRead,
+impl RetainedVectorIndex {
+    pub(crate) fn from_entries(
+        entries: Budgeted<VectorEntries>,
+        dimensions: u32,
+        index_kind: &'static str,
+        control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
+        control.check()?;
         Ok(Self {
-            entries: index.load_all_from(read)?.into_shared()?,
-            dimensions: index.dimensions,
-            control: read.control().clone(),
+            entries: entries.into_shared()?,
+            dimensions,
+            index_kind,
+            control: control.clone(),
         })
     }
 
@@ -79,7 +87,7 @@ impl CanonicalSnapshot {
     }
 }
 
-impl VectorIndex for CanonicalSnapshot {
+impl VectorIndex for RetainedVectorIndex {
     fn contains_document(&self, doc_id: DocId) -> StorageBackendResult<bool> {
         self.control.check()?;
         Ok(self
@@ -92,7 +100,7 @@ impl VectorIndex for CanonicalSnapshot {
         self.dimensions
     }
     fn index_kind(&self) -> &'static str {
-        "keyvalue-bruteforce"
+        self.index_kind
     }
     fn add(&mut self, _: DocId, _: Vec<f32>) -> StorageBackendResult<()> {
         Err(read_only())
@@ -125,7 +133,7 @@ impl VectorIndex for CanonicalSnapshot {
         self.control.check()?;
         validate_vector_values(self.dimensions, query)?;
         if !threshold.is_finite() {
-            return Err(other_error(format!(
+            return Err(StorageBackendError::Other(format!(
                 "vector similarity threshold must be finite, got {threshold}"
             )));
         }
@@ -142,5 +150,8 @@ impl VectorIndex for CanonicalSnapshot {
 }
 
 fn read_only() -> StorageBackendError {
-    other_error("cannot write a retained KeyValue vector snapshot")
+    StorageBackendError::Other("cannot write a retained vector snapshot".into())
 }
+
+#[cfg(test)]
+mod tests;

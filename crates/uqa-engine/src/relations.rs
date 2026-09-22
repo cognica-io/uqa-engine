@@ -322,7 +322,7 @@ impl Engine {
                 }
                 return live
                     .as_ref()
-                    .map(Self::detach_empty_query_table)
+                    .map(|table| self.detach_empty_query_table(table))
                     .transpose()
                     .map_err(query_table_snapshot_error);
             }

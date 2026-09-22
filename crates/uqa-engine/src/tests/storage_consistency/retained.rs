@@ -27,6 +27,58 @@ fn engines() -> (tempfile::TempDir, Vec<Engine>) {
 }
 
 #[test]
+fn reconstructed_vector_capture_keeps_session_quota_and_the_prior_view_after_rejection() {
+    use uqa_execution::query::document_changes::DocumentChanges;
+    let (_directory, engines) = engines();
+    for engine in engines {
+        engine.sql("CREATE TABLE vector_quota (id INTEGER PRIMARY KEY, v VECTOR(2)); CREATE INDEX vector_quota_index ON vector_quota USING hnsw (v); INSERT INTO vector_quota VALUES (1, ARRAY[1.0, 0.0])", &[]).unwrap();
+        let live = engine.require_table("vector_quota").unwrap();
+        let id = engine.table_doc_ids("vector_quota").unwrap()[0];
+        let control = engine.query_retention_control().unwrap();
+        let changes =
+            DocumentChanges::from_shared([(id.checked_add(1).unwrap(), None)], &control).unwrap();
+        let view = engine
+            .detach_query_table(&live, &live, Some(changes.clone()))
+            .unwrap();
+        let full = control
+            .memory()
+            .reserve(control.memory().limit() - control.memory().used())
+            .unwrap();
+        let error = engine
+            .detach_query_table(&live, &live, Some(changes.clone()))
+            .err()
+            .unwrap();
+        assert_eq!(error.sqlstate(), Some("53200"), "{error}");
+        drop(full);
+        engine
+            .sql("UPDATE vector_quota SET v = ARRAY[0.0, 1.0]", &[])
+            .unwrap();
+        engine.close().unwrap();
+        drop(changes);
+        drop(live);
+        drop(engine);
+        assert_eq!(
+            view.vector_indexes.read()["v"]
+                .search_threshold(&[1.0, 0.0], 0.9)
+                .unwrap()
+                .doc_ids()
+                .collect::<Vec<_>>(),
+            [id]
+        );
+        assert!(view
+            .vector_indexes
+            .write()
+            .get_mut("v")
+            .unwrap()
+            .clear()
+            .is_err());
+        assert!(control.memory().used() > 0);
+        drop(view);
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
 fn private_payload_quota_failure_rolls_back_the_statement_and_savepoint_remains_usable() {
     let (_directory, engines) = engines();
     for engine in engines {
@@ -448,10 +500,14 @@ fn successive_private_captures_keep_distinct_boundaries_across_provider_rollback
 
 #[test]
 fn private_capture_failures_keep_transaction_diagnostics_and_the_original_view() {
+    use uqa_execution::query::document_changes::DocumentChanges;
     let directory = tempfile::tempdir().unwrap();
     let engine = Engine::open(&directory.path().join("capture-errors.db")).unwrap();
     engine.sql("CREATE TABLE capture_errors (id INT PRIMARY KEY, body TEXT); INSERT INTO capture_errors VALUES (1, 'original')", &[]).unwrap();
     engine.sql("BEGIN ISOLATION LEVEL REPEATABLE READ; SELECT * FROM capture_errors; UPDATE capture_errors SET body = 'private'", &[]).unwrap();
+    let changes =
+        DocumentChanges::from_shared([(2, None)], &engine.query_retention_control().unwrap())
+            .unwrap();
     let failures: [(SnapshotErrorFactory, &str); 3] = [
         (|| uqa_core::QueryCancelled.into(), "57014"),
         (
@@ -475,6 +531,14 @@ fn private_capture_failures_keep_transaction_diagnostics_and_the_original_view()
         probe.snapshot_error = Some(failure);
         let live = engine.require_table("capture_errors").unwrap();
         let original = std::mem::replace(&mut *live.document_store.write(), Box::new(probe));
+        let direct_error = engine
+            .detach_query_table(&live, &live, None)
+            .err()
+            .expect("source capture must fail");
+        let rebuilt_error = engine
+            .detach_query_table(&live, &live, Some(changes.clone()))
+            .err()
+            .expect("source capture before reconstruction must fail");
         let snapshot_error = engine
             .capture_statement_read_snapshot()
             .err()
@@ -483,6 +547,8 @@ fn private_capture_failures_keep_transaction_diagnostics_and_the_original_view()
             .get_query_document_fields_multi("capture_errors", &[1], &["body"])
             .unwrap_err();
         *live.document_store.write() = original;
+        assert_eq!(direct_error.sqlstate(), Some(state), "{direct_error}");
+        assert_eq!(rebuilt_error.sqlstate(), Some(state), "{rebuilt_error}");
         assert_eq!(snapshot_error.sqlstate(), Some(state), "{snapshot_error}");
         assert_eq!(query_error.sqlstate(), Some(state), "{query_error}");
         if state == "57014" {

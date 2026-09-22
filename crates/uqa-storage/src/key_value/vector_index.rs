@@ -7,7 +7,8 @@
 //! Vector-index adapter over an ordered key/value store.
 
 mod read;
-mod snapshot;
+
+use crate::vector_index::RetainedVectorIndex;
 
 use super::index_view::read_view;
 
@@ -44,9 +45,14 @@ impl KeyValueVectorIndex {
         }
     }
 
-    fn read_snapshot(&self) -> StorageBackendResult<snapshot::CanonicalSnapshot> {
+    fn read_snapshot(&self) -> StorageBackendResult<RetainedVectorIndex> {
         read_view(self.store.as_ref(), |read| {
-            snapshot::CanonicalSnapshot::load(self, read)
+            RetainedVectorIndex::from_entries(
+                self.load_all_from(read)?,
+                self.dimensions,
+                "keyvalue-bruteforce",
+                read.control(),
+            )
         })
     }
 

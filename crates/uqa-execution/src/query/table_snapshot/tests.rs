@@ -7,8 +7,10 @@
 use super::*;
 use parking_lot::Mutex;
 use std::sync::Arc;
+use uqa_core::CancellationToken;
 use uqa_storage::{DocumentMetadata, StorageBackendResult};
 
+mod budgets;
 mod retained;
 
 fn columns(sql: &str) -> Vec<ColumnDef> {
@@ -98,7 +100,7 @@ fn base_column_incarnations_and_private_column_layouts_remain_distinct() {
         &schema(&target, &index),
         DocumentChanges::from_rows(BTreeMap::from([(2, Some(private.clone()))]), &control())
             .unwrap(),
-        &CancellationToken::new(),
+        &control(),
     )
     .unwrap();
     assert_eq!(view.documents.get_stored(2).unwrap(), Some(private));
@@ -185,7 +187,7 @@ fn reconstruction_pages_rows_and_skips_private_replacements_and_deletions() {
         &fields,
         &schema(&fields, &index),
         DocumentChanges::from_rows(changes, &control()).unwrap(),
-        &CancellationToken::new(),
+        &control(),
     )
     .unwrap();
     assert_eq!(view.document_count, count);
@@ -247,7 +249,7 @@ fn adapted_text_vectors_defaults_and_generated_fields_agree_with_rows() {
         &source_columns,
         &selected,
         DocumentChanges::default(),
-        &CancellationToken::new(),
+        &control(),
     )
     .unwrap();
     assert_eq!(
@@ -290,7 +292,7 @@ fn cancellation_prevents_any_source_read_or_partial_result() {
         &[],
         &schema(&[], &index),
         DocumentChanges::default(),
-        &cancel
+        &StorageReadControl::new(control().memory(), &cancel)
     )
     .is_err());
     assert!(source.requested.lock().is_empty());

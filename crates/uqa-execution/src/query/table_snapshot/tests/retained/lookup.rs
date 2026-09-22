@@ -26,7 +26,7 @@ fn retained_point_lookups_stop_after_the_first_matching_identity_page() {
         &[],
         &schema(&[], &index),
         DocumentChanges::default(),
-        &CancellationToken::new(),
+        &control(),
     )
     .unwrap();
     assert_eq!(
@@ -70,7 +70,7 @@ fn retained_point_lookups_preserve_missing_fields_nulls_and_private_masks() {
         &[],
         &schema(&[], &index),
         DocumentChanges::from_rows(changes, &control()).unwrap(),
-        &CancellationToken::new(),
+        &control(),
     )
     .unwrap();
     assert_eq!(
@@ -140,7 +140,7 @@ fn retained_identity_scans_cancel_before_reading_another_masked_page() {
             &[],
             &schema(&[], &index),
             DocumentChanges::from_rows(changes, &control()).unwrap(),
-            &cancellation,
+            &StorageReadControl::new(control().memory(), &cancellation),
         )
         .unwrap();
         assert!(matches!(

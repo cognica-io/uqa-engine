@@ -9,10 +9,11 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use uqa_analysis::Analyzer;
-use uqa_core::{CancellationToken, DocId, FieldName, Value};
+use uqa_core::{DocId, FieldName, Value};
 use uqa_sql::{ast::ColumnDef, ColumnType, SQLError};
+use uqa_storage::{read_control::StorageReadControl, vector_index::RetainedVectorIndexBuilder};
 use uqa_storage::{
-    DocumentStore, InvertedIndex, MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex,
+    DocumentStore, InvertedIndex, MemoryDocumentStore, MemoryInvertedIndex, StorageBackendError,
     StoredDocument, VectorIndex,
 };
 
@@ -40,14 +41,23 @@ pub struct MaterializedTable {
     pub document_count: u64,
 }
 
+struct SnapshotBuilder {
+    documents: Box<dyn DocumentStore>,
+    text: Box<dyn InvertedIndex>,
+    vectors: BTreeMap<FieldName, RetainedVectorIndexBuilder>,
+    document_count: u64,
+    control: StorageReadControl,
+}
+
 /// Retain the immutable base instead of copying its documents into another complete store. Private replacements and row-layout metadata are shared by nested views, and projected reads avoid unrelated fields. Text/vector reconstruction still retains its resulting indexes.
 pub fn retain(
     source: Arc<dyn DocumentStore>,
     source_columns: &[ColumnDef],
     schema: &SnapshotSchema<'_>,
     changes: DocumentChanges,
-    cancellation: &CancellationToken,
+    control: &StorageReadControl,
 ) -> Result<MaterializedTable, SQLError> {
+    let cancellation = control.cancellation();
     cancellation.check()?;
     let documents = documents::RetainedDocuments::new(
         source,
@@ -57,7 +67,7 @@ pub fn retain(
         cancellation,
     )
     .map_err(|error| snapshot_error("retained documents", &error))?;
-    let mut result = empty(schema)?;
+    let mut result = SnapshotBuilder::new(schema, control)?;
     result.document_count = u64::try_from(
         documents
             .len()
@@ -74,7 +84,7 @@ pub fn retain(
         .into_iter()
         .collect::<Vec<_>>();
     if fields.is_empty() {
-        return Ok(result);
+        return result.finish();
     }
     let mut after = None;
     loop {
@@ -102,7 +112,7 @@ pub fn retain(
         }
     }
     cancellation.check()?;
-    Ok(result)
+    result.finish()
 }
 
 /// Reconstruct a selected query view without keeping intermediate corpus-sized document maps. Base rows use their original column identities; evaluated private rows already use the selected schema. Each row moves into its final store after its index inputs are extracted. The resulting memory stores still retain the complete selected view.
@@ -111,11 +121,12 @@ pub fn materialize(
     source_columns: &[ColumnDef],
     schema: &SnapshotSchema<'_>,
     changes: DocumentChanges,
-    cancellation: &CancellationToken,
+    control: &StorageReadControl,
 ) -> Result<MaterializedTable, SQLError> {
+    let cancellation = control.cancellation();
     cancellation.check()?;
     let layout = RowLayout::new(source_columns, Arc::clone(&schema.columns));
-    let mut result = empty(schema)?;
+    let mut result = SnapshotBuilder::new(schema, control)?;
     let mut after = None;
     loop {
         cancellation.check()?;
@@ -164,44 +175,76 @@ pub fn materialize(
             .map_err(|error| snapshot_error("document count", &error))?,
     )
     .map_err(|_| SQLError::Internal("query snapshot document count overflow".into()))?;
-    Ok(result)
+    result.finish()
 }
 
-pub fn empty(schema: &SnapshotSchema<'_>) -> Result<MaterializedTable, SQLError> {
-    let mut text = MemoryInvertedIndex::new(schema.analyzer.clone());
-    for field in schema.text_fields {
-        text.set_field_analyzer_revisions(
-            field,
-            schema
-                .text_revisions
-                .index_analyzer_revision(field)
-                .map_err(|error| snapshot_error("index analyzer revision", &error))?,
-            schema
-                .text_revisions
-                .search_analyzer_revision(field)
-                .map_err(|error| snapshot_error("search analyzer revision", &error))?,
-        )
-        .map_err(|error| snapshot_error("field analyzer revisions", &error))?;
-    }
-    let vectors = schema
-        .vector_dimensions
-        .iter()
-        .map(|(field, dimensions)| {
-            (
-                field.clone(),
-                Box::new(MemoryVectorIndex::new(*dimensions)) as Box<dyn VectorIndex>,
+pub fn empty(
+    schema: &SnapshotSchema<'_>,
+    control: &StorageReadControl,
+) -> Result<MaterializedTable, SQLError> {
+    SnapshotBuilder::new(schema, control)?.finish()
+}
+
+impl SnapshotBuilder {
+    fn new(schema: &SnapshotSchema<'_>, control: &StorageReadControl) -> Result<Self, SQLError> {
+        control.cancellation().check()?;
+        let mut text = MemoryInvertedIndex::new(schema.analyzer.clone());
+        for field in schema.text_fields {
+            text.set_field_analyzer_revisions(
+                field,
+                schema
+                    .text_revisions
+                    .index_analyzer_revision(field)
+                    .map_err(|error| snapshot_error("index analyzer revision", &error))?,
+                schema
+                    .text_revisions
+                    .search_analyzer_revision(field)
+                    .map_err(|error| snapshot_error("search analyzer revision", &error))?,
             )
+            .map_err(|error| {
+                SQLError::Internal(format!(
+                    "construct query field analyzer revisions snapshot: {error}"
+                ))
+            })?;
+        }
+        let vectors = schema
+            .vector_dimensions
+            .iter()
+            .map(|(field, dimensions)| {
+                (
+                    field.clone(),
+                    RetainedVectorIndexBuilder::new(*dimensions, control),
+                )
+            })
+            .collect();
+        Ok(Self {
+            documents: Box::new(MemoryDocumentStore::new()),
+            text: Box::new(text),
+            vectors,
+            document_count: 0,
+            control: control.clone(),
         })
-        .collect();
-    Ok(MaterializedTable {
-        documents: Box::new(MemoryDocumentStore::new()),
-        text: Box::new(text),
-        vectors,
-        document_count: 0,
-    })
-}
+    }
 
-impl MaterializedTable {
+    fn finish(self) -> Result<MaterializedTable, SQLError> {
+        let vectors = self
+            .vectors
+            .into_iter()
+            .map(|(field, index)| {
+                let index = index
+                    .finish()
+                    .map_err(|error| snapshot_error("vector index", &error))?;
+                Ok((field, Box::new(index) as Box<dyn VectorIndex>))
+            })
+            .collect::<Result<_, SQLError>>()?;
+        Ok(MaterializedTable {
+            documents: self.documents,
+            text: self.text,
+            vectors,
+            document_count: self.document_count,
+        })
+    }
+
     fn insert(
         &mut self,
         id: DocId,
@@ -243,15 +286,20 @@ impl MaterializedTable {
                 .map(|column| &column.ty)
                 .filter(|ty| matches!(ty, ColumnType::Tensor(_) | ColumnType::Vector(_)))
                 .unwrap_or(&fallback);
-            let vectors = uqa_sql::assignment::vectors::index_vectors_for_type(value, ty)?;
+            let vectors = uqa_sql::assignment::vectors::index_vectors_for_type_budgeted(
+                value,
+                ty,
+                self.control.memory(),
+                &mut || self.control.cancellation().check(),
+            )?;
             index
-                .add_many(id, vectors)
+                .add_document(id, vectors)
                 .map_err(|error| snapshot_error("vector index", &error))?;
         }
         Ok(())
     }
 }
 
-fn snapshot_error(component: &str, error: &impl std::fmt::Display) -> SQLError {
-    SQLError::Internal(format!("construct query {component} snapshot: {error}"))
+fn snapshot_error(component: &str, error: &StorageBackendError) -> SQLError {
+    crate::storage_errors::storage_error(&format!("construct query {component} snapshot"), error)
 }
