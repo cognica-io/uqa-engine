@@ -27,7 +27,7 @@ impl Engine {
             .map(|(field, index)| (field.clone(), index.dimensions()))
             .collect();
         operation(&uqa_execution::query::table_snapshot::SnapshotSchema {
-            columns: &columns,
+            columns,
             analyzer: &analyzer,
             text_fields: &text_fields,
             text_revisions: text_revisions.as_ref(),

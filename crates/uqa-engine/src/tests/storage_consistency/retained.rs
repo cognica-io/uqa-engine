@@ -151,6 +151,43 @@ fn current_private_snapshot_does_not_read_rows_to_reapply_its_own_changes() {
 }
 
 #[test]
+fn changed_schema_snapshot_retains_base_rows_until_the_query_reads_them() {
+    let engine = Engine::new();
+    engine.sql("CREATE TABLE adapted_rows (id INTEGER PRIMARY KEY, payload TEXT); INSERT INTO adapted_rows VALUES (1, 'original'), (2, 'other')", &[]).unwrap();
+    let live = engine.require_table("adapted_rows").unwrap();
+    let ids = engine.table_doc_ids("adapted_rows").unwrap();
+    let base = engine.detach_query_table(&live, &live, None).unwrap();
+    let probe = PortalSnapshotProbeStore::from_table(&engine, "adapted_rows");
+    let row_reads = Arc::clone(&probe.row_reads);
+    let id_reads = Arc::clone(&probe.doc_id_calls);
+    let captures = Arc::clone(&probe.snapshot_calls);
+    engine
+        .sql(
+            "ALTER TABLE adapted_rows ADD COLUMN added INTEGER DEFAULT 17",
+            &[],
+        )
+        .unwrap();
+    *base.document_store.write() = Box::new(probe);
+    let selected = engine.detach_query_table(&base, &live, None).unwrap();
+    assert_eq!(row_reads.load(std::sync::atomic::Ordering::Relaxed), 0);
+    assert_eq!(id_reads.load(std::sync::atomic::Ordering::Relaxed), 0);
+    assert_eq!(captures.load(std::sync::atomic::Ordering::Relaxed), 1);
+    assert_eq!(selected.document_store.read().len().unwrap(), 2);
+    engine.sql("DROP TABLE adapted_rows", &[]).unwrap();
+    engine.close().unwrap();
+    drop(engine);
+    drop(live);
+    drop(base);
+    let rows = selected
+        .document_store
+        .read()
+        .get_fields_multi(&ids, &["id", "added"])
+        .unwrap();
+    assert_eq!(rows[&ids[0]], vec![Value::Int(1), Value::Int(17)]);
+    assert_eq!(rows[&ids[1]], vec![Value::Int(2), Value::Int(17)]);
+}
+
+#[test]
 fn cursor_snapshot_preserves_added_defaults_and_virtual_generated_values() {
     let (_directory, engines) = engines();
     for engine in engines {

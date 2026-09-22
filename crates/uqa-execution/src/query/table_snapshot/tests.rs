@@ -9,6 +9,8 @@ use parking_lot::Mutex;
 use std::sync::Arc;
 use uqa_storage::{DocumentMetadata, StorageBackendResult};
 
+mod retained;
+
 fn columns(sql: &str) -> Vec<ColumnDef> {
     let uqa_sql::Statement::CreateTable(table) = uqa_sql::compile(sql).unwrap().remove(0) else {
         unreachable!()
@@ -36,7 +38,7 @@ fn document(values: &[(&str, Value)], xmin: u32) -> StoredDocument {
 
 fn schema<'a>(columns: &'a [ColumnDef], index: &'a dyn InvertedIndex) -> SnapshotSchema<'a> {
     SnapshotSchema {
-        columns,
+        columns: Arc::new(columns.to_vec()),
         analyzer: index.analyzer(),
         text_fields: &[],
         text_revisions: index,

@@ -408,6 +408,17 @@ impl Engine {
         let source_columns = data.columns.snapshot();
         let source = data.document_store.read();
         let storage = Self::with_query_snapshot_schema(metadata, |schema| {
+            if self.storage.backend.is_none() || self.versioned_backend_transactions() {
+                return uqa_execution::query::table_snapshot::retain(
+                    source
+                        .snapshot()
+                        .map_err(|error| portal_snapshot_error("documents", &error))?,
+                    &source_columns,
+                    schema,
+                    changes.unwrap_or_default(),
+                    &self.runtime.cancellation,
+                );
+            }
             uqa_execution::query::table_snapshot::materialize(
                 source.as_ref(),
                 &source_columns,

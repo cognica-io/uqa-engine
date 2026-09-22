@@ -7,17 +7,21 @@
 //! Column-incarnation mapping distinguishes retained base rows from current private rows.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use uqa_core::Value;
 use uqa_sql::{ast::ColumnDef, SQLError};
 use uqa_storage::StoredDocument;
 
-pub(super) struct RowLayout<'a> {
-    columns: &'a [ColumnDef],
-    source: Vec<(&'a str, Option<&'a str>)>,
+mod projection;
+pub(super) use projection::RowProjection;
+
+pub(super) struct RowLayout {
+    columns: Arc<Vec<ColumnDef>>,
+    source: Vec<(String, Option<String>)>,
 }
 
-impl<'a> RowLayout<'a> {
-    pub(super) fn new(source: &'a [ColumnDef], columns: &'a [ColumnDef]) -> Self {
+impl RowLayout {
+    pub(super) fn new(source: &[ColumnDef], columns: Arc<Vec<ColumnDef>>) -> Self {
         let by_id = columns
             .iter()
             .filter_map(|column| column.object_id.map(|id| (id, column)))
@@ -35,8 +39,8 @@ impl<'a> RowLayout<'a> {
                         })
                     });
                 (
-                    column.name.as_str(),
-                    target.map(|target| target.name.as_str()),
+                    column.name.clone(),
+                    target.map(|target| target.name.clone()),
                 )
             })
             .collect();
@@ -53,8 +57,10 @@ impl<'a> RowLayout<'a> {
             .source
             .iter()
             .filter_map(|(source, target)| {
-                let value = fields.remove(*source);
-                target.and_then(|target| value.map(|value| (target, value)))
+                let value = fields.remove(source);
+                target
+                    .as_ref()
+                    .and_then(|target| value.map(|value| (target, value)))
             })
             .collect::<Vec<_>>();
         for (target, value) in moved {
@@ -68,7 +74,7 @@ impl<'a> RowLayout<'a> {
         mut document: StoredDocument,
     ) -> Result<StoredDocument, SQLError> {
         let fields = document.fields_mut();
-        for column in self.columns {
+        for column in self.columns.iter() {
             if column.generated.is_none() && !fields.contains_key(&column.name) {
                 fields.insert(
                     column.name.clone(),
@@ -76,7 +82,7 @@ impl<'a> RowLayout<'a> {
                 );
             }
         }
-        crate::query::generated::materialize_missing_generated_columns(self.columns, fields)?;
+        crate::query::generated::materialize_missing_generated_columns(&self.columns, fields)?;
         Ok(document)
     }
 }
