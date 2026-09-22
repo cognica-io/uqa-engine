@@ -143,12 +143,12 @@ fn retained_identity_scans_cancel_before_reading_another_masked_page() {
             &StorageReadControl::new(control().memory(), &cancellation),
         )
         .unwrap();
+        let nested = view.documents.snapshot().unwrap();
         assert!(matches!(
             view.documents.next_doc_ids(None, 1),
             Err(uqa_storage::StorageBackendError::Cancelled(_))
         ));
         assert_eq!(pages.load(Ordering::Relaxed), 1);
-        let nested = view.documents.snapshot().unwrap();
         assert!(matches!(
             nested.find_doc_id_by_field("key", &Value::Null),
             Err(uqa_storage::StorageBackendError::Cancelled(_))

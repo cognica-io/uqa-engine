@@ -4,10 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Preserve requested row order and early termination across base and private projections.
+//! Requested row order, presence and early termination share the query's workspace allowance.
 
 use super::{DocId, DocumentStore, RetainedDocuments, StorageBackendResult, Value};
 use crate::query::table_snapshot::layout::RowProjection;
+use uqa_core::memory::BudgetedVec;
 
 impl RetainedDocuments {
     pub(super) fn visit_projection(
@@ -16,12 +17,21 @@ impl RetainedDocuments {
         fields: &[&str],
         visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
     ) -> StorageBackendResult<()> {
-        let base_projection = self.0.layout.projection(fields);
-        let private_projection = self.0.private_layout.projection(fields);
-        let nulls = vec![&Value::Null; fields.len()];
+        self.0.control.check()?;
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let base_projection = self.0.layout.projection(fields)?;
+        let private_projection = self.0.private_layout.projection(fields)?;
+        let mut nulls = BudgetedVec::new(self.0.control.memory());
+        nulls.reserve(fields.len())?;
+        for _ in fields {
+            self.0.control.check()?;
+            nulls.push(&Value::Null)?;
+        }
         let mut index = 0;
         while index < ids.len() {
-            self.0.cancellation.check()?;
+            self.0.control.check()?;
             let id = ids[index];
             let private = self.0.changes.contains_change(id);
             let projection = if private {
@@ -32,6 +42,7 @@ impl RetainedDocuments {
             if let Some(projection) = projection.as_ref() {
                 let start = index;
                 while index < ids.len() && self.0.changes.contains_change(ids[index]) == private {
+                    self.0.control.check()?;
                     index += 1;
                 }
                 let source: &dyn DocumentStore = if private {
@@ -50,35 +61,42 @@ impl RetainedDocuments {
                     break;
                 }
             } else {
-                if !self.visit_individual_projection(id, fields, visitor)? {
+                if !self.visit_individual_projection(id, fields, &nulls, visitor)? {
                     break;
                 }
                 index += 1;
             }
         }
-        Ok(())
+        self.0.control.check()
     }
 
     fn visit_individual_projection(
         &self,
         id: DocId,
         fields: &[&str],
+        nulls: &[&Value],
         visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
     ) -> StorageBackendResult<bool> {
+        self.0.control.check()?;
         let present = self.contains_doc_id(id)?;
-        let values = if present {
-            fields
-                .iter()
-                .map(|field| {
-                    self.get_field(id, field)
-                        .map(|value| value.unwrap_or(Value::Null))
-                })
-                .collect::<StorageBackendResult<Vec<_>>>()?
-        } else {
-            vec![Value::Null; fields.len()]
-        };
-        let values = values.iter().collect::<Vec<_>>();
-        Ok(visitor(id, present, &values))
+        if !present {
+            self.0.control.check()?;
+            return Ok(visitor(id, false, nulls));
+        }
+        let mut values = BudgetedVec::new(self.0.control.memory());
+        values.reserve(fields.len())?;
+        for field in fields {
+            self.0.control.check()?;
+            values.push(self.get_field(id, field)?.unwrap_or(Value::Null))?;
+        }
+        let mut projected = BudgetedVec::new(self.0.control.memory());
+        projected.reserve(values.len())?;
+        for value in values.iter() {
+            self.0.control.check()?;
+            projected.push(value)?;
+        }
+        self.0.control.check()?;
+        Ok(visitor(id, true, &projected))
     }
 
     fn visit_source_projection(
@@ -92,26 +110,42 @@ impl RetainedDocuments {
     ) -> StorageBackendResult<bool> {
         let mut offset = 0;
         while offset < ids.len() {
+            self.0.control.check()?;
             let mut visited = 0;
             let mut ambiguous = None;
             let mut keep_going = true;
-            source.for_each_fields_multi_ref_with_presence(
+            let mut failure = None;
+            let read = source.for_each_fields_multi_ref_with_presence(
                 &ids[offset..],
                 &projection.sources,
                 &mut |id, present, values| {
                     visited += 1;
+                    if let Err(error) = self.0.control.check() {
+                        failure = Some(error);
+                        return false;
+                    }
                     if present && projection.needs_presence(values) {
                         ambiguous = Some(id);
                         return false;
                     }
                     keep_going = if present {
-                        visitor(id, true, &projection.values(values))
+                        match projection.values(values) {
+                            Ok(projected) => visitor(id, true, &projected),
+                            Err(error) => {
+                                failure = Some(error);
+                                false
+                            }
+                        }
                     } else {
                         visitor(id, false, nulls)
                     };
                     keep_going
                 },
-            )?;
+            );
+            if let Some(error) = failure {
+                return Err(error);
+            }
+            read?;
             if !keep_going {
                 return Ok(false);
             }
@@ -119,7 +153,7 @@ impl RetainedDocuments {
                 break;
             };
             // Release the provider's borrowed-row guard before requesting field-presence information.
-            if !self.visit_individual_projection(id, fields, visitor)? {
+            if !self.visit_individual_projection(id, fields, nulls, visitor)? {
                 return Ok(false);
             }
             offset += visited;

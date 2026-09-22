@@ -8,14 +8,19 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use uqa_core::{DocId, Value};
+use uqa_core::{
+    memory::{Budgeted, BudgetedVec},
+    DocId, Value,
+};
 use uqa_storage::{
-    DocumentMetadata, DocumentStore, StorageBackendError, StorageBackendResult, StoredDocument,
+    read_control::StorageReadControl, DocumentMetadata, DocumentStore, StorageBackendError,
+    StorageBackendResult, StoredDocument,
 };
 
 use super::layout::RowLayout;
 use crate::query::document_changes::DocumentChanges;
 
+mod identifiers;
 mod projection;
 
 struct State {
@@ -24,11 +29,11 @@ struct State {
     private_layout: RowLayout,
     changes: DocumentChanges,
     count: usize,
-    cancellation: uqa_core::CancellationToken,
+    control: StorageReadControl,
 }
 
 #[derive(Clone)]
-pub(super) struct RetainedDocuments(Arc<State>);
+pub(super) struct RetainedDocuments(Arc<Budgeted<State>>);
 
 impl RetainedDocuments {
     pub(super) fn new(
@@ -36,12 +41,12 @@ impl RetainedDocuments {
         layout: RowLayout,
         private_layout: RowLayout,
         changes: DocumentChanges,
-        cancellation: &uqa_core::CancellationToken,
+        control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
-        cancellation.check()?;
+        control.check()?;
         let mut count = source.len()?;
         for (id, replacement) in changes.changes() {
-            cancellation.check()?;
+            control.check()?;
             let present = source.contains_doc_id(id)?;
             count = match (present, replacement) {
                 (true, false) => count.checked_sub(1),
@@ -50,14 +55,18 @@ impl RetainedDocuments {
             }
             .ok_or_else(|| StorageBackendError::Other("query document count overflow".into()))?;
         }
-        Ok(Self(Arc::new(State {
+        control.check()?;
+        let state = State {
             source,
             layout,
             private_layout,
             changes,
             count,
-            cancellation: cancellation.clone(),
-        })))
+            control: control.clone(),
+        };
+        Ok(Self(
+            Budgeted::new(state, control.memory().empty_reservation()).into_shared()?,
+        ))
     }
 
     fn visit_ids(
@@ -66,12 +75,12 @@ impl RetainedDocuments {
     ) -> StorageBackendResult<()> {
         let mut after = None;
         loop {
-            let ids = self.next_doc_ids(after, crate::DEFAULT_BATCH_SIZE)?;
+            let ids = self.id_page(after, crate::DEFAULT_BATCH_SIZE)?;
             let Some(last) = ids.last().copied() else {
                 return Ok(());
             };
-            for id in ids {
-                self.0.cancellation.check()?;
+            for id in ids.iter().copied() {
+                self.0.control.check()?;
                 if !visitor(id)? {
                     return Ok(());
                 }
@@ -133,6 +142,7 @@ impl DocumentStore for RetainedDocuments {
     }
 
     fn get_stored(&self, id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
+        self.0.control.check()?;
         if self.0.changes.contains_change(id) {
             self.0
                 .changes
@@ -152,21 +162,14 @@ impl DocumentStore for RetainedDocuments {
         &self,
         ids: &[DocId],
     ) -> StorageBackendResult<BTreeMap<DocId, StoredDocument>> {
-        let base_ids = ids
-            .iter()
-            .filter(|id| !self.0.changes.contains_change(**id))
-            .copied()
-            .collect::<Vec<_>>();
+        let base_ids = self.selected_ids(ids, false)?;
         let base = self.0.source.get_stored_many(&base_ids)?;
+        drop(base_ids);
         let mut rows = BTreeMap::new();
         for (id, row) in base {
             rows.insert(id, self.0.layout.adapt_base(row).map_err(layout_error)?);
         }
-        let private_ids = ids
-            .iter()
-            .filter(|id| self.0.changes.contains_change(**id))
-            .copied()
-            .collect::<Vec<_>>();
+        let private_ids = self.selected_ids(ids, true)?;
         for (id, row) in self.0.changes.get_stored_many(&private_ids)? {
             rows.insert(
                 id,
@@ -177,6 +180,7 @@ impl DocumentStore for RetainedDocuments {
     }
 
     fn get_metadata(&self, id: DocId) -> StorageBackendResult<Option<DocumentMetadata>> {
+        self.0.control.check()?;
         if self.0.changes.contains_change(id) {
             self.0.changes.get_metadata(id)
         } else {
@@ -185,6 +189,7 @@ impl DocumentStore for RetainedDocuments {
     }
 
     fn contains_doc_id(&self, id: DocId) -> StorageBackendResult<bool> {
+        self.0.control.check()?;
         match self.0.changes.change_presence(id) {
             Some(present) => Ok(present),
             None => self.0.source.contains_doc_id(id),
@@ -192,6 +197,7 @@ impl DocumentStore for RetainedDocuments {
     }
 
     fn get_field(&self, id: DocId, field: &str) -> StorageBackendResult<Option<Value>> {
+        self.0.control.check()?;
         if self.0.changes.contains_change(id) {
             self.0.private_layout.base_field(&self.0.changes, id, field)
         } else {
@@ -212,6 +218,7 @@ impl DocumentStore for RetainedDocuments {
         fields: &[String],
         values: &[Value],
     ) -> StorageBackendResult<Option<DocId>> {
+        self.0.control.check()?;
         if fields.is_empty() || fields.len() != values.len() {
             return Ok(None);
         }
@@ -278,11 +285,17 @@ impl DocumentStore for RetainedDocuments {
         ids: &[DocId],
         fields: &[&str],
     ) -> StorageBackendResult<Option<Vec<Option<uqa_storage::SharedDocumentRow>>>> {
-        let Some(projection) = self.0.layout.projection(fields) else {
+        let Some(projection) = self.0.layout.projection(fields)? else {
             return Ok(None);
         };
-        if !projection.only_sources() || ids.iter().any(|id| self.0.changes.contains_change(*id)) {
+        if !projection.only_sources() {
             return Ok(None);
+        }
+        for id in ids {
+            self.0.control.check()?;
+            if self.0.changes.contains_change(*id) {
+                return Ok(None);
+            }
         }
         let rows = self.0.source.get_shared_fields(ids, &projection.sources)?;
         if rows.as_ref().is_some_and(|rows| {
@@ -301,7 +314,7 @@ impl DocumentStore for RetainedDocuments {
         limit: usize,
         fields: &[&str],
     ) -> StorageBackendResult<Option<Vec<(DocId, uqa_storage::SharedDocumentRow)>>> {
-        let Some(projection) = self.0.layout.projection(fields) else {
+        let Some(projection) = self.0.layout.projection(fields)? else {
             return Ok(None);
         };
         if self.0.changes.has_changes() || !projection.only_sources() {
@@ -327,7 +340,7 @@ impl DocumentStore for RetainedDocuments {
         fields: &[&str],
         visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
     ) -> StorageBackendResult<Option<usize>> {
-        let ids = self.next_doc_ids(after, limit)?;
+        let ids = self.id_page(after, limit)?;
         let mut visited = 0;
         self.for_each_fields_multi_ref(&ids, fields, &mut |id, values| {
             visited += 1;
@@ -337,71 +350,24 @@ impl DocumentStore for RetainedDocuments {
     }
 
     fn doc_ids(&self) -> StorageBackendResult<Vec<DocId>> {
-        let mut ids = Vec::new();
+        let mut ids = BudgetedVec::new(self.0.control.memory());
         loop {
-            let page = self.next_doc_ids(ids.last().copied(), crate::DEFAULT_BATCH_SIZE)?;
+            let page = self.id_page(ids.last().copied(), crate::DEFAULT_BATCH_SIZE)?;
             if page.is_empty() {
                 break;
             }
-            ids.extend(page);
+            ids.extend_from_slice(&page)?;
         }
+        let (ids, _memory) = ids.into_parts();
         Ok(ids)
     }
 
     fn next_doc_id(&self, after: Option<DocId>) -> StorageBackendResult<Option<DocId>> {
-        Ok(self.next_doc_ids(after, 1)?.into_iter().next())
+        Ok(self.id_page(after, 1)?.first().copied())
     }
 
     fn next_doc_ids(&self, after: Option<DocId>, limit: usize) -> StorageBackendResult<Vec<DocId>> {
-        self.0.cancellation.check()?;
-        if limit == 0 {
-            return Ok(Vec::new());
-        }
-        let mut base = Vec::new();
-        let mut cursor = after;
-        while base.len() < limit {
-            self.0.cancellation.check()?;
-            let page = self
-                .0
-                .source
-                .next_doc_ids(cursor, (limit - base.len()).min(crate::DEFAULT_BATCH_SIZE))?;
-            let Some(last) = page.last().copied() else {
-                break;
-            };
-            if cursor.is_some_and(|cursor| page[0] <= cursor)
-                || page.windows(2).any(|pair| pair[0] >= pair[1])
-            {
-                return Err(StorageBackendError::Other(
-                    "query document page did not advance in id order".into(),
-                ));
-            }
-            cursor = Some(last);
-            base.extend(
-                page.into_iter()
-                    .filter(|id| !self.0.changes.contains_change(*id)),
-            );
-        }
-        let private = self
-            .0
-            .changes
-            .changes_after(after)
-            .take_while(|_| !self.0.cancellation.is_cancelled())
-            .filter_map(|(id, present)| present.then_some(id))
-            .take(limit);
-        let mut base = base.into_iter().peekable();
-        let mut private = private.peekable();
-        let mut ids = Vec::new();
-        while ids.len() < limit {
-            self.0.cancellation.check()?;
-            let id = match (base.peek(), private.peek()) {
-                (Some(left), Some(right)) if left < right => base.next(),
-                (_, Some(_)) => private.next(),
-                (Some(_), None) => base.next(),
-                (None, None) => break,
-            };
-            ids.extend(id);
-        }
-        self.0.cancellation.check()?;
+        let (ids, _memory) = self.id_page(after, limit)?.into_parts();
         Ok(ids)
     }
 
@@ -415,10 +381,12 @@ impl DocumentStore for RetainedDocuments {
     }
 
     fn len(&self) -> StorageBackendResult<usize> {
+        self.0.control.check()?;
         Ok(self.0.count)
     }
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>> {
+        self.0.control.check()?;
         Ok(Arc::new(self.clone()))
     }
 }

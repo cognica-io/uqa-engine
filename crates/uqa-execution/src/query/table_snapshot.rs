@@ -60,10 +60,12 @@ pub fn retain(
     cancellation.check()?;
     let documents = documents::RetainedDocuments::new(
         source,
-        RowLayout::new(source_columns, Arc::clone(&schema.columns)),
-        RowLayout::new(&schema.columns, Arc::clone(&schema.columns)),
+        RowLayout::new(source_columns, Arc::clone(&schema.columns), control)
+            .map_err(|error| snapshot_error("base row layout", &error))?,
+        RowLayout::new(&schema.columns, Arc::clone(&schema.columns), control)
+            .map_err(|error| snapshot_error("private row layout", &error))?,
         changes,
-        cancellation,
+        control,
     )
     .map_err(|error| snapshot_error("retained documents", &error))?;
     let mut result = SnapshotBuilder::new(schema, control)?;
@@ -88,7 +90,7 @@ pub fn retain(
     loop {
         cancellation.check()?;
         let ids = documents
-            .next_doc_ids(after, crate::DEFAULT_BATCH_SIZE)
+            .id_page(after, crate::DEFAULT_BATCH_SIZE)
             .map_err(|error| snapshot_error("document ids", &error))?;
         let Some(last) = ids.last().copied() else {
             break;
@@ -110,7 +112,8 @@ pub fn materialize(
 ) -> Result<MaterializedTable, SQLError> {
     let cancellation = control.cancellation();
     cancellation.check()?;
-    let layout = RowLayout::new(source_columns, Arc::clone(&schema.columns));
+    let layout = RowLayout::new(source_columns, Arc::clone(&schema.columns), control)
+        .map_err(|error| snapshot_error("row layout", &error))?;
     let mut result = SnapshotBuilder::new(schema, control)?;
     let mut retained = RetainedDocumentStoreBuilder::new(control);
     let mut after = None;

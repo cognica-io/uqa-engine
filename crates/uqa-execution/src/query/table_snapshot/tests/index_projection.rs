@@ -13,6 +13,7 @@ struct DecodingSource {
     rows: Arc<MemoryDocumentStore>,
     control: StorageReadControl,
     scratch: Option<usize>,
+    headroom: usize,
     visited: Arc<AtomicUsize>,
     cancel_after_stop: bool,
 }
@@ -49,9 +50,9 @@ impl DocumentStore for DecodingSource {
         visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
     ) -> StorageBackendResult<()> {
         self.control.check()?;
-        let bytes = self
-            .scratch
-            .unwrap_or_else(|| self.control.memory().limit() - self.control.memory().used());
+        let bytes = self.scratch.unwrap_or_else(|| {
+            self.control.memory().limit() - self.control.memory().used() - self.headroom
+        });
         let reservation = self.control.memory().reserve(bytes)?;
         // Model decoded provider workspace that must coexist with its index consumer.
         let _scratch = Budgeted::new(vec![0_u8; bytes], reservation);
@@ -88,6 +89,8 @@ fn source(
         rows: Arc::new(rows),
         control: control.clone(),
         scratch,
+        // Leave room for borrowed projection references, but not the reconstructed output.
+        headroom: 256,
         visited: Arc::new(AtomicUsize::new(0)),
         cancel_after_stop: false,
     }
@@ -98,7 +101,7 @@ fn provider_projection_allowance_remains_live_during_index_reconstruction() {
     for vector in [false, true] {
         let control = StorageReadControl::with_limit(64 * 1024);
         let columns = columns(if vector {
-            "CREATE TABLE t (value VECTOR(2))"
+            "CREATE TABLE t (value VECTOR(1024))"
         } else {
             "CREATE TABLE t (value TEXT)"
         });
@@ -106,11 +109,11 @@ fn provider_projection_allowance_remains_live_during_index_reconstruction() {
         let mut schema = schema(&columns, &index);
         let text_fields = ["value".into()];
         let value = if vector {
-            schema.vector_dimensions.insert("value".into(), 2);
-            Value::List(vec![Value::Float(1.0), Value::Float(0.0)])
+            schema.vector_dimensions.insert("value".into(), 1024);
+            Value::List(vec![Value::Float(1.0); 1024])
         } else {
             schema.text_fields = &text_fields;
-            Value::Str("retained input".into())
+            Value::Str("retained input ".repeat(16))
         };
         let source = source(&control, None, &[value]);
         let visited = Arc::clone(&source.visited);
@@ -132,31 +135,34 @@ fn provider_projection_allowance_remains_live_during_index_reconstruction() {
 
 #[test]
 fn index_reconstruction_stops_at_its_first_error_before_later_provider_cancellation() {
-    let control = StorageReadControl::with_limit(64 * 1024);
-    let columns = columns("CREATE TABLE t (value TEXT)");
-    let index = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
-    let mut schema = schema(&columns, &index);
-    let text_fields = ["value".into()];
-    schema.text_fields = &text_fields;
-    let mut source = source(
-        &control,
-        None,
-        &[Value::Str("first".into()), Value::Str("second".into())],
-    );
-    source.cancel_after_stop = true;
-    let visited = Arc::clone(&source.visited);
-    let result = retain(
-        Arc::new(source),
-        &columns,
-        &schema,
-        DocumentChanges::default(),
-        &control,
-    );
-    let error = result.err().expect("consumer cannot exceed the allowance");
-    assert_eq!(error.sqlstate(), Some("53200"), "{error}");
-    assert_eq!(visited.load(Ordering::Relaxed), 1);
-    assert!(control.cancellation().is_cancelled());
-    assert_eq!(control.memory().used(), 0);
+    for headroom in [0, 256] {
+        let control = StorageReadControl::with_limit(64 * 1024);
+        let columns = columns("CREATE TABLE t (value TEXT)");
+        let index = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
+        let mut schema = schema(&columns, &index);
+        let text_fields = ["value".into()];
+        schema.text_fields = &text_fields;
+        let mut source = source(
+            &control,
+            None,
+            &[Value::Str("first".into()), Value::Str("second".into())],
+        );
+        source.headroom = headroom;
+        source.cancel_after_stop = true;
+        let visited = Arc::clone(&source.visited);
+        let result = retain(
+            Arc::new(source),
+            &columns,
+            &schema,
+            DocumentChanges::default(),
+            &control,
+        );
+        let error = result.err().expect("consumer cannot exceed the allowance");
+        assert_eq!(error.sqlstate(), Some("53200"), "{error}");
+        assert_eq!(visited.load(Ordering::Relaxed), 1);
+        assert!(control.cancellation().is_cancelled());
+        assert_eq!(control.memory().used(), 0);
+    }
 }
 
 #[test]
