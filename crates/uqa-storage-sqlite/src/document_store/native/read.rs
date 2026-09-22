@@ -11,77 +11,28 @@ use uqa_storage::mvcc::VersionError;
 
 use super::NativeDocumentRead;
 use crate::document_store::{
-    blob, decode_legacy_document_body, document_id_from_sqlite, sqlite_doc_id, BTreeMap, DocId,
-    DocumentMetadata, SQLiteError, SQLiteResult, StoredDocument, Value,
+    document_id_from_sqlite, sqlite_doc_id, BTreeMap, DocId, DocumentMetadata, SQLiteError,
+    SQLiteResult, StoredDocument, Value,
 };
 use crate::mvcc::native::{NativeRecordFamily as Family, NativeRecordIdentity};
 
 impl NativeDocumentRead<'_> {
     pub(crate) fn body(&self, doc_id: DocId) -> SQLiteResult<Option<StoredDocument>> {
-        let id = sqlite_doc_id(doc_id)?;
-        let Some(owner) = self.owner else {
-            return Ok(None);
-        };
-        self.snapshot
-            .read_row(Family::Documents, owner, &[ValueRef::Integer(id)], |row| {
-                let body = row[2].as_str().map_err(|_| {
-                    SQLiteError::StorageBackend("native document body must be text".into())
-                })?;
-                Ok(StoredDocument::with_metadata(
-                    decode_legacy_document_body(body)?,
-                    metadata(row[3], self.table, doc_id)?,
-                ))
-            })
-    }
-
-    fn hydrate(&self, doc_id: DocId, field: &str, value: &Value) -> SQLiteResult<Value> {
-        let Some(marker) = blob::blob_marker_info(value) else {
-            return Ok(value.clone());
-        };
-        blob::load_marked_document_blob_with(self.table, doc_id, field, &marker, |field| {
-            let Some(owner) = self.owner else {
-                return Ok(None);
-            };
-            self.snapshot.read_row(
-                Family::DocumentBlobs,
-                owner,
-                &[
-                    ValueRef::Integer(sqlite_doc_id(doc_id)?),
-                    ValueRef::Text(field.as_bytes()),
-                ],
-                |row| {
-                    let bytes = row[3].as_blob().map_err(|_| {
-                        SQLiteError::StorageBackend("native document BLOB must be binary".into())
-                    })?;
-                    let mut output = Vec::new();
-                    output.try_reserve_exact(bytes.len()).map_err(|error| {
-                        super::super::allocation_error("native document BLOB", error)
-                    })?;
-                    output.extend_from_slice(bytes);
-                    Ok(output)
-                },
-            )
-        })?
-        .ok_or_else(|| {
-            SQLiteError::StorageBackend("document BLOB decoder returned no value".into())
-        })
+        Ok(self
+            .retained_body(doc_id)?
+            .map(uqa_storage::RetainedStoredDocument::into_stored))
     }
 
     pub(crate) fn get_stored(&self, doc_id: DocId) -> SQLiteResult<Option<StoredDocument>> {
-        let Some(mut document) = self.body(doc_id)? else {
-            return Ok(None);
-        };
-        for (field, value) in document.fields_mut() {
-            *value = self.hydrate(doc_id, field, value)?;
-        }
-        Ok(Some(document))
+        Ok(self
+            .retained(doc_id, None)?
+            .map(uqa_storage::RetainedStoredDocument::into_stored))
     }
 
     pub(crate) fn get_field(&self, doc_id: DocId, field: &str) -> SQLiteResult<Option<Value>> {
-        self.body(doc_id)?
-            .and_then(|document| document.into_fields().remove(field))
-            .map(|value| self.hydrate(doc_id, field, &value))
-            .transpose()
+        Ok(self
+            .retained(doc_id, Some(&[field]))?
+            .and_then(|document| document.into_stored().into_fields().remove(field)))
     }
 
     pub(crate) fn metadata(&self, doc_id: DocId) -> SQLiteResult<Option<DocumentMetadata>> {
@@ -144,7 +95,7 @@ impl NativeDocumentRead<'_> {
             return Ok(out);
         }
         for &id in ids {
-            let Some(document) = self.body(id)? else {
+            let Some(document) = self.retained(id, Some(fields))? else {
                 continue;
             };
             let mut values = Vec::new();
@@ -152,10 +103,7 @@ impl NativeDocumentRead<'_> {
                 super::super::allocation_error("native projected fields", error)
             })?;
             for &field in fields {
-                values.push(match document.fields().get(field) {
-                    Some(value) => self.hydrate(id, field, value)?,
-                    None => Value::Null,
-                });
+                values.push(document.fields().get(field).cloned().unwrap_or(Value::Null));
             }
             out.insert(id, values);
         }
@@ -284,7 +232,11 @@ impl NativeDocumentRead<'_> {
     }
 }
 
-fn metadata(value: ValueRef<'_>, table: &str, doc_id: DocId) -> SQLiteResult<DocumentMetadata> {
+pub(super) fn metadata(
+    value: ValueRef<'_>,
+    table: &str,
+    doc_id: DocId,
+) -> SQLiteResult<DocumentMetadata> {
     if value == ValueRef::Null {
         return Ok(DocumentMetadata::default());
     }

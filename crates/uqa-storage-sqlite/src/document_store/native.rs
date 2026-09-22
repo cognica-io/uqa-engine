@@ -6,6 +6,7 @@
 
 //! Document operations over one committed/private native record boundary.
 
+mod decoded;
 mod read;
 mod write;
 

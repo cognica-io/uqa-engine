@@ -238,12 +238,40 @@ impl DocumentStore for SQLiteDocumentStore {
         Ok(None)
     }
 
+    fn for_each_fields_multi_ref(
+        &self,
+        doc_ids: &[DocId],
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> StorageBackendResult<()> {
+        self.for_each_fields_multi_ref_with_presence(doc_ids, fields, &mut |id, _, values| {
+            visitor(id, values)
+        })
+    }
+
+    fn for_each_fields_multi(
+        &self,
+        doc_ids: &[DocId],
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, Vec<Value>) -> bool,
+    ) -> StorageBackendResult<()> {
+        self.for_each_fields_multi_ref_with_presence(doc_ids, fields, &mut |id, _, values| {
+            visitor(id, values.iter().map(|value| (*value).clone()).collect())
+        })
+    }
+
     fn for_each_fields_multi_ref_with_presence(
         &self,
         doc_ids: &[DocId],
         fields: &[&str],
         visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
     ) -> StorageBackendResult<()> {
+        if self
+            .read_native(|read| read.visit_projection(doc_ids, fields, visitor))?
+            .is_some()
+        {
+            return Ok(());
+        }
         let snapshot = self.snapshot()?;
         if fields.is_empty() {
             for &id in doc_ids {

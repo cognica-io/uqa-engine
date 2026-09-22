@@ -32,6 +32,7 @@ type EncodedDocument = (Document, Vec<(String, Vec<u8>)>);
 
 mod batching;
 mod blob;
+mod controlled;
 mod native;
 mod store;
 mod trait_impl;
