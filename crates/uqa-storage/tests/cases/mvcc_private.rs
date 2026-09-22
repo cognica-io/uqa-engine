@@ -17,6 +17,9 @@ use uqa_storage::mvcc::{
 use uqa_storage::read_control::StorageReadControl;
 use uqa_storage::StorageSavepointId;
 
+#[path = "mvcc_private/reclamation.rs"]
+mod reclamation;
+
 fn control() -> StorageReadControl {
     StorageReadControl::with_limit(1 << 20)
 }

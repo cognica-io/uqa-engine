@@ -21,7 +21,9 @@ mod vec;
 pub use deque::BudgetedDeque;
 pub use hash_set::BudgetedHashSet;
 pub use heap::BudgetedBinaryHeap;
-pub use map::{BudgetedMap, BudgetedMapIter, PreparedMapEntry};
+pub use map::{
+    BudgetedMap, BudgetedMapIter, BudgetedSharedMap, BudgetedSharedMapIter, PreparedMapEntry,
+};
 pub use string::BudgetedString;
 pub use vec::BudgetedVec;
 

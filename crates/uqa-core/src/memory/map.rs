@@ -6,9 +6,12 @@
 
 //! Ordered maps reserve complete AVL nodes before publication, including links and padding.
 
+mod shared;
 #[cfg(test)]
 mod tests;
 mod tree;
+
+pub use shared::{BudgetedSharedMap, BudgetedSharedMapIter};
 
 use std::borrow::Borrow;
 

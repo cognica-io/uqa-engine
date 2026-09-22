@@ -6,13 +6,11 @@
 
 //! Transaction-private evaluated replacements, retained command views and undo.
 
-use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use uqa_core::memory::{BudgetedVec, MemoryBudget, MemoryReservation};
-use uqa_core::CancellationToken;
+use uqa_core::memory::{BudgetedSharedMap, BudgetedVec, MemoryBudget, MemoryReservation};
 
 use crate::read_control::StorageReadControl;
 use crate::StorageSavepointId;
@@ -23,11 +21,9 @@ use super::{PreparedRecordCommit, PreparedRecordWrite, RecordWrite, VersionError
 struct Change {
     write: PreparedRecordWrite,
     identity: PrivateRecordRevision,
-    introduced: u64,
-    undone_at: Option<u64>,
-    previous_for_key: Option<usize>,
-    previous_active: Option<usize>,
 }
+
+type Records = BudgetedSharedMap<RecordKey, Change>;
 
 /// Process-local identity of an evaluated private batch. Identities are never reused across transactions or undo branches; they are not durable commit sequences.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -62,59 +58,17 @@ impl PrivateRecordKey {
     }
 }
 
-struct Head {
-    position: Option<usize>,
-    _memory: MemoryReservation,
-}
-
 struct Savepoint {
     id: StorageSavepointId,
-    active: Option<usize>,
+    records: Records,
 }
 
 struct State {
-    revision: u64,
-    heads: BTreeMap<RecordKey, Head>,
-    changes: BudgetedVec<Change>,
-    active: Option<usize>,
+    records: Records,
     savepoints: BudgetedVec<Savepoint>,
 }
 
 impl State {
-    fn visible(
-        &self,
-        position: Option<usize>,
-        revision: u64,
-        cancellation: &CancellationToken,
-    ) -> VersionResult<Option<&PreparedRecordWrite>> {
-        Ok(self
-            .visible_change(position, revision, cancellation)?
-            .map(|change| &change.write))
-    }
-
-    fn visible_change(
-        &self,
-        mut position: Option<usize>,
-        revision: u64,
-        cancellation: &CancellationToken,
-    ) -> VersionResult<Option<&Change>> {
-        while let Some(index) = position {
-            cancellation.check()?;
-            let change = &self.changes[index];
-            if change.introduced <= revision && change.undone_at.is_none_or(|end| revision < end) {
-                return Ok(Some(change));
-            }
-            position = change.previous_for_key;
-        }
-        Ok(None)
-    }
-
-    fn next_revision(&self) -> VersionResult<u64> {
-        self.revision
-            .checked_add(1)
-            .ok_or(VersionError::PrivateRevisionExhausted)
-    }
-
     fn savepoint_position(&self, id: StorageSavepointId) -> VersionResult<usize> {
         self.savepoints
             .iter()
@@ -122,19 +76,12 @@ impl State {
             .ok_or(VersionError::SavepointMissing(id))
     }
 
-    fn undo_to(&mut self, target: Option<usize>) -> VersionResult<()> {
-        if self.active == target {
-            return Ok(());
+    fn truncate_savepoints(&mut self, len: usize) {
+        if len == 0 {
+            self.savepoints = BudgetedVec::new(self.records.budget());
+        } else {
+            self.savepoints.truncate(len);
         }
-        let revision = self.next_revision()?;
-        while self.active != target {
-            let change =
-                &mut self.changes[self.active.expect("savepoint belongs to active history")];
-            change.undone_at = Some(revision);
-            self.active = change.previous_active;
-        }
-        self.revision = revision;
-        Ok(())
     }
 }
 
@@ -145,7 +92,7 @@ struct Owner {
 
 /// One transaction's record changes. No provider lock or native transaction is retained between operations.
 ///
-/// Command views retain their original values even after rollback and later writes. Undo marks remain in the bounded journal until this owner and its last view are dropped; this primitive does not spill or reclaim intermediate commands.
+/// Command views and savepoints share immutable ordered roots. Replacements copy only their search paths; obsolete payloads are released as soon as the last referencing root or returned record is dropped. Rollback restores a root without allocating. This primitive does not spill retained values.
 pub struct PrivateRecordChanges {
     owner: Arc<Owner>,
 }
@@ -162,23 +109,21 @@ impl PrivateRecordChanges {
         key: &[u8],
         control: &StorageReadControl,
     ) -> VersionResult<Option<super::commit::RecordWriteKind>> {
-        let state = self.owner.state.lock();
-        let Some(head) = state.heads.get(key) else {
-            return Ok(None);
-        };
-        Ok(state
-            .visible(head.position, state.revision, control.cancellation())?
-            .map(PreparedRecordWrite::kind))
+        control.check()?;
+        Ok(self
+            .owner
+            .state
+            .lock()
+            .records
+            .get(key)
+            .map(|change| change.write.kind()))
     }
 
     pub fn new(memory: &MemoryBudget) -> Self {
         Self {
             owner: Arc::new(Owner {
                 state: Mutex::new(State {
-                    revision: 0,
-                    heads: BTreeMap::new(),
-                    changes: BudgetedVec::new(memory),
-                    active: None,
+                    records: Records::new(memory),
                     savepoints: BudgetedVec::new(memory),
                 }),
                 memory: memory.clone(),
@@ -206,71 +151,38 @@ impl PrivateRecordChanges {
             return Ok(());
         }
         let mut state = self.owner.state.lock();
-        let revision = state.next_revision()?;
-        let mut inserted = BudgetedVec::new(&self.owner.memory);
         for (index, write) in writes.iter().enumerate() {
             control.cancellation().check()?;
-            if let Some(head) = state.heads.get(write.key()) {
-                if let Some(previous) =
-                    state.visible(head.position, state.revision, control.cancellation())?
-                {
-                    if previous.expected() != write.expected() {
-                        return Err(VersionError::WriteConflict {
-                            mutation: index,
-                            expected: write.expected(),
-                            actual: previous.expected(),
-                        });
-                    }
+            if let Some(previous) = state.records.get(write.key()) {
+                if previous.write.expected() != write.expected() {
+                    return Err(VersionError::WriteConflict {
+                        mutation: index,
+                        expected: write.expected(),
+                        actual: previous.write.expected(),
+                    });
                 }
-            } else {
-                let memory = self
-                    .owner
-                    .memory
-                    .reserve(std::mem::size_of::<(RecordKey, Head)>())?;
-                inserted.push((
-                    write.shared_key(),
-                    Head {
-                        position: None,
-                        _memory: memory,
-                    },
-                ))?;
             }
         }
-        state.changes.reserve(writes.len())?;
-        control.cancellation().check()?;
         let identity = PrivateRecordRevision::allocate()?;
-        // Every fallible reservation and validation precedes publication under this mutex.
-        while let Some((key, head)) = inserted.pop() {
-            state.heads.insert(key, head);
-        }
+        let mut records = state.records.clone();
         for write in writes {
-            let previous_for_key = state.heads[write.key()].position;
-            let previous_active = state.active;
-            let position = state.changes.len();
-            state
-                .changes
-                .push(Change {
+            control.cancellation().check()?;
+            records = records.with_insert(
+                write.shared_key(),
+                Change {
                     write: write.clone(),
                     identity,
-                    introduced: revision,
-                    undone_at: None,
-                    previous_for_key,
-                    previous_active,
-                })
-                .expect("complete batch capacity was reserved");
-            state
-                .heads
-                .get_mut(write.key())
-                .expect("prepared head exists")
-                .position = Some(position);
-            state.active = Some(position);
+                },
+            )?;
         }
-        state.revision = revision;
+        control.cancellation().check()?;
+        // Candidate roots own every reservation before this single atomic publication.
+        state.records = records;
         Ok(())
     }
 
     pub fn has_written(&self) -> bool {
-        self.owner.state.lock().active.is_some()
+        !self.owner.state.lock().records.is_empty()
     }
 
     pub fn snapshot(&self) -> VersionResult<PrivateRecordSnapshot> {
@@ -278,18 +190,16 @@ impl PrivateRecordChanges {
             .owner
             .memory
             .reserve(std::mem::size_of::<PrivateRecordSnapshot>())?;
-        let revision = self.owner.state.lock().revision;
         Ok(PrivateRecordSnapshot {
-            owner: Arc::clone(&self.owner),
-            revision,
+            records: self.owner.state.lock().records.clone(),
             _memory: memory,
         })
     }
 
     pub fn savepoint(&self, id: StorageSavepointId) -> VersionResult<()> {
         let mut state = self.owner.state.lock();
-        let active = state.active;
-        state.savepoints.push(Savepoint { id, active })?;
+        let records = state.records.clone();
+        state.savepoints.push(Savepoint { id, records })?;
         Ok(())
     }
 
@@ -297,7 +207,7 @@ impl PrivateRecordChanges {
     pub fn release_savepoint(&self, id: StorageSavepointId) -> VersionResult<()> {
         let mut state = self.owner.state.lock();
         let position = state.savepoint_position(id)?;
-        state.savepoints.truncate(position);
+        state.truncate_savepoints(position);
         Ok(())
     }
 
@@ -305,16 +215,15 @@ impl PrivateRecordChanges {
     pub fn rollback_to_savepoint(&self, id: StorageSavepointId) -> VersionResult<()> {
         let mut state = self.owner.state.lock();
         let position = state.savepoint_position(id)?;
-        let active = state.savepoints[position].active;
-        state.undo_to(active)?;
-        state.savepoints.truncate(position + 1);
+        state.records = state.savepoints[position].records.clone();
+        state.truncate_savepoints(position + 1);
         Ok(())
     }
 
     pub fn rollback(&self) -> VersionResult<()> {
         let mut state = self.owner.state.lock();
-        state.undo_to(None)?;
-        state.savepoints.clear();
+        state.records = Records::new(&self.owner.memory);
+        state.truncate_savepoints(0);
         Ok(())
     }
 
@@ -323,13 +232,9 @@ impl PrivateRecordChanges {
         control.cancellation().check()?;
         let state = self.owner.state.lock();
         let mut writes = BudgetedVec::new(control.memory());
-        for head in state.heads.values() {
+        for (_, change) in &state.records {
             control.cancellation().check()?;
-            if let Some(write) =
-                state.visible(head.position, state.revision, control.cancellation())?
-            {
-                writes.push(write.clone())?;
-            }
+            writes.push(change.write.clone())?;
         }
         PreparedRecordCommit::from_unique_owned(writes, control)
     }
@@ -337,18 +242,16 @@ impl PrivateRecordChanges {
 
 /// Fixed private visibility for a command or retained source cursor; tombstones remain distinguishable from an unchanged key.
 pub struct PrivateRecordSnapshot {
-    owner: Arc<Owner>,
-    revision: u64,
+    records: Records,
     _memory: MemoryReservation,
 }
 
 impl PrivateRecordSnapshot {
     /// Retain this exact private revision without following later writes or copying its values.
     pub(super) fn try_clone(&self) -> VersionResult<Self> {
-        let memory = self.owner.memory.reserve(std::mem::size_of::<Self>())?;
+        let memory = self.records.budget().reserve(std::mem::size_of::<Self>())?;
         Ok(Self {
-            owner: Arc::clone(&self.owner),
-            revision: self.revision,
+            records: self.records.clone(),
             _memory: memory,
         })
     }
@@ -366,12 +269,8 @@ impl PrivateRecordSnapshot {
         if limit == 0 {
             return Ok(result);
         }
-        let state = self.owner.state.lock();
         let start = after.filter(|after| *after >= prefix).unwrap_or(prefix);
-        for (key, head) in state
-            .heads
-            .range::<[u8], _>((std::ops::Bound::Included(start), std::ops::Bound::Unbounded))
-        {
+        for (key, change) in self.records.range_from(std::ops::Bound::Included(start)) {
             control.check()?;
             let key = key.bytes();
             if !key.starts_with(prefix) {
@@ -380,16 +279,12 @@ impl PrivateRecordSnapshot {
             if after.is_some_and(|after| key <= after) {
                 continue;
             }
-            if let Some(change) =
-                state.visible_change(head.position, self.revision, control.cancellation())?
-            {
-                result.push(PrivateRecordKey {
-                    key: change.write.shared_key(),
-                    revision: change.identity,
-                })?;
-                if result.len() == limit {
-                    break;
-                }
+            result.push(PrivateRecordKey {
+                key: change.write.shared_key(),
+                revision: change.identity,
+            })?;
+            if result.len() == limit {
+                break;
             }
         }
         Ok(result)
@@ -408,13 +303,10 @@ impl PrivateRecordSnapshot {
         if limit == 0 {
             return Ok(());
         }
-        let state = self.owner.state.lock();
         let start = after.filter(|after| *after >= prefix).unwrap_or(prefix);
-        let mut entries = state
-            .heads
-            .range::<[u8], _>((std::ops::Bound::Included(start), std::ops::Bound::Unbounded));
+        let mut entries = self.records.range_from(std::ops::Bound::Included(start));
         let mut next_private = || -> VersionResult<Option<&PreparedRecordWrite>> {
-            for (key, head) in entries.by_ref() {
+            for (key, change) in entries.by_ref() {
                 control.cancellation().check()?;
                 if !key.bytes().starts_with(prefix) {
                     return Ok(None);
@@ -422,11 +314,7 @@ impl PrivateRecordSnapshot {
                 if after.is_some_and(|after| key.bytes() <= after) {
                     continue;
                 }
-                if let Some(write) =
-                    state.visible(head.position, self.revision, control.cancellation())?
-                {
-                    return Ok(Some(write));
-                }
+                return Ok(Some(&change.write));
             }
             Ok(None)
         };
@@ -472,11 +360,7 @@ impl PrivateRecordSnapshot {
         control: &StorageReadControl,
     ) -> VersionResult<Option<PreparedRecordWrite>> {
         control.cancellation().check()?;
-        let state = self.owner.state.lock();
-        let position = state.heads.get(key).and_then(|head| head.position);
-        Ok(state
-            .visible(position, self.revision, control.cancellation())?
-            .cloned())
+        Ok(self.records.get(key).map(|change| change.write.clone()))
     }
 
     /// Return a bounded ordered page of private replacements, including deletions.
@@ -492,12 +376,8 @@ impl PrivateRecordSnapshot {
         if limit == 0 {
             return Ok(result);
         }
-        let state = self.owner.state.lock();
         let start = after.filter(|after| *after >= prefix).unwrap_or(prefix);
-        for (key, head) in state
-            .heads
-            .range::<[u8], _>((std::ops::Bound::Included(start), std::ops::Bound::Unbounded))
-        {
+        for (key, change) in self.records.range_from(std::ops::Bound::Included(start)) {
             control.cancellation().check()?;
             let key = key.bytes();
             if !key.starts_with(prefix) {
@@ -506,13 +386,9 @@ impl PrivateRecordSnapshot {
             if after.is_some_and(|after| key <= after) {
                 continue;
             }
-            if let Some(write) =
-                state.visible(head.position, self.revision, control.cancellation())?
-            {
-                result.push(write.clone())?;
-                if result.len() == limit {
-                    break;
-                }
+            result.push(change.write.clone())?;
+            if result.len() == limit {
+                break;
             }
         }
         Ok(result)
