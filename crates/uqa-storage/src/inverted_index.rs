@@ -28,10 +28,12 @@ mod bindings;
 mod changes;
 mod contract;
 pub mod defaults;
+mod footprint;
 mod memory;
 mod metadata;
 mod read_cursor;
 mod retained;
+mod snapshot;
 
 #[cfg(test)]
 mod tests;
@@ -95,6 +97,9 @@ pub struct MemoryInvertedIndex {
     bindings: AnalyzerBindings,
     /// Snapshots share immutable corpus state; validated writes detach it once.
     state: Arc<MemoryIndexState>,
+    /// Controlled readers keep the shared generation's allowance after the source changes or closes.
+    state_memory: Option<Arc<uqa_core::memory::MemoryReservation>>,
+    read_control: Option<crate::read_control::StorageReadControl>,
 }
 
 /// Cloning retains the existing independently owned corpus maps; snapshot APIs share them until a write.
@@ -103,11 +108,13 @@ impl Clone for MemoryInvertedIndex {
         Self {
             bindings: self.bindings.clone(),
             state: Arc::new((*self.state).clone()),
+            state_memory: None,
+            read_control: None,
         }
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 struct MemoryIndexState {
     /// `(field, term) -> doc_id -> entry (positions inside the doc)`
     index: BTreeMap<PostingKey, BTreeMap<DocId, MemoryPosting>>,
@@ -123,6 +130,7 @@ struct MemoryIndexState {
     /// `doc_fields` (O(corpus) at query time otherwise).
     field_doc_counts: BTreeMap<FieldName, u64>,
     doc_count: u64,
+    retention: footprint::RetainedPayload,
 }
 
 type PostingKey = (FieldName, TokenTermKey);
@@ -178,6 +186,8 @@ impl MemoryInvertedIndex {
         Self {
             bindings,
             state: Arc::default(),
+            state_memory: None,
+            read_control: None,
         }
     }
 
@@ -185,7 +195,15 @@ impl MemoryInvertedIndex {
         Self {
             bindings: self.bindings.clone(),
             state: Arc::clone(&self.state),
+            state_memory: self.state_memory.clone(),
+            read_control: self.read_control.clone(),
         }
+    }
+
+    fn check_retained_read(&self) -> StorageBackendResult<()> {
+        self.read_control
+            .as_ref()
+            .map_or(Ok(()), crate::read_control::StorageReadControl::check)
     }
 
     fn stage_document(
@@ -328,34 +346,29 @@ impl MemoryIndexState {
         plan: MemoryReplacementPlan,
     ) -> StorageBackendResult<()> {
         for key in plan.old_terms {
-            let postings = self.index.get_mut(&key).ok_or_else(|| {
-                StorageBackendError::Other(format!(
-                    "inverted-index document {doc_id} lost a validated posting before replacement"
-                ))
-            })?;
-            postings.remove(&doc_id);
-            if postings.is_empty() {
-                self.index.remove(&key);
-            }
+            self.remove_posting(doc_id, &key)?;
         }
-        self.doc_fields.remove(&doc_id);
-        self.doc_terms.remove(&doc_id);
+        self.remove_document_metadata(doc_id);
         for (field, counters) in plan.field_counters {
-            if counters.docs == 0 {
-                self.total_length.remove(&field);
-                self.field_doc_counts.remove(&field);
-            } else {
-                self.total_length.insert(counters.total_key, counters.total);
-                self.field_doc_counts.insert(field, counters.docs);
-            }
+            footprint::set_counter(
+                &mut self.total_length,
+                counters.total_key,
+                (counters.docs != 0).then_some(counters.total),
+                &mut self.retention,
+            );
+            footprint::set_counter(
+                &mut self.field_doc_counts,
+                field,
+                (counters.docs != 0).then_some(counters.docs),
+                &mut self.retention,
+            );
         }
         for (key, entry) in staged.postings {
-            self.index.entry(key).or_default().insert(doc_id, entry);
+            self.insert_posting(doc_id, key, entry);
         }
         self.doc_count = plan.next_doc_count;
         if !staged.fields.is_empty() {
-            self.doc_fields.insert(doc_id, staged.fields);
-            self.doc_terms.insert(doc_id, staged.terms);
+            self.insert_document_metadata(doc_id, staged.fields, staged.terms);
         }
         Ok(())
     }

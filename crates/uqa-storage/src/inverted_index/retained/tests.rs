@@ -18,7 +18,7 @@ fn builder(control: &StorageReadControl) -> RetainedInvertedIndexBuilder {
     .unwrap()
 }
 
-fn corpus_bytes(state: &MemoryIndexState) -> usize {
+pub(in crate::inverted_index) fn corpus_bytes(state: &MemoryIndexState) -> usize {
     size_of::<MemoryIndexState>()
         + state
             .index
@@ -218,6 +218,9 @@ fn nested_readers_retain_one_charge_and_reject_mutation() {
     assert_eq!(control.memory().used(), bytes);
     let first = retained.snapshot().unwrap();
     let second = first.snapshot().unwrap();
+    let other = StorageReadControl::with_limit(0);
+    let second = second.snapshot_with_control(&other).unwrap();
+    assert_eq!(other.memory().used(), 0);
     assert_eq!(control.memory().used(), bytes);
     assert!(retained.clear().is_err());
     assert!(retained.add_document(2, BTreeMap::new()).is_err());
@@ -235,6 +238,46 @@ fn nested_readers_retain_one_charge_and_reject_mutation() {
     assert_eq!(control.memory().used(), bytes);
     assert_eq!(second.get_term_freq(1, "body", "same").unwrap(), 2);
     drop(second);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn direct_owner_recapture_cannot_escape_retention_cancellation_or_read_only_state() {
+    let control = StorageReadControl::with_limit(1 << 20);
+    let mut index = builder(&control);
+    index
+        .add_document(1, [("body", "original original")])
+        .unwrap();
+    let retained = index.finish().unwrap();
+    let other = StorageReadControl::with_limit(0);
+    let owner: &dyn InvertedIndex = &*retained;
+    let mut rebound = owner.snapshot_with_control(&other).unwrap();
+    let ordinary = owner.snapshot().unwrap();
+    assert_eq!(other.memory().used(), 0);
+    assert!(owner.writable_snapshot().is_err());
+    assert!(Arc::get_mut(&mut rebound).unwrap().clear().is_err());
+    control.cancellation().cancel();
+    assert!(matches!(
+        owner.doc_count(),
+        Err(StorageBackendError::Cancelled(_))
+    ));
+    control.cancellation().reset();
+    drop(retained);
+    assert!(control.memory().used() > 0);
+    assert_eq!(rebound.get_term_freq(1, "body", "original").unwrap(), 2);
+    control.cancellation().cancel();
+    for view in [&rebound, &ordinary] {
+        assert!(matches!(
+            view.doc_count(),
+            Err(StorageBackendError::Cancelled(_))
+        ));
+        assert!(matches!(
+            view.snapshot_with_control(&other),
+            Err(StorageBackendError::Cancelled(_))
+        ));
+    }
+    drop(rebound);
+    drop(ordinary);
     assert_eq!(control.memory().used(), 0);
 }
 
@@ -271,6 +314,7 @@ fn reconstructed_morphology_keeps_lossless_terms_and_graphs_when_enabled() {
         index.add_document(1, [("body", text)]).unwrap();
         assert_eq!(control.memory().used(), corpus_bytes(&index.index.state));
         let retained = index.finish().unwrap();
+        let captured = ordinary.snapshot_with_control(&control).unwrap();
         let keys = ordinary.vocabulary_keys("body").unwrap();
         assert!(!keys.is_empty());
         assert_eq!(retained.vocabulary_keys("body").unwrap(), keys);
@@ -279,6 +323,7 @@ fn reconstructed_morphology_keeps_lossless_terms_and_graphs_when_enabled() {
             let expected = ordinary.get_occurrences(1, "body", key).unwrap();
             long_edge |= expected.iter().any(|edge| edge.position_length > 1);
             assert_eq!(retained.get_occurrences(1, "body", key).unwrap(), expected);
+            assert_eq!(captured.get_occurrences(1, "body", key).unwrap(), expected);
         }
         assert!(long_edge);
         if tokenizer == "nori_tokenizer" {
@@ -290,6 +335,11 @@ fn reconstructed_morphology_keeps_lossless_terms_and_graphs_when_enabled() {
             retained.indexed_field_metadata(1, "body").unwrap(),
             ordinary.indexed_field_metadata(1, "body").unwrap()
         );
+        assert_eq!(
+            captured.indexed_field_metadata(1, "body").unwrap(),
+            ordinary.indexed_field_metadata(1, "body").unwrap()
+        );
+        drop(captured);
         drop(retained);
         assert_eq!(control.memory().used(), 0);
     }

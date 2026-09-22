@@ -81,6 +81,9 @@ fn read_only() -> StorageBackendError {
     StorageBackendError::Other("cannot write a retained serializable text reader".into())
 }
 
+#[cfg(test)]
+mod tests;
+
 impl<I: Deref<Target = dyn InvertedIndex> + Send + Sync> InvertedIndex for ObservedTextIndex<I> {
     fn analyzer(&self) -> &Analyzer {
         self.index.analyzer()
@@ -131,6 +134,16 @@ impl<I: Deref<Target = dyn InvertedIndex> + Send + Sync> InvertedIndex for Obser
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn InvertedIndex>> {
         Ok(Arc::new(ObservedTextIndex {
             index: self.index.snapshot()?,
+            observation: self.observation.clone(),
+        }))
+    }
+
+    fn snapshot_with_control(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Arc<dyn InvertedIndex>> {
+        Ok(Arc::new(ObservedTextIndex {
+            index: self.index.snapshot_with_control(control)?,
             observation: self.observation.clone(),
         }))
     }

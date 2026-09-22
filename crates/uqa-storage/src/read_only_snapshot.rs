@@ -46,7 +46,12 @@ impl<T: ?Sized> ReadOnlySnapshot<T> {
         let mut pending = (snapshot, memory);
         let shared = pending.1.budget().reserve(size_of::<MemoryReservation>())?;
         pending.1.absorb(shared);
-        Ok(Self(pending.0, Some(Arc::new(pending.1)), None))
+        Ok(Self::with_shared_retention(pending.0, Arc::new(pending.1)))
+    }
+
+    /// The owning value can retain the same lease so direct owner snapshots cannot separate shared data from its allowance.
+    pub(crate) fn with_shared_retention(snapshot: Arc<T>, memory: Arc<MemoryReservation>) -> Self {
+        Self(snapshot, Some(memory), None)
     }
 }
 

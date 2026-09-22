@@ -19,8 +19,10 @@ impl InvertedIndex for MemoryInvertedIndex {
         field: &str,
         control: &crate::read_control::StorageReadControl,
     ) -> StorageBackendResult<IndexStats> {
+        self.check_retained_read()?;
         control.check()?;
         let stats = self.field_stats_scalar(field)?;
+        self.check_retained_read()?;
         control.check()?;
         Ok(stats)
     }
@@ -43,15 +45,18 @@ impl InvertedIndex for MemoryInvertedIndex {
         term: &TokenTermKey,
         control: &crate::read_control::StorageReadControl,
     ) -> StorageBackendResult<uqa_core::memory::Budgeted<Vec<TokenOccurrence>>> {
+        self.check_retained_read()?;
         let postings = super::read_cursor::controlled_postings(self, field, term, control)?;
         let mut output = uqa_core::memory::BudgetedVec::new(control.memory());
         if let Some(posting) = postings.and_then(|postings| postings.get(&doc_id)) {
             output.reserve(posting.occurrences.len())?;
             for occurrence in &posting.occurrences {
+                self.check_retained_read()?;
                 control.check()?;
                 output.push(*occurrence)?;
             }
         }
+        self.check_retained_read()?;
         control.check()?;
         let (values, memory) = output.into_parts();
         Ok(uqa_core::memory::Budgeted::new(values, memory))
@@ -136,26 +141,22 @@ impl InvertedIndex for MemoryInvertedIndex {
 
         let state = Arc::make_mut(&mut self.state);
         for key in keys {
-            let inner = state.index.get_mut(&key).ok_or_else(|| {
-                StorageBackendError::Other(format!(
-                    "inverted-index document {doc_id} lost a validated posting before removal"
-                ))
-            })?;
-            inner.remove(&doc_id);
-            if inner.is_empty() {
-                state.index.remove(&key);
-            }
+            state.remove_posting(doc_id, &key)?;
         }
-        state.doc_terms.remove(&doc_id);
-        state.doc_fields.remove(&doc_id);
+        state.remove_document_metadata(doc_id);
         for (field, (total, field_docs)) in next_field_counters {
-            if field_docs == 0 {
-                state.total_length.remove(&field);
-                state.field_doc_counts.remove(&field);
-            } else {
-                state.total_length.insert(field.clone(), total);
-                state.field_doc_counts.insert(field, field_docs);
-            }
+            super::footprint::set_counter(
+                &mut state.total_length,
+                field.clone(),
+                (field_docs != 0).then_some(total),
+                &mut state.retention,
+            );
+            super::footprint::set_counter(
+                &mut state.field_doc_counts,
+                field,
+                (field_docs != 0).then_some(field_docs),
+                &mut state.retention,
+            );
         }
         state.doc_count = next_doc_count;
         Ok(())
@@ -202,6 +203,7 @@ impl InvertedIndex for MemoryInvertedIndex {
     }
 
     fn get_posting_list(&self, field: &str, term: &str) -> StorageBackendResult<PostingList> {
+        self.check_retained_read()?;
         self.get_posting_list_key(field, &TokenTermKey::from_text(term))
     }
 
@@ -210,6 +212,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<PostingList> {
+        self.check_retained_read()?;
         let entries = self
             .state
             .index
@@ -226,6 +229,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         field: &str,
         term: &str,
     ) -> StorageBackendResult<Box<dyn PostingCursor>> {
+        self.check_retained_read()?;
         self.posting_cursor_key(field, &TokenTermKey::from_text(term))
     }
 
@@ -234,6 +238,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<Box<dyn PostingCursor>> {
+        self.check_retained_read()?;
         let entries = self
             .state
             .index
@@ -256,6 +261,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<Vec<crate::clustered_postings::OccurrencePosting>> {
+        self.check_retained_read()?;
         self.state
             .index
             .get(&(field.to_owned(), term.clone()))
@@ -277,6 +283,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<Vec<TokenOccurrence>> {
+        self.check_retained_read()?;
         Ok(self
             .state
             .index
@@ -290,6 +297,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         doc_id: DocId,
         field: &str,
     ) -> StorageBackendResult<Option<IndexedFieldMetadata>> {
+        self.check_retained_read()?;
         Ok(self
             .state
             .doc_fields
@@ -304,6 +312,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         term: &str,
         visit: &mut dyn FnMut(&PostingEntry),
     ) -> StorageBackendResult<()> {
+        self.check_retained_read()?;
         if let Some(postings) = self
             .state
             .index
@@ -322,6 +331,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         term: &str,
         visit: &mut dyn FnMut(DocId, u64),
     ) -> StorageBackendResult<()> {
+        self.check_retained_read()?;
         if let Some(postings) = self
             .state
             .index
@@ -338,10 +348,12 @@ impl InvertedIndex for MemoryInvertedIndex {
     }
 
     fn doc_freq(&self, field: &str, term: &str) -> StorageBackendResult<u64> {
+        self.check_retained_read()?;
         self.doc_freq_key(field, &TokenTermKey::from_text(term))
     }
 
     fn doc_freq_key(&self, field: &str, term: &TokenTermKey) -> StorageBackendResult<u64> {
+        self.check_retained_read()?;
         self.state
             .index
             .get(&(field.to_owned(), term.clone()))
@@ -351,6 +363,7 @@ impl InvertedIndex for MemoryInvertedIndex {
     }
 
     fn get_doc_length(&self, doc_id: DocId, field: &str) -> StorageBackendResult<u64> {
+        self.check_retained_read()?;
         Ok(self
             .state
             .doc_fields
@@ -360,6 +373,7 @@ impl InvertedIndex for MemoryInvertedIndex {
     }
 
     fn get_term_freq(&self, doc_id: DocId, field: &str, term: &str) -> StorageBackendResult<u64> {
+        self.check_retained_read()?;
         self.get_term_freq_key(doc_id, field, &TokenTermKey::from_text(term))
     }
 
@@ -369,6 +383,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<u64> {
+        self.check_retained_read()?;
         self.state
             .index
             .get(&(field.to_owned(), term.clone()))
@@ -379,14 +394,17 @@ impl InvertedIndex for MemoryInvertedIndex {
     }
 
     fn doc_count(&self) -> StorageBackendResult<u64> {
+        self.check_retained_read()?;
         Ok(self.state.doc_count)
     }
 
     fn total_field_length(&self, field: &str) -> StorageBackendResult<u64> {
+        self.check_retained_read()?;
         Ok(self.state.total_length.get(field).copied().unwrap_or(0))
     }
 
     fn vocabulary_terms(&self, field: &str) -> StorageBackendResult<Vec<String>> {
+        self.check_retained_read()?;
         self.vocabulary_keys(field)?
             .into_iter()
             .map(|key| Ok(key.to_term().into_string()?))
@@ -394,6 +412,7 @@ impl InvertedIndex for MemoryInvertedIndex {
     }
 
     fn vocabulary_keys(&self, field: &str) -> StorageBackendResult<Vec<TokenTermKey>> {
+        self.check_retained_read()?;
         Ok(self
             .state
             .index
@@ -404,6 +423,7 @@ impl InvertedIndex for MemoryInvertedIndex {
     }
 
     fn stats(&self) -> StorageBackendResult<IndexStats> {
+        self.check_retained_read()?;
         let mut s = IndexStats::default();
         s.total_docs = self.state.doc_count;
         if self.state.doc_count > 0 {
@@ -426,6 +446,7 @@ impl InvertedIndex for MemoryInvertedIndex {
     }
 
     fn posting_count(&self, field: Option<&str>) -> StorageBackendResult<u64> {
+        self.check_retained_read()?;
         checked_sum_u64(
             self.state
                 .index
@@ -438,6 +459,7 @@ impl InvertedIndex for MemoryInvertedIndex {
     }
 
     fn doc_length_count(&self, field: Option<&str>) -> StorageBackendResult<u64> {
+        self.check_retained_read()?;
         Ok(match field {
             Some(target) => self
                 .state
@@ -453,6 +475,7 @@ impl InvertedIndex for MemoryInvertedIndex {
     }
 
     fn term_count(&self, field: Option<&str>) -> StorageBackendResult<u64> {
+        self.check_retained_read()?;
         usize_to_u64(
             self.state
                 .index
@@ -466,14 +489,30 @@ impl InvertedIndex for MemoryInvertedIndex {
     }
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn InvertedIndex>> {
+        if let Some(control) = &self.read_control {
+            return self.controlled_snapshot(control);
+        }
         Ok(Arc::new(self.shared_snapshot()))
     }
 
+    fn snapshot_with_control(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Arc<dyn InvertedIndex>> {
+        self.controlled_snapshot(control)
+    }
+
     fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn InvertedIndex>> {
+        if self.read_control.is_some() {
+            return Err(StorageBackendError::Other(
+                "cannot write a retained inverted-index snapshot".into(),
+            ));
+        }
         Ok(Box::new(self.shared_snapshot()))
     }
 
     fn field_names(&self) -> StorageBackendResult<Vec<FieldName>> {
+        self.check_retained_read()?;
         Ok(self.state.total_length.keys().cloned().collect())
     }
 
@@ -512,6 +551,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         &self,
         field: &str,
     ) -> StorageBackendResult<Arc<uqa_analysis::CompiledAnalyzer>> {
+        self.check_retained_read()?;
         Ok(self.bindings.index_revision(field)?)
     }
 
@@ -519,6 +559,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         &self,
         field: &str,
     ) -> StorageBackendResult<Arc<uqa_analysis::CompiledAnalyzer>> {
+        self.check_retained_read()?;
         Ok(self.bindings.search_revision(field)?)
     }
 

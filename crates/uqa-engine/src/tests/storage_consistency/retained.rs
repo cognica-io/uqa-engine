@@ -27,6 +27,68 @@ fn engines() -> (tempfile::TempDir, Vec<Engine>) {
 }
 
 #[test]
+fn current_memory_text_capture_uses_session_retention_in_both_adapters() {
+    let engine = Engine::new();
+    engine.sql("CREATE TABLE memory_text (id INTEGER PRIMARY KEY, body TEXT); CREATE INDEX memory_text_index ON memory_text USING gin (body); INSERT INTO memory_text VALUES (1, 'original original')", &[]).unwrap();
+    let live = engine.require_table("memory_text").unwrap();
+    let id = engine.table_doc_ids("memory_text").unwrap()[0];
+    let key = live
+        .inverted_index
+        .read()
+        .vocabulary_keys("body")
+        .unwrap()
+        .remove(0);
+    let occurrences = live
+        .inverted_index
+        .read()
+        .get_occurrences(id, "body", &key)
+        .unwrap();
+    let metadata = live
+        .inverted_index
+        .read()
+        .indexed_field_metadata(id, "body")
+        .unwrap();
+    let control = engine.query_retention_control().unwrap();
+    let view = engine.detach_query_table(&live, &live, None).unwrap();
+    let context = engine.snapshot_context("memory_text").unwrap().unwrap();
+    assert!(control.memory().used() > 0);
+    let full = control
+        .memory()
+        .reserve(control.memory().limit() - control.memory().used())
+        .unwrap();
+    for error in [
+        engine.detach_query_table(&live, &live, None).err().unwrap(),
+        engine.snapshot_context("memory_text").err().unwrap(),
+    ] {
+        assert_eq!(error.sqlstate(), Some("53200"), "{error}");
+    }
+    drop(full);
+    engine
+        .sql("UPDATE memory_text SET body = 'replacement'", &[])
+        .unwrap();
+    engine.close().unwrap();
+    drop(live);
+    drop(engine);
+    let nested = view.inverted_index.read().snapshot().unwrap();
+    drop(view);
+    for reader in [&nested, context.inverted_index.as_ref().unwrap()] {
+        assert_eq!(
+            reader.get_occurrences(id, "body", &key).unwrap(),
+            occurrences
+        );
+        assert_eq!(reader.indexed_field_metadata(id, "body").unwrap(), metadata);
+    }
+    control.cancellation().cancel();
+    assert!(matches!(
+        nested.doc_count(),
+        Err(uqa_storage::StorageBackendError::Cancelled(_))
+    ));
+    drop(context);
+    drop(nested);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn current_memory_vector_capture_uses_the_session_allowance_and_preserves_old_readers() {
     for kind in ["memory-bruteforce", "hnsw", "ivf"] {
         let engine = Engine::new();

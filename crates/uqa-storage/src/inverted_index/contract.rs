@@ -546,6 +546,17 @@ pub trait InvertedIndex: Send + Sync {
     /// Read-only handle suitable for an `ExecutionContext`.
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn InvertedIndex>>;
 
+    /// Capture the selected view with its caller's retention allowance. Providers that already retain their own read boundary preserve it; memory owners override this hook to charge their shared state before publication.
+    fn snapshot_with_control(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Arc<dyn InvertedIndex>> {
+        control.check()?;
+        let snapshot = self.snapshot()?;
+        control.check()?;
+        Ok(snapshot)
+    }
+
     /// Independent writable copy used to restore an in-memory engine
     /// transaction without reconstructing analyzer state from documents.
     fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn InvertedIndex>> {

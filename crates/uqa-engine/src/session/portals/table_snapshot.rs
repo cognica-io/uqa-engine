@@ -96,7 +96,7 @@ impl Engine {
         let inverted_index = data
             .inverted_index
             .read()
-            .snapshot()
+            .snapshot_with_control(control)
             .map_err(|error| super::portal_snapshot_error("inverted index", &error))?;
         let vector_indexes = data
             .vector_indexes

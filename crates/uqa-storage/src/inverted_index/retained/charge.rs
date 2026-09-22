@@ -12,7 +12,7 @@ use super::{
 };
 use crate::inverted_index::{MemoryPosting, PostingKey};
 use std::collections::BTreeSet;
-use uqa_core::{memory::MemoryError, TokenOccurrence};
+use uqa_core::memory::MemoryError;
 
 pub(super) struct Charge {
     pub retained: usize,
@@ -67,20 +67,8 @@ pub(super) fn new_document(
         control.check()?;
         charge.entries::<(DocId, MemoryPosting)>(1)?;
         charge.keep(
-            posting
-                .occurrences
-                .capacity()
-                .checked_mul(size_of::<TokenOccurrence>())
-                .ok_or(MemoryError::SizeOverflow)?,
-        )?;
-        charge.keep(
-            posting
-                .projection
-                .payload
-                .positions
-                .capacity()
-                .checked_mul(size_of::<u32>())
-                .ok_or(MemoryError::SizeOverflow)?,
+            usize::try_from(super::super::footprint::posting_buffers(posting))
+                .map_err(|_| MemoryError::SizeOverflow)?,
         )?;
         if !state.index.contains_key(key) {
             charge.entries::<(PostingKey, BTreeMap<DocId, MemoryPosting>)>(1)?;

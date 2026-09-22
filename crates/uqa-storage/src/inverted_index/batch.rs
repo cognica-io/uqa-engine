@@ -53,23 +53,28 @@ impl MemoryBatch {
                                 "inverted-index document {id} references a missing posting"
                             ))
                         })?;
-                    staged
-                        .index
-                        .entry(key.clone())
-                        .or_default()
-                        .insert(id, posting.clone());
+                    staged.insert_posting(id, key.clone(), posting.clone());
                 }
                 batch.fields.extend(fields.keys().cloned());
-                staged.doc_terms.insert(id, terms.clone());
-                staged.doc_fields.insert(id, fields.clone());
+                staged.insert_document_metadata(id, fields.clone(), terms.clone());
             }
         }
         for field in &batch.fields {
             if let Some(&length) = source.state.total_length.get(field) {
-                staged.total_length.insert(field.clone(), length);
+                super::footprint::set_counter(
+                    &mut staged.total_length,
+                    field.clone(),
+                    Some(length),
+                    &mut staged.retention,
+                );
             }
             if let Some(&count) = source.state.field_doc_counts.get(field) {
-                staged.field_doc_counts.insert(field.clone(), count);
+                super::footprint::set_counter(
+                    &mut staged.field_doc_counts,
+                    field.clone(),
+                    Some(count),
+                    &mut staged.retention,
+                );
             }
         }
         Ok(batch)
@@ -80,46 +85,40 @@ impl MemoryBatch {
         let staged = self.state;
         let target = Arc::make_mut(&mut target.state);
         for id in self.documents {
-            if let Some(terms) = target.doc_terms.remove(&id) {
-                for key in terms {
-                    let postings = target.index.get_mut(&key).expect("validated batch posting");
-                    postings.remove(&id);
-                    if postings.is_empty() {
-                        target.index.remove(&key);
-                    }
+            if let Some(terms) = target.take_document_terms(id) {
+                for key in &terms {
+                    target
+                        .remove_posting(id, key)
+                        .expect("validated batch posting");
                 }
             }
-            target.doc_fields.remove(&id);
+            target.remove_document_metadata(id);
         }
         for (key, postings) in staged.index {
-            let target_postings = target.index.entry(key).or_default();
-            for (id, posting) in postings {
-                target_postings.insert(id, posting);
-            }
+            target.insert_postings(key, postings);
         }
-        for (id, terms) in staged.doc_terms {
-            target.doc_terms.insert(id, terms);
-        }
+        let mut terms = staged.doc_terms;
         for (id, fields) in staged.doc_fields {
-            target.doc_fields.insert(id, fields);
+            target.insert_document_metadata(
+                id,
+                fields,
+                terms.remove(&id).expect("validated batch reverse terms"),
+            );
         }
         for field in self.fields {
-            match staged.total_length.get(&field) {
-                Some(&length) => {
-                    target.total_length.insert(field.clone(), length);
-                }
-                None => {
-                    target.total_length.remove(&field);
-                }
-            }
-            match staged.field_doc_counts.get(&field) {
-                Some(&count) => {
-                    target.field_doc_counts.insert(field, count);
-                }
-                None => {
-                    target.field_doc_counts.remove(&field);
-                }
-            }
+            super::footprint::set_counter(
+                &mut target.total_length,
+                field.clone(),
+                staged.total_length.get(&field).copied(),
+                &mut target.retention,
+            );
+            let count = staged.field_doc_counts.get(&field).copied();
+            super::footprint::set_counter(
+                &mut target.field_doc_counts,
+                field,
+                count,
+                &mut target.retention,
+            );
         }
         target.doc_count = staged.doc_count;
     }

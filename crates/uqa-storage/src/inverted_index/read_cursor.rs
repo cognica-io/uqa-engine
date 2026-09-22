@@ -63,6 +63,7 @@ impl<'a> MemoryPostingReadCursor<'a> {
     }
 
     fn check(&self) -> StorageBackendResult<()> {
+        self.index.check_retained_read()?;
         if let Some(control) = &self.control {
             control.check()?;
         }

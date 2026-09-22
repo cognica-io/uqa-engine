@@ -139,5 +139,7 @@ proptest! {
         }
         index.try_add_documents(documents).unwrap();
         assert_state(&index, &expected);
+        crate::inverted_index::snapshot::tests::assert_accounted(&index);
+        crate::inverted_index::snapshot::tests::assert_accounted(&expected);
     }
 }

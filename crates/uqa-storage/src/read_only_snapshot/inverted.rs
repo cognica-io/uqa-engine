@@ -19,8 +19,38 @@ use crate::{InvertedIndex, StorageBackendResult, TokenTermKey};
 
 use super::{read_only_error, ReadOnlySnapshot};
 
+impl<T: InvertedIndex + ?Sized> ReadOnlySnapshot<T> {
+    /// Retain the first selected read control. Generation reservations can be shared without giving an unrelated reader the prior reader's cancellation signal.
+    pub fn with_inverted_read_control(
+        mut self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        control.check()?;
+        if self.2.is_none() {
+            self.2 = Some(control.clone());
+        }
+        self.check_inverted_read()?;
+        Ok(self)
+    }
+
+    fn check_inverted_read(&self) -> StorageBackendResult<()> {
+        self.2.as_ref().map_or(Ok(()), StorageReadControl::check)
+    }
+
+    fn inverted_control<'a>(
+        &'a self,
+        requested: &'a StorageReadControl,
+    ) -> StorageBackendResult<&'a StorageReadControl> {
+        requested.check()?;
+        self.check_inverted_read()?;
+        // Retention and read workspace can have different limits; preserve the explicit reader allowance.
+        Ok(requested)
+    }
+}
+
 impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
     fn source_rebuild_required(&self) -> StorageBackendResult<bool> {
+        self.check_inverted_read()?;
         self.0.source_rebuild_required()
     }
 
@@ -91,6 +121,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
     }
 
     fn get_posting_list(&self, field: &str, term: &str) -> StorageBackendResult<PostingList> {
+        self.check_inverted_read()?;
         self.0.get_posting_list(field, term)
     }
 
@@ -99,6 +130,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<PostingList> {
+        self.check_inverted_read()?;
         self.0.get_posting_list_key(field, term)
     }
 
@@ -107,6 +139,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<Box<dyn PostingCursor>> {
+        self.check_inverted_read()?;
         self.0.posting_cursor_key(field, term)
     }
 
@@ -125,7 +158,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         control: &StorageReadControl,
     ) -> StorageBackendResult<BudgetedPostingReadCursor<'a>> {
         self.0
-            .posting_read_cursor_key_budgeted(field, term, control)
+            .posting_read_cursor_key_budgeted(field, term, self.inverted_control(control)?)
     }
 
     fn visit_score_clusters(
@@ -137,8 +170,14 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         control: &StorageReadControl,
         visit: &mut crate::clustered_postings::ScoreClusterVisitor<'_>,
     ) -> StorageBackendResult<()> {
-        self.0
-            .visit_score_clusters(field, term, after, limit, control, visit)
+        self.0.visit_score_clusters(
+            field,
+            term,
+            after,
+            limit,
+            self.inverted_control(control)?,
+            visit,
+        )
     }
 
     fn get_occurrences_budgeted(
@@ -149,7 +188,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Budgeted<Vec<TokenOccurrence>>> {
         self.0
-            .get_occurrences_budgeted(doc_id, field, term, control)
+            .get_occurrences_budgeted(doc_id, field, term, self.inverted_control(control)?)
     }
 
     fn get_occurrence_postings(
@@ -157,6 +196,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<Vec<OccurrencePosting>> {
+        self.check_inverted_read()?;
         self.0.get_occurrence_postings(field, term)
     }
 
@@ -166,6 +206,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<Vec<TokenOccurrence>> {
+        self.check_inverted_read()?;
         self.0.get_occurrences(doc_id, field, term)
     }
 
@@ -174,10 +215,12 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         doc_id: DocId,
         field: &str,
     ) -> StorageBackendResult<Option<IndexedFieldMetadata>> {
+        self.check_inverted_read()?;
         self.0.indexed_field_metadata(doc_id, field)
     }
 
     fn doc_freq_key(&self, field: &str, term: &TokenTermKey) -> StorageBackendResult<u64> {
+        self.check_inverted_read()?;
         self.0.doc_freq_key(field, term)
     }
 
@@ -187,10 +230,12 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<u64> {
+        self.check_inverted_read()?;
         self.0.get_term_freq_key(doc_id, field, term)
     }
 
     fn vocabulary_keys(&self, field: &str) -> StorageBackendResult<Vec<TokenTermKey>> {
+        self.check_inverted_read()?;
         self.0.vocabulary_keys(field)
     }
 
@@ -199,6 +244,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         field: &str,
         terms: &[String],
     ) -> StorageBackendResult<Vec<PostingList>> {
+        self.check_inverted_read()?;
         self.0.get_posting_lists_bulk(field, terms)
     }
 
@@ -207,6 +253,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         field: &str,
         term: &str,
     ) -> StorageBackendResult<Box<dyn PostingCursor>> {
+        self.check_inverted_read()?;
         self.0.posting_cursor(field, term)
     }
 
@@ -215,6 +262,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         field: &str,
         terms: &[String],
     ) -> StorageBackendResult<Vec<Box<dyn PostingCursor>>> {
+        self.check_inverted_read()?;
         self.0.posting_cursors_bulk(field, terms)
     }
 
@@ -223,6 +271,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         field: &str,
         terms: &[TokenTermKey],
     ) -> StorageBackendResult<Vec<Box<dyn PostingCursor>>> {
+        self.check_inverted_read()?;
         self.0.posting_cursors_keys_bulk(field, terms)
     }
 
@@ -231,6 +280,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         field: &str,
         terms: &[TokenTermKey],
     ) -> StorageBackendResult<Vec<PostingList>> {
+        self.check_inverted_read()?;
         self.0.get_posting_lists_keys_bulk(field, terms)
     }
 
@@ -240,6 +290,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         terms: &[TokenTermKey],
         scorer_fingerprint: &str,
     ) -> StorageBackendResult<Vec<Option<Vec<f64>>>> {
+        self.check_inverted_read()?;
         self.0
             .persisted_block_max_scores_keys_bulk(field, terms, scorer_fingerprint)
     }
@@ -250,6 +301,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         field: &str,
         terms: &[TokenTermKey],
     ) -> StorageBackendResult<Vec<(u64, Vec<u64>)>> {
+        self.check_inverted_read()?;
         self.0.get_scoring_inputs_keys_bulk(doc_ids, field, terms)
     }
 
@@ -268,6 +320,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         term: &str,
         scorer_fingerprint: &str,
     ) -> StorageBackendResult<Option<Vec<f64>>> {
+        self.check_inverted_read()?;
         self.0
             .persisted_block_max_scores(field, term, scorer_fingerprint)
     }
@@ -278,6 +331,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         terms: &[String],
         scorer_fingerprint: &str,
     ) -> StorageBackendResult<Vec<Option<Vec<f64>>>> {
+        self.check_inverted_read()?;
         self.0
             .persisted_block_max_scores_bulk(field, terms, scorer_fingerprint)
     }
@@ -288,6 +342,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         term: &str,
         visit: &mut dyn FnMut(&PostingEntry),
     ) -> StorageBackendResult<()> {
+        self.check_inverted_read()?;
         self.0.for_each_posting(field, term, visit)
     }
 
@@ -297,38 +352,47 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         term: &str,
         visit: &mut dyn FnMut(DocId, u64),
     ) -> StorageBackendResult<()> {
+        self.check_inverted_read()?;
         self.0.for_each_term_freq(field, term, visit)
     }
 
     fn doc_freq(&self, field: &str, term: &str) -> StorageBackendResult<u64> {
+        self.check_inverted_read()?;
         self.0.doc_freq(field, term)
     }
 
     fn get_doc_length(&self, doc_id: DocId, field: &str) -> StorageBackendResult<u64> {
+        self.check_inverted_read()?;
         self.0.get_doc_length(doc_id, field)
     }
 
     fn get_term_freq(&self, doc_id: DocId, field: &str, term: &str) -> StorageBackendResult<u64> {
+        self.check_inverted_read()?;
         self.0.get_term_freq(doc_id, field, term)
     }
 
     fn doc_count(&self) -> StorageBackendResult<u64> {
+        self.check_inverted_read()?;
         self.0.doc_count()
     }
 
     fn total_field_length(&self, field: &str) -> StorageBackendResult<u64> {
+        self.check_inverted_read()?;
         self.0.total_field_length(field)
     }
 
     fn field_doc_count(&self, field: &str) -> StorageBackendResult<u64> {
+        self.check_inverted_read()?;
         self.0.field_doc_count(field)
     }
 
     fn field_stats(&self, field: &str) -> StorageBackendResult<IndexStats> {
+        self.check_inverted_read()?;
         self.0.field_stats(field)
     }
 
     fn field_stats_scalar(&self, field: &str) -> StorageBackendResult<IndexStats> {
+        self.check_inverted_read()?;
         self.0.field_stats_scalar(field)
     }
 
@@ -337,46 +401,70 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         field: &str,
         control: &StorageReadControl,
     ) -> StorageBackendResult<IndexStats> {
-        self.0.field_stats_scalar_budgeted(field, control)
+        self.0
+            .field_stats_scalar_budgeted(field, self.inverted_control(control)?)
     }
 
     fn vocabulary_terms(&self, field: &str) -> StorageBackendResult<Vec<String>> {
+        self.check_inverted_read()?;
         self.0.vocabulary_terms(field)
     }
 
     fn stats(&self) -> StorageBackendResult<IndexStats> {
+        self.check_inverted_read()?;
         self.0.stats()
     }
 
     fn posting_count(&self, field: Option<&str>) -> StorageBackendResult<u64> {
+        self.check_inverted_read()?;
         self.0.posting_count(field)
     }
 
     fn doc_length_count(&self, field: Option<&str>) -> StorageBackendResult<u64> {
+        self.check_inverted_read()?;
         self.0.doc_length_count(field)
     }
 
     fn term_count(&self, field: Option<&str>) -> StorageBackendResult<u64> {
+        self.check_inverted_read()?;
         self.0.term_count(field)
     }
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn InvertedIndex>> {
+        self.check_inverted_read()?;
         Ok(Arc::new(self.clone()))
     }
 
+    fn snapshot_with_control(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Arc<dyn InvertedIndex>> {
+        control.check()?;
+        if self.1.is_some() || self.2.is_some() {
+            return self.clone().with_inverted_read_control(control)?.snapshot();
+        }
+        Ok(Arc::new(ReadOnlySnapshot::new(
+            self.0.snapshot_with_control(control)?,
+        )))
+    }
+
     fn field_names(&self) -> StorageBackendResult<Vec<FieldName>> {
+        self.check_inverted_read()?;
         self.0.field_names()
     }
 
     fn get_posting_list_any_field(&self, term: &str) -> StorageBackendResult<PostingList> {
+        self.check_inverted_read()?;
         self.0.get_posting_list_any_field(term)
     }
 
     fn doc_freq_any_field(&self, term: &str) -> StorageBackendResult<u64> {
+        self.check_inverted_read()?;
         self.0.doc_freq_any_field(term)
     }
 
     fn get_total_doc_length(&self, doc_id: DocId) -> StorageBackendResult<u64> {
+        self.check_inverted_read()?;
         self.0.get_total_doc_length(doc_id)
     }
 
@@ -385,6 +473,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         doc_ids: &[DocId],
         field: &str,
     ) -> StorageBackendResult<BTreeMap<DocId, u64>> {
+        self.check_inverted_read()?;
         self.0.get_doc_lengths_bulk(doc_ids, field)
     }
 
@@ -394,6 +483,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         field: &str,
         term: &str,
     ) -> StorageBackendResult<BTreeMap<DocId, u64>> {
+        self.check_inverted_read()?;
         self.0.get_term_freqs_bulk(doc_ids, field, term)
     }
 
@@ -403,10 +493,12 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         field: &str,
         terms: &[String],
     ) -> StorageBackendResult<Vec<(u64, Vec<u64>)>> {
+        self.check_inverted_read()?;
         self.0.get_scoring_inputs_bulk(doc_ids, field, terms)
     }
 
     fn get_total_term_freq(&self, doc_id: DocId, term: &str) -> StorageBackendResult<u64> {
+        self.check_inverted_read()?;
         self.0.get_total_term_freq(doc_id, term)
     }
 
@@ -435,6 +527,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         &self,
         field: &str,
     ) -> StorageBackendResult<Arc<uqa_analysis::CompiledAnalyzer>> {
+        self.check_inverted_read()?;
         self.0.index_analyzer_revision(field)
     }
 
@@ -442,6 +535,7 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         &self,
         field: &str,
     ) -> StorageBackendResult<Arc<uqa_analysis::CompiledAnalyzer>> {
+        self.check_inverted_read()?;
         self.0.search_analyzer_revision(field)
     }
 

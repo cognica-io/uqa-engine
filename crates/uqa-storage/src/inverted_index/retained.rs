@@ -114,7 +114,13 @@ impl RetainedInvertedIndexBuilder {
     pub fn finish(mut self) -> StorageBackendResult<ReadOnlySnapshot<dyn InvertedIndex>> {
         self.control.check()?;
         self.memory.grow(size_of::<MemoryInvertedIndex>())?;
-        ReadOnlySnapshot::with_retention(Arc::new(self.index), self.memory)
+        self.memory.grow(size_of::<MemoryReservation>())?;
+        self.index.read_control = Some(self.control.clone());
+        let memory = Arc::new(self.memory);
+        self.index.state_memory = Some(Arc::clone(&memory));
+        let index: Arc<dyn InvertedIndex> = Arc::new(self.index);
+        ReadOnlySnapshot::with_shared_retention(index, memory)
+            .with_inverted_read_control(&self.control)
     }
 }
 
@@ -138,4 +144,4 @@ fn copy_name(
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
