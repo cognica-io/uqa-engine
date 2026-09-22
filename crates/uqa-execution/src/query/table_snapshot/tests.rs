@@ -96,7 +96,8 @@ fn base_column_incarnations_and_private_column_layouts_remain_distinct() {
         &source,
         &source_columns,
         &schema(&target, &index),
-        BTreeMap::from([(2, Some(private.clone()))]).into(),
+        DocumentChanges::from_rows(BTreeMap::from([(2, Some(private.clone()))]), &control())
+            .unwrap(),
         &CancellationToken::new(),
     )
     .unwrap();
@@ -183,7 +184,7 @@ fn reconstruction_pages_rows_and_skips_private_replacements_and_deletions() {
         &source,
         &fields,
         &schema(&fields, &index),
-        changes.into(),
+        DocumentChanges::from_rows(changes, &control()).unwrap(),
         &CancellationToken::new(),
     )
     .unwrap();
@@ -293,4 +294,19 @@ fn cancellation_prevents_any_source_read_or_partial_result() {
     )
     .is_err());
     assert!(source.requested.lock().is_empty());
+}
+
+fn control() -> uqa_storage::read_control::StorageReadControl {
+    uqa_storage::read_control::StorageReadControl::with_limit(1 << 20)
+}
+
+fn selection(
+    rows: impl IntoIterator<Item = (DocId, bool)>,
+) -> crate::query::document_changes::DocumentSelection {
+    let control = control();
+    let mut selected = crate::query::document_changes::DocumentSelection::new(&control);
+    for (id, present) in rows {
+        selected.insert(id, present, &control).unwrap();
+    }
+    selected
 }

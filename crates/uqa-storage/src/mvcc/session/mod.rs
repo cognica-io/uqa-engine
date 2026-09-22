@@ -144,7 +144,7 @@ impl VersionedKeyValueStore {
         )
     }
 
-    /// Open an independently owned read-only session at this exact committed/private view. Its original participant and snapshot leases remain retained, but completing this reader never completes the originating transaction.
+    /// Open an independently owned read-only session at this exact committed/private view. Its original participant, snapshot leases and retention allowance remain shared, while read cancellation stays independent. Completing this reader never completes the originating transaction.
     pub fn new_retained_read_session(
         &self,
         cancellation: &uqa_core::CancellationToken,
@@ -152,6 +152,8 @@ impl VersionedKeyValueStore {
         cancellation.check()?;
         let retained = self.view().map_err(VersionError::into_storage_error)?;
         let mut session = self.new_session_with_cancellation(cancellation);
+        session.control =
+            StorageReadControl::new(self.control.memory(), session.control.cancellation());
         session.retained = Some(retained);
         Ok(session)
     }
@@ -336,6 +338,10 @@ impl super::IdentifierAllocator for VersionedKeyValueStore {
 }
 
 impl KeyValueStore for VersionedKeyValueStore {
+    fn retention_control(&self) -> Option<StorageReadControl> {
+        Some(Self::retention_control(self))
+    }
+
     fn serializable_session(&self) -> Option<&dyn SerializableSession> {
         self.persistence
             .serializable_coordinator()

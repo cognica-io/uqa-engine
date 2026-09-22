@@ -157,7 +157,7 @@ fn retained_private_views_capture_no_base_rows_and_project_in_requested_order() 
         Arc::new(source),
         &columns,
         &schema(&target, &index),
-        changes.into(),
+        DocumentChanges::from_rows(changes, &control()).unwrap(),
         &CancellationToken::new(),
     )
     .unwrap();
@@ -292,7 +292,7 @@ fn retained_projection_preserves_absent_defaults_explicit_nulls_and_generated_va
         &source,
         &columns,
         &selected,
-        BTreeMap::clone(&changes).into(),
+        DocumentChanges::from_rows(BTreeMap::clone(&changes), &control()).unwrap(),
         &CancellationToken::new(),
     )
     .unwrap();
@@ -300,7 +300,7 @@ fn retained_projection_preserves_absent_defaults_explicit_nulls_and_generated_va
         source.snapshot().unwrap(),
         &columns,
         &selected,
-        changes.into(),
+        DocumentChanges::from_rows(changes, &control()).unwrap(),
         &CancellationToken::new(),
     )
     .unwrap();
@@ -452,7 +452,7 @@ fn retained_index_reconstruction_reads_only_indexed_fields() {
         Arc::new(probe),
         &columns,
         &selected,
-        changes.into(),
+        DocumentChanges::from_rows(changes, &control()).unwrap(),
         &CancellationToken::new(),
     )
     .unwrap();
@@ -558,7 +558,7 @@ fn retained_identity_pages_cross_deleted_ranges_without_reading_rows() {
         Arc::new(ProjectedSource::new(&source)),
         &[],
         &schema(&[], &index),
-        changes.into(),
+        DocumentChanges::from_rows(changes, &control()).unwrap(),
         &CancellationToken::new(),
     )
     .unwrap();

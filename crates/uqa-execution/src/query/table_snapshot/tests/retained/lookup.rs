@@ -69,7 +69,7 @@ fn retained_point_lookups_preserve_missing_fields_nulls_and_private_masks() {
         Arc::new(ProjectedSource::new(&source)),
         &[],
         &schema(&[], &index),
-        changes.into(),
+        DocumentChanges::from_rows(changes, &control()).unwrap(),
         &CancellationToken::new(),
     )
     .unwrap();
@@ -139,7 +139,7 @@ fn retained_identity_scans_cancel_before_reading_another_masked_page() {
             Arc::new(probe),
             &[],
             &schema(&[], &index),
-            changes.into(),
+            DocumentChanges::from_rows(changes, &control()).unwrap(),
             &cancellation,
         )
         .unwrap();

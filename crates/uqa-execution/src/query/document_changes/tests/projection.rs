@@ -12,13 +12,16 @@ use crate::query::exact_lookup::{ExactLookupOverlay, FieldPresence};
 fn projections_batch_sources_and_preserve_order_duplicates_and_early_stop() {
     let probe = Probe::new(&source());
     let mut changes = retained(&probe);
-    changes.insert_shared(
-        7,
-        Some((
-            Arc::new(document(70).into_fields()),
-            DocumentMetadata::default(),
-        )),
-    );
+    changes
+        .insert_shared(
+            7,
+            Some((
+                Arc::new(document(70).into_fields()),
+                DocumentMetadata::default(),
+            )),
+            &control(),
+        )
+        .unwrap();
     let ids = [4, 1, 7, 1, 4, 9, 99, 4];
     let mut visited = Vec::new();
     changes
@@ -166,7 +169,7 @@ fn private_exact_lookup_reads_only_key_fields_and_distinguishes_missing_from_nul
             .unwrap(),
         None
     );
-    let deleted = DocumentChanges::from(BTreeMap::from([(1, None)]));
+    let deleted = DocumentChanges::from_rows(BTreeMap::from([(1, None)]), &control()).unwrap();
     assert!(!ExactLookupOverlay::is_empty(&deleted).unwrap());
     assert!(DocumentStore::is_empty(&deleted).unwrap());
 }
@@ -176,13 +179,16 @@ fn retained_full_reads_batch_only_explicitly_requested_rows() {
     let mut probe = Probe::new(&source());
     probe.allow_copy = true;
     let mut changes = retained(&probe);
-    changes.insert_shared(
-        7,
-        Some((
-            Arc::new(document(70).into_fields()),
-            DocumentMetadata::default(),
-        )),
-    );
+    changes
+        .insert_shared(
+            7,
+            Some((
+                Arc::new(document(70).into_fields()),
+                DocumentMetadata::default(),
+            )),
+            &control(),
+        )
+        .unwrap();
     let rows = changes.get_stored_many(&[4, 1, 7, 4, 8, u64::MAX]).unwrap();
     assert_eq!(
         rows.keys().copied().collect::<Vec<_>>(),

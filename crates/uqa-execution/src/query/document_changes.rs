@@ -7,15 +7,19 @@
 //! Evaluated query changes share immutable row sources instead of recopying private payloads.
 
 use std::collections::BTreeMap;
-use std::ops::Bound::{Excluded, Unbounded};
 use std::sync::Arc;
-use uqa_core::{CancellationToken, DocId, Value};
+use uqa_core::{DocId, Value};
+use uqa_storage::read_control::StorageReadControl;
 use uqa_storage::{
     document_store::Document, DocumentMetadata, DocumentStore, StorageBackendError,
     StorageBackendResult, StoredDocument,
 };
 
+mod desired;
 mod projection;
+pub use desired::DocumentSelection;
+mod selection;
+use selection::Selection;
 
 #[cfg(test)]
 mod tests;
@@ -54,59 +58,73 @@ impl Change {
     }
 }
 
-/// A fixed selection of replacements and tombstones. Clones and document snapshots share both the selection and its immutable sources; extensions use copy-on-write metadata without cloning payloads.
+/// A fixed selection of replacements and tombstones. Clones and document snapshots share both the selection and its allocation lease; fallible extensions charge replacement capacity while retaining the original source owners.
 #[derive(Clone, Default)]
-pub struct DocumentChanges(Arc<BTreeMap<DocId, Change>>);
+pub struct DocumentChanges(Option<Arc<Selection>>);
 
 impl DocumentChanges {
     /// Serialized providers copy selected private rows while their live handle is guarded; immutable providers use `with_retained` instead.
     pub fn capture_owned(
         source: &dyn DocumentStore,
-        desired: BTreeMap<DocId, bool>,
-        cancellation: &CancellationToken,
+        desired: DocumentSelection,
+        control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
-        let mut result = BTreeMap::new();
-        let mut desired = desired.into_iter();
+        let mut result = Self::default();
+        let desired = desired.finish(control)?;
+        let mut desired = desired.entries();
         loop {
-            cancellation.check()?;
-            let page = desired
-                .by_ref()
-                .take(crate::DEFAULT_BATCH_SIZE)
-                .collect::<Vec<_>>();
+            control.check()?;
+            let mut page = uqa_core::memory::BudgetedVec::new(control.memory());
+            for row in desired.by_ref().take(crate::DEFAULT_BATCH_SIZE) {
+                page.push(row)?;
+            }
             if page.is_empty() {
                 break;
             }
-            let ids = page
-                .iter()
-                .filter_map(|(id, present)| present.then_some(*id))
-                .collect::<Vec<_>>();
+            let mut ids = uqa_core::memory::BudgetedVec::new(control.memory());
+            for (id, present) in page.iter() {
+                if *present {
+                    ids.push(*id)?;
+                }
+            }
             let mut documents = source.get_stored_many(&ids)?;
-            for (id, present) in page {
-                result.insert(id, present.then(|| documents.remove(&id)).flatten());
+            for (id, present) in page.iter().copied() {
+                result.insert(
+                    id,
+                    present
+                        .then(|| documents.remove(&id))
+                        .flatten()
+                        .map_or(Change::Deleted, |row| Change::Owned(Arc::new(row))),
+                    control,
+                )?;
             }
         }
-        Ok(Self::from(result))
+        Ok(result)
     }
 
     pub fn has_changes(&self) -> bool {
-        !self.0.is_empty()
+        !self.rows().is_empty()
     }
 
     pub fn contains_change(&self, id: DocId) -> bool {
-        self.0.contains_key(&id)
+        self.get(id).is_some()
     }
 
     pub fn change_presence(&self, id: DocId) -> Option<bool> {
-        self.0.get(&id).map(Change::present)
+        self.get(id).map(Change::present)
     }
 
     pub fn changes(&self) -> impl Iterator<Item = (DocId, bool)> + '_ {
-        self.0.iter().map(|(id, change)| (*id, change.present()))
+        self.rows()
+            .iter()
+            .map(|(id, change)| (*id, change.present()))
     }
 
     pub fn changes_after(&self, after: Option<DocId>) -> impl Iterator<Item = (DocId, bool)> + '_ {
-        self.0
-            .range((after.map_or(Unbounded, Excluded), Unbounded))
+        self.rows()[self
+            .rows()
+            .partition_point(|(id, _)| after.is_some_and(|after| *id <= after))..]
+            .iter()
             .map(|(id, change)| (*id, change.present()))
     }
 
@@ -114,21 +132,22 @@ impl DocumentChanges {
     pub fn with_retained(
         mut self,
         source: Arc<dyn DocumentStore>,
-        desired: BTreeMap<DocId, bool>,
-        cancellation: &CancellationToken,
+        desired: DocumentSelection,
+        control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
-        cancellation.check()?;
-        let changes = Arc::make_mut(&mut self.0);
-        for (id, present) in desired {
-            cancellation.check()?;
+        control.check()?;
+        let desired = desired.finish(control)?;
+        let mut newer = Self::default();
+        for (id, present) in desired.entries() {
+            control.check()?;
             let change = if present && source.contains_doc_id(id)? {
                 Change::Retained(Arc::clone(&source))
             } else {
                 Change::Deleted
             };
-            changes.insert(id, change);
+            newer.insert(id, change, control)?;
         }
-        cancellation.check()?;
+        self.extend(newer, control)?;
         Ok(self)
     }
 
@@ -136,25 +155,73 @@ impl DocumentChanges {
         &mut self,
         id: DocId,
         document: Option<(Arc<Document>, DocumentMetadata)>,
-    ) {
-        Arc::make_mut(&mut self.0).insert(
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<()> {
+        self.insert(
             id,
             document.map_or(Change::Deleted, |(fields, metadata)| {
                 Change::Shared(fields, metadata)
             }),
-        );
+            control,
+        )
     }
 
-    pub fn extend(&mut self, newer: Self) {
-        Arc::make_mut(&mut self.0).extend(Arc::unwrap_or_clone(newer.0));
+    /// Capture evaluated fields without copying their payloads, then merge the complete selection with an older view.
+    pub fn from_shared(
+        rows: impl IntoIterator<Item = (DocId, Option<(Arc<Document>, DocumentMetadata)>)>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        control.check()?;
+        let mut selected = Self::default();
+        for (id, row) in rows {
+            selected.insert_shared(id, row, control)?;
+        }
+        control.check()?;
+        Ok(selected)
+    }
+
+    pub fn from_rows(
+        rows: BTreeMap<DocId, Option<StoredDocument>>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        control.check()?;
+        let mut selected = Self::default();
+        for (id, row) in rows {
+            selected.insert(
+                id,
+                row.map_or(Change::Deleted, |row| Change::Owned(Arc::new(row))),
+                control,
+            )?;
+        }
+        control.check()?;
+        Ok(selected)
     }
 
     pub fn into_rows(
         self,
     ) -> impl Iterator<Item = StorageBackendResult<(DocId, Option<StoredDocument>)>> {
-        Arc::unwrap_or_clone(self.0)
-            .into_iter()
-            .map(|(id, change)| change.into_stored(id).map(|row| (id, row)))
+        let (mut owned, shared) = match self.0.map(Arc::try_unwrap) {
+            Some(Ok(selection)) => {
+                let (rows, capacity, allocation) = selection.into_parts();
+                (
+                    Some((rows.into_iter(), capacity, allocation)),
+                    Self::default(),
+                )
+            }
+            Some(Err(selection)) => (None, Self(Some(selection))),
+            None => (None, Self::default()),
+        };
+        let mut position = 0;
+        std::iter::from_fn(move || {
+            let (id, change) = if let Some((rows, _, _)) = owned.as_mut() {
+                rows.next()?
+            } else {
+                let row = shared.rows().get(position)?.clone();
+                position += 1;
+                row
+            };
+            Some(change.into_stored(id).map(|row| (id, row)))
+        })
     }
 
     fn source_run<'a>(
@@ -162,31 +229,16 @@ impl DocumentChanges {
         ids: &[DocId],
         start: usize,
     ) -> Option<(usize, &'a Arc<dyn DocumentStore>)> {
-        let Change::Retained(source) = self.0.get(&ids[start])? else {
+        let Change::Retained(source) = self.get(ids[start])? else {
             return None;
         };
         let mut end = start + 1;
         while end < ids.len()
-            && matches!(self.0.get(&ids[end]), Some(Change::Retained(next)) if Arc::ptr_eq(source, next))
+            && matches!(self.get(ids[end]), Some(Change::Retained(next)) if Arc::ptr_eq(source, next))
         {
             end += 1;
         }
         Some((end, source))
-    }
-}
-
-impl From<BTreeMap<DocId, Option<StoredDocument>>> for DocumentChanges {
-    fn from(rows: BTreeMap<DocId, Option<StoredDocument>>) -> Self {
-        Self(Arc::new(
-            rows.into_iter()
-                .map(|(id, row)| {
-                    (
-                        id,
-                        row.map_or(Change::Deleted, |row| Change::Owned(Arc::new(row))),
-                    )
-                })
-                .collect(),
-        ))
     }
 }
 
@@ -220,8 +272,7 @@ impl DocumentStore for DocumentChanges {
     }
 
     fn get_stored(&self, id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
-        self.0
-            .get(&id)
+        self.get(id)
             .cloned()
             .unwrap_or(Change::Deleted)
             .into_stored(id)
@@ -249,7 +300,7 @@ impl DocumentStore for DocumentChanges {
     }
 
     fn get_metadata(&self, id: DocId) -> StorageBackendResult<Option<DocumentMetadata>> {
-        Ok(match self.0.get(&id) {
+        Ok(match self.get(id) {
             Some(Change::Owned(row)) => Some(row.metadata()),
             Some(Change::Shared(_, metadata)) => Some(*metadata),
             Some(Change::Retained(source)) => return source.get_metadata(id),
@@ -262,7 +313,7 @@ impl DocumentStore for DocumentChanges {
     }
 
     fn get_field(&self, id: DocId, field: &str) -> StorageBackendResult<Option<Value>> {
-        match self.0.get(&id) {
+        match self.get(id) {
             Some(Change::Retained(source)) => source.get_field(id, field),
             change => Ok(change
                 .and_then(Change::fields)

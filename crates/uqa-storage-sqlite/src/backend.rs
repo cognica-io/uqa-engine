@@ -124,6 +124,10 @@ impl uqa_storage::mvcc::IdentifierAllocator for SQLiteStorageBackend {
 }
 
 impl PersistentStorageBackend for SQLiteStorageBackend {
+    fn retention_control(&self) -> Option<uqa_storage::read_control::StorageReadControl> {
+        self.conn.retention_control()
+    }
+
     fn serializable_session(&self) -> Option<&dyn uqa_storage::mvcc::SerializableSession> {
         self.conn
             .is_native_record_session()

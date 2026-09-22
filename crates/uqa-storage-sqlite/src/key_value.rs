@@ -87,6 +87,10 @@ impl uqa_storage::mvcc::IdentifierAllocator for SQLiteKeyValueStore {
 }
 
 impl KeyValueStore for SQLiteKeyValueStore {
+    fn retention_control(&self) -> Option<uqa_storage::read_control::StorageReadControl> {
+        Some(self.records.retention_control())
+    }
+
     fn serializable_session(&self) -> Option<&dyn uqa_storage::mvcc::SerializableSession> {
         Some(&self.conn)
     }

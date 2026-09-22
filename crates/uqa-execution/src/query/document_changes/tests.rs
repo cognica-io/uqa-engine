@@ -6,8 +6,10 @@
 
 use super::*;
 use parking_lot::Mutex;
+use uqa_core::CancellationToken;
 use uqa_storage::MemoryDocumentStore;
 
+mod budgets;
 mod projection;
 
 #[derive(Clone)]
@@ -133,15 +135,14 @@ fn retained(probe: &Probe) -> DocumentChanges {
     DocumentChanges::default()
         .with_retained(
             probe.snapshot().unwrap(),
-            [
+            selection([
                 (1, true),
                 (4, true),
                 (8, true),
                 (9, false),
                 (u64::MAX, true),
-            ]
-            .into(),
-            &CancellationToken::new(),
+            ]),
+            &control(),
         )
         .unwrap()
 }
@@ -190,20 +191,35 @@ fn shared_command_changes_preserve_old_views_and_borrow_payloads() {
     let probe = Probe::new(&source());
     let fields = Arc::new(document(70).into_fields());
     let mut changes = retained(&probe);
-    changes.insert_shared(
-        7,
-        Some((Arc::clone(&fields), DocumentMetadata::with_tuple_xmin(52))),
-    );
+    changes
+        .insert_shared(
+            7,
+            Some((Arc::clone(&fields), DocumentMetadata::with_tuple_xmin(52))),
+            &control(),
+        )
+        .unwrap();
     let original = changes.clone();
-    changes.insert_shared(1, None);
-    changes.insert_shared(
-        7,
-        Some((
-            Arc::new(document(71).into_fields()),
-            DocumentMetadata::with_tuple_xmin(53),
-        )),
-    );
-    changes.extend(BTreeMap::from([(4, None), (6, Some(document(60)))]).into());
+    changes.insert_shared(1, None, &control()).unwrap();
+    changes
+        .insert_shared(
+            7,
+            Some((
+                Arc::new(document(71).into_fields()),
+                DocumentMetadata::with_tuple_xmin(53),
+            )),
+            &control(),
+        )
+        .unwrap();
+    changes
+        .extend(
+            DocumentChanges::from_rows(
+                BTreeMap::from([(4, None), (6, Some(document(60)))]),
+                &control(),
+            )
+            .unwrap(),
+            &control(),
+        )
+        .unwrap();
     original
         .for_each_fields_multi_ref(&[7], &["opaque"], &mut |_, values| {
             assert!(std::ptr::eq(values[0], &raw const fields["opaque"]));
@@ -225,13 +241,14 @@ fn shared_command_changes_preserve_old_views_and_borrow_payloads() {
 fn capture_failure_and_cancellation_leave_retained_views_intact() {
     let mut probe = Probe::new(&source());
     probe.fail_at = Some(4);
-    let original = DocumentChanges::from(BTreeMap::from([(2, Some(document(20)))]));
+    let original =
+        DocumentChanges::from_rows(BTreeMap::from([(2, Some(document(20)))]), &control()).unwrap();
     let error = original
         .clone()
         .with_retained(
             probe.snapshot().unwrap(),
-            [(1, true), (4, true)].into(),
-            &CancellationToken::new(),
+            selection([(1, true), (4, true)]),
+            &control(),
         )
         .err()
         .unwrap();
@@ -244,11 +261,20 @@ fn capture_failure_and_cancellation_leave_retained_views_intact() {
     cancellation.cancel();
     let error = original
         .clone()
-        .with_retained(probe.snapshot().unwrap(), [(1, true)].into(), &cancellation)
+        .with_retained(
+            probe.snapshot().unwrap(),
+            selection([(1, true)]),
+            &uqa_storage::read_control::StorageReadControl::new(control().memory(), &cancellation),
+        )
         .err()
         .unwrap();
     assert!(matches!(error, StorageBackendError::Cancelled(_)));
-    assert!(DocumentChanges::capture_owned(&probe, [(1, true)].into(), &cancellation).is_err());
+    assert!(DocumentChanges::capture_owned(
+        &probe,
+        selection([(1, true)]),
+        &uqa_storage::read_control::StorageReadControl::new(control().memory(), &cancellation)
+    )
+    .is_err());
     assert_eq!(original.get_field(2, "key").unwrap(), Some(Value::Int(20)));
 }
 
@@ -258,9 +284,8 @@ fn serialized_capture_copies_only_selected_rows_in_bounded_pages() {
     let mut probe = Probe::new(&rows);
     probe.allow_copy = true;
     let count = u64::try_from(crate::DEFAULT_BATCH_SIZE * 2 + 5).unwrap();
-    let desired = (0..count).map(|id| (id, id % 2 == 0)).collect();
-    let changes =
-        DocumentChanges::capture_owned(&probe, desired, &CancellationToken::new()).unwrap();
+    let desired = selection((0..count).map(|id| (id, id % 2 == 0)));
+    let changes = DocumentChanges::capture_owned(&probe, desired, &control()).unwrap();
     let copied = probe.copies.lock();
     assert_eq!(copied.len(), 3);
     assert!(copied
@@ -288,4 +313,19 @@ fn changes_reject_mutation_without_reading_payloads() {
     assert!(changes.clear().is_err());
     assert!(changes.writable_snapshot().is_err());
     assert_eq!(changes.len().unwrap(), 3);
+}
+
+fn control() -> uqa_storage::read_control::StorageReadControl {
+    uqa_storage::read_control::StorageReadControl::with_limit(1 << 20)
+}
+
+fn selection(
+    rows: impl IntoIterator<Item = (DocId, bool)>,
+) -> crate::query::document_changes::DocumentSelection {
+    let control = control();
+    let mut selected = crate::query::document_changes::DocumentSelection::new(&control);
+    for (id, present) in rows {
+        selected.insert(id, present, &control).unwrap();
+    }
+    selected
 }

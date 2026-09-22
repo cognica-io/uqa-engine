@@ -50,17 +50,20 @@ fn scan(projection: &[&str]) -> LocalTableRowSource {
     let mut changes = DocumentChanges::default()
         .with_retained(
             private.snapshot().unwrap(),
-            [(1, false), (3, true), (5, false)].into(),
-            &CancellationToken::new(),
+            selection([(1, false), (3, true), (5, false)]),
+            &control(),
         )
         .unwrap();
-    changes.insert_shared(
-        4,
-        Some((
-            Arc::new(row(400, 52).into_fields()),
-            DocumentMetadata::with_tuple_xmin(52),
-        )),
-    );
+    changes
+        .insert_shared(
+            4,
+            Some((
+                Arc::new(row(400, 52).into_fields()),
+                DocumentMetadata::with_tuple_xmin(52),
+            )),
+            &control(),
+        )
+        .unwrap();
     let columns = projection
         .iter()
         .map(|field| (*field).to_string())
@@ -139,4 +142,19 @@ fn command_scan_keeps_metadata_generated_values_and_predicate_progress() {
     assert_eq!(last[0].lock_origins()[0].doc_id, u64::MAX);
     scan.cancellation.cancel();
     assert!(scan.next_command_physical_rows_batch(1).is_err());
+}
+
+fn control() -> uqa_storage::read_control::StorageReadControl {
+    uqa_storage::read_control::StorageReadControl::with_limit(1 << 20)
+}
+
+fn selection(
+    rows: impl IntoIterator<Item = (DocId, bool)>,
+) -> crate::query::document_changes::DocumentSelection {
+    let control = control();
+    let mut selected = crate::query::document_changes::DocumentSelection::new(&control);
+    for (id, present) in rows {
+        selected.insert(id, present, &control).unwrap();
+    }
+    selected
 }

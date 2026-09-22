@@ -10,6 +10,51 @@ use super::*;
 use uqa_storage::{KeyValueStorageBackend, PersistentStorageBackend};
 
 #[test]
+fn retained_backend_readers_share_the_original_limit_and_release_their_last_charge() {
+    let persistence = Persistence::new();
+    let source = Arc::new(persistence.session(1 << 20));
+    let control = source.retention_control();
+    let backend = KeyValueStorageBackend::new(source.clone());
+    let reader = backend
+        .open_retained_read_session(&uqa_core::CancellationToken::new())
+        .unwrap();
+    let nested = reader
+        .backend
+        .open_retained_read_session(&uqa_core::CancellationToken::new())
+        .unwrap();
+    let nested_control = nested.backend.retention_control().unwrap();
+    assert!(nested_control.memory().shares_allowance(control.memory()));
+    control.cancellation().cancel();
+    nested_control.check().unwrap();
+    control.cancellation().reset();
+    assert!(backend
+        .retention_control()
+        .unwrap()
+        .memory()
+        .shares_allowance(control.memory()));
+    let independent = backend.open_session().unwrap();
+    assert!(!independent
+        .backend
+        .retention_control()
+        .unwrap()
+        .memory()
+        .shares_allowance(control.memory()));
+    let retained = control.memory().used();
+    let reservation = nested_control
+        .memory()
+        .reserve(control.memory().limit() - retained)
+        .unwrap();
+    assert!(control.memory().reserve(1).is_err());
+    drop(source);
+    drop(backend);
+    drop(reader);
+    drop(nested);
+    assert!(control.memory().used() >= reservation.bytes());
+    drop(reservation);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn retained_sessions_keep_private_tombstones_and_the_original_committed_boundary() {
     let persistence = Persistence::new();
     let source = persistence.session(1 << 20);

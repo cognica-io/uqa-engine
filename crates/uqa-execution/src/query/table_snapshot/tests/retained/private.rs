@@ -33,8 +33,8 @@ fn private_source_uses_current_column_layout_and_survives_source_mutation() {
     let changes = DocumentChanges::default()
         .with_retained(
             Arc::new(private_probe),
-            [(3, true), (5, false), (7, true)].into(),
-            &CancellationToken::new(),
+            selection([(3, true), (5, false), (7, true)]),
+            &control(),
         )
         .unwrap();
     let index = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
@@ -97,8 +97,8 @@ fn stored_generated_private_fields_need_no_unrelated_payload_reads() {
     let changes = DocumentChanges::default()
         .with_retained(
             Arc::new(ProjectedSource::new(&private)),
-            [(2, true)].into(),
-            &CancellationToken::new(),
+            selection([(2, true)]),
+            &control(),
         )
         .unwrap();
     let index = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
@@ -133,8 +133,8 @@ fn missing_generated_private_values_are_completed_from_the_selected_source() {
     let changes = DocumentChanges::default()
         .with_retained(
             private.snapshot().unwrap(),
-            [(2, true)].into(),
-            &CancellationToken::new(),
+            selection([(2, true)]),
+            &control(),
         )
         .unwrap();
     let index = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());

@@ -26,6 +26,67 @@ fn engines() -> (tempfile::TempDir, Vec<Engine>) {
     (directory, engines)
 }
 
+#[test]
+fn retained_query_selection_shares_provider_memory_and_survives_budget_rejection() {
+    use uqa_execution::query::document_changes::DocumentSelection;
+    let (_directory, engines) = engines();
+    for engine in engines {
+        engine.sql("CREATE TABLE selected_memory (id INTEGER PRIMARY KEY, body TEXT); INSERT INTO selected_memory VALUES (1, 'original')", &[]).unwrap();
+        engine.sql("BEGIN ISOLATION LEVEL REPEATABLE READ; SELECT * FROM selected_memory; UPDATE selected_memory SET body = 'private'", &[]).unwrap();
+        let control = engine.query_retention_control().unwrap();
+        if let Some(backend) = &engine.storage.backend {
+            let provider_control = backend.retention_control().unwrap();
+            assert!(control.memory().shares_allowance(provider_control.memory()));
+            let reader = backend
+                .open_retained_read_session(&engine.runtime.cancellation)
+                .unwrap();
+            let nested = reader
+                .backend
+                .open_retained_read_session(&engine.runtime.cancellation)
+                .unwrap();
+            assert!(nested
+                .backend
+                .retention_control()
+                .unwrap()
+                .memory()
+                .shares_allowance(control.memory()));
+        }
+        let table = engine.require_table("selected_memory").unwrap();
+        let id = table.document_store.read().doc_ids().unwrap()[0];
+        let desired = || {
+            let mut rows = DocumentSelection::new(&control);
+            rows.insert(id, true, &control).unwrap();
+            rows
+        };
+        let selected = engine
+            .capture_query_document_changes(&table, desired())
+            .unwrap();
+        let retained = selected.snapshot().unwrap();
+        let next = desired();
+        let full = control
+            .memory()
+            .reserve(control.memory().limit() - control.memory().used())
+            .unwrap();
+        let error = engine
+            .capture_query_document_changes(&table, next)
+            .err()
+            .unwrap();
+        assert_eq!(error.sqlstate(), Some("53200"));
+        drop(full);
+        assert_eq!(retained.get_field(id, "body").unwrap(), Some(s("private")));
+        assert_eq!(selected.get_field(id, "body").unwrap(), Some(s("private")));
+        engine.rollback().unwrap();
+        drop(selected);
+        drop(table);
+        engine.close().unwrap();
+        drop(engine);
+        assert!(control.memory().used() > 0);
+        assert_eq!(retained.get_field(id, "body").unwrap(), Some(s("private")));
+        drop(retained);
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
 fn prepare(engine: &Engine) {
     engine.sql("CREATE TABLE retained (id INTEGER PRIMARY KEY, body TEXT, embedding VECTOR(2)); CREATE INDEX retained_text ON retained USING gin (body); CREATE INDEX retained_vectors ON retained USING hnsw (embedding); INSERT INTO retained VALUES (1, 'original', ARRAY[1.0, 0.0])", &[]).unwrap();
 }

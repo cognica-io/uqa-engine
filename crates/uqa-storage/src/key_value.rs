@@ -262,6 +262,11 @@ pub trait KeyValueBatch {
 
 /// Ordered byte-key storage used by Key/Value catalog and index backends.
 pub trait KeyValueStore: Send + Sync {
+    /// Shared session allowance, including resources retained by readers after their producer finishes. Versioned wrappers must forward this capability.
+    fn retention_control(&self) -> Option<crate::read_control::StorageReadControl> {
+        None
+    }
+
     /// Original participant admission and logical observations. Wrappers must forward this capability, including original attribution on retained read-only sessions; capability presence does not establish complete SQL SSI support.
     fn serializable_session(&self) -> Option<&dyn crate::mvcc::SerializableSession> {
         None

@@ -34,7 +34,7 @@ impl DocumentChanges {
                 index = end;
             } else {
                 let id = ids[index];
-                let keep_going = match self.0.get(&id).and_then(Change::fields) {
+                let keep_going = match self.get(id).and_then(Change::fields) {
                     Some(document) => {
                         let values = fields
                             .iter()

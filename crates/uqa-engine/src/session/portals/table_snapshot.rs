@@ -10,13 +10,40 @@ use super::{DocumentStore, Engine, InvertedIndex, SQLError, TableState, VectorIn
 use uqa_storage::ReadOnlySnapshot;
 
 impl Engine {
+    pub(crate) fn query_retention_control(
+        &self,
+    ) -> Result<uqa_storage::read_control::StorageReadControl, SQLError> {
+        use uqa_storage::read_control::StorageReadControl;
+        if let Some(control) = self
+            .storage
+            .backend
+            .as_ref()
+            .and_then(|backend| backend.retention_control())
+        {
+            return Ok(StorageReadControl::new(
+                control.memory(),
+                &self.runtime.cancellation,
+            ));
+        }
+        if self.versioned_backend_transactions() {
+            return Err(SQLError::Internal(
+                "versioned backend omitted its retention allowance".into(),
+            ));
+        }
+        Ok(StorageReadControl::new(
+            &self.session.query_retention,
+            &self.runtime.cancellation,
+        ))
+    }
+
     pub(crate) fn capture_query_document_changes(
         &self,
         table: &TableState,
-        desired: std::collections::BTreeMap<crate::DocId, bool>,
+        desired: uqa_execution::query::document_changes::DocumentSelection,
     ) -> Result<uqa_execution::query::document_changes::DocumentChanges, SQLError> {
         use uqa_execution::query::document_changes::DocumentChanges;
         use uqa_execution::storage_errors::storage_error;
+        let control = self.query_retention_control()?;
         let source = table.document_store.read();
         if self.storage.backend.is_none() || self.versioned_backend_transactions() {
             DocumentChanges::default().with_retained(
@@ -24,10 +51,10 @@ impl Engine {
                     .snapshot()
                     .map_err(|error| storage_error("capture private document source", &error))?,
                 desired,
-                &self.runtime.cancellation,
+                &control,
             )
         } else {
-            DocumentChanges::capture_owned(source.as_ref(), desired, &self.runtime.cancellation)
+            DocumentChanges::capture_owned(source.as_ref(), desired, &control)
         }
         .map_err(|error| storage_error("capture private document changes", &error))
     }

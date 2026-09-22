@@ -27,7 +27,7 @@ use fetch::{
 };
 use uqa_sql::ast::{CursorDirection, FetchCursorStmt};
 
-use uqa_execution::query::document_changes::DocumentChanges;
+use uqa_execution::query::document_changes::{DocumentChanges, DocumentSelection};
 use uqa_sql::binding::portals::SessionPortalTableDependencies;
 
 type SessionPortalTableSource = (
@@ -466,22 +466,30 @@ impl Engine {
         if relation_names.is_empty() {
             return Ok(std::collections::BTreeMap::new());
         }
+        let control = self.query_retention_control()?;
         let desired = {
             let stack = self.session.transactions.lock();
-            let mut desired = std::collections::BTreeMap::<
-                String,
-                std::collections::BTreeMap<crate::DocId, bool>,
-            >::new();
+            let mut desired = std::collections::BTreeMap::<String, DocumentSelection>::new();
             for change in stack.iter().flat_map(|frame| frame.row_changes.iter()) {
                 if let Some(table) = relation_names.get(&change.source_generation) {
-                    desired.entry(table.clone()).or_default().insert(
-                        change.pending.key.doc_id,
-                        !matches!(
-                            change.pending.kind,
-                            crate::row_locks::PendingRowChangeKind::Delete
-                                | crate::row_locks::PendingRowChangeKind::Rewrite(_)
-                        ),
-                    );
+                    desired
+                        .entry(table.clone())
+                        .or_insert_with(|| DocumentSelection::new(&control))
+                        .insert(
+                            change.pending.key.doc_id,
+                            !matches!(
+                                change.pending.kind,
+                                crate::row_locks::PendingRowChangeKind::Delete
+                                    | crate::row_locks::PendingRowChangeKind::Rewrite(_)
+                            ),
+                            &control,
+                        )
+                        .map_err(|error| {
+                            uqa_execution::storage_errors::storage_error(
+                                "select portal rows",
+                                &error,
+                            )
+                        })?;
                 }
                 if let crate::row_locks::PendingRowChangeKind::Rewrite(successor) =
                     change.pending.kind
@@ -492,8 +500,14 @@ impl Engine {
                     {
                         desired
                             .entry(table.clone())
-                            .or_default()
-                            .insert(successor.doc_id, true);
+                            .or_insert_with(|| DocumentSelection::new(&control))
+                            .insert(successor.doc_id, true, &control)
+                            .map_err(|error| {
+                                uqa_execution::storage_errors::storage_error(
+                                    "select portal rows",
+                                    &error,
+                                )
+                            })?;
                     }
                 }
             }

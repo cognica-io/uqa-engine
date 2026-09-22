@@ -5,10 +5,11 @@
 //
 
 use super::{
-    command_exact_document_key, command_exact_lookup_parts, Arc, BTreeMap, CommandOverlayDocument,
-    DocId, Document, Engine, SQLError, Value,
+    command_exact_document_key, command_exact_lookup_parts, Arc, CommandOverlayDocument, DocId,
+    Document, Engine, SQLError, Value,
 };
-use uqa_execution::query::document_changes::DocumentChanges;
+use uqa_execution::query::document_changes::{DocumentChanges, DocumentSelection};
+use uqa_execution::storage_errors::storage_error;
 use uqa_storage::{DocumentMetadata, StoredDocument};
 
 impl Engine {
@@ -231,16 +232,24 @@ impl Engine {
         if overlays.is_empty() && !changes.has_changes() {
             return Ok(None);
         }
+        let control = self.query_retention_control()?;
         for overlay in overlays.iter() {
             if let Some(documents) = overlay.documents.get(&canonical) {
-                for (id, document) in documents {
-                    changes.insert_shared(
-                        *id,
-                        document
-                            .as_ref()
-                            .map(|document| (Arc::clone(&document.fields), document.metadata)),
-                    );
-                }
+                let additions = DocumentChanges::from_shared(
+                    documents.iter().map(|(id, document)| {
+                        (
+                            *id,
+                            document
+                                .as_ref()
+                                .map(|document| (Arc::clone(&document.fields), document.metadata)),
+                        )
+                    }),
+                    &control,
+                )
+                .map_err(|error| storage_error("capture command selection", &error))?;
+                changes
+                    .extend(additions, &control)
+                    .map_err(|error| storage_error("merge command selection", &error))?;
             }
         }
         Ok(Some(changes))
@@ -270,6 +279,7 @@ impl Engine {
         let Some(generation) = generation else {
             return Ok(changes.has_changes().then_some(changes));
         };
+        let control = self.query_retention_control()?;
         let desired = {
             let stack = self.session.transactions.lock();
             if self.query_transaction_overlay.is_none()
@@ -279,7 +289,7 @@ impl Engine {
             {
                 return Ok(None);
             }
-            let mut desired = BTreeMap::new();
+            let mut desired = DocumentSelection::new(&control);
             for change in stack.iter().flat_map(|frame| frame.row_changes.iter()) {
                 if self
                     .query_transaction_origin
@@ -288,20 +298,25 @@ impl Engine {
                     continue;
                 }
                 if change.source_generation == generation {
-                    desired.insert(
-                        change.pending.key.doc_id,
-                        !matches!(
-                            change.pending.kind,
-                            crate::row_locks::PendingRowChangeKind::Delete
-                                | crate::row_locks::PendingRowChangeKind::Rewrite(_)
-                        ),
-                    );
+                    desired
+                        .insert(
+                            change.pending.key.doc_id,
+                            !matches!(
+                                change.pending.kind,
+                                crate::row_locks::PendingRowChangeKind::Delete
+                                    | crate::row_locks::PendingRowChangeKind::Rewrite(_)
+                            ),
+                            &control,
+                        )
+                        .map_err(|error| storage_error("select private query rows", &error))?;
                 }
                 if let crate::row_locks::PendingRowChangeKind::Rewrite(successor) =
                     change.pending.kind
                 {
                     if change.successor_generation == Some(generation) {
-                        desired.insert(successor.doc_id, true);
+                        desired
+                            .insert(successor.doc_id, true, &control)
+                            .map_err(|error| storage_error("select private query rows", &error))?;
                     }
                 }
             }
@@ -322,7 +337,12 @@ impl Engine {
                     "transaction row changes refer to unavailable relation generation for `{canonical_table}`"
                 ))
             })?;
-        changes.extend(self.capture_query_document_changes(&live, desired)?);
+        changes
+            .extend(
+                self.capture_query_document_changes(&live, desired)?,
+                &control,
+            )
+            .map_err(|error| storage_error("merge private query rows", &error))?;
         Ok(Some(changes))
     }
 }

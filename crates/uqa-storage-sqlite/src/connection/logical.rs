@@ -207,6 +207,15 @@ impl ManagedConnection {
         operation(logical)
     }
 
+    pub(crate) fn retention_control(
+        &self,
+    ) -> Option<uqa_storage::read_control::StorageReadControl> {
+        self.session
+            .logical
+            .get()
+            .map(|logical| logical.retention_control())
+    }
+
     pub(crate) fn begin_record_read(&self) -> Result<()> {
         self.surface_cleanup_failure()?;
         let _gate = self.session.gate.write();

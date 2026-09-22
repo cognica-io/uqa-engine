@@ -287,6 +287,11 @@ pub trait PersistentStorageProvider: Send + Sync {
 
 /// Factory plus transaction surface for persistent table/index storage.
 pub trait PersistentStorageBackend: Send + Sync {
+    /// Shared allowance for this session's private state and retained query resources. Versioned wrappers must forward it; nested retained readers keep the original allowance rather than granting another limit.
+    fn retention_control(&self) -> Option<crate::read_control::StorageReadControl> {
+        None
+    }
+
     /// Original participant admission and logical observations, shared with the paired catalog transaction. Retained readers preserve original attribution without owning completion. Wrappers must forward this capability; SQL access-path coverage remains the execution owner's responsibility.
     fn serializable_session(&self) -> Option<&dyn crate::mvcc::SerializableSession> {
         None
