@@ -91,11 +91,9 @@ new_storage = {{ package = "uqa-storage", path = {json.dumps(str(ROOT / "crates/
         (project / "Cargo.toml").write_text(manifest)
         (project / "src" / "bin" / "old.rs").write_text(OLD)
         (project / "src" / "bin" / "new.rs").write_text(NEW)
-        environment = dict(os.environ, CARGO_BUILD_JOBS="2")
         subprocess.run(
             ["cargo", "build", "--manifest-path", str(project / "Cargo.toml"), "--target-dir", str(target)],
             check=True,
-            env=environment,
         )
         checksum = registry_package_checksum(project / "Cargo.toml", "uqa-storage-redb", "0.3.6")
         print(f"Released provider checksum: {checksum}", flush=True)

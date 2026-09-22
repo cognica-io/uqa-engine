@@ -243,7 +243,6 @@ new_core = {{ package = "uqa-core", path = {json.dumps(str(ROOT / "crates/uqa-co
         subprocess.run(
             ["cargo", "build", "--manifest-path", str(project / "Cargo.toml"), "--target-dir", str(target)],
             check=True,
-            env=dict(os.environ, CARGO_BUILD_JOBS="2"),
         )
         checksum = registry_package_checksum(project / "Cargo.toml", "uqa-storage-sqlite", "0.3.6")
         print(f"Released provider checksum: {checksum}", flush=True)

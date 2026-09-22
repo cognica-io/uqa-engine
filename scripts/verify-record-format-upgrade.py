@@ -174,7 +174,6 @@ def build(source: Path, project: Path, label: str, target: Path, offline: bool) 
     subprocess.run(
         ["cargo", "build", *network, "--locked", "--manifest-path", str(project / "Cargo.toml"), "--target-dir", str(target)],
         check=True,
-        env=dict(os.environ, CARGO_BUILD_JOBS="2"),
     )
     return target / "debug" / (name + (".exe" if os.name == "nt" else ""))
 
