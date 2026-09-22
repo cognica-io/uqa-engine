@@ -23,6 +23,7 @@ struct State {
     layout: RowLayout,
     changes: BTreeMap<DocId, Option<StoredDocument>>,
     count: usize,
+    cancellation: uqa_core::CancellationToken,
 }
 
 #[derive(Clone)]
@@ -52,7 +53,42 @@ impl RetainedDocuments {
             layout,
             changes,
             count,
+            cancellation: cancellation.clone(),
         })))
+    }
+
+    fn visit_ids(
+        &self,
+        mut visitor: impl FnMut(DocId) -> StorageBackendResult<bool>,
+    ) -> StorageBackendResult<()> {
+        let mut after = None;
+        loop {
+            let ids = self.next_doc_ids(after, crate::DEFAULT_BATCH_SIZE)?;
+            let Some(last) = ids.last().copied() else {
+                return Ok(());
+            };
+            for id in ids {
+                self.0.cancellation.check()?;
+                if !visitor(id)? {
+                    return Ok(());
+                }
+            }
+            after = Some(last);
+        }
+    }
+
+    fn find_id(
+        &self,
+        mut matches: impl FnMut(DocId) -> StorageBackendResult<bool>,
+    ) -> StorageBackendResult<Option<DocId>> {
+        let mut found = None;
+        self.visit_ids(|id| {
+            if matches(id)? {
+                found = Some(id);
+            }
+            Ok(found.is_none())
+        })?;
+        Ok(found)
     }
 }
 
@@ -161,6 +197,36 @@ impl DocumentStore for RetainedDocuments {
             Some(None) => Ok(None),
             None => self.0.layout.base_field(self.0.source.as_ref(), id, field),
         }
+    }
+
+    fn find_doc_id_by_field(
+        &self,
+        field: &str,
+        value: &Value,
+    ) -> StorageBackendResult<Option<DocId>> {
+        self.find_id(|id| Ok(self.get_field(id, field)?.as_ref() == Some(value)))
+    }
+
+    fn find_doc_id_by_fields(
+        &self,
+        fields: &[String],
+        values: &[Value],
+    ) -> StorageBackendResult<Option<DocId>> {
+        if fields.is_empty() || fields.len() != values.len() {
+            return Ok(None);
+        }
+        self.find_id(|id| {
+            for (field, value) in fields.iter().zip(values) {
+                if self.get_field(id, field)?.unwrap_or(Value::Null) != *value {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        })
+    }
+
+    fn has_value(&self, field: &str, value: &Value) -> StorageBackendResult<bool> {
+        Ok(self.find_doc_id_by_field(field, value)?.is_some())
     }
 
     fn get_fields_multi(
@@ -287,12 +353,14 @@ impl DocumentStore for RetainedDocuments {
     }
 
     fn next_doc_ids(&self, after: Option<DocId>, limit: usize) -> StorageBackendResult<Vec<DocId>> {
+        self.0.cancellation.check()?;
         if limit == 0 {
             return Ok(Vec::new());
         }
         let mut base = Vec::new();
         let mut cursor = after;
         while base.len() < limit {
+            self.0.cancellation.check()?;
             let page = self
                 .0
                 .source
@@ -317,12 +385,14 @@ impl DocumentStore for RetainedDocuments {
             .0
             .changes
             .range((after.map_or(Unbounded, Excluded), Unbounded))
+            .take_while(|_| !self.0.cancellation.is_cancelled())
             .filter_map(|(id, row)| row.as_ref().map(|_| *id))
             .take(limit);
         let mut base = base.into_iter().peekable();
         let mut private = private.peekable();
         let mut ids = Vec::new();
         while ids.len() < limit {
+            self.0.cancellation.check()?;
             let id = match (base.peek(), private.peek()) {
                 (Some(left), Some(right)) if left < right => base.next(),
                 (_, Some(_)) => private.next(),
@@ -331,7 +401,17 @@ impl DocumentStore for RetainedDocuments {
             };
             ids.extend(id);
         }
+        self.0.cancellation.check()?;
         Ok(ids)
+    }
+
+    fn max_doc_id(&self) -> StorageBackendResult<DocId> {
+        let mut last = 0;
+        self.visit_ids(|id| {
+            last = id;
+            Ok(true)
+        })?;
+        Ok(last)
     }
 
     fn len(&self) -> StorageBackendResult<usize> {

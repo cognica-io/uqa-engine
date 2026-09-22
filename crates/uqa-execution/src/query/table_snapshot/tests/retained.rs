@@ -7,12 +7,15 @@
 use super::*;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+mod lookup;
+
 #[derive(Clone)]
 struct ProjectedSource {
     rows: Arc<dyn DocumentStore>,
     pages: Arc<AtomicUsize>,
     projections: Arc<AtomicUsize>,
     borrowing: Arc<AtomicBool>,
+    cancel_after_page: Option<CancellationToken>,
 }
 
 impl ProjectedSource {
@@ -22,6 +25,7 @@ impl ProjectedSource {
             pages: Arc::default(),
             projections: Arc::default(),
             borrowing: Arc::default(),
+            cancel_after_page: None,
         }
     }
 }
@@ -89,7 +93,11 @@ impl DocumentStore for ProjectedSource {
     fn next_doc_ids(&self, after: Option<DocId>, limit: usize) -> StorageBackendResult<Vec<DocId>> {
         assert!(limit <= crate::DEFAULT_BATCH_SIZE);
         self.pages.fetch_add(1, Ordering::Relaxed);
-        self.rows.next_doc_ids(after, limit)
+        let ids = self.rows.next_doc_ids(after, limit)?;
+        if let Some(token) = &self.cancel_after_page {
+            token.cancel();
+        }
+        Ok(ids)
     }
     fn len(&self) -> StorageBackendResult<usize> {
         self.rows.len()
