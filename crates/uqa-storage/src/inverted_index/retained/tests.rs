@@ -219,7 +219,7 @@ fn nested_readers_retain_one_charge_and_reject_mutation() {
     let first = retained.snapshot().unwrap();
     let second = first.snapshot().unwrap();
     let other = StorageReadControl::with_limit(0);
-    let second = second.snapshot_with_control(&other).unwrap();
+    let third = second.snapshot_with_control(&other).unwrap();
     assert_eq!(other.memory().used(), 0);
     assert_eq!(control.memory().used(), bytes);
     assert!(retained.clear().is_err());
@@ -235,9 +235,10 @@ fn nested_readers_retain_one_charge_and_reject_mutation() {
         .is_err());
     drop(retained);
     drop(first);
-    assert_eq!(control.memory().used(), bytes);
-    assert_eq!(second.get_term_freq(1, "body", "same").unwrap(), 2);
     drop(second);
+    assert_eq!(control.memory().used(), bytes);
+    assert_eq!(third.get_term_freq(1, "body", "same").unwrap(), 2);
+    drop(third);
     assert_eq!(control.memory().used(), 0);
 }
 
