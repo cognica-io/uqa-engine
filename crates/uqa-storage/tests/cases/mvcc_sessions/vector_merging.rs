@@ -161,6 +161,9 @@ fn vector_repreparation_and_receipt_recovery_preserve_the_sealed_fingerprint() {
             if fault == CommitFault::LoseBeforeCommit {
                 assert_eq!(state.attempts[start + 2], expected);
             }
+            drop(state);
+            // The live index retains its decoded physical cache after transaction completion.
+            drop(left);
             assert_eq!(a.retention_control().memory().used(), 0);
         }
     }
@@ -209,6 +212,8 @@ fn vector_commit_allowance_failure_preserves_the_inputs_for_retry() {
         drop(hold);
         a.commit_transaction().unwrap();
         assert_eq!(right.count().unwrap(), 3);
+        // Check final release after both the transaction and its cached index owner finish.
+        drop(left);
         assert_eq!(control.memory().used(), 0);
     }
 }

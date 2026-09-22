@@ -266,6 +266,8 @@ fn maintenance_and_graph_occurrence_vector_effects_share_refresh_and_publication
                 right.graph_vertex(1).unwrap().unwrap().properties_json,
                 "{\"changed\":true}"
             );
+            // The live vector handle owns its last decoded physical generation and allowance.
+            drop(vector_left);
             assert_eq!(a.retention_control().memory().used(), 0);
         }
     }
