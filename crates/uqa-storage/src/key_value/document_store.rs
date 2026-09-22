@@ -7,6 +7,7 @@
 //! Document access and mutations use one provider-owned view of the exact storage name.
 
 mod migration;
+mod projection;
 mod read;
 
 use std::collections::BTreeMap;
@@ -170,18 +171,27 @@ impl DocumentStore for KeyValueDocumentStore {
         fields: &[&str],
         visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
     ) -> StorageBackendResult<()> {
-        // Finish persistence access before invoking the caller, including empty projections.
-        let projected = self.get_fields_multi(ids, fields)?;
-        let null = Value::Null;
-        let missing = vec![&null; fields.len()];
-        for id in ids {
-            let present = projected.get(id);
-            let row = present.map(|row| row.iter().collect::<Vec<_>>());
-            if !visitor(*id, present.is_some(), row.as_deref().unwrap_or(&missing)) {
-                break;
-            }
-        }
-        Ok(())
+        self.visit_projection(ids, fields, visitor)
+    }
+
+    fn for_each_fields_multi_ref(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> StorageBackendResult<()> {
+        self.visit_projection(ids, fields, &mut |id, _, values| visitor(id, values))
+    }
+
+    fn for_each_fields_multi(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, Vec<Value>) -> bool,
+    ) -> StorageBackendResult<()> {
+        self.visit_projection(ids, fields, &mut |id, _, values| {
+            visitor(id, values.iter().map(|value| (*value).clone()).collect())
+        })
     }
 
     fn get_fields_bulk(

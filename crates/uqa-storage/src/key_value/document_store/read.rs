@@ -147,7 +147,7 @@ impl Documents<'_> {
         let mut found = None;
         for_each_key(self.read, &prefix, &mut |key| {
             let id = decode_id(&prefix, key)?;
-            if let Some(document) = self.get(id)? {
+            if let Some(document) = self.get_retained(id)? {
                 if predicate(document.fields()) {
                     found = Some(id);
                 }
