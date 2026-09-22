@@ -16,29 +16,31 @@ impl RetainedDocuments {
         fields: &[&str],
         visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
     ) -> StorageBackendResult<()> {
-        let projection = self.0.layout.projection(fields);
+        let base_projection = self.0.layout.projection(fields);
+        let private_projection = self.0.private_layout.projection(fields);
         let nulls = vec![&Value::Null; fields.len()];
         let mut index = 0;
         while index < ids.len() {
+            self.0.cancellation.check()?;
             let id = ids[index];
-            if let Some(row) = self.0.changes.get(&id) {
-                let keep_going = match row {
-                    None => visitor(id, false, &nulls),
-                    Some(row) => match self.0.layout.private_projection(row, fields) {
-                        Some(values) => visitor(id, true, &values),
-                        None => self.visit_individual_projection(id, fields, visitor)?,
-                    },
-                };
-                if !keep_going {
-                    break;
-                }
-                index += 1;
-            } else if let Some(projection) = projection.as_ref() {
+            let private = self.0.changes.contains_change(id);
+            let projection = if private {
+                &private_projection
+            } else {
+                &base_projection
+            };
+            if let Some(projection) = projection.as_ref() {
                 let start = index;
-                while index < ids.len() && !self.0.changes.contains_key(&ids[index]) {
+                while index < ids.len() && self.0.changes.contains_change(ids[index]) == private {
                     index += 1;
                 }
-                if !self.visit_base_projection(
+                let source: &dyn DocumentStore = if private {
+                    &self.0.changes
+                } else {
+                    self.0.source.as_ref()
+                };
+                if !self.visit_source_projection(
+                    source,
                     &ids[start..index],
                     fields,
                     projection,
@@ -79,8 +81,9 @@ impl RetainedDocuments {
         Ok(visitor(id, present, &values))
     }
 
-    fn visit_base_projection(
+    fn visit_source_projection(
         &self,
+        source: &dyn DocumentStore,
         ids: &[DocId],
         fields: &[&str],
         projection: &RowProjection<'_>,
@@ -92,7 +95,7 @@ impl RetainedDocuments {
             let mut visited = 0;
             let mut ambiguous = None;
             let mut keep_going = true;
-            self.0.source.for_each_fields_multi_ref_with_presence(
+            source.for_each_fields_multi_ref_with_presence(
                 &ids[offset..],
                 &projection.sources,
                 &mut |id, present, values| {

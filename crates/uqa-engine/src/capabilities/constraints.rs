@@ -74,7 +74,7 @@ impl MutationRead for Engine {
         table: &str,
     ) -> Result<Option<BTreeSet<DocId>>, SQLError> {
         self.command_overlay_changes(table)
-            .map(|changes| changes.map(|changes| changes.into_keys().collect()))
+            .map(|changes| changes.map(|changes| changes.changes().map(|(id, _)| id).collect()))
     }
 }
 impl MutationIndexRead for Engine {

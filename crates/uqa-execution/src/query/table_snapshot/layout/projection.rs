@@ -8,7 +8,7 @@
 
 use super::RowLayout;
 use uqa_core::{DocId, Value};
-use uqa_storage::{DocumentStore, StorageBackendError, StorageBackendResult, StoredDocument};
+use uqa_storage::{DocumentStore, StorageBackendError, StorageBackendResult};
 
 enum Slot<'a> {
     Source(usize),
@@ -105,26 +105,6 @@ impl RowLayout {
         })
     }
 
-    pub(in crate::query::table_snapshot) fn private_projection<'a>(
-        &'a self,
-        document: &'a StoredDocument,
-        fields: &[&str],
-    ) -> Option<Vec<&'a Value>> {
-        fields
-            .iter()
-            .map(|field| {
-                if let Some(value) = document.fields().get(*field) {
-                    return Some(value);
-                }
-                match self.columns.iter().find(|column| column.name == *field) {
-                    Some(column) if column.generated.is_some() => None,
-                    Some(column) => Some(column.missing_value.as_ref().unwrap_or(&Value::Null)),
-                    None => Some(&Value::Null),
-                }
-            })
-            .collect()
-    }
-
     pub(in crate::query::table_snapshot) fn base_field(
         &self,
         source: &dyn DocumentStore,
@@ -138,6 +118,16 @@ impl RowLayout {
                 source.get_field(id, field)
             };
         };
+        if let Some(name) = self.source_name(field) {
+            if let Some(value) = source.get_field(id, name)? {
+                return Ok(Some(value));
+            }
+        }
+        if !self.source.iter().any(|(name, _)| name == field) {
+            if let Some(value) = source.get_field(id, field)? {
+                return Ok(Some(value));
+            }
+        }
         if column.generated.is_some() {
             return source
                 .get_stored(id)?
@@ -149,38 +139,8 @@ impl RowLayout {
                 .transpose()
                 .map(Option::flatten);
         }
-        if let Some(name) = self.source_name(field) {
-            if let Some(value) = source.get_field(id, name)? {
-                return Ok(Some(value));
-            }
-        }
-        if !self.source.iter().any(|(name, _)| name == field) {
-            if let Some(value) = source.get_field(id, field)? {
-                return Ok(Some(value));
-            }
-        }
         Ok(source
             .contains_doc_id(id)?
             .then(|| column.missing_value.clone().unwrap_or(Value::Null)))
-    }
-
-    pub(in crate::query::table_snapshot) fn private_field(
-        &self,
-        document: &StoredDocument,
-        field: &str,
-    ) -> StorageBackendResult<Option<Value>> {
-        if let Some(value) = document.fields().get(field) {
-            return Ok(Some(value.clone()));
-        }
-        let Some(column) = self.columns.iter().find(|column| column.name == field) else {
-            return Ok(None);
-        };
-        if column.generated.is_some() {
-            return self
-                .complete_private(document.clone())
-                .map(|mut row| row.fields_mut().remove(field))
-                .map_err(Self::error);
-        }
-        Ok(Some(column.missing_value.clone().unwrap_or(Value::Null)))
     }
 }

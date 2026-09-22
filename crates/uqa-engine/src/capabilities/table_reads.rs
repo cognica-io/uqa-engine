@@ -57,10 +57,7 @@ impl QueryTableAccess for Engine {
     fn command_overlay_changes(
         &self,
         name: &str,
-    ) -> Result<
-        Option<std::collections::BTreeMap<uqa_core::DocId, Option<uqa_storage::StoredDocument>>>,
-        SQLError,
-    > {
+    ) -> Result<Option<uqa_execution::query::document_changes::DocumentChanges>, SQLError> {
         self.command_overlay_changes(name)
     }
     fn table_doc_count(&self, name: &str) -> Result<u64, SQLError> {

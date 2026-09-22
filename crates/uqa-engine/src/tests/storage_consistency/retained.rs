@@ -231,3 +231,171 @@ fn fixed_snapshot_keeps_private_values_after_column_rename_and_name_reuse() {
         engine.rollback().unwrap();
     }
 }
+
+#[test]
+fn fixed_private_captures_share_rows_without_decoding_or_enumerating_the_source() {
+    use std::sync::atomic::Ordering;
+    let directory = tempfile::tempdir().unwrap();
+    let engine = Engine::open(&directory.path().join("private-capture.db")).unwrap();
+    engine.sql("CREATE TABLE private_capture (id INTEGER PRIMARY KEY, body TEXT); INSERT INTO private_capture VALUES (1, 'original'), (2, 'deleted')", &[]).unwrap();
+    engine.sql("BEGIN ISOLATION LEVEL REPEATABLE READ; SELECT * FROM private_capture; UPDATE private_capture SET body = 'private' WHERE id = 1; DELETE FROM private_capture WHERE id = 2; INSERT INTO private_capture VALUES (3, 'inserted')", &[]).unwrap();
+    let probe = PortalSnapshotProbeStore::from_table(&engine, "private_capture");
+    let reads = Arc::clone(&probe.row_reads);
+    let ids = Arc::clone(&probe.doc_id_calls);
+    let live = engine.require_table("private_capture").unwrap();
+    let original = std::mem::replace(&mut *live.document_store.write(), Box::new(probe));
+    let first = engine.capture_statement_read_snapshot().unwrap();
+    let second = engine.capture_statement_read_snapshot().unwrap();
+    let selected = engine.try_query_table("private_capture").unwrap().unwrap();
+    let changes = engine
+        .command_overlay_changes("private_capture")
+        .unwrap()
+        .unwrap();
+    assert_eq!(reads.load(Ordering::Relaxed), 0);
+    assert_eq!(ids.load(Ordering::Relaxed), 0);
+    let private_ids = changes.doc_ids().unwrap();
+    let projected = engine
+        .get_query_document_fields_multi("private_capture", &private_ids, &["body", "xmin"])
+        .unwrap();
+    assert_eq!(projected.len(), 2);
+    assert_eq!(reads.load(Ordering::Relaxed), 0);
+    assert_eq!(ids.load(Ordering::Relaxed), 0);
+    *live.document_store.write() = original;
+    drop(live);
+    engine
+        .sql("UPDATE private_capture SET body = 'later'; ROLLBACK", &[])
+        .unwrap();
+    for snapshot in [first, second] {
+        let reader = engine.statement_read_snapshot_engine(&snapshot);
+        let rows = reader
+            .sql("SELECT body FROM private_capture ORDER BY id", &[])
+            .unwrap()
+            .rows;
+        assert_eq!(
+            rows.iter()
+                .map(|row| row["body"].clone())
+                .collect::<Vec<_>>(),
+            vec![s("private"), s("inserted")]
+        );
+    }
+    engine.close().unwrap();
+    let rows = selected
+        .document_store
+        .read()
+        .get_fields_multi(&private_ids, &["body"])
+        .unwrap();
+    assert_eq!(
+        rows.values().map(|row| row[0].clone()).collect::<Vec<_>>(),
+        vec![s("private"), s("inserted")]
+    );
+}
+
+#[test]
+fn successive_private_captures_keep_distinct_boundaries_across_provider_rollback_and_close() {
+    let (_directory, engines) = engines();
+    for engine in engines {
+        engine.sql("CREATE TABLE private_capture (id INTEGER PRIMARY KEY, body TEXT); INSERT INTO private_capture VALUES (1, 'original'), (2, 'deleted')", &[]).unwrap();
+        engine.sql("BEGIN ISOLATION LEVEL REPEATABLE READ; SELECT * FROM private_capture; UPDATE private_capture SET body = 'first' WHERE id = 1; DELETE FROM private_capture WHERE id = 2; INSERT INTO private_capture VALUES (3, 'inserted')", &[]).unwrap();
+        // Query selection can return the live in-memory handle; explicitly capture it before testing lifetime across later mutations.
+        let capture = || {
+            let selected = engine.require_query_table("private_capture").unwrap();
+            engine
+                .detach_query_table(&selected, &selected, None)
+                .unwrap()
+        };
+        let first = capture();
+        let snapshot = engine.capture_statement_read_snapshot().unwrap();
+        engine.sql("SAVEPOINT private_rows; UPDATE private_capture SET body = 'second' WHERE id = 1; DELETE FROM private_capture WHERE id = 3; INSERT INTO private_capture VALUES (4, 'later')", &[]).unwrap();
+        let second = capture();
+        engine.sql("ROLLBACK TO private_rows", &[]).unwrap();
+        let restored = capture();
+        engine.rollback().unwrap();
+        let reader = engine.statement_read_snapshot_engine(&snapshot);
+        assert_eq!(
+            reader
+                .sql("SELECT body FROM private_capture ORDER BY id", &[])
+                .unwrap()
+                .rows
+                .iter()
+                .map(|row| row["body"].clone())
+                .collect::<Vec<_>>(),
+            vec![s("first"), s("inserted")]
+        );
+        drop(reader);
+        drop(snapshot);
+        engine.close().unwrap();
+        drop(engine);
+        for (table, expected) in [
+            (first, vec![s("first"), s("inserted")]),
+            (second, vec![s("second"), s("later")]),
+            (restored, vec![s("first"), s("inserted")]),
+        ] {
+            let store = table.document_store.read();
+            let ids = store.next_doc_ids(None, 8).unwrap();
+            let rows = store.get_fields_multi(&ids, &["body"]).unwrap();
+            assert_eq!(
+                rows.values().map(|row| row[0].clone()).collect::<Vec<_>>(),
+                expected
+            );
+        }
+    }
+}
+
+#[test]
+fn private_capture_failures_keep_transaction_diagnostics_and_the_original_view() {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = Engine::open(&directory.path().join("capture-errors.db")).unwrap();
+    engine.sql("CREATE TABLE capture_errors (id INT PRIMARY KEY, body TEXT); INSERT INTO capture_errors VALUES (1, 'original')", &[]).unwrap();
+    engine.sql("BEGIN ISOLATION LEVEL REPEATABLE READ; SELECT * FROM capture_errors; UPDATE capture_errors SET body = 'private'", &[]).unwrap();
+    let failures: [(SnapshotErrorFactory, &str); 3] = [
+        (|| uqa_core::QueryCancelled.into(), "57014"),
+        (
+            || uqa_core::memory::MemoryError::SizeOverflow.into(),
+            "53200",
+        ),
+        (
+            || {
+                uqa_storage::mvcc::VersionError::ReadConflict {
+                    dependency: 0,
+                    expected: None,
+                    actual: None,
+                }
+                .into_storage_error()
+            },
+            "40001",
+        ),
+    ];
+    for (failure, state) in failures {
+        let mut probe = PortalSnapshotProbeStore::from_table(&engine, "capture_errors");
+        probe.snapshot_error = Some(failure);
+        let live = engine.require_table("capture_errors").unwrap();
+        let original = std::mem::replace(&mut *live.document_store.write(), Box::new(probe));
+        let snapshot_error = engine
+            .capture_statement_read_snapshot()
+            .err()
+            .expect("capture must fail");
+        let query_error = engine
+            .get_query_document_fields_multi("capture_errors", &[1], &["body"])
+            .unwrap_err();
+        *live.document_store.write() = original;
+        assert_eq!(snapshot_error.sqlstate(), Some(state), "{snapshot_error}");
+        assert_eq!(query_error.sqlstate(), Some(state), "{query_error}");
+        if state == "57014" {
+            assert!(matches!(query_error, SQLError::Cancelled(_)));
+        }
+        assert_eq!(
+            engine
+                .get_query_document_fields_multi("capture_errors", &[1], &["body"])
+                .unwrap()[&1],
+            vec![s("private")]
+        );
+    }
+    engine.rollback().unwrap();
+    assert_eq!(
+        engine
+            .sql("SELECT body FROM capture_errors", &[])
+            .unwrap()
+            .rows[0]["body"],
+        s("original")
+    );
+}

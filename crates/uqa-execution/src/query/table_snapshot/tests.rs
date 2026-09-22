@@ -96,7 +96,7 @@ fn base_column_incarnations_and_private_column_layouts_remain_distinct() {
         &source,
         &source_columns,
         &schema(&target, &index),
-        [(2, Some(private.clone()))].into(),
+        BTreeMap::from([(2, Some(private.clone()))]).into(),
         &CancellationToken::new(),
     )
     .unwrap();
@@ -173,7 +173,7 @@ fn reconstruction_pages_rows_and_skips_private_replacements_and_deletions() {
     }
     let fields = columns("CREATE TABLE t (id INTEGER)");
     let index = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
-    let changes = [
+    let changes: BTreeMap<_, _> = [
         (0, None),
         (1, Some(document(&[("id", Value::Int(-1))], 21))),
         (count, Some(document(&[("id", Value::Int(-2))], 21))),
@@ -183,7 +183,7 @@ fn reconstruction_pages_rows_and_skips_private_replacements_and_deletions() {
         &source,
         &fields,
         &schema(&fields, &index),
-        changes,
+        changes.into(),
         &CancellationToken::new(),
     )
     .unwrap();
@@ -245,7 +245,7 @@ fn adapted_text_vectors_defaults_and_generated_fields_agree_with_rows() {
         &source,
         &source_columns,
         &selected,
-        BTreeMap::new(),
+        DocumentChanges::default(),
         &CancellationToken::new(),
     )
     .unwrap();
@@ -284,6 +284,13 @@ fn cancellation_prevents_any_source_read_or_partial_result() {
     let index = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
     let cancel = CancellationToken::new();
     cancel.cancel();
-    assert!(materialize(&source, &[], &schema(&[], &index), BTreeMap::new(), &cancel).is_err());
+    assert!(materialize(
+        &source,
+        &[],
+        &schema(&[], &index),
+        DocumentChanges::default(),
+        &cancel
+    )
+    .is_err());
     assert!(source.requested.lock().is_empty());
 }

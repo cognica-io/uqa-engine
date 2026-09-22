@@ -10,6 +10,28 @@ use super::{DocumentStore, Engine, InvertedIndex, SQLError, TableState, VectorIn
 use uqa_storage::ReadOnlySnapshot;
 
 impl Engine {
+    pub(crate) fn capture_query_document_changes(
+        &self,
+        table: &TableState,
+        desired: std::collections::BTreeMap<crate::DocId, bool>,
+    ) -> Result<uqa_execution::query::document_changes::DocumentChanges, SQLError> {
+        use uqa_execution::query::document_changes::DocumentChanges;
+        use uqa_execution::storage_errors::storage_error;
+        let source = table.document_store.read();
+        if self.storage.backend.is_none() || self.versioned_backend_transactions() {
+            DocumentChanges::default().with_retained(
+                source
+                    .snapshot()
+                    .map_err(|error| storage_error("capture private document source", &error))?,
+                desired,
+                &self.runtime.cancellation,
+            )
+        } else {
+            DocumentChanges::capture_owned(source.as_ref(), desired, &self.runtime.cancellation)
+        }
+        .map_err(|error| storage_error("capture private document changes", &error))
+    }
+
     pub(super) fn with_query_snapshot_schema<T>(
         metadata: &TableState,
         operation: impl FnOnce(

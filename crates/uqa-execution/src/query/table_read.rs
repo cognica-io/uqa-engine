@@ -44,9 +44,6 @@ pub trait QueryTableAccess: Sync {
     fn command_overlay_changes(
         &self,
         name: &str,
-    ) -> Result<
-        Option<std::collections::BTreeMap<uqa_core::DocId, Option<uqa_storage::StoredDocument>>>,
-        uqa_sql::SQLError,
-    >;
+    ) -> Result<Option<super::document_changes::DocumentChanges>, uqa_sql::SQLError>;
     fn table_doc_count(&self, name: &str) -> Result<u64, uqa_sql::SQLError>;
 }

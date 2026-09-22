@@ -18,6 +18,7 @@ use uqa_storage::{
 
 mod documents;
 mod layout;
+use super::document_changes::DocumentChanges;
 use layout::RowLayout;
 
 #[cfg(test)]
@@ -44,13 +45,14 @@ pub fn retain(
     source: Arc<dyn DocumentStore>,
     source_columns: &[ColumnDef],
     schema: &SnapshotSchema<'_>,
-    changes: BTreeMap<DocId, Option<StoredDocument>>,
+    changes: DocumentChanges,
     cancellation: &CancellationToken,
 ) -> Result<MaterializedTable, SQLError> {
     cancellation.check()?;
     let documents = documents::RetainedDocuments::new(
         source,
         RowLayout::new(source_columns, Arc::clone(&schema.columns)),
+        RowLayout::new(&schema.columns, Arc::clone(&schema.columns)),
         changes,
         cancellation,
     )
@@ -108,7 +110,7 @@ pub fn materialize(
     source: &dyn DocumentStore,
     source_columns: &[ColumnDef],
     schema: &SnapshotSchema<'_>,
-    changes: BTreeMap<DocId, Option<StoredDocument>>,
+    changes: DocumentChanges,
     cancellation: &CancellationToken,
 ) -> Result<MaterializedTable, SQLError> {
     cancellation.check()?;
@@ -133,7 +135,7 @@ pub fn materialize(
         after = Some(last);
         let selected = ids
             .into_iter()
-            .filter(|id| !changes.contains_key(id))
+            .filter(|id| !changes.contains_change(*id))
             .collect::<Vec<_>>();
         if selected.is_empty() {
             continue;
@@ -147,8 +149,9 @@ pub fn materialize(
             result.insert(id, document, schema)?;
         }
     }
-    for (id, document) in changes {
+    for change in changes.into_rows() {
         cancellation.check()?;
+        let (id, document) = change.map_err(|error| snapshot_error("private documents", &error))?;
         if let Some(document) = document {
             result.insert(id, layout.complete_private(document)?, schema)?;
         }

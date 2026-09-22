@@ -5,9 +5,10 @@
 //
 
 use super::{
-    command_exact_document_key, command_exact_lookup_parts, document_store_read_error, Arc,
-    BTreeMap, CommandOverlayDocument, DocId, Document, Engine, SQLError, Value,
+    command_exact_document_key, command_exact_lookup_parts, Arc, BTreeMap, CommandOverlayDocument,
+    DocId, Document, Engine, SQLError, Value,
 };
+use uqa_execution::query::document_changes::DocumentChanges;
 use uqa_storage::{DocumentMetadata, StoredDocument};
 
 impl Engine {
@@ -221,28 +222,25 @@ impl Engine {
     pub(crate) fn command_overlay_changes(
         &self,
         table: &str,
-    ) -> Result<Option<BTreeMap<DocId, Option<StoredDocument>>>, SQLError> {
+    ) -> Result<Option<DocumentChanges>, SQLError> {
         let canonical = self.command_overlay_table_name(table)?;
         let mut changes = self
             .fixed_transaction_row_changes(&canonical)?
             .unwrap_or_default();
         let overlays = self.session.command_mutation_overlays.lock();
-        if overlays.is_empty() && changes.is_empty() {
+        if overlays.is_empty() && !changes.has_changes() {
             return Ok(None);
         }
         for overlay in overlays.iter() {
             if let Some(documents) = overlay.documents.get(&canonical) {
-                changes.extend(documents.iter().map(|(doc_id, document)| {
-                    (
-                        *doc_id,
-                        document.as_ref().map(|document| {
-                            StoredDocument::with_metadata(
-                                document.fields.as_ref().clone(),
-                                document.metadata,
-                            )
-                        }),
-                    )
-                }));
+                for (id, document) in documents {
+                    changes.insert_shared(
+                        *id,
+                        document
+                            .as_ref()
+                            .map(|document| (Arc::clone(&document.fields), document.metadata)),
+                    );
+                }
             }
         }
         Ok(Some(changes))
@@ -251,14 +249,14 @@ impl Engine {
     pub(crate) fn fixed_transaction_row_changes(
         &self,
         canonical_table: &str,
-    ) -> Result<Option<BTreeMap<DocId, Option<StoredDocument>>>, SQLError> {
+    ) -> Result<Option<DocumentChanges>, SQLError> {
         let mut changes = self
             .query_transaction_overlay
             .as_ref()
             .and_then(|overlay| overlay.get(canonical_table).cloned())
             .unwrap_or_default();
         if self.query_transaction_overlay.is_some() && self.query_transaction_origin.is_none() {
-            return Ok((!changes.is_empty()).then_some(changes));
+            return Ok(changes.has_changes().then_some(changes));
         }
         let relation = crate::RelationIdentity::from_legacy_name(canonical_table)
             .map_err(SQLError::Internal)?;
@@ -270,7 +268,7 @@ impl Engine {
             .or_else(|| self.storage.tables.read().get(&relation).cloned());
         let generation = query_table.map(|table| table.storage_generation());
         let Some(generation) = generation else {
-            return Ok((!changes.is_empty()).then_some(changes));
+            return Ok(changes.has_changes().then_some(changes));
         };
         let desired = {
             let stack = self.session.transactions.lock();
@@ -310,7 +308,7 @@ impl Engine {
             desired
         };
         if desired.is_empty() {
-            return Ok((!changes.is_empty()).then_some(changes));
+            return Ok(changes.has_changes().then_some(changes));
         }
         let live = self
             .storage
@@ -324,21 +322,7 @@ impl Engine {
                     "transaction row changes refer to unavailable relation generation for `{canonical_table}`"
                 ))
             })?;
-        let present = desired
-            .iter()
-            .filter_map(|(doc_id, present)| present.then_some(*doc_id))
-            .collect::<Vec<_>>();
-        let mut documents = live
-            .document_store
-            .read()
-            .get_stored_many(&present)
-            .map_err(|error| {
-                document_store_read_error("read fixed-snapshot transaction changes", &error)
-            })?;
-        changes.extend(desired.into_iter().map(|(doc_id, present)| {
-            let document = present.then(|| documents.remove(&doc_id)).flatten();
-            (doc_id, document)
-        }));
+        changes.extend(self.capture_query_document_changes(&live, desired)?);
         Ok(Some(changes))
     }
 }

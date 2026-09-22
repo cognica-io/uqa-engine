@@ -18,8 +18,8 @@ use crate::{
     SessionPortalCatalogSnapshot, SessionPortalCommandDeclaration, SessionPortalData,
     SessionPortalDeclaration, SessionPortalMaterialization, SessionPortalPosition,
     SessionPortalRestart, SessionPortalSQLFunctionSnapshots, SessionPortalState,
-    SessionPortalTableSnapshots, SessionPortalViewSnapshots, StorageContext, StoredDocument,
-    TableState, Value, VectorIndex,
+    SessionPortalTableSnapshots, SessionPortalViewSnapshots, StorageContext, TableState, Value,
+    VectorIndex,
 };
 use fetch::{
     ensure_portal_rows_for_fetch, fetch_directional_query_portal, fetch_indices,
@@ -27,6 +27,7 @@ use fetch::{
 };
 use uqa_sql::ast::{CursorDirection, FetchCursorStmt};
 
+use uqa_execution::query::document_changes::DocumentChanges;
 use uqa_sql::binding::portals::SessionPortalTableDependencies;
 
 type SessionPortalTableSource = (
@@ -351,10 +352,7 @@ impl Engine {
     fn detach_session_portal_table_snapshots(
         &self,
         sources: Vec<SessionPortalTableSource>,
-        mut transaction_overlay: std::collections::BTreeMap<
-            String,
-            std::collections::BTreeMap<crate::DocId, Option<StoredDocument>>,
-        >,
+        mut transaction_overlay: std::collections::BTreeMap<String, DocumentChanges>,
     ) -> Result<SessionPortalTableSnapshots, SQLError> {
         let mut snapshots = std::collections::BTreeMap::new();
         for (relation, data, metadata) in sources {
@@ -395,12 +393,12 @@ impl Engine {
         &self,
         data: &std::sync::Arc<TableState>,
         metadata: &std::sync::Arc<TableState>,
-        changes: Option<std::collections::BTreeMap<crate::DocId, Option<StoredDocument>>>,
+        changes: Option<DocumentChanges>,
     ) -> Result<std::sync::Arc<TableState>, SQLError> {
         if std::sync::Arc::ptr_eq(data, metadata)
             && changes
                 .as_ref()
-                .is_none_or(std::collections::BTreeMap::is_empty)
+                .is_none_or(|changes| !changes.has_changes())
             && (self.storage.backend.is_none() || self.versioned_backend_transactions())
         {
             return Self::retain_query_table(data);
@@ -457,13 +455,7 @@ impl Engine {
     fn capture_session_portal_transaction_overlay(
         &self,
         sources: &[SessionPortalTableSource],
-    ) -> Result<
-        std::collections::BTreeMap<
-            String,
-            std::collections::BTreeMap<crate::DocId, Option<StoredDocument>>,
-        >,
-        SQLError,
-    > {
+    ) -> Result<std::collections::BTreeMap<String, DocumentChanges>, SQLError> {
         let relation_names = sources
             .iter()
             .filter(|(_, data, metadata)| !std::sync::Arc::ptr_eq(data, metadata))
@@ -510,24 +502,9 @@ impl Engine {
         let mut overlay = std::collections::BTreeMap::new();
         for (table_name, desired_documents) in desired {
             let table = self.require_table(&table_name)?;
-            let present = desired_documents
-                .iter()
-                .filter_map(|(doc_id, present)| present.then_some(*doc_id))
-                .collect::<Vec<_>>();
-            let mut documents = table
-                .document_store
-                .read()
-                .get_stored_many(&present)
-                .map_err(|error| portal_snapshot_error("transaction documents", &error))?;
             overlay.insert(
                 table_name,
-                desired_documents
-                    .into_iter()
-                    .map(|(doc_id, present)| {
-                        let document = present.then(|| documents.remove(&doc_id)).flatten();
-                        (doc_id, document)
-                    })
-                    .collect(),
+                self.capture_query_document_changes(&table, desired_documents)?,
             );
         }
         Ok(overlay)

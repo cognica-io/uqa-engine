@@ -6,6 +6,8 @@
 
 //! Bind public table queries to their transaction and retain unscoped execution and mutation views.
 
+use uqa_execution::query::document_changes::DocumentChanges;
+
 use crate::{Engine, TableState};
 use std::sync::Arc;
 use uqa_sql::SQLError;
@@ -173,8 +175,8 @@ impl Engine {
         let mut visible = doc_ids
             .into_iter()
             .collect::<std::collections::BTreeSet<_>>();
-        for (doc_id, document) in changes {
-            if document.is_some() {
+        for (doc_id, present) in changes.changes() {
+            if present {
                 visible.insert(doc_id);
             } else {
                 visible.remove(&doc_id);
@@ -193,7 +195,7 @@ impl Engine {
         };
         if let Some(changes) = self
             .command_overlay_changes(table)?
-            .filter(|changes| !changes.is_empty())
+            .filter(DocumentChanges::has_changes)
         {
             let store = t.document_store.read();
             let mut count =
@@ -201,11 +203,11 @@ impl Engine {
                     SQLError::Internal(format!("read document count: {error}"))
                 })?)
                 .map_err(|_| SQLError::Internal("document count exceeds u64".into()))?;
-            for (doc_id, document) in changes {
+            for (doc_id, present) in changes.changes() {
                 let persisted = store.contains_doc_id(doc_id).map_err(|error| {
                     SQLError::Internal(format!("read command-visible document count: {error}"))
                 })?;
-                match (persisted, document.is_some()) {
+                match (persisted, present) {
                     (false, true) => {
                         count = count.checked_add(1).ok_or_else(|| {
                             SQLError::Internal("document count exceeds u64".into())

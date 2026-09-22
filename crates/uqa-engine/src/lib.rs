@@ -144,8 +144,7 @@ use uqa_storage::{
     InvertedIndex, MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex,
     PersistentStorageBackend, PersistentStorageProvider, PersistentStorageSession,
     RelationIdentity, SequenceRow, StorageBackendError, StorageBackendResult, StorageSavepointId,
-    StoredDocument, TableSchema, VectorFieldSchema, VectorIndex, VectorIndexOpenMode,
-    VectorIndexSpec,
+    TableSchema, VectorFieldSchema, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
 };
 use uqa_storage_sqlite::{
     ManagedConnection, SQLiteCompressedContainerAnchor, SQLiteStorageProvider,
@@ -204,7 +203,7 @@ type SessionPortalSQLFunctionSnapshots =
     Arc<BTreeMap<String, Vec<Arc<user_functions::SQLUserFunction>>>>;
 type SessionPortalCatalogSnapshot = Arc<DurableCatalogSnapshot>;
 type SessionPortalTransactionOverlay =
-    Arc<BTreeMap<String, BTreeMap<DocId, Option<StoredDocument>>>>;
+    Arc<BTreeMap<String, uqa_execution::query::document_changes::DocumentChanges>>;
 type ColumnStatsMap = BTreeMap<String, uqa_planner::ColumnStats>;
 type FixedTransactionCatalogBaseline = BTreeMap<[u8; 16], (RelationIdentity, Vec<u8>)>;
 type NontransactionalSequenceValues = BTreeMap<[u8; 16], NontransactionalSequenceHistory>;

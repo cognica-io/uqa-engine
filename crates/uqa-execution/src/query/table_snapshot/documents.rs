@@ -7,7 +7,6 @@
 //! Immutable query rows share their retained source and adapt only requested documents.
 
 use std::collections::BTreeMap;
-use std::ops::Bound::{Excluded, Unbounded};
 use std::sync::Arc;
 use uqa_core::{DocId, Value};
 use uqa_storage::{
@@ -15,13 +14,15 @@ use uqa_storage::{
 };
 
 use super::layout::RowLayout;
+use crate::query::document_changes::DocumentChanges;
 
 mod projection;
 
 struct State {
     source: Arc<dyn DocumentStore>,
     layout: RowLayout,
-    changes: BTreeMap<DocId, Option<StoredDocument>>,
+    private_layout: RowLayout,
+    changes: DocumentChanges,
     count: usize,
     cancellation: uqa_core::CancellationToken,
 }
@@ -33,15 +34,16 @@ impl RetainedDocuments {
     pub(super) fn new(
         source: Arc<dyn DocumentStore>,
         layout: RowLayout,
-        changes: BTreeMap<DocId, Option<StoredDocument>>,
+        private_layout: RowLayout,
+        changes: DocumentChanges,
         cancellation: &uqa_core::CancellationToken,
     ) -> StorageBackendResult<Self> {
         cancellation.check()?;
         let mut count = source.len()?;
-        for (id, row) in &changes {
+        for (id, replacement) in changes.changes() {
             cancellation.check()?;
-            let present = source.contains_doc_id(*id)?;
-            count = match (present, row.is_some()) {
+            let present = source.contains_doc_id(id)?;
+            count = match (present, replacement) {
                 (true, false) => count.checked_sub(1),
                 (false, true) => count.checked_add(1),
                 _ => Some(count),
@@ -51,6 +53,7 @@ impl RetainedDocuments {
         Ok(Self(Arc::new(State {
             source,
             layout,
+            private_layout,
             changes,
             count,
             cancellation: cancellation.clone(),
@@ -130,22 +133,18 @@ impl DocumentStore for RetainedDocuments {
     }
 
     fn get_stored(&self, id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
-        match self.0.changes.get(&id) {
-            Some(row) => row
-                .as_ref()
-                .map(|row| {
-                    self.0
-                        .layout
-                        .complete_private(row.clone())
-                        .map_err(layout_error)
-                })
-                .transpose(),
-            None => self
-                .0
+        if self.0.changes.contains_change(id) {
+            self.0
+                .changes
+                .get_stored(id)?
+                .map(|row| self.0.layout.complete_private(row).map_err(layout_error))
+                .transpose()
+        } else {
+            self.0
                 .source
                 .get_stored(id)?
                 .map(|row| self.0.layout.adapt_base(row).map_err(layout_error))
-                .transpose(),
+                .transpose()
         }
     }
 
@@ -155,7 +154,7 @@ impl DocumentStore for RetainedDocuments {
     ) -> StorageBackendResult<BTreeMap<DocId, StoredDocument>> {
         let base_ids = ids
             .iter()
-            .filter(|id| !self.0.changes.contains_key(id))
+            .filter(|id| !self.0.changes.contains_change(**id))
             .copied()
             .collect::<Vec<_>>();
         let base = self.0.source.get_stored_many(&base_ids)?;
@@ -163,39 +162,40 @@ impl DocumentStore for RetainedDocuments {
         for (id, row) in base {
             rows.insert(id, self.0.layout.adapt_base(row).map_err(layout_error)?);
         }
-        for id in ids {
-            if let Some(Some(row)) = self.0.changes.get(id) {
-                rows.insert(
-                    *id,
-                    self.0
-                        .layout
-                        .complete_private(row.clone())
-                        .map_err(layout_error)?,
-                );
-            }
+        let private_ids = ids
+            .iter()
+            .filter(|id| self.0.changes.contains_change(**id))
+            .copied()
+            .collect::<Vec<_>>();
+        for (id, row) in self.0.changes.get_stored_many(&private_ids)? {
+            rows.insert(
+                id,
+                self.0.layout.complete_private(row).map_err(layout_error)?,
+            );
         }
         Ok(rows)
     }
 
     fn get_metadata(&self, id: DocId) -> StorageBackendResult<Option<DocumentMetadata>> {
-        match self.0.changes.get(&id) {
-            Some(row) => Ok(row.as_ref().map(StoredDocument::metadata)),
-            None => self.0.source.get_metadata(id),
+        if self.0.changes.contains_change(id) {
+            self.0.changes.get_metadata(id)
+        } else {
+            self.0.source.get_metadata(id)
         }
     }
 
     fn contains_doc_id(&self, id: DocId) -> StorageBackendResult<bool> {
-        match self.0.changes.get(&id) {
-            Some(row) => Ok(row.is_some()),
+        match self.0.changes.change_presence(id) {
+            Some(present) => Ok(present),
             None => self.0.source.contains_doc_id(id),
         }
     }
 
     fn get_field(&self, id: DocId, field: &str) -> StorageBackendResult<Option<Value>> {
-        match self.0.changes.get(&id) {
-            Some(Some(row)) => self.0.layout.private_field(row, field),
-            Some(None) => Ok(None),
-            None => self.0.layout.base_field(self.0.source.as_ref(), id, field),
+        if self.0.changes.contains_change(id) {
+            self.0.private_layout.base_field(&self.0.changes, id, field)
+        } else {
+            self.0.layout.base_field(self.0.source.as_ref(), id, field)
         }
     }
 
@@ -281,7 +281,7 @@ impl DocumentStore for RetainedDocuments {
         let Some(projection) = self.0.layout.projection(fields) else {
             return Ok(None);
         };
-        if !projection.only_sources() || ids.iter().any(|id| self.0.changes.contains_key(id)) {
+        if !projection.only_sources() || ids.iter().any(|id| self.0.changes.contains_change(*id)) {
             return Ok(None);
         }
         let rows = self.0.source.get_shared_fields(ids, &projection.sources)?;
@@ -304,7 +304,7 @@ impl DocumentStore for RetainedDocuments {
         let Some(projection) = self.0.layout.projection(fields) else {
             return Ok(None);
         };
-        if !self.0.changes.is_empty() || !projection.only_sources() {
+        if self.0.changes.has_changes() || !projection.only_sources() {
             return Ok(None);
         }
         let rows = self
@@ -378,15 +378,15 @@ impl DocumentStore for RetainedDocuments {
             cursor = Some(last);
             base.extend(
                 page.into_iter()
-                    .filter(|id| !self.0.changes.contains_key(id)),
+                    .filter(|id| !self.0.changes.contains_change(*id)),
             );
         }
         let private = self
             .0
             .changes
-            .range((after.map_or(Unbounded, Excluded), Unbounded))
+            .changes_after(after)
             .take_while(|_| !self.0.cancellation.is_cancelled())
-            .filter_map(|(id, row)| row.as_ref().map(|_| *id))
+            .filter_map(|(id, present)| present.then_some(id))
             .take(limit);
         let mut base = base.into_iter().peekable();
         let mut private = private.peekable();

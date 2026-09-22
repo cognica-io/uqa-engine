@@ -10,26 +10,11 @@ use super::{
     document_store_read_error, document_store_write_error, Arc, BTreeMap, DocId, Document, Engine,
     FieldName, SQLError, TableState, Value,
 };
-use uqa_storage::{DocumentMetadata, StoredDocument};
+use uqa_storage::{DocumentMetadata, DocumentStore, StoredDocument};
 
 enum CommandOverlayDocument {
     Present(uqa_storage::StoredDocument),
     Deleted,
-}
-
-fn project_stored_values(
-    document: &StoredDocument,
-    fields: &[&str],
-    columns: &[uqa_sql::ast::ColumnDef],
-) -> Vec<Value> {
-    fields
-        .iter()
-        .map(|field| {
-            uqa_execution::query::document_projection::project_stored_document_column(
-                document, field, columns,
-            )
-        })
-        .collect()
 }
 
 fn command_exact_lookup_parts(
@@ -236,11 +221,13 @@ impl Engine {
             })?;
         if let Some(changes) = self.command_overlay_changes(table)? {
             for doc_id in doc_ids {
-                let Some(document) = changes.get(doc_id) else {
+                if !changes.contains_change(*doc_id) {
                     continue;
-                };
-                if let Some(document) = document {
-                    documents.insert(*doc_id, document.clone());
+                }
+                if let Some(document) = changes.get_stored(*doc_id).map_err(|error| {
+                    document_store_read_error("read private generated document projection", &error)
+                })? {
+                    documents.insert(*doc_id, document);
                 } else {
                     documents.remove(doc_id);
                 }
@@ -281,87 +268,38 @@ impl Engine {
     ) -> Result<BTreeMap<DocId, Vec<Value>>, SQLError> {
         let table_state = self.require_query_table(table)?;
         let columns = table_state.columns.read().clone();
-        let requested = fields
+        let changes = self.command_overlay_changes(table)?;
+        let persisted_ids = doc_ids
             .iter()
-            .map(|field| (*field).to_string())
+            .copied()
+            .filter(|id| {
+                changes
+                    .as_ref()
+                    .is_none_or(|changes| !changes.contains_change(*id))
+            })
             .collect::<Vec<_>>();
-        let uses_tuple_xmin = uqa_execution::query::document_projection::projections_use_tuple_xmin(
-            &requested, &columns,
-        );
-        if crate::generated::projection_contains_virtual_generated_column(&columns, &requested) {
-            let mut projected = BTreeMap::new();
-            for doc_id in doc_ids {
-                let Some(document) = self.get_query_document(table, *doc_id)? else {
-                    continue;
-                };
-                projected.insert(
-                    *doc_id,
-                    fields
-                        .iter()
-                        .map(|field| document.get(*field).cloned().unwrap_or(Value::Null))
-                        .collect(),
-                );
-            }
-            return Ok(projected);
-        }
-        if let Some(changes) = self.command_overlay_changes(table)? {
-            let persisted_ids = doc_ids
+        let mut projected = uqa_execution::query::document_projection::read_document_projection(
+            &**table_state.document_store.read(),
+            &persisted_ids,
+            fields,
+            &columns,
+        )?;
+        if let Some(changes) = changes {
+            let private_ids = doc_ids
                 .iter()
-                .filter(|doc_id| !changes.contains_key(doc_id))
                 .copied()
+                .filter(|id| changes.change_presence(*id) == Some(true))
                 .collect::<Vec<_>>();
-            let mut projected = if uses_tuple_xmin {
-                table_state
-                    .document_store
-                    .read()
-                    .get_stored_many(&persisted_ids)
-                    .map_err(|error| {
-                        document_store_read_error("read query documents with metadata", &error)
-                    })?
-                    .into_iter()
-                    .map(|(doc_id, document)| {
-                        (doc_id, project_stored_values(&document, fields, &columns))
-                    })
-                    .collect()
-            } else {
-                table_state
-                    .document_store
-                    .read()
-                    .get_fields_multi(&persisted_ids, fields)
-                    .map_err(|error| {
-                        document_store_read_error("read query document fields", &error)
-                    })?
-            };
-            for doc_id in doc_ids {
-                if let Some(Some(document)) = changes.get(doc_id) {
-                    projected.insert(*doc_id, project_stored_values(document, fields, &columns));
-                }
-            }
-            return Ok(projected);
+            projected.extend(
+                uqa_execution::query::document_projection::read_document_projection(
+                    &changes,
+                    &private_ids,
+                    fields,
+                    &columns,
+                )?,
+            );
         }
-        if uses_tuple_xmin {
-            return table_state
-                .document_store
-                .read()
-                .get_stored_many(doc_ids)
-                .map_err(|error| {
-                    document_store_read_error("read query documents with metadata", &error)
-                })
-                .map(|documents| {
-                    documents
-                        .into_iter()
-                        .map(|(doc_id, document)| {
-                            (doc_id, project_stored_values(&document, fields, &columns))
-                        })
-                        .collect()
-                });
-        }
-        let result = table_state
-            .document_store
-            .read()
-            .get_fields_multi(doc_ids, fields)
-            .map_err(|error| document_store_read_error("read query document fields", &error));
-        result
+        Ok(projected)
     }
 
     pub(crate) fn get_document_fields(

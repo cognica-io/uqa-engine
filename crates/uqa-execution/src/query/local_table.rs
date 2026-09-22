@@ -33,9 +33,7 @@ pub struct LocalTableRowSource {
     lock_origin: Option<SharedLockOrigin>,
     recheck_pins: Option<Arc<Vec<crate::row_locks::recheck::RecheckDoc>>>,
     recheck_cursor: usize,
-    command_changes: Option<
-        Arc<std::collections::BTreeMap<uqa_core::DocId, Option<uqa_storage::StoredDocument>>>,
-    >,
+    command_changes: Option<super::document_changes::DocumentChanges>,
     command_change_after: Option<uqa_core::DocId>,
     command_base_after: Option<uqa_core::DocId>,
     command_base_ids: std::collections::VecDeque<uqa_core::DocId>,
@@ -132,9 +130,7 @@ pub struct LocalTableScanConfig {
     pub estimated_cardinality: u64,
     pub lock_origin: Option<SharedLockOrigin>,
     pub recheck_pins: Option<Arc<Vec<crate::row_locks::recheck::RecheckDoc>>>,
-    pub command_changes: Option<
-        Arc<std::collections::BTreeMap<uqa_core::DocId, Option<uqa_storage::StoredDocument>>>,
-    >,
+    pub command_changes: Option<super::document_changes::DocumentChanges>,
 }
 
 impl LocalTableRowSource {

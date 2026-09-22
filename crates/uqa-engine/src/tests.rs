@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use uqa_storage::{DocumentMetadata, StoredDocument};
 
 #[path = "../tests/support/native_catalog.rs"]
 pub(crate) mod native_storage;

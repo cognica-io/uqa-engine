@@ -25,7 +25,7 @@ fn retained_point_lookups_stop_after_the_first_matching_identity_page() {
         Arc::new(probe),
         &[],
         &schema(&[], &index),
-        BTreeMap::new(),
+        DocumentChanges::default(),
         &CancellationToken::new(),
     )
     .unwrap();
@@ -59,7 +59,7 @@ fn retained_point_lookups_preserve_missing_fields_nulls_and_private_masks() {
         source.put_stored(id, document(&fields, 41)).unwrap();
     }
     let index = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
-    let changes = [
+    let changes: BTreeMap<_, _> = [
         (2, None),
         (3, Some(document(&[("key", Value::Int(30))], 42))),
         (u64::MAX, Some(document(&[("nullable", Value::Null)], 43))),
@@ -69,7 +69,7 @@ fn retained_point_lookups_preserve_missing_fields_nulls_and_private_masks() {
         Arc::new(ProjectedSource::new(&source)),
         &[],
         &schema(&[], &index),
-        changes,
+        changes.into(),
         &CancellationToken::new(),
     )
     .unwrap();
@@ -139,7 +139,7 @@ fn retained_identity_scans_cancel_before_reading_another_masked_page() {
             Arc::new(probe),
             &[],
             &schema(&[], &index),
-            changes,
+            changes.into(),
             &cancellation,
         )
         .unwrap();

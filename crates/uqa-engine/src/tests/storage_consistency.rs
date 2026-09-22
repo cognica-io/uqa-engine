@@ -95,9 +95,12 @@ fn transaction_snapshot_captures_one_writable_copy_without_probe_clone() {
     assert_eq!(writable_calls.load(std::sync::atomic::Ordering::Relaxed), 1);
 }
 
+type SnapshotErrorFactory = fn() -> StorageBackendError;
+
 #[derive(Clone)]
 struct PortalSnapshotProbeStore {
     docs: Arc<BTreeMap<DocId, StoredDocument>>,
+    snapshot_error: Option<SnapshotErrorFactory>,
     snapshot_calls: Arc<std::sync::atomic::AtomicUsize>,
     row_reads: Arc<std::sync::atomic::AtomicUsize>,
     doc_id_calls: Arc<std::sync::atomic::AtomicUsize>,
@@ -113,6 +116,7 @@ impl PortalSnapshotProbeStore {
         let docs = store.get_stored_many(&doc_ids).unwrap();
         Self {
             docs: Arc::new(docs),
+            snapshot_error: None,
             snapshot_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             row_reads: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             doc_id_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -132,6 +136,41 @@ impl DocumentStore for PortalSnapshotProbeStore {
         self.row_reads
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Ok(self.docs.get(&doc_id).cloned())
+    }
+
+    fn contains_doc_id(&self, doc_id: DocId) -> StorageBackendResult<bool> {
+        Ok(self.docs.contains_key(&doc_id))
+    }
+
+    fn get_metadata(&self, doc_id: DocId) -> StorageBackendResult<Option<DocumentMetadata>> {
+        Ok(self.docs.get(&doc_id).map(StoredDocument::metadata))
+    }
+
+    fn get_field(&self, doc_id: DocId, field: &str) -> StorageBackendResult<Option<Value>> {
+        Ok(self
+            .docs
+            .get(&doc_id)
+            .and_then(|row| row.fields().get(field))
+            .cloned())
+    }
+
+    fn get_fields_multi(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+    ) -> StorageBackendResult<BTreeMap<DocId, Vec<Value>>> {
+        Ok(ids
+            .iter()
+            .filter_map(|id| {
+                self.docs.get(id).map(|row| {
+                    let values = fields
+                        .iter()
+                        .map(|field| row.fields().get(*field).cloned().unwrap_or(Value::Null))
+                        .collect();
+                    (*id, values)
+                })
+            })
+            .collect())
     }
 
     fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
@@ -162,6 +201,9 @@ impl DocumentStore for PortalSnapshotProbeStore {
             std::sync::atomic::Ordering::Relaxed,
         );
 
+        if let Some(error) = self.snapshot_error {
+            return Err(error());
+        }
         Ok(Arc::new(self.clone()))
     }
 

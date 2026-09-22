@@ -8,6 +8,7 @@ use super::*;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 mod lookup;
+mod private;
 
 #[derive(Clone)]
 struct ProjectedSource {
@@ -140,7 +141,7 @@ fn retained_private_views_capture_no_base_rows_and_project_in_requested_order() 
     let pages = Arc::clone(&source.pages);
     let projections = Arc::clone(&source.projections);
     let index = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
-    let changes = [
+    let changes: BTreeMap<_, _> = [
         (2, Some(document(&[("renamed", Value::Int(200))], 51))),
         (
             3,
@@ -156,7 +157,7 @@ fn retained_private_views_capture_no_base_rows_and_project_in_requested_order() 
         Arc::new(source),
         &columns,
         &schema(&target, &index),
-        changes,
+        changes.into(),
         &CancellationToken::new(),
     )
     .unwrap();
@@ -277,7 +278,7 @@ fn defaulted_documents() -> (Vec<ColumnDef>, Vec<ColumnDef>, MemoryDocumentStore
 #[test]
 fn retained_projection_preserves_absent_defaults_explicit_nulls_and_generated_values() {
     let (columns, target, source) = defaulted_documents();
-    let changes = [(
+    let changes: BTreeMap<_, _> = [(
         3,
         Some(document(
             &[("a", Value::Int(8)), ("renamed", Value::Int(1))],
@@ -291,7 +292,7 @@ fn retained_projection_preserves_absent_defaults_explicit_nulls_and_generated_va
         &source,
         &columns,
         &selected,
-        BTreeMap::clone(&changes),
+        BTreeMap::clone(&changes).into(),
         &CancellationToken::new(),
     )
     .unwrap();
@@ -299,7 +300,7 @@ fn retained_projection_preserves_absent_defaults_explicit_nulls_and_generated_va
         source.snapshot().unwrap(),
         &columns,
         &selected,
-        changes,
+        changes.into(),
         &CancellationToken::new(),
     )
     .unwrap();
@@ -342,7 +343,7 @@ fn retained_projection_preserves_absent_defaults_explicit_nulls_and_generated_va
         Arc::new(ProjectedSource::new(&source)),
         &columns,
         &selected,
-        BTreeMap::new(),
+        DocumentChanges::default(),
         &CancellationToken::new(),
     )
     .unwrap();
@@ -366,7 +367,7 @@ fn retained_renamed_projection_resolves_missing_fields_after_releasing_source() 
         Arc::new(ProjectedSource::new(&source)),
         &columns,
         &schema(&target, &index),
-        BTreeMap::new(),
+        DocumentChanges::default(),
         &CancellationToken::new(),
     )
     .unwrap();
@@ -435,7 +436,7 @@ fn retained_index_reconstruction_reads_only_indexed_fields() {
     let mut selected = schema(&columns, &index);
     selected.text_fields = &fields;
     selected.vector_dimensions.insert("v".into(), 2);
-    let changes = [(
+    let changes: BTreeMap<_, _> = [(
         2,
         Some(document(
             &[
@@ -451,7 +452,7 @@ fn retained_index_reconstruction_reads_only_indexed_fields() {
         Arc::new(probe),
         &columns,
         &selected,
-        changes,
+        changes.into(),
         &CancellationToken::new(),
     )
     .unwrap();
@@ -506,7 +507,7 @@ fn retained_renamed_rows_keep_shared_projections() {
         Arc::new(ProjectedSource::new(&source)),
         &columns,
         &schema(&target, &index),
-        BTreeMap::new(),
+        DocumentChanges::default(),
         &CancellationToken::new(),
     )
     .unwrap();
@@ -557,7 +558,7 @@ fn retained_identity_pages_cross_deleted_ranges_without_reading_rows() {
         Arc::new(ProjectedSource::new(&source)),
         &[],
         &schema(&[], &index),
-        changes,
+        changes.into(),
         &CancellationToken::new(),
     )
     .unwrap();

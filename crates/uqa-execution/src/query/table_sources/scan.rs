@@ -12,7 +12,6 @@ use crate::query::{
     },
     CteScope,
 };
-use std::sync::Arc;
 use uqa_core::Value;
 use uqa_sql::{
     plan::{
@@ -282,10 +281,7 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
                 ctes.recheck_docs_for_scan(origin_qualifier, storage_name)
             });
         let command_changes = if ctes.reads_command_overlay() {
-            context
-                .tables
-                .command_overlay_changes(&table_name)?
-                .map(Arc::new)
+            context.tables.command_overlay_changes(&table_name)?
         } else {
             None
         };

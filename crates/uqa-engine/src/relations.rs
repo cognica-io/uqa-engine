@@ -4,10 +4,16 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use uqa_execution::query::document_changes::DocumentChanges;
+
 use super::{
     Arc, Engine, RelationIdentity, SQLError, StorageBackendError, StorageBackendResult, TableState,
 };
 use crate::capabilities::RelationResolution;
+
+fn query_table_snapshot_error(error: SQLError) -> StorageBackendError {
+    StorageBackendError::backend("query table snapshot", error)
+}
 
 impl Engine {
     pub(crate) fn rewrite_relation_rename_dependents(
@@ -271,12 +277,12 @@ impl Engine {
                 let table = Arc::clone(table);
                 let changes = self
                     .fixed_transaction_row_changes(&resolved)
-                    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+                    .map_err(query_table_snapshot_error)?;
                 return match changes {
-                    Some(changes) if !changes.is_empty() => self
+                    Some(changes) if changes.has_changes() => self
                         .detach_query_table(&table, &table, Some(changes))
                         .map(Some)
-                        .map_err(|error| StorageBackendError::Other(error.to_string())),
+                        .map_err(query_table_snapshot_error),
                     _ => Ok(Some(table)),
                 };
             }
@@ -310,15 +316,15 @@ impl Engine {
             {
                 let changes = self
                     .fixed_transaction_row_changes(&resolved)
-                    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-                if changes.as_ref().is_some_and(|changes| !changes.is_empty()) {
+                    .map_err(query_table_snapshot_error)?;
+                if changes.as_ref().is_some_and(DocumentChanges::has_changes) {
                     return Ok(live);
                 }
                 return live
                     .as_ref()
                     .map(Self::detach_empty_query_table)
                     .transpose()
-                    .map_err(|error| StorageBackendError::Other(error.to_string()));
+                    .map_err(query_table_snapshot_error);
             }
             return Ok(live);
         };
@@ -327,18 +333,18 @@ impl Engine {
         };
         let changes = self
             .fixed_transaction_row_changes(&resolved)
-            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            .map_err(query_table_snapshot_error)?;
         let metadata_changed = Self::table_catalog_metadata_fingerprint(&snapshot_table)?
             != Self::table_catalog_metadata_fingerprint(metadata)?;
         match (changes, metadata_changed) {
-            (Some(changes), _) if !changes.is_empty() => self
+            (Some(changes), _) if changes.has_changes() => self
                 .detach_query_table(&snapshot_table, metadata, Some(changes))
                 .map(Some)
-                .map_err(|error| StorageBackendError::Other(error.to_string())),
+                .map_err(query_table_snapshot_error),
             (_, true) => self
                 .detach_query_table(&snapshot_table, metadata, None)
                 .map(Some)
-                .map_err(|error| StorageBackendError::Other(error.to_string())),
+                .map_err(query_table_snapshot_error),
             _ => Ok(Some(snapshot_table)),
         }
     }
@@ -351,7 +357,12 @@ impl Engine {
 
     pub(crate) fn require_query_table(&self, name: &str) -> Result<Arc<TableState>, SQLError> {
         self.try_query_table(name)
-            .map_err(|error| SQLError::Internal(format!("resolve query table `{name}`: {error}")))?
+            .map_err(|error| {
+                uqa_execution::storage_errors::storage_error(
+                    &format!("resolve query table `{name}`"),
+                    &error,
+                )
+            })?
             .ok_or_else(|| SQLError::UnknownTable(name.to_string()))
     }
 
