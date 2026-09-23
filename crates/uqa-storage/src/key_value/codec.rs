@@ -369,6 +369,29 @@ pub(super) fn document_key_prefix(table: &str) -> StorageBackendResult<Vec<u8>> 
     table_prefixed_key(TAG_DOCUMENT, table)
 }
 
+pub(super) fn document_key_prefix_controlled(
+    table: &str,
+    control: &crate::read_control::StorageReadControl,
+) -> StorageBackendResult<uqa_core::memory::BudgetedVec<u8>> {
+    control.check()?;
+    let length = key_segment_length(table.len())?;
+    let mut key = uqa_core::memory::BudgetedVec::new(control.memory());
+    key.reserve(
+        table
+            .len()
+            .checked_add(5)
+            .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?,
+    )?;
+    key.push(TAG_DOCUMENT)?;
+    key.extend_from_slice(&length.to_be_bytes())?;
+    for chunk in table.as_bytes().chunks(8192) {
+        control.check()?;
+        key.extend_from_slice(chunk)?;
+    }
+    control.check()?;
+    Ok(key)
+}
+
 pub(super) fn document_key(table: &str, doc_id: DocId) -> StorageBackendResult<Vec<u8>> {
     let mut key = document_key_prefix(table)?;
     push_u64(&mut key, doc_id);

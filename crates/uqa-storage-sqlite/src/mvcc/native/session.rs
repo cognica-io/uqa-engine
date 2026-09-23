@@ -105,25 +105,61 @@ impl NativeSnapshot {
         components: &[ValueRef<'_>],
         read: impl FnOnce(&[ValueRef<'_>]) -> Result<R>,
     ) -> Result<Option<R>> {
-        let key =
-            NativeRecordIdentity::new(family, owner)?.encode_key(components, &self.control)?;
-        let record = self.view.get(&key, &self.control)?;
+        self.read_row_controlled(family, owner, components, &self.control, read)
+    }
+
+    fn read_row_controlled<R>(
+        &self,
+        family: Family,
+        owner: NativeRecordOwner,
+        components: &[ValueRef<'_>],
+        control: &StorageReadControl,
+        read: impl FnOnce(&[ValueRef<'_>]) -> Result<R>,
+    ) -> Result<Option<R>> {
+        self.control.check()?;
+        control.check()?;
+        let key = NativeRecordIdentity::new(family, owner)?.encode_key(components, control)?;
+        let record = self.view.get(&key, control)?;
+        self.control.check()?;
+        control.check()?;
         let Some(bytes) = record.as_ref().and_then(|record| record.value()) else {
             return Ok(None);
         };
-        let (_, row) = decode_record(&key, bytes, &self.control)?;
-        read(&row).map(Some)
+        let (_, row) = decode_record(&key, bytes, control)?;
+        let result = read(&row)?;
+        control.check()?;
+        self.control.check()?;
+        Ok(Some(result))
     }
 
     pub(crate) fn table_owner(&self, table: &str) -> Result<Option<NativeRecordOwner>> {
-        Ok(self.table_binding(table)?.map(|(owner, _)| owner))
+        self.table_owner_controlled(table, &self.control)
+    }
+
+    pub(crate) fn table_owner_controlled(
+        &self,
+        table: &str,
+        control: &StorageReadControl,
+    ) -> Result<Option<NativeRecordOwner>> {
+        Ok(self
+            .table_binding_controlled(table, control)?
+            .map(|(owner, _)| owner))
     }
 
     pub(crate) fn table_binding(&self, table: &str) -> Result<Option<(NativeRecordOwner, bool)>> {
-        self.read_row(
+        self.table_binding_controlled(table, &self.control)
+    }
+
+    fn table_binding_controlled(
+        &self,
+        table: &str,
+        control: &StorageReadControl,
+    ) -> Result<Option<(NativeRecordOwner, bool)>> {
+        self.read_row_controlled(
             Family::TableOwners,
             NativeRecordOwner::Database(self.database),
             &[ValueRef::Text(table.as_bytes())],
+            control,
             |values| {
                 let id = |value: ValueRef<'_>| {
                     value

@@ -179,6 +179,19 @@ impl DocumentStore for ReadFailure {
     fn doc_ids(&self) -> StorageBackendResult<Vec<DocId>> {
         Ok(vec![1])
     }
+    fn next_doc_ids_controlled(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<DocId>> {
+        control.check()?;
+        let mut ids = uqa_core::memory::BudgetedVec::new(control.memory());
+        if limit != 0 && after.is_none_or(|after| after < 1) {
+            ids.push(1)?;
+        }
+        Ok(ids)
+    }
     fn len(&self) -> StorageBackendResult<usize> {
         Ok(1)
     }

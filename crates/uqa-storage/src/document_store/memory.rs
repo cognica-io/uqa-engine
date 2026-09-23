@@ -9,9 +9,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use uqa_core::{DocId, Value};
+use uqa_core::{memory::BudgetedVec, DocId, Value};
 
 use crate::backend::StorageBackendResult;
+use crate::read_control::StorageReadControl;
 
 use super::{Document, DocumentMetadata, DocumentStore, SharedDocumentRow, StoredDocument};
 
@@ -354,6 +355,25 @@ impl DocumentStore for MemoryDocumentStore {
                 .collect(),
             None => self.state.documents.keys().take(limit).copied().collect(),
         })
+    }
+
+    fn next_doc_ids_controlled(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<BudgetedVec<DocId>> {
+        use std::ops::Bound::{Excluded, Unbounded};
+
+        control.check()?;
+        let mut ids = BudgetedVec::new(control.memory());
+        let after = after.map_or(Unbounded, Excluded);
+        for (&id, _) in self.state.documents.range((after, Unbounded)).take(limit) {
+            control.check()?;
+            ids.push(id)?;
+        }
+        control.check()?;
+        Ok(ids)
     }
 
     fn next_shared_fields(

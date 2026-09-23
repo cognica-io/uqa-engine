@@ -10,7 +10,7 @@ mod decoded;
 mod read;
 mod write;
 
-use uqa_storage::KeyValueBatch;
+use uqa_storage::{read_control::StorageReadControl, KeyValueBatch};
 
 use super::{SQLiteDocumentStore, SQLiteError, SQLiteResult};
 use crate::mvcc::native::{NativeRecordOwner, NativeSnapshot};
@@ -23,10 +23,18 @@ pub(super) struct NativeDocumentRead<'a> {
 
 impl<'a> NativeDocumentRead<'a> {
     fn new(snapshot: &'a NativeSnapshot, table: &'a str) -> SQLiteResult<Self> {
+        Self::with_control(snapshot, table, &snapshot.control)
+    }
+
+    fn with_control(
+        snapshot: &'a NativeSnapshot,
+        table: &'a str,
+        control: &StorageReadControl,
+    ) -> SQLiteResult<Self> {
         Ok(Self {
             snapshot,
             table,
-            owner: snapshot.table_owner(table)?,
+            owner: snapshot.table_owner_controlled(table, control)?,
         })
     }
 }
@@ -36,12 +44,26 @@ impl SQLiteDocumentStore {
         &self,
         operation: impl FnOnce(&NativeDocumentRead<'_>) -> SQLiteResult<R>,
     ) -> SQLiteResult<Option<R>> {
+        self.read_native_with_control(None, operation)
+    }
+
+    pub(super) fn read_native_with_control<R>(
+        &self,
+        control: Option<&StorageReadControl>,
+        operation: impl FnOnce(&NativeDocumentRead<'_>) -> SQLiteResult<R>,
+    ) -> SQLiteResult<Option<R>> {
         let snapshot = match &self.retained {
             Some(snapshot) => Some(std::sync::Arc::clone(snapshot)),
             None => self.conn.native_snapshot()?,
         };
         snapshot
-            .map(|snapshot| operation(&NativeDocumentRead::new(&snapshot, &self.table)?))
+            .map(|snapshot| {
+                operation(&NativeDocumentRead::with_control(
+                    &snapshot,
+                    &self.table,
+                    control.unwrap_or(&snapshot.control),
+                )?)
+            })
             .transpose()
     }
 

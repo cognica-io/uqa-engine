@@ -617,6 +617,15 @@ impl DocumentStore for SQLiteDocumentStore {
         })?)
     }
 
+    fn next_doc_ids_controlled(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<DocId>> {
+        Ok(self.read_ids_controlled(after, limit, control)?)
+    }
+
     fn max_doc_id(&self) -> StorageBackendResult<DocId> {
         SQLiteDocumentStore::max_doc_id(self)
     }

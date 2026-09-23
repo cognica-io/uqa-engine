@@ -12,6 +12,7 @@ mod tests;
 use rusqlite::types::ValueRef;
 use uqa_core::memory::BudgetedVec;
 use uqa_storage::mvcc::VersionError;
+use uqa_storage::read_control::StorageReadControl;
 
 use super::NativeDocumentRead;
 use crate::document_store::{
@@ -118,8 +119,11 @@ impl NativeDocumentRead<'_> {
         &self,
         after: Option<DocId>,
         limit: usize,
+        control: &StorageReadControl,
         mut visit: impl FnMut(DocId) -> SQLiteResult<()>,
     ) -> SQLiteResult<()> {
+        control.check()?;
+        self.snapshot.control.check()?;
         if limit == 0 {
             return Ok(());
         }
@@ -128,37 +132,37 @@ impl NativeDocumentRead<'_> {
             return Ok(());
         };
         let identity = NativeRecordIdentity::new(Family::Documents, owner)?;
-        let prefix = identity.encode_prefix(&[], &self.snapshot.control)?;
+        let prefix = identity.encode_prefix(&[], control)?;
         let after = after
-            .map(|id| identity.encode_key(&[ValueRef::Integer(id)], &self.snapshot.control))
+            .map(|id| identity.encode_key(&[ValueRef::Integer(id)], control))
             .transpose()?;
         let mut count = 0;
         self.snapshot.view.visit_keys(
             &prefix,
             after.as_deref(),
             usize::MAX,
-            &self.snapshot.control,
+            control,
             &mut |key, record| {
+                control.check()?;
+                self.snapshot.control.check()?;
                 if record.live {
-                    NativeRecordIdentity::visit_key_components(
-                        key,
-                        &self.snapshot.control,
-                        |_, value| {
-                            let ValueRef::Integer(id) = value else {
-                                return Err(VersionError::InvalidEncoding(
-                                    "native document key must be integer",
-                                ));
-                            };
-                            let id = document_id_from_sqlite(id)
-                                .map_err(|error| VersionError::Storage(error.into()))?;
-                            visit(id).map_err(|error| VersionError::Storage(error.into()))
-                        },
-                    )?;
+                    NativeRecordIdentity::visit_key_components(key, control, |_, value| {
+                        let ValueRef::Integer(id) = value else {
+                            return Err(VersionError::InvalidEncoding(
+                                "native document key must be integer",
+                            ));
+                        };
+                        let id = document_id_from_sqlite(id)
+                            .map_err(|error| VersionError::Storage(error.into()))?;
+                        visit(id).map_err(|error| VersionError::Storage(error.into()))
+                    })?;
                     count += 1;
                 }
                 Ok(count < limit)
             },
         )?;
+        control.check()?;
+        self.snapshot.control.check()?;
         Ok(())
     }
 
@@ -168,10 +172,19 @@ impl NativeDocumentRead<'_> {
     }
 
     fn id_page(&self, after: Option<DocId>, limit: usize) -> SQLiteResult<BudgetedVec<DocId>> {
-        self.snapshot.control.check()?;
-        let mut ids = BudgetedVec::new(self.snapshot.control.memory());
-        self.visit_ids(after, limit, |id| {
-            self.snapshot.control.check()?;
+        self.id_page_controlled(after, limit, &self.snapshot.control)
+    }
+
+    pub(crate) fn id_page_controlled(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> SQLiteResult<BudgetedVec<DocId>> {
+        control.check()?;
+        let mut ids = BudgetedVec::new(control.memory());
+        self.visit_ids(after, limit, control, |id| {
+            control.check()?;
             ids.push(id)?;
             Ok(())
         })?;
@@ -201,7 +214,7 @@ impl NativeDocumentRead<'_> {
 
     pub(crate) fn len(&self) -> SQLiteResult<usize> {
         let mut count: usize = 0;
-        self.visit_ids(None, usize::MAX, |_| {
+        self.visit_ids(None, usize::MAX, &self.snapshot.control, |_| {
             count = count.checked_add(1).ok_or_else(|| {
                 SQLiteError::StorageBackend("native document count overflow".into())
             })?;
@@ -212,7 +225,7 @@ impl NativeDocumentRead<'_> {
 
     pub(crate) fn max_doc_id(&self) -> SQLiteResult<DocId> {
         let mut last = 0;
-        self.visit_ids(None, usize::MAX, |id| {
+        self.visit_ids(None, usize::MAX, &self.snapshot.control, |id| {
             last = id;
             Ok(())
         })?;

@@ -371,6 +371,15 @@ impl DocumentStore for RetainedDocuments {
         Ok(ids)
     }
 
+    fn next_doc_ids_controlled(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<BudgetedVec<DocId>> {
+        self.id_page_controlled(after, limit, control)
+    }
+
     fn max_doc_id(&self) -> StorageBackendResult<DocId> {
         let mut last = 0;
         self.visit_ids(|id| {

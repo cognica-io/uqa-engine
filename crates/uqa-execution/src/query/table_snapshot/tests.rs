@@ -13,6 +13,7 @@ use uqa_storage::{
 };
 
 mod budgets;
+mod controlled_ids;
 mod copied;
 mod document_view;
 mod id_cursor;
@@ -156,6 +157,15 @@ impl DocumentStore for PagedSource {
     fn next_doc_ids(&self, after: Option<DocId>, limit: usize) -> StorageBackendResult<Vec<DocId>> {
         assert!(limit <= crate::DEFAULT_BATCH_SIZE);
         self.rows.next_doc_ids(after, limit)
+    }
+    fn next_doc_ids_controlled(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<DocId>> {
+        assert!(limit <= crate::DEFAULT_BATCH_SIZE);
+        self.rows.next_doc_ids_controlled(after, limit, control)
     }
     fn len(&self) -> StorageBackendResult<usize> {
         self.rows.len()

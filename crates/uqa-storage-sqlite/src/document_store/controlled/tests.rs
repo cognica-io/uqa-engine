@@ -9,6 +9,7 @@ use crate::document_store::{blob as ordinary, typed_value::StoredValue};
 use std::collections::BTreeMap;
 use uqa_core::{ArrayValue, DecimalValue, TemporalValue};
 
+mod identities;
 mod native;
 
 fn encoded(value: Value) -> Vec<u8> {

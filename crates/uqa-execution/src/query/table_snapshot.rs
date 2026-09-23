@@ -119,22 +119,19 @@ pub fn materialize(
     let mut after = None;
     loop {
         cancellation.check()?;
-        let ids = source
-            .next_doc_ids(after, crate::DEFAULT_BATCH_SIZE)
-            .map_err(|error| snapshot_error("document ids", &error))?;
+        let ids = uqa_storage::document_store::read_document_ids(
+            source,
+            after,
+            crate::DEFAULT_BATCH_SIZE,
+            control,
+        )
+        .map_err(|error| snapshot_error("document ids", &error))?;
         let Some(last) = ids.last().copied() else {
             break;
         };
-        if after.is_some_and(|after| ids[0] <= after)
-            || ids.windows(2).any(|pair| pair[0] >= pair[1])
-        {
-            return Err(SQLError::Internal(
-                "query snapshot document page did not advance in id order".into(),
-            ));
-        }
         after = Some(last);
         let mut selected = uqa_core::memory::BudgetedVec::new(control.memory());
-        for id in ids {
+        for id in ids.iter().copied() {
             cancellation.check()?;
             if !changes.contains_change(id) {
                 selected

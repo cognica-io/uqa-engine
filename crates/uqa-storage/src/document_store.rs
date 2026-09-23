@@ -13,10 +13,13 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use uqa_core::{DocId, FieldName, PathSegment, Value};
+use uqa_core::{memory::BudgetedVec, DocId, FieldName, PathSegment, Value};
 
 use crate::backend::{StorageBackendError, StorageBackendResult};
+use crate::read_control::StorageReadControl;
 
+mod controlled_ids;
+pub use controlled_ids::read_document_ids;
 pub mod decoding;
 pub mod identifiers;
 mod retained;
@@ -481,6 +484,22 @@ pub trait DocumentStore: Send + Sync {
             .filter(|doc_id| after.is_none_or(|after| *doc_id > after))
             .take(limit)
             .collect())
+    }
+
+    /// Read at most `limit` identities in strictly ascending order after `after`, retaining the supplied allowance with the output. Implementations reserve producer scratch and output before allocation, preserve this store's selected view, and never read document payloads. The default rejects unsupported providers without calling an unbounded owned cursor; empty requests still honor cancellation. Controlled consumers use [`read_document_ids`] to validate the returned page and its allowance.
+    fn next_doc_ids_controlled(
+        &self,
+        _after: Option<DocId>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<BudgetedVec<DocId>> {
+        control.check()?;
+        if limit == 0 {
+            return Ok(BudgetedVec::new(control.memory()));
+        }
+        Err(StorageBackendError::Other(
+            "controlled document identity reads are not supported".into(),
+        ))
     }
 
     /// Return the next bounded id range and its shared positional projections

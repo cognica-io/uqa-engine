@@ -16,8 +16,10 @@ use std::sync::Arc;
 use super::codec::{document_key, document_key_prefix, encode_stored_document_value, other_error};
 use super::{table_owners, KeyValueBatch, KeyValueRead, KeyValueStore};
 use crate::document_store::Document;
+use crate::read_control::StorageReadControl;
 use crate::{DocumentStore, StorageBackendResult, StoredDocument};
 use read::Documents;
+use uqa_core::memory::BudgetedVec;
 use uqa_core::{DocId, Value};
 
 #[derive(Clone)]
@@ -262,6 +264,19 @@ impl DocumentStore for KeyValueDocumentStore {
 
     fn next_doc_ids(&self, after: Option<DocId>, limit: usize) -> StorageBackendResult<Vec<DocId>> {
         self.read(|view| view.ids(after, limit))
+    }
+
+    fn next_doc_ids_controlled(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<BudgetedVec<DocId>> {
+        control.check()?;
+        if limit == 0 {
+            return Ok(BudgetedVec::new(control.memory()));
+        }
+        self.read(|view| view.id_page_controlled(after, limit, control))
     }
 
     fn for_each_next_fields(

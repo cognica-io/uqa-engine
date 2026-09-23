@@ -40,6 +40,14 @@ impl DocumentStore for DecodingSource {
     fn next_doc_ids(&self, after: Option<DocId>, limit: usize) -> StorageBackendResult<Vec<DocId>> {
         self.rows.next_doc_ids(after, limit)
     }
+    fn next_doc_ids_controlled(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<DocId>> {
+        self.rows.next_doc_ids_controlled(after, limit, control)
+    }
     fn len(&self) -> StorageBackendResult<usize> {
         self.rows.len()
     }

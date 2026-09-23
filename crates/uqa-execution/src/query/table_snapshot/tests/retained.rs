@@ -100,6 +100,20 @@ impl DocumentStore for ProjectedSource {
         }
         Ok(ids)
     }
+    fn next_doc_ids_controlled(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<DocId>> {
+        assert!(limit <= crate::DEFAULT_BATCH_SIZE);
+        self.pages.fetch_add(1, Ordering::Relaxed);
+        let ids = self.rows.next_doc_ids_controlled(after, limit, control)?;
+        if let Some(token) = &self.cancel_after_page {
+            token.cancel();
+        }
+        Ok(ids)
+    }
     fn len(&self) -> StorageBackendResult<usize> {
         self.rows.len()
     }

@@ -291,13 +291,26 @@ impl DocumentStore for RetainedDocumentStore {
         Ok(self.after(after).first().map(|(id, _)| *id))
     }
     fn next_doc_ids(&self, after: Option<DocId>, limit: usize) -> StorageBackendResult<Vec<DocId>> {
+        let (ids, _memory) = self
+            .next_doc_ids_controlled(after, limit, &self.control)?
+            .into_parts();
+        Ok(ids)
+    }
+    fn next_doc_ids_controlled(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<BudgetedVec<DocId>> {
         self.control.check()?;
-        let mut ids = BudgetedVec::new(self.control.memory());
+        control.check()?;
+        let mut ids = BudgetedVec::new(control.memory());
         for (id, _) in self.after(after).iter().take(limit) {
             self.control.check()?;
+            control.check()?;
             ids.push(*id)?;
         }
-        let (ids, _memory) = ids.into_parts();
+        control.check()?;
         Ok(ids)
     }
     fn max_doc_id(&self) -> StorageBackendResult<DocId> {

@@ -11,10 +11,12 @@ mod tests;
 
 use crate::document_store::Document;
 use crate::key_value::codec::{
-    decode_retained_stored_document_value, document_key, document_key_prefix, other_error,
+    decode_retained_stored_document_value, document_key, document_key_prefix,
+    document_key_prefix_controlled, other_error,
 };
 use crate::key_value::view::for_each_key;
 use crate::key_value::KeyValueRead;
+use crate::read_control::StorageReadControl;
 use crate::{RetainedStoredDocument, StorageBackendResult, StoredDocument};
 use std::collections::BTreeMap;
 use uqa_core::{memory::BudgetedVec, DocId, Value};
@@ -121,20 +123,74 @@ impl Documents<'_> {
         after: Option<DocId>,
         limit: usize,
     ) -> StorageBackendResult<BudgetedVec<DocId>> {
+        self.id_page_controlled(after, limit, self.read.control())
+    }
+
+    pub(super) fn id_page_controlled(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<BudgetedVec<DocId>> {
+        control.check()?;
         self.read.control().check()?;
-        let prefix = document_key_prefix(self.table)?;
-        let after = after.map(|id| document_key(self.table, id)).transpose()?;
-        let mut ids = BudgetedVec::new(self.read.control().memory());
-        self.read.visit_keys_after(
+        let mut ids = BudgetedVec::new(control.memory());
+        if limit == 0 {
+            return Ok(ids);
+        }
+        let prefix = document_key_prefix_controlled(self.table, control)?;
+        let mut cursor = BudgetedVec::new(control.memory());
+        if let Some(id) = after {
+            cursor.reserve(
+                prefix
+                    .len()
+                    .checked_add(8)
+                    .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?,
+            )?;
+            cursor.extend_from_slice(&prefix)?;
+            cursor.extend_from_slice(&id.to_be_bytes())?;
+        }
+        let mut failure = None;
+        let mut previous = after;
+        let scanned = self.read.visit_keys_after(
             &prefix,
-            after.as_deref(),
+            after.map(|_| &*cursor),
             limit,
-            self.read.control(),
+            control,
             &mut |key| {
-                ids.push(decode_id(&prefix, key)?)?;
-                Ok(())
+                if failure.is_some() {
+                    return Err(other_error("document identity scan has already failed"));
+                }
+                let result = (|| {
+                    control.check()?;
+                    self.read.control().check()?;
+                    if !key.starts_with(&prefix) || ids.len() == limit {
+                        return Err(other_error(
+                            "document identity scan exceeds its selected range",
+                        ));
+                    }
+                    let id = decode_id(&prefix, key)?;
+                    if previous.is_some_and(|previous| id <= previous) {
+                        return Err(other_error(
+                            "document identity scan does not advance in id order",
+                        ));
+                    }
+                    ids.push(id)?;
+                    previous = Some(id);
+                    Ok(())
+                })();
+                result.map_err(|error| {
+                    failure = Some(error);
+                    other_error("document identity scan failed")
+                })
             },
-        )?;
+        );
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        scanned?;
+        control.check()?;
+        self.read.control().check()?;
         Ok(ids)
     }
 

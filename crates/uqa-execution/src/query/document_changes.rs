@@ -426,6 +426,30 @@ impl DocumentStore for DocumentChanges {
             .collect())
     }
 
+    fn next_doc_ids_controlled(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<DocId>> {
+        control.check()?;
+        let mut ids = uqa_core::memory::BudgetedVec::new(control.memory());
+        if limit == 0 {
+            return Ok(ids);
+        }
+        for (id, present) in self.changes_after(after) {
+            control.check()?;
+            if ids.len() == limit {
+                break;
+            }
+            if present {
+                ids.push(id)?;
+            }
+        }
+        control.check()?;
+        Ok(ids)
+    }
+
     fn len(&self) -> StorageBackendResult<usize> {
         Ok(self.changes().filter(|(_, present)| *present).count())
     }

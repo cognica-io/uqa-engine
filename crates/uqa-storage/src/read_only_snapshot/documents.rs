@@ -7,9 +7,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use uqa_core::{DocId, PathSegment, Value};
+use uqa_core::{memory::BudgetedVec, DocId, PathSegment, Value};
 
 use crate::document_store::{Document, DocumentMetadata, SharedDocumentRow, StoredDocument};
+use crate::read_control::StorageReadControl;
 use crate::{DocumentStore, StorageBackendResult};
 
 use super::{read_only_error, ReadOnlySnapshot};
@@ -164,6 +165,15 @@ impl DocumentStore for ReadOnlySnapshot<dyn DocumentStore> {
 
     fn next_doc_ids(&self, after: Option<DocId>, limit: usize) -> StorageBackendResult<Vec<DocId>> {
         self.0.next_doc_ids(after, limit)
+    }
+
+    fn next_doc_ids_controlled(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<BudgetedVec<DocId>> {
+        self.0.next_doc_ids_controlled(after, limit, control)
     }
 
     fn next_shared_fields(

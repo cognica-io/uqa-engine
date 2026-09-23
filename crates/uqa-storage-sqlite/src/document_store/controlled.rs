@@ -17,6 +17,7 @@ use super::{DocId, SQLiteError};
 
 mod blob;
 mod container;
+mod identifiers;
 mod typed;
 
 pub(super) use blob::{decode_blob, marker, Marker};
