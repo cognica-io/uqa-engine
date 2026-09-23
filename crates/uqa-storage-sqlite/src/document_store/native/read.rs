@@ -163,6 +163,11 @@ impl NativeDocumentRead<'_> {
     }
 
     pub(crate) fn ids(&self, after: Option<DocId>, limit: usize) -> SQLiteResult<Vec<DocId>> {
+        let (ids, _memory) = self.id_page(after, limit)?.into_parts();
+        Ok(ids)
+    }
+
+    fn id_page(&self, after: Option<DocId>, limit: usize) -> SQLiteResult<BudgetedVec<DocId>> {
         self.snapshot.control.check()?;
         let mut ids = BudgetedVec::new(self.snapshot.control.memory());
         self.visit_ids(after, limit, |id| {
@@ -170,8 +175,28 @@ impl NativeDocumentRead<'_> {
             ids.push(id)?;
             Ok(())
         })?;
-        let (ids, _memory) = ids.into_parts();
         Ok(ids)
+    }
+
+    pub(in crate::document_store) fn visit_next_ids(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> SQLiteResult<usize> {
+        let ids = self.id_page(after, limit)?;
+        let mut visited = 0;
+        for id in ids.iter().copied() {
+            self.snapshot.control.check()?;
+            visited += 1;
+            let keep_going = visitor(id, &[]);
+            self.snapshot.control.check()?;
+            if !keep_going {
+                break;
+            }
+        }
+        self.snapshot.control.check()?;
+        Ok(visited)
     }
 
     pub(crate) fn len(&self) -> SQLiteResult<usize> {

@@ -9,6 +9,12 @@
 use super::{DocId, RetainedDocuments, StorageBackendError, StorageBackendResult};
 use uqa_core::memory::{BudgetedVec, MemoryError};
 
+enum BorrowedPage {
+    Unsupported,
+    Empty,
+    Last(DocId),
+}
+
 impl RetainedDocuments {
     pub(in crate::query::table_snapshot) fn id_page(
         &self,
@@ -26,6 +32,14 @@ impl RetainedDocuments {
         while base.len() < limit {
             control.check()?;
             let requested = (limit - base.len()).min(crate::DEFAULT_BATCH_SIZE);
+            match self.append_borrowed_ids(cursor, requested, &mut base)? {
+                BorrowedPage::Empty => break,
+                BorrowedPage::Last(last) => {
+                    cursor = Some(last);
+                    continue;
+                }
+                BorrowedPage::Unsupported => {}
+            }
             let page = self.0.source.next_doc_ids(cursor, requested)?;
             let Some(last) = page.last().copied() else {
                 break;
@@ -77,6 +91,57 @@ impl RetainedDocuments {
         }
         control.check()?;
         Ok(ids)
+    }
+
+    fn append_borrowed_ids(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        ids: &mut BudgetedVec<DocId>,
+    ) -> StorageBackendResult<BorrowedPage> {
+        let mut count = 0;
+        let mut last = after;
+        let mut failure = None;
+        let result = self.0.source.for_each_next_fields(after, limit, &[], &mut |id, _| {
+            if failure.is_some() {
+                return false;
+            }
+            let result = (|| {
+                self.0.control.check()?;
+                if count == limit || last.is_some_and(|last| id <= last) {
+                    return Err(StorageBackendError::Other(
+                        "query document cursor exceeds its request or does not advance in id order".into(),
+                    ));
+                }
+                count += 1;
+                last = Some(id);
+                if !self.0.changes.contains_change(id) {
+                    ids.push(id)?;
+                }
+                Ok(())
+            })();
+            if let Err(error) = result {
+                failure = Some(error);
+                return false;
+            }
+            true
+        });
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        let result = result?;
+        self.0.control.check()?;
+        match result {
+            Some(reported) if reported == count => Ok(if count == 0 {
+                BorrowedPage::Empty
+            } else {
+                BorrowedPage::Last(last.expect("visited identity"))
+            }),
+            None if count == 0 => Ok(BorrowedPage::Unsupported),
+            _ => Err(StorageBackendError::Other(
+                "query document cursor reports a count inconsistent with its callbacks".into(),
+            )),
+        }
     }
 
     pub(super) fn selected_ids(

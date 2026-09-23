@@ -621,6 +621,19 @@ impl DocumentStore for SQLiteDocumentStore {
         SQLiteDocumentStore::max_doc_id(self)
     }
 
+    fn for_each_next_fields(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        if !fields.is_empty() {
+            return Ok(None);
+        }
+        Ok(self.read_native(|read| read.visit_next_ids(after, limit, visitor))?)
+    }
+
     #[expect(
         clippy::redundant_closure_for_method_calls,
         reason = "a method item cannot satisfy the borrowed reader's higher-ranked lifetimes"

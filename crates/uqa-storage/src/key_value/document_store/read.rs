@@ -112,6 +112,15 @@ impl Documents<'_> {
         after: Option<DocId>,
         limit: usize,
     ) -> StorageBackendResult<Vec<DocId>> {
+        let (ids, _memory) = self.id_page(after, limit)?.into_parts();
+        Ok(ids)
+    }
+
+    pub(super) fn id_page(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+    ) -> StorageBackendResult<BudgetedVec<DocId>> {
         self.read.control().check()?;
         let prefix = document_key_prefix(self.table)?;
         let after = after.map(|id| document_key(self.table, id)).transpose()?;
@@ -126,7 +135,6 @@ impl Documents<'_> {
                 Ok(())
             },
         )?;
-        let (ids, _memory) = ids.into_parts();
         Ok(ids)
     }
 

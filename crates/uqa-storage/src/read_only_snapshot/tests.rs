@@ -68,6 +68,26 @@ fn document_adapter_preserves_shared_projections_and_rejects_writes() {
     drop(retained);
     assert!(Arc::get_mut(&mut second).unwrap().delete(7).is_err());
     assert_eq!(second.len().unwrap(), 1);
+    let mut ids = Vec::new();
+    assert_eq!(
+        second
+            .for_each_next_fields(None, 2, &[], &mut |id, values| {
+                assert!(values.is_empty());
+                ids.push(id);
+                false
+            })
+            .unwrap(),
+        Some(1)
+    );
+    assert_eq!(ids, [7]);
+    assert_eq!(
+        second
+            .for_each_next_fields(Some(7), 2, &[], &mut |_, _| {
+                panic!("the exhausted identity cursor must not invoke its consumer")
+            })
+            .unwrap(),
+        Some(0)
+    );
 }
 
 #[test]

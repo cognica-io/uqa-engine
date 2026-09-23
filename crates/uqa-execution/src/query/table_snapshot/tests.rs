@@ -15,6 +15,7 @@ use uqa_storage::{
 mod budgets;
 mod copied;
 mod document_view;
+mod id_cursor;
 mod index_projection;
 mod retained;
 

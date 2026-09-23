@@ -264,6 +264,32 @@ impl DocumentStore for KeyValueDocumentStore {
         self.read(|view| view.ids(after, limit))
     }
 
+    fn for_each_next_fields(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        if !fields.is_empty() {
+            return Ok(None);
+        }
+        let (ids, control) =
+            self.read(|view| Ok((view.id_page(after, limit)?, view.read.control().clone())))?;
+        let mut visited = 0;
+        for id in ids.iter().copied() {
+            control.check()?;
+            visited += 1;
+            let keep_going = visitor(id, &[]);
+            control.check()?;
+            if !keep_going {
+                break;
+            }
+        }
+        control.check()?;
+        Ok(Some(visited))
+    }
+
     fn len(&self) -> StorageBackendResult<usize> {
         self.read(|view| view.count())
     }
