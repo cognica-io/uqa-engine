@@ -70,7 +70,7 @@ struct FaultPersistence {
     fault: AtomicU8,
     identifier_fault: AtomicU8,
     serializable_fault: AtomicU8,
-    serializable_commit: Mutex<Option<uqa_storage::mvcc::SerializableTransactionId>>,
+    serializable_completion: Mutex<Option<uqa_storage::mvcc::SerializableTransactionId>>,
     foreground: std::thread::ThreadId,
     foreground_transaction_allocations: AtomicUsize,
     foreground_record_commits: AtomicUsize,
@@ -267,7 +267,7 @@ fn fixtures() -> (tempfile::TempDir, Vec<Arc<FaultPersistence>>) {
                     fault: AtomicU8::new(HEALTHY),
                     identifier_fault: AtomicU8::new(HEALTHY),
                     serializable_fault: AtomicU8::new(HEALTHY),
-                    serializable_commit: Mutex::new(None),
+                    serializable_completion: Mutex::new(None),
                     foreground: std::thread::current().id(),
                     foreground_transaction_allocations: AtomicUsize::new(0),
                     foreground_record_commits: AtomicUsize::new(0),
@@ -575,6 +575,7 @@ fn a_lost_abort_reply_resolves_as_a_known_abort_and_restores_private_catalog_cha
         persistence.fault.store(LOSE_ABORT_REPLY, Ordering::Release);
         assert_unknown(&root.rollback().unwrap_err());
         assert!(root.pending_commit().is_some());
+        assert!(!root.transaction_failed());
         persistence.fault.store(HEALTHY, Ordering::Release);
         let error = root.commit().unwrap_err();
         assert_eq!(error.sqlstate(), Some("25000"), "{error}");

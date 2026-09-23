@@ -266,6 +266,7 @@ enum TransactionStatus {
     Failed,
     FailedBackendAborted,
     CommitPending(uqa_storage::mvcc::TransactionOutcomeId),
+    RollbackPending(uqa_storage::mvcc::TransactionOutcomeId),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

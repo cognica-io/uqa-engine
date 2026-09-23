@@ -85,7 +85,7 @@ impl Engine {
                     }
                     query(self)
                 },
-                |error| map_transaction_error(SQLError::Internal(error)),
+                &map_transaction_error,
             );
         }
         self.runtime
@@ -142,7 +142,7 @@ impl Engine {
                     self.prepare_explicit_transaction_writer()?;
                     f(self)
                 },
-                SQLError::Internal,
+                std::convert::identity,
             );
         }
         if self.storage.backend.is_none() {
@@ -173,7 +173,7 @@ impl Engine {
                     self.prepare_serializable_transaction_snapshot()?;
                     f(self)
                 },
-                SQLError::Internal,
+                std::convert::identity,
             )
         } else {
             self.transaction(|engine| {
@@ -211,7 +211,7 @@ impl Engine {
                         .map_err(&map_transaction_error)?;
                     f(self)
                 },
-                |message| map_transaction_error(SQLError::Internal(message)),
+                &map_transaction_error,
             );
         }
         if self.storage.backend.is_none() {
@@ -319,7 +319,7 @@ impl Engine {
                     }
                     f(self)
                 },
-                StorageBackendError::Other,
+                |error| StorageBackendError::backend("transaction abort", error),
             );
         }
         let mut scope = TransactionScope::begin(self).map_err(|error| {
@@ -388,7 +388,7 @@ impl Engine {
                         })?;
                     f(self)
                 },
-                std::convert::identity,
+                |error| error.to_string(),
             );
         }
         let mut scope = TransactionScope::begin(self)

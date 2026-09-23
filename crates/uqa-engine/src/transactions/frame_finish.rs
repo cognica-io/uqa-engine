@@ -85,7 +85,7 @@ impl Engine {
             };
             if let Err(error) = commit_result {
                 drop(publication);
-                if let Some(error) = Self::retain_pending_commit(stack, &error) {
+                if let Some(error) = Self::retain_pending_completion(stack, &error, false) {
                     return Err(error);
                 }
                 let action = if storage_savepoint.is_some() {
@@ -133,7 +133,7 @@ impl Engine {
                     .begin_change_publication(&self.runtime.cancellation)
                     .map_err(|error| match status {
                         TransactionStatus::CommitPending(transaction) => {
-                            Self::pending_commit_error(transaction, error)
+                            Self::pending_completion_error(transaction, error)
                         }
                         _ => error,
                     })?,
@@ -149,7 +149,7 @@ impl Engine {
                     drop(notification_commit);
                     drop(change_publication);
                     if let TransactionStatus::CommitPending(transaction) = status {
-                        return Err(Self::pending_commit_error(transaction, error));
+                        return Err(Self::pending_completion_error(transaction, error));
                     }
                     return Err(match self.rollback_transaction_frame(stack) {
                         Ok(()) => error,
@@ -229,7 +229,7 @@ impl Engine {
                 if let Some(TransactionStatus::CommitPending(transaction)) =
                     stack.last().map(|frame| frame.status)
                 {
-                    return Err(Self::pending_commit_error(transaction, error));
+                    return Err(Self::pending_completion_error(transaction, error));
                 }
                 Err(match self.rollback_transaction_frame(stack) {
                     Ok(()) => error,
@@ -325,7 +325,7 @@ impl Engine {
         if let Some(backend) = self.storage.backend.as_ref() {
             if nested || backend.in_transaction() {
                 if let Err(error) = backend.rollback_transaction() {
-                    if let Some(error) = Self::retain_pending_commit(stack, &error) {
+                    if let Some(error) = Self::retain_pending_completion(stack, &error, true) {
                         return Err(error);
                     }
                     if backend.in_transaction() {
@@ -396,7 +396,7 @@ impl Engine {
                     });
                 }
             }
-            if let Some(error) = Self::retain_pending_commit(stack, &error) {
+            if let Some(error) = Self::retain_pending_completion(stack, &error, true) {
                 return Err(error);
             }
             return Err(self.recover_failed_transaction_finish(
@@ -408,30 +408,40 @@ impl Engine {
         Ok(())
     }
 
-    fn retain_pending_commit(
+    pub(super) fn retain_pending_completion(
         stack: &mut [TransactionFrame],
         error: &StorageBackendError,
+        rollback: bool,
     ) -> Option<SQLError> {
         let frame = stack.last_mut()?;
         if frame.storage_savepoint.is_some() {
             return None;
         }
-        let transaction = match error.transaction_outcome() {
-            Some(
-                TransactionOutcome::Indeterminate(transaction)
-                | TransactionOutcome::Committed(transaction),
-            ) => transaction,
+        // Keep the original unresolved operation: a prior COMMIT must still report a confirmed abort, while failed-statement cleanup can only finish rollback.
+        let rollback = match frame.status {
+            TransactionStatus::CommitPending(_) => false,
+            TransactionStatus::RollbackPending(_) => true,
+            _ => rollback,
+        };
+        let (transaction, rollback) = match error.transaction_outcome() {
+            Some(TransactionOutcome::Indeterminate(transaction)) => (transaction, rollback),
+            Some(TransactionOutcome::Committed(transaction)) => (transaction, false),
             Some(TransactionOutcome::Aborted(_)) => {
                 frame.status = TransactionStatus::Failed;
                 return None;
             }
             None => match frame.status {
-                TransactionStatus::CommitPending(transaction) => transaction,
+                TransactionStatus::CommitPending(transaction) => (transaction, rollback),
+                TransactionStatus::RollbackPending(transaction) => (transaction, true),
                 _ => return None,
             },
         };
-        frame.status = TransactionStatus::CommitPending(transaction);
-        Some(Self::pending_commit_error(transaction, error))
+        frame.status = if rollback {
+            TransactionStatus::RollbackPending(transaction)
+        } else {
+            TransactionStatus::CommitPending(transaction)
+        };
+        Some(Self::pending_completion_error(transaction, error))
     }
 
     pub(super) fn rollback_transaction_frame(

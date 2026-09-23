@@ -147,19 +147,23 @@ impl Engine {
         failed: bool,
         apply_on_commit: bool,
     ) -> Result<(), SQLError> {
-        if let Some(TransactionStatus::CommitPending(transaction)) =
-            guard.last().map(|frame| frame.status)
+        if let Some(
+            status @ (TransactionStatus::CommitPending(transaction)
+            | TransactionStatus::RollbackPending(transaction)),
+        ) = guard.last().map(|frame| frame.status)
         {
+            let rollback = matches!(status, TransactionStatus::RollbackPending(_));
             return match tx {
+                TransactionStmt::Commit if rollback => self.rollback_transaction_frame(guard),
                 TransactionStmt::Commit => self.commit_transaction_frame(guard, false),
                 TransactionStmt::CommitAndChain => {
-                    self.finish_transaction_and_chain(guard, "COMMIT", true, false)
+                    self.finish_transaction_and_chain(guard, "COMMIT", !rollback, false)
                 }
                 TransactionStmt::Rollback => self.rollback_transaction_frame(guard),
                 TransactionStmt::RollbackAndChain => {
                     self.finish_transaction_and_chain(guard, "ROLLBACK", false, false)
                 }
-                _ => Err(Self::pending_commit_error(
+                _ => Err(Self::pending_completion_error(
                     transaction,
                     "only COMMIT or ROLLBACK can resolve this transaction",
                 )),

@@ -87,7 +87,7 @@ impl Engine {
         }));
 
         if !started {
-            return self.finish_existing_transaction_operation(result, SQLError::Internal);
+            return self.finish_existing_transaction_operation(result, std::convert::identity);
         }
         match result {
             Ok(Ok(value)) => {

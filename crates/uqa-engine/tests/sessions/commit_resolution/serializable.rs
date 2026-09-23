@@ -14,9 +14,21 @@ use uqa_storage::mvcc::{
 
 impl FaultPersistence {
     fn lose_serializable_commit_reply(&self, target: SerializableTransactionId) {
-        *self.serializable_commit.lock().unwrap() = Some(target);
+        *self.serializable_completion.lock().unwrap() = Some(target);
         self.serializable_fault
             .store(LOSE_COMMITTED_REPLY, Ordering::Release);
+    }
+
+    fn fail_serializable_abort(&self, target: SerializableTransactionId, persist: bool) {
+        *self.serializable_completion.lock().unwrap() = Some(target);
+        self.serializable_fault.store(
+            if persist {
+                LOSE_ABORT_REPLY
+            } else {
+                LOSE_UNCOMMITTED_REPLY
+            },
+            Ordering::Release,
+        );
     }
 }
 
@@ -38,22 +50,36 @@ impl SerializableCoordinator for FaultPersistence {
             .into());
         }
         let coordinator = self.inner.serializable_coordinator().unwrap();
-        if fault != LOSE_COMMITTED_REPLY {
+        if !matches!(
+            fault,
+            LOSE_COMMITTED_REPLY | LOSE_ABORT_REPLY | LOSE_UNCOMMITTED_REPLY
+        ) {
             return coordinator.with_serializable_admission(control, operation);
         }
         let target = self
-            .serializable_commit
+            .serializable_completion
             .lock()
             .unwrap()
             .expect("lost completion reply has an original participant");
-        let mut committed = false;
-        // Command refresh can precede COMMIT; lose only the selected participant's persisted completion.
-        coordinator.with_serializable_admission(control, &mut |graph, leases| {
+        let mut completed = false;
+        // Command refresh can precede completion; inject only after the selected participant changes its outcome.
+        let result = coordinator.with_serializable_admission(control, &mut |graph, leases| {
             operation(graph, leases)?;
-            committed = graph.status(target)? == SerializableStatus::Committed;
+            let terminal = if fault == LOSE_COMMITTED_REPLY {
+                SerializableStatus::Committed
+            } else {
+                SerializableStatus::Aborted
+            };
+            completed = graph.status(target)? == terminal;
+            if completed && fault == LOSE_UNCOMMITTED_REPLY {
+                return Err(StorageBackendError::Other(
+                    "injected failure before logical completion persisted".into(),
+                )
+                .into());
+            }
             Ok(())
-        })?;
-        if committed {
+        });
+        if completed {
             self.serializable_fault
                 .store(UNAVAILABLE, Ordering::Release);
             return Err(StorageBackendError::Other(
@@ -61,7 +87,7 @@ impl SerializableCoordinator for FaultPersistence {
             )
             .into());
         }
-        Ok(())
+        result
     }
 }
 
@@ -164,5 +190,97 @@ fn a_scoped_empty_commit_preserves_logical_resolution_without_replaying_the_call
         assert_eq!(calls.load(Ordering::Acquire), 1);
         assert!(store.serializable_read_context().unwrap().is_none());
         assert_eq!(persistence.foreground_record_writes(), record_writes);
+    }
+}
+
+#[test]
+fn statement_abort_retains_a_live_backend_until_rollback_succeeds() {
+    let (_directory, fixtures) = fixtures();
+    for persistence in fixtures {
+        let (root, store) = retained_engine(persistence.clone());
+        root.sql("BEGIN ISOLATION LEVEL SERIALIZABLE", &[]).unwrap();
+        root.sql("SELECT id FROM completion_source", &[]).unwrap();
+        let actor = store.serializable_read_context().unwrap().unwrap().id();
+        persistence
+            .serializable_fault
+            .store(UNAVAILABLE, Ordering::Release);
+
+        let error = root.sql("SELECT 1 / 0", &[]).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("transaction abort cleanup failed"));
+        assert!(store.in_transaction());
+        assert_eq!(root.transaction_depth(), 1);
+        assert_eq!(
+            store.serializable_read_context().unwrap().unwrap().id(),
+            actor
+        );
+        assert!(
+            root.rollback().is_err(),
+            "failed statement cleanup must not hide the still-active backend"
+        );
+        assert!(store.in_transaction());
+        assert_eq!(root.transaction_depth(), 1);
+
+        persistence
+            .serializable_fault
+            .store(HEALTHY, Ordering::Release);
+        root.rollback().unwrap();
+        assert!(!store.in_transaction());
+        assert_eq!(root.transaction_depth(), 0);
+        assert!(store.serializable_read_context().unwrap().is_none());
+        assert_eq!(count(&root, "completion_source"), Value::Int(1));
+    }
+}
+
+#[test]
+fn uncertain_statement_abort_preserves_rollback_intent_and_the_original_participant() {
+    for persisted in [false, true] {
+        for finish in [
+            "COMMIT",
+            "ROLLBACK",
+            "COMMIT AND CHAIN",
+            "ROLLBACK AND CHAIN",
+        ] {
+            let (_directory, fixtures) = fixtures();
+            for persistence in fixtures {
+                let (root, store) = retained_engine(persistence.clone());
+                root.sql("BEGIN ISOLATION LEVEL SERIALIZABLE", &[]).unwrap();
+                root.sql("INSERT INTO completion_source VALUES (2)", &[])
+                    .unwrap();
+                let actor = store.serializable_read_context().unwrap().unwrap().id();
+                let record_writes = persistence.foreground_record_writes();
+                persistence.fail_serializable_abort(actor, persisted);
+
+                assert_unknown(&root.sql("SELECT 1 / 0", &[]).unwrap_err());
+                assert_eq!(
+                    root.pending_transaction_completion(),
+                    Some(TransactionOutcomeId::Serializable(actor)),
+                    "failed statement cleanup must retain its uncertain logical outcome"
+                );
+                assert_unknown(&root.sql("SELECT 1", &[]).unwrap_err());
+                assert_unknown(&root.commit().unwrap_err());
+                assert_unknown(&root.rollback().unwrap_err());
+                assert!(store.in_transaction());
+                assert_eq!(root.transaction_depth(), 1);
+                assert!(root.transaction_failed());
+                assert_eq!(persistence.foreground_record_writes(), record_writes);
+
+                persistence
+                    .serializable_fault
+                    .store(HEALTHY, Ordering::Release);
+                root.sql(finish, &[]).unwrap();
+                if finish.ends_with("CHAIN") {
+                    assert_eq!(root.transaction_depth(), 1);
+                    assert!(!root.transaction_failed());
+                    root.rollback().unwrap();
+                }
+                assert!(!store.in_transaction());
+                assert_eq!(root.transaction_depth(), 0);
+                assert_eq!(root.pending_transaction_completion(), None);
+                assert_eq!(persistence.foreground_record_writes(), record_writes);
+                assert_eq!(count(&root, "completion_source"), Value::Int(1));
+            }
+        }
     }
 }

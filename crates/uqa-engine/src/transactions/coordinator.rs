@@ -121,12 +121,14 @@ impl Engine {
             .is_some_and(|frame| {
                 matches!(
                     frame.status,
-                    TransactionStatus::Failed | TransactionStatus::FailedBackendAborted
+                    TransactionStatus::Failed
+                        | TransactionStatus::FailedBackendAborted
+                        | TransactionStatus::RollbackPending(_)
                 )
             })
     }
 
-    /// Physical write identity of an unresolved commit. Read-only serializable completion has no physical receipt; use `pending_transaction_completion` to inspect either kind. Callers must not replay transaction bodies.
+    /// Physical write identity of an unresolved completion. Read-only serializable completion has no physical receipt; use `pending_transaction_completion` to inspect either kind. Callers must not replay transaction bodies.
     pub fn pending_commit(&self) -> Option<uqa_storage::mvcc::StorageTransactionId> {
         match self.pending_transaction_completion()? {
             uqa_storage::mvcc::TransactionOutcomeId::Records(transaction) => Some(transaction),
@@ -134,12 +136,14 @@ impl Engine {
         }
     }
 
-    /// Retained physical or logical completion identity. Only commit resolution or whole-transaction rollback may proceed while this is present.
+    /// Retained physical or logical completion identity. Only completion resolution or whole-transaction rollback may proceed while this is present. A failed transaction retains its rollback intent even when the caller requests COMMIT.
     pub fn pending_transaction_completion(
         &self,
     ) -> Option<uqa_storage::mvcc::TransactionOutcomeId> {
         self.session.transactions.lock().last().and_then(|frame| {
-            if let TransactionStatus::CommitPending(transaction) = frame.status {
+            if let TransactionStatus::CommitPending(transaction)
+            | TransactionStatus::RollbackPending(transaction) = frame.status
+            {
                 Some(transaction)
             } else {
                 None
@@ -530,23 +534,28 @@ impl Engine {
     pub(super) fn transaction_status_error(status: TransactionStatus) -> Option<SQLError> {
         match status {
             TransactionStatus::Active => None,
-            TransactionStatus::CommitPending(transaction) => Some(Self::pending_commit_error(
-                transaction,
-                "resolve the retained commit before executing another statement",
-            )),
+            TransactionStatus::CommitPending(transaction)
+            | TransactionStatus::RollbackPending(transaction) => {
+                Some(Self::pending_completion_error(
+                    transaction,
+                    "resolve the retained transaction before executing another statement",
+                ))
+            }
             TransactionStatus::Failed | TransactionStatus::FailedBackendAborted => {
                 Some(failed_transaction_error())
             }
         }
     }
 
-    pub(super) fn pending_commit_error(
+    pub(super) fn pending_completion_error(
         transaction: uqa_storage::mvcc::TransactionOutcomeId,
         detail: impl std::fmt::Display,
     ) -> SQLError {
         SQLError::Routine {
             sqlstate: "08007".into(),
-            message: format!("transaction {transaction:?} requires commit resolution: {detail}"),
+            message: format!(
+                "transaction {transaction:?} requires completion resolution: {detail}"
+            ),
         }
     }
 }

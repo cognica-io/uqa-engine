@@ -8,8 +8,8 @@
 
 use super::{
     ConstraintModeState, Engine, EngineDataSnapshot, SQLError, SessionStateSnapshot,
-    StorageSavepointId, TransactionCharacteristicsState, TransactionDirtyState, TransactionFrame,
-    TransactionRowChange, TransactionStatus,
+    StorageBackendError, StorageBackendResult, StorageSavepointId, TransactionCharacteristicsState,
+    TransactionDirtyState, TransactionFrame, TransactionRowChange, TransactionStatus,
 };
 
 pub(super) fn panic_description(payload: &(dyn std::any::Any + Send)) -> &str {
@@ -83,13 +83,21 @@ fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot 
 
 impl Engine {
     pub(crate) fn abort_sql_transaction_after_error(&self, error: SQLError) -> SQLError {
-        transaction_abort_result(error, &self.abort_transaction_after_failure())
+        let cleanup_errors = self.abort_transaction_after_failure();
+        if cleanup_errors.is_empty() {
+            error
+        } else {
+            self.transaction_abort_cleanup_error(format!(
+                "{error}; transaction abort cleanup failed: {}",
+                cleanup_errors.join("; ")
+            ))
+        }
     }
 
     pub(super) fn run_existing_transaction_operation<R, E: std::fmt::Display>(
         &self,
         operation: impl FnOnce() -> Result<R, E>,
-        map_cleanup_error: impl Fn(String) -> E,
+        map_cleanup_error: impl Fn(SQLError) -> E,
     ) -> Result<R, E> {
         self.finish_existing_transaction_operation(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation)),
@@ -100,7 +108,7 @@ impl Engine {
     pub(super) fn finish_existing_transaction_operation<R, E: std::fmt::Display>(
         &self,
         result: std::thread::Result<Result<R, E>>,
-        map_cleanup_error: impl Fn(String) -> E,
+        map_cleanup_error: impl Fn(SQLError) -> E,
     ) -> Result<R, E> {
         match result {
             Ok(Ok(value)) => Ok(value),
@@ -109,9 +117,11 @@ impl Engine {
                 if cleanup_errors.is_empty() {
                     Err(error)
                 } else {
-                    Err(map_cleanup_error(format!(
-                        "{error}; transaction abort cleanup failed: {}",
-                        cleanup_errors.join("; ")
+                    Err(map_cleanup_error(self.transaction_abort_cleanup_error(
+                        format!(
+                            "{error}; transaction abort cleanup failed: {}",
+                            cleanup_errors.join("; ")
+                        ),
                     )))
                 }
             }
@@ -120,13 +130,23 @@ impl Engine {
                 if cleanup_errors.is_empty() {
                     std::panic::resume_unwind(payload)
                 } else {
-                    Err(map_cleanup_error(format!(
-                        "transaction abort after panic failed: {}; original panic: {}",
-                        cleanup_errors.join("; "),
-                        panic_description(payload.as_ref())
+                    Err(map_cleanup_error(self.transaction_abort_cleanup_error(
+                        format!(
+                            "transaction abort after panic failed: {}; original panic: {}",
+                            cleanup_errors.join("; "),
+                            panic_description(payload.as_ref())
+                        ),
                     )))
                 }
             }
+        }
+    }
+
+    fn transaction_abort_cleanup_error(&self, detail: String) -> SQLError {
+        if let Some(transaction) = self.pending_transaction_completion() {
+            Self::pending_completion_error(transaction, detail)
+        } else {
+            SQLError::Internal(detail)
         }
     }
 
@@ -141,36 +161,35 @@ impl Engine {
         }
 
         let rollback_state = statement_abort_snapshot(frame);
-        let frame_storage_savepoint = frame.storage_savepoint;
+        let storage_savepoint = rollback_state.storage_savepoint.or(frame.storage_savepoint);
         let outer_frame = &stack[0];
         let nontransactional_sequence_values = outer_frame.nontransactional_sequence_values.clone();
-        // A nested frame owns a backend savepoint of its own; aborting the statement rolls the storage back to that savepoint so the outer frames' writes and locks survive, exactly like a PostgreSQL subtransaction abort. Only the outermost frame aborts the whole backend transaction.
-        let savepoints_deferred = Self::backend_savepoints_deferred(&stack);
         let mut cleanup_errors = Vec::new();
-        let mut backend_aborted = false;
-
-        if let Some(backend) = self.storage.backend.as_ref() {
-            // A deferred outer transaction has written nothing to storage, so its backend savepoints exist only logically and there is nothing to roll back at the backend for a savepoint or nested frame; the outermost abort still ends the read transaction.
-            let rollback = if rollback_state.storage_savepoint.is_some()
-                || frame_storage_savepoint.is_some()
-            {
-                if savepoints_deferred {
-                    Ok(())
-                } else if let Some(storage_savepoint) = rollback_state.storage_savepoint {
-                    backend.rollback_to_savepoint(storage_savepoint)
-                } else if let Some(frame_savepoint) = frame_storage_savepoint {
-                    backend.rollback_to_savepoint(frame_savepoint)
-                } else {
-                    Ok(())
-                }
-            } else {
-                backend_aborted = true;
-                backend.rollback_transaction()
-            };
-            if let Err(rollback_error) = rollback {
+        let backend_aborted = match self
+            .rollback_failed_statement_backend(&stack, storage_savepoint)
+        {
+            Ok(aborted) => aborted,
+            Err(rollback_error) => {
                 cleanup_errors.push(format!("storage rollback: {rollback_error}"));
+                let pending =
+                    Self::retain_pending_completion(&mut stack, &rollback_error, true).is_some();
+                if pending
+                    || storage_savepoint.is_some()
+                    || self
+                        .storage
+                        .backend
+                        .as_ref()
+                        .is_some_and(|backend| backend.in_transaction())
+                {
+                    if !pending {
+                        stack.last_mut().expect("retained frame").status =
+                            TransactionStatus::Failed;
+                    }
+                    return cleanup_errors;
+                }
+                true
             }
-        }
+        };
 
         self.restore_graph_transaction_overlay(&rollback_state.session);
         if let Some(snapshot) = rollback_state.data.as_ref() {
@@ -217,6 +236,31 @@ impl Engine {
         cleanup_errors
     }
 
+    fn rollback_failed_statement_backend(
+        &self,
+        stack: &[TransactionFrame],
+        storage_savepoint: Option<StorageSavepointId>,
+    ) -> StorageBackendResult<bool> {
+        let Some(backend) = self.storage.backend.as_ref() else {
+            return Ok(false);
+        };
+        // Nested frames retain the outer writes and locks. Deferred savepoints have no backend state until writer promotion.
+        if let Some(savepoint) = storage_savepoint {
+            if !Self::backend_savepoints_deferred(stack) {
+                backend.rollback_to_savepoint(savepoint)?;
+            }
+            return Ok(false);
+        }
+        backend.rollback_transaction()?;
+        if backend.in_transaction() {
+            return Err(StorageBackendError::Other(
+                "storage rollback did not end the transaction; transaction state is retained"
+                    .into(),
+            ));
+        }
+        Ok(true)
+    }
+
     fn release_aborted_statement_locks(&self, keep_mark: Option<u32>) {
         if let Some(mark) = keep_mark {
             self.row_locks.release_mark_above(self.session_id, mark);
@@ -231,16 +275,5 @@ pub(super) fn failed_transaction_error() -> SQLError {
         sqlstate: "25P02".into(),
         message: "current transaction is aborted, commands ignored until end of transaction block"
             .into(),
-    }
-}
-
-fn transaction_abort_result(error: SQLError, cleanup_errors: &[String]) -> SQLError {
-    if cleanup_errors.is_empty() {
-        error
-    } else {
-        SQLError::Internal(format!(
-            "{error}; transaction abort cleanup failed: {}",
-            cleanup_errors.join("; ")
-        ))
     }
 }
