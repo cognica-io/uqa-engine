@@ -6,7 +6,11 @@
 
 //! Compound reads hydrate selected BLOBs from the same retained record view as the document body.
 
+#[cfg(test)]
+mod tests;
+
 use rusqlite::types::ValueRef;
+use uqa_core::memory::BudgetedVec;
 use uqa_storage::mvcc::VersionError;
 
 use super::NativeDocumentRead;
@@ -159,13 +163,14 @@ impl NativeDocumentRead<'_> {
     }
 
     pub(crate) fn ids(&self, after: Option<DocId>, limit: usize) -> SQLiteResult<Vec<DocId>> {
-        let mut ids = Vec::new();
+        self.snapshot.control.check()?;
+        let mut ids = BudgetedVec::new(self.snapshot.control.memory());
         self.visit_ids(after, limit, |id| {
-            ids.try_reserve(1)
-                .map_err(|error| super::super::allocation_error("native document IDs", error))?;
-            ids.push(id);
+            self.snapshot.control.check()?;
+            ids.push(id)?;
             Ok(())
         })?;
+        let (ids, _memory) = ids.into_parts();
         Ok(ids)
     }
 

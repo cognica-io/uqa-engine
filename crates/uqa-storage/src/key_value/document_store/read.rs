@@ -6,6 +6,9 @@
 
 //! Compound document reads keep keys, payloads, and projections on the supplied boundary.
 
+#[cfg(test)]
+mod tests;
+
 use crate::document_store::Document;
 use crate::key_value::codec::{
     decode_retained_stored_document_value, document_key, document_key_prefix, other_error,
@@ -14,7 +17,7 @@ use crate::key_value::view::for_each_key;
 use crate::key_value::KeyValueRead;
 use crate::{RetainedStoredDocument, StorageBackendResult, StoredDocument};
 use std::collections::BTreeMap;
-use uqa_core::{DocId, Value};
+use uqa_core::{memory::BudgetedVec, DocId, Value};
 
 pub(super) struct Documents<'a> {
     pub(super) read: &'a dyn KeyValueRead,
@@ -109,19 +112,21 @@ impl Documents<'_> {
         after: Option<DocId>,
         limit: usize,
     ) -> StorageBackendResult<Vec<DocId>> {
+        self.read.control().check()?;
         let prefix = document_key_prefix(self.table)?;
         let after = after.map(|id| document_key(self.table, id)).transpose()?;
-        let mut ids = Vec::new();
+        let mut ids = BudgetedVec::new(self.read.control().memory());
         self.read.visit_keys_after(
             &prefix,
             after.as_deref(),
             limit,
             self.read.control(),
             &mut |key| {
-                ids.push(decode_id(&prefix, key)?);
+                ids.push(decode_id(&prefix, key)?)?;
                 Ok(())
             },
         )?;
+        let (ids, _memory) = ids.into_parts();
         Ok(ids)
     }
 
