@@ -110,7 +110,7 @@ impl IndexedSpill {
                 })?;
 
         let write_result = (|| -> std::io::Result<()> {
-            write_indexed_record(self.data.as_file_mut(), &length.to_le_bytes(), &payload)?;
+            write_indexed_record(self.data.as_file_mut(), length.to_le_bytes(), &payload)?;
             self.data.as_file_mut().flush()?;
             self.offsets
                 .as_file_mut()
@@ -246,10 +246,10 @@ fn read_indexed_offset(file: &mut OffsetFile, position: u64) -> ExecResult<u64> 
 
 fn write_indexed_record(
     file: &mut NamedTempFile,
-    length: &[u8; 8],
+    length: [u8; 8],
     payload: &[u8],
 ) -> std::io::Result<()> {
-    let mut buffers = [IoSlice::new(length), IoSlice::new(payload)];
+    let mut buffers = [IoSlice::new(&length), IoSlice::new(payload)];
     let mut remaining = &mut buffers[..];
     while !remaining.is_empty() {
         match file.write_vectored(remaining) {

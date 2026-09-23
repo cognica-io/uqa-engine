@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-/// Native execution links bundled `SQLCipher`. A fresh raw key protects each private index without borrowing a database credential or deriving a passphrase. Browser SQLite has no encrypted provider and retains its existing temporary-database behavior.
+/// Native execution links bundled `SQLCipher`. A fresh raw key protects each private index without borrowing a database credential or deriving a passphrase. Browser `SQLite` has no encrypted provider and retains its existing temporary-database behavior.
 pub(crate) fn open(path: &Path) -> rusqlite::Result<rusqlite::Connection> {
     let connection = rusqlite::Connection::open(path)?;
     #[cfg(not(target_os = "emscripten"))]

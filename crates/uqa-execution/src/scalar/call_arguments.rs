@@ -18,6 +18,8 @@ pub use uqa_sql::ir::{
     scalar_call_argument, scalar_call_arguments, validate_scalar_call_arguments, ScalarCallArgument,
 };
 
+type EvaluatedArguments = Vec<(Option<String>, Value)>;
+
 pub fn eval_call_arguments(
     arguments: &[ScalarExpr],
     context: &ScalarEvalContext<'_>,
@@ -35,7 +37,7 @@ pub(super) fn eval_call_arguments_with_control(
     arguments: &[ScalarExpr],
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
-) -> Result<Produced<Vec<(Option<String>, Value)>>, SQLError> {
+) -> Result<Produced<EvaluatedArguments>, SQLError> {
     let decoded = uqa_sql::ir::scalar_call_arguments_with_control(arguments, control)?;
     let mut output = ProductionVec::new(*control);
     output.reserve(decoded.len())?;

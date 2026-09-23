@@ -19,7 +19,6 @@ use crate::{
     SessionPortalDeclaration, SessionPortalMaterialization, SessionPortalPosition,
     SessionPortalRestart, SessionPortalSQLFunctionSnapshots, SessionPortalState,
     SessionPortalTableSnapshots, SessionPortalViewSnapshots, StorageContext, TableState, Value,
-    VectorIndex,
 };
 use fetch::{
     ensure_portal_rows_for_fetch, fetch_directional_query_portal, fetch_indices,

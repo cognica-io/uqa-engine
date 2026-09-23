@@ -344,15 +344,18 @@ jobs:
           - label: Linux
             os: ubuntu-24.04
             rustflags: "-D warnings -C linker-features=-lld"
+            shell: bash
           - label: macOS
             os: macos-14
             rustflags: "-D warnings"
+            shell: bash
           - label: Windows
             os: windows-latest
             rustflags: "-D warnings"
+            shell: pwsh
     defaults:
       run:
-        shell: bash
+        shell: ${{ matrix.shell }}
     steps:
       - uses: actions/checkout@v4
         with:

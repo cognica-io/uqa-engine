@@ -38,6 +38,7 @@ fn generated_scalar_results_keep_the_original_allowance_through_shared_evaluatio
             Value::Str("AB AB!!!".into()),
         ),
         ("n + 2", Value::Int(9)),
+        ("16777216::real + 1::real", Value::Float(16_777_216.0)),
         (
             "CASE WHEN n > 0 THEN array_append(ARRAY[n, n + 1], n + 2) ELSE ARRAY[0] END",
             Value::Array(

@@ -338,6 +338,13 @@ fn decode_value(encoded: &[u8]) -> Result<Value, SQLError> {
 mod tests {
     use super::*;
 
+    fn cache_directory(disk: &DiskRetryCache) -> std::path::PathBuf {
+        std::path::Path::new(disk.connection.path().expect("persistent retry cache"))
+            .parent()
+            .expect("private cache directory")
+            .to_path_buf()
+    }
+
     #[test]
     fn failed_retry_cache_migration_preserves_memory_entries() {
         let key = b"row".to_vec();
@@ -349,7 +356,7 @@ mod tests {
             disk: None,
         };
         let disk = DiskRetryCache::new().unwrap();
-        let path = disk._directory.path().to_owned();
+        let path = cache_directory(&disk);
         disk.connection
             .execute("DROP TABLE retry_cache", [])
             .unwrap();
@@ -366,7 +373,7 @@ mod tests {
     fn committed_retry_images_are_encrypted_and_removed_with_the_owner() {
         const SECRET: &[u8] = b"private-committed-row-retry-secret-marker";
         let mut disk = DiskRetryCache::new().unwrap();
-        let path = disk._directory.path().to_owned();
+        let path = cache_directory(&disk);
         disk.insert_all(&HashMap::from([(b"row".to_vec(), SECRET.to_vec())]))
             .unwrap();
         assert_eq!(disk.lookup(b"row").unwrap().as_deref(), Some(SECRET));

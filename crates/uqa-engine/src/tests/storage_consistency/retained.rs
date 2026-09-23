@@ -195,13 +195,7 @@ fn reconstructed_vector_capture_keeps_session_quota_and_the_prior_view_after_rej
                 .collect::<Vec<_>>(),
             [id]
         );
-        assert!(view
-            .vector_indexes
-            .write()
-            .get_mut("v")
-            .unwrap()
-            .clear()
-            .is_err());
+        assert!(view.vector_indexes.write().live_mut().is_err());
         assert!(control.memory().used() > 0);
         drop(view);
         assert_eq!(control.memory().used(), 0);

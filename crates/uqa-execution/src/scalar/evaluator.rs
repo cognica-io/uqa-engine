@@ -142,13 +142,14 @@ pub(super) fn eval_scalar_inner(
                     .transpose()?
                     .unwrap_or(false)
             {
-                return uqa_sql::expr::eval_float_arithmetic_with_control(
+                let value = uqa_sql::expr::eval_float_arithmetic_with_control(
                     *op,
                     &left,
                     &right,
                     uqa_sql::expr::FloatWidth::Real,
                     control,
-                );
+                )?;
+                return plain(value, control);
             }
             eval_binary_values_with_integer_width_with_control(
                 *op,

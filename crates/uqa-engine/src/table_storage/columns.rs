@@ -305,8 +305,7 @@ impl Engine {
         self.rename_column_analyzer_assignments(&table_name, from, to);
         let vector_dimensions = {
             let mut vectors = t.vector_indexes.write();
-            let vs = vectors.live_mut()?;
-            if let Some(mut idx) = vs.remove(from) {
+            if let Some(mut idx) = vectors.live_mut()?.remove(from) {
                 let dimensions = idx.dimensions();
                 idx.clear()?;
                 Some(dimensions)

@@ -589,7 +589,7 @@ impl Engine {
         idx.as_mut()
             .add(doc_id, vector)
             .map_err(|error| SQLError::Internal(format!("index document vector: {error}")))?;
-        drop(idxs);
+        drop(registrations);
         self.note_table_data_changed();
         self.note_row_changed(table, doc_id)?;
         Ok(true)
@@ -644,7 +644,7 @@ impl Engine {
         idx.as_mut()
             .add_many(doc_id, vectors)
             .map_err(|error| SQLError::Internal(format!("index document vectors: {error}")))?;
-        drop(idxs);
+        drop(registrations);
         self.note_table_data_changed();
         self.note_row_changed(table, doc_id)?;
         Ok(true)

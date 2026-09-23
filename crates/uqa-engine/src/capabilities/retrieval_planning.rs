@@ -72,7 +72,7 @@ impl TextStatisticsRead for TextRead<'_> {
 }
 impl VectorStatisticsRead for VectorRead<'_> {
     fn dimensions(&self, field: &str) -> Option<u32> {
-        self.0.get(field).map(|index| index.dimensions())
+        self.0.get(field).map(uqa_storage::VectorIndex::dimensions)
     }
 }
 impl RetrievalStatisticsTable for TableStatistics {
