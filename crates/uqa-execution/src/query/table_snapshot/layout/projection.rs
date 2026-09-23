@@ -7,7 +7,10 @@
 //! Map projected fields without decoding unrelated row payloads.
 
 use super::RowLayout;
-use uqa_core::{memory::BudgetedVec, DocId, Value};
+use uqa_core::{
+    memory::{BudgetedVec, MemoryReservation},
+    DocId, Value,
+};
 use uqa_storage::{
     read_control::StorageReadControl, DocumentStore, StorageBackendError, StorageBackendResult,
 };
@@ -199,6 +202,7 @@ impl RowLayout {
         source: &dyn DocumentStore,
         id: DocId,
         field: &str,
+        memory: &mut MemoryReservation,
     ) -> StorageBackendResult<Option<Value>> {
         let Some(column) = self.columns.iter().find(|column| column.name == field) else {
             return if self.source.iter().any(|(name, _)| name == field) {
@@ -226,6 +230,13 @@ impl RowLayout {
         }
         let present = source.contains_doc_id(id)?;
         self.control.check()?;
-        Ok(present.then(|| column.missing_value.clone().unwrap_or(Value::Null)))
+        if !present {
+            return Ok(None);
+        }
+        let copied = self.copy_default(column.missing_value.as_ref())?;
+        self.control.check()?;
+        let (value, value_memory) = copied.into_parts();
+        memory.absorb(value_memory);
+        Ok(Some(value))
     }
 }

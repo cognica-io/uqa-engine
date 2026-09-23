@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 use uqa_core::{
-    memory::{BudgetedMap, BudgetedString, BudgetedVec, MemoryReservation},
+    memory::{Budgeted, BudgetedMap, BudgetedString, BudgetedVec, MemoryReservation},
     Value,
 };
 use uqa_sql::{ast::ColumnDef, SQLError};
@@ -69,17 +69,29 @@ impl RowLayout {
         })
     }
 
-    pub(super) fn adapt_base(&self, document: StoredDocument) -> Result<StoredDocument, SQLError> {
-        self.complete_private(self.remap_base(document)?)
+    pub(super) fn adapt_base(
+        &self,
+        document: StoredDocument,
+        memory: &mut MemoryReservation,
+    ) -> Result<StoredDocument, SQLError> {
+        let document = self.remap_base(document, memory)?;
+        self.complete_private(document, memory)
     }
 
-    fn remap_base(&self, mut document: StoredDocument) -> Result<StoredDocument, SQLError> {
+    fn remap_base(
+        &self,
+        mut document: StoredDocument,
+        memory: &mut MemoryReservation,
+    ) -> Result<StoredDocument, SQLError> {
         self.control.cancellation().check()?;
-        // Remove every source slot before installing targets so rename chains and name reuse cannot overwrite another column incarnation.
+        // Remove every changed source slot before installing targets so rename chains and name reuse cannot overwrite another column incarnation.
         let fields = document.fields_mut();
         let mut moved = BudgetedVec::new(self.control.memory());
         for (source, target) in self.source.iter() {
             self.control.cancellation().check()?;
+            if target.as_deref() == Some(source.as_str()) {
+                continue;
+            }
             let value = fields.remove(source);
             if let (Some(target), Some(value)) = (target, value) {
                 moved
@@ -90,7 +102,12 @@ impl RowLayout {
         let (moved, _memory) = moved.into_parts();
         for (target, value) in moved {
             self.control.cancellation().check()?;
-            fields.insert(target.to_string(), value);
+            memory
+                .grow(size_of::<(String, Value)>())
+                .map_err(|error| super::snapshot_error("row adaptation", &error.into()))?;
+            let target = copy_name(target, &self.control, memory)
+                .map_err(|error| super::snapshot_error("row adaptation", &error))?;
+            fields.insert(target, value);
         }
         Ok(document)
     }
@@ -98,8 +115,9 @@ impl RowLayout {
     pub(super) fn complete_private(
         &self,
         document: StoredDocument,
+        memory: &mut MemoryReservation,
     ) -> Result<StoredDocument, SQLError> {
-        let mut document = self.complete_defaults(document)?;
+        let mut document = self.complete_defaults(document, memory)?;
         crate::query::generated::materialize_missing_generated_columns(
             &self.columns,
             document.fields_mut(),
@@ -108,20 +126,41 @@ impl RowLayout {
         Ok(document)
     }
 
-    fn complete_defaults(&self, mut document: StoredDocument) -> Result<StoredDocument, SQLError> {
+    fn complete_defaults(
+        &self,
+        mut document: StoredDocument,
+        memory: &mut MemoryReservation,
+    ) -> Result<StoredDocument, SQLError> {
         self.control.cancellation().check()?;
         let fields = document.fields_mut();
         for column in self.columns.iter() {
             self.control.cancellation().check()?;
             if column.generated.is_none() && !fields.contains_key(&column.name) {
-                fields.insert(
-                    column.name.clone(),
-                    column.missing_value.clone().unwrap_or(Value::Null),
-                );
+                memory
+                    .grow(size_of::<(String, Value)>())
+                    .map_err(|error| super::snapshot_error("row defaults", &error.into()))?;
+                let name = copy_name(&column.name, &self.control, memory)
+                    .map_err(|error| super::snapshot_error("row defaults", &error))?;
+                let copied = self
+                    .copy_default(column.missing_value.as_ref())
+                    .map_err(|error| super::snapshot_error("row defaults", &error))?;
+                let (value, value_memory) = copied.into_parts();
+                fields.insert(name, value);
+                memory.absorb(value_memory);
             }
         }
         self.control.cancellation().check()?;
         Ok(document)
+    }
+
+    fn copy_default(&self, value: Option<&Value>) -> StorageBackendResult<Budgeted<Value>> {
+        value
+            .unwrap_or(&Value::Null)
+            .clone_budgeted(self.control.memory(), self.control.cancellation())
+            .map_err(|error| match error {
+                uqa_core::ValueRetentionError::Memory(error) => error.into(),
+                uqa_core::ValueRetentionError::Cancelled(error) => error.into(),
+            })
     }
 }
 

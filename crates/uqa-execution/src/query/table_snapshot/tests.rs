@@ -20,6 +20,7 @@ mod copied;
 mod document_view;
 mod id_cursor;
 mod index_projection;
+mod owned_defaults;
 mod retained;
 
 fn columns(sql: &str) -> Vec<ColumnDef> {

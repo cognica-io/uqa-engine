@@ -83,11 +83,15 @@ impl RetainedDocuments {
             self.0.control.check()?;
             return Ok(visitor(id, false, nulls));
         }
+        let mut memory = self.0.control.memory().empty_reservation();
         let mut values = BudgetedVec::new(self.0.control.memory());
         values.reserve(fields.len())?;
         for field in fields {
             self.0.control.check()?;
-            values.push(self.get_field(id, field)?.unwrap_or(Value::Null))?;
+            values.push(
+                self.read_field(id, field, &mut memory)?
+                    .unwrap_or(Value::Null),
+            )?;
         }
         let mut projected = BudgetedVec::new(self.0.control.memory());
         projected.reserve(values.len())?;
