@@ -11,6 +11,7 @@ use super::{
     Serialize, Serializer, TemporalValue,
 };
 
+mod copying;
 mod decoding;
 mod retention;
 pub use decoding::JsonValueDecoder;

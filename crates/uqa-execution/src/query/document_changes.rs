@@ -84,13 +84,22 @@ impl DocumentChanges {
                     ids.push(*id)?;
                 }
             }
-            let mut documents = source.get_stored_many(&ids)?;
+            let (documents, _page_memory) =
+                uqa_storage::document_store::read_stored_documents(source, &ids, control)?
+                    .into_parts();
+            let mut documents = documents.into_iter();
             for (id, present) in page.iter().copied() {
-                result.insert_owned(
-                    id,
-                    present.then(|| documents.remove(&id)).flatten(),
-                    control,
-                )?;
+                control.check()?;
+                let row = if present {
+                    documents.next().expect("validated whole-row page length")
+                } else {
+                    None
+                };
+                let change = row.map_or(Change::Deleted, |row| {
+                    let (fields, metadata) = row.into_parts();
+                    Change::Fields(fields, metadata)
+                });
+                result.insert(id, change, control)?;
             }
         }
         Ok(result)

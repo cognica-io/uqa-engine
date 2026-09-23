@@ -18,6 +18,10 @@ use uqa_core::{
 pub struct RetainedDocumentFields(Arc<Budgeted<Arc<Document>>>);
 
 impl RetainedDocumentFields {
+    pub(super) fn shares_allowance(&self, control: &StorageReadControl) -> bool {
+        self.0.budget().shares_allowance(control.memory())
+    }
+
     /// Move already charged decoded fields into shared immutable storage. The input reservation covers live entries, key capacities and value payloads, excluding the map's inline layout. Foreign or incomplete leases are rejected; shared wrappers are reserved before allocation.
     pub fn from_budgeted(
         fields: Budgeted<Document>,

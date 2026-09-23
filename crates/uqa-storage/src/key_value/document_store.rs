@@ -144,6 +144,18 @@ impl DocumentStore for KeyValueDocumentStore {
         self.read(|view| view.get(id))
     }
 
+    fn get_stored_many_controlled(
+        &self,
+        ids: &[DocId],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<crate::RetainedDocumentPage> {
+        control.check()?;
+        if ids.is_empty() {
+            return Ok(BudgetedVec::new(control.memory()));
+        }
+        self.read(|view| view.retained_many_controlled(ids, control))
+    }
+
     fn get_stored_many(
         &self,
         ids: &[DocId],

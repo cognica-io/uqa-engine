@@ -35,6 +35,64 @@ fn decode_id(prefix: &[u8], key: &[u8]) -> StorageBackendResult<DocId> {
 }
 
 impl Documents<'_> {
+    pub(super) fn retained_many_controlled(
+        &self,
+        ids: &[DocId],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<crate::RetainedDocumentPage> {
+        self.read.control().check()?;
+        control.check()?;
+        let mut page = BudgetedVec::new(control.memory());
+        page.reserve(ids.len())?;
+        for id in ids {
+            self.read.control().check()?;
+            control.check()?;
+            let mut key = document_key_prefix_controlled(self.table, control)?;
+            key.extend_from_slice(&id.to_be_bytes())?;
+            let mut result = None;
+            let mut failure = None;
+            let scanned = self.read.visit_value_budgeted(&key, control, &mut |value| {
+                if failure.is_some() {
+                    return Err(other_error("document value visitor has already failed"));
+                }
+                let decoded = (|| {
+                    self.read.control().check()?;
+                    control.check()?;
+                    if result.is_some() {
+                        return Err(other_error(
+                            "document value visitor returned more than one row",
+                        ));
+                    }
+                    value
+                        .map(|bytes| decode_retained_stored_document_value(bytes, control))
+                        .transpose()
+                })();
+                match decoded {
+                    Ok(row) => {
+                        result = Some(row);
+                        Ok(())
+                    }
+                    Err(error) => {
+                        failure = Some(error);
+                        Err(other_error("document value visitor failed"))
+                    }
+                }
+            });
+            if let Some(error) = failure {
+                return Err(error);
+            }
+            scanned?;
+            self.read.control().check()?;
+            control.check()?;
+            page.push(
+                result.ok_or_else(|| other_error("document value visitor did not return a row"))?,
+            )?;
+        }
+        self.read.control().check()?;
+        control.check()?;
+        Ok(page)
+    }
+
     pub(super) fn get(&self, id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
         self.get_retained(id)
             .map(|document| document.map(RetainedStoredDocument::into_stored))

@@ -11,6 +11,7 @@ use uqa_core::{ArrayValue, DecimalValue, TemporalValue};
 
 mod identities;
 mod native;
+mod rows;
 
 fn encoded(value: Value) -> Vec<u8> {
     serde_json::to_vec(&StoredValue::from_value(value)).unwrap()

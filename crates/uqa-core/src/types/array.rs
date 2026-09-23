@@ -78,6 +78,22 @@ impl ArrayValue {
         &self.storage.elements
     }
 
+    /// Preserve the validated shape and already normalized elements of an existing array. The copying owner reserves these buffers and the boxed header before transferring them here.
+    pub(super) fn from_copied_parts(
+        elements: Vec<Value>,
+        dimensions: Vec<usize>,
+        lower_bounds: Vec<i32>,
+    ) -> Self {
+        debug_assert_eq!(dimensions.len(), lower_bounds.len());
+        Self {
+            storage: Box::new(ArrayStorage {
+                elements,
+                dimensions,
+                lower_bounds,
+            }),
+        }
+    }
+
     pub fn into_elements(self) -> Vec<Value> {
         self.storage.elements
     }

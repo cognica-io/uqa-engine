@@ -19,6 +19,7 @@ pub(super) struct NativeDocumentRead<'a> {
     snapshot: &'a NativeSnapshot,
     table: &'a str,
     owner: Option<NativeRecordOwner>,
+    control: &'a StorageReadControl,
 }
 
 impl<'a> NativeDocumentRead<'a> {
@@ -29,12 +30,13 @@ impl<'a> NativeDocumentRead<'a> {
     fn with_control(
         snapshot: &'a NativeSnapshot,
         table: &'a str,
-        control: &StorageReadControl,
+        control: &'a StorageReadControl,
     ) -> SQLiteResult<Self> {
         Ok(Self {
             snapshot,
             table,
             owner: snapshot.table_owner_controlled(table, control)?,
+            control,
         })
     }
 }

@@ -148,6 +148,40 @@ impl DocumentStore for MemoryDocumentStore {
             .map(|stored| self.materialize_stored_document(stored)))
     }
 
+    fn get_stored_many_controlled(
+        &self,
+        ids: &[DocId],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<super::RetainedDocumentPage> {
+        control.check()?;
+        let mut page = BudgetedVec::new(control.memory());
+        page.reserve(ids.len())?;
+        for id in ids {
+            control.check()?;
+            let row = self
+                .state
+                .documents
+                .get(id)
+                .map(|row| -> StorageBackendResult<_> {
+                    let fields = super::controlled_rows::copy_fields(
+                        self.state.layouts[row.layout_id]
+                            .iter()
+                            .map(String::as_str)
+                            .zip(row.values.iter()),
+                        control,
+                    )?;
+                    Ok(super::RetainedStoredDocument::with_metadata(
+                        fields,
+                        row.metadata,
+                    ))
+                })
+                .transpose()?;
+            page.push(row)?;
+        }
+        control.check()?;
+        Ok(page)
+    }
+
     fn get_stored_many(
         &self,
         doc_ids: &[DocId],

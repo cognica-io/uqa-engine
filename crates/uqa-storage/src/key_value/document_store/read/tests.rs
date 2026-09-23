@@ -12,6 +12,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::Value;
 
 mod controlled;
+mod rows;
 
 #[test]
 fn borrowed_identity_pages_retain_the_allowance_and_allow_reentrant_writes() {

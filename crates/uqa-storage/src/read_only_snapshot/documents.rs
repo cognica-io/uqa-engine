@@ -28,6 +28,14 @@ impl DocumentStore for ReadOnlySnapshot<dyn DocumentStore> {
         self.0.get_stored(doc_id)
     }
 
+    fn get_stored_many_controlled(
+        &self,
+        ids: &[DocId],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<crate::RetainedDocumentPage> {
+        self.0.get_stored_many_controlled(ids, control)
+    }
+
     fn put(&mut self, _doc_id: DocId, _document: Document) -> StorageBackendResult<()> {
         Err(read_only_error())
     }

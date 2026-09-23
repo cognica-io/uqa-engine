@@ -10,6 +10,7 @@ use uqa_core::CancellationToken;
 use uqa_storage::MemoryDocumentStore;
 
 mod budgets;
+mod controlled_rows;
 mod projection;
 
 #[derive(Clone)]
@@ -60,6 +61,18 @@ impl DocumentStore for Probe {
         );
         self.copies.lock().push(ids.to_vec());
         self.source.get_stored_many(ids)
+    }
+    fn get_stored_many_controlled(
+        &self,
+        ids: &[DocId],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::RetainedDocumentPage> {
+        assert!(
+            self.allow_copy,
+            "capture must not copy immutable private rows"
+        );
+        self.copies.lock().push(ids.to_vec());
+        self.source.get_stored_many_controlled(ids, control)
     }
     fn get_metadata(&self, id: DocId) -> StorageBackendResult<Option<DocumentMetadata>> {
         self.source.get_metadata(id)

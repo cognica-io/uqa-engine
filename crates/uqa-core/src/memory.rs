@@ -188,6 +188,10 @@ impl<T> Budgeted<T> {
         self.memory.bytes()
     }
 
+    pub fn budget(&self) -> &MemoryBudget {
+        self.memory.budget()
+    }
+
     /// Share the immutable value and its lease, reserving the shared payload before allocation. Reference-count bookkeeping is outside the payload allowance.
     pub fn into_shared(self) -> Result<Arc<Self>, MemoryError> {
         let mut memory = self.memory.budget().reserve(std::mem::size_of::<Self>())?;

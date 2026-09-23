@@ -49,6 +49,14 @@ impl DocumentStore for SQLiteDocumentStore {
         Ok(self.get_stored_inner(doc_id)?)
     }
 
+    fn get_stored_many_controlled(
+        &self,
+        ids: &[DocId],
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::RetainedDocumentPage> {
+        Ok(self.read_rows_controlled(ids, control)?)
+    }
+
     fn get_stored_many(
         &self,
         doc_ids: &[DocId],

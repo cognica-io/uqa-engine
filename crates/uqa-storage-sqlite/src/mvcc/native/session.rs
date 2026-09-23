@@ -108,7 +108,7 @@ impl NativeSnapshot {
         self.read_row_controlled(family, owner, components, &self.control, read)
     }
 
-    fn read_row_controlled<R>(
+    pub(crate) fn read_row_controlled<R>(
         &self,
         family: Family,
         owner: NativeRecordOwner,

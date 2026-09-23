@@ -28,20 +28,39 @@ struct Decoded {
 }
 
 impl NativeDocumentRead<'_> {
+    pub(in crate::document_store) fn retained_many(
+        &self,
+        ids: &[DocId],
+    ) -> SQLiteResult<uqa_storage::RetainedDocumentPage> {
+        self.snapshot.control.check()?;
+        self.control.check()?;
+        let mut page = BudgetedVec::new(self.control.memory());
+        page.reserve(ids.len())?;
+        for id in ids {
+            self.snapshot.control.check()?;
+            self.control.check()?;
+            page.push(self.retained(*id, None)?)?;
+        }
+        self.snapshot.control.check()?;
+        self.control.check()?;
+        Ok(page)
+    }
+
     fn decoded_body(&self, id: DocId) -> SQLiteResult<Option<Decoded>> {
         let key = sqlite_doc_id(id)?;
         let Some(owner) = self.owner else {
             return Ok(None);
         };
-        self.snapshot
-            .read_row(Family::Documents, owner, &[ValueRef::Integer(key)], |row| {
+        self.snapshot.read_row_controlled(
+            Family::Documents,
+            owner,
+            &[ValueRef::Integer(key)],
+            self.control,
+            |row| {
                 let body = row[2].as_str().map_err(|_| {
                     SQLiteError::StorageBackend("native document body must be text".into())
                 })?;
-                let fields = decode_legacy_document_fields_budgeted(
-                    body.as_bytes(),
-                    &self.snapshot.control,
-                )?;
+                let fields = decode_legacy_document_fields_budgeted(body.as_bytes(), self.control)?;
                 let metadata = super::read::metadata(row[3], self.table, id)?;
                 let (fields, memory) = fields.into_parts();
                 Ok(Decoded {
@@ -49,7 +68,8 @@ impl NativeDocumentRead<'_> {
                     metadata,
                     memory,
                 })
-            })
+            },
+        )
     }
 
     pub(super) fn retained_body(&self, id: DocId) -> SQLiteResult<Option<RetainedStoredDocument>> {
@@ -63,45 +83,27 @@ impl NativeDocumentRead<'_> {
         id: DocId,
         projection: Option<&[&str]>,
     ) -> SQLiteResult<Option<RetainedStoredDocument>> {
-        let Some(mut row) = self.decoded_body(id)? else {
+        let Some(row) = self.decoded_body(id)? else {
             return Ok(None);
         };
-        for (field, value) in &mut row.fields {
-            self.snapshot.control.check()?;
-            if projection.is_some_and(|fields| !fields.contains(&field.as_str())) {
-                continue;
-            }
-            let Some(marker) = controlled::marker(value) else {
-                continue;
-            };
-            let replacement = self.hydrate_retained(id, field, marker)?;
-            let replaced_bytes = value
-                .retained_payload_bytes(
-                    self.snapshot.control.memory(),
-                    self.snapshot.control.cancellation(),
-                )
-                .map_err(|error| {
-                    controlled::read_error(match error {
-                        uqa_core::ValueRetentionError::Memory(error) => {
-                            JsonReadError::Memory(error)
-                        }
-                        uqa_core::ValueRetentionError::Cancelled(error) => {
-                            JsonReadError::Cancelled(error)
-                        }
-                    })
-                })?;
-            let (replacement, memory) = replacement.into_parts();
-            *value = replacement;
-            drop(row.memory.split(replaced_bytes));
-            row.memory.absorb(memory);
-        }
-        self.finish(row).map(Some)
+        let fields = controlled::rows::hydrate_fields(
+            Budgeted::new(row.fields, row.memory),
+            projection,
+            self.control,
+            |field, marker| self.hydrate_retained(id, field, marker),
+        )?;
+        self.snapshot.control.check()?;
+        self.control.check()?;
+        Ok(Some(RetainedStoredDocument::with_metadata(
+            fields,
+            row.metadata,
+        )))
     }
 
     fn finish(&self, row: Decoded) -> SQLiteResult<RetainedStoredDocument> {
         let fields = RetainedDocumentFields::from_budgeted(
             Budgeted::new(row.fields, row.memory),
-            &self.snapshot.control,
+            self.control,
         )?;
         Ok(RetainedStoredDocument::with_metadata(fields, row.metadata))
     }
@@ -122,18 +124,19 @@ impl NativeDocumentRead<'_> {
         }
         let owner = self.owner.expect("a decoded body has a native owner");
         self.snapshot
-            .read_row(
+            .read_row_controlled(
                 Family::DocumentBlobs,
                 owner,
                 &[
                     ValueRef::Integer(sqlite_doc_id(id)?),
                     ValueRef::Text(field.as_bytes()),
                 ],
+                self.control,
                 |row| {
                     let bytes = row[3].as_blob().map_err(|_| {
                         SQLiteError::StorageBackend("native document BLOB must be binary".into())
                     })?;
-                    controlled::decode_blob(bytes, marker, &self.snapshot.control).map_err(
+                    controlled::decode_blob(bytes, marker, self.control).map_err(
                         |error| match error {
                             JsonReadError::InvalidJson => {
                                 controlled::corrupt(self.table, id, field, marker.invalid_reason())

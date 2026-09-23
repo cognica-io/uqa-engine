@@ -64,8 +64,8 @@ pub use clustered_postings::{
 };
 pub use document_store::{
     DocumentMetadata, DocumentStore, MemoryDocumentStore, RetainedDocumentFields,
-    RetainedDocumentStore, RetainedDocumentStoreBuilder, RetainedStoredDocument, SharedDocumentRow,
-    StoredDocument,
+    RetainedDocumentPage, RetainedDocumentStore, RetainedDocumentStoreBuilder,
+    RetainedStoredDocument, SharedDocumentRow, StoredDocument,
 };
 pub use hnsw_index::HNSWIndex;
 pub use index_abc::Index;

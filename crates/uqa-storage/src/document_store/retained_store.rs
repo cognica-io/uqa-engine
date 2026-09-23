@@ -157,6 +157,40 @@ impl DocumentStore for RetainedDocumentStore {
         self.control.check()?;
         Ok(self.document(id).cloned())
     }
+
+    fn get_stored_many_controlled(
+        &self,
+        ids: &[DocId],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<super::RetainedDocumentPage> {
+        self.control.check()?;
+        control.check()?;
+        let mut page = BudgetedVec::new(control.memory());
+        page.reserve(ids.len())?;
+        for id in ids {
+            self.control.check()?;
+            control.check()?;
+            let row = self
+                .document(*id)
+                .map(|row| -> StorageBackendResult<_> {
+                    let fields = super::controlled_rows::copy_fields(
+                        row.fields()
+                            .iter()
+                            .map(|(name, value)| (name.as_str(), value)),
+                        control,
+                    )?;
+                    Ok(super::RetainedStoredDocument::with_metadata(
+                        fields,
+                        row.metadata(),
+                    ))
+                })
+                .transpose()?;
+            page.push(row)?;
+        }
+        self.control.check()?;
+        control.check()?;
+        Ok(page)
+    }
     fn get_metadata(&self, id: DocId) -> StorageBackendResult<Option<DocumentMetadata>> {
         self.control.check()?;
         Ok(self.document(id).map(StoredDocument::metadata))

@@ -20,6 +20,8 @@ use crate::read_control::StorageReadControl;
 
 mod controlled_ids;
 pub use controlled_ids::read_document_ids;
+mod controlled_rows;
+pub use controlled_rows::{read_stored_documents, RetainedDocumentPage};
 pub mod decoding;
 pub mod identifiers;
 mod retained;
@@ -180,6 +182,21 @@ pub trait DocumentStore: Send + Sync {
 
     /// Read one typed storage record without projecting metadata into user fields.
     fn get_stored(&self, doc_id: DocId) -> StorageBackendResult<Option<StoredDocument>>;
+
+    /// Read one fixed view into a charged page in exactly the requested order, preserving duplicates and missing rows. The page and every decoded field payload retain the invoking allowance. Unsupported providers must not fall back to unbounded owned materialization.
+    fn get_stored_many_controlled(
+        &self,
+        doc_ids: &[DocId],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<RetainedDocumentPage> {
+        control.check()?;
+        if doc_ids.is_empty() {
+            return Ok(BudgetedVec::new(control.memory()));
+        }
+        Err(StorageBackendError::Other(
+            "controlled whole-document reads are not supported by this store".into(),
+        ))
+    }
 
     /// Replace public fields while preserving metadata already owned by the stored tuple. Engine code that creates a new tuple version must call [`DocumentStore::put_stored`] with the new metadata explicitly.
     fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()> {
