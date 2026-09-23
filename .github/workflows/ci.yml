@@ -32,6 +32,14 @@ on:
           - ubuntu-24.04
           - macos-14
           - windows-latest
+      transaction_suite:
+        description: Select all transaction histories or retained resource owners and consumers
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - retained-resources
       run_nori_allocations:
         description: Run only persistent Nori allocation and output checks when run_rust is false
         required: false
@@ -42,7 +50,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.run_transactions && inputs.transaction_platform || 'default' }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.run_transactions && inputs.transaction_platform || 'default' }}-${{ inputs.run_transactions && inputs.transaction_suite || 'default' }}
   cancel-in-progress: true
 
 env:
@@ -341,7 +349,7 @@ jobs:
           esac
 
   concurrent-transactions:
-    name: concurrent transactions ${{ matrix.os }}
+    name: concurrent transactions ${{ matrix.os }} (${{ inputs.transaction_suite }})
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_transactions }}
     runs-on: ${{ matrix.os }}
     env:
@@ -378,7 +386,7 @@ jobs:
           -- -D warnings
       - name: Verify retained owners and actual provider histories
         run: >-
-          cargo test --locked
+          cargo test --locked --no-fail-fast
           -p uqa-core -p uqa-sql -p uqa-storage -p uqa-storage-sqlite -p uqa-storage-redb
           -p uqa-execution -p uqa-engine -p uqa-pg-server
           --lib --tests --features uqa-engine/nori,uqa-engine/kuromoji --
@@ -392,10 +400,8 @@ jobs:
           mutation::conflict:: row_locks::retry_cache:: storage_errors::tests::
           tests::storage_consistency:: table_storage::documents::tests::
           transactions::tests::mutation_failures:: state::catalog_cell::tests::
-          transaction_lifecycle::pg18_cursors:: sessions::concurrent_writes:: sessions::native_publication::
-          sql_generated_columns:: redb_backend:: sqlite_key_value_backend:: queries::sql_cursor::secure_temporary::
-          storage::transaction_lifecycle::pg18_isolation:: storage::sessions::serializable_observations::
-          storage::sessions::concurrent_inserts:: concurrent_transactions::
+          sql_generated_columns:: queries::sql_cursor::secure_temporary:: concurrent_transactions::
+          ${{ inputs.transaction_suite == 'all' && 'transaction_lifecycle::pg18_cursors:: sessions::concurrent_writes:: sessions::native_publication:: redb_backend:: sqlite_key_value_backend:: storage::transaction_lifecycle::pg18_isolation:: storage::sessions::serializable_observations:: storage::sessions::concurrent_inserts::' || '' }}
           --skip snapshot_creation_does_not_scale_with_document_count
           --skip mvcc::process_writer_helper
           --skip storage::sessions::concurrent_inserts::processes::insert_worker
@@ -403,6 +409,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: concurrent-transactions-${{ matrix.os }}-${{ github.sha }}
+          name: concurrent-transactions-${{ matrix.os }}-${{ inputs.transaction_suite }}-${{ github.sha }}
           path: target/concurrent-transactions.log
           if-no-files-found: ignore

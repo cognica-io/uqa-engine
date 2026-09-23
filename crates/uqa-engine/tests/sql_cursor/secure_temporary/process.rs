@@ -16,6 +16,7 @@ use super::{assert_original_mutation, open, KEY, MODE_ENV, PATH_ENV, SECRET};
 
 struct Process {
     child: Child,
+    mode: usize,
     events: mpsc::Receiver<String>,
     reader: Option<std::thread::JoinHandle<()>>,
 }
@@ -52,6 +53,7 @@ impl Process {
         });
         Self {
             child,
+            mode,
             events,
             reader: Some(reader),
         }
@@ -59,7 +61,16 @@ impl Process {
 
     fn expect(&self, expected: &str) {
         loop {
-            let line = self.events.recv_timeout(Duration::from_secs(60)).unwrap();
+            let line = self
+                .events
+                .recv_timeout(Duration::from_secs(60))
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "provider mode {} child {} did not reach {expected}: {error}",
+                        self.mode,
+                        self.child.id()
+                    )
+                });
             if let Some((_, event)) = line.split_once("retained-temp:") {
                 assert_eq!(event, expected);
                 return;
@@ -175,12 +186,11 @@ pub(super) fn verify(mode: usize, kill: bool) {
         protected_files(&temporary);
         let (engine, records) = open(&path, mode);
         assert_original_mutation(&engine);
-        records
-            .reclaim_versions(&uqa_storage::read_control::StorageReadControl::with_limit(
-                1 << 20,
-            ))
-            .unwrap();
-        drop((engine, records));
+        drop(engine);
+        let control = uqa_storage::read_control::StorageReadControl::with_limit(1 << 20);
+        records.reclaim_versions(&control).unwrap();
+        assert_eq!(records.reclaim_versions(&control).unwrap(), 0);
+        drop(records);
     } else {
         process.command("cancel");
         process.expect("mutation-released");

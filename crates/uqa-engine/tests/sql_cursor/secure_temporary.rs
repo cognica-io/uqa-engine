@@ -82,7 +82,7 @@ fn setup(engine: &Engine) {
     engine.sql("SET work_mem TO '1B'", &[]).unwrap();
 }
 
-fn retained_cursors(engine: &Engine, records: &dyn VersionedPersistence) {
+fn retained_cursors(engine: &Engine, records: &dyn VersionedPersistence) -> u64 {
     let reader = engine.new_session().unwrap();
     reader.sql("SET work_mem TO '1B'", &[]).unwrap();
     let cursor = reader
@@ -111,7 +111,7 @@ fn retained_cursors(engine: &Engine, records: &dyn VersionedPersistence) {
             .collect::<Vec<_>>()
     );
     drop(old);
-    assert!(records.reclaim_versions(&control).unwrap() > 0);
+    let released_versions = records.reclaim_versions(&control).unwrap();
     event("cursor-released");
     assert_eq!(command(), "continue");
 
@@ -131,6 +131,7 @@ fn retained_cursors(engine: &Engine, records: &dyn VersionedPersistence) {
     engine.sql("CLOSE ALL", &[]).unwrap();
     event("portal-released");
     assert_eq!(command(), "continue");
+    released_versions
 }
 
 fn cancelled_mutation(engine: &Engine) {
@@ -190,10 +191,19 @@ fn assert_original_mutation(engine: &Engine) {
 
 fn child(path: &Path, mode: usize) {
     let (engine, records) = open(path, mode);
+    let control = StorageReadControl::with_limit(1 << 20);
+    let independent_reader = records.snapshot(&control).unwrap();
     setup(&engine);
-    retained_cursors(&engine, &*records);
+    let released_versions = retained_cursors(&engine, &*records);
+    assert_eq!(released_versions, 0);
     cancelled_mutation(&engine);
-    drop((engine, records));
+    // Cursor release is not the final retention boundary. The independent reader pins earlier history, and the last Engine joins its automatic statistics worker before final reclamation.
+    drop(engine);
+    drop(independent_reader);
+    let final_versions = records.reclaim_versions(&control).unwrap();
+    assert!(final_versions > 0);
+    assert_eq!(records.reclaim_versions(&control).unwrap(), 0);
+    drop(records);
     event("closed");
 }
 
