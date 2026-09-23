@@ -65,17 +65,20 @@ fn declared_lookup_borrows_exact_types_and_matches_unqualified_physical_schema()
     }
     assert!(std::ptr::eq(
         declared.type_of("items").unwrap(),
-        &columns[3].ty
+        &raw const columns[3].ty
     ));
-    for position in 0..=columns.len() {
+    for (position, column) in columns.iter().enumerate() {
         assert_eq!(
             declared.column_type(position),
             physical.column_type(position)
         );
-        if let Some(ty) = declared.column_type(position) {
-            assert!(std::ptr::eq(ty, &columns[position].ty));
-        }
+        assert!(std::ptr::eq(
+            declared.column_type(position).unwrap(),
+            &raw const column.ty
+        ));
     }
+    assert_eq!(declared.column_type(columns.len()), None);
+    assert_eq!(physical.column_type(columns.len()), None);
     for qualifier in ["t", "absent", ""] {
         assert_eq!(
             declared.has_qualifier(qualifier),
@@ -93,7 +96,7 @@ fn declared_lookup_borrows_exact_types_and_matches_unqualified_physical_schema()
     assert!(declared.physical_schema().is_none());
     assert!(std::ptr::eq(
         ScalarTypeSchema::physical_schema(&physical).unwrap(),
-        &physical
+        &raw const physical
     ));
 }
 

@@ -148,10 +148,6 @@ impl<'a> Source<'a, Expr> {
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "exhaustive AST projection preserves every scalar variant"
-)]
 fn owned(expression: Expr) -> Node<'static> {
     match expression {
         Expr::Star => Node::Star,
@@ -248,10 +244,6 @@ fn owned(expression: Expr) -> Node<'static> {
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "exhaustive AST projection preserves every scalar variant"
-)]
 fn borrowed(expression: &Expr) -> Node<'_> {
     match expression {
         Expr::Star => Node::Star,

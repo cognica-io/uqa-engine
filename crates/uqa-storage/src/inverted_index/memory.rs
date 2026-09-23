@@ -225,7 +225,7 @@ impl InvertedIndex for MemoryInvertedIndex {
             .index
             .get(&(field.to_owned(), term.clone()))
             .into_iter()
-            .flat_map(|postings| postings.values())
+            .flat_map(uqa_core::memory::OwnedMap::values)
             .map(|posting| posting.projection.clone())
             .collect();
         Ok(PostingList::from_sorted_unchecked(entries))
@@ -251,7 +251,7 @@ impl InvertedIndex for MemoryInvertedIndex {
             .index
             .get(&(field.to_owned(), term.clone()))
             .into_iter()
-            .flat_map(|postings| postings.values())
+            .flat_map(uqa_core::memory::OwnedMap::values)
             .map(|posting| {
                 Ok(PostingScore {
                     doc_id: posting.projection.doc_id,
@@ -273,7 +273,7 @@ impl InvertedIndex for MemoryInvertedIndex {
             .index
             .get(&(field.to_owned(), term.clone()))
             .into_iter()
-            .flat_map(|postings| postings.values())
+            .flat_map(uqa_core::memory::OwnedMap::values)
             .map(|posting| {
                 Ok(crate::clustered_postings::OccurrencePosting {
                     doc_id: posting.projection.doc_id,
