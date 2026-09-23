@@ -208,6 +208,8 @@ A failure test must verify absence of partial rows, indexes, graph objects, mode
 
 For development record-format changes, run `python3 scripts/verify-record-format-upgrade.py --old-ref <previous-format-commit>`. The verifier builds actual previous and current provider binaries using each source revision's locked dependencies. It verifies native SQLite and SQLite Key/Value in all four file modes, plus redb after its previous file owner closes. SQLite also keeps an old connection and logical snapshot alive across the upgrade. Every case checks prior-writer rejection and exact preservation of fixture records, database identity, committed sequence and committed/pending receipts. Probe databases and compact state files are temporary; build output stays under ignored `target/record-format-probe`.
 
+For released-file compatibility, run `python3 scripts/verify-sqlite-legacy-writer.py` and `python3 scripts/verify-redb-legacy-writer.py`. They compile the actual crates.io 0.3.6 providers and current ordinary-dependency consumers, record the released package checksums, create legacy files, migrate and mutate them, reject the old writers and reopen twice. SQLite covers native, Key/Value and standalone graph files in plain, SQLCipher, compressed and encrypted-compressed modes; redb checks its incompatible legacy table guard. Migration interruption and explicit backup restoration remain owning provider tests, as mapped in the [concurrent storage acceptance plan](../../plans/0008-concurrent-storage-transactions.md#existing-file-and-backup-acceptance).
+
 ## Documentation verification
 
 Manual changes should check:

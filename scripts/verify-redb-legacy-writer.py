@@ -101,9 +101,9 @@ new_storage = {{ package = "uqa-storage", path = {json.dumps(str(ROOT / "crates/
         old = str(target / "debug" / f"old{extension}")
         new = str(target / "debug" / f"new{extension}")
         database = str(project / "legacy.redb")
-        for command in ([old, "create", database], [new, database, "migrate"], [old, "reject", database], [new, database, "reopen"]):
+        for command in ([old, "create", database], [new, database, "migrate"], [old, "reject", database], [new, database, "reopen"], [new, database, "reopen"]):
             subprocess.run(command, check=True)
-        print("Actual 0.3.6 create, migration, old-writer rejection and reopen passed.")
+        print("Actual 0.3.6 create, migration, old-writer rejection and two reopens passed.")
 
 
 if __name__ == "__main__":

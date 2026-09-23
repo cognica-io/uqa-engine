@@ -251,15 +251,15 @@ new_core = {{ package = "uqa-core", path = {json.dumps(str(ROOT / "crates/uqa-co
         new = str(target / "debug" / f"new{extension}")
         for mode in ("plain", "encrypted", "compressed", "compressed-encrypted"):
             database = str(project / f"{mode}.db")
-            for binary, action in ((old, "create"), (new, "migrate"), (old, "reject"), (new, "reopen")):
+            for binary, action in ((old, "create"), (new, "migrate"), (old, "reject"), (new, "reopen"), (new, "reopen")):
                 subprocess.run([binary, mode, action, database], check=True)
             database = str(project / f"native-{mode}.db")
-            for binary, action in ((old, "native-create"), (new, "native-migrate"), (old, "native-reject"), (new, "native-reopen")):
+            for binary, action in ((old, "native-create"), (new, "native-migrate"), (old, "native-reject"), (new, "native-reopen"), (new, "native-reopen")):
                 subprocess.run([binary, mode, action, database], check=True)
             database = str(project / f"graph-{mode}.db")
-            for binary, action in ((old, "graph-create"), (new, "graph-migrate"), (old, "graph-reject"), (new, "graph-reopen")):
+            for binary, action in ((old, "graph-create"), (new, "graph-migrate"), (old, "graph-reject"), (new, "graph-reopen"), (new, "graph-reopen")):
                 subprocess.run([binary, mode, action, database], check=True)
-        print("Actual 0.3.6 create, migration, old-writer rejection and reopen passed for native, Key/Value and standalone graphs in four modes.")
+        print("Actual 0.3.6 create, migration, old-writer rejection and two reopens passed for native, Key/Value and standalone graphs in four modes.")
 
 
 if __name__ == "__main__":
