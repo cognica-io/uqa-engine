@@ -8,7 +8,10 @@
 
 use std::borrow::Cow;
 
-use uqa_core::{ArrayValue, Value};
+use uqa_core::{
+    memory::{Produced, ProductionControl},
+    ArrayValue, Value,
+};
 
 use crate::ast::{ColumnType, InternalColumnRef};
 use crate::error::{Result, SQLError};
@@ -600,28 +603,56 @@ impl<'a> EvalContext<'a> {
     /// the AST evaluator. Physical scalar IR evaluators call this instead of
     /// reconstructing an [`Expr::Column`](crate::ast::Expr::Column) carrier.
     pub fn column_value(&self, name: &str) -> Result<Value> {
-        if self.row_lookup()?.column_is_ambiguous(name) {
+        self.column_value_with_control(name, &ProductionControl::uncontrolled())
+            .map(|value| value.into_uncontrolled().expect("ordinary column value"))
+    }
+
+    /// Resolve the same row slot while its copied payload retains the caller's allowance and cancellation scopes.
+    pub fn column_value_with_control(
+        &self,
+        name: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Value>> {
+        control.check()?;
+        let row = self.row_lookup()?;
+        if row.column_is_ambiguous(name) {
             return Err(SQLError::AmbiguousColumn(name.to_string()));
         }
-        Ok(self
-            .row_lookup()?
-            .column(name)
-            .cloned()
-            .unwrap_or(Value::Null))
+        Ok(control.copy_value(row.column(name).unwrap_or(&Value::Null))?)
     }
 
     /// Resolve a qualified column without constructing an AST expression.
     pub fn qualified_column_value(&self, qualifier: &str, column: &str) -> Result<Value> {
-        if self
-            .row_lookup()?
-            .qualified_column_is_ambiguous(qualifier, column)
-        {
+        self.qualified_column_value_with_control(
+            qualifier,
+            column,
+            &ProductionControl::uncontrolled(),
+        )
+        .map(|value| {
+            value
+                .into_uncontrolled()
+                .expect("ordinary qualified column value")
+        })
+    }
+
+    /// Resolve a qualified slot with the same ambiguity and missing-value behavior under a retained output owner.
+    pub fn qualified_column_value_with_control(
+        &self,
+        qualifier: &str,
+        column: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Value>> {
+        control.check()?;
+        let row = self.row_lookup()?;
+        if row.qualified_column_is_ambiguous(qualifier, column) {
             return Err(SQLError::AmbiguousColumn(format!("{qualifier}.{column}")));
         }
-        Ok(self
-            .row_lookup()?
-            .qualified_column(qualifier, column)
-            .cloned()
-            .unwrap_or(Value::Null))
+        Ok(control.copy_value(
+            row.qualified_column(qualifier, column)
+                .unwrap_or(&Value::Null),
+        )?)
     }
 }
+
+#[cfg(test)]
+mod production_tests;

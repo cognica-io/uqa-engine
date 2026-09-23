@@ -6,10 +6,12 @@
 
 //! Bind range-polymorphic functions while declared range identity is available.
 
+use super::call::{BindingCall, InferType};
 use crate::ast::{
     ColumnType, FunctionBinding, FunctionDispatch, RangeFunctionOperation, RangeSubtype,
 };
-use crate::SQLParam;
+use crate::{SQLError, SQLParam};
+use uqa_core::memory::{MemoryReservation, Produced, ProductionControl};
 
 use crate::{schema::ScalarTypeSchema, ScalarExpr};
 
@@ -23,62 +25,117 @@ pub(super) fn bind_call(
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> String {
-    if binding.is_some() {
-        return name;
+    let control = ProductionControl::uncontrolled();
+    let mut infer = |expression: &ScalarExpr| {
+        scalar_type_inner(expression, schema, params, resolver)?
+            .map(|ty| {
+                control
+                    .finish(ty, control.empty_reservation())
+                    .map_err(Into::into)
+            })
+            .transpose()
+    };
+    if let Ok(Some(selected)) = select_binding(&name, binding.as_ref(), args, &mut infer, &control)
+    {
+        *binding = Some(
+            selected
+                .into_uncontrolled()
+                .expect("ordinary range binding"),
+        );
     }
-    let local = name
-        .strip_prefix("pg_catalog.")
-        .unwrap_or(&name)
-        .to_ascii_lowercase();
-    if !matches!(
-        local.as_str(),
-        "lower"
-            | "upper"
-            | "isempty"
-            | "lower_inc"
-            | "upper_inc"
-            | "lower_inf"
-            | "upper_inf"
-            | "range_merge"
-            | "multirange"
-            | "array_overlap"
-            | "contains_op"
-            | "contained_by_op"
-            | "range_adjacent"
-    ) {
-        return name;
-    }
-    let Some(first) = args.first() else {
-        return name;
-    };
-    let Ok(Some(first_type)) = scalar_type_inner(first, schema, params, resolver) else {
-        return name;
-    };
-    let Some((subtype, _type_name, multirange)) = range_identity(&first_type) else {
-        return name;
-    };
-    let operation = match local.as_str() {
-        "lower" => RangeFunctionOperation::Lower,
-        "upper" => RangeFunctionOperation::Upper,
-        "isempty" => RangeFunctionOperation::IsEmpty,
-        "lower_inc" => RangeFunctionOperation::LowerInclusive,
-        "upper_inc" => RangeFunctionOperation::UpperInclusive,
-        "lower_inf" => RangeFunctionOperation::LowerInfinite,
-        "upper_inf" => RangeFunctionOperation::UpperInfinite,
-        "range_merge" => RangeFunctionOperation::Merge,
-        "multirange" => RangeFunctionOperation::Multirange,
-        "array_overlap" => RangeFunctionOperation::Overlap,
-        "contains_op" => RangeFunctionOperation::Contains,
-        "contained_by_op" => RangeFunctionOperation::ContainedBy,
-        "range_adjacent" => RangeFunctionOperation::Adjacent,
-        _ => unreachable!("range function name was checked above"),
-    };
-    *binding = Some(FunctionBinding::dispatched(FunctionDispatch::Range {
-        operation,
-        subtype,
-        multirange,
-    }));
     name
+}
+
+#[cfg(test)]
+pub(super) fn bind_call_with_control(
+    call: Produced<BindingCall>,
+    infer: &mut InferType<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<BindingCall>, SQLError> {
+    let mut owner = super::call::CallOwner::new(call, control)?;
+    bind_call_in_place_with_control(&mut owner.call, &mut owner.memory, infer, control)?;
+    owner.finish(control)
+}
+
+/// The caller keeps the enclosing expression and its lease alive throughout mutation, including on errors and unwinding.
+pub(super) fn bind_call_in_place_with_control(
+    call: &mut BindingCall,
+    memory: &mut Option<MemoryReservation>,
+    infer: &mut InferType<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    super::call::check_memory(memory.as_ref(), control)?;
+    let selected = select_binding(
+        &call.name,
+        call.binding.as_ref(),
+        &call.arguments,
+        infer,
+        control,
+    )?;
+    let Some(selected) = selected else {
+        return Ok(());
+    };
+    let (selected, extra) = selected.into_parts();
+    *memory = control.combine(memory.take(), extra);
+    call.binding = Some(selected);
+    control.check()?;
+    Ok(())
+}
+
+fn select_binding(
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    args: &[ScalarExpr],
+    infer: &mut InferType<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<FunctionBinding>>, SQLError> {
+    control.check()?;
+    if binding.is_some() {
+        return Ok(None);
+    }
+    let Some(operation) = function_operation(name) else {
+        return Ok(None);
+    };
+    let Some(first) = args.first() else {
+        return Ok(None);
+    };
+    let first_type = match super::call::infer_with_control(first, infer, control) {
+        Ok(Some(ty)) => ty,
+        Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
+        Ok(None) | Err(_) => return Ok(None),
+    };
+    let Some((subtype, _, multirange)) = range_identity(&first_type) else {
+        return Ok(None);
+    };
+    Ok(Some(FunctionBinding::dispatched_with_control(
+        FunctionDispatch::Range {
+            operation,
+            subtype,
+            multirange,
+        },
+        control,
+    )?))
+}
+
+fn function_operation(name: &str) -> Option<RangeFunctionOperation> {
+    let local = name.strip_prefix("pg_catalog.").unwrap_or(name);
+    [
+        ("lower", RangeFunctionOperation::Lower),
+        ("upper", RangeFunctionOperation::Upper),
+        ("isempty", RangeFunctionOperation::IsEmpty),
+        ("lower_inc", RangeFunctionOperation::LowerInclusive),
+        ("upper_inc", RangeFunctionOperation::UpperInclusive),
+        ("lower_inf", RangeFunctionOperation::LowerInfinite),
+        ("upper_inf", RangeFunctionOperation::UpperInfinite),
+        ("range_merge", RangeFunctionOperation::Merge),
+        ("multirange", RangeFunctionOperation::Multirange),
+        ("array_overlap", RangeFunctionOperation::Overlap),
+        ("contains_op", RangeFunctionOperation::Contains),
+        ("contained_by_op", RangeFunctionOperation::ContainedBy),
+        ("range_adjacent", RangeFunctionOperation::Adjacent),
+    ]
+    .into_iter()
+    .find_map(|(candidate, operation)| local.eq_ignore_ascii_case(candidate).then_some(operation))
 }
 
 pub(super) fn function_type(
@@ -105,12 +162,9 @@ pub(super) fn function_type(
             | RangeFunctionOperation::Adjacent => ColumnType::Boolean,
         });
     }
-    let local = name
-        .strip_prefix("pg_catalog.")
-        .unwrap_or(name)
-        .to_ascii_lowercase();
-    if let Some(subtype) = subtype_for_constructor(&local) {
-        return Some(if local == subtype.range_name() {
+    let local = name.strip_prefix("pg_catalog.").unwrap_or(name);
+    if let Some(subtype) = subtype_for_constructor(local) {
+        return Some(if local.eq_ignore_ascii_case(subtype.range_name()) {
             ColumnType::Range(subtype)
         } else {
             ColumnType::Multirange(subtype)
@@ -118,14 +172,12 @@ pub(super) fn function_type(
     }
     let first = argument_types.first()?.as_ref()?;
     let (subtype, _, _) = range_identity(first)?;
-    match local.as_str() {
-        "lower" | "upper" => Some(subtype.scalar_type()),
-        "isempty" | "lower_inc" | "upper_inc" | "lower_inf" | "upper_inf" | "array_overlap"
-        | "contains_op" | "contained_by_op" | "range_adjacent" => Some(ColumnType::Boolean),
-        "range_merge" => Some(ColumnType::Range(subtype)),
-        "multirange" => Some(ColumnType::Multirange(subtype)),
-        _ => None,
-    }
+    Some(match function_operation(name)? {
+        RangeFunctionOperation::Lower | RangeFunctionOperation::Upper => subtype.scalar_type(),
+        RangeFunctionOperation::Merge => ColumnType::Range(subtype),
+        RangeFunctionOperation::Multirange => ColumnType::Multirange(subtype),
+        _ => ColumnType::Boolean,
+    })
 }
 
 fn range_identity(ty: &ColumnType) -> Option<(RangeSubtype, &'static str, bool)> {
@@ -147,5 +199,8 @@ fn subtype_for_constructor(name: &str) -> Option<RangeSubtype> {
         RangeSubtype::TimestampTz,
     ]
     .into_iter()
-    .find(|subtype| name == subtype.range_name() || name == subtype.multirange_name())
+    .find(|subtype| {
+        name.eq_ignore_ascii_case(subtype.range_name())
+            || name.eq_ignore_ascii_case(subtype.multirange_name())
+    })
 }

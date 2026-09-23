@@ -27,9 +27,11 @@ mod range;
 mod time;
 mod uuid;
 
-pub use array_transform::argument_positions as array_transform_argument_positions;
+pub use array_transform::{
+    argument_positions as array_transform_argument_positions,
+    argument_positions_with_control as array_transform_argument_positions_with_control,
+};
 pub use json::value_to_json_text;
-use json::{json_concat, json_delete};
 pub use json_strip::argument_positions as json_strip_nulls_argument_positions;
 pub use range::{
     multirange_from_ranges, parse_multirange, parse_range, CanonicalMultirange, CanonicalRange,
@@ -56,22 +58,22 @@ mod scalar_range;
 mod scalar_temporal;
 mod session_settings;
 
-use binary::{compare, eval_comparison_op, values_equal};
 pub use binary::{
     compare_nullable_with_control, compare_with_control, eval_binary_values,
-    eval_binary_values_with_integer_width, eval_comparison_truth,
+    eval_binary_values_with_control, eval_binary_values_with_integer_width,
+    eval_binary_values_with_integer_width_with_control, eval_comparison_truth,
     eval_comparison_truth_with_control, integer_width_for_literal, integer_width_for_type, truthy,
     values_equal_nullable_with_control, values_equal_with_control, IntegerWidth,
 };
 pub(crate) use binary::{division_by_zero, out_of_range};
+use binary::{eval_comparison_op, values_equal};
 pub use casting::{
     array_dimensions, cast_value, cast_value_from, cast_value_from_with_control, negate_value,
     negate_value_with_control, parse_pg_array_literal, parse_pg_array_literal_with_control,
 };
-pub(crate) use conversion::to_f64;
 use conversion::{
-    allocation_error, coerce_i64, expect_str, float_to_i64_rounded, float_to_i64_trunc, gcd_i64,
-    initcap_str, nonnegative_usize, string1, to_decimal, to_i64,
+    allocation_error, coerce_i64, float_to_i64_rounded, float_to_i64_trunc, nonnegative_usize,
+    to_decimal, to_i64,
 };
 pub use conversion::{
     array_value_to_string, value_to_string, value_to_string_with_control, vector_value_to_string,
@@ -81,12 +83,12 @@ pub use conversion::{
     value_to_tensor, value_to_tensor_with_control, value_to_vector, value_to_vector_with_control,
 };
 pub use current_time::clock_timestamp_micros;
-pub use floating::{eval_float_arithmetic, format_real, FloatWidth};
+pub use floating::{
+    eval_float_arithmetic, eval_float_arithmetic_with_control, format_real, FloatWidth,
+};
 #[cfg(test)]
 use scalar_dispatch::eval_scalar_function;
-use scalar_helpers::{
-    compile_pg_regex, point_xy, quote_literal, similar_to_regex, trim_chars, typeof_value,
-};
+use scalar_helpers::{compile_pg_regex, point_xy, similar_to_regex, typeof_value};
 pub use scalar_helpers::{quote_ident, CompiledLikePattern};
 
 mod builtin;
@@ -102,7 +104,7 @@ pub use builtin::{
 };
 pub use call_arguments::{
     call_argument_value, evaluate_call_args, validate_named_argument_order,
-    variadic_argument_value, wrap_variadic_argument,
+    validate_named_argument_order_with_control, variadic_argument_value, wrap_variadic_argument,
 };
 pub use call_dispatch::{eval_builtin_function_call, eval_function_call};
 pub use context::{
@@ -113,7 +115,7 @@ pub use diagnostics::{unknown_function_error, value_type_name};
 pub use evaluator::eval;
 mod numeric_operator;
 use evaluator::eval_between;
-pub use numeric_operator::eval_numeric_operator;
+pub use numeric_operator::{eval_numeric_operator, eval_numeric_operator_with_control};
 
 #[cfg(test)]
 mod tests;

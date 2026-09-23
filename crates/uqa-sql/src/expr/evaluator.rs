@@ -10,7 +10,6 @@ use uqa_core::{ArrayValue, Value};
 
 use crate::ast::Expr;
 use crate::error::{Result, SQLError};
-use crate::params::SQLParam;
 
 use super::binary::{compare_nullable, eval_binary, truthy, values_equal, values_equal_nullable};
 use super::builtin::eval_bound_builtin_function_call;
@@ -31,18 +30,7 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
         )),
         Expr::Literal(v) | Expr::TypedLiteral { value: v, .. } => Ok(v.clone()),
         Expr::Param(i) => match i.checked_sub(1).and_then(|index| ctx.params.get(index)) {
-            Some(SQLParam::Scalar(v) | SQLParam::TypedScalar { value: v, .. }) => Ok(v.clone()),
-            Some(SQLParam::Vector(v)) => Ok(Value::List(
-                v.iter().map(|x| Value::Float(f64::from(*x))).collect(),
-            )),
-            Some(SQLParam::Tensor(vectors)) => Ok(Value::List(
-                vectors
-                    .iter()
-                    .map(|vector| {
-                        Value::List(vector.iter().map(|x| Value::Float(f64::from(*x))).collect())
-                    })
-                    .collect(),
-            )),
+            Some(parameter) => parameter.to_value(),
             None => Err(SQLError::MissingParam(*i)),
         },
         Expr::Column(name) => {

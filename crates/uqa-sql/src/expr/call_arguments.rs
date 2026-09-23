@@ -8,7 +8,10 @@
 
 use std::borrow::Cow;
 
-use uqa_core::Value;
+use uqa_core::{
+    memory::{ProductionControl, ProductionVec},
+    Value,
+};
 
 use crate::ast::{Expr, FunctionBinding, FunctionDispatch};
 use crate::error::{Result, SQLError};
@@ -103,9 +106,18 @@ pub fn call_argument_value(argument: &Expr) -> &Expr {
 pub fn validate_named_argument_order<'a>(
     argument_names: impl IntoIterator<Item = Option<&'a str>>,
 ) -> Result<()> {
+    validate_named_argument_order_with_control(argument_names, &ProductionControl::uncontrolled())
+}
+
+pub fn validate_named_argument_order_with_control<'a>(
+    argument_names: impl IntoIterator<Item = Option<&'a str>>,
+    control: &ProductionControl<'_>,
+) -> Result<()> {
+    control.check()?;
     let mut saw_named = false;
-    let mut named = Vec::new();
+    let mut named = ProductionVec::new(*control);
     for argument_name in argument_names {
+        control.check()?;
         let Some(argument_name) = argument_name else {
             if saw_named {
                 return Err(SQLError::Routine {
@@ -122,7 +134,7 @@ pub fn validate_named_argument_order<'a>(
                 message: format!("argument name \"{argument_name}\" used more than once"),
             });
         }
-        named.push(argument_name);
+        named.push_copy(argument_name)?;
     }
     Ok(())
 }

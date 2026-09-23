@@ -324,15 +324,32 @@ impl FunctionBinding {
     /// Construct a parser- or binder-owned expression with an identity that cannot collide with a SQL routine name.
     #[must_use]
     pub fn dispatched(dispatch: FunctionDispatch) -> Self {
-        Self {
-            object_id: None,
-            name: dispatch.label().into(),
-            argument_types: Vec::new(),
-            builtin: true,
-            dispatch: Some(dispatch),
-            invocation: None,
-            resolution_error: None,
-        }
+        Self::dispatched_with_control(
+            dispatch,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary dispatch constructor cannot be cancelled or limited")
+        .into_uncontrolled()
+        .expect("ordinary dispatch owner")
+    }
+
+    pub fn dispatched_with_control(
+        dispatch: FunctionDispatch,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Self>, uqa_core::ValueRetentionError> {
+        let (name, memory) = control.copy_text(dispatch.label())?.into_parts();
+        control.finish(
+            Self {
+                object_id: None,
+                name,
+                argument_types: Vec::new(),
+                builtin: true,
+                dispatch: Some(dispatch),
+                invocation: None,
+                resolution_error: None,
+            },
+            memory,
+        )
     }
 
     /// Preserve an undefined-overload error structurally without fabricating a dispatch name.

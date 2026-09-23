@@ -23,6 +23,7 @@ chrono = { workspace = true }
 crc32fast = { workspace = true }
 getrandom = { workspace = true }
 icu_casemap = { workspace = true }
+writeable = { workspace = true }
 libm = { workspace = true }
 regex = { workspace = true }
 thiserror = { workspace = true }

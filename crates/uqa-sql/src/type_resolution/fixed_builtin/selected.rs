@@ -39,39 +39,40 @@ impl SelectedCall {
     }
 }
 
-// Value fields precede their lease so errors and unwinding destroy the tree first.
-struct Construction<'a> {
+// Standalone wrappers destroy their call before releasing its lease.
+#[cfg(test)]
+struct CallOwner {
     call: SelectedCall,
     memory: Option<MemoryReservation>,
+}
+
+struct Construction<'a, 'b> {
+    call: &'b mut SelectedCall,
+    memory: &'b mut Option<MemoryReservation>,
     control: ProductionControl<'a>,
 }
 
-impl Construction<'_> {
+impl Construction<'_, '_> {
     fn retain<T>(&mut self, value: Produced<T>) -> T {
         let (value, memory) = value.into_parts();
-        self.memory = self.control.combine(self.memory.take(), memory);
+        *self.memory = self.control.combine(self.memory.take(), memory);
         value
     }
 
     fn cast(&mut self, argument: ScalarExpr, ty: &ColumnType) -> Result<ScalarExpr, SQLError> {
         let name = ty.sql_name_with_control(&self.control)?;
         let memory = self.control.reserve(size_of::<ScalarExpr>())?;
-        self.memory = self.control.combine(self.memory.take(), memory);
+        *self.memory = self.control.combine(self.memory.take(), memory);
         let ty = self.retain(name);
         Ok(ScalarExpr::Cast {
             expr: Box::new(argument),
             ty,
         })
     }
-
-    fn finish(self) -> Result<Produced<SelectedCall>, SQLError> {
-        self.control
-            .finish(self.call, self.memory)
-            .map_err(Into::into)
-    }
 }
 
 /// Argument inference belongs to the caller; original types are indexed by supplied position, while effective types retain unknown-literal overload matching. Reordering does not infer the same expression again.
+#[cfg(test)]
 pub(super) fn bind_call_with_control(
     call: Produced<SelectedCall>,
     names: &[Option<String>],
@@ -79,17 +80,37 @@ pub(super) fn bind_call_with_control(
     effective_types: &[Option<ColumnType>],
     control: &ProductionControl<'_>,
 ) -> Result<(bool, Produced<SelectedCall>), SQLError> {
-    control.check()?;
+    let call = super::super::call::check_owner(call, control)?;
     let (call, memory) = call.into_parts();
-    let call = control.finish(call, memory)?;
-    let (call, memory) = call.into_parts();
+    let mut owner = CallOwner { call, memory };
+    let matched = bind_call_in_place_with_control(
+        &mut owner.call,
+        &mut owner.memory,
+        names,
+        original_types,
+        effective_types,
+        control,
+    )?;
+    Ok((matched, control.finish(owner.call, owner.memory)?))
+}
+
+/// Borrow the enclosing expression lease so sibling allocations remain retained if this constructor fails after moving supplied arguments.
+pub(super) fn bind_call_in_place_with_control(
+    call: &mut SelectedCall,
+    memory: &mut Option<MemoryReservation>,
+    names: &[Option<String>],
+    original_types: &[Option<ColumnType>],
+    effective_types: &[Option<ColumnType>],
+    control: &ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    super::super::call::check_memory(memory.as_ref(), control)?;
     let mut construction = Construction {
         call,
         memory,
         control: *control,
     };
     let Some(signature) = registry::bound_signature(&construction.call.binding, control)? else {
-        return Ok((false, construction.finish()?));
+        return Ok(false);
     };
     let Some(matched) = super::super::overload_resolution::match_signature_with_control(
         signature,
@@ -98,7 +119,7 @@ pub(super) fn bind_call_with_control(
         control,
     )?
     else {
-        return Ok((false, construction.finish()?));
+        return Ok(false);
     };
     if construction.call.arguments.len() != original_types.len()
         || !valid_positions(
@@ -108,7 +129,7 @@ pub(super) fn bind_call_with_control(
             &construction.call.binding.name,
         )
     {
-        return Ok((false, construction.finish()?));
+        return Ok(false);
     }
     let mut arguments = Arguments::new(signature.argument_types.len(), control)?;
     for (position, declared) in signature.argument_types.iter().enumerate() {
@@ -146,7 +167,7 @@ pub(super) fn bind_call_with_control(
         arguments.push(argument)?;
     }
     let (arguments, memory) = arguments.into_parts();
-    construction.memory = control.combine(construction.memory.take(), memory);
+    *construction.memory = control.combine(construction.memory.take(), memory);
     construction.call.arguments = arguments;
     let (name, _) = registry::lookup(&construction.call.binding.name)
         .expect("selected registry descriptor exists");
@@ -164,7 +185,8 @@ pub(super) fn bind_call_with_control(
     construction.call.binding.invocation = None;
     construction.call.binding.resolution_error = None;
     construction.call.binding.dispatch = super::runtime_dispatch(&construction.call.binding);
-    Ok((true, construction.finish()?))
+    control.check()?;
+    Ok(true)
 }
 
 fn valid_positions(positions: &[usize], count: usize, parameters: usize, name: &str) -> bool {

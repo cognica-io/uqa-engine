@@ -6,9 +6,13 @@
 
 //! `PostgreSQL` containment-operator type resolution and unknown-literal coercion.
 
+use super::call::{BindingCall, InferType};
 use crate::ast::ColumnType;
 use crate::{SQLError, SQLParam};
-use uqa_core::Value;
+use uqa_core::{
+    memory::{MemoryReservation, Produced, ProductionControl},
+    Value,
+};
 
 use crate::{schema::ScalarTypeSchema, ScalarExpr};
 
@@ -20,11 +24,13 @@ pub(super) fn is_operator(name: &str) -> bool {
     matches!(name, "contains_op" | "contained_by_op")
 }
 
-pub(super) fn resolve_operator_type(
+pub(super) fn resolve_operator_type_with_control(
     name: &str,
     args: &[ScalarExpr],
     argument_types: &[Option<ColumnType>],
-) -> Result<Option<ColumnType>, SQLError> {
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    control.check()?;
     if args.len() != 2 {
         return Err(SQLError::BadArity {
             name: name.into(),
@@ -39,7 +45,7 @@ pub(super) fn resolve_operator_type(
         (Some(left), Some(right)) => match (base_type(left), base_type(right)) {
             (ColumnType::JsonB, ColumnType::JsonB) => true,
             (left @ ColumnType::Array(_), right @ ColumnType::Array(_)) => {
-                super::common::same_operator_type(left, right)
+                super::common::same_operator_type_with_control(left, right, control)?
             }
             (
                 ColumnType::Range(left) | ColumnType::Multirange(left),
@@ -56,14 +62,16 @@ pub(super) fn resolve_operator_type(
         }
     };
     if compatible {
-        return Ok(Some(ColumnType::Boolean));
+        return Ok(Some(
+            control.finish(ColumnType::Boolean, control.empty_reservation())?,
+        ));
     }
     Err(SQLError::Routine {
         sqlstate: "42883".into(),
         message: format!(
             "operator does not exist: {} {symbol} {}",
-            type_name(left.as_ref()),
-            type_name(right.as_ref())
+            type_name(left),
+            type_name(right)
         ),
     })
 }
@@ -74,43 +82,110 @@ pub(super) fn bind_unknown_arguments(
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) {
-    if args.len() != 2 {
-        return;
-    }
-    let unknown = [is_unknown_literal(&args[0]), is_unknown_literal(&args[1])];
-    let unknown_index = match unknown {
-        [true, false] => 0,
-        [false, true] => 1,
-        _ => return,
+    let control = ProductionControl::uncontrolled();
+    let mut infer = |expression: &ScalarExpr| {
+        scalar_type_inner(expression, schema, params, resolver)?
+            .map(|ty| {
+                control
+                    .finish(ty, control.empty_reservation())
+                    .map_err(Into::into)
+            })
+            .transpose()
     };
-    let known_index = 1 - unknown_index;
-    let Ok(Some(known_type)) = scalar_type_inner(
-        named_argument_value(&args[known_index]),
-        schema,
-        params,
-        resolver,
-    ) else {
-        return;
-    };
-    let target = base_type(&known_type);
-    if !supported_type(target) {
-        return;
+    if let Ok(Some(prepared)) = prepare_cast(args, &mut infer, &control) {
+        let (index, ty) = prepared
+            .into_uncontrolled()
+            .expect("ordinary containment cast");
+        install_cast(args, index, ty);
     }
-    let inner = std::mem::replace(&mut args[unknown_index], ScalarExpr::Literal(Value::Null));
-    args[unknown_index] = ScalarExpr::Cast {
+}
+
+#[cfg(test)]
+pub(super) fn bind_unknown_arguments_with_control(
+    call: Produced<BindingCall>,
+    infer: &mut InferType<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<BindingCall>, SQLError> {
+    let mut owner = super::call::CallOwner::new(call, control)?;
+    bind_unknown_arguments_in_place_with_control(
+        &mut owner.call,
+        &mut owner.memory,
+        infer,
+        control,
+    )?;
+    owner.finish(control)
+}
+
+/// The caller keeps the enclosing expression and its lease alive throughout mutation, including on errors and unwinding.
+pub(super) fn bind_unknown_arguments_in_place_with_control(
+    call: &mut BindingCall,
+    memory: &mut Option<MemoryReservation>,
+    infer: &mut InferType<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    super::call::check_memory(memory.as_ref(), control)?;
+    let Some(prepared) = prepare_cast(&call.arguments, infer, control)? else {
+        return Ok(());
+    };
+    let ((index, ty), extra) = prepared.into_parts();
+    *memory = control.combine(memory.take(), extra);
+    install_cast(&mut call.arguments, index, ty);
+    control.check()?;
+    Ok(())
+}
+
+fn install_cast(args: &mut [ScalarExpr], index: usize, ty: String) {
+    let inner = std::mem::replace(&mut args[index], ScalarExpr::Literal(Value::Null));
+    args[index] = ScalarExpr::Cast {
         expr: Box::new(inner),
-        ty: target.sql_name(),
+        ty,
     };
 }
 
-fn argument_type(
+fn prepare_cast(
+    args: &[ScalarExpr],
+    infer: &mut InferType<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<(usize, String)>>, SQLError> {
+    control.check()?;
+    if args.len() != 2 {
+        return Ok(None);
+    }
+    let unknown = [is_unknown_literal(&args[0]), is_unknown_literal(&args[1])];
+    let index = match unknown {
+        [true, false] => 0,
+        [false, true] => 1,
+        _ => return Ok(None),
+    };
+    let known_type = match super::call::infer_with_control(
+        named_argument_value(&args[1 - index]),
+        infer,
+        control,
+    ) {
+        Ok(Some(ty)) => ty,
+        Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
+        Ok(None) | Err(_) => return Ok(None),
+    };
+    let target = base_type(&known_type);
+    if !supported_type(target) {
+        return Ok(None);
+    }
+    let ty = target.sql_name_with_control(control)?;
+    let extra = control.reserve(size_of::<ScalarExpr>())?;
+    let (ty, memory) = ty.into_parts();
+    Ok(Some(
+        control.finish((index, ty), control.combine(memory, extra))?,
+    ))
+}
+
+fn argument_type<'a>(
     expression: &ScalarExpr,
-    resolved_type: Option<&ColumnType>,
-) -> Option<ColumnType> {
+    resolved_type: Option<&'a ColumnType>,
+) -> Option<&'a ColumnType> {
     if is_unknown_literal(expression) {
         None
     } else {
-        resolved_type.cloned()
+        resolved_type
     }
 }
 

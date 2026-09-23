@@ -14,7 +14,7 @@ use uqa_core::{
 use crate::schema::ScalarTypeSchema;
 use crate::{scalar_call_arguments, RowSchema, ScalarExpr};
 
-use super::{scalar_type_inner, FunctionTypeResolver};
+use super::FunctionTypeResolver;
 
 /// Decoded function-call argument names, effective overload types, and whether the call used explicit `VARIADIC` syntax.
 #[doc(hidden)]
@@ -102,10 +102,33 @@ pub fn common_context_expression_type(
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ColumnType>, SQLError> {
+    common_context_expression_type_with_control(
+        expression,
+        schema,
+        params,
+        resolver,
+        &ProductionControl::uncontrolled(),
+    )
+    .map(|ty| {
+        ty.map(|ty| {
+            ty.into_uncontrolled()
+                .expect("ordinary common-context inference has no reservation")
+        })
+    })
+}
+
+pub(super) fn common_context_expression_type_with_control(
+    expression: &ScalarExpr,
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    resolver: Option<&dyn FunctionTypeResolver>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    control.check()?;
     if matches!(expression, ScalarExpr::Literal(Value::Str(_) | Value::Null)) {
         return Ok(None);
     }
-    scalar_type_inner(expression, schema, params, resolver)
+    super::scalar_type_inner_with_control(expression, schema, params, resolver, control)
 }
 
 /// Preserve parser-level `unknown` identity for fixed built-in overload selection.
@@ -114,13 +137,12 @@ pub fn effective_overload_argument_type(
     expression: &ScalarExpr,
     resolved: Option<ColumnType>,
 ) -> Option<ColumnType> {
-    if matches!(expression, ScalarExpr::Literal(Value::Str(_) | Value::Null))
-        || matches!(expression, ScalarExpr::Param(_))
-            && matches!(resolved.as_ref(), Some(ColumnType::Text))
+    if effective_overload_argument_type_ref_with_params(expression, resolved.as_ref(), &[])
+        .is_some()
     {
-        None
-    } else {
         resolved
+    } else {
+        None
     }
 }
 
@@ -131,6 +153,21 @@ pub fn effective_overload_argument_type_with_params(
     resolved: Option<ColumnType>,
     params: &[SQLParam],
 ) -> Option<ColumnType> {
+    if effective_overload_argument_type_ref_with_params(expression, resolved.as_ref(), params)
+        .is_some()
+    {
+        resolved
+    } else {
+        None
+    }
+}
+
+/// Borrow the same effective argument type before a controlled caller decides whether a payload copy is needed.
+pub(super) fn effective_overload_argument_type_ref_with_params<'a>(
+    expression: &ScalarExpr,
+    resolved: Option<&'a ColumnType>,
+    params: &[SQLParam],
+) -> Option<&'a ColumnType> {
     if let ScalarExpr::Param(index) = expression {
         if index
             .checked_sub(1)
@@ -140,19 +177,36 @@ pub fn effective_overload_argument_type_with_params(
             return resolved;
         }
     }
-    effective_overload_argument_type(expression, resolved)
+    if matches!(expression, ScalarExpr::Literal(Value::Str(_) | Value::Null))
+        || matches!(expression, ScalarExpr::Param(_)) && matches!(resolved, Some(ColumnType::Text))
+    {
+        None
+    } else {
+        resolved
+    }
 }
 
-pub(super) fn parameter_type(parameter: &SQLParam) -> Option<ColumnType> {
-    match parameter {
-        SQLParam::Scalar(value) => value_type(value),
-        SQLParam::TypedScalar { ty, .. } => Some(ty.clone()),
+pub(super) fn parameter_type_with_control(
+    parameter: &SQLParam,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    control.check()?;
+    let scalar = match parameter {
+        SQLParam::Scalar(value) => return value_type_with_control(value, control),
+        SQLParam::TypedScalar { ty, .. } => return Ok(Some(ty.clone_with_control(control)?)),
         SQLParam::Vector(values) => u32::try_from(values.len()).ok().map(ColumnType::Vector),
         SQLParam::Tensor(values) => values
             .first()
             .and_then(|values| u32::try_from(values.len()).ok())
             .map(ColumnType::Tensor),
-    }
+    };
+    scalar
+        .map(|ty| {
+            control
+                .finish(ty, control.empty_reservation())
+                .map_err(Into::into)
+        })
+        .transpose()
 }
 
 pub(crate) fn value_type(value: &Value) -> Option<ColumnType> {
@@ -165,7 +219,7 @@ pub(crate) fn value_type(value: &Value) -> Option<ColumnType> {
         })
 }
 
-pub(super) fn value_type_with_control(
+pub(crate) fn value_type_with_control(
     value: &Value,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
@@ -355,82 +409,7 @@ pub(super) fn common_type_with_control(
         .map_err(Into::into)
 }
 
-pub(super) fn case_output_type(
-    expression: &ScalarExpr,
-    common: &ColumnType,
-    schema: &dyn ScalarTypeSchema,
-    params: &[SQLParam],
-    resolver: Option<&dyn FunctionTypeResolver>,
-) -> Result<ColumnType, SQLError> {
-    let ScalarExpr::Case {
-        base,
-        when,
-        else_branch,
-    } = expression
-    else {
-        return Ok(common.clone());
-    };
-    let mut output = None;
-    let mut include = |expression: Option<&ScalarExpr>| -> Result<(), SQLError> {
-        let ty = expression
-            .map(|expression| common_context_expression_type(expression, schema, params, resolver))
-            .transpose()?
-            .flatten();
-        let ty = ty
-            .filter(|ty| ty.regtype_name() == common.regtype_name())
-            .unwrap_or_else(|| common.without_type_modifiers());
-        output = merge_optional_types(output.take(), Some(ty))?;
-        Ok(())
-    };
-    for (condition, value) in when {
-        match constant_case_condition(base.as_deref(), condition, schema, params, resolver) {
-            Some(Value::Bool(false) | Value::Null) => {}
-            Some(Value::Bool(true)) => {
-                include(Some(value))?;
-                return Ok(output.unwrap_or_else(|| common.without_type_modifiers()));
-            }
-            _ => include(Some(value))?,
-        }
-    }
-    include(else_branch.as_deref())?;
-    Ok(output.unwrap_or_else(|| common.without_type_modifiers()))
-}
-
-fn constant_case_condition(
-    base: Option<&ScalarExpr>,
-    condition: &ScalarExpr,
-    schema: &dyn ScalarTypeSchema,
-    params: &[SQLParam],
-    resolver: Option<&dyn FunctionTypeResolver>,
-) -> Option<Value> {
-    let Some(base) = base else {
-        return constant_value(condition);
-    };
-    let left = constant_value(base)?;
-    let right = constant_value(condition)?;
-    let left_type = common_context_expression_type(base, schema, params, resolver).ok()?;
-    let right_type = common_context_expression_type(condition, schema, params, resolver).ok()?;
-    let operand_type = match (left_type, right_type) {
-        (Some(left), Some(right)) => super::equality_operand_type(&left, &right).ok()?,
-        (Some(known), None) | (None, Some(known)) => known.without_type_modifiers(),
-        (None, None) => ColumnType::Text,
-    };
-    let ty = operand_type.sql_name();
-    let left = crate::expr::cast_value(&left, &ty).ok()?;
-    let right = crate::expr::cast_value(&right, &ty).ok()?;
-    crate::expr::eval_binary_values(crate::ast::BinaryOp::Equal, &left, &right).ok()
-}
-
-fn constant_value(expression: &ScalarExpr) -> Option<Value> {
-    match expression {
-        ScalarExpr::Literal(value) => Some(value.clone()),
-        ScalarExpr::Cast { expr, ty } => crate::expr::cast_value(&constant_value(expr)?, ty).ok(),
-        ScalarExpr::Binary { op, lhs, rhs } => {
-            crate::expr::eval_binary_values(*op, &constant_value(lhs)?, &constant_value(rhs)?).ok()
-        }
-        _ => None,
-    }
-}
+pub(super) mod case;
 
 fn is_integral_type(ty: &ColumnType) -> bool {
     matches!(
@@ -464,11 +443,6 @@ pub(super) fn numeric_rank(ty: &ColumnType) -> Option<u8> {
 }
 
 /// Array dimensions belong to values; `PostgreSQL` operator signatures identify an array by its scalar element type, including an element domain's identity.
-pub(super) fn same_operator_type(left: &ColumnType, right: &ColumnType) -> bool {
-    same_operator_type_with_control(left, right, &ProductionControl::uncontrolled())
-        .expect("ordinary operator identity cannot be cancelled or limited")
-}
-
 pub(super) fn same_operator_type_with_control(
     left: &ColumnType,
     right: &ColumnType,

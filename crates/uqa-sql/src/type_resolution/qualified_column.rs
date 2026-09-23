@@ -11,11 +11,13 @@ use crate::SQLError;
 
 use crate::schema::ScalarTypeSchema;
 
-pub(super) fn resolve(
+pub(super) fn resolve_with_control(
     schema: &dyn ScalarTypeSchema,
     qualifier: &str,
     column: &str,
-) -> Result<Option<ColumnType>, SQLError> {
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+    control.check()?;
     if schema.qualified_column_is_ambiguous(qualifier, column) {
         return Err(SQLError::AmbiguousColumn(format!("{qualifier}.{column}")));
     }
@@ -26,5 +28,8 @@ pub(super) fn resolve(
     {
         return Err(SQLError::unknown_qualified_column(qualifier, column));
     }
-    Ok(schema.qualified_type(qualifier, column).cloned())
+    schema
+        .qualified_type(qualifier, column)
+        .map(|ty| ty.clone_with_control(control).map_err(Into::into))
+        .transpose()
 }

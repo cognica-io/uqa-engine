@@ -65,6 +65,7 @@ pub(in crate::expr) fn json_concat_with_control(
     typed(&output, true, control).map(Some)
 }
 
+#[cfg(test)]
 pub(in crate::expr) fn json_delete_with_control(
     args: &[Value],
     control: &ProductionControl<'_>,

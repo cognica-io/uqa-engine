@@ -103,10 +103,6 @@ pub fn values_equal_nullable_with_control(
     Ok(equal)
 }
 
-pub(in crate::expr) fn compare(a: &Value, b: &Value) -> Result<Ordering> {
-    compare_with_control(a, b, &ProductionControl::uncontrolled())
-}
-
 /// Compare with the existing two-valued selector convention that SQL UNKNOWN sorts as equal.
 pub fn compare_with_control(
     a: &Value,

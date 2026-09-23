@@ -377,5 +377,7 @@ fn input(value: &Value, control: &ProductionControl<'_>) -> Result<Node> {
 
 pub(in crate::expr) use access::json_extract_operator_with_control;
 pub(in crate::expr) use functions::evaluate;
-pub(in crate::expr) use mutation::{json_concat_with_control, json_delete_with_control};
+#[cfg(test)]
+pub(in crate::expr) use mutation::json_delete_with_control;
+pub(in crate::expr) use mutation::{json_concat_with_control, json_delete_values_with_control};
 pub(in crate::expr) use writer::quote_with_control;

@@ -6,6 +6,8 @@
 
 //! One registry and binding path for implemented fixed-signature `PostgreSQL` built-ins.
 
+mod binding;
+pub(super) use binding::bind_call_in_place_with_control;
 mod registry;
 mod selected;
 mod selection;
@@ -112,6 +114,22 @@ pub(super) fn resolve_type(
 ) -> Result<Option<ColumnType>, SQLError> {
     let argument_names = argument_names(args);
     let argument_types = effective_argument_types(args, argument_types, params);
+    if resolver.is_none() {
+        return resolve_return_type_with_control(
+            name,
+            binding,
+            &argument_names,
+            &argument_types,
+            explicit_variadic,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+        .map(|ty| {
+            Some(
+                ty.into_uncontrolled()
+                    .expect("ordinary fixed result type has no reservation"),
+            )
+        });
+    }
     resolve_overload(
         name,
         binding,
@@ -121,6 +139,30 @@ pub(super) fn resolve_type(
         resolver,
     )
     .map(|overload| Some(overload.return_type))
+}
+
+/// Infer the selected result directly from the borrowed descriptor without constructing an unused execution binding.
+pub(super) fn resolve_return_type_with_control(
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    argument_names: &[Option<String>],
+    argument_types: &[Option<ColumnType>],
+    explicit_variadic: bool,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<ColumnType>, SQLError> {
+    let selected = selection::select_with_control(
+        name,
+        binding,
+        argument_names,
+        argument_types,
+        explicit_variadic,
+        control,
+    )?;
+    selected
+        .declaration
+        .return_type
+        .clone_with_control(control)
+        .map_err(Into::into)
 }
 
 pub(super) fn resolve_overload(
@@ -193,10 +235,13 @@ pub(super) fn bind_call(
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> String {
+    if resolver.is_none() {
+        return binding::bind_local_call(name, binding, args, schema, params);
+    }
     if binding.is_none() && resolver.is_some_and(|resolver| resolver.has_untyped_function(&name)) {
         return name;
     }
-    let Some((registered_name, _)) = registry::lookup(&name) else {
+    let Some(_) = registry::lookup(&name) else {
         return name;
     };
     let Ok(call_arguments) = scalar_call_arguments(args) else {
@@ -214,16 +259,6 @@ pub(super) fn bind_call(
     };
     let names = argument_names(args);
     let effective_types = effective_argument_types(args, &argument_types, params);
-    if resolver.is_none()
-        && !(explicit_variadic && names.iter().any(Option::is_some))
-        && binding.as_mut().is_some_and(|binding| {
-            registry::lookup(&binding.name)
-                .is_some_and(|(selected_name, _)| selected_name == registered_name)
-                && bind_selected_call(binding, args, &names, &argument_types, &effective_types)
-        })
-    {
-        return name;
-    }
     let builtins = overloads(&name).expect("fixed registry membership was checked");
     let selected = resolve_overload(
         &name,
@@ -267,28 +302,6 @@ pub(super) fn bind_call(
     selected.binding.dispatch = runtime_dispatch(&selected.binding);
     *binding = Some(selected.binding);
     name
-}
-
-/// Already selected generated-column bindings need structural argument matching and coercion, not candidate construction or ranking. Invalid bindings continue through the existing diagnostic path.
-fn bind_selected_call(
-    binding: &mut FunctionBinding,
-    args: &mut Vec<ScalarExpr>,
-    names: &[Option<String>],
-    argument_types: &[Option<ColumnType>],
-    effective_types: &[Option<ColumnType>],
-) -> bool {
-    let control = uqa_core::memory::ProductionControl::uncontrolled();
-    let call = selected::SelectedCall::take(binding, args);
-    let call = control
-        .finish(call, None)
-        .expect("uncontrolled input owner");
-    let (matched, call) =
-        selected::bind_call_with_control(call, names, argument_types, effective_types, &control)
-            .expect("ordinary fixed binding constructors cannot be cancelled or limited");
-    let call = call.into_uncontrolled().expect("uncontrolled output owner");
-    *binding = call.binding;
-    *args = call.arguments;
-    matched
 }
 
 fn coerce_arguments(
@@ -435,22 +448,15 @@ fn unresolved_call_signature(
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
 ) -> String {
-    let arguments = argument_names
-        .iter()
-        .zip(argument_types)
-        .map(|(argument_name, argument_type)| {
-            let argument_type = argument_type
-                .as_ref()
-                .map_or_else(|| "unknown".into(), ColumnType::regtype_name);
-            argument_name
-                .as_ref()
-                .map_or(argument_type.clone(), |name| {
-                    format!("{name} => {argument_type}")
-                })
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("{name}({arguments})")
+    binding::unresolved_call_signature_with_control(
+        name,
+        argument_names,
+        argument_types,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary unresolved signature formatter")
+    .into_uncontrolled()
+    .expect("ordinary signature has no reservation")
 }
 
 fn named_argument_value_owned(expression: ScalarExpr) -> ScalarExpr {

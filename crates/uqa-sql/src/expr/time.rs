@@ -95,10 +95,6 @@ pub(super) fn timestamp_plus_interval(
 /// Binary arithmetic when either operand is temporal. Handles the full
 /// `PostgreSQL` matrix used by the engine: date/int, date/date,
 /// temporal/interval, timestamp/timestamp, and interval scaling.
-pub(super) fn temporal_arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
-    temporal_arith_with_control(a, b, op, &ProductionControl::uncontrolled())
-}
-
 #[expect(
     clippy::too_many_lines,
     reason = "temporal dispatch preserves PostgreSQL unit and error precedence"

@@ -7,8 +7,12 @@
 //! Shared string, regex, quoting, and point helpers for scalar built-ins.
 
 use super::conversion::to_f64_with_control;
-use super::{value_to_string, Result, SQLError, TemporalValue, Value};
+use super::{Result, SQLError, TemporalValue, Value};
 use uqa_core::memory::ProductionControl;
+
+mod quoting;
+pub use quoting::quote_ident;
+pub(super) use quoting::{quote_ident_with_control, quote_literal_with_control};
 
 // --------------------------------------------------------------------
 // JSON helpers
@@ -72,236 +76,9 @@ pub(super) fn point_xy(v: &Value, control: &ProductionControl<'_>) -> Result<(f6
     }
 }
 
-/// A LIKE/ILIKE pattern compiled once for repeated evaluation.
-///
-/// ASCII values use a byte matcher without per-row allocation. Unicode keeps
-/// SQL's character-oriented `_` semantics and the existing lowercase rules.
-pub struct CompiledLikePattern {
-    case_insensitive: bool,
-    pattern_chars: Vec<LikePatternToken<char>>,
-    pattern_ascii: Option<Vec<LikePatternToken<u8>>>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum LikePatternToken<T> {
-    Literal(T),
-    AnyOne,
-    AnyMany,
-    DanglingEscape,
-}
-
-impl CompiledLikePattern {
-    #[must_use]
-    pub fn new(pattern: &str, case_insensitive: bool) -> Self {
-        Self::with_escape(pattern, case_insensitive, None)
-            .expect("the default LIKE escape is exactly one character")
-    }
-
-    #[must_use]
-    pub fn from_value(pattern: &Value, case_insensitive: bool) -> Self {
-        Self::new(&value_to_string(pattern), case_insensitive)
-    }
-
-    /// Compile a pattern with `PostgreSQL`'s optional `ESCAPE` clause.
-    /// `None` selects the default backslash, while `Some("")` disables escaping.
-    pub fn with_escape(
-        pattern: &str,
-        case_insensitive: bool,
-        escape: Option<&str>,
-    ) -> Result<Self> {
-        let escape = like_escape_character(escape)?;
-        let pattern_chars = compile_like_pattern(pattern, case_insensitive, escape);
-        let pattern_ascii = pattern_chars
-            .iter()
-            .map(|token| match token {
-                LikePatternToken::Literal(character) if character.is_ascii() => {
-                    Some(LikePatternToken::Literal(*character as u8))
-                }
-                LikePatternToken::Literal(_) => None,
-                LikePatternToken::AnyOne => Some(LikePatternToken::AnyOne),
-                LikePatternToken::AnyMany => Some(LikePatternToken::AnyMany),
-                LikePatternToken::DanglingEscape => Some(LikePatternToken::DanglingEscape),
-            })
-            .collect::<Option<Vec<_>>>();
-        Ok(Self {
-            case_insensitive,
-            pattern_chars,
-            pattern_ascii,
-        })
-    }
-
-    #[must_use]
-    pub fn is_match(&self, haystack: &str) -> bool {
-        self.try_is_match(haystack).unwrap_or(false)
-    }
-
-    /// Match while preserving `PostgreSQL` errors such as a dangling escape.
-    pub fn try_is_match(&self, haystack: &str) -> Result<bool> {
-        if self.case_insensitive {
-            let normalized = haystack.to_lowercase();
-            if let Some(pattern) = self
-                .pattern_ascii
-                .as_deref()
-                .filter(|_| normalized.is_ascii())
-            {
-                return wildcard_match(normalized.as_bytes(), pattern);
-            }
-            let haystack = normalized.chars().collect::<Vec<_>>();
-            return wildcard_match(&haystack, &self.pattern_chars);
-        }
-        if let Some(pattern) = self
-            .pattern_ascii
-            .as_deref()
-            .filter(|_| haystack.is_ascii())
-        {
-            return wildcard_match(haystack.as_bytes(), pattern);
-        }
-        let haystack = haystack.chars().collect::<Vec<_>>();
-        wildcard_match(&haystack, &self.pattern_chars)
-    }
-
-    #[must_use]
-    pub fn matches_value(&self, haystack: &Value) -> bool {
-        self.try_matches_value(haystack).unwrap_or(false)
-    }
-
-    /// Match a value while preserving `PostgreSQL` pattern errors.
-    pub fn try_matches_value(&self, haystack: &Value) -> Result<bool> {
-        match haystack {
-            Value::Str(text) => self.try_is_match(text),
-            Value::FixedChar(text) => self.try_is_match(text.trim_end_matches(' ')),
-            Value::Null => self.try_is_match(""),
-            other => self.try_is_match(&value_to_string(other)),
-        }
-    }
-}
-
-fn like_escape_character(escape: Option<&str>) -> Result<Option<char>> {
-    let Some(escape) = escape else {
-        return Ok(Some('\\'));
-    };
-    let mut characters = escape.chars();
-    let first = characters.next();
-    if characters.next().is_some() {
-        return Err(SQLError::Routine {
-            sqlstate: "22025".into(),
-            message: "invalid escape string".into(),
-        });
-    }
-    Ok(first)
-}
-
-fn compile_like_pattern(
-    pattern: &str,
-    case_insensitive: bool,
-    escape: Option<char>,
-) -> Vec<LikePatternToken<char>> {
-    let mut output = Vec::with_capacity(pattern.chars().count());
-    let mut characters = pattern.chars();
-    while let Some(character) = characters.next() {
-        if escape == Some(character) {
-            let Some(literal) = characters.next() else {
-                output.push(LikePatternToken::DanglingEscape);
-                break;
-            };
-            push_like_literal(&mut output, literal, case_insensitive);
-            continue;
-        }
-        match character {
-            '%' => output.push(LikePatternToken::AnyMany),
-            '_' => output.push(LikePatternToken::AnyOne),
-            literal => push_like_literal(&mut output, literal, case_insensitive),
-        }
-    }
-    output
-}
-
-fn push_like_literal(
-    output: &mut Vec<LikePatternToken<char>>,
-    literal: char,
-    case_insensitive: bool,
-) {
-    if case_insensitive {
-        output.extend(literal.to_lowercase().map(LikePatternToken::Literal));
-    } else {
-        output.push(LikePatternToken::Literal(literal));
-    }
-}
-
-fn wildcard_match<T: Copy + Eq>(haystack: &[T], pattern: &[LikePatternToken<T>]) -> Result<bool> {
-    let mut haystack_index = 0;
-    let mut pattern_index = 0;
-    let mut star: Option<(usize, usize)> = None;
-    while haystack_index < haystack.len() {
-        match pattern.get(pattern_index) {
-            Some(LikePatternToken::Literal(literal)) if *literal == haystack[haystack_index] => {
-                haystack_index += 1;
-                pattern_index += 1;
-            }
-            Some(LikePatternToken::AnyOne) => {
-                haystack_index += 1;
-                pattern_index += 1;
-            }
-            Some(LikePatternToken::AnyMany) => {
-                star = Some((pattern_index, haystack_index));
-                pattern_index += 1;
-            }
-            Some(LikePatternToken::DanglingEscape) => {
-                return Err(SQLError::Routine {
-                    sqlstate: "22025".into(),
-                    message: "LIKE pattern must not end with escape character".into(),
-                });
-            }
-            _ => {
-                if let Some((star_pattern, star_haystack)) = star {
-                    pattern_index = star_pattern + 1;
-                    haystack_index = star_haystack + 1;
-                    star = Some((star_pattern, star_haystack + 1));
-                } else {
-                    return Ok(false);
-                }
-            }
-        }
-    }
-    while matches!(pattern.get(pattern_index), Some(LikePatternToken::AnyMany)) {
-        pattern_index += 1;
-    }
-    Ok(pattern_index == pattern.len())
-}
-
-/// `trim` / `ltrim` / `rtrim` / `btrim` with the optional
-/// character-SET second argument (defaults to whitespace).
-pub(super) fn trim_chars(args: &[Value], start: bool, end: bool) -> Result<Value> {
-    if args.is_empty() || args.len() > 2 {
-        return Err(SQLError::TypeMismatch("trim takes 1-2 args".into()));
-    }
-    if args.iter().any(|arg| matches!(arg, Value::Null)) {
-        return Ok(Value::Null);
-    }
-    let s = value_to_string(&args[0]);
-    let out = match args.get(1) {
-        None => match (start, end) {
-            (true, true) => s.trim(),
-            (true, false) => s.trim_start(),
-            (false, true) => s.trim_end(),
-            (false, false) => s.as_str(),
-        }
-        .to_string(),
-        Some(set) => {
-            let set: Vec<char> = value_to_string(set).chars().collect();
-            let matches_set = |c: char| set.contains(&c);
-            let mut out = s.as_str();
-            if start {
-                out = out.trim_start_matches(matches_set);
-            }
-            if end {
-                out = out.trim_end_matches(matches_set);
-            }
-            out.to_string()
-        }
-    };
-    Ok(Value::Str(out))
-}
+pub(super) mod casing;
+mod like_pattern;
+pub use like_pattern::CompiledLikePattern;
 
 /// Compile a regex with `PostgreSQL` match-flag behavior.
 pub(super) fn compile_pg_regex(
@@ -809,34 +586,10 @@ pub(super) fn is_quoted_keyword(word: &str) -> bool {
     KEYWORDS.binary_search(&word).is_ok()
 }
 
-/// `quote_ident`: double-quote unless the identifier is a safe
-/// lower-case name that is not a keyword.
-pub fn quote_ident(ident: &str) -> String {
-    let safe = !ident.is_empty()
-        && ident.chars().enumerate().all(|(i, c)| {
-            c.is_ascii_lowercase() || c == '_' || (i > 0 && (c.is_ascii_digit() || c == '$'))
-        });
-    if safe && !is_quoted_keyword(ident) {
-        return ident.to_string();
-    }
-    format!("\"{}\"", ident.replace('"', "\"\""))
-}
-
-/// `quote_literal`: single-quote with doubled quotes; backslashes
-/// switch to the `E'...'` form with doubled backslashes.
-pub(super) fn quote_literal(text: &str) -> String {
-    let escaped = text.replace('\'', "''");
-    if escaped.contains('\\') {
-        format!("E'{}'", escaped.replace('\\', "\\\\"))
-    } else {
-        format!("'{escaped}'")
-    }
-}
-
 /// Translate a SQL `SIMILAR TO` pattern into an anchored PostgreSQL-style regex.
 /// `None` selects the default backslash escape and `Some("")` disables escaping.
 pub(super) fn similar_to_regex(pattern: &str, escape: Option<&str>) -> Result<String> {
-    let escape = like_escape_character(escape)?;
+    let escape = like_pattern::escape_character(escape)?;
     let mut out = String::with_capacity(pattern.len() + 8);
     out.push_str("^(?:");
     let mut after_escape = false;

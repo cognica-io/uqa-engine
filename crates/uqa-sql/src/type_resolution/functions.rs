@@ -4,18 +4,22 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use crate::ast::{BinaryOp, ColumnType, FunctionBinding, FunctionDispatch};
+use crate::ast::{ColumnType, FunctionBinding};
 use crate::{SQLError, SQLParam};
-use uqa_core::Value;
+use uqa_core::memory::ProductionControl;
 
-use crate::{scalar_call_argument, scalar_call_arguments, schema::ScalarTypeSchema, ScalarExpr};
+use crate::{scalar_call_argument, schema::ScalarTypeSchema, ScalarExpr};
 
-use super::common::{
-    base_type, common_numeric_type, common_type, merge_optional_types, numeric_type,
-};
-use super::{
-    array_transform, containment, fixed_builtin, range, scalar_type_inner, FunctionTypeResolver,
-};
+use super::{fixed_builtin, scalar_type_inner, FunctionTypeResolver};
+mod production;
+pub(super) use production::builtin_function_type_with_control;
+
+#[derive(Clone, Copy)]
+pub(super) struct FunctionTypeCall<'a> {
+    pub name: &'a str,
+    pub binding: Option<&'a FunctionBinding>,
+    pub args: &'a [ScalarExpr],
+}
 
 pub fn builtin_function_type(
     name: &str,
@@ -61,10 +65,6 @@ pub fn builtin_function_argument_targets(
     targets
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "type resolution preserves candidate order and ambiguity diagnostics atomically"
-)]
 pub(super) fn builtin_function_type_inner(
     name: &str,
     binding: Option<&FunctionBinding>,
@@ -74,355 +74,34 @@ pub(super) fn builtin_function_type_inner(
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ColumnType>, SQLError> {
-    if let Some((binding, FunctionDispatch::NumericOperator(operator))) =
-        binding.and_then(|binding| binding.dispatch.map(|dispatch| (binding, dispatch)))
-    {
-        if let Some(error) = &binding.resolution_error {
-            return Err(error.sql_error());
-        }
-        let operand_types = if binding.argument_types.is_empty() {
-            args.iter()
-                .map(|argument| {
-                    super::common_context_expression_type(argument, schema, params, resolver)
-                })
-                .collect::<Result<Vec<_>, _>>()?
-        } else {
-            binding
-                .argument_types
-                .iter()
-                .map(|name| ColumnType::from_sql_name(name).map(Some))
-                .collect::<Result<Vec<_>, _>>()?
-        };
-        return super::operators::numeric_operator_types(operator, &operand_types)
-            .map(|selected| Some(selected.result));
-    }
-    let original_name = name;
-    let lower = name.to_ascii_lowercase();
-    let name = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
-    if binding.is_none()
-        && resolver.is_some_and(|resolver| resolver.has_untyped_function(original_name))
-    {
-        return Ok(None);
-    }
-    if name.contains('.')
-        && resolver.is_none()
-        && binding.and_then(|binding| binding.dispatch).is_none()
-    {
-        return Ok(None);
-    }
-    let call_arguments = scalar_call_arguments(args)?;
-    let explicit_variadic = call_arguments
-        .iter()
-        .any(|argument| argument.explicit_variadic);
-    let argument_types = call_arguments
-        .iter()
-        .map(|argument| scalar_type_inner(argument.value, schema, params, resolver))
-        .collect::<Result<Vec<_>, _>>()?;
-    if name.contains('.') && binding.and_then(|binding| binding.dispatch).is_none() {
-        return resolve_extension_function_type(
-            resolver,
-            original_name,
-            binding,
-            args,
-            &argument_types,
-            explicit_variadic,
-            params,
-        );
-    }
-    let ordered_argument_types = order_by
-        .iter()
-        .map(|order| scalar_type_inner(&order.expr, schema, params, resolver))
-        .collect::<Result<Vec<_>, _>>()?;
-    let argument = |position: usize| argument_types.get(position).cloned().flatten();
-    let ordered_argument = || ordered_argument_types.first().cloned().flatten();
-    let first = || argument(0);
-    if let Some(dispatch) = binding.and_then(|binding| binding.dispatch) {
-        match dispatch {
-            FunctionDispatch::NumericOperator(_) => unreachable!("numeric operator handled above"),
-            FunctionDispatch::JsonExtract { as_text, .. } => {
-                let input = first();
-                let input = input.as_ref().map(base_type);
-                return match input {
-                    Some(ColumnType::Json | ColumnType::JsonB) => Ok(Some(if as_text {
-                        ColumnType::Text
-                    } else {
-                        input.expect("matched JSON input").clone()
-                    })),
-                    None => Ok(None),
-                    Some(other) => Err(SQLError::Routine {
-                        sqlstate: "42883".into(),
-                        message: format!(
-                            "JSON extraction operator does not exist for {}",
-                            other.sql_name()
-                        ),
-                    }),
-                };
-            }
-            FunctionDispatch::NamedArgument | FunctionDispatch::VariadicArgument => {
-                return Ok(first());
-            }
-            FunctionDispatch::ArraySubscripts | FunctionDispatch::Subscript => {
-                return Ok(first().and_then(array_element_type));
-            }
-            FunctionDispatch::ArraySlices | FunctionDispatch::Slice => return Ok(first()),
-            FunctionDispatch::AnyOperator | FunctionDispatch::AllOperator => {
-                let operator = match args.get(2) {
-                    Some(ScalarExpr::Literal(Value::Str(operator))) => match operator.as_str() {
-                        "=" => Some(BinaryOp::Equal),
-                        "<>" | "!=" => Some(BinaryOp::NotEqual),
-                        "<" => Some(BinaryOp::Less),
-                        "<=" => Some(BinaryOp::LessEqual),
-                        ">" => Some(BinaryOp::Greater),
-                        ">=" => Some(BinaryOp::GreaterEqual),
-                        _ => None,
-                    },
-                    _ => None,
-                };
-                if let Some(operator) = operator {
-                    super::operators::binary_result_type(operator, argument(0).as_ref(), None)?;
-                }
-                return Ok(Some(ColumnType::Boolean));
-            }
-            FunctionDispatch::IsDistinct => {
-                super::operators::binary_result_type(
-                    BinaryOp::Equal,
-                    argument(0).as_ref(),
-                    argument(1).as_ref(),
-                )?;
-                return Ok(Some(ColumnType::Boolean));
-            }
-            FunctionDispatch::BetweenSymmetric => {
-                let value = argument(0);
-                for bound in [argument(1), argument(2)] {
-                    super::operators::binary_result_type(
-                        BinaryOp::GreaterEqual,
-                        value.as_ref(),
-                        bound.as_ref(),
-                    )?;
-                }
-                return Ok(Some(ColumnType::Boolean));
-            }
-            FunctionDispatch::ToBinInt4
-            | FunctionDispatch::ToBinInt8
-            | FunctionDispatch::ToHexInt4
-            | FunctionDispatch::ToHexInt8
-            | FunctionDispatch::ToOctInt4
-            | FunctionDispatch::ToOctInt8
-            | FunctionDispatch::RandomInt4Range
-            | FunctionDispatch::RandomInt8Range
-            | FunctionDispatch::RandomNumericRange
-            | FunctionDispatch::ArraySortJson
-            | FunctionDispatch::Range { .. } => {}
-        }
-    }
-    if let Some(ty) = range::function_type(name, binding, &argument_types) {
-        return Ok(Some(ty));
-    }
-    if fixed_builtin::is_function(name) {
-        return fixed_builtin::resolve_type(
-            original_name,
-            binding,
-            args,
-            &argument_types,
-            explicit_variadic,
-            params,
-            resolver,
-        );
-    }
-    match name {
-        "pg_typeof" => Ok(Some(ColumnType::Regtype)),
-        "typeof"
-        | "upper"
-        | "lower"
-        | "initcap"
-        | "trim"
-        | "btrim"
-        | "ltrim"
-        | "rtrim"
-        | "concat"
-        | "concat_ws"
-        | "replace"
-        | "substring"
-        | "substr"
-        | "left"
-        | "right"
-        | "chr"
-        | "regexp_replace"
-        | "lpad"
-        | "rpad"
-        | "repeat"
-        | "translate"
-        | "overlay"
-        | "format"
-        | "encode"
-        | "split_part"
-        | "quote_ident"
-        | "quote_literal"
-        | "quote_nullable"
-        | "regexp_substr"
-        | "array_to_string"
-        | "array_dims"
-        | "json_typeof"
-        | "jsonb_typeof"
-        | "jsonb_pretty"
-        | "to_char"
-        | "timeofday"
-        | "current_setting"
-        | "merge_action"
-        | "string_to_table"
-        | "regexp_split_to_table"
-        | "json_object_keys"
-        | "jsonb_object_keys"
-        | "json_array_elements_text"
-        | "jsonb_array_elements_text"
-        | "json_extract_path_text"
-        | "jsonb_extract_path_text" => Ok(Some(ColumnType::Text)),
-        "array_sort" | "array_reverse" => array_transform::resolve_type(
-            original_name,
-            binding,
-            args,
-            &argument_types,
-            explicit_variadic,
-            resolver,
-        ),
-        "count" | "row_number" | "rank" | "dense_rank" | "nextval" | "currval" | "lastval"
-        | "setval" => Ok(Some(ColumnType::BigInteger)),
-        "sum" => Ok(first().and_then(|ty| aggregate_sum_type(&ty))),
-        "avg" => Ok(first().and_then(|ty| aggregate_average_type(&ty))),
-        "stddev" | "stddev_samp" | "stddev_pop" | "variance" | "var_samp" | "var_pop" => {
-            Ok(first().and_then(|ty| aggregate_average_type(&ty)))
-        }
-        "min" | "max" | "lag" | "lead" | "first_value" | "last_value" | "nth_value" | "nullif"
-        | "array_cat" | "array_remove" | "array_replace" | "trim_array" | "array_sample"
-        | "array_append" | "generate_series" => Ok(first()),
-        "mode" | "percentile_disc" => Ok(ordered_argument()),
-        "percentile_cont" => Ok(ordered_argument().map(|ty| match base_type(&ty) {
-            ColumnType::Interval => ColumnType::Interval,
-            _ => ColumnType::DoublePrecision,
-        })),
-        "array_agg" => Ok(first().map(|ty| ColumnType::Array(Box::new(ty)))),
-        "string_agg" => Ok(first().map(|ty| {
-            if matches!(ty, ColumnType::Bytea) {
-                ColumnType::Bytea
-            } else {
-                ColumnType::Text
-            }
-        })),
-        "json_agg"
-        | "json_object_agg"
-        | "json_array_elements"
-        | "json_extract_path"
-        | "to_json"
-        | "row_to_json"
-        | "json_build_object"
-        | "json_build_array" => Ok(Some(ColumnType::Json)),
-        "jsonb_agg"
-        | "jsonb_object_agg"
-        | "jsonb_array_elements"
-        | "jsonb_extract_path"
-        | "json_delete_path"
-        | "jsonb_set"
-        | "jsonb_insert"
-        | "to_jsonb"
-        | "jsonb_build_object"
-        | "jsonb_build_array" => Ok(Some(ColumnType::JsonB)),
-        "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => {
-            Ok(Some(ColumnType::Record))
-        }
-        "contains_op" | "contained_by_op" => {
-            containment::resolve_operator_type(name, args, &argument_types)
-        }
-        "bool_and" | "bool_or" | "every" | "starts_with" | "like" | "ilike" | "similar_to"
-        | "regexp_like" | "isfinite" | "json_contains" | "json_contained_by" | "json_has_key"
-        | "json_has_any_key" | "json_has_all_keys" | "jsonb_path_exists" | "jsonpath_exists"
-        | "jsonb_path_match" | "jsonpath_match" | "array_overlap" | "st_within" | "st_dwithin"
-        | "overlaps" => Ok(Some(ColumnType::Boolean)),
-        "coalesce" | "greatest" | "least" => common_argument_type(args, &argument_types),
-        "concat_op" => concat_type(argument(0), argument(1)),
-        "ntile" | "position" | "strpos" | "ascii" | "width_bucket" | "regexp_count"
-        | "regexp_instr" | "num_nulls" | "num_nonnulls" | "array_length" | "array_upper"
-        | "array_lower" | "array_ndims" | "cardinality" | "array_position"
-        | "json_array_length" | "jsonb_array_length" => Ok(Some(ColumnType::Integer)),
-        "abs" => Ok(first().map(|ty| base_type(&ty).clone())),
-        "round" | "trunc" | "ceil" | "ceiling" | "floor" | "sign" => {
-            Ok(first().map(|ty| numeric_unary_result_type(&ty)))
-        }
-        "gcd" | "lcm" => numeric_binary_function_type(argument(0), argument(1)),
-        "div" | "factorial" | "extract" | "to_number" => Ok(Some(numeric_type())),
-        "ln" | "log" | "log10" => numeric_transcendental_type(args, &argument_types),
-        "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "atan2" | "sinh" | "cosh" | "tanh"
-        | "exp" | "log2" | "degrees" | "radians" | "pi" | "st_distance" | "date_part" => {
-            Ok(Some(ColumnType::DoublePrecision))
-        }
-        "regexp_match" | "regexp_matches" | "string_to_array" => {
-            Ok(Some(ColumnType::Array(Box::new(ColumnType::Text))))
-        }
-        "array_positions" => Ok(Some(ColumnType::Array(Box::new(ColumnType::Integer)))),
-        "decode" => Ok(Some(ColumnType::Bytea)),
-        "array_prepend" => Ok(argument(1)),
-        "array_fill" => Ok(first().map(|ty| ColumnType::Array(Box::new(ty)))),
-        "unnest" => Ok(first().and_then(array_element_type)),
-        "now"
-        | "current_timestamp"
-        | "clock_timestamp"
-        | "statement_timestamp"
-        | "transaction_timestamp"
-        | "to_timestamp" => Ok(Some(ColumnType::TimestampTz)),
-        "current_time" => Ok(Some(ColumnType::TimeTz)),
-        "localtime" => Ok(Some(ColumnType::Time)),
-        "localtimestamp" | "make_timestamp" => Ok(Some(ColumnType::Timestamp)),
-        "current_date" | "make_date" | "to_date" => Ok(Some(ColumnType::Date)),
-        "age" | "make_interval" | "justify_hours" => Ok(Some(ColumnType::Interval)),
-        "date_trunc" => Ok(argument(1).map(|ty| match base_type(&ty) {
-            ColumnType::Interval => ColumnType::Interval,
-            ColumnType::Timestamp => ColumnType::Timestamp,
-            _ => ColumnType::TimestampTz,
-        })),
-        "current_database" | "current_catalog" | "current_schema" | "current_user"
-        | "session_user" => Ok(Some(ColumnType::Name)),
-        "current_schemas" => Ok(Some(ColumnType::Array(Box::new(ColumnType::Name)))),
-        _ => resolve_extension_function_type(
-            resolver,
-            original_name,
-            binding,
-            args,
-            &argument_types,
-            explicit_variadic,
-            params,
-        ),
-    }
-}
-
-fn resolve_extension_function_type(
-    resolver: Option<&dyn FunctionTypeResolver>,
-    name: &str,
-    binding: Option<&FunctionBinding>,
-    args: &[ScalarExpr],
-    resolved_types: &[Option<ColumnType>],
-    explicit_variadic: bool,
-    params: &[SQLParam],
-) -> Result<Option<ColumnType>, SQLError> {
-    let Some(resolver) = resolver else {
-        return Ok(None);
+    let control = ProductionControl::uncontrolled();
+    let mut infer = |expression: &ScalarExpr| {
+        scalar_type_inner(expression, schema, params, resolver)?
+            .map(|ty| {
+                control
+                    .finish(ty, control.empty_reservation())
+                    .map_err(Into::into)
+            })
+            .transpose()
     };
-    let mut argument_names = Vec::with_capacity(args.len());
-    let mut argument_types = Vec::with_capacity(args.len());
-    for (argument, resolved_type) in args.iter().zip(resolved_types) {
-        let (name, value) = named_argument(argument);
-        argument_names.push(name);
-        argument_types.push(super::effective_overload_argument_type_with_params(
-            value,
-            resolved_type.clone(),
-            params,
-        ));
-    }
-    resolver.resolve_function_type(
-        name,
-        binding,
-        &argument_names,
-        &argument_types,
-        explicit_variadic,
+    builtin_function_type_with_control(
+        FunctionTypeCall {
+            name,
+            binding,
+            args,
+        },
+        order_by,
+        params,
+        resolver,
+        &mut infer,
+        &control,
     )
+    .map(|ty| {
+        ty.map(|ty| {
+            ty.into_uncontrolled()
+                .expect("ordinary builtin result type")
+        })
+    })
 }
 
 pub(super) fn named_argument(expression: &ScalarExpr) -> (Option<String>, &ScalarExpr) {
@@ -435,127 +114,10 @@ pub(super) fn named_argument_value(expression: &ScalarExpr) -> &ScalarExpr {
     scalar_call_argument(expression).map_or(expression, |argument| argument.value)
 }
 
-fn aggregate_sum_type(ty: &ColumnType) -> Option<ColumnType> {
-    Some(match base_type(ty) {
-        ColumnType::SmallInteger | ColumnType::Integer => ColumnType::BigInteger,
-        ColumnType::BigInteger | ColumnType::Numeric { .. } => numeric_type(),
-        ColumnType::Real => ColumnType::Real,
-        ColumnType::DoublePrecision => ColumnType::DoublePrecision,
-        _ => return None,
-    })
-}
-
-fn aggregate_average_type(ty: &ColumnType) -> Option<ColumnType> {
-    Some(match base_type(ty) {
-        ColumnType::SmallInteger
-        | ColumnType::Integer
-        | ColumnType::BigInteger
-        | ColumnType::Numeric { .. } => numeric_type(),
-        ColumnType::Real | ColumnType::DoublePrecision => ColumnType::DoublePrecision,
-        _ => return None,
-    })
-}
-
-fn common_argument_type(
-    args: &[ScalarExpr],
-    argument_types: &[Option<ColumnType>],
-) -> Result<Option<ColumnType>, SQLError> {
-    let mut result = None;
-    for (argument, argument_type) in args.iter().zip(argument_types) {
-        result = merge_optional_types(
-            result,
-            if matches!(
-                named_argument_value(argument),
-                ScalarExpr::Literal(Value::Str(_) | Value::Null)
-            ) {
-                None
-            } else {
-                argument_type.clone()
-            },
-        )?;
-    }
-    Ok(result.or(Some(ColumnType::Text)))
-}
-
-fn concat_type(
-    left: Option<ColumnType>,
-    right: Option<ColumnType>,
-) -> Result<Option<ColumnType>, SQLError> {
-    match (left, right) {
-        (Some(ColumnType::Array(left)), Some(ColumnType::Array(right))) => {
-            common_type(&left, &right).map(|element| Some(ColumnType::Array(Box::new(element))))
-        }
-        (Some(array @ ColumnType::Array(_)), _) | (_, Some(array @ ColumnType::Array(_))) => {
-            Ok(Some(array))
-        }
-        (Some(ColumnType::JsonB), Some(ColumnType::JsonB)) => Ok(Some(ColumnType::JsonB)),
-        _ => Ok(Some(ColumnType::Text)),
-    }
-}
-
 fn concat_argument_type(other: Option<&ColumnType>) -> ColumnType {
     match other {
         Some(array @ ColumnType::Array(_)) => array.clone(),
         Some(ColumnType::JsonB) => ColumnType::JsonB,
         _ => ColumnType::Text,
-    }
-}
-
-fn numeric_unary_result_type(ty: &ColumnType) -> ColumnType {
-    if matches!(base_type(ty), ColumnType::Numeric { .. }) {
-        numeric_type()
-    } else {
-        ColumnType::DoublePrecision
-    }
-}
-
-fn numeric_binary_function_type(
-    left: Option<ColumnType>,
-    right: Option<ColumnType>,
-) -> Result<Option<ColumnType>, SQLError> {
-    match (left, right) {
-        (Some(left), Some(right)) => common_numeric_type(base_type(&left), base_type(&right))
-            .map(Some)
-            .ok_or_else(|| {
-                SQLError::TypeMismatch(format!(
-                    "types {} and {} are not numeric",
-                    left.sql_name(),
-                    right.sql_name()
-                ))
-            }),
-        (Some(ty), None) | (None, Some(ty)) => Ok(Some(base_type(&ty).clone())),
-        (None, None) => Ok(None),
-    }
-}
-
-fn numeric_transcendental_type(
-    args: &[ScalarExpr],
-    argument_types: &[Option<ColumnType>],
-) -> Result<Option<ColumnType>, SQLError> {
-    let mut saw_argument = false;
-    for argument_type in argument_types {
-        let Some(ty) = argument_type else {
-            continue;
-        };
-        saw_argument = true;
-        if !matches!(base_type(ty), ColumnType::Numeric { .. }) {
-            return Ok(Some(ColumnType::DoublePrecision));
-        }
-    }
-    Ok(if saw_argument {
-        Some(numeric_type())
-    } else if args.is_empty() {
-        None
-    } else {
-        Some(ColumnType::DoublePrecision)
-    })
-}
-
-fn array_element_type(ty: ColumnType) -> Option<ColumnType> {
-    match ty {
-        ColumnType::Array(element) => Some(*element),
-        ColumnType::Int2Vector => Some(ColumnType::SmallInteger),
-        ColumnType::OidVector => Some(ColumnType::Oid),
-        _ => None,
     }
 }

@@ -4051,6 +4051,7 @@ dependencies = [
  "thiserror 1.0.69",
  "uqa-core",
  "uqa-pg-query",
+ "writeable",
 ]
 
 [[package]]

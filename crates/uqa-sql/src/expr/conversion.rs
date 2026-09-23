@@ -194,23 +194,6 @@ fn append_escaped(
     Ok(())
 }
 
-pub(super) fn expect_str(args: &[Value], idx: usize) -> Result<String> {
-    args.get(idx)
-        .map(value_to_string)
-        .ok_or_else(|| SQLError::TypeMismatch(format!("missing arg #{idx}")))
-}
-
-pub(super) fn string1<F: FnOnce(&str) -> String>(args: &[Value], f: F) -> Result<Value> {
-    if args.is_empty() {
-        return Err(SQLError::TypeMismatch("string fn needs 1 arg".into()));
-    }
-    if matches!(args[0], Value::Null) {
-        return Ok(Value::Null);
-    }
-    let s = value_to_string(&args[0]);
-    Ok(Value::Str(f(&s)))
-}
-
 pub(super) fn float1_with_control<F: FnOnce(f64) -> f64>(
     args: &[Value],
     name: &str,
@@ -225,29 +208,6 @@ pub(super) fn float1_with_control<F: FnOnce(f64) -> f64>(
         return Ok(Value::Null);
     }
     Ok(Value::Float(f(to_f64_with_control(&args[0], control)?)))
-}
-
-pub(super) fn initcap_str(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut start = true;
-    for ch in s.chars() {
-        if ch.is_whitespace() {
-            out.push(ch);
-            start = true;
-            continue;
-        }
-        if start {
-            for c in ch.to_uppercase() {
-                out.push(c);
-            }
-            start = false;
-        } else {
-            for c in ch.to_lowercase() {
-                out.push(c);
-            }
-        }
-    }
-    out
 }
 
 pub(super) fn to_i64(v: &Value) -> Result<i64> {

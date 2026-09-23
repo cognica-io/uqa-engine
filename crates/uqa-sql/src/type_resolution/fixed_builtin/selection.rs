@@ -99,7 +99,10 @@ pub(super) fn select_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<SelectedSignature, SQLError> {
     control.check()?;
-    crate::expr::validate_named_argument_order(argument_names.iter().map(Option::as_deref))?;
+    crate::expr::validate_named_argument_order_with_control(
+        argument_names.iter().map(Option::as_deref),
+        control,
+    )?;
     let undefined = || {
         function_resolution_error(
             "42883",

@@ -16,10 +16,6 @@ pub enum FloatWidth {
     DoublePrecision,
 }
 
-pub(super) fn to_float(value: &Value, width: FloatWidth) -> Result<f64> {
-    to_float_with_control(value, width, &ProductionControl::uncontrolled())
-}
-
 pub(super) fn to_float_with_control(
     value: &Value,
     width: FloatWidth,
@@ -147,11 +143,23 @@ pub fn eval_float_arithmetic(
     right: &Value,
     width: FloatWidth,
 ) -> Result<Value> {
+    eval_float_arithmetic_with_control(op, left, right, width, &ProductionControl::uncontrolled())
+}
+
+/// Evaluate the same width-specific arithmetic with controlled numeric coercion workspace. The resulting float carrier is inline.
+pub fn eval_float_arithmetic_with_control(
+    op: BinaryOp,
+    left: &Value,
+    right: &Value,
+    width: FloatWidth,
+    control: &ProductionControl<'_>,
+) -> Result<Value> {
+    control.check()?;
     if matches!(left, Value::Null) || matches!(right, Value::Null) {
         return Ok(Value::Null);
     }
-    let left = to_float(left, width)?;
-    let right = to_float(right, width)?;
+    let left = to_float_with_control(left, width, control)?;
+    let right = to_float_with_control(right, width, control)?;
     if matches!(op, BinaryOp::Divide) && right == 0.0 && !left.is_nan() {
         return Err(division_by_zero());
     }

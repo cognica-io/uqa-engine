@@ -7,13 +7,16 @@
 //! Extended `PostgreSQL` scalar and lowered operator built-ins.
 
 use super::{
-    compile_pg_regex, eval_between, eval_comparison_op, expect_str, out_of_range, quote_ident,
-    quote_literal, similar_to_regex, to_i64, value_to_string, values_equal, ArrayValue, BinaryOp,
-    DecimalValue, Result, SQLError, Value,
+    compile_pg_regex, eval_between, eval_comparison_op, out_of_range, similar_to_regex, to_i64,
+    value_to_string, values_equal, ArrayValue, BinaryOp, Result, SQLError, Value,
 };
 use crate::ast::FunctionDispatch;
 
 mod arrays;
+mod immutable;
+pub(super) use immutable::{
+    eval_postgres_immutable_with_control, eval_postgres_integer_base_with_control,
+};
 mod subscripts;
 pub(super) use subscripts::eval_postgres_subscript_with_control;
 mod text;
@@ -26,6 +29,15 @@ use text::{
 
 pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
     if let Some(result) =
+        eval_postgres_immutable_with_control(name, args, &ProductionControl::uncontrolled())
+    {
+        return Some(result.map(|value| {
+            value
+                .into_uncontrolled()
+                .expect("ordinary postgres scalar result")
+        }));
+    }
+    if let Some(result) =
         eval_postgres_arrays_with_control(name, args, &ProductionControl::uncontrolled())
     {
         return Some(result.map(|value| {
@@ -35,23 +47,12 @@ pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Resu
         }));
     }
     const NAMES: &[&str] = &[
-        "factorial",
-        "bit_length",
-        "to_bin",
-        "to_hex",
-        "to_oct",
-        "string_to_array",
         "string_to_table",
-        "quote_ident",
-        "quote_literal",
-        "quote_nullable",
         "regexp_count",
         "regexp_instr",
         "regexp_like",
         "regexp_substr",
         "similar_to",
-        "num_nulls",
-        "num_nonnulls",
         "current_database",
         "version",
         "current_catalog",
@@ -78,17 +79,20 @@ pub(super) fn eval_dispatched_postgres_function(
                 .expect("ordinary subscript result")
         }));
     }
+    if let Some(result) =
+        eval_postgres_integer_base_with_control(dispatch, args, &ProductionControl::uncontrolled())
+    {
+        return Some(result.map(|value| {
+            value
+                .into_uncontrolled()
+                .expect("ordinary integer base result")
+        }));
+    }
     Some(match dispatch {
         FunctionDispatch::AnyOperator => eval_any_all(args, true),
         FunctionDispatch::AllOperator => eval_any_all(args, false),
         FunctionDispatch::IsDistinct => eval_is_distinct(args),
         FunctionDispatch::BetweenSymmetric => eval_between_symmetric(args),
-        FunctionDispatch::ToBinInt4
-        | FunctionDispatch::ToBinInt8
-        | FunctionDispatch::ToHexInt4
-        | FunctionDispatch::ToHexInt8
-        | FunctionDispatch::ToOctInt4
-        | FunctionDispatch::ToOctInt8 => eval_integer_base(dispatch, args),
         _ => return None,
     })
 }
@@ -104,104 +108,13 @@ fn eval_postgres_function(name: &str, args: &[Value]) -> Result<Value> {
             // PostgreSQL scalar surface: math, strings, arrays, operators
             // lowered to internal functions.
             // -------------------------------------------------------------
-            "factorial" => {
-                if args.len() != 1 {
-                    return Err(SQLError::TypeMismatch("factorial takes 1 arg".into()));
-                }
-                if matches!(args[0], Value::Null) {
-                    return Ok(Value::Null);
-                }
-                let n = to_i64(&args[0])?;
-                if n < 0 {
-                    return Err(SQLError::Routine {
-                        sqlstate: "2201F".into(),
-                        message: "factorial of a negative number is undefined".into(),
-                    });
-                }
-                let mut acc: i128 = 1;
-                for k in 2..=n as i128 {
-                    acc = acc.checked_mul(k).ok_or_else(|| out_of_range("numeric"))?;
-                }
-                if let Ok(small) = i64::try_from(acc) {
-                    return Ok(Value::Int(small));
-                }
-                DecimalValue::parse(&acc.to_string())
-                    .map(Value::Decimal)
-                    .ok_or_else(|| out_of_range("numeric"))
+            "string_to_table" => {
+                immutable::string_to_array(args, &ProductionControl::uncontrolled()).map(|value| {
+                    value
+                        .into_uncontrolled()
+                        .expect("ordinary string_to_table result")
+                })
             }
-            "bit_length" => {
-                let [value] = args else {
-                    return Err(SQLError::TypeMismatch("bit_length takes 1 arg".into()));
-                };
-                let octets = match value {
-                    Value::Null => return Ok(Value::Null),
-                    Value::Str(text) => text.len(),
-                    Value::FixedChar(text) => text.trim_end_matches(' ').len(),
-                    Value::Bytes(bytes) => bytes.len(),
-                    _ => {
-                        return Err(SQLError::TypeMismatch(
-                            "bit_length requires text or bytea".into(),
-                        ));
-                    }
-                };
-                Ok(Value::Int(octets as i64 * 8))
-            }
-            "to_bin" | "to_hex" | "to_oct" => Err(SQLError::Internal(format!(
-                "{name} reached runtime before its integer overload was bound"
-            ))),
-            "string_to_array" | "string_to_table" => {
-                if args.len() < 2 || args.len() > 3 {
-                    return Err(SQLError::TypeMismatch(
-                        "string_to_array takes 2-3 args".into(),
-                    ));
-                }
-                if matches!(args[0], Value::Null) {
-                    return Ok(Value::Null);
-                }
-                let s = value_to_string(&args[0]);
-                let null_marker = args.get(2).filter(|v| !matches!(v, Value::Null));
-                let mark = |part: &str| -> Value {
-                    if let Some(marker) = null_marker {
-                        if part == value_to_string(marker) {
-                            return Value::Null;
-                        }
-                    }
-                    Value::Str(part.to_string())
-                };
-                let items: Vec<Value> = match &args[1] {
-                    // NULL separator: split into individual characters.
-                    Value::Null => s.chars().map(|c| mark(&c.to_string())).collect(),
-                    sep => {
-                        let sep = value_to_string(sep);
-                        if s.is_empty() {
-                            Vec::new()
-                        } else if sep.is_empty() {
-                            vec![mark(&s)]
-                        } else {
-                            s.split(sep.as_str()).map(mark).collect()
-                        }
-                    }
-                };
-                ArrayValue::try_new(items)
-                    .map(Value::Array)
-                    .ok_or_else(|| SQLError::TypeMismatch("invalid string_to_array result".into()))
-            }
-            "quote_ident" => {
-                if matches!(args.first(), Some(Value::Null)) {
-                    return Ok(Value::Null);
-                }
-                Ok(Value::Str(quote_ident(&expect_str(args, 0)?)))
-            }
-            "quote_literal" => {
-                if matches!(args.first(), Some(Value::Null)) {
-                    return Ok(Value::Null);
-                }
-                Ok(Value::Str(quote_literal(&expect_str(args, 0)?)))
-            }
-            "quote_nullable" => match args.first() {
-                Some(Value::Null) | None => Ok(Value::Str("NULL".into())),
-                Some(other) => Ok(Value::Str(quote_literal(&value_to_string(other)))),
-            },
             "regexp_count" => {
                 if args.len() < 2 || args.len() > 4 {
                     return Err(SQLError::TypeMismatch("regexp_count takes 2-4 args".into()));
@@ -318,12 +231,6 @@ fn eval_postgres_function(name: &str, args: &[Value]) -> Result<Value> {
                 let re = compile_pg_regex(&pat, "", false)?;
                 Ok(Value::Bool(re.is_match(&s)))
             }
-            "num_nulls" => Ok(Value::Int(
-                args.iter().filter(|v| matches!(v, Value::Null)).count() as i64,
-            )),
-            "num_nonnulls" => Ok(Value::Int(
-                args.iter().filter(|v| !matches!(v, Value::Null)).count() as i64,
-            )),
             // The engine has one database and one logical user identity; schema
             // identifiers are intercepted above because they are session-scoped.
             "current_database" | "current_catalog" => Ok(Value::Str("uqa".into())),
@@ -387,37 +294,6 @@ fn eval_postgres_function(name: &str, args: &[Value]) -> Result<Value> {
             _ => unreachable!("function family membership was checked before dispatch"),
         }
     })()
-}
-
-fn eval_integer_base(dispatch: FunctionDispatch, args: &[Value]) -> Result<Value> {
-    let [argument] = args else {
-        return Err(SQLError::TypeMismatch(format!(
-            "{} takes 1 arg",
-            dispatch.label()
-        )));
-    };
-    if matches!(argument, Value::Null) {
-        return Ok(Value::Null);
-    }
-    let value = to_i64(argument)?;
-    Ok(Value::Str(match dispatch {
-        FunctionDispatch::ToBinInt4 => {
-            let value = i32::try_from(value).map_err(|_| out_of_range("integer"))?;
-            format!("{:b}", value as u32)
-        }
-        FunctionDispatch::ToBinInt8 => format!("{:b}", value as u64),
-        FunctionDispatch::ToHexInt4 => {
-            let value = i32::try_from(value).map_err(|_| out_of_range("integer"))?;
-            format!("{:x}", value as u32)
-        }
-        FunctionDispatch::ToHexInt8 => format!("{:x}", value as u64),
-        FunctionDispatch::ToOctInt4 => {
-            let value = i32::try_from(value).map_err(|_| out_of_range("integer"))?;
-            format!("{:o}", value as u32)
-        }
-        FunctionDispatch::ToOctInt8 => format!("{:o}", value as u64),
-        _ => unreachable!("integer-base dispatch was checked by the caller"),
-    }))
 }
 
 fn eval_any_all(args: &[Value], is_any: bool) -> Result<Value> {

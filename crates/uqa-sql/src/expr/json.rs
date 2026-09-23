@@ -14,9 +14,11 @@ use super::{hex_encode, out_of_range, value_to_string};
 
 mod path;
 mod production;
+#[cfg(test)]
+pub(super) use production::json_delete_with_control;
 pub(super) use production::{
     cast_json_value_with_control, evaluate, format_core_value_as_json_with_control,
-    format_value_as_json_with_control, json_concat_with_control, json_delete_with_control,
+    format_value_as_json_with_control, json_concat_with_control, json_delete_values_with_control,
     json_extract_operator_with_control, quote_with_control, utf8_lossy_with_control,
 };
 
@@ -325,30 +327,6 @@ pub(super) fn json_extract_operator(args: &[Value], as_text: bool, path: bool) -
     )?
     .into_uncontrolled()
     .expect("ordinary JSON extraction has no lease"))
-}
-
-pub(super) fn json_concat(args: &[Value]) -> Result<Option<Value>> {
-    Ok(
-        json_concat_with_control(args, &uqa_core::memory::ProductionControl::uncontrolled())?.map(
-            |value| {
-                value
-                    .into_uncontrolled()
-                    .expect("ordinary JSON concatenation has no lease")
-            },
-        ),
-    )
-}
-
-pub(super) fn json_delete(args: &[Value]) -> Result<Option<Value>> {
-    Ok(
-        json_delete_with_control(args, &uqa_core::memory::ProductionControl::uncontrolled())?.map(
-            |value| {
-                value
-                    .into_uncontrolled()
-                    .expect("ordinary JSON deletion has no lease")
-            },
-        ),
-    )
 }
 
 fn json_array_index(len: usize, key: &str) -> Option<usize> {

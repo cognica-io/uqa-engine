@@ -6,15 +6,16 @@
 
 //! SQL comparison, three-valued logic, and numeric arithmetic.
 
-use super::{
-    eval, json_delete, time, to_decimal, BinaryOp, EvalContext, Expr, Result, SQLError, SQLParam,
-    Value,
-};
+use super::{eval, time, BinaryOp, EvalContext, Expr, Result, SQLError, SQLParam, Value};
+
+use uqa_core::memory::{Produced, ProductionControl};
 
 mod comparison;
+#[cfg(test)]
+mod production_tests;
 
 pub(super) use comparison::{
-    compare, compare_nullable, eval_comparison_op, values_equal, values_equal_nullable,
+    compare_nullable, eval_comparison_op, values_equal, values_equal_nullable,
 };
 pub use comparison::{
     compare_nullable_with_control, compare_with_control, eval_comparison_truth,
@@ -85,17 +86,35 @@ pub fn integer_width_for_literal(value: i64) -> IntegerWidth {
 
 #[must_use]
 pub fn integer_width_for_type(ty: &str) -> Option<IntegerWidth> {
-    let ty = ty.trim().to_ascii_lowercase();
-    match ty.as_str() {
-        "smallint" | "int2" | "pg_catalog.int2" => Some(IntegerWidth::SmallInt),
-        "integer" | "int" | "int4" | "serial" | "serial4" | "pg_catalog.int4" => {
-            Some(IntegerWidth::Integer)
-        }
-        "bigint" | "int8" | "bigserial" | "serial8" | "pg_catalog.int8" => {
-            Some(IntegerWidth::BigInt)
-        }
-        _ => None,
-    }
+    let ty = ty.trim();
+    [
+        (
+            IntegerWidth::SmallInt,
+            &["smallint", "int2", "pg_catalog.int2"][..],
+        ),
+        (
+            IntegerWidth::Integer,
+            &[
+                "integer",
+                "int",
+                "int4",
+                "serial",
+                "serial4",
+                "pg_catalog.int4",
+            ][..],
+        ),
+        (
+            IntegerWidth::BigInt,
+            &["bigint", "int8", "bigserial", "serial8", "pg_catalog.int8"][..],
+        ),
+    ]
+    .into_iter()
+    .find_map(|(width, names)| {
+        names
+            .iter()
+            .any(|name| ty.eq_ignore_ascii_case(name))
+            .then_some(width)
+    })
 }
 
 fn integer_expr_width(expr: &Expr) -> Option<IntegerWidth> {
@@ -120,17 +139,38 @@ fn integer_binary_width(lhs: &Expr, rhs: &Expr) -> Option<IntegerWidth> {
 /// ahead of time but must retain the evaluator's exact comparison, numeric
 /// promotion, NULL, overflow, and division-by-zero semantics.
 pub fn eval_binary_values(op: BinaryOp, l: &Value, r: &Value) -> Result<Value> {
+    eval_binary_values_with_control(op, l, r, &ProductionControl::uncontrolled()).map(|value| {
+        value
+            .into_uncontrolled()
+            .expect("ordinary binary result has no reservation")
+    })
+}
+
+/// Evaluate the existing binary operator while owning every value producer and comparison workspace under one allowance.
+pub fn eval_binary_values_with_control(
+    op: BinaryOp,
+    l: &Value,
+    r: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    control.check()?;
     match op {
         BinaryOp::Equal
         | BinaryOp::NotEqual
         | BinaryOp::Less
         | BinaryOp::LessEqual
         | BinaryOp::Greater
-        | BinaryOp::GreaterEqual => eval_comparison_op(op, l, r),
-        BinaryOp::Add => arith(l, r, op),
-        BinaryOp::Subtract => arith(l, r, op),
-        BinaryOp::Multiply => arith(l, r, op),
-        BinaryOp::Divide => arith(l, r, op),
+        | BinaryOp::GreaterEqual => {
+            let value = eval_comparison_truth_with_control(op, l, r, control)?
+                .map(Value::Bool)
+                .unwrap_or(Value::Null);
+            control
+                .finish(value, control.empty_reservation())
+                .map_err(Into::into)
+        }
+        BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
+            arith(l, r, op, control)
+        }
     }
 }
 
@@ -143,12 +183,34 @@ pub fn eval_binary_values_with_integer_width(
     r: &Value,
     integer_width: Option<IntegerWidth>,
 ) -> Result<Value> {
-    let value = eval_binary_values(op, l, r)?;
+    eval_binary_values_with_integer_width_with_control(
+        op,
+        l,
+        r,
+        integer_width,
+        &ProductionControl::uncontrolled(),
+    )
+    .map(|value| {
+        value
+            .into_uncontrolled()
+            .expect("ordinary width-checked result has no reservation")
+    })
+}
+
+/// Preserve the selected integer width without separating an allocated result from its owner on errors.
+pub fn eval_binary_values_with_integer_width_with_control(
+    op: BinaryOp,
+    l: &Value,
+    r: &Value,
+    integer_width: Option<IntegerWidth>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let result = eval_binary_values_with_control(op, l, r, control)?;
     let Some(integer_width) = integer_width else {
-        return Ok(value);
+        return Ok(result);
     };
-    let Value::Int(value) = value else {
-        return Ok(value);
+    let Value::Int(value) = *result else {
+        return Ok(result);
     };
     let in_range = match integer_width {
         IntegerWidth::SmallInt => i16::try_from(value).is_ok(),
@@ -156,7 +218,7 @@ pub fn eval_binary_values_with_integer_width(
         IntegerWidth::BigInt => true,
     };
     if in_range {
-        Ok(Value::Int(value))
+        Ok(result)
     } else {
         Err(out_of_range(match integer_width {
             IntegerWidth::SmallInt => "smallint",
@@ -278,10 +340,18 @@ pub(crate) fn out_of_range(type_name: &str) -> SQLError {
     }
 }
 
-pub(super) fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
+fn arith(
+    a: &Value,
+    b: &Value,
+    op: BinaryOp,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    control.check()?;
     // SQL three-valued logic: NULL `op` anything == NULL.
     if matches!(a, Value::Null) || matches!(b, Value::Null) {
-        return Ok(Value::Null);
+        return control
+            .finish(Value::Null, control.empty_reservation())
+            .map_err(Into::into);
     }
     // Integer x integer is the overwhelmingly common analytical path.
     // Resolve it before probing unrelated temporal / decimal / floating
@@ -306,17 +376,23 @@ pub(super) fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
                 )))
             }
         };
-        return out.map(Value::Int).ok_or_else(|| out_of_range("bigint"));
+        let value = out.map(Value::Int).ok_or_else(|| out_of_range("bigint"))?;
+        return control
+            .finish(value, control.empty_reservation())
+            .map_err(Into::into);
     }
     if matches!(op, BinaryOp::Subtract)
         && matches!(a, Value::JsonB(_) | Value::Map(_) | Value::List(_))
     {
-        if let Some(value) = json_delete(&[a.clone(), b.clone()])? {
+        if let Some(value) = super::json::json_delete_values_with_control(a, b, control)? {
             return Ok(value);
         }
     }
     if matches!(a, Value::Temporal(_)) || matches!(b, Value::Temporal(_)) {
-        return time::temporal_arith(a, b, op);
+        let value = time::temporal_arith_with_control(a, b, op, control)?;
+        return control
+            .finish(value, control.empty_reservation())
+            .map_err(Into::into);
     }
     let has_decimal = matches!(a, Value::Decimal(_)) || matches!(b, Value::Decimal(_));
     let has_float = matches!(a, Value::Float(_)) || matches!(b, Value::Float(_));
@@ -324,23 +400,37 @@ pub(super) fn arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
     // float/numeric arithmetic. Exact decimal arithmetic only applies
     // when no float operand is involved.
     if has_decimal && !has_float {
-        return decimal_arith(a, b, op);
+        return decimal_arith(a, b, op, control);
     }
-    super::eval_float_arithmetic(op, a, b, super::FloatWidth::DoublePrecision)
+    let value = super::eval_float_arithmetic_with_control(
+        op,
+        a,
+        b,
+        super::FloatWidth::DoublePrecision,
+        control,
+    )?;
+    control
+        .finish(value, control.empty_reservation())
+        .map_err(Into::into)
 }
 
-pub(super) fn decimal_arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
-    let left = to_decimal(a)?;
-    let right = to_decimal(b)?;
+fn decimal_arith(
+    a: &Value,
+    b: &Value,
+    op: BinaryOp,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let left = super::conversion::to_decimal_with_control(a, control)?;
+    let right = super::conversion::to_decimal_with_control(b, control)?;
     let value = match op {
-        BinaryOp::Add => left.checked_add(&right),
-        BinaryOp::Subtract => left.checked_sub(&right),
-        BinaryOp::Multiply => left.checked_mul(&right),
+        BinaryOp::Add => left.checked_add_with_control(&right, control)?,
+        BinaryOp::Subtract => left.checked_sub_with_control(&right, control)?,
+        BinaryOp::Multiply => left.checked_mul_with_control(&right, control)?,
         BinaryOp::Divide => {
             if right.is_zero() {
                 return Err(division_by_zero());
             }
-            left.checked_div_postgres(&right)
+            left.checked_div_postgres_with_control(&right, control)?
         }
         _ => {
             return Err(SQLError::Internal(format!(
@@ -349,5 +439,8 @@ pub(super) fn decimal_arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value>
         }
     }
     .ok_or_else(|| out_of_range("numeric"))?;
-    Ok(Value::Decimal(value))
+    let (value, memory) = value.into_parts();
+    control
+        .finish(Value::Decimal(value), memory)
+        .map_err(Into::into)
 }

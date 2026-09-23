@@ -6,9 +6,7 @@
 
 //! Numeric operator signatures are independent of ordinary function overloads.
 
-use crate::ast::{
-    ColumnType, FunctionBinding, FunctionResolutionError, NumericOperator, OperatorResolutionError,
-};
+use crate::ast::{ColumnType, FunctionBinding, NumericOperator};
 use crate::{schema::ScalarTypeSchema, FunctionTypeResolver, SQLError, SQLParam, ScalarExpr};
 
 use super::{resolution, UnaryOperatorCatalogEntry};
@@ -29,43 +27,24 @@ pub(in crate::type_resolution) fn bind_call(
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) {
-    if !binding.argument_types.is_empty() || binding.resolution_error.is_some() {
-        return;
-    }
-    let types = arguments
-        .iter()
-        .map(|argument| crate::common_context_expression_type(argument, schema, params, resolver))
-        .collect::<Result<Vec<_>, _>>();
-    let Ok(types) = types else { return };
-    // A schema-free pass cannot choose a signature for a still-unresolved column, routine or subquery. Parser unknown constants can be resolved.
-    if arguments.iter().zip(&types).any(|(argument, ty)| {
-        ty.is_none()
-            && !matches!(
-                argument,
-                ScalarExpr::Literal(uqa_core::Value::Str(_) | uqa_core::Value::Null)
-                    | ScalarExpr::Param(_)
-            )
-    }) {
-        return;
-    }
-    match numeric_operator_types(operator, &types) {
-        Ok(selected) => {
-            binding.argument_types = selected
-                .arguments
-                .iter()
-                .map(ColumnType::sql_name)
-                .collect();
-        }
-        Err(error) => {
-            binding.resolution_error = Some(FunctionResolutionError::Operator(Box::new(
-                OperatorResolutionError {
-                    sqlstate: error.sqlstate().unwrap_or("XX000").into(),
-                    message: error.to_string(),
-                },
-            )));
-        }
-    }
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    let mut infer = |argument: &ScalarExpr| {
+        crate::common_context_expression_type(argument, schema, params, resolver)?
+            .map(|ty| {
+                control
+                    .finish(ty, control.empty_reservation())
+                    .map_err(Into::into)
+            })
+            .transpose()
+    };
+    // This legacy best-effort API leaves inference failures deferred, including errors returned by a custom resolver. The controlled entry propagates resource failures to its caller.
+    let _ = bind_call_in_place_with_control(
+        operator, binding, arguments, &mut None, &mut infer, &control,
+    );
 }
+
+mod binding;
+pub(in crate::type_resolution) use binding::bind_call_in_place_with_control;
 
 mod production;
 pub use production::numeric_operator_types_with_control;

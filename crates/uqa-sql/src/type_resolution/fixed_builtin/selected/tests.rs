@@ -218,3 +218,93 @@ fn selected_input_rejects_foreign_allowance_and_mode_before_no_match_return() {
     assert!(result.is_err());
     assert_eq!(budget.used(), 0);
 }
+
+struct SharedRoot {
+    call: SelectedCall,
+    sibling: String,
+    memory: Option<MemoryReservation>,
+}
+
+#[test]
+fn selected_in_place_construction_keeps_siblings_charged_through_partial_failure() {
+    for available in [0, 32, 128, 512, 1024, 8192] {
+        let budget = MemoryBudget::new(1 << 20);
+        let token = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &token, &token);
+        let call = input(&source(), &budget);
+        let sibling = control.copy_text("sibling outside selected call").unwrap();
+        let (call, memory) = call.into_parts();
+        let (sibling, extra) = sibling.into_parts();
+        let mut root = SharedRoot {
+            call,
+            sibling,
+            memory: control.combine(memory, extra),
+        };
+        let initial = budget.used();
+        let other = budget
+            .reserve(budget.limit() - initial - available)
+            .unwrap();
+        let result = bind_call_in_place_with_control(
+            &mut root.call,
+            &mut root.memory,
+            &[None],
+            &[Some(ColumnType::Text)],
+            &[None],
+            &control,
+        );
+        match result {
+            Ok(matched) => {
+                assert!(matched);
+                assert_eq!(root.call.arguments.len(), 2);
+            }
+            Err(error) => assert_eq!(error.sqlstate(), Some("53200")),
+        }
+        assert_eq!(root.sibling, "sibling outside selected call");
+        let retained = root.memory.as_ref().unwrap().bytes();
+        assert!(retained >= initial);
+        assert_eq!(budget.used(), other.bytes() + retained);
+        drop(root);
+        assert_eq!(budget.used(), other.bytes());
+        drop(other);
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
+fn selected_in_place_cancellation_leaves_the_shared_lease_with_its_root() {
+    for cancel_original in [false, true] {
+        let budget = MemoryBudget::new(1 << 20);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        let call = input(&source(), &budget);
+        let sibling = control.copy_text("sibling outside selected call").unwrap();
+        let (call, memory) = call.into_parts();
+        let (sibling, extra) = sibling.into_parts();
+        let mut root = SharedRoot {
+            call,
+            sibling,
+            memory: control.combine(memory, extra),
+        };
+        let initial = budget.used();
+        if cancel_original {
+            original.cancel();
+        } else {
+            invoking.cancel();
+        }
+        let error = bind_call_in_place_with_control(
+            &mut root.call,
+            &mut root.memory,
+            &[None],
+            &[Some(ColumnType::Text)],
+            &[None],
+            &control,
+        )
+        .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("57014"));
+        assert_eq!(budget.used(), initial);
+        assert_eq!(root.sibling, "sibling outside selected call");
+        drop(root);
+        assert_eq!(budget.used(), 0);
+    }
+}
