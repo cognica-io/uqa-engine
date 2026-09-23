@@ -58,6 +58,8 @@ mod scalar_range;
 mod scalar_temporal;
 mod session_settings;
 
+#[cfg(test)]
+use binary::eval_comparison_op;
 pub use binary::{
     compare_nullable_with_control, compare_with_control, eval_binary_values,
     eval_binary_values_with_control, eval_binary_values_with_integer_width,
@@ -66,7 +68,6 @@ pub use binary::{
     values_equal_nullable_with_control, values_equal_with_control, IntegerWidth,
 };
 pub(crate) use binary::{division_by_zero, out_of_range};
-use binary::{eval_comparison_op, values_equal};
 pub use casting::{
     array_dimensions, cast_value, cast_value_from, cast_value_from_with_control, negate_value,
     negate_value_with_control, parse_pg_array_literal, parse_pg_array_literal_with_control,
@@ -108,13 +109,14 @@ pub use call_arguments::{
 };
 pub use call_dispatch::{eval_builtin_function_call, eval_function_call};
 pub use context::{
-    cast_value_with_type_resolution, coercion_type_name, format_regtype_value, EngineHook,
+    cast_value_with_type_resolution, cast_value_with_type_resolution_with_control,
+    coercion_type_name, format_regtype_value, format_regtype_value_with_control, EngineHook,
     EvalContext, RowLookup,
 };
 pub use diagnostics::{unknown_function_error, value_type_name};
 pub use evaluator::eval;
 mod numeric_operator;
-use evaluator::eval_between;
+use evaluator::eval_between_with_control;
 pub use numeric_operator::{eval_numeric_operator, eval_numeric_operator_with_control};
 
 #[cfg(test)]

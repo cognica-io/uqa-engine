@@ -14,14 +14,12 @@ mod comparison;
 #[cfg(test)]
 mod production_tests;
 
-pub(super) use comparison::{
-    compare_nullable, eval_comparison_op, values_equal, values_equal_nullable,
-};
 pub use comparison::{
     compare_nullable_with_control, compare_with_control, eval_comparison_truth,
     eval_comparison_truth_with_control, values_equal_nullable_with_control,
     values_equal_with_control,
 };
+pub(super) use comparison::{eval_comparison_op, values_equal, values_equal_nullable};
 
 pub(super) fn eval_binary(
     op: BinaryOp,

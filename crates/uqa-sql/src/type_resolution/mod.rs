@@ -209,6 +209,26 @@ pub fn scalar_type(
     scalar_type_inner(expression, schema, params, None)
 }
 
+/// Infer a scalar type from borrowed schema and parameter metadata while retaining every constructed type and temporary buffer under the supplied allowance.
+pub fn scalar_type_with_control(
+    expression: &ScalarExpr,
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+    scalar_type_inner_with_control(expression, schema, params, None, control)
+}
+
+/// Preserve unknown-literal and domain rules when selecting an operator's common type without a catalog callback.
+pub fn common_context_type_with_control(
+    expression: &ScalarExpr,
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+    common::common_context_expression_type_with_control(expression, schema, params, None, control)
+}
+
 pub fn scalar_type_with_resolver(
     expression: &ScalarExpr,
     schema: &dyn ScalarTypeSchema,

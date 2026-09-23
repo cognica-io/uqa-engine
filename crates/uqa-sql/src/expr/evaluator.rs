@@ -11,7 +11,9 @@ use uqa_core::{ArrayValue, Value};
 use crate::ast::Expr;
 use crate::error::{Result, SQLError};
 
-use super::binary::{compare_nullable, eval_binary, truthy, values_equal, values_equal_nullable};
+use super::binary::{
+    compare_nullable_with_control, eval_binary, truthy, values_equal, values_equal_nullable,
+};
 use super::builtin::eval_bound_builtin_function_call;
 use super::call_arguments::evaluate_call_args;
 use super::call_dispatch::eval_function_call;
@@ -267,8 +269,22 @@ fn explicit_expr_type(expr: &Expr) -> Option<&str> {
 /// `expr BETWEEN low AND high` under three-valued logic: a definite
 /// FALSE on either bound wins over a NULL on the other.
 pub(super) fn eval_between(v: &Value, lo: &Value, hi: &Value) -> Result<Value> {
-    let ge = compare_nullable(v, lo)?.map(|ord| ord.is_ge());
-    let le = compare_nullable(v, hi)?.map(|ord| ord.is_le());
+    eval_between_with_control(
+        v,
+        lo,
+        hi,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+pub(super) fn eval_between_with_control(
+    v: &Value,
+    lo: &Value,
+    hi: &Value,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Value> {
+    let ge = compare_nullable_with_control(v, lo, control)?.map(|ord| ord.is_ge());
+    let le = compare_nullable_with_control(v, hi, control)?.map(|ord| ord.is_le());
     Ok(match (ge, le) {
         (Some(false), _) | (_, Some(false)) => Value::Bool(false),
         (Some(true), Some(true)) => Value::Bool(true),

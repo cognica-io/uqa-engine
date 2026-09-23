@@ -112,10 +112,6 @@ pub fn compare_with_control(
     Ok(compare_nullable_with_control(a, b, control)?.unwrap_or(Ordering::Equal))
 }
 
-pub(in crate::expr) fn compare_nullable(a: &Value, b: &Value) -> Result<Option<Ordering>> {
-    compare_nullable_with_control(a, b, &ProductionControl::uncontrolled())
-}
-
 pub fn compare_nullable_with_control(
     a: &Value,
     b: &Value,

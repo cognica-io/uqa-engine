@@ -7,12 +7,13 @@
 //! Extended `PostgreSQL` scalar and lowered operator built-ins.
 
 use super::{
-    compile_pg_regex, eval_between, eval_comparison_op, out_of_range, similar_to_regex, to_i64,
-    value_to_string, values_equal, ArrayValue, BinaryOp, Result, SQLError, Value,
+    compile_pg_regex, out_of_range, similar_to_regex, to_i64, value_to_string, ArrayValue, Result,
+    SQLError, Value,
 };
 use crate::ast::FunctionDispatch;
 
 mod arrays;
+mod comparison;
 mod immutable;
 pub(super) use immutable::{
     eval_postgres_immutable_with_control, eval_postgres_integer_base_with_control,
@@ -21,7 +22,7 @@ mod subscripts;
 pub(super) use subscripts::eval_postgres_subscript_with_control;
 mod text;
 pub(super) use arrays::eval_postgres_arrays_with_control;
-use uqa_core::memory::ProductionControl;
+use uqa_core::memory::{Produced, ProductionControl};
 
 use text::{
     invalid_regex_parameter, nonnegative_regex_parameter, positive_regex_parameter, regex_tail,
@@ -70,31 +71,32 @@ pub(super) fn eval_dispatched_postgres_function(
     dispatch: FunctionDispatch,
     args: &[Value],
 ) -> Option<Result<Value>> {
-    if let Some(result) =
-        eval_postgres_subscript_with_control(dispatch, args, &ProductionControl::uncontrolled())
-    {
-        return Some(result.map(|value| {
+    eval_dispatched_postgres_function_with_control(
+        dispatch,
+        args,
+        &ProductionControl::uncontrolled(),
+    )
+    .map(|result| {
+        result.map(|value| {
             value
                 .into_uncontrolled()
-                .expect("ordinary subscript result")
-        }));
-    }
-    if let Some(result) =
-        eval_postgres_integer_base_with_control(dispatch, args, &ProductionControl::uncontrolled())
-    {
-        return Some(result.map(|value| {
-            value
-                .into_uncontrolled()
-                .expect("ordinary integer base result")
-        }));
-    }
-    Some(match dispatch {
-        FunctionDispatch::AnyOperator => eval_any_all(args, true),
-        FunctionDispatch::AllOperator => eval_any_all(args, false),
-        FunctionDispatch::IsDistinct => eval_is_distinct(args),
-        FunctionDispatch::BetweenSymmetric => eval_between_symmetric(args),
-        _ => return None,
+                .expect("ordinary dispatched PostgreSQL result")
+        })
     })
+}
+
+pub(super) fn eval_dispatched_postgres_function_with_control(
+    dispatch: FunctionDispatch,
+    args: &[Value],
+    control: &ProductionControl<'_>,
+) -> Option<Result<Produced<Value>>> {
+    if let Some(result) = eval_postgres_subscript_with_control(dispatch, args, control) {
+        return Some(result);
+    }
+    if let Some(result) = eval_postgres_integer_base_with_control(dispatch, args, control) {
+        return Some(result);
+    }
+    comparison::evaluate(dispatch, args, control)
 }
 
 #[expect(
@@ -296,75 +298,6 @@ fn eval_postgres_function(name: &str, args: &[Value]) -> Result<Value> {
     })()
 }
 
-fn eval_any_all(args: &[Value], is_any: bool) -> Result<Value> {
-    if args.len() != 3 {
-        return Err(SQLError::TypeMismatch("ANY/ALL takes 3 args".into()));
-    }
-    let op = match value_to_string(&args[2]).as_str() {
-        "=" => BinaryOp::Equal,
-        "<>" | "!=" => BinaryOp::NotEqual,
-        "<" => BinaryOp::Less,
-        "<=" => BinaryOp::LessEqual,
-        ">" => BinaryOp::Greater,
-        ">=" => BinaryOp::GreaterEqual,
-        other => {
-            return Err(SQLError::Unsupported(format!(
-                "operator `{other}` with ANY/ALL"
-            )));
-        }
-    };
-    let Value::Array(array) = &args[1] else {
-        if matches!(args[1], Value::Null) {
-            return Ok(Value::Null);
-        }
-        return Err(SQLError::TypeMismatch("ANY/ALL requires an array".into()));
-    };
-    let mut saw_null = false;
-    let mut items = Vec::new();
-    flatten_array_elements(array.elements(), &mut items);
-    for item in items {
-        match eval_comparison_op(op, &args[0], item)? {
-            Value::Bool(true) if is_any => return Ok(Value::Bool(true)),
-            Value::Bool(false) if !is_any => return Ok(Value::Bool(false)),
-            Value::Null => saw_null = true,
-            _ => {}
-        }
-    }
-    if saw_null {
-        return Ok(Value::Null);
-    }
-    Ok(Value::Bool(!is_any))
-}
-
-fn eval_is_distinct(args: &[Value]) -> Result<Value> {
-    if args.len() != 2 {
-        return Err(SQLError::TypeMismatch(
-            "IS DISTINCT FROM takes 2 args".into(),
-        ));
-    }
-    let distinct = match (&args[0], &args[1]) {
-        (Value::Null, Value::Null) => false,
-        (Value::Null, _) | (_, Value::Null) => true,
-        (left, right) => !values_equal(left, right),
-    };
-    Ok(Value::Bool(distinct))
-}
-
-fn eval_between_symmetric(args: &[Value]) -> Result<Value> {
-    if args.len() != 3 {
-        return Err(SQLError::TypeMismatch(
-            "BETWEEN SYMMETRIC takes 3 args".into(),
-        ));
-    }
-    let forward = eval_between(&args[0], &args[1], &args[2])?;
-    let backward = eval_between(&args[0], &args[2], &args[1])?;
-    Ok(match (&forward, &backward) {
-        (Value::Bool(true), _) | (_, Value::Bool(true)) => Value::Bool(true),
-        (Value::Null, _) | (_, Value::Null) => Value::Null,
-        _ => Value::Bool(false),
-    })
-}
-
 fn rebuild_array_with_bounds(elements: Vec<Value>, lower_bounds: Vec<i32>) -> Result<Value> {
     let rebuilt = if elements.is_empty() {
         ArrayValue::try_new(elements)
@@ -374,14 +307,4 @@ fn rebuild_array_with_bounds(elements: Vec<Value>, lower_bounds: Vec<i32>) -> Re
     rebuilt
         .map(Value::Array)
         .ok_or_else(|| SQLError::TypeMismatch("array dimensions do not match".into()))
-}
-
-fn flatten_array_elements<'a>(elements: &'a [Value], output: &mut Vec<&'a Value>) {
-    for element in elements {
-        if let Value::List(nested) = element {
-            flatten_array_elements(nested, output);
-        } else {
-            output.push(element);
-        }
-    }
 }

@@ -8,7 +8,10 @@
 
 use std::sync::Arc;
 use uqa_core::{
-    memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryError, MemoryReservation},
+    memory::{
+        Budgeted, BudgetedVec, MemoryBudget, MemoryError, MemoryReservation, Produced,
+        ProductionControl,
+    },
     CancellationToken, QueryCancelled, Value, ValueRetentionError,
 };
 
@@ -101,6 +104,39 @@ impl ColumnDef {
 }
 
 impl ColumnType {
+    /// Retain a type returned by an external catalog resolver. Its constructor belongs to that resolver; SQL retains the exposed payload before deriving names or traversing the type.
+    pub(crate) fn retain_external_with_control(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Self>> {
+        struct Handoff {
+            value: ColumnType,
+            memory: Option<MemoryReservation>,
+        }
+        let mut output = Handoff {
+            value: self,
+            memory: control.empty_reservation(),
+        };
+        control.check()?;
+        if let Some(budget) = control.budget() {
+            let mut walker = Walker::with_control(budget, *control);
+            let result = walker
+                .visit(Node::Type(&output.value))
+                .and_then(|()| walker.drain());
+            let Walker {
+                memory, pending, ..
+            } = walker;
+            drop(pending);
+            output
+                .memory
+                .as_mut()
+                .expect("controlled catalog handoff")
+                .absorb(memory);
+            result?;
+        }
+        Ok(control.finish(output.value, output.memory)?)
+    }
+
     /// Admit nested type names and boxed base types, excluding this type's inline layout.
     pub fn reserve_retained_payload(
         &self,
@@ -132,15 +168,22 @@ enum Node<'a> {
 struct Walker<'a> {
     memory: MemoryReservation,
     pending: BudgetedVec<Node<'a>>,
-    cancellation: &'a CancellationToken,
+    control: ProductionControl<'a>,
 }
 
 impl<'a> Walker<'a> {
-    fn new(budget: &MemoryBudget, cancellation: &'a CancellationToken) -> Self {
+    fn new(budget: &'a MemoryBudget, cancellation: &'a CancellationToken) -> Self {
+        Self::with_control(
+            budget,
+            ProductionControl::new(budget, cancellation, cancellation),
+        )
+    }
+
+    fn with_control(budget: &'a MemoryBudget, control: ProductionControl<'a>) -> Self {
         Self {
             memory: budget.empty_reservation(),
             pending: BudgetedVec::new(budget),
-            cancellation,
+            control,
         }
     }
 
@@ -150,15 +193,20 @@ impl<'a> Walker<'a> {
     }
 
     fn finish(mut self) -> Result<MemoryReservation> {
-        self.cancellation.check()?;
-        while let Some(node) = self.pending.pop() {
-            self.visit(node)?;
-        }
+        self.drain()?;
         Ok(self.memory)
     }
 
+    fn drain(&mut self) -> Result<()> {
+        self.control.check_cancellation()?;
+        while let Some(node) = self.pending.pop() {
+            self.visit(node)?;
+        }
+        Ok(())
+    }
+
     fn visit(&mut self, node: Node<'a>) -> Result<()> {
-        self.cancellation.check()?;
+        self.control.check_cancellation()?;
         match node {
             Node::Column(column) => self.column(column),
             Node::Type(ty) => self.ty(ty),
@@ -168,13 +216,13 @@ impl<'a> Walker<'a> {
     }
 
     fn node(&mut self, node: Node<'a>) -> Result<()> {
-        self.cancellation.check()?;
+        self.control.check_cancellation()?;
         self.pending.push(node)?;
         Ok(())
     }
 
     fn charge(&mut self, bytes: usize) -> Result<()> {
-        self.cancellation.check()?;
+        self.control.check_cancellation()?;
         self.memory.grow(bytes)?;
         Ok(())
     }
@@ -220,7 +268,9 @@ impl<'a> Walker<'a> {
     }
 
     fn value(&mut self, value: &Value) -> Result<()> {
-        let memory = value.reserve_retained_payload(self.memory.budget(), self.cancellation)?;
+        let memory = value.reserve_retained_payload_with_check(self.memory.budget(), || {
+            self.control.check_cancellation()
+        })?;
         self.memory.absorb(memory);
         Ok(())
     }
