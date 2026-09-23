@@ -44,7 +44,7 @@ Catalog identities, destination/address reservations, retained snapshots and ato
 
 ## Merge closure ledger
 
-Two of the ten fixed closure rows retain their completed evidence without additional validation. Receipt lifecycle changes require scoped revalidation of the previously completed publication/recovery and existing-file/backup rows; six other rows remain open. The checklist has no new rows.
+Four of the ten fixed rows have previously completed implementation and source-scoped acceptance. Two of those four retain current closing evidence; the other two, publication/recovery and existing-file/backup, require only the checks affected by the subsequent receipt lifecycle and format changes. Six rows remain unfinished. Report these separately as four previously accepted rows, including two awaiting affected revalidation, and six unfinished rows. The final-merge checklist marks only current closing evidence; its two checked boxes must not be reported as if the earlier four completions had disappeared. The checklist has no new rows.
 
 This ledger is the current remaining-work list. The implementation-unit and acceptance tables below define ownership and required behavior; their broad headings are not counts of unfinished tasks. Close a row only with its stated evidence, record the implementation revision separately from final integration evidence, and keep closed rows closed unless an affected change or a reproduced failure invalidates that evidence. Findings must identify the existing acceptance requirement they violate; unrelated bugs belong to the separate issues above. Reuse valid unchanged owner evidence rather than restarting every scoped test suite after each commit.
 
