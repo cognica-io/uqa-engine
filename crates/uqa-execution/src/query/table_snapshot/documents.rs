@@ -21,7 +21,7 @@ use super::layout::RowLayout;
 use crate::query::document_changes::DocumentChanges;
 
 mod identifiers;
-mod projection;
+pub(super) mod projection;
 
 struct State {
     source: Arc<dyn DocumentStore>,

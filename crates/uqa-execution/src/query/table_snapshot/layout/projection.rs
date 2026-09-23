@@ -103,6 +103,23 @@ impl RowLayout {
         &'a self,
         fields: &'a [&str],
     ) -> StorageBackendResult<Option<RowProjection<'a>>> {
+        self.project_fields(fields, false)
+    }
+
+    pub(super) fn generated_inputs<'a>(
+        &'a self,
+        fields: &'a [&str],
+    ) -> StorageBackendResult<RowProjection<'a>> {
+        self.project_fields(fields, true).map(|projection| {
+            projection.expect("stored generated inputs do not evaluate another expression")
+        })
+    }
+
+    fn project_fields<'a>(
+        &'a self,
+        fields: &'a [&str],
+        stored_generated: bool,
+    ) -> StorageBackendResult<Option<RowProjection<'a>>> {
         self.control.check()?;
         let mut sources = BudgetedVec::new(self.control.memory());
         let mut slots = BudgetedVec::new(self.control.memory());
@@ -112,7 +129,7 @@ impl RowLayout {
             let column = self.columns.iter().find(|c| c.name == *field);
             let source = if let Some(column) = column {
                 // Generated production retains its separate expression-evaluation boundary.
-                if column.generated.is_some() {
+                if column.generated.is_some() && !stored_generated {
                     return Ok(None);
                 }
                 match self
@@ -122,7 +139,11 @@ impl RowLayout {
                     Some(source) => Some(source),
                     None => {
                         slots.push(Slot::Constant(
-                            column.missing_value.as_ref().unwrap_or(&Value::Null),
+                            column
+                                .missing_value
+                                .as_ref()
+                                .filter(|_| column.generated.is_none())
+                                .unwrap_or(&Value::Null),
                         ))?;
                         continue;
                     }
@@ -142,7 +163,9 @@ impl RowLayout {
                 } else {
                     None
                 };
-                let default = column.and_then(|column| column.missing_value.as_ref());
+                let default = column
+                    .filter(|column| column.generated.is_none())
+                    .and_then(|column| column.missing_value.as_ref());
                 if alternate.is_some() || default.is_some() {
                     slots.push(Slot::Missing {
                         source: index,
@@ -199,23 +222,7 @@ impl RowLayout {
             }
         }
         if column.generated.is_some() {
-            return source
-                .get_stored(id)?
-                .map(|row| {
-                    (|| {
-                        let mut row = self.complete_defaults(self.remap_base(row)?)?;
-                        crate::query::generated::materialize_missing_generated_column(
-                            &self.columns,
-                            row.fields_mut(),
-                            field,
-                        )?;
-                        self.control.cancellation().check()?;
-                        Ok(row.fields_mut().remove(field))
-                    })()
-                    .map_err(Self::error)
-                })
-                .transpose()
-                .map(Option::flatten);
+            return self.generated_field(source, id, column);
         }
         let present = source.contains_doc_id(id)?;
         self.control.check()?;

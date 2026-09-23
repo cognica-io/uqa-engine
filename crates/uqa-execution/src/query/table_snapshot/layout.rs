@@ -14,6 +14,7 @@ use uqa_core::{
 use uqa_sql::{ast::ColumnDef, SQLError};
 use uqa_storage::{read_control::StorageReadControl, StorageBackendResult, StoredDocument};
 
+mod generated;
 mod projection;
 pub(super) use projection::RowProjection;
 

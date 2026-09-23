@@ -7,7 +7,7 @@
 //! Physical/logical row conversion for `PostgreSQL` generated columns.
 
 use uqa_sql::ast::{ColumnDef, GeneratedColumnKind};
-use uqa_sql::{ResultRow, SQLError};
+use uqa_sql::{expr::RowLookup, SQLError};
 use uqa_storage::document_store::Document;
 
 pub fn materialize_virtual_generated_columns(
@@ -42,14 +42,6 @@ pub fn materialize_missing_generated_columns(
     document: &mut Document,
 ) -> Result<(), SQLError> {
     materialize_matching_missing_generated_columns(columns, document, |_| true)
-}
-
-pub(crate) fn materialize_missing_generated_column(
-    columns: &[ColumnDef],
-    document: &mut Document,
-    field: &str,
-) -> Result<(), SQLError> {
-    materialize_matching_missing_generated_columns(columns, document, |name| name == field)
 }
 
 fn materialize_matching_missing_generated_columns(
@@ -119,6 +111,14 @@ fn evaluate_generated_column(
     generated: &uqa_sql::ast::GeneratedColumn,
     document: &Document,
 ) -> Result<uqa_core::Value, SQLError> {
+    let expression = prepare_generated_column(schema, generated)?;
+    evaluate_generated_expression(&expression, document)
+}
+
+pub(crate) fn prepare_generated_column(
+    schema: &crate::RowSchema,
+    generated: &uqa_sql::ast::GeneratedColumn,
+) -> Result<crate::ScalarExpr, SQLError> {
     let mut expression = uqa_sql::plan::ExpressionPlan::lower((*generated.expression).clone());
     if !expression.subqueries.is_empty() {
         return Err(SQLError::Internal(
@@ -126,10 +126,16 @@ fn evaluate_generated_column(
         ));
     }
     expression.scalar = crate::bind_type_introspection(expression.scalar, schema, &[]);
-    let row: &ResultRow = document;
+    Ok(expression.scalar)
+}
+
+pub(crate) fn evaluate_generated_expression(
+    expression: &crate::ScalarExpr,
+    row: &dyn RowLookup,
+) -> Result<uqa_core::Value, SQLError> {
     crate::eval_scalar(
-        &expression.scalar,
-        &crate::ScalarEvalContext::new(Some(row), &[]),
+        expression,
+        &crate::ScalarEvalContext::from_row_lookup(row, &[]),
     )
 }
 

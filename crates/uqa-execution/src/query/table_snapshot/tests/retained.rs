@@ -7,6 +7,7 @@
 use super::*;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+mod generated;
 mod lookup;
 mod presence;
 mod private;
@@ -18,6 +19,7 @@ struct ProjectedSource {
     projections: Arc<AtomicUsize>,
     borrowing: Arc<AtomicBool>,
     cancel_after_page: Option<CancellationToken>,
+    cancel_after_projection: Option<(CancellationToken, Arc<AtomicBool>)>,
     forbid_owned_fields: bool,
 }
 
@@ -29,6 +31,7 @@ impl ProjectedSource {
             projections: Arc::default(),
             borrowing: Arc::default(),
             cancel_after_page: None,
+            cancel_after_projection: None,
             forbid_owned_fields: false,
         }
     }
@@ -89,6 +92,11 @@ impl DocumentStore for ProjectedSource {
             .rows
             .for_each_fields_multi_ref_with_presence(ids, fields, visitor);
         self.borrowing.store(false, Ordering::Relaxed);
+        if let Some((token, armed)) = &self.cancel_after_projection {
+            if armed.swap(false, Ordering::Relaxed) {
+                token.cancel();
+            }
+        }
         result
     }
     fn get_shared_fields(
