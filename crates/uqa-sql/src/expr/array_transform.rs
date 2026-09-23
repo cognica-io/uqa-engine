@@ -80,20 +80,26 @@ pub fn argument_positions_with_control(
         .transpose()?)
 }
 
-pub(super) fn reorder_named_values(
+pub(super) fn reorder_named_values_with_control(
     function: &str,
     call_args: &[(Option<String>, Value)],
-) -> Option<Vec<Value>> {
-    let argument_names = call_args
-        .iter()
-        .map(|(name, _)| name.as_deref())
-        .collect::<Vec<_>>();
-    let positions = argument_positions(function, &argument_names)
-        .ok()
-        .flatten()?;
-    let mut values = vec![None; call_args.len()];
-    for ((_, value), position) in call_args.iter().zip(positions) {
-        values[position] = Some(value.clone());
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Vec<Value>>>> {
+    let names = super::call_arguments::evaluated_argument_names_with_control(call_args, control)?;
+    let positions = match argument_positions_with_control(function, &names, control) {
+        Ok(Some(positions)) => positions,
+        Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
+        Ok(None) | Err(_) => return Ok(None),
+    };
+    let mut values = [None; 3];
+    for ((_, value), position) in call_args.iter().zip(positions.iter().copied()) {
+        values[position] = Some(value);
     }
-    values.into_iter().collect()
+    let mut output = ProductionVec::new(*control);
+    output.reserve(call_args.len())?;
+    for value in &values[..call_args.len()] {
+        let Some(value) = value else { return Ok(None) };
+        output.push_produced(control.copy_value(value)?)?;
+    }
+    Ok(Some(output.finish()?))
 }

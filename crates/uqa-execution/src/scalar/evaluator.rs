@@ -11,8 +11,7 @@ use uqa_core::{ArrayValue, Value};
 use uqa_sql::ast::BinaryOp;
 use uqa_sql::expr::{
     cast_value_with_type_resolution, eval_binary_values, eval_binary_values_with_integer_width,
-    eval_bound_builtin_function_call, eval_function_call, integer_width_for_literal,
-    integer_width_for_type, negate_value, truthy, IntegerWidth,
+    eval_bound_builtin_function_call, eval_function_call, negate_value, truthy, IntegerWidth,
 };
 use uqa_sql::{SQLError, SQLParam};
 
@@ -499,47 +498,11 @@ fn execute_in_subquery(
 }
 
 fn scalar_source_type(expression: &ScalarExpr, context: &ScalarEvalContext<'_>) -> Option<String> {
-    match expression {
-        ScalarExpr::TypedLiteral {
-            bound_type: Some(ty),
-            ..
-        } => {
-            return Some(literal_operator_type(ty).sql_name());
-        }
-        ScalarExpr::Func {
-            binding: Some(binding),
-            ..
-        } if binding
-            .invocation
-            .as_ref()
-            .is_some_and(|invocation| invocation.return_type.is_some()) =>
-        {
-            return binding
-                .invocation
-                .as_ref()
-                .and_then(|invocation| invocation.return_type.clone());
-        }
-        ScalarExpr::Cast { ty, .. } | ScalarExpr::TypedLiteral { ty, .. } => {
-            return Some(ty.clone())
-        }
-        ScalarExpr::UnaryMinus(inner) => return scalar_source_type(inner, context),
-        ScalarExpr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => {
-            return Some("integer".into());
-        }
-        ScalarExpr::Literal(Value::Int(_)) => return Some("bigint".into()),
-        ScalarExpr::Literal(Value::Bytes(_)) => return Some("bytea".into()),
-        ScalarExpr::Literal(Value::Str(_) | Value::FixedChar(_)) => return None,
-        _ => {}
-    }
-    let empty = crate::RowSchema::default();
-    crate::scalar_type(
+    uqa_sql::scalar_operand_type_name(
         expression,
-        context.row_schema().unwrap_or(&empty),
+        context.row_schema().unwrap_or(&crate::RowSchema::default()),
         context.params(),
     )
-    .ok()
-    .flatten()
-    .map(|ty| literal_operator_type(&ty).sql_name())
 }
 
 fn real_type_name(name: &str) -> bool {
@@ -549,46 +512,11 @@ fn real_type_name(name: &str) -> bool {
     )
 }
 
-fn scalar_integer_width(expression: &ScalarExpr) -> Option<IntegerWidth> {
-    match expression {
-        ScalarExpr::Literal(Value::Int(value)) => Some(integer_width_for_literal(*value)),
-        ScalarExpr::TypedLiteral {
-            bound_type: Some(ty),
-            ..
-        } => integer_width_for_type(&literal_operator_type(ty).sql_name()),
-        ScalarExpr::Cast { ty, .. } | ScalarExpr::TypedLiteral { ty, .. } => {
-            integer_width_for_type(ty)
-        }
-        ScalarExpr::UnaryMinus(inner) => scalar_integer_width(inner),
-        ScalarExpr::Binary {
-            op: BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide,
-            lhs,
-            rhs,
-        } => Some(scalar_integer_width(lhs)?.max(scalar_integer_width(rhs)?)),
-        _ => None,
-    }
-}
-
-fn literal_operator_type(mut ty: &uqa_sql::ast::ColumnType) -> &uqa_sql::ast::ColumnType {
-    while let uqa_sql::ast::ColumnType::Domain { base, .. } = ty {
-        ty = base;
-    }
-    ty
-}
-
 pub(crate) fn scalar_integer_binary_width(
     lhs: &ScalarExpr,
     rhs: &ScalarExpr,
     schema: &crate::RowSchema,
     parameters: &[SQLParam],
 ) -> Option<IntegerWidth> {
-    let width = |expression| {
-        scalar_integer_width(expression).or_else(|| {
-            let ty = crate::scalar_type(expression, schema, parameters)
-                .ok()
-                .flatten()?;
-            integer_width_for_type(&literal_operator_type(&ty).sql_name())
-        })
-    };
-    Some(width(lhs)?.max(width(rhs)?))
+    uqa_sql::scalar_integer_operation_width(lhs, rhs, schema, parameters)
 }

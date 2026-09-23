@@ -38,6 +38,11 @@ mod qualified_column;
 mod range;
 mod reverse;
 mod routine_signature;
+mod scalar_input;
+pub use scalar_input::{
+    scalar_integer_operation_width, scalar_integer_operation_width_with_control,
+    scalar_operand_type_name, scalar_operand_type_name_with_control,
+};
 mod string_binary;
 
 pub use cast_compatibility::{

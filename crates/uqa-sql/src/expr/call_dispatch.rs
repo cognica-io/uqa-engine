@@ -15,8 +15,11 @@ use super::context::EvalContext;
 use super::conversion::to_f64;
 use super::diagnostics::{unknown_function_error, value_type_name};
 use super::json::{jsonpath_candidate, jsonpath_match};
+use super::random;
 use super::scalar_dispatch::{eval_scalar_function, eval_sequence_function};
-use super::{array_transform, json_strip, random};
+
+mod named;
+use named::builtin_named_args;
 
 /// Execute a scalar function after its argument expressions have already been evaluated.
 ///
@@ -196,7 +199,11 @@ fn eval_function_call_inner(
     }
 
     if call_args.iter().any(|(name, _)| name.is_some()) {
-        if let Some(positional) = builtin_named_args(lower, &call_args) {
+        if let Some(positional) = builtin_named_args(
+            lower,
+            &call_args,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )? {
             return eval_scalar_function(lower, &positional);
         }
         if let Some(engine) = ctx.engine.filter(|_| allow_dynamic_dispatch) {
@@ -232,129 +239,4 @@ fn eval_function_call_inner(
         }
         other => other,
     }
-}
-
-fn builtin_named_args(function: &str, call_args: &[(Option<String>, Value)]) -> Option<Vec<Value>> {
-    if matches!(function, "array_sort" | "array_reverse") {
-        return array_transform::reorder_named_values(function, call_args);
-    }
-    if matches!(function, "json_strip_nulls" | "jsonb_strip_nulls") {
-        return json_strip::reorder_named_values(function, call_args);
-    }
-    let names: &[&str] = match function {
-        "regexp_count" => match call_args.len() {
-            2 => &["string", "pattern"],
-            3 => &["string", "pattern", "start"],
-            4 => &["string", "pattern", "start", "flags"],
-            _ => return None,
-        },
-        "regexp_like" => match call_args.len() {
-            2 => &["string", "pattern"],
-            3 => &["string", "pattern", "flags"],
-            _ => return None,
-        },
-        "regexp_substr" => match call_args.len() {
-            2 => &["string", "pattern"],
-            3 => &["string", "pattern", "start"],
-            4 => &["string", "pattern", "start", "N"],
-            5 => &["string", "pattern", "start", "N", "flags"],
-            6 => &["string", "pattern", "start", "N", "flags", "subexpr"],
-            _ => return None,
-        },
-        "regexp_instr" => match call_args.len() {
-            2 => &["string", "pattern"],
-            3 => &["string", "pattern", "start"],
-            4 => &["string", "pattern", "start", "N"],
-            5 => &["string", "pattern", "start", "N", "endoption"],
-            6 => &["string", "pattern", "start", "N", "endoption", "flags"],
-            7 => &[
-                "string",
-                "pattern",
-                "start",
-                "N",
-                "endoption",
-                "flags",
-                "subexpr",
-            ],
-            _ => return None,
-        },
-        "regexp_replace" => match call_args.len() {
-            3 => &["string", "pattern", "replacement"],
-            4 if call_args
-                .iter()
-                .any(|(name, _)| name.as_deref() == Some("flags")) =>
-            {
-                &["string", "pattern", "replacement", "flags"]
-            }
-            4 => &["string", "pattern", "replacement", "start"],
-            5 => &["string", "pattern", "replacement", "start", "N"],
-            6 => &["string", "pattern", "replacement", "start", "N", "flags"],
-            _ => return None,
-        },
-        "make_interval" => return make_interval_named_args(call_args),
-        _ => return None,
-    };
-    reorder_named_args(call_args, names)
-}
-
-fn reorder_named_args(
-    call_args: &[(Option<String>, Value)],
-    parameter_names: &[&str],
-) -> Option<Vec<Value>> {
-    if call_args.len() != parameter_names.len() {
-        return None;
-    }
-    let mut slots = vec![None; parameter_names.len()];
-    let mut positional_index = 0;
-    let mut saw_named = false;
-    for (name, value) in call_args {
-        let slot = if let Some(name) = name {
-            saw_named = true;
-            parameter_names
-                .iter()
-                .position(|candidate| candidate == name)?
-        } else {
-            if saw_named {
-                return None;
-            }
-            let slot = positional_index;
-            positional_index += 1;
-            slot
-        };
-        if slots.get(slot)?.is_some() {
-            return None;
-        }
-        slots[slot] = Some(value.clone());
-    }
-    slots.into_iter().collect()
-}
-
-/// Map `make_interval(name => value, ...)` onto the positional
-/// `(years, months, weeks, days, hours, mins, secs)` argument list.
-/// Returns `None` when an unknown parameter name appears.
-fn make_interval_named_args(call_args: &[(Option<String>, Value)]) -> Option<Vec<Value>> {
-    const NAMES: [&str; 7] = ["years", "months", "weeks", "days", "hours", "mins", "secs"];
-    let mut positional = vec![Value::Int(0); NAMES.len()];
-    let mut positional_index = 0;
-    let mut saw_named = false;
-    let mut assigned = [false; NAMES.len()];
-    for (name, value) in call_args {
-        let slot = if let Some(name) = name {
-            saw_named = true;
-            NAMES.iter().position(|candidate| candidate == name)?
-        } else {
-            if saw_named {
-                return None;
-            }
-            let slot = positional_index;
-            positional_index += 1;
-            slot
-        };
-        if slot >= NAMES.len() || assigned[slot] {
-            return None;
-        }
-        assigned[slot] = true;
-        positional[slot] = value.clone();
-    }
-    Some(positional)
 }

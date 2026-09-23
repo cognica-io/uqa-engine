@@ -9,7 +9,7 @@
 use std::borrow::Cow;
 
 use uqa_core::{
-    memory::{ProductionControl, ProductionVec},
+    memory::{Produced, ProductionControl, ProductionVec},
     Value,
 };
 
@@ -179,4 +179,17 @@ fn evaluate_call_argument_value(argument: &Expr, ctx: &EvalContext<'_>) -> Resul
         }
     }
     eval(argument, ctx)
+}
+
+/// Borrow argument labels while owning only the traversal buffer; the evaluated call retains the names and values.
+pub(super) fn evaluated_argument_names_with_control<'a>(
+    args: &'a [(Option<String>, Value)],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<Option<&'a str>>>> {
+    let mut names = ProductionVec::new(*control);
+    names.reserve(args.len())?;
+    for (name, _) in args {
+        names.push_copy(name.as_deref())?;
+    }
+    Ok(names.finish()?)
 }

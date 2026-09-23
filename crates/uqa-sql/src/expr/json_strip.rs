@@ -8,13 +8,13 @@
 
 use uqa_core::{
     json::{decode_json_string_with_control, JsonReadError},
-    memory::{Produced, ProductionControl, ProductionString},
+    memory::{Produced, ProductionControl, ProductionString, ProductionVec},
     Value,
 };
 
 use crate::error::{Result, SQLError};
 
-use super::validate_named_argument_order;
+use super::validate_named_argument_order_with_control;
 
 const PARAMETER_NAMES: [&str; 2] = ["target", "strip_in_arrays"];
 
@@ -23,16 +23,37 @@ pub fn argument_positions(
     name: &str,
     argument_names: &[Option<&str>],
 ) -> Result<Option<Vec<usize>>> {
-    validate_named_argument_order(argument_names.iter().copied())?;
-    let lower = name.to_ascii_lowercase();
-    let function = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
-    if !matches!(function, "json_strip_nulls" | "jsonb_strip_nulls")
+    argument_positions_with_control(name, argument_names, &ProductionControl::uncontrolled()).map(
+        |positions| {
+            positions.map(|positions| {
+                positions
+                    .into_uncontrolled()
+                    .expect("ordinary JSON null-stripping argument positions")
+            })
+        },
+    )
+}
+
+pub fn argument_positions_with_control(
+    name: &str,
+    argument_names: &[Option<&str>],
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Vec<usize>>>> {
+    control.check()?;
+    validate_named_argument_order_with_control(argument_names.iter().copied(), control)?;
+    let function = name
+        .get(..11)
+        .filter(|prefix| prefix.eq_ignore_ascii_case("pg_catalog."))
+        .map_or(name, |_| &name[11..]);
+    if !(function.eq_ignore_ascii_case("json_strip_nulls")
+        || function.eq_ignore_ascii_case("jsonb_strip_nulls"))
         || !(1..=2).contains(&argument_names.len())
     {
         return Ok(None);
     }
     let mut occupied = [false; PARAMETER_NAMES.len()];
-    let mut positions = Vec::with_capacity(argument_names.len());
+    let mut positions = ProductionVec::new(*control);
+    positions.reserve(argument_names.len())?;
     let mut positional = 0usize;
     for argument_name in argument_names {
         let position = if let Some(argument_name) = argument_name {
@@ -51,28 +72,35 @@ pub fn argument_positions(
             return Ok(None);
         }
         occupied[position] = true;
-        positions.push(position);
+        positions.push_copy(position)?;
     }
-    Ok(occupied[0].then_some(positions))
+    Ok(occupied[0].then(|| positions.finish()).transpose()?)
 }
 
-pub(super) fn reorder_named_values(
+pub(super) fn reorder_named_values_with_control(
     function: &str,
     call_args: &[(Option<String>, Value)],
-) -> Option<Vec<Value>> {
-    let argument_names = call_args
-        .iter()
-        .map(|(name, _)| name.as_deref())
-        .collect::<Vec<_>>();
-    let positions = argument_positions(function, &argument_names)
-        .ok()
-        .flatten()?;
-    let mut values = vec![None; PARAMETER_NAMES.len()];
-    for ((_, value), position) in call_args.iter().zip(positions) {
-        values[position] = Some(value.clone());
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Vec<Value>>>> {
+    let names = super::call_arguments::evaluated_argument_names_with_control(call_args, control)?;
+    let positions = match argument_positions_with_control(function, &names, control) {
+        Ok(Some(positions)) => positions,
+        Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
+        Ok(None) | Err(_) => return Ok(None),
+    };
+    let mut values = [None; PARAMETER_NAMES.len()];
+    for ((_, value), position) in call_args.iter().zip(positions.iter().copied()) {
+        values[position] = Some(value);
     }
-    values[1].get_or_insert(Value::Bool(false));
-    values.into_iter().collect()
+    let default = Value::Bool(false);
+    values[1].get_or_insert(&default);
+    let mut output = ProductionVec::new(*control);
+    output.reserve(values.len())?;
+    for value in values {
+        let Some(value) = value else { return Ok(None) };
+        output.push_produced(control.copy_value(value)?)?;
+    }
+    Ok(Some(output.finish()?))
 }
 
 pub(super) fn invalid_json_input(input: &str) -> SQLError {
