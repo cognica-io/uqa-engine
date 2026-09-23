@@ -18,6 +18,8 @@ mod generations;
 mod graph_lookup;
 mod materialization;
 mod migration;
+mod namespace;
+mod namespace_upgrade;
 mod occurrence_guards;
 mod persistence;
 pub(super) mod standalone_graph;

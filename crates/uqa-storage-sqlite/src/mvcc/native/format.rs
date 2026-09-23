@@ -13,7 +13,8 @@ use uqa_storage::{
 };
 
 use super::{
-    capture, graph_lookup, invalid, owners, physical, NativeRecord, NativeRecordFamily as Family,
+    capture, graph_lookup, invalid, owners, physical, NativeMapping, NativeRecord,
+    NativeRecordFamily as Family, NativeRecordNamespace,
 };
 use crate::mvcc::{codec, schema, write, PhysicalResult};
 
@@ -33,11 +34,13 @@ const FORMAT_SIX: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGE
 
 const FORMAT_SEVEN: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 7), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))";
 
+const FORMAT_EIGHT: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 8), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))";
+
 #[cfg(test)]
 mod tests;
 
 const TABLES: [(&str, &str); 4] = [
-    ("_uqa_mvcc_native_format", "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 8), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))"),
+    ("_uqa_mvcc_native_format", "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 9), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))"),
     ("_uqa_mvcc_native_owners", "CREATE TABLE _uqa_mvcc_native_owners (name TEXT PRIMARY KEY NOT NULL, object_id BLOB NOT NULL CHECK(typeof(object_id) = 'blob' AND length(object_id) = 16 AND object_id != zeroblob(16)), generation BLOB NOT NULL CHECK(typeof(generation) = 'blob' AND length(generation) = 16 AND generation != zeroblob(16)), catalog_owned INTEGER NOT NULL CHECK(catalog_owned IN (0, 1))) WITHOUT ROWID"),
     ("_uqa_mvcc_native_expected", "CREATE TABLE _uqa_mvcc_native_expected (family INTEGER NOT NULL, physical_key BLOB NOT NULL, old_key BLOB, new_key BLOB, new_value BLOB, PRIMARY KEY(family, physical_key), CHECK((new_key IS NULL) = (new_value IS NULL))) WITHOUT ROWID"),
     ("_uqa_mvcc_native_changes", "CREATE TABLE _uqa_mvcc_native_changes (family INTEGER NOT NULL, physical_key BLOB NOT NULL, PRIMARY KEY(family, physical_key)) WITHOUT ROWID"),
@@ -62,11 +65,38 @@ pub(in crate::mvcc) fn reject_mapped(connection: &Connection) -> PhysicalResult<
     Ok(())
 }
 
-pub(in crate::mvcc) fn check_mapping(connection: &Connection, native: bool) -> PhysicalResult<()> {
-    if !native {
+pub(in crate::mvcc) fn check_mapping(
+    connection: &Connection,
+    native: Option<NativeRecordNamespace>,
+) -> PhysicalResult<()> {
+    let Some(expected) = native else {
         return reject_mapped(connection);
+    };
+    check_mapping_version(connection, 9)?;
+    if namespace(connection)? != expected {
+        return Err(invalid("native record namespace changed").into());
     }
-    check_mapping_version(connection, 8)
+    Ok(())
+}
+
+fn namespace(connection: &Connection) -> PhysicalResult<NativeRecordNamespace> {
+    let mut statement = connection
+        .prepare("SELECT record_namespace FROM _uqa_mvcc_native_format WHERE singleton = 1")?;
+    let mut rows = statement.query([])?;
+    let row = rows
+        .next()?
+        .ok_or_else(|| invalid("missing native record namespace"))?;
+    Ok(NativeRecordNamespace(codec::identity(codec::bytes(
+        row, 0,
+    )?)?))
+}
+
+fn insert_format(connection: &Connection, identity: DatabaseId) -> PhysicalResult<()> {
+    connection.execute(
+        "INSERT INTO _uqa_mvcc_native_format VALUES (1, 9, 49, ?1)",
+        [identity.as_bytes().as_slice()],
+    )?;
+    Ok(())
 }
 
 fn check_mapping_version(connection: &Connection, version: u32) -> PhysicalResult<()> {
@@ -103,27 +133,27 @@ fn prepare_catalog_sources(
 pub(in crate::mvcc) fn initialize(
     connection: &Connection,
     control: &StorageReadControl,
-) -> PhysicalResult<DatabaseId> {
+) -> PhysicalResult<NativeMapping> {
     control.cancellation().check().map_err(VersionError::from)?;
     let _permit = schema::WritePermit::acquire(connection)?;
     let transaction = schema::begin(connection)?;
-    let identity = initialize_in(&transaction, control)?;
+    let mapping = initialize_in(&transaction, control)?;
     transaction.commit()?;
-    Ok(identity)
+    Ok(mapping)
 }
 
 pub(in crate::mvcc) fn initialize_in(
     transaction: &Connection,
     control: &StorageReadControl,
-) -> PhysicalResult<DatabaseId> {
+) -> PhysicalResult<NativeMapping> {
     control.cancellation().check().map_err(VersionError::from)?;
     if transaction.is_autocommit() {
         return Err(invalid("native baseline import requires an owning transaction").into());
     }
     if present(transaction)? {
-        let identity = reopen(transaction, control)?;
+        let mapping = reopen(transaction, control)?;
         control.cancellation().check().map_err(VersionError::from)?;
-        return Ok(identity);
+        return Ok(mapping);
     }
     prepare_catalog_sources(transaction, control)?;
     let identity = schema::initialize_in(transaction)?.identity;
@@ -163,8 +193,8 @@ pub(in crate::mvcc) fn initialize_in(
     occurrence_accelerators::create(transaction)?;
     occurrence_accelerators::import(transaction, control)?;
     crate::Catalog::upgrade_metadata_cache_triggers(transaction)?;
-    validate_layouts(transaction, 8)?;
-    validate_cache_triggers(transaction, 8)?;
+    validate_layouts(transaction, 9)?;
+    validate_cache_triggers(transaction, 9)?;
     owners::seed(transaction, control)?;
     super::sequences::validate_source(transaction)?;
     graph_lookup::seed(transaction, control)?;
@@ -197,7 +227,7 @@ pub(in crate::mvcc) fn initialize_in(
         "UPDATE _uqa_mvcc_metadata SET sequence = ?1 WHERE singleton = 1",
         params![baseline.as_u64().to_be_bytes().as_slice()],
     )?;
-    transaction.execute("INSERT INTO _uqa_mvcc_native_format VALUES (1, 8, 49)", [])?;
+    insert_format(transaction, identity)?;
     install_guards(transaction)?;
     super::standalone_graph::install_legacy_guards(transaction, control)?;
     let invalid_foreign_key = transaction
@@ -209,10 +239,13 @@ pub(in crate::mvcc) fn initialize_in(
         return Err(invalid("native source catalog violates a physical foreign key").into());
     }
     control.cancellation().check().map_err(VersionError::from)?;
-    Ok(identity)
+    Ok(NativeMapping {
+        identity,
+        namespace: NativeRecordNamespace(identity),
+    })
 }
 
-fn reopen(connection: &Connection, control: &StorageReadControl) -> PhysicalResult<DatabaseId> {
+fn reopen(connection: &Connection, control: &StorageReadControl) -> PhysicalResult<NativeMapping> {
     crate::Catalog::upgrade_metadata_cache_triggers(connection)?;
     let version =
         if schema::definition_matches(connection, TABLES[0].0, LEGACY_FORMAT)? == Some(true) {
@@ -229,8 +262,10 @@ fn reopen(connection: &Connection, control: &StorageReadControl) -> PhysicalResu
             6
         } else if schema::definition_matches(connection, TABLES[0].0, FORMAT_SEVEN)? == Some(true) {
             7
-        } else {
+        } else if schema::definition_matches(connection, TABLES[0].0, FORMAT_EIGHT)? == Some(true) {
             8
+        } else {
+            9
         };
     validate_format(connection, version)?;
     let initialized = schema::initialize_in(connection)?;
@@ -276,17 +311,22 @@ fn reopen(connection: &Connection, control: &StorageReadControl) -> PhysicalResu
         for (_, sql) in graph_lookup::source_triggers(&graph_lookup::SCOPED_SOURCES) {
             connection.execute_batch(&sql)?;
         }
+    }
+    if version < 9 {
         connection.execute_batch("DROP TABLE _uqa_mvcc_native_format")?;
         connection.execute_batch(TABLES[0].1)?;
-        connection.execute("INSERT INTO _uqa_mvcc_native_format VALUES (1, 8, 49)", [])?;
+        insert_format(connection, identity)?;
         for action in ["INSERT", "UPDATE", "DELETE"] {
             connection.execute_batch(&schema::trigger(TABLES[0].0, action).1)?;
         }
-        validate_format(connection, 8)?;
-        check_mapping_version(connection, 8)?;
+        validate_format(connection, 9)?;
+        check_mapping_version(connection, 9)?;
     }
     super::standalone_graph::validate_legacy_guards(connection, control)?;
-    Ok(identity)
+    Ok(NativeMapping {
+        identity,
+        namespace: namespace(connection)?,
+    })
 }
 
 fn install_guards(transaction: &Connection) -> PhysicalResult<()> {
@@ -326,6 +366,7 @@ fn validate_format(connection: &Connection, version: u32) -> PhysicalResult<()> 
                 5 => FORMAT_FIVE,
                 6 => FORMAT_SIX,
                 7 => FORMAT_SEVEN,
+                8 => FORMAT_EIGHT,
                 _ => sql,
             }
         } else {

@@ -41,7 +41,7 @@ pub(super) fn reserve_bindings(
 pub(super) fn allocate(
     connection: &Connection,
     identity: DatabaseId,
-    native: bool,
+    native: Option<native::NativeRecordNamespace>,
     control: &StorageReadControl,
 ) -> PhysicalResult<StorageTransactionId> {
     let _permit = admission::permit(connection, control)?;
@@ -73,7 +73,7 @@ pub(super) fn commit(
     connection: &Connection,
     id: StorageTransactionId,
     prepared: &PreparedRecordCommit,
-    native: bool,
+    native: Option<native::NativeRecordNamespace>,
     control: &StorageReadControl,
 ) -> CommitResult {
     let rejected = |error: Error| CommitFailure::Rejected(error.into_version());
@@ -99,8 +99,8 @@ pub(super) fn commit(
         sequence,
         fingerprint: prepared.fingerprint(),
     };
-    if native {
-        native::materialize(&transaction, id.database(), prepared, sequence, control)
+    if let Some(namespace) = native {
+        native::materialize(&transaction, namespace.0, prepared, sequence, control)
             .map_err(rejected)?;
     }
     stage(&transaction, prepared, receipt, control).map_err(rejected)?;
@@ -176,7 +176,7 @@ pub(super) fn stage_record(
 pub(super) fn abort(
     connection: &Connection,
     id: StorageTransactionId,
-    native: bool,
+    native: Option<native::NativeRecordNamespace>,
     control: &StorageReadControl,
 ) -> PhysicalResult<CommitStatus> {
     let _permit = schema::WritePermit::acquire(connection)?;

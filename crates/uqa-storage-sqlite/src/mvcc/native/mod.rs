@@ -28,7 +28,6 @@ mod session;
 mod standalone_graph;
 mod vector_guards;
 
-pub(super) use graph_cache::NativeGraphRecords;
 pub(crate) use session::NativeSnapshot;
 
 pub(super) use format::{check_mapping, initialize, initialize_in, present, reject_mapped};
@@ -44,8 +43,17 @@ pub use row::{decode_row, encode_row};
 
 use rusqlite::types::ValueRef;
 use uqa_core::memory::BudgetedVec;
-use uqa_storage::mvcc::{CommitSequence, RecordWrite, VersionError, VersionResult};
+use uqa_storage::mvcc::{CommitSequence, DatabaseId, RecordWrite, VersionError, VersionResult};
 use uqa_storage::read_control::StorageReadControl;
+
+/// Stable data addressing, independent of the transaction history incarnation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct NativeRecordNamespace(pub(super) DatabaseId);
+
+pub(super) struct NativeMapping {
+    pub(super) identity: DatabaseId,
+    pub(super) namespace: NativeRecordNamespace,
+}
 
 /// One evaluated native row in the provider's record encoding. Its charged buffers can be borrowed by common storage's conditional commit preparation.
 #[derive(Debug)]

@@ -33,7 +33,7 @@ fn watermark(connection: &Connection, namespace: &[u8]) -> PhysicalResult<Option
 pub(super) fn read(
     connection: &Connection,
     database: DatabaseId,
-    native: bool,
+    native: Option<native::NativeRecordNamespace>,
     namespace: &[u8],
     control: &StorageReadControl,
 ) -> PhysicalResult<Option<u64>> {
@@ -53,7 +53,7 @@ pub(super) fn read(
 pub(super) fn allocate(
     connection: &Connection,
     database: DatabaseId,
-    native: bool,
+    native: Option<native::NativeRecordNamespace>,
     namespace: &[u8],
     request: IdentifierRequest,
     control: &StorageReadControl,

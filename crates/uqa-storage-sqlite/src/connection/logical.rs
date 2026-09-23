@@ -17,6 +17,7 @@ use super::{
 
 pub(super) struct BoundRecordSession {
     pub(super) store: Arc<VersionedKeyValueStore>,
+    /// Stable native data namespace, separate from the store's transaction history identity.
     pub(super) native: Option<DatabaseId>,
 }
 

@@ -46,7 +46,7 @@ fn record(
 ) -> NativeRecord {
     NativeRecord::encode(
         family,
-        NativeRecordOwner::Database(store.database_id()),
+        NativeRecordOwner::Database(store.native_namespace().unwrap()),
         values,
         control,
     )
@@ -138,7 +138,7 @@ fn native_graph_lookup_baseline_is_complete_and_selective_without_entity_payload
         let small = StorageReadControl::with_limit(16 << 10);
         let prefix = NativeRecordIdentity::new(
             Family::GraphLookups,
-            NativeRecordOwner::Database(store.database_id()),
+            NativeRecordOwner::Database(store.native_namespace().unwrap()),
         )
         .unwrap()
         .encode_prefix(

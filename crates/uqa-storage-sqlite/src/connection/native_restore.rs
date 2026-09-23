@@ -6,7 +6,7 @@
 
 //! Publish a legacy catalog's semantic restoration and native record baseline in one physical transaction.
 
-use uqa_storage::mvcc::{VersionError, VersionedPersistence, VersionedSessionOptions};
+use uqa_storage::mvcc::{VersionError, VersionedSessionOptions};
 use uqa_storage::read_control::StorageReadControl;
 use uqa_storage::KeyValueStore;
 
@@ -62,7 +62,9 @@ impl ManagedConnection {
             &StorageReadControl::with_limit(options.retained_bytes),
         )
         .map_err(VersionError::into_storage_error)?;
-        let database = records.database_id();
+        let namespace = records
+            .native_namespace()
+            .ok_or(SQLiteError::SessionMappingMismatch)?;
         Ok(Arc::new(BoundRecordSession {
             store: Arc::new(VersionedKeyValueStore::new_with_cancellation(
                 Arc::new(records),
@@ -70,7 +72,7 @@ impl ManagedConnection {
                 options,
                 self.write_cancellation(),
             )),
-            native: Some(database),
+            native: Some(namespace),
         }))
     }
 

@@ -73,7 +73,7 @@ fn populated_dynamic_accelerators_convert_with_canonical_rows_in_every_file_mode
                     .get::<_, i64>(
                     0
                 ))?,
-                8
+                9
             );
             Ok(())
         });

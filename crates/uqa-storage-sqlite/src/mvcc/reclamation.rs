@@ -14,7 +14,7 @@ use uqa_storage::read_control::StorageReadControl;
 pub(super) fn reclaim(
     connection: &Connection,
     identity: DatabaseId,
-    mapped: bool,
+    mapped: Option<native::NativeRecordNamespace>,
     oldest: Option<CommitSequence>,
     control: &StorageReadControl,
 ) -> PhysicalResult<u64> {

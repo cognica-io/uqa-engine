@@ -78,7 +78,7 @@ fn sqlite_error(error: rusqlite::Error) -> VersionError {
 pub struct SQLiteRecordStore {
     connection: ManagedConnection,
     identity: DatabaseId,
-    native: bool,
+    native: Option<native::NativeRecordNamespace>,
     snapshots: Arc<uqa_storage::mvcc::SnapshotRegistry>,
 }
 
@@ -93,12 +93,15 @@ impl SQLiteRecordStore {
         transaction: &Connection,
         control: &StorageReadControl,
     ) -> VersionResult<Self> {
-        let identity = native::initialize_in(transaction, control).map_err(Error::into_version)?;
+        let native::NativeMapping {
+            identity,
+            namespace,
+        } = native::initialize_in(transaction, control).map_err(Error::into_version)?;
         Ok(Self {
             snapshots: retention::registry(connection, identity)?,
             connection: connection.record_connection(),
             identity,
-            native: true,
+            native: Some(namespace),
         })
     }
 
@@ -117,7 +120,7 @@ impl SQLiteRecordStore {
             snapshots: retention::registry(&connection, identity)?,
             connection,
             identity,
-            native: false,
+            native: None,
         })
     }
 
@@ -132,7 +135,10 @@ impl SQLiteRecordStore {
             ));
         }
         let connection = connection.record_connection();
-        let identity = connection
+        let native::NativeMapping {
+            identity,
+            namespace,
+        } = connection
             .with(|connection| Ok(native::initialize(connection, control)))
             .map_err(|error| VersionError::Storage(error.into()))?
             .map_err(Error::into_version)?;
@@ -140,7 +146,7 @@ impl SQLiteRecordStore {
             snapshots: retention::registry(&connection, identity)?,
             connection,
             identity,
-            native: true,
+            native: Some(namespace),
         })
     }
 
@@ -157,8 +163,14 @@ impl SQLiteRecordStore {
             snapshots: retention::registry(&connection, identity)?,
             connection,
             identity,
-            native: false,
+            native: None,
         })
+    }
+
+    /// Immutable namespace for database-owned native record keys. Use it with `NativeRecordOwner::Database`; `VersionedPersistence::database_id` identifies the transaction history and may differ after restoration. Key/Value and raw record stores return `None`.
+    #[must_use]
+    pub fn native_namespace(&self) -> Option<DatabaseId> {
+        self.native.map(|namespace| namespace.0)
     }
 
     fn with<T>(
@@ -251,35 +263,34 @@ impl VersionedPersistence for SQLiteRecordStore {
         self.identity
     }
     fn graph_record_layout(&self) -> Option<&dyn uqa_storage::mvcc::GraphRecordLayout> {
-        if self.native {
-            Some(&native::NativeGraphRecords)
-        } else {
-            Some(&uqa_storage::key_value::KeyValueGraphRecords)
+        match self.native.as_ref() {
+            Some(namespace) => Some(namespace),
+            None => Some(&uqa_storage::key_value::KeyValueGraphRecords),
         }
     }
     fn occurrence_record_layout(&self) -> &dyn uqa_storage::mvcc::OccurrenceRecordLayout {
-        if self.native {
+        if self.native.is_some() {
             &crate::inverted_index::NativeOccurrenceRecords
         } else {
             &uqa_storage::key_value::KeyValueOccurrenceRecords
         }
     }
     fn maintenance_record_layout(&self) -> &dyn uqa_storage::mvcc::MaintenanceRecordLayout {
-        if self.native {
+        if self.native.is_some() {
             &native::NativeMaintenanceRecords
         } else {
             &uqa_storage::key_value::KeyValueMaintenanceRecords
         }
     }
     fn ivf_record_layout(&self) -> &dyn uqa_storage::mvcc::IVFRecordLayout {
-        if self.native {
+        if self.native.is_some() {
             &crate::vector_index::NativeIVFRecords
         } else {
             &uqa_storage::key_value::KeyValueIVFRecords
         }
     }
     fn hnsw_record_layout(&self) -> Option<&dyn uqa_storage::mvcc::HNSWRecordLayout> {
-        if self.native {
+        if self.native.is_some() {
             Some(&crate::vector_index::NativeHNSWRecords)
         } else {
             Some(&uqa_storage::key_value::KeyValueHNSWRecords)

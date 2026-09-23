@@ -85,7 +85,7 @@ fn transaction_and_identifier_admission_survive_a_rejected_busy_attempt() {
     let store = SQLiteRecordStore::new(&connection).unwrap();
     let control = control();
     let id = after_physical_contention(&path, &store, &control, false, false, |connection| {
-        write::allocate(connection, store.identity, false, &control)
+        write::allocate(connection, store.identity, None, &control)
     })
     .unwrap();
     assert_eq!(id.allocation(), 1);
@@ -98,7 +98,7 @@ fn transaction_and_identifier_admission_survive_a_rejected_busy_attempt() {
             super::super::identifiers::allocate(
                 connection,
                 store.identity,
-                false,
+                None,
                 b"identities",
                 uqa_storage::mvcc::IdentifierRequest::Observe(41),
                 &control,
@@ -112,7 +112,7 @@ fn transaction_and_identifier_admission_survive_a_rejected_busy_attempt() {
     );
     let prepared = prepared(b"item", b"published", &control);
     let receipt = after_physical_contention(&path, &store, &control, false, false, |connection| {
-        write::commit(connection, id, &prepared, false, &control)
+        write::commit(connection, id, &prepared, None, &control)
     })
     .unwrap();
     assert_eq!(
@@ -129,7 +129,7 @@ fn cancelling_writer_admission_does_not_consume_a_transaction_or_identifier() {
     let store = SQLiteRecordStore::new(&connection).unwrap();
     let control = control();
     let result = after_physical_contention(&path, &store, &control, false, true, |connection| {
-        write::allocate(connection, store.identity, false, &control)
+        write::allocate(connection, store.identity, None, &control)
     });
     assert!(matches!(
         result,
@@ -144,7 +144,7 @@ fn cancelling_writer_admission_does_not_consume_a_transaction_or_identifier() {
         super::super::identifiers::allocate(
             connection,
             store.identity,
-            false,
+            None,
             b"identities",
             uqa_storage::mvcc::IdentifierRequest::Observe(41),
             &control,
@@ -190,7 +190,7 @@ fn commit_behind_reader(cancel: bool) {
                 },
             )
             .unwrap();
-        write::commit(connection, id, &prepared, false, &control)
+        write::commit(connection, id, &prepared, None, &control)
     });
     assert_eq!(staged.load(Ordering::SeqCst), 1, "publication was restaged");
     control.cancellation().reset();

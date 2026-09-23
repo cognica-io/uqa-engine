@@ -46,7 +46,13 @@ pub(super) fn records(
     with(connection, |connection| {
         let mut records = Vec::new();
         physical::visit(connection, family.layout(), control, |values| {
-            let owner = owners::for_row(connection, store.database_id(), family, values, control)?;
+            let owner = owners::for_row(
+                connection,
+                store.native_namespace().unwrap(),
+                family,
+                values,
+                control,
+            )?;
             records.push(NativeRecord::encode(family, owner, values, control)?);
             Ok(())
         })?;

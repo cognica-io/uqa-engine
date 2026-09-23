@@ -26,6 +26,7 @@ use crate::connection::Result;
 pub(crate) struct NativeSnapshot {
     pub(crate) view: MergedRecordSnapshot,
     pub(crate) control: StorageReadControl,
+    /// Stable native data namespace used to address records across history restorations.
     pub(crate) database: DatabaseId,
 }
 

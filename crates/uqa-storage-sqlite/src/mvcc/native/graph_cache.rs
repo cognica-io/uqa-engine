@@ -16,10 +16,8 @@ use uqa_storage::{
 
 use super::{
     decode_record, encode_row, invalid, NativeRecordFamily as Family, NativeRecordIdentity,
-    NativeRecordOwner,
+    NativeRecordNamespace, NativeRecordOwner,
 };
-
-pub(in crate::mvcc) struct NativeGraphRecords;
 
 fn text(value: &str) -> ValueRef<'_> {
     ValueRef::Text(value.as_bytes())
@@ -71,16 +69,15 @@ fn key_text(
     Ok(bytes)
 }
 
-impl GraphRecordLayout for NativeGraphRecords {
+impl GraphRecordLayout for NativeRecordNamespace {
     fn key(
         &self,
-        database: DatabaseId,
+        _database: DatabaseId,
         address: GraphRecordKey<'_>,
         control: &StorageReadControl,
     ) -> VersionResult<BudgetedVec<u8>> {
         let encode = |family, parts: &[ValueRef<'_>], full| {
-            let identity =
-                NativeRecordIdentity::new(family, NativeRecordOwner::Database(database))?;
+            let identity = NativeRecordIdentity::new(family, NativeRecordOwner::Database(self.0))?;
             if full {
                 identity.encode_key(parts, control)
             } else {

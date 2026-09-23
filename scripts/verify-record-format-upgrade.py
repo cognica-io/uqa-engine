@@ -93,6 +93,7 @@ fn rejected<T, E: std::fmt::Display>(result: Result<T, E>, native_reopen: bool) 
     // Native reopen validates physical families and exact cache triggers before the common record version. Retained handles must still reject through their record-format guard.
     let native_schema_fence = native_reopen && matches!(error.as_str(),
         "invalid versioned record encoding: unmapped native table requires an explicit record family"
+        | "invalid versioned record encoding: missing or changed native materialization schema or guard"
         | "SQLite storage failed: storage backend error: missing or changed metadata cache trigger");
     assert!(error.contains("record format") || error.contains("record table definition") || native_schema_fence, "unrelated failure: {error}");
 }
@@ -213,6 +214,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--old-ref", required=True, help="Git revision of the previous development record format")
     parser.add_argument("--offline", action="store_true", help="Use only locally cached dependencies")
+    parser.add_argument("--provider", action="append", choices=("native", "key-value", "redb"), help="Verify only the named provider; repeat for multiple providers (default: all)")
     args = parser.parse_args()
     revision = subprocess.check_output(["git", "rev-parse", "--verify", "--end-of-options", args.old_ref + "^{commit}"], cwd=ROOT, text=True).strip()
     target = ROOT / "target/record-format-probe"
@@ -230,11 +232,13 @@ def main() -> None:
         previous = build(source, directory / "previous-probe", "previous", target, args.offline)
         current = build(ROOT, directory / "current-probe", "current", target, args.offline)
         print(f"Previous source revision: {revision}", flush=True)
-        for kind in ("native", "key-value"):
-            for mode in ("plain", "encrypted", "compressed", "compressed-encrypted"):
+        count = 0
+        for kind in dict.fromkeys(args.provider or ("native", "key-value", "redb")):
+            modes = ("plain",) if kind == "redb" else ("plain", "encrypted", "compressed", "compressed-encrypted")
+            for mode in modes:
                 verify(previous, current, directory, kind, mode)
-        verify(previous, current, directory, "redb", "plain")
-        print("Development record-format upgrade verified in all nine provider/file configurations.", flush=True)
+                count += 1
+        print(f"Development record-format upgrade verified in {count} provider/file configurations.", flush=True)
 
 
 if __name__ == "__main__":
