@@ -8,18 +8,69 @@
 
 use uqa_storage::mvcc::StorageTransactionId;
 
-use super::super::liveness::{admit, prepare};
+use super::super::liveness::{admit, prepare_records};
 use super::*;
 
+fn record_store(path: &Path, mode: usize, initialize: bool) -> SQLiteRecordStore {
+    let connection = open(path, mode % 4);
+    if mode < 4 {
+        SQLiteRecordStore::new(&connection).unwrap()
+    } else {
+        if initialize {
+            crate::Catalog::open(connection.clone()).unwrap();
+        }
+        SQLiteRecordStore::for_native(&connection, &control()).unwrap()
+    }
+}
+
+fn record(
+    store: &SQLiteRecordStore,
+    key: &[u8],
+    control: &StorageReadControl,
+) -> (Vec<u8>, Vec<u8>) {
+    use crate::mvcc::native::{NativeRecord, NativeRecordFamily, NativeRecordOwner};
+    use rusqlite::types::ValueRef;
+    let Some(namespace) = store.native_namespace() else {
+        return (key.to_vec(), b"durable".to_vec());
+    };
+    let record = NativeRecord::encode(
+        NativeRecordFamily::Metadata,
+        NativeRecordOwner::Database(namespace),
+        &[ValueRef::Text(key), ValueRef::Text(b"durable")],
+        control,
+    )
+    .unwrap();
+    (record.key().to_vec(), record.row().to_vec())
+}
+
 fn child(path: &Path, mode: usize) {
-    let connection = open(path, mode);
-    let store = SQLiteRecordStore::new(&connection).unwrap();
+    let store = record_store(path, mode, false);
     let control = control();
     let active = admit(&store, &control);
     let pending = admit(&store, &control);
     let committed = admit(&store, &control);
-    let (pending_id, pending_write) = prepare(&store, &pending, b"pending", &control);
-    let (committed_id, committed_write) = prepare(&store, &committed, b"committed", &control);
+    let (pending_key, pending_value) = record(&store, b"pending", &control);
+    let (committed_key, committed_value) = record(&store, b"committed", &control);
+    let (pending_id, pending_write) = prepare_records(
+        &store,
+        &pending,
+        &[RecordWrite {
+            key: &pending_key,
+            expected: None,
+            value: Some(&pending_value),
+        }],
+        &control,
+    );
+    let (committed_id, committed_write) = prepare_records(
+        &store,
+        &committed,
+        &[RecordWrite {
+            key: &committed_key,
+            expected: None,
+            value: Some(&committed_value),
+        }],
+        &control,
+    );
     event("participants-retained");
     event(&format!(
         "identities {} {} {} {} {}",
@@ -39,6 +90,24 @@ fn child(path: &Path, mode: usize) {
                 drop(held);
                 event("records-committed");
             }
+            "stage-main" => {
+                let _held = store.serializable_admission(&control).unwrap();
+                store.connection.with_physical::<()>(|connection| {
+                    connection.create_scalar_function(
+                        "__uqa_test_main_commit_gate",
+                        0,
+                        rusqlite::functions::FunctionFlags::SQLITE_UTF8,
+                        |_| -> rusqlite::Result<i64> {
+                            event("main-records-staged");
+                            loop { std::thread::park(); }
+                        },
+                    )?;
+                    connection.execute_batch("CREATE TEMP TRIGGER retain_uncommitted_main AFTER UPDATE OF status ON _uqa_mvcc_transactions WHEN NEW.status = 2 BEGIN SELECT __uqa_test_main_commit_gate(); END")?;
+                    // This is the same physical commit owner used by SQLiteRecordStore. The gate runs after all records, heads and the terminal receipt are staged, while their native transaction is still open.
+                    crate::mvcc::write::commit(connection, committed_id, &committed_write, store.native, &control).unwrap();
+                    unreachable!("the parent must terminate the process at the physical staging barrier");
+                }).unwrap();
+            }
             other => panic!("unexpected participant peer command {other}"),
         }
     }
@@ -55,12 +124,13 @@ fn process_death_recovers_only_dead_owners_and_preserves_committed_data() {
         );
         return;
     }
-    for mode in 0..4 {
+    for (mode, committed_before_loss) in (0..8).flat_map(|mode| [(mode, false), (mode, true)]) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("liveness.db");
-        let connection = open(&path, mode);
-        let store = SQLiteRecordStore::new(&connection).unwrap();
+        let store = record_store(&path, mode, true);
         let control = control();
+        let (pending_key, _) = record(&store, b"pending", &control);
+        let (committed_key, committed_value) = record(&store, b"committed", &control);
         let survivor = admit(&store, &control);
         let mut peer = Peer::start_test(
             &path,
@@ -98,7 +168,11 @@ fn process_death_recovers_only_dead_owners_and_preserves_committed_data() {
             CommitStatus::Pending
         );
         drop(held);
-        peer.command("commit", "records-committed");
+        if committed_before_loss {
+            peer.command("commit", "records-committed");
+        } else {
+            peer.command("stage-main", "main-records-staged");
+        }
         peer.child.kill().unwrap();
         assert!(!peer.child.wait().unwrap().success());
         let (later, snapshot) = store
@@ -112,20 +186,29 @@ fn process_death_recovers_only_dead_owners_and_preserves_committed_data() {
             .unwrap();
         assert!(later.id().allocation() > committed);
         let outcome = store.commit_status(committed_id, &control).unwrap();
-        assert!(matches!(outcome, CommitStatus::Committed(_)));
-        assert!(snapshot.get(b"pending", &control).unwrap().is_none());
-        let record = snapshot.get(b"committed", &control).unwrap().unwrap();
-        assert_eq!(record.value().map(|value| &***value), Some(&b"durable"[..]));
-        drop(record);
+        assert!(snapshot.get(&pending_key, &control).unwrap().is_none());
+        let record = snapshot.get(&committed_key, &control).unwrap();
+        if committed_before_loss {
+            assert!(matches!(outcome, CommitStatus::Committed(_)));
+            assert_eq!(
+                record.unwrap().value().map(|value| &***value),
+                Some(committed_value.as_slice())
+            );
+        } else {
+            assert_eq!(outcome, CommitStatus::Aborted);
+            assert!(record.is_none());
+        }
         let mut held = store.serializable_admission(&control).unwrap();
         held.graph().check_active(survivor.id()).unwrap();
         assert!(held.graph().check_active(actor(active)).is_err());
-        assert_eq!(
-            held.graph_mut()
-                .resolve_publication(publication, CommitStatus::Unknown)
-                .unwrap(),
-            outcome
-        );
+        if committed_before_loss {
+            assert_eq!(
+                held.graph_mut()
+                    .resolve_publication(publication, CommitStatus::Unknown)
+                    .unwrap(),
+                outcome
+            );
+        }
         drop((held, survivor, later, snapshot));
         store.recover_serializable(&control).unwrap();
         assert_eq!(control.memory().used(), 0);

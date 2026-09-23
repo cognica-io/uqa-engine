@@ -71,8 +71,9 @@ pub(super) fn prepare(
     key: &[u8],
     control: &StorageReadControl,
 ) -> (StorageTransactionId, PreparedRecordCommit) {
-    let transaction = store.allocate_transaction(control).unwrap();
-    let prepared = PreparedRecordCommit::new(
+    prepare_records(
+        store,
+        actor,
         &[RecordWrite {
             key,
             expected: None,
@@ -80,7 +81,16 @@ pub(super) fn prepare(
         }],
         control,
     )
-    .unwrap();
+}
+
+pub(super) fn prepare_records(
+    store: &SQLiteRecordStore,
+    actor: &SerializableParticipant,
+    records: &[RecordWrite<'_>],
+    control: &StorageReadControl,
+) -> (StorageTransactionId, PreparedRecordCommit) {
+    let transaction = store.allocate_transaction(control).unwrap();
+    let prepared = PreparedRecordCommit::new(records, control).unwrap();
     let mut held = store.serializable_admission(control).unwrap();
     held.graph_mut()
         .prepare_publication(actor.id(), transaction, prepared.fingerprint(), control)

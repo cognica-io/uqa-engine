@@ -58,8 +58,9 @@ fn prepare(
     key: &[u8],
     control: &StorageReadControl,
 ) -> (SerializablePublication, PreparedRecordCommit) {
-    let physical = store.allocate_transaction(control).unwrap();
-    let prepared = PreparedRecordCommit::new(
+    prepare_records(
+        store,
+        actor,
         &[RecordWrite {
             key,
             expected: None,
@@ -67,7 +68,16 @@ fn prepare(
         }],
         control,
     )
-    .unwrap();
+}
+
+fn prepare_records(
+    store: &RedbRecordStore,
+    actor: &SerializableParticipant,
+    records: &[RecordWrite<'_>],
+    control: &StorageReadControl,
+) -> (SerializablePublication, PreparedRecordCommit) {
+    let physical = store.allocate_transaction(control).unwrap();
+    let prepared = PreparedRecordCommit::new(records, control).unwrap();
     let publication = graph(store, control, |graph| {
         graph.prepare_publication(actor.id(), physical, prepared.fingerprint(), control)
     })

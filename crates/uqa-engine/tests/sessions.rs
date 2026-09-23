@@ -28,6 +28,8 @@ mod concurrent_inserts;
 mod concurrent_writes;
 #[path = "sessions/identifiers.rs"]
 mod identifiers;
+#[path = "sessions/native_publication.rs"]
+mod native_publication;
 #[path = "sessions/native_records.rs"]
 mod native_records;
 #[path = "sessions/serializable_observations.rs"]
