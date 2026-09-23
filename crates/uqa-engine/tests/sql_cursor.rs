@@ -8,6 +8,10 @@ use uqa_core::Value;
 use uqa_engine::Engine;
 use uqa_execution::DEFAULT_BATCH_SIZE;
 
+#[cfg(not(target_os = "emscripten"))]
+#[path = "sql_cursor/secure_temporary.rs"]
+mod secure_temporary;
+
 #[test]
 fn cursor_spills_under_tiny_work_mem_and_yields_bounded_column_batches() {
     let engine = Engine::new();
