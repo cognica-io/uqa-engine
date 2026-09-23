@@ -6,6 +6,8 @@
 
 //! Durable record deltas reproduce complete checkpoints without republishing retained predicates.
 
+mod admission;
+
 use std::collections::BTreeMap;
 
 use proptest::prelude::*;

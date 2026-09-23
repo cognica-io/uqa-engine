@@ -143,7 +143,7 @@ impl<'a> Decoder<'a> {
         loop {
             self.control.check()?;
             match self.input.read(&mut [0]) {
-                Ok(0) => return Ok(()),
+                Ok(0) => return self.control.check().map_err(Into::into),
                 Ok(_) => return Err(invalid()),
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
                 Err(error) => return Err(io_error(error)),

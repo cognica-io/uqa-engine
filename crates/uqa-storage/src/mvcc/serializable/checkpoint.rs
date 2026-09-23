@@ -168,6 +168,7 @@ impl SerializableGraph {
         for entries in [&mut graph.predicates.reads, &mut graph.predicates.writes] {
             entries.sort_unstable_by_key(|entry| (entry.predicate.object, entry.fingerprint));
         }
+        control.check()?;
         graph.checkpoint_changed = false;
         Ok(graph)
     }

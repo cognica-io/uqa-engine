@@ -7,6 +7,7 @@
 //! Handoff preserves decisions and private observation marks; corrupt or incomplete state never escapes decoding.
 
 mod changes;
+mod completion;
 
 use std::ops::Bound::{Excluded, Included};
 

@@ -21,7 +21,7 @@ use crate::{
 };
 
 impl SerializableGraph {
-    /// Restore a complete ordered checkpoint record set for this database incarnation. The scanner supplies each key and one bounded value reader exactly once in byte-key order. Checksums, identities, keys, counts and graph references must all agree. The graph, owned predicates and retained comparison keys share the caller's allowance; no partial restore escapes on error.
+    /// Restore a complete ordered checkpoint record set for this database incarnation. The scanner supplies each key and one bounded value reader exactly once in byte-key order, stopping on a callback error. Admission retains the first decode error even if the scanner suppresses or replaces that stop signal; subsequent callbacks read nothing. Checksums, identities, keys, counts and graph references must all agree. The graph, owned predicates and retained comparison keys share the caller's allowance; no partial restore escapes on error.
     pub fn read_checkpoint_records(
         database: DatabaseId,
         coordinator: [u8; 16],
@@ -33,21 +33,37 @@ impl SerializableGraph {
         control.check()?;
         let mut graph = Self::new(database, coordinator, control.memory())?;
         let mut expected = [0; 4];
-        scan(&mut |key, input| {
-            control.check()?;
-            let key = SerializableCheckpointKey::from_bytes(key)?;
-            if graph
-                .checkpoint_records
-                .last()
-                .is_some_and(|previous| *previous >= key)
-                || (graph.checkpoint_records.is_empty() && key != SerializableCheckpointKey::HEADER)
-            {
+        let mut failure = None;
+        let scanned = scan(&mut |key, input| {
+            if failure.is_some() {
                 return Err(invalid());
             }
-            restore_record(&mut graph, key, input, &mut expected, control)?;
-            graph.checkpoint_records.push(key)?;
-            Ok(())
-        })?;
+            let result = (|| {
+                control.check()?;
+                let key = SerializableCheckpointKey::from_bytes(key)?;
+                if graph
+                    .checkpoint_records
+                    .last()
+                    .is_some_and(|previous| *previous >= key)
+                    || (graph.checkpoint_records.is_empty()
+                        && key != SerializableCheckpointKey::HEADER)
+                {
+                    return Err(invalid());
+                }
+                restore_record(&mut graph, key, input, &mut expected, control)?;
+                graph.checkpoint_records.push(key)?;
+                Ok(())
+            })();
+            result.map_err(|error| {
+                failure = Some(error);
+                invalid()
+            })
+        });
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        scanned?;
+        control.check()?;
         if graph.checkpoint_records.is_empty()
             || expected
                 != [
@@ -71,6 +87,7 @@ impl SerializableGraph {
             return Err(invalid());
         }
         graph.incoming.sort_unstable();
+        control.check()?;
         graph.checkpoint_changed = false;
         Ok(graph)
     }
