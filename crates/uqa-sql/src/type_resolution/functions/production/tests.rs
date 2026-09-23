@@ -51,26 +51,46 @@ fn function_results_retain_nested_type_payloads_and_release_inference_scratch() 
     let control = ProductionControl::new(&budget, &token, &token);
     let field = ScalarExpr::Column("value".into());
     let array_type = ColumnType::Array(Box::new(domain()));
-    for (name, ty, expected) in [
-        ("min", domain(), domain()),
-        ("array_agg", domain(), array_type.clone()),
-        ("array_cat", array_type.clone(), array_type.clone()),
-        ("unnest", array_type, domain()),
-        ("abs", domain(), ColumnType::Varchar(Some(17))),
+    for (name, argument_count, ty, expected) in [
+        ("min", 1, domain(), domain()),
+        ("array_agg", 1, domain(), array_type.clone()),
+        ("array_cat", 2, array_type.clone(), array_type.clone()),
+        ("unnest", 1, array_type, domain()),
+        (
+            "abs",
+            1,
+            ColumnType::Domain {
+                schema: "app".into(),
+                name: "bounded_integer".into(),
+                oid: 99_998,
+                base: Box::new(ColumnType::Integer),
+            },
+            ColumnType::Integer,
+        ),
         (
             "PG_CATALOG.ARRAY_REVERSE",
+            1,
             ColumnType::Array(Box::new(ColumnType::Json)),
             ColumnType::Array(Box::new(ColumnType::Json)),
         ),
     ] {
-        let output = resolve(name, None, std::slice::from_ref(&field), &ty, &control)
-            .unwrap()
-            .unwrap();
+        let args = vec![field.clone(); argument_count];
+        let output = resolve(name, None, &args, &ty, &control).unwrap().unwrap();
         assert_eq!(*output, expected, "{name}");
         assert_eq!(budget.used(), output.reserved_bytes());
         drop(output);
         assert_eq!(budget.used(), 0);
     }
+    let error = resolve(
+        "abs",
+        None,
+        std::slice::from_ref(&field),
+        &domain(),
+        &control,
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42883"));
+    assert_eq!(budget.used(), 0);
 }
 
 #[test]
