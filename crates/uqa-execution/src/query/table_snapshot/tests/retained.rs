@@ -8,6 +8,7 @@ use super::*;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 mod lookup;
+mod presence;
 mod private;
 
 #[derive(Clone)]
@@ -17,6 +18,7 @@ struct ProjectedSource {
     projections: Arc<AtomicUsize>,
     borrowing: Arc<AtomicBool>,
     cancel_after_page: Option<CancellationToken>,
+    forbid_owned_fields: bool,
 }
 
 impl ProjectedSource {
@@ -27,6 +29,7 @@ impl ProjectedSource {
             projections: Arc::default(),
             borrowing: Arc::default(),
             cancel_after_page: None,
+            forbid_owned_fields: false,
         }
     }
 }
@@ -52,10 +55,26 @@ impl DocumentStore for ProjectedSource {
         self.rows.contains_doc_id(id)
     }
     fn get_field(&self, id: DocId, field: &str) -> StorageBackendResult<Option<Value>> {
+        assert!(
+            !self.forbid_owned_fields,
+            "projection must borrow its values"
+        );
         assert!(!self.borrowing.load(Ordering::Relaxed));
         assert_ne!(field, "opaque");
         self.projections.fetch_add(1, Ordering::Relaxed);
         self.rows.get_field(id, field)
+    }
+    fn field_presence_controlled(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<bool>> {
+        assert!(
+            !self.borrowing.load(Ordering::Relaxed),
+            "metadata must precede the provider borrow"
+        );
+        self.rows.field_presence_controlled(ids, fields, control)
     }
     fn for_each_fields_multi_ref_with_presence(
         &self,

@@ -31,6 +31,7 @@ impl NativeDocumentRead<'_> {
     pub(in crate::document_store) fn retained_many(
         &self,
         ids: &[DocId],
+        projection: Option<&[&str]>,
     ) -> SQLiteResult<uqa_storage::RetainedDocumentPage> {
         self.snapshot.control.check()?;
         self.control.check()?;
@@ -39,7 +40,7 @@ impl NativeDocumentRead<'_> {
         for id in ids {
             self.snapshot.control.check()?;
             self.control.check()?;
-            page.push(self.retained(*id, None)?)?;
+            page.push(self.retained(*id, projection)?)?;
         }
         self.snapshot.control.check()?;
         self.control.check()?;

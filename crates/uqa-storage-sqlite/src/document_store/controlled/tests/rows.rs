@@ -9,9 +9,11 @@ use crate::{
 };
 use uqa_core::{ArrayValue, DecimalValue, Value};
 use uqa_storage::{
-    document_store::read_stored_documents, key_value::KeyValueDocumentStore,
-    mvcc::VersionedSessionOptions, read_control::StorageReadControl, DocumentMetadata,
-    DocumentStore, StorageBackendError, StoredDocument,
+    document_store::{read_field_presence, read_stored_documents},
+    key_value::KeyValueDocumentStore,
+    mvcc::VersionedSessionOptions,
+    read_control::StorageReadControl,
+    DocumentMetadata, DocumentStore, StorageBackendError, StoredDocument,
 };
 
 #[derive(Clone, Copy)]
@@ -21,6 +23,8 @@ enum Provider {
     KeyValue,
 }
 const PROVIDERS: [Provider; 3] = [Provider::Legacy, Provider::Native, Provider::KeyValue];
+
+mod presence;
 
 fn document() -> StoredDocument {
     StoredDocument::with_metadata(
@@ -67,8 +71,8 @@ fn document() -> StoredDocument {
     )
 }
 
-fn verify(connection: &ManagedConnection, provider: Provider) {
-    let mut source: Box<dyn DocumentStore> = match provider {
+fn store(connection: &ManagedConnection, provider: Provider) -> Box<dyn DocumentStore> {
+    match provider {
         Provider::KeyValue => Box::new(KeyValueDocumentStore::new(
             std::sync::Arc::new(SQLiteKeyValueStore::new(connection.clone()).unwrap()),
             "docs",
@@ -82,7 +86,11 @@ fn verify(connection: &ManagedConnection, provider: Provider) {
             }
             Box::new(SQLiteDocumentStore::new(connection.clone(), "docs"))
         }
-    };
+    }
+}
+
+fn verify(connection: &ManagedConnection, provider: Provider) {
+    let mut source = store(connection, provider);
     let expected = document();
     for id in [1, 3, 5] {
         source.put_stored(id, expected.clone()).unwrap();
@@ -106,6 +114,18 @@ fn verify(connection: &ManagedConnection, provider: Provider) {
     drop(live);
     assert_eq!(control.memory().used(), 0);
     if let Some(snapshot) = snapshot {
+        let presence = read_field_presence(
+            snapshot.as_ref(),
+            &[3, 99, 3],
+            &["bytes", "numeric", "missing"],
+            &control,
+        )
+        .unwrap();
+        assert_eq!(
+            &*presence,
+            &[true, true, false, false, false, false, true, true, false]
+        );
+        drop(presence);
         let page = read_stored_documents(snapshot.as_ref(), &[3, 99, 1, 3], &control).unwrap();
         assert!(page[1].is_none());
         for index in [0, 2, 3] {
@@ -129,6 +149,18 @@ fn verify(connection: &ManagedConnection, provider: Provider) {
         Err(StorageBackendError::Memory(_))
     ));
     assert_eq!(tiny.memory().used(), 0);
+    let presence = read_field_presence(
+        source.as_ref(),
+        &[3, 1, 5],
+        &["bytes", "numeric", "missing"],
+        &control,
+    )
+    .unwrap();
+    assert_eq!(
+        &*presence,
+        &[false, false, false, false, false, false, true, true, false]
+    );
+    drop(presence);
     assert!(read_stored_documents(source.as_ref(), &[], &tiny)
         .unwrap()
         .is_empty());
@@ -138,6 +170,10 @@ fn verify(connection: &ManagedConnection, provider: Provider) {
         Err(StorageBackendError::Cancelled(_))
     ));
     assert_eq!(control.memory().used(), 0);
+    assert!(matches!(
+        read_field_presence(source.as_ref(), &[5], &["bytes"], &control),
+        Err(StorageBackendError::Cancelled(_))
+    ));
     control.cancellation().reset();
     if let Some(captured) = connection.retention_control() {
         captured.cancellation().cancel();

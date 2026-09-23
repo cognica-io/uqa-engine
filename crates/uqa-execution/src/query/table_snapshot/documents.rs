@@ -188,6 +188,67 @@ impl DocumentStore for RetainedDocuments {
         }
     }
 
+    fn field_presence_controlled(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<BudgetedVec<bool>> {
+        self.0.control.check()?;
+        control.check()?;
+        let mut present = BudgetedVec::new(control.memory());
+        if fields.is_empty() {
+            return Ok(present);
+        }
+        for id in ids {
+            self.0.control.check()?;
+            control.check()?;
+            let private = self.0.changes.contains_change(*id);
+            let (source, layout): (&dyn DocumentStore, &RowLayout) = if private {
+                (&self.0.changes, &self.0.private_layout)
+            } else {
+                (self.0.source.as_ref(), &self.0.layout)
+            };
+            let row_ids = uqa_storage::document_store::read_document_ids(
+                source,
+                id.checked_sub(1),
+                1,
+                control,
+            )?;
+            let exists = row_ids.first() == Some(id);
+            let mut unknown = BudgetedVec::new(control.memory());
+            for field in fields {
+                control.check()?;
+                if !layout.field_is_declared(field) && !layout.field_is_removed(field) {
+                    unknown.push(*field)?;
+                }
+            }
+            let physical = if exists {
+                uqa_storage::document_store::read_field_presence(source, &[*id], &unknown, control)?
+            } else {
+                BudgetedVec::new(control.memory())
+            };
+            let mut index = 0;
+            for field in fields {
+                self.0.control.check()?;
+                control.check()?;
+                let value = if !exists || layout.field_is_removed(field) {
+                    false
+                } else if layout.field_is_declared(field) {
+                    true
+                } else {
+                    let value = physical[index];
+                    index += 1;
+                    value
+                };
+                present.push(value)?;
+            }
+        }
+        self.0.control.check()?;
+        control.check()?;
+        Ok(present)
+    }
+
     fn contains_doc_id(&self, id: DocId) -> StorageBackendResult<bool> {
         self.0.control.check()?;
         match self.0.changes.change_presence(id) {
@@ -288,23 +349,24 @@ impl DocumentStore for RetainedDocuments {
         let Some(projection) = self.0.layout.projection(fields)? else {
             return Ok(None);
         };
-        if !projection.only_sources() {
+        let Some(sources) = projection.shared_sources()? else {
             return Ok(None);
-        }
+        };
         for id in ids {
             self.0.control.check()?;
             if self.0.changes.contains_change(*id) {
                 return Ok(None);
             }
         }
-        let rows = self.0.source.get_shared_fields(ids, &projection.sources)?;
+        let rows = self.0.source.get_shared_fields(ids, &sources)?;
         if rows.as_ref().is_some_and(|rows| {
             rows.iter()
                 .flatten()
-                .any(|row| row.with_projected(|values| projection.needs_presence(values)))
+                .any(|row| row.with_projected(|values| projection.needs_shared_fallback(values)))
         }) {
             return Ok(None);
         }
+        self.0.control.check()?;
         Ok(rows)
     }
 
@@ -317,19 +379,21 @@ impl DocumentStore for RetainedDocuments {
         let Some(projection) = self.0.layout.projection(fields)? else {
             return Ok(None);
         };
-        if self.0.changes.has_changes() || !projection.only_sources() {
+        if self.0.changes.has_changes() {
             return Ok(None);
         }
-        let rows = self
-            .0
-            .source
-            .next_shared_fields(after, limit, &projection.sources)?;
+        let Some(sources) = projection.shared_sources()? else {
+            return Ok(None);
+        };
+        let rows = self.0.source.next_shared_fields(after, limit, &sources)?;
         if rows.as_ref().is_some_and(|rows| {
-            rows.iter()
-                .any(|(_, row)| row.with_projected(|values| projection.needs_presence(values)))
+            rows.iter().any(|(_, row)| {
+                row.with_projected(|values| projection.needs_shared_fallback(values))
+            })
         }) {
             return Ok(None);
         }
+        self.0.control.check()?;
         Ok(rows)
     }
 

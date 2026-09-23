@@ -127,6 +127,27 @@ impl PortalSnapshotProbeStore {
 }
 
 impl DocumentStore for PortalSnapshotProbeStore {
+    fn field_presence_controlled(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<bool>> {
+        control.check()?;
+        let mut present = uqa_core::memory::BudgetedVec::new(control.memory());
+        for id in ids {
+            for field in fields {
+                control.check()?;
+                present.push(
+                    self.docs
+                        .get(id)
+                        .is_some_and(|row| row.fields().contains_key(*field)),
+                )?;
+            }
+        }
+        Ok(present)
+    }
+
     fn put_stored(&mut self, doc_id: DocId, document: StoredDocument) -> StorageBackendResult<()> {
         Arc::make_mut(&mut self.docs).insert(doc_id, document);
         Ok(())

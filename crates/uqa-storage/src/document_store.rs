@@ -22,6 +22,8 @@ mod controlled_ids;
 pub use controlled_ids::read_document_ids;
 mod controlled_rows;
 pub use controlled_rows::{read_stored_documents, RetainedDocumentPage};
+mod controlled_presence;
+pub use controlled_presence::read_field_presence;
 pub mod decoding;
 pub mod identifiers;
 mod retained;
@@ -196,6 +198,16 @@ pub trait DocumentStore: Send + Sync {
         Err(StorageBackendError::Other(
             "controlled whole-document reads are not supported by this store".into(),
         ))
+    }
+
+    /// Read field existence on one selected view, in document-major and then field order. A stored NULL is present; an absent field or document is not. The returned boolean buffer retains the invoking allowance. The default uses controlled rows without invoking legacy owned materializers; stores can inspect their existing field layout without copying values.
+    fn field_presence_controlled(
+        &self,
+        doc_ids: &[DocId],
+        fields: &[&str],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<BudgetedVec<bool>> {
+        controlled_presence::from_controlled_rows(self, doc_ids, fields, control)
     }
 
     /// Replace public fields while preserving metadata already owned by the stored tuple. Engine code that creates a new tuple version must call [`DocumentStore::put_stored`] with the new metadata explicitly.

@@ -36,6 +36,23 @@ impl DocumentStore for ReadOnlySnapshot<dyn DocumentStore> {
         self.0.get_stored_many_controlled(ids, control)
     }
 
+    fn field_presence_controlled(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<BudgetedVec<bool>> {
+        if let Some(captured) = &self.2 {
+            captured.check()?;
+        }
+        let present =
+            crate::document_store::read_field_presence(self.0.as_ref(), ids, fields, control)?;
+        if let Some(captured) = &self.2 {
+            captured.check()?;
+        }
+        Ok(present)
+    }
+
     fn put(&mut self, _doc_id: DocId, _document: Document) -> StorageBackendResult<()> {
         Err(read_only_error())
     }

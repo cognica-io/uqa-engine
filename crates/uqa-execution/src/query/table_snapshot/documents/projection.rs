@@ -53,7 +53,6 @@ impl RetainedDocuments {
                 if !self.visit_source_projection(
                     source,
                     &ids[start..index],
-                    fields,
                     projection,
                     &nulls,
                     visitor,
@@ -103,61 +102,67 @@ impl RetainedDocuments {
         &self,
         source: &dyn DocumentStore,
         ids: &[DocId],
-        fields: &[&str],
         projection: &RowProjection<'_>,
         nulls: &[&Value],
         visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
     ) -> StorageBackendResult<bool> {
-        let mut offset = 0;
-        while offset < ids.len() {
-            self.0.control.check()?;
-            let mut visited = 0;
-            let mut ambiguous = None;
-            let mut keep_going = true;
-            let mut failure = None;
-            let read = source.for_each_fields_multi_ref_with_presence(
-                &ids[offset..],
+        let presence = if projection.needs_presence() {
+            uqa_storage::document_store::read_field_presence(
+                source,
+                ids,
                 &projection.sources,
-                &mut |id, present, values| {
-                    visited += 1;
-                    if let Err(error) = self.0.control.check() {
-                        failure = Some(error);
-                        return false;
-                    }
-                    if present && projection.needs_presence(values) {
-                        ambiguous = Some(id);
-                        return false;
-                    }
-                    keep_going = if present {
-                        match projection.values(values) {
-                            Ok(projected) => visitor(id, true, &projected),
-                            Err(error) => {
-                                failure = Some(error);
-                                false
-                            }
+                &self.0.control,
+            )?
+        } else {
+            BudgetedVec::new(self.0.control.memory())
+        };
+        let mut visited = 0;
+        let mut keep_going = true;
+        let mut failure = None;
+        let read = source.for_each_fields_multi_ref_with_presence(
+            ids,
+            &projection.sources,
+            &mut |id, present, values| {
+                if let Err(error) = self.0.control.check() {
+                    failure = Some(error);
+                    return false;
+                }
+                if ids.get(visited) != Some(&id) || values.len() != projection.sources.len() {
+                    failure = Some(super::StorageBackendError::Other(
+                        "document projection returned an unexpected identity or field count".into(),
+                    ));
+                    return false;
+                }
+                let fields_present = if projection.needs_presence() {
+                    let start = visited * projection.sources.len();
+                    &presence[start..start + projection.sources.len()]
+                } else {
+                    &[]
+                };
+                visited += 1;
+                keep_going = if present {
+                    match projection.values(values, fields_present) {
+                        Ok(projected) => visitor(id, true, &projected),
+                        Err(error) => {
+                            failure = Some(error);
+                            false
                         }
-                    } else {
-                        visitor(id, false, nulls)
-                    };
-                    keep_going
-                },
-            );
-            if let Some(error) = failure {
-                return Err(error);
-            }
-            read?;
-            if !keep_going {
-                return Ok(false);
-            }
-            let Some(id) = ambiguous else {
-                break;
-            };
-            // Release the provider's borrowed-row guard before requesting field-presence information.
-            if !self.visit_individual_projection(id, fields, nulls, visitor)? {
-                return Ok(false);
-            }
-            offset += visited;
+                    }
+                } else {
+                    visitor(id, false, nulls)
+                };
+                keep_going
+            },
+        );
+        if let Some(error) = failure {
+            return Err(error);
         }
-        Ok(true)
+        read?;
+        if keep_going && visited != ids.len() {
+            return Err(super::StorageBackendError::Other(
+                "document projection ended before every requested identity".into(),
+            ));
+        }
+        Ok(keep_going)
     }
 }

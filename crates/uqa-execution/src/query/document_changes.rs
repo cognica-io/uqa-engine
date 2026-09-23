@@ -348,6 +348,42 @@ impl DocumentStore for DocumentChanges {
         })
     }
 
+    fn field_presence_controlled(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<bool>> {
+        control.check()?;
+        let mut present = uqa_core::memory::BudgetedVec::new(control.memory());
+        if fields.is_empty() {
+            return Ok(present);
+        }
+        let mut index = 0;
+        while index < ids.len() {
+            control.check()?;
+            if let Some((end, source)) = self.source_run(ids, index) {
+                let page = uqa_storage::document_store::read_field_presence(
+                    source.as_ref(),
+                    &ids[index..end],
+                    fields,
+                    control,
+                )?;
+                present.extend_from_slice(&page)?;
+                index = end;
+            } else {
+                let row = self.get(ids[index]).and_then(Change::fields);
+                for field in fields {
+                    control.check()?;
+                    present.push(row.is_some_and(|row| row.contains_key(*field)))?;
+                }
+                index += 1;
+            }
+        }
+        control.check()?;
+        Ok(present)
+    }
+
     fn contains_doc_id(&self, id: DocId) -> StorageBackendResult<bool> {
         Ok(self.change_presence(id) == Some(true))
     }

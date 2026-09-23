@@ -328,6 +328,28 @@ impl DocumentStore for RetainedDocumentStore {
         Ok(Some(visited))
     }
 
+    fn field_presence_controlled(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<BudgetedVec<bool>> {
+        self.control.check()?;
+        control.check()?;
+        let mut present = BudgetedVec::new(control.memory());
+        for id in ids {
+            let row = self.document(*id);
+            for field in fields {
+                self.control.check()?;
+                control.check()?;
+                present.push(row.is_some_and(|row| row.fields().contains_key(*field)))?;
+            }
+        }
+        self.control.check()?;
+        control.check()?;
+        Ok(present)
+    }
+
     fn find_doc_id_by_field(
         &self,
         field: &str,

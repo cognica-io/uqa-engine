@@ -26,12 +26,21 @@ impl SQLiteDocumentStore {
         ids: &[DocId],
         control: &StorageReadControl,
     ) -> SQLiteResult<RetainedDocumentPage> {
+        self.read_projected_rows_controlled(ids, None, control)
+    }
+
+    pub(in crate::document_store) fn read_projected_rows_controlled(
+        &self,
+        ids: &[DocId],
+        projection: Option<&[&str]>,
+        control: &StorageReadControl,
+    ) -> SQLiteResult<RetainedDocumentPage> {
         control.check()?;
         if ids.is_empty() {
             return Ok(BudgetedVec::new(control.memory()));
         }
-        if let Some(page) =
-            self.read_native_with_control(Some(control), |read| read.retained_many(ids))?
+        if let Some(page) = self
+            .read_native_with_control(Some(control), |read| read.retained_many(ids, projection))?
         {
             return Ok(page);
         }
@@ -41,7 +50,13 @@ impl SQLiteDocumentStore {
             page.reserve(ids.len())?;
             for id in ids {
                 control.check()?;
-                page.push(read_legacy(connection, &self.table, *id, control)?)?;
+                page.push(read_legacy(
+                    connection,
+                    &self.table,
+                    *id,
+                    projection,
+                    control,
+                )?)?;
             }
             control.check()?;
             Ok(page)
@@ -55,6 +70,7 @@ fn read_legacy(
     connection: &Connection,
     table: &str,
     id: DocId,
+    projection: Option<&[&str]>,
     control: &StorageReadControl,
 ) -> SQLiteResult<Option<RetainedStoredDocument>> {
     let mut statement = connection.prepare_cached(
@@ -77,7 +93,7 @@ fn read_legacy(
             SQLiteError::StorageBackend("document tuple xmin is outside the u32 range".into())
         })?),
     };
-    let fields = hydrate_fields(fields, None, control, |field, marker| {
+    let fields = hydrate_fields(fields, projection, control, |field, marker| {
         if marker.field != field {
             return Err(corrupt(
                 table,

@@ -14,13 +14,17 @@ use uqa_storage::{
 
 enum Slot<'a> {
     Source(usize),
+    Missing {
+        source: usize,
+        alternate: Option<usize>,
+        default: &'a Value,
+    },
     Constant(&'a Value),
 }
 
 pub(in crate::query::table_snapshot) struct RowProjection<'a> {
     pub sources: BudgetedVec<&'a str>,
     slots: BudgetedVec<Slot<'a>>,
-    ambiguous_nulls: BudgetedVec<usize>,
     control: StorageReadControl,
 }
 
@@ -28,6 +32,7 @@ impl RowProjection<'_> {
     pub fn values<'a>(
         &'a self,
         values: &[&'a Value],
+        present: &[bool],
     ) -> StorageBackendResult<BudgetedVec<&'a Value>> {
         self.control.check()?;
         let mut projected = BudgetedVec::new(self.control.memory());
@@ -36,20 +41,49 @@ impl RowProjection<'_> {
             self.control.check()?;
             projected.push(match slot {
                 Slot::Source(index) => values[*index],
+                Slot::Missing {
+                    source,
+                    alternate,
+                    default,
+                } => {
+                    if present[*source] {
+                        values[*source]
+                    } else if let Some(alternate) = alternate.filter(|index| present[*index]) {
+                        values[alternate]
+                    } else {
+                        default
+                    }
+                }
                 Slot::Constant(value) => *value,
             })?;
         }
         Ok(projected)
     }
 
-    pub fn only_sources(&self) -> bool {
-        self.sources.len() == self.slots.len()
+    pub fn shared_sources(&self) -> StorageBackendResult<Option<BudgetedVec<&str>>> {
+        self.control.check()?;
+        let mut sources = BudgetedVec::new(self.control.memory());
+        for slot in self.slots.iter() {
+            self.control.check()?;
+            let source = match slot {
+                Slot::Source(source) | Slot::Missing { source, .. } => *source,
+                Slot::Constant(_) => return Ok(None),
+            };
+            sources.push(self.sources[source])?;
+        }
+        Ok(Some(sources))
     }
 
-    pub fn needs_presence(&self, values: &[&Value]) -> bool {
-        self.ambiguous_nulls
+    pub fn needs_shared_fallback(&self, values: &[&Value]) -> bool {
+        self.slots.iter().zip(values).any(|(slot, value)| {
+            matches!(slot, Slot::Missing { .. }) && matches!(value, Value::Null)
+        })
+    }
+
+    pub fn needs_presence(&self) -> bool {
+        self.slots
             .iter()
-            .any(|index| matches!(values[*index], Value::Null))
+            .any(|slot| matches!(slot, Slot::Missing { .. }))
     }
 }
 
@@ -72,12 +106,12 @@ impl RowLayout {
         self.control.check()?;
         let mut sources = BudgetedVec::new(self.control.memory());
         let mut slots = BudgetedVec::new(self.control.memory());
-        let mut ambiguous_nulls = BudgetedVec::new(self.control.memory());
         for field in fields {
             self.control.check()?;
             let original_slot = self.source.iter().any(|(name, _)| name == field);
-            let source = if let Some(column) = self.columns.iter().find(|c| c.name == *field) {
-                // Owned projections distinguish absent fields from explicit NULL before applying a missing value, and evaluate generated dependencies.
+            let column = self.columns.iter().find(|c| c.name == *field);
+            let source = if let Some(column) = column {
+                // Generated production retains its separate expression-evaluation boundary.
                 if column.generated.is_some() {
                     return Ok(None);
                 }
@@ -85,7 +119,6 @@ impl RowLayout {
                     .source_name(field)
                     .or_else(|| (!original_slot).then_some(*field))
                 {
-                    Some(_) if column.missing_value.is_some() => return Ok(None),
                     Some(source) => Some(source),
                     None => {
                         slots.push(Slot::Constant(
@@ -100,12 +133,25 @@ impl RowLayout {
                 Some(*field)
             };
             if let Some(source) = source {
-                // A missing renamed source preserves an undeclared target field, whereas an explicit NULL overwrites it.
-                if source != *field && !original_slot {
-                    ambiguous_nulls.push(sources.len())?;
-                }
-                slots.push(Slot::Source(sources.len()))?;
+                let index = sources.len();
                 sources.push(source)?;
+                let alternate = if source != *field && !original_slot {
+                    let alternate = sources.len();
+                    sources.push(*field)?;
+                    Some(alternate)
+                } else {
+                    None
+                };
+                let default = column.and_then(|column| column.missing_value.as_ref());
+                if alternate.is_some() || default.is_some() {
+                    slots.push(Slot::Missing {
+                        source: index,
+                        alternate,
+                        default: default.unwrap_or(&Value::Null),
+                    })?;
+                } else {
+                    slots.push(Slot::Source(index))?;
+                }
             } else {
                 slots.push(Slot::Constant(&Value::Null))?;
             }
@@ -113,9 +159,16 @@ impl RowLayout {
         Ok(Some(RowProjection {
             sources,
             slots,
-            ambiguous_nulls,
             control: self.control.clone(),
         }))
+    }
+
+    pub(in crate::query::table_snapshot) fn field_is_declared(&self, field: &str) -> bool {
+        self.columns.iter().any(|column| column.name == field)
+    }
+
+    pub(in crate::query::table_snapshot) fn field_is_removed(&self, field: &str) -> bool {
+        !self.field_is_declared(field) && self.source.iter().any(|(name, _)| name == field)
     }
 
     pub(in crate::query::table_snapshot) fn base_field(

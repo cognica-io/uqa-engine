@@ -280,6 +280,25 @@ impl DocumentStore for MemoryDocumentStore {
         Ok(())
     }
 
+    fn field_presence_controlled(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<BudgetedVec<bool>> {
+        control.check()?;
+        let mut present = BudgetedVec::new(control.memory());
+        for id in ids {
+            let row = self.state.documents.get(id);
+            for field in fields {
+                control.check()?;
+                present.push(row.is_some_and(|row| self.field(row, field).is_some()))?;
+            }
+        }
+        control.check()?;
+        Ok(present)
+    }
+
     fn get_shared_fields(
         &self,
         doc_ids: &[DocId],

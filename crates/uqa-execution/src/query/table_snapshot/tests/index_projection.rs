@@ -51,6 +51,14 @@ impl DocumentStore for DecodingSource {
     fn len(&self) -> StorageBackendResult<usize> {
         self.rows.len()
     }
+    fn field_presence_controlled(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<bool>> {
+        self.rows.field_presence_controlled(ids, fields, control)
+    }
     fn for_each_fields_multi_ref_with_presence(
         &self,
         ids: &[DocId],
@@ -143,9 +151,12 @@ fn provider_projection_allowance_remains_live_during_index_reconstruction() {
 
 #[test]
 fn index_reconstruction_stops_at_its_first_error_before_later_provider_cancellation() {
-    for headroom in [0, 256] {
+    for (headroom, defaults) in [(0, false), (256, false), (0, true), (256, true)] {
         let control = StorageReadControl::with_limit(64 * 1024);
-        let columns = columns("CREATE TABLE t (value TEXT)");
+        let mut columns = columns("CREATE TABLE t (value TEXT)");
+        if defaults {
+            columns[0].missing_value = Some(Value::Str("missing".into()));
+        }
         let index = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
         let mut schema = schema(&columns, &index);
         let text_fields = ["value".into()];

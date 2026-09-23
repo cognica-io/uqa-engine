@@ -19,7 +19,7 @@ pub type RetainedDocumentPage = BudgetedVec<Option<RetainedStoredDocument>>;
 
 /// Validate one whole-row page without releasing its provider reservations or copying decoded payloads.
 pub fn read_stored_documents(
-    source: &dyn DocumentStore,
+    source: &(impl DocumentStore + ?Sized),
     ids: &[uqa_core::DocId],
     control: &StorageReadControl,
 ) -> StorageBackendResult<RetainedDocumentPage> {

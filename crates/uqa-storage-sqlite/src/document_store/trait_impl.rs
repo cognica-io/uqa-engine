@@ -303,6 +303,32 @@ impl DocumentStore for SQLiteDocumentStore {
         Ok(())
     }
 
+    fn field_presence_controlled(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<bool>> {
+        control.check()?;
+        let mut present = uqa_core::memory::BudgetedVec::new(control.memory());
+        if fields.is_empty() {
+            return Ok(present);
+        }
+        // Existence depends on body keys, so metadata reads never hydrate value BLOBs.
+        let rows = self.read_projected_rows_controlled(ids, Some(&[]), control)?;
+        for row in rows.iter() {
+            for field in fields {
+                control.check()?;
+                present.push(
+                    row.as_ref()
+                        .is_some_and(|row| row.fields().contains_key(*field)),
+                )?;
+            }
+        }
+        control.check()?;
+        Ok(present)
+    }
+
     fn iter_all(&self) -> StorageBackendResult<Box<dyn Iterator<Item = (DocId, Document)> + '_>> {
         let snapshot = self.snapshot()?;
         let mut rows = Vec::new();

@@ -9,8 +9,10 @@
 use super::*;
 use uqa_storage::key_value::conformance::{verify_document_ownership, verify_document_reopen};
 use uqa_storage::{
-    document_store::read_document_ids, key_value::KeyValueDocumentStore,
-    read_control::StorageReadControl, DocumentStore, StorageBackendError,
+    document_store::{read_document_ids, read_field_presence},
+    key_value::KeyValueDocumentStore,
+    read_control::StorageReadControl,
+    DocumentStore, StorageBackendError,
 };
 
 #[test]
@@ -97,6 +99,20 @@ fn controlled_whole_rows_keep_redb_selected_payloads_after_provider_close() {
     let snapshot = documents.snapshot().unwrap();
     documents.delete(3).unwrap();
     let control = StorageReadControl::with_limit(1 << 20);
+    let presence = read_field_presence(
+        snapshot.as_ref(),
+        &[3, 99, 3],
+        &["record", "missing", "payload"],
+        &control,
+    )
+    .unwrap();
+    assert_eq!(
+        &*presence,
+        &[true, false, true, false, false, false, true, false, true]
+    );
+    assert!(control.memory().used() < 32 << 10);
+    drop(presence);
+    assert_eq!(control.memory().used(), 0);
     let page = read_stored_documents(snapshot.as_ref(), &[3, 99, 3], &control).unwrap();
     assert!(page[1].is_none());
     for index in [0, 2] {
@@ -110,11 +126,20 @@ fn controlled_whole_rows_keep_redb_selected_payloads_after_provider_close() {
     assert!(read_stored_documents(&documents, &[3], &control).unwrap()[0].is_none());
     let tiny = StorageReadControl::with_limit(4096);
     assert!(matches!(
+        read_field_presence(snapshot.as_ref(), &[3], &["payload"], &tiny),
+        Err(StorageBackendError::Memory(_))
+    ));
+    assert_eq!(tiny.memory().used(), 0);
+    assert!(matches!(
         read_stored_documents(snapshot.as_ref(), &[3], &tiny),
         Err(StorageBackendError::Memory(_))
     ));
     assert_eq!(tiny.memory().used(), 0);
     tiny.cancellation().cancel();
+    assert!(matches!(
+        read_field_presence(snapshot.as_ref(), &[3], &["payload"], &tiny),
+        Err(StorageBackendError::Cancelled(_))
+    ));
     assert!(matches!(
         read_stored_documents(snapshot.as_ref(), &[3], &tiny),
         Err(StorageBackendError::Cancelled(_))
