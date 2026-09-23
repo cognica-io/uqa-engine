@@ -113,6 +113,8 @@ struct State {
     abort_fault: AbortFault,
     attempts: Vec<CommitFingerprint>,
     required_keys: Vec<Vec<u8>>,
+    acknowledgements: Vec<ReceiptAcknowledgement>,
+    acknowledgement_fault: bool,
 }
 struct Persistence {
     store: MemoryVersionStore,
@@ -134,6 +136,8 @@ impl Persistence {
                 abort_fault: AbortFault::None,
                 attempts: Vec::new(),
                 required_keys: Vec::new(),
+                acknowledgements: Vec::new(),
+                acknowledgement_fault: false,
             }),
         })
     }
@@ -147,6 +151,30 @@ impl Persistence {
 }
 
 impl VersionedPersistence for Persistence {
+    fn acknowledge_transaction(
+        &self,
+        acknowledgement: ReceiptAcknowledgement,
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        control.check()?;
+        let mut state = self.state.lock();
+        let id = acknowledgement.transaction();
+        acknowledgement.validate(
+            state
+                .receipts
+                .get(&id.allocation())
+                .copied()
+                .unwrap_or(CommitStatus::Unknown),
+        )?;
+        state.acknowledgements.push(acknowledgement);
+        if std::mem::take(&mut state.acknowledgement_fault) {
+            return Err(
+                StorageBackendError::Other("lost receipt acknowledgement reply".into()).into(),
+            );
+        }
+        Ok(())
+    }
+
     fn serializable_coordinator(&self) -> Option<&dyn SerializableCoordinator> {
         Some(self)
     }

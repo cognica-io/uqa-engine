@@ -48,6 +48,17 @@ impl SerializableSession for ManagedConnection {
 }
 
 impl ManagedConnection {
+    pub(crate) fn with_local_receipt_admission<T>(
+        &self,
+        state: Option<&std::sync::Arc<uqa_storage::mvcc::LocalSerializableState>>,
+        control: &StorageReadControl,
+        operation: impl FnOnce(&dyn uqa_storage::mvcc::SerializableLeases) -> VersionResult<T>,
+    ) -> VersionResult<T> {
+        state
+            .unwrap_or(&self.pool.receipt_state)
+            .with_admission(&self.pool, control, operation)
+    }
+
     fn with_serializable_session<T>(
         &self,
         operation: impl FnOnce(&dyn SerializableSession) -> StorageBackendResult<T>,

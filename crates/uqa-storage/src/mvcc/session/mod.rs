@@ -306,6 +306,10 @@ impl VersionedKeyValueStore {
             .as_mut()
             .expect("retained attempt")
             .commit(&*self.persistence, &self.write_control())?;
+        active
+            .as_ref()
+            .expect("retained attempt")
+            .acknowledge_completion(&*self.persistence, &self.control)?;
         *active = None;
         Ok(result)
     }
@@ -613,6 +617,10 @@ impl KeyValueStore for VersionedKeyValueStore {
             .as_mut()
             .ok_or_else(no_transaction)?
             .commit(&*self.persistence, &self.write_control())?;
+        active
+            .as_ref()
+            .expect("completed attempt")
+            .acknowledge_completion(&*self.persistence, &self.control)?;
         *active = None;
         Ok(())
     }
@@ -623,6 +631,10 @@ impl KeyValueStore for VersionedKeyValueStore {
             .as_mut()
             .ok_or_else(no_transaction)?
             .abort(&*self.persistence, &self.control)?;
+        active
+            .as_ref()
+            .expect("completed attempt")
+            .acknowledge_completion(&*self.persistence, &self.control)?;
         *active = None;
         Ok(())
     }

@@ -21,6 +21,31 @@ use crate::StorageBackendError;
 use crate::StorageBackendResult;
 
 impl Transaction {
+    pub(in crate::mvcc::session) fn acknowledge_completion(
+        &self,
+        persistence: &dyn VersionedPersistence,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<()> {
+        use crate::mvcc::ReceiptAcknowledgement;
+        let acknowledgement = match self.outcome {
+            Some(CommitErrorOutcome::Committed(receipt)) => {
+                ReceiptAcknowledgement::Committed(receipt)
+            }
+            Some(CommitErrorOutcome::Aborted(transaction)) => {
+                ReceiptAcknowledgement::Aborted(transaction)
+            }
+            None => return Ok(()),
+            Some(CommitErrorOutcome::Indeterminate(_)) => {
+                return Err(
+                    self.completion_error(VersionError::TransactionSealed.into_storage_error())
+                );
+            }
+        };
+        persistence
+            .acknowledge_transaction(acknowledgement, control)
+            .map_err(|error| self.completion_error(error.into_storage_error()))
+    }
+
     pub(in crate::mvcc::session) fn pending_completion(&self) -> Option<TransactionOutcomeId> {
         self.allocation
             .map(TransactionOutcomeId::Records)

@@ -18,13 +18,26 @@ pub(super) fn validate_metadata(
     table: &impl ReadableTable<&'static str, &'static [u8]>,
     expected: DatabaseId,
 ) -> VersionResult<()> {
-    if read_u64(table, "format")? != 42 {
+    if read_u64(table, "format")? != 43 {
         return Err(VersionError::InvalidEncoding("unknown record format"));
     }
     if database_id(table)? != expected {
         return Err(VersionError::WrongDatabase);
     }
+    receipt_limit(table)?;
     Ok(())
+}
+
+pub(super) fn receipt_limit(
+    table: &impl ReadableTable<&'static str, &'static [u8]>,
+) -> VersionResult<u64> {
+    let limit = read_u64(table, "receipt_limit")?;
+    if limit == 0 {
+        return Err(VersionError::InvalidEncoding(
+            "invalid receipt retention limit",
+        ));
+    }
+    Ok(limit)
 }
 
 pub(super) fn database_id(
@@ -63,14 +76,44 @@ pub(super) fn status(
     let Some(bytes) = table.get(transaction.allocation()).map_err(redb_error)? else {
         return Ok(CommitStatus::Unknown);
     };
-    let bytes = bytes.value();
-    match bytes {
-        [0] => Ok(CommitStatus::Pending),
-        [1] => Ok(CommitStatus::Aborted),
-        [2, rest @ ..] if rest.len() == 40 => Ok(CommitStatus::Committed(CommitReceipt {
+    decode_status(transaction, bytes.value())
+}
+
+pub(super) const MANAGED_RECEIPT: u8 = 0x08;
+
+pub(super) fn receipt_tag(bytes: &[u8]) -> VersionResult<u8> {
+    let Some(&tag) = bytes.first() else {
+        return Err(VersionError::InvalidEncoding("invalid transaction receipt"));
+    };
+    let status = tag & !MANAGED_RECEIPT;
+    if !matches!((status, bytes.len()), (0 | 1 | 3, 1) | (2 | 4, 41)) {
+        return Err(VersionError::InvalidEncoding("invalid transaction receipt"));
+    }
+    Ok(tag)
+}
+
+pub(super) fn receipt_owner(
+    table: &impl ReadableTable<u64, &'static [u8]>,
+    transaction: StorageTransactionId,
+) -> VersionResult<u8> {
+    let bytes = table
+        .get(transaction.allocation())
+        .map_err(redb_error)?
+        .ok_or(VersionError::UnknownTransaction)?;
+    Ok(receipt_tag(bytes.value())? & MANAGED_RECEIPT)
+}
+
+pub(super) fn decode_status(
+    transaction: StorageTransactionId,
+    bytes: &[u8],
+) -> VersionResult<CommitStatus> {
+    match receipt_tag(bytes)? & !MANAGED_RECEIPT {
+        0 => Ok(CommitStatus::Pending),
+        1 | 3 => Ok(CommitStatus::Aborted),
+        2 | 4 => Ok(CommitStatus::Committed(CommitReceipt {
             transaction,
-            sequence: CommitSequence::from_u64(decode_u64(&rest[..8])?),
-            fingerprint: rest[8..].try_into().expect("checked receipt width"),
+            sequence: CommitSequence::from_u64(decode_u64(&bytes[1..9])?),
+            fingerprint: bytes[9..].try_into().expect("checked receipt width"),
         })),
         _ => Err(VersionError::InvalidEncoding("invalid transaction receipt")),
     }

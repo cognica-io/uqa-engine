@@ -383,9 +383,6 @@ impl SerializableGraph {
             self.checkpoint_changed |= retain_copy(&mut self.transactions, |entry| {
                 entry.owner == ParticipantOwner::Leased
             });
-            if self.transactions.is_empty() {
-                self.transactions = BudgetedVec::new(self.transactions.budget());
-            }
             self.checkpoint_changed |= !self.outgoing.is_empty();
             self.outgoing = BudgetedVec::new(self.outgoing.budget());
             self.incoming = BudgetedVec::new(self.incoming.budget());
@@ -482,5 +479,8 @@ fn retain_copy<T: Copy>(values: &mut BudgetedVec<T>, mut retain: impl FnMut(T) -
         }
     }
     values.truncate(kept);
+    if values.is_empty() {
+        *values = BudgetedVec::new(values.budget());
+    }
     kept != previous
 }

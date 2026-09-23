@@ -23,6 +23,60 @@ fn setup() -> (SerializableGraph, StorageReadControl) {
     )
 }
 
+#[test]
+fn retired_edges_release_their_capacity_while_an_unknown_publication_stays_prepared() {
+    use crate::mvcc::{CommitStatus, StorageTransactionId};
+
+    let (mut graph, control) = setup();
+    begin(&mut graph, &control, &[1, 2, 3]);
+    graph
+        .observe_read(id(1), SerializablePredicate::object([8; 16]), &control)
+        .unwrap();
+    graph
+        .observe_write(id(2), SerializablePredicate::object([8; 16]), &control)
+        .unwrap();
+    let publication = graph
+        .prepare_publication(
+            id(2),
+            StorageTransactionId::new(DATABASE, 11).unwrap(),
+            [3; 32],
+            &control,
+        )
+        .unwrap();
+    assert_eq!(
+        graph
+            .resolve_publication(publication, CommitStatus::Unknown)
+            .unwrap(),
+        CommitStatus::Unknown
+    );
+    graph.reclaim();
+    assert_eq!(graph.outgoing.len(), 1);
+    assert_eq!(graph.incoming.len(), 1);
+    assert_eq!(graph.predicates.reads.len(), 1);
+    assert_eq!(graph.predicates.writes.len(), 1);
+    let exhausted = control
+        .memory()
+        .reserve(control.memory().limit() - control.memory().used())
+        .unwrap();
+    control.cancellation().cancel();
+    graph.rollback(id(1)).unwrap();
+    graph.reclaim();
+    assert_eq!(graph.outgoing.capacity(), 0);
+    assert_eq!(graph.incoming.capacity(), 0);
+    assert_eq!(graph.predicates.reads.capacity(), 0);
+    assert_eq!(graph.predicates.writes.len(), 1);
+    assert_eq!(graph.status(id(2)).unwrap(), SerializableStatus::Prepared);
+    assert_eq!(graph.status(id(3)).unwrap(), SerializableStatus::Active);
+    assert_eq!(graph.publication(id(2)).unwrap(), Some(publication));
+    drop(exhausted);
+    graph
+        .resolve_publication(publication, CommitStatus::Aborted)
+        .unwrap();
+    graph.rollback(id(3)).unwrap();
+    graph.reclaim();
+    assert_eq!(control.memory().used(), 0);
+}
+
 fn begin(graph: &mut SerializableGraph, control: &StorageReadControl, ids: &[u64]) {
     for &allocation in ids {
         graph.begin(id(allocation), false, control).unwrap();

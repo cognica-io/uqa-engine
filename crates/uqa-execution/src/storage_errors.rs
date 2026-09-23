@@ -34,6 +34,15 @@ pub fn storage_error(action: &str, error: &uqa_storage::StorageBackendError) -> 
     }
     let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(error);
     while let Some(source) = cause {
+        if matches!(
+            source.downcast_ref::<uqa_storage::mvcc::VersionError>(),
+            Some(uqa_storage::mvcc::VersionError::ReceiptRetentionExhausted { .. })
+        ) {
+            return SQLError::Routine {
+                sqlstate: "53400".into(),
+                message: format!("{action}: {error}"),
+            };
+        }
         // Transparent Core wrappers forward their inner source and may terminate the error chain themselves.
         let cancelled = match source.downcast_ref::<uqa_storage::StorageBackendError>() {
             Some(uqa_storage::StorageBackendError::Cancelled(cancelled)) => Some(cancelled),
@@ -102,6 +111,17 @@ pub fn storage_error(action: &str, error: &uqa_storage::StorageBackendError) -> 
 mod tests {
     use super::*;
     use uqa_storage::{mvcc::VersionError, StorageBackendError};
+
+    #[test]
+    fn durable_receipt_capacity_preserves_its_configuration_limit_diagnostic() {
+        let error = StorageBackendError::backend(
+            "provider",
+            VersionError::ReceiptRetentionExhausted { limit: 7 },
+        );
+        let sql = storage_error("allocate transaction", &error);
+        assert_eq!(sql.sqlstate(), Some("53400"));
+        assert!(sql.to_string().contains("7 entries"));
+    }
 
     #[test]
     fn core_normalization_diagnostics_survive_provider_error_wrappers() {

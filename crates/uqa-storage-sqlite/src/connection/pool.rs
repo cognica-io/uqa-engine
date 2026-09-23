@@ -23,6 +23,7 @@ struct PoolState {
 pub(super) struct ConnectionPool {
     pub(super) memory_identity: Mutex<Option<String>>,
     pub(super) serializable_leases: Mutex<Option<Arc<uqa_storage::mvcc::LocalSerializableLeases>>>,
+    pub(super) receipt_state: Arc<uqa_storage::mvcc::LocalSerializableState>,
     pub(super) serializable_connection:
         Mutex<Option<(uqa_storage::mvcc::DatabaseId, ManagedConnection)>>,
     pub(super) snapshot_registry: Mutex<
@@ -54,6 +55,7 @@ impl ConnectionPool {
         Arc::new(Self {
             memory_identity: Mutex::new(None),
             serializable_leases: Mutex::new(None),
+            receipt_state: Arc::default(),
             serializable_connection: Mutex::new(None),
             snapshot_registry: Mutex::new(None),
             spec,

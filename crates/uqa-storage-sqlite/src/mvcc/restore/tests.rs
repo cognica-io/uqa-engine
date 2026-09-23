@@ -21,6 +21,7 @@ use crate::{
 mod failures;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod process;
+mod receipts;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Boundary {

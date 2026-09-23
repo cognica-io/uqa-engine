@@ -18,6 +18,7 @@ mod identifiers;
 mod metadata;
 mod migration;
 mod read;
+mod receipts;
 mod reclamation;
 mod serializable;
 

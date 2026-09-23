@@ -67,6 +67,16 @@ impl SerializablePublication {
 }
 
 impl SerializableGraph {
+    /// Whether the retained checkpoint still needs this exact physical receipt, including prepared outcomes, committed conflict history and live terminal completion leases. Receipt reclamation must check the durably published graph under the provider's exclusive SSI admission.
+    pub fn retains_transaction_receipt(&self, transaction: StorageTransactionId) -> bool {
+        transaction.database() == self.database
+            && self.transactions.iter().any(|entry| {
+                entry
+                    .publication
+                    .is_some_and(|publication| publication.allocation == transaction.allocation())
+            })
+    }
+
     /// Validate terminal outcomes restored from a provider checkpoint before exposing its graph or invoking admission. Every retained committed or aborted publication must still have the same authoritative physical receipt; these receipts outlive record-history reclamation. A missing receipt rejects the persisted checkpoint rather than letting a stale backup branch borrow its confirmed outcome. Prepared publications keep their ordinary reconciliation path. This read-only check borrows retained entries, allocates no payload and leaves live-session terminal outcome precedence unchanged.
     pub fn validate_persisted_publications(
         &self,

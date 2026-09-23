@@ -6,6 +6,8 @@
 
 mod refresh;
 mod serializable;
+#[cfg(test)]
+mod tests;
 
 use std::sync::Arc;
 
@@ -40,6 +42,7 @@ pub(super) struct Transaction {
     pub(super) changes: PrivateRecordChanges,
     read_only: bool,
     pub(super) allocation: Option<StorageTransactionId>,
+    receipt_owner: Option<crate::mvcc::RetainedTransactionAllocation>,
     prepared: Option<PreparedRecordCommit>,
     materialized: Option<PreparedRecordCommit>,
     graph: BudgetedVec<OwnedGraphMutation>,
@@ -74,6 +77,7 @@ impl Transaction {
             changes: PrivateRecordChanges::new(control.memory()),
             read_only,
             allocation: None,
+            receipt_owner: None,
             prepared: None,
             materialized: None,
             graph: BudgetedVec::new(control.memory()),
@@ -292,9 +296,9 @@ impl Transaction {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(self)));
         if !matches!(&result, Ok(Ok(_))) {
             self.changes.rollback_to_savepoint(id)?;
-            self.graph.truncate(graph_position);
-            self.vector.truncate(vector_position);
-            self.requirements.truncate(requirement_position);
+            truncate_retained(&mut self.graph, graph_position);
+            truncate_retained(&mut self.vector, vector_position);
+            truncate_retained(&mut self.requirements, requirement_position);
         }
         self.changes.release_savepoint(id)?;
         match result {
@@ -341,7 +345,7 @@ impl Transaction {
         for savepoint in self.savepoints[position..].iter().rev() {
             savepoint.changes.release_savepoint(savepoint.id)?;
         }
-        self.savepoints.truncate(position);
+        truncate_retained(&mut self.savepoints, position);
         Ok(())
     }
 
@@ -372,12 +376,12 @@ impl Transaction {
         savepoint.changes.rollback_to_savepoint(savepoint.id)?;
         self.changes = savepoint.changes.share_owner();
         self.committed = Arc::clone(&savepoint.committed);
-        self.graph
-            .truncate(self.savepoints[position].graph_position);
-        self.vector
-            .truncate(self.savepoints[position].vector_position);
-        self.requirements
-            .truncate(self.savepoints[position].requirement_position);
+        truncate_retained(&mut self.graph, self.savepoints[position].graph_position);
+        truncate_retained(&mut self.vector, self.savepoints[position].vector_position);
+        truncate_retained(
+            &mut self.requirements,
+            self.savepoints[position].requirement_position,
+        );
         self.savepoints.truncate(position + 1);
         Ok(())
     }
@@ -423,7 +427,15 @@ impl Transaction {
             return Ok(None);
         }
         if self.allocation.is_none() {
-            self.allocation = Some(persistence.allocate_transaction(control)?);
+            let owner = match persistence.allocate_managed_transaction(control) {
+                Err(VersionError::ReceiptRetentionExhausted { .. }) => {
+                    persistence.reclaim_transaction_receipts(control)?;
+                    persistence.allocate_managed_transaction(control)?
+                }
+                result => result?,
+            };
+            self.allocation = Some(owner.transaction());
+            self.receipt_owner = Some(owner);
         }
         Ok(self.allocation)
     }
@@ -573,5 +585,14 @@ impl Transaction {
                 Err(self.retain_uncertain_outcome(id, VersionError::UnknownTransaction.into()))
             }
         }
+    }
+}
+
+/// Release an empty mutation or savepoint buffer without allocating during undo. Nonempty buffers retain their original allowance and surviving evaluated inputs.
+fn truncate_retained<T>(values: &mut BudgetedVec<T>, len: usize) {
+    if len == 0 {
+        *values = BudgetedVec::new(values.budget());
+    } else {
+        values.truncate(len);
     }
 }

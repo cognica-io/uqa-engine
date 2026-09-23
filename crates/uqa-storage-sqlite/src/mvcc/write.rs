@@ -44,10 +44,31 @@ pub(super) fn allocate(
     native: Option<native::NativeRecordNamespace>,
     control: &StorageReadControl,
 ) -> PhysicalResult<StorageTransactionId> {
+    allocate_with_owner(connection, identity, native, false, control, |_| Ok(()))
+}
+
+pub(super) fn allocate_with_owner(
+    connection: &Connection,
+    identity: DatabaseId,
+    native: Option<native::NativeRecordNamespace>,
+    managed: bool,
+    control: &StorageReadControl,
+    retain: impl FnOnce(StorageTransactionId) -> VersionResult<()>,
+) -> PhysicalResult<StorageTransactionId> {
     let _permit = admission::permit(connection, control)?;
     let transaction = admission::begin(connection, control)?;
     native::check_mapping(&transaction, native)?;
     let current = codec::header(&transaction, identity)?;
+    let retained: u64 =
+        transaction.query_row("SELECT count(*) FROM _uqa_mvcc_transactions", [], |row| {
+            row.get(0)
+        })?;
+    if retained >= current.receipt_limit {
+        return Err(VersionError::ReceiptRetentionExhausted {
+            limit: current.receipt_limit,
+        }
+        .into());
+    }
     let id = StorageTransactionId::new(
         identity,
         current
@@ -56,13 +77,14 @@ pub(super) fn allocate(
             .ok_or(VersionError::TransactionIdsExhausted)?,
     )?;
     let bytes = id.allocation().to_be_bytes();
+    retain(id)?;
     transaction.execute(
         "UPDATE _uqa_mvcc_metadata SET allocated = ?1 WHERE singleton = 1",
         params![bytes.as_slice()],
     )?;
     transaction.execute(
-        "INSERT INTO _uqa_mvcc_transactions VALUES (?1, 0, NULL, NULL)",
-        params![bytes.as_slice()],
+        "INSERT INTO _uqa_mvcc_transactions (allocation, status, sequence, fingerprint, managed) VALUES (?1, 0, NULL, NULL, ?2)",
+        params![bytes.as_slice(), i64::from(managed)],
     )?;
     control.cancellation().check().map_err(VersionError::from)?;
     admission::commit(transaction, control)?;

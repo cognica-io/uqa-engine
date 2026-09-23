@@ -160,13 +160,13 @@ fn malformed_main_and_auxiliary_components_fail_before_durable_restore_intent() 
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 #[test]
-fn legacy_detached_snapshot_and_ssi_leases_exclude_restore() {
-    for serializable in [false, true] {
+fn detached_snapshot_participant_and_receipt_leases_exclude_restore() {
+    for kind in 0..3 {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("legacy-owner.db");
         let backup = seed(&path, 0, false);
         let control = control();
-        let file = if serializable {
+        let file = if kind == 1 {
             let graph = uqa_storage::mvcc::SerializableGraph::new(
                 backup.request.source(),
                 backup.coordinator,
@@ -174,6 +174,8 @@ fn legacy_detached_snapshot_and_ssi_leases_exclude_restore() {
             )
             .unwrap();
             crate::mvcc::serializable::lease_file(&path, &graph).unwrap()
+        } else if kind == 2 {
+            crate::mvcc::receipts::lease_file(&path, backup.request.source()).unwrap()
         } else {
             crate::mvcc::retention::lease_file(&path, backup.request.source()).unwrap()
         };

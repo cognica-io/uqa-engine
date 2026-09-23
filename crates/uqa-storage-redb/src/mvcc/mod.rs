@@ -10,6 +10,7 @@ mod codec;
 mod identifiers;
 mod migration;
 mod read;
+mod receipts;
 mod reclamation;
 pub(crate) mod restore;
 mod retention;
@@ -25,8 +26,9 @@ use redb::{
 };
 use uqa_storage::mvcc::{
     resolve_prepared_receipt, CommitFailure, CommitReceipt, CommitResult, CommitSequence,
-    CommitStatus, CommittedRecordSnapshot, DatabaseId, PreparedRecordCommit, StorageTransactionId,
-    VersionError, VersionResult, VersionedPersistence,
+    CommitStatus, CommittedRecordSnapshot, DatabaseId, PreparedRecordCommit,
+    ReceiptAcknowledgement, RetainedTransactionAllocation, StorageTransactionId, VersionError,
+    VersionResult, VersionedPersistence, DEFAULT_RECEIPT_RETENTION_LIMIT,
 };
 use uqa_storage::read_control::StorageReadControl;
 
@@ -40,13 +42,14 @@ const TRANSACTIONS: TableDefinition<u64, &[u8]> = TableDefinition::new("uqa_mvcc
 
 /// Physical record persistence over one shared redb file owner. Reads retain logical sequence boundaries, and native writers exist only inside allocation, commit and abort calls.
 ///
-/// Retained logical snapshots protect their predecessor histories; reclamation preserves head tombstones and all commit receipts. Logical Key/Value sessions use these records; Engine SQL isolation and shared-index publication require additional coordination.
+/// Retained logical snapshots protect their predecessor histories; receipt reclamation separately preserves explicit resolution owners and every durable SSI publication. Logical Key/Value sessions use these records; Engine SQL isolation and shared-index publication require additional coordination.
 #[derive(Clone)]
 pub struct RedbRecordStore {
     database: Arc<Database>,
     identity: DatabaseId,
     snapshots: Arc<uqa_storage::mvcc::SnapshotRegistry>,
     serializable: Arc<uqa_storage::mvcc::LocalSerializableState>,
+    receipts: Arc<uqa_storage::mvcc::LocalSerializableState>,
 }
 
 impl RedbRecordStore {
@@ -71,7 +74,7 @@ impl RedbRecordStore {
                 .map(|value| codec::decode_u64(value.value()))
                 .transpose()?;
             if let Some(format) = initialized {
-                if !matches!(format, 1..=42) {
+                if !matches!(format, 1..=43) {
                     return Err(VersionError::InvalidEncoding("unknown record format"));
                 }
                 if present != if format < 5 { 15 } else { 31 } {
@@ -79,14 +82,31 @@ impl RedbRecordStore {
                         "identifier allocation table disagrees with record format",
                     ));
                 }
-                read_u64(&metadata, "allocated")?;
+                let allocated = read_u64(&metadata, "allocated")?;
                 read_u64(&metadata, "sequence")?;
                 let identity = codec::database_id(&metadata)?;
-                if format < 42 {
+                if format < 43 {
+                    // Predecessor receipts retain manual resolution ownership. Validate their old encoding before exposing the new acknowledgement tags.
+                    for entry in receipts.iter().map_err(redb_error)? {
+                        let (allocation, receipt) = entry.map_err(redb_error)?;
+                        if allocation.value() == 0
+                            || allocation.value() > allocated
+                            || codec::receipt_tag(receipt.value())? > 2
+                        {
+                            return Err(VersionError::InvalidEncoding("invalid legacy receipt"));
+                        }
+                    }
                     metadata
-                        .insert("format", 42_u64.to_be_bytes().as_slice())
+                        .insert(
+                            "receipt_limit",
+                            DEFAULT_RECEIPT_RETENTION_LIMIT.to_be_bytes().as_slice(),
+                        )
+                        .map_err(redb_error)?;
+                    metadata
+                        .insert("format", 43_u64.to_be_bytes().as_slice())
                         .map_err(redb_error)?;
                 }
+                codec::receipt_limit(&metadata)?;
                 identity
             } else {
                 if metadata
@@ -130,7 +150,7 @@ impl RedbRecordStore {
                     .insert("database", bytes.as_slice())
                     .map_err(redb_error)?;
                 metadata
-                    .insert("format", 42_u64.to_be_bytes().as_slice())
+                    .insert("format", 43_u64.to_be_bytes().as_slice())
                     .map_err(redb_error)?;
                 metadata
                     .insert("allocated", 0_u64.to_be_bytes().as_slice())
@@ -138,17 +158,25 @@ impl RedbRecordStore {
                 metadata
                     .insert("sequence", 0_u64.to_be_bytes().as_slice())
                     .map_err(redb_error)?;
+                metadata
+                    .insert(
+                        "receipt_limit",
+                        DEFAULT_RECEIPT_RETENTION_LIMIT.to_be_bytes().as_slice(),
+                    )
+                    .map_err(redb_error)?;
                 DatabaseId::from_bytes(bytes)
             }
         };
         transaction.commit().map_err(redb_error)?;
         let snapshots = retention::registry(&database, identity)?;
-        let serializable = serializable::registry(&database, identity)?;
+        let serializable = serializable::registry(&database, identity, false)?;
+        let receipts = serializable::registry(&database, identity, true)?;
         Ok(Self {
             database,
             identity,
             snapshots,
             serializable,
+            receipts,
         })
     }
 
@@ -229,8 +257,10 @@ impl RedbRecordStore {
             sequence,
             fingerprint: prepared.fingerprint(),
         };
+        let mut encoded_receipt = receipt_bytes(receipt);
+        encoded_receipt[0] |= codec::receipt_owner(&receipts, id)?;
         receipts
-            .insert(id.allocation(), receipt_bytes(receipt).as_slice())
+            .insert(id.allocation(), encoded_receipt.as_slice())
             .map_err(redb_error)?;
         metadata
             .insert("sequence", sequence.as_u64().to_be_bytes().as_slice())
@@ -274,28 +304,26 @@ impl VersionedPersistence for RedbRecordStore {
         &self,
         control: &StorageReadControl,
     ) -> VersionResult<StorageTransactionId> {
-        control.cancellation().check()?;
-        let transaction = physical_writer(&self.database)?;
-        let id = {
-            let mut metadata = transaction.open_table(METADATA).map_err(redb_error)?;
-            codec::validate_metadata(&metadata, self.identity)?;
-            let allocation = read_u64(&metadata, "allocated")?
-                .checked_add(1)
-                .ok_or(VersionError::TransactionIdsExhausted)?;
-            let id = StorageTransactionId::new(self.identity, allocation)?;
-            transaction
-                .open_table(TRANSACTIONS)
-                .map_err(redb_error)?
-                .insert(allocation, [0].as_slice())
-                .map_err(redb_error)?;
-            metadata
-                .insert("allocated", allocation.to_be_bytes().as_slice())
-                .map_err(redb_error)?;
-            id
-        };
-        control.cancellation().check()?;
-        transaction.commit().map_err(redb_error)?;
-        Ok(id)
+        receipts::allocate(self, false, control, |_| Ok(()))
+    }
+
+    fn allocate_managed_transaction(
+        &self,
+        control: &StorageReadControl,
+    ) -> VersionResult<RetainedTransactionAllocation> {
+        receipts::allocate_managed(self, control)
+    }
+
+    fn acknowledge_transaction(
+        &self,
+        acknowledgement: ReceiptAcknowledgement,
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        receipts::acknowledge(self, acknowledgement, control)
+    }
+
+    fn reclaim_transaction_receipts(&self, control: &StorageReadControl) -> VersionResult<u64> {
+        receipts::reclaim(self, control)
     }
 
     fn snapshot(
@@ -382,8 +410,9 @@ impl VersionedPersistence for RedbRecordStore {
             let mut receipts = transaction.open_table(TRANSACTIONS).map_err(redb_error)?;
             match status(&receipts, id)? {
                 CommitStatus::Pending => {
+                    let owner = codec::receipt_owner(&receipts, id)?;
                     receipts
-                        .insert(id.allocation(), [1].as_slice())
+                        .insert(id.allocation(), [1 | owner].as_slice())
                         .map_err(redb_error)?;
                     CommitStatus::Aborted
                 }

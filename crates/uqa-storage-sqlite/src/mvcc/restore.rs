@@ -131,7 +131,14 @@ fn preflight(connection: &Connection, request: DatabaseRestore) -> PhysicalResul
     let source = request.needs_restore(identity)?;
     let pending = match format {
         1..=42 => None,
-        43 => codec::restoration_header(connection)?.2,
+        43 => connection
+            .query_row(
+                "SELECT restore_target FROM _uqa_mvcc_metadata WHERE singleton = 1",
+                [],
+                |row| row.get::<_, Option<[u8; 16]>>(0),
+            )?
+            .map(DatabaseId::from_bytes),
+        44 => codec::restoration_header(connection)?.2,
         _ => return Err(VersionError::InvalidEncoding("unknown record format").into()),
     };
     if pending.is_some_and(|target| !source || target != request.target()) {
@@ -149,7 +156,7 @@ fn validate_mapping(
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
     if state.pending {
-        schema::validate_restoration(connection)?;
+        schema::initialize_restoration(connection)?;
     } else if native::present(connection)? {
         native::initialize_in(connection, control)?;
     } else {

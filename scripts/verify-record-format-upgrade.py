@@ -146,6 +146,10 @@ fn main() {
         return;
     }
     assert_eq!(action, "verify");
+    let next = records.allocate_transaction(&control).unwrap();
+    assert!(next.allocation() > pending, "upgrade reused a predecessor allocation");
+    assert_eq!(records.abort(next, &control).unwrap(), CommitStatus::Aborted);
+    assert_eq!(report(&*records, committed, pending), expected);
 }
 '''
 

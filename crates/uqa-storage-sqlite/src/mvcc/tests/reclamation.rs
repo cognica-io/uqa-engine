@@ -12,7 +12,7 @@ use std::path::Path;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod process;
 
-fn open(path: &Path, mode: usize) -> ManagedConnection {
+pub(super) fn open(path: &Path, mode: usize) -> ManagedConnection {
     match mode {
         0 => ManagedConnection::open(path),
         1 => ManagedConnection::open_encrypted(path, "snapshot-retention-test"),

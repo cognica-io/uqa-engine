@@ -13,6 +13,7 @@ use super::PhysicalResult;
 
 pub(super) struct Header {
     pub(super) allocated: u64,
+    pub(super) receipt_limit: u64,
     pub(super) sequence: CommitSequence,
     pub(super) key_value_mapping: bool,
 }
@@ -52,7 +53,7 @@ pub(super) fn restoration_header(
     let row = rows
         .next()?
         .ok_or(VersionError::InvalidEncoding("missing record metadata"))?;
-    if row.get::<_, i64>(1)? != 43 {
+    if row.get::<_, i64>(1)? != 44 {
         return Err(VersionError::InvalidEncoding("unknown record format").into());
     }
     let database = identity(bytes(row, 2)?)?;
@@ -67,6 +68,12 @@ pub(super) fn restoration_header(
         database,
         Header {
             allocated: integer(bytes(row, 3)?)?,
+            receipt_limit: u64::try_from(row.get::<_, i64>(7)?)
+                .ok()
+                .filter(|limit| *limit != 0)
+                .ok_or(VersionError::InvalidEncoding(
+                    "invalid receipt retention limit",
+                ))?,
             sequence: CommitSequence::from_u64(integer(bytes(row, 4)?)?),
             key_value_mapping: match row.get::<_, i64>(5)? {
                 0 => false,
@@ -97,7 +104,7 @@ pub(super) fn status(
         return Ok(CommitStatus::Unknown);
     };
     match row.get::<_, i64>(0)? {
-        0 | 1
+        0 | 1 | 3
             if matches!(row.get_ref(1)?, ValueRef::Null)
                 && matches!(row.get_ref(2)?, ValueRef::Null) =>
         {
@@ -107,7 +114,7 @@ pub(super) fn status(
                 CommitStatus::Aborted
             })
         }
-        2 => Ok(CommitStatus::Committed(CommitReceipt {
+        2 | 4 => Ok(CommitStatus::Committed(CommitReceipt {
             transaction,
             sequence: CommitSequence::from_u64(integer(bytes(row, 1)?)?),
             fingerprint: bytes(row, 2)?

@@ -14,6 +14,7 @@ mod key_value;
 pub(crate) mod leases;
 pub mod native;
 mod read;
+pub(crate) mod receipts;
 mod reclamation;
 pub(crate) mod restore;
 mod retention;
@@ -306,6 +307,13 @@ impl VersionedPersistence for SQLiteRecordStore {
             write::allocate(connection, self.identity, self.native, control)
         })
     }
+
+    fn allocate_managed_transaction(
+        &self,
+        control: &StorageReadControl,
+    ) -> VersionResult<uqa_storage::mvcc::RetainedTransactionAllocation> {
+        self.allocate_receipt_owner(control)
+    }
     fn snapshot(
         &self,
         control: &StorageReadControl,
@@ -372,6 +380,21 @@ impl VersionedPersistence for SQLiteRecordStore {
             read.commit()?;
             Ok(status)
         })
+    }
+
+    fn acknowledge_transaction(
+        &self,
+        acknowledgement: uqa_storage::mvcc::ReceiptAcknowledgement,
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        self.check_transaction(acknowledgement.transaction())?;
+        self.with_write(control, |connection| {
+            receipts::acknowledge(connection, self.native, acknowledgement, control)
+        })
+    }
+
+    fn reclaim_transaction_receipts(&self, control: &StorageReadControl) -> VersionResult<u64> {
+        self.reclaim_receipts(control)
     }
     fn abort(
         &self,

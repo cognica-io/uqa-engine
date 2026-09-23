@@ -187,6 +187,15 @@ pub trait VersionedPersistence: Send + Sync {
         control: &StorageReadControl,
     ) -> VersionResult<StorageTransactionId>;
 
+    /// Allocate a receipt with explicit managed resolution ownership. Publish its lease before the Pending row becomes durable under the same receipt admission used by recovery. Only an authoritatively absent managed lease permits abandoned-owner recovery; raw allocations retain manual ownership. The default preserves legacy indefinite receipt retention.
+    fn allocate_managed_transaction(
+        &self,
+        control: &StorageReadControl,
+    ) -> VersionResult<super::RetainedTransactionAllocation> {
+        self.allocate_transaction(control)
+            .map(super::RetainedTransactionAllocation::untracked)
+    }
+
     fn snapshot(
         &self,
         control: &StorageReadControl,
@@ -208,6 +217,20 @@ pub trait VersionedPersistence: Send + Sync {
         transaction: StorageTransactionId,
         control: &StorageReadControl,
     ) -> VersionResult<CommitStatus>;
+
+    /// Durably release caller resolution ownership only after preserving its confirmed terminal outcome. This never releases a retained SSI publication. The default keeps historical receipts indefinitely; providers with bounded receipts override it. Errors preserve the caller's completed retry state, and a retry after durable acknowledgement remains valid even after reclamation.
+    fn acknowledge_transaction(
+        &self,
+        _acknowledgement: super::ReceiptAcknowledgement,
+        _control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        Ok(())
+    }
+
+    /// Reclaim explicitly acknowledged receipts only after their final durable SSI publication reference has disappeared. Pending and unacknowledged receipts survive, including unknown completion owners. This is separate from record-history reclamation and does not advance allocation or visibility.
+    fn reclaim_transaction_receipts(&self, _control: &StorageReadControl) -> VersionResult<u64> {
+        Ok(0)
+    }
 
     /// Atomically end a pending allocation. Return an existing committed receipt unchanged; abort must never overwrite a commit.
     fn abort(

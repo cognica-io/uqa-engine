@@ -81,6 +81,8 @@ pub enum VersionError {
     WrongDatabase,
     #[error("transaction allocation space exhausted")]
     TransactionIdsExhausted,
+    #[error("durable transaction receipt limit of {limit} entries exhausted")]
+    ReceiptRetentionExhausted { limit: u64 },
     #[error("no retained transaction allocation or outcome")]
     UnknownTransaction,
     #[error("transaction has already ended")]

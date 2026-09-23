@@ -37,14 +37,15 @@ pub(super) fn clear_restored_state(transaction: &redb::WriteTransaction) -> Vers
     schema::clear_restored_state(transaction)
 }
 
-type Registries = HashMap<usize, (DatabaseId, Weak<LocalSerializableState>)>;
+type Registries = HashMap<(usize, bool), (DatabaseId, Weak<LocalSerializableState>)>;
 
 pub(super) fn registry(
     database: &Arc<Database>,
     identity: DatabaseId,
+    receipt_namespace: bool,
 ) -> VersionResult<Arc<LocalSerializableState>> {
     static REGISTRIES: OnceLock<Mutex<Registries>> = OnceLock::new();
-    let key = Arc::as_ptr(database) as usize;
+    let key = (Arc::as_ptr(database) as usize, receipt_namespace);
     let mut registries = REGISTRIES
         .get_or_init(Mutex::default)
         .lock()

@@ -18,6 +18,8 @@ pub(super) struct Exclusion {
     _snapshots: crate::mvcc::leases::NativeLeaseAdmission,
     #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
     _participants: crate::mvcc::leases::NativeLeaseAdmission,
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+    _receipts: crate::mvcc::leases::NativeLeaseAdmission,
 }
 
 pub(super) fn exclude(
@@ -32,6 +34,8 @@ pub(super) fn exclude(
         let path = connection.database_path().expect("file restore owner");
         let participants = crate::mvcc::serializable::lease_file(path, graph)?;
         let participants = empty(&participants, control)?;
+        let receipts = crate::mvcc::receipts::lease_file(path, identity)?;
+        let receipts = empty(&receipts, control)?;
         let uqa_storage::PersistentStorageIdentity::File(path) =
             uqa_storage::PersistentStorageIdentity::for_database_path(path)?
         else {
@@ -42,6 +46,7 @@ pub(super) fn exclude(
         Ok(Exclusion {
             _snapshots: snapshots,
             _participants: participants,
+            _receipts: receipts,
         })
     }
     #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
