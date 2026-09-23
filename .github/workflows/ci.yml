@@ -17,6 +17,11 @@ on:
         description: Run the Rust validation jobs for a Rust-affecting change
         required: true
         type: boolean
+      run_transactions:
+        description: Run concurrent transaction owner and public API acceptance without measurements
+        required: false
+        default: false
+        type: boolean
       run_nori_allocations:
         description: Run only persistent Nori allocation and output checks when run_rust is false
         required: false
@@ -314,7 +319,7 @@ jobs:
   gate:
     name: pre-merge CI
     if: ${{ always() }}
-    needs: [test-linux, test-fdw-linux, test-macos, clippy, msrv, doc, deny, upstream-regression-oracle, nori-reference, nori-benchmark]
+    needs: [test-linux, test-fdw-linux, test-macos, clippy, msrv, doc, deny, upstream-regression-oracle, nori-reference, nori-benchmark, concurrent-transactions]
     runs-on: ubuntu-24.04
     env:
       RESULTS: ${{ join(needs.*.result, ' ') }}
@@ -324,3 +329,74 @@ jobs:
           case " $RESULTS " in
             *" failure "*|*" cancelled "*) exit 1 ;;
           esac
+
+  concurrent-transactions:
+    name: concurrent transactions ${{ matrix.label }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_transactions }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Linux
+            os: ubuntu-24.04
+          - label: macOS
+            os: macos-14
+          - label: Windows
+            os: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Free Linux runner disk
+        if: runner.os == 'Linux'
+        run: bash .github/scripts/free-linux-runner-disk.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Lint transaction owners and consumers
+        run: >-
+          cargo clippy --locked
+          -p uqa-core -p uqa-sql -p uqa-storage -p uqa-storage-sqlite -p uqa-storage-redb
+          -p uqa-execution -p uqa-engine -p uqa-pg-server
+          --lib --tests --features uqa-engine/nori,uqa-engine/kuromoji
+          -- -D warnings
+      - name: Verify retained owners and actual provider histories
+        run: >-
+          cargo test --locked
+          -p uqa-core -p uqa-sql -p uqa-storage -p uqa-storage-sqlite -p uqa-storage-redb
+          -p uqa-execution -p uqa-engine -p uqa-pg-server
+          --lib --tests --features uqa-engine/nori,uqa-engine/kuromoji --
+          memory:: types::value:: types::array:: types::decimal:: types::jsonb:: types::temporal:: types::tests:: json::tests float_text::
+          expr:: type_resolution:: schema::retention:: schema::generated:: assignment:: scalar::
+          document_store:: inverted_index:: key_value::tests::index_retention::
+          mvcc:: mvcc_sessions:: analyzer_bindings:: analyzer_revisions:: occurrences:: field_metadata:: japanese::
+          temporary_file:: vector_index::collection:: compound:: logical_sessions:: restore::
+          query::generated:: query::table_snapshot:: query::document_changes:: serializable::
+          spill:: spill_scan:: external_sort:: distinct:: join:: aggregation:: temporary_database::
+          mutation::conflict:: row_locks::retry_cache:: storage_errors::tests::
+          tests::storage_consistency:: table_storage::documents::tests::
+          transactions::tests::mutation_failures:: state::catalog_cell::tests::
+          transaction_lifecycle::pg18_cursors:: sessions::concurrent_writes:: sessions::native_publication::
+          sql_generated_columns:: redb_backend:: sqlite_key_value_backend:: queries::sql_cursor::secure_temporary::
+          storage::transaction_lifecycle::pg18_isolation:: storage::sessions::serializable_observations::
+          storage::sessions::concurrent_inserts:: concurrent_transactions::
+          --skip snapshot_creation_does_not_scale_with_document_count
+          --skip mvcc::process_writer_helper
+          --skip storage::sessions::concurrent_inserts::processes::insert_worker
+          2>&1 | tee target/concurrent-transactions.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: concurrent-transactions-${{ matrix.label }}-${{ github.sha }}
+          path: target/concurrent-transactions.log
+          if-no-files-found: ignore

@@ -42,6 +42,8 @@ The workspace declares `unsafe_code = "deny"` and `unused_must_use = "deny"`. Cl
 
 The manual Python Wheels and JavaScript Bindings workflows accept `full_matrix=true` to build every release binding package without publishing. Python builds six platform wheels, the source distribution, and its minimum-interpreter check; JavaScript builds six native addons, the seven native npm archives, and the WASM npm archive. These are the same reusable jobs called by the release workflow, with normal binding checks retained. The native Windows ARM64 runner executes its addon tests and examples as well. Build success and archive license checks are required; no placeholder binary establishes package acceptance.
 
+Pre-merge CI also accepts `run_transactions=true` with `run_rust=false` and `run_nori_allocations=false`. This selects strict owner Clippy and the retained-resource, provider, SQL isolation and TCP transaction histories on Linux, macOS and Windows without scheduling timing or allocation measurements. It compiles the selected crate targets together and skips the allocation-scaling probe and standalone child entry points; their functional parent schedules still run. The JavaScript Bindings workflow defaults `run_nori_measurements` to false so its native, WASM and real-browser checks can run independently; enabling measurements requires separate host authorization. These selections are functional evidence and make no performance claim.
+
 ```sh
 gh workflow run python-wheels.yml --ref feature/verify-bindings -f full_matrix=true
 gh workflow run javascript-bindings.yml --ref feature/verify-bindings -f full_matrix=true
