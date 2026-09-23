@@ -26,6 +26,8 @@ icu_casemap = { workspace = true }
 writeable = { workspace = true }
 libm = { workspace = true }
 regex = { workspace = true }
+regex-automata = { workspace = true }
+regex-syntax = { workspace = true }
 thiserror = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]

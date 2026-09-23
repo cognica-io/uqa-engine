@@ -8,7 +8,7 @@
 
 use super::conversion::to_f64_with_control;
 use super::{Result, SQLError, TemporalValue, Value};
-use uqa_core::memory::ProductionControl;
+use uqa_core::memory::{Produced, ProductionControl, ProductionString};
 
 mod quoting;
 pub use quoting::quote_ident;
@@ -80,342 +80,20 @@ pub(super) mod casing;
 mod like_pattern;
 pub use like_pattern::CompiledLikePattern;
 
-/// Compile a regex with `PostgreSQL` match-flag behavior.
-pub(super) fn compile_pg_regex(
+#[cfg(test)]
+fn compile_pg_regex(
     pattern: &str,
     flags: &str,
     global_allowed: bool,
-) -> Result<regex::Regex> {
-    #[derive(Clone, Copy)]
-    enum Syntax {
-        Advanced,
-        Basic,
-        Quoted,
-    }
-
-    let mut case_insensitive = false;
-    let mut multi_line = false;
-    let mut dot_matches_new_line = true;
-    let mut expanded = false;
-    let mut syntax = Syntax::Advanced;
-    for flag in flags.chars() {
-        match flag {
-            'g' if global_allowed => {}
-            // PostgreSQL 18 clears the composite `REG_ADVANCED` mask after
-            // setting `REG_EXTENDED`, which leaves both `b` and `e` using
-            // BRE behavior. Match the server's observable behavior exactly.
-            'b' | 'e' => syntax = Syntax::Basic,
-            'c' => case_insensitive = false,
-            'i' => case_insensitive = true,
-            'm' | 'n' => {
-                multi_line = true;
-                dot_matches_new_line = false;
-            }
-            'p' => {
-                multi_line = false;
-                dot_matches_new_line = false;
-            }
-            'q' => syntax = Syntax::Quoted,
-            's' => {
-                multi_line = false;
-                dot_matches_new_line = true;
-            }
-            't' => expanded = false,
-            'w' => {
-                multi_line = true;
-                dot_matches_new_line = true;
-            }
-            'x' => expanded = true,
-            invalid => {
-                return Err(SQLError::Routine {
-                    sqlstate: "22023".into(),
-                    message: format!("invalid regular expression option: \"{invalid}\""),
-                });
-            }
-        }
-    }
-    if matches!(syntax, Syntax::Quoted) && (expanded || multi_line || !dot_matches_new_line) {
-        return Err(SQLError::Routine {
-            sqlstate: "2201B".into(),
-            message: "invalid regular expression: invalid argument to regex function".into(),
-        });
-    }
-    let pattern = if expanded {
-        expand_postgres_regex(pattern)
-    } else {
-        pattern.to_string()
-    };
-    let pattern = match syntax {
-        Syntax::Advanced => pattern,
-        Syntax::Basic => postgres_basic_regex(&pattern),
-        Syntax::Quoted => regex::escape(&pattern),
-    };
-    let pattern = postgres_character_class_regex(&pattern, !dot_matches_new_line);
-    let mut builder = regex::RegexBuilder::new(&pattern);
-    builder
-        .case_insensitive(case_insensitive)
-        .multi_line(multi_line)
-        .dot_matches_new_line(dot_matches_new_line);
-    builder.build().map_err(|error| SQLError::Routine {
-        sqlstate: "2201B".into(),
-        message: format!("invalid regular expression: {error}"),
-    })
-}
-
-fn postgres_character_class_regex(pattern: &str, exclude_newline: bool) -> String {
-    let characters = pattern.chars().collect::<Vec<_>>();
-    let mut output = String::with_capacity(pattern.len());
-    let mut position = 0usize;
-    let mut in_bracket = false;
-    let mut bracket_can_close = false;
-    while let Some(&character) = characters.get(position) {
-        position += 1;
-        if character == '\\' {
-            output.push(character);
-            if let Some(&escaped) = characters.get(position) {
-                position += 1;
-                output.push(escaped);
-                if in_bracket {
-                    bracket_can_close = true;
-                }
-            }
-            continue;
-        }
-        if !in_bracket {
-            output.push(character);
-            if character == '[' {
-                in_bracket = true;
-                bracket_can_close = false;
-                if characters.get(position) == Some(&'^') {
-                    position += 1;
-                    output.push('^');
-                    if characters.get(position) == Some(&']') {
-                        position += 1;
-                        output.push(']');
-                        bracket_can_close = true;
-                    }
-                    if exclude_newline {
-                        output.push_str("\\n");
-                        if characters.get(position) == Some(&'-') {
-                            position += 1;
-                            output.push_str("\\-");
-                            bracket_can_close = true;
-                        }
-                    }
-                }
-            }
-            continue;
-        }
-        if character == '[' && matches!(characters.get(position), Some('.' | ':' | '=')) {
-            let delimiter = characters[position];
-            output.push(character);
-            output.push(delimiter);
-            position += 1;
-            while let Some(&nested) = characters.get(position) {
-                position += 1;
-                output.push(nested);
-                if nested == delimiter && characters.get(position) == Some(&']') {
-                    output.push(']');
-                    position += 1;
-                    break;
-                }
-            }
-            bracket_can_close = true;
-            continue;
-        }
-        if character == '[' {
-            output.push_str("\\[");
-            bracket_can_close = true;
-            continue;
-        }
-        output.push(character);
-        if character == ']' && bracket_can_close {
-            in_bracket = false;
-        } else if character != '^' || bracket_can_close {
-            bracket_can_close = true;
-        }
-    }
-    output
-}
-
-fn expand_postgres_regex(pattern: &str) -> String {
-    let mut output = String::with_capacity(pattern.len());
-    let mut characters = pattern.chars().peekable();
-    let mut in_bracket = false;
-    let mut bracket_can_close = false;
-    while let Some(character) = characters.next() {
-        if character == '\\' {
-            output.push(character);
-            if let Some(escaped) = characters.next() {
-                output.push(escaped);
-                if in_bracket {
-                    bracket_can_close = true;
-                }
-            }
-            continue;
-        }
-        if in_bracket {
-            if character == '[' {
-                if let Some(delimiter @ ('.' | ':' | '=')) = characters.peek().copied() {
-                    output.push(character);
-                    output.push(delimiter);
-                    characters.next();
-                    while let Some(nested) = characters.next() {
-                        output.push(nested);
-                        if nested == delimiter && characters.peek() == Some(&']') {
-                            output.push(']');
-                            characters.next();
-                            break;
-                        }
-                    }
-                    bracket_can_close = true;
-                    continue;
-                }
-            }
-            output.push(character);
-            if character == ']' && bracket_can_close {
-                in_bracket = false;
-            } else if character != '^' || bracket_can_close {
-                bracket_can_close = true;
-            }
-            continue;
-        }
-        match character {
-            '[' => {
-                in_bracket = true;
-                bracket_can_close = false;
-                output.push(character);
-            }
-            '#' => {
-                for comment in characters.by_ref() {
-                    if comment == '\n' {
-                        break;
-                    }
-                }
-            }
-            whitespace if postgres_expanded_regex_whitespace(whitespace) => {}
-            other => output.push(other),
-        }
-    }
-    output
-}
-
-fn postgres_expanded_regex_whitespace(character: char) -> bool {
-    matches!(
-        character,
-        '\u{0009}'..='\u{000D}'
-            | '\u{0020}'
-            | '\u{1680}'
-            | '\u{2000}'..='\u{2006}'
-            | '\u{2008}'..='\u{200A}'
-            | '\u{2028}'..='\u{2029}'
-            | '\u{205F}'
-            | '\u{3000}'
+) -> Result<super::regex::LocalRegex> {
+    super::regex::compile(
+        pattern,
+        flags,
+        global_allowed,
+        &ProductionControl::uncontrolled(),
     )
 }
 
-fn postgres_basic_regex(pattern: &str) -> String {
-    let mut output = String::with_capacity(pattern.len());
-    let characters = pattern.chars().collect::<Vec<_>>();
-    let mut position = 0usize;
-    let mut in_bracket = false;
-    let mut bracket_can_close = false;
-    let mut at_subexpression_start = true;
-    while let Some(&character) = characters.get(position) {
-        position += 1;
-        if in_bracket {
-            if character == '\\' {
-                output.push_str(r"\\");
-                bracket_can_close = true;
-                continue;
-            }
-            output.push(character);
-            if character == ']' && bracket_can_close {
-                in_bracket = false;
-                at_subexpression_start = false;
-            } else if character != '^' || bracket_can_close {
-                bracket_can_close = true;
-            }
-            continue;
-        }
-        if character == '\\' {
-            match characters.get(position).copied() {
-                Some('(') => {
-                    position += 1;
-                    output.push('(');
-                    at_subexpression_start = true;
-                }
-                Some(')') => {
-                    position += 1;
-                    output.push(')');
-                    at_subexpression_start = false;
-                }
-                Some(bound @ ('{' | '}')) => {
-                    position += 1;
-                    output.push(bound);
-                }
-                Some(escaped) if escaped.is_ascii_alphabetic() => {
-                    position += 1;
-                    output.push(escaped);
-                    at_subexpression_start = false;
-                }
-                Some(escaped) => {
-                    position += 1;
-                    output.push('\\');
-                    output.push(escaped);
-                    at_subexpression_start = false;
-                }
-                None => output.push('\\'),
-            }
-            continue;
-        }
-        match character {
-            '[' => {
-                in_bracket = true;
-                bracket_can_close = false;
-                output.push(character);
-            }
-            '^' if at_subexpression_start => output.push(character),
-            '^' => {
-                output.push_str(r"\^");
-                at_subexpression_start = false;
-            }
-            '$' => {
-                let closes_subexpression = matches!(
-                    (characters.get(position), characters.get(position + 1)),
-                    (Some('\\'), Some(')'))
-                );
-                if position == characters.len() || closes_subexpression {
-                    output.push(character);
-                } else {
-                    output.push_str(r"\$");
-                    at_subexpression_start = false;
-                }
-            }
-            '*' if at_subexpression_start => {
-                output.push_str(r"\*");
-                at_subexpression_start = false;
-            }
-            literal @ ('+' | '?' | '(' | ')' | '{' | '}' | '|') => {
-                output.push('\\');
-                output.push(literal);
-                at_subexpression_start = false;
-            }
-            other => {
-                output.push(other);
-                at_subexpression_start = false;
-            }
-        }
-    }
-    output
-}
-
-/// Reserved / type / column-name keywords `PostgreSQL`'s
-/// `quote_ident` quotes even when the identifier is otherwise safe.
-#[expect(
-    clippy::too_many_lines,
-    reason = "builtin dispatch preserves arity, NULL, and error precedence"
-)]
 pub(super) fn is_quoted_keyword(word: &str) -> bool {
     const KEYWORDS: &[&str] = &[
         "all",
@@ -588,10 +266,15 @@ pub(super) fn is_quoted_keyword(word: &str) -> bool {
 
 /// Translate a SQL `SIMILAR TO` pattern into an anchored PostgreSQL-style regex.
 /// `None` selects the default backslash escape and `Some("")` disables escaping.
-pub(super) fn similar_to_regex(pattern: &str, escape: Option<&str>) -> Result<String> {
+pub(super) fn similar_to_regex_with_control(
+    pattern: &str,
+    escape: Option<&str>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>> {
+    control.check()?;
     let escape = like_pattern::escape_character(escape)?;
-    let mut out = String::with_capacity(pattern.len() + 8);
-    out.push_str("^(?:");
+    let mut out = ProductionString::new(*control);
+    out.push_str("^(?:")?;
     let mut after_escape = false;
     let mut quote_count = 0;
     let mut bracket_depth = 0usize;
@@ -600,8 +283,8 @@ pub(super) fn similar_to_regex(pattern: &str, escape: Option<&str>) -> Result<St
         if after_escape {
             if character == '"' && bracket_depth == 0 {
                 match quote_count {
-                    0 => out.push_str("){1,1}?("),
-                    1 => out.push_str("){1,1}(?:"),
+                    0 => out.push_str("){1,1}?(")?,
+                    1 => out.push_str("){1,1}(?:")?,
                     _ => {
                         return Err(SQLError::Routine {
                             sqlstate: "2200C".into(),
@@ -611,7 +294,7 @@ pub(super) fn similar_to_regex(pattern: &str, escape: Option<&str>) -> Result<St
                 }
                 quote_count += 1;
             } else {
-                push_similar_escaped(&mut out, character);
+                push_similar_escaped(&mut out, character)?;
                 bracket_position = 3;
             }
             after_escape = false;
@@ -623,9 +306,9 @@ pub(super) fn similar_to_regex(pattern: &str, escape: Option<&str>) -> Result<St
         }
         if bracket_depth > 0 {
             if character == '\\' && escape != Some('\\') {
-                out.push('\\');
+                out.push('\\')?;
             }
-            out.push(character);
+            out.push(character)?;
             if character == ']' && bracket_position > 2 {
                 bracket_depth -= 1;
             } else if character == '[' {
@@ -639,34 +322,34 @@ pub(super) fn similar_to_regex(pattern: &str, escape: Option<&str>) -> Result<St
             continue;
         }
         match character {
-            '%' => out.push_str(".*"),
-            '_' => out.push('.'),
+            '%' => out.push_str(".*")?,
+            '_' => out.push('.')?,
             '[' => {
                 bracket_depth = 1;
                 bracket_position = 1;
-                out.push('[');
+                out.push('[')?;
             }
-            '(' => out.push_str("(?:"),
+            '(' => out.push_str("(?:")?,
             '\\' | '.' | '^' | '$' => {
-                out.push('\\');
-                out.push(character);
+                out.push('\\')?;
+                out.push(character)?;
             }
-            other => out.push(other),
+            other => out.push(other)?,
         }
     }
-    out.push_str(")$");
-    Ok(out)
+    out.push_str(")$")?;
+    Ok(out.finish()?)
 }
 
-fn push_similar_escaped(output: &mut String, character: char) {
+fn push_similar_escaped(output: &mut ProductionString<'_>, character: char) -> Result<()> {
     match character {
         'b' => {
-            output.push_str(r"\x08");
-            return;
+            output.push_str(r"\x08")?;
+            return Ok(());
         }
         'B' => {
-            output.push_str(r"\\");
-            return;
+            output.push_str(r"\\")?;
+            return Ok(());
         }
         _ => {}
     }
@@ -689,9 +372,10 @@ fn push_similar_escaped(output: &mut String, character: char) {
                 | '-'
         )
     {
-        output.push('\\');
+        output.push('\\')?;
     }
-    output.push(character);
+    output.push(character)?;
+    Ok(())
 }
 
 #[cfg(test)]

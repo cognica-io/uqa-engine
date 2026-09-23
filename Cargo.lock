@@ -4046,6 +4046,8 @@ dependencies = [
  "libm",
  "proptest",
  "regex",
+ "regex-automata",
+ "regex-syntax",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

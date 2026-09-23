@@ -16,13 +16,11 @@ use uqa_core::{
 };
 
 mod numeric;
-mod regex;
 mod text;
 
 pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
     match name {
         "concat" | "concat_ws" => Some(concat(name, args)),
-        "regexp_match" | "regexp_matches" | "regexp_replace" => Some(regex::evaluate(name, args)),
         _ => eval_core_functions_with_control(name, args, &ProductionControl::uncontrolled()).map(
             |result| {
                 result.map(|value| {
@@ -40,6 +38,9 @@ pub(super) fn eval_core_functions_with_control(
     args: &[Value],
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>>> {
+    if matches!(name, "regexp_match" | "regexp_matches" | "regexp_replace") {
+        return super::regex::evaluate(name, args, control);
+    }
     let evaluate = match name {
         "coalesce" | "nullif" | "greatest" | "least" => selection,
         "abs" | "round" | "ceil" | "ceiling" | "floor" | "power" | "pow" | "sqrt" | "mod"

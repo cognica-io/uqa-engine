@@ -24,6 +24,7 @@ mod json;
 mod json_strip;
 mod random;
 mod range;
+mod regex;
 mod time;
 mod uuid;
 
@@ -89,7 +90,7 @@ pub use floating::{
 };
 #[cfg(test)]
 use scalar_dispatch::eval_scalar_function;
-use scalar_helpers::{compile_pg_regex, point_xy, similar_to_regex, typeof_value};
+use scalar_helpers::{point_xy, typeof_value};
 pub use scalar_helpers::{quote_ident, CompiledLikePattern};
 
 mod builtin;
