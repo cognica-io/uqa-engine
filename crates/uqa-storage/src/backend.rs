@@ -565,11 +565,10 @@ pub trait PersistentStorageBackend: Send + Sync {
     fn rollback_to_savepoint(&self, id: StorageSavepointId) -> StorageBackendResult<()>;
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod identity_tests {
     use super::*;
 
-    #[cfg(unix)]
     #[test]
     fn dangling_database_symlink_keeps_the_target_identity_after_creation() {
         use std::os::unix::fs::symlink;

@@ -22,6 +22,16 @@ on:
         required: false
         default: false
         type: boolean
+      transaction_platform:
+        description: Select the transaction runner to verify an affected platform independently
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - ubuntu-24.04
+          - macos-14
+          - windows-latest
       run_nori_allocations:
         description: Run only persistent Nori allocation and output checks when run_rust is false
         required: false
@@ -32,7 +42,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.run_transactions && inputs.transaction_platform || 'default' }}
   cancel-in-progress: true
 
 env:
@@ -331,31 +341,19 @@ jobs:
           esac
 
   concurrent-transactions:
-    name: concurrent transactions ${{ matrix.label }}
+    name: concurrent transactions ${{ matrix.os }}
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_transactions }}
     runs-on: ${{ matrix.os }}
     env:
-      RUSTFLAGS: ${{ matrix.rustflags }}
+      RUSTFLAGS: ${{ matrix.os == 'ubuntu-24.04' && '-D warnings -C linker-features=-lld' || '-D warnings' }}
     timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - label: Linux
-            os: ubuntu-24.04
-            rustflags: "-D warnings -C linker-features=-lld"
-            shell: bash
-          - label: macOS
-            os: macos-14
-            rustflags: "-D warnings"
-            shell: bash
-          - label: Windows
-            os: windows-latest
-            rustflags: "-D warnings"
-            shell: pwsh
+        os: ${{ fromJSON(inputs.transaction_platform == 'all' && '["ubuntu-24.04","macos-14","windows-latest"]' || format('["{0}"]', inputs.transaction_platform)) }}
     defaults:
       run:
-        shell: ${{ matrix.shell }}
+        shell: ${{ matrix.os == 'windows-latest' && 'pwsh' || 'bash' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -405,6 +403,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: concurrent-transactions-${{ matrix.label }}-${{ github.sha }}
+          name: concurrent-transactions-${{ matrix.os }}-${{ github.sha }}
           path: target/concurrent-transactions.log
           if-no-files-found: ignore
