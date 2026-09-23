@@ -15,6 +15,7 @@ mod deque;
 mod hash_set;
 mod heap;
 mod map;
+mod production;
 mod string;
 mod vec;
 
@@ -25,6 +26,7 @@ pub use map::{
     BudgetedMap, BudgetedMapIter, BudgetedSharedMap, BudgetedSharedMapIter, OwnedMap,
     OwnedMapIntoIter, OwnedSet, OwnedSetIntoIter, OwnedSetIter, PreparedMapEntry,
 };
+pub use production::{Produced, ProductionControl, ProductionString, ProductionVec};
 pub use string::BudgetedString;
 pub use vec::BudgetedVec;
 

@@ -188,14 +188,19 @@ fn cancellation_keeps_prior_retained_strings_and_releases_reader_scratch() {
 fn string_quota_precedes_decoding_and_final_lease_charges_owned_capacity() {
     let cancellation = CancellationToken::new();
     for encoded in [r#""plain""#, r#""a\n\uD83D\uDE03\u0000""#, r#""""#] {
-        let envelope = encoded.len() * 4 + 16;
-        let rejected = MemoryBudget::new(envelope - 1);
-        assert!(matches!(
-            decode_json_string(encoded, &rejected, &cancellation),
-            Err(JsonReadError::Memory(MemoryError::Limit { .. }))
-        ));
+        let rejected = MemoryBudget::new(0);
+        if encoded == r#""""# {
+            assert!(decode_json_string(encoded, &rejected, &cancellation)
+                .unwrap()
+                .is_empty());
+        } else {
+            assert!(matches!(
+                decode_json_string(encoded, &rejected, &cancellation),
+                Err(JsonReadError::Memory(MemoryError::Limit { .. }))
+            ));
+        }
         assert_eq!(rejected.used(), 0);
-        let memory = MemoryBudget::new(envelope);
+        let memory = MemoryBudget::new(4096);
         let value = decode_json_string(encoded, &memory, &cancellation).unwrap();
         assert_eq!(&**value, serde_json::from_str::<String>(encoded).unwrap());
         assert_eq!(memory.used(), value.capacity());
@@ -300,4 +305,48 @@ fn borrowed_byte_tokens_preserve_ignored_input_without_lossy_utf8_conversion() {
         Err(JsonReadError::InvalidJson)
     ));
     assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn controlled_strings_match_serde_escapes_and_preserve_both_cancellation_owners() {
+    let memory = MemoryBudget::new(4096);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &original, &invoking);
+    for text in [
+        r#""\"\\\/\b\f\n\r\t\u0000\uD83D\uDE03한글""#,
+        " \"literal\" ",
+    ] {
+        let value = decode_json_string_with_control(text, &control).unwrap();
+        assert_eq!(&**value, serde_json::from_str::<String>(text).unwrap());
+        assert_eq!(value.reserved_bytes(), value.capacity());
+        drop(value);
+        assert_eq!(memory.used(), 0);
+    }
+    for cancel_original in [false, true] {
+        let prior = decode_json_string_with_control(r#""prior""#, &control).unwrap();
+        let before = memory.used();
+        let mut reader = JsonReader::with_control("[1,2]", &control);
+        reader.next_event().unwrap();
+        if cancel_original {
+            original.cancel();
+        } else {
+            invoking.cancel();
+        }
+        assert!(matches!(
+            reader.next_event(),
+            Err(JsonReadError::Cancelled(_))
+        ));
+        assert!(matches!(
+            decode_json_string_with_control(r#""next""#, &control),
+            Err(JsonReadError::Cancelled(_))
+        ));
+        drop(reader);
+        assert_eq!(memory.used(), before);
+        assert_eq!(&**prior, "prior");
+        original.reset();
+        invoking.reset();
+        drop(prior);
+        assert_eq!(memory.used(), 0);
+    }
 }

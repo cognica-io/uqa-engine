@@ -69,3 +69,38 @@ fn cancelled_canonical_format_returns_the_original_typed_error_without_retention
     ));
     assert_eq!(memory.used(), 0);
 }
+
+#[test]
+fn produced_sql_text_preserves_display_scale_and_releases_both_workspaces() {
+    let memory = MemoryBudget::new(1 << 20);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &original, &invoking);
+    for input in [
+        "0",
+        "0.0000",
+        "12.3400",
+        "-0.0000012000",
+        "10000",
+        "NaN",
+        "Infinity",
+        "-Infinity",
+    ] {
+        let value = DecimalValue::parse_with_control(input, &control)
+            .unwrap()
+            .unwrap();
+        let retained = value.reserved_bytes();
+        let text = value.to_sql_string_with_control(&control).unwrap();
+        assert_eq!(&**text, input);
+        assert_eq!(memory.used(), retained + text.capacity());
+        drop(text);
+        drop(value);
+        assert_eq!(memory.used(), 0);
+    }
+    invoking.cancel();
+    assert!(matches!(
+        DecimalValue::parse_with_control("1", &control),
+        Err(ValueRetentionError::Cancelled(_))
+    ));
+    assert_eq!(memory.used(), 0);
+}

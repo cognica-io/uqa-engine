@@ -22,6 +22,12 @@ impl BudgetedString {
         }
     }
 
+    /// Transfer a completed string and its existing allocation lease without copying its buffer.
+    pub fn from_budgeted(value: super::Budgeted<String>) -> Self {
+        let (value, memory) = value.into_parts();
+        Self { value, memory }
+    }
+
     pub fn capacity(&self) -> usize {
         self.value.capacity()
     }
@@ -58,6 +64,10 @@ impl BudgetedString {
         Ok(())
     }
 
+    pub fn truncate(&mut self, length: usize) {
+        self.value.truncate(length);
+    }
+
     pub fn into_parts(self) -> (String, MemoryReservation) {
         (self.value, self.memory)
     }
@@ -68,5 +78,25 @@ impl std::ops::Deref for BudgetedString {
 
     fn deref(&self) -> &str {
         &self.value
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn completed_string_transfer_preserves_buffer_and_lease() {
+        let budget = MemoryBudget::new(128);
+        let mut source = BudgetedString::new(&budget);
+        source.push_str("transferred").unwrap();
+        let (value, memory) = source.into_parts();
+        let pointer = value.as_ptr();
+        let capacity = value.capacity();
+        let output = BudgetedString::from_budgeted(super::super::Budgeted::new(value, memory));
+        assert_eq!(output.as_ptr(), pointer);
+        assert_eq!(budget.used(), capacity);
+        drop(output);
+        assert_eq!(budget.used(), 0);
     }
 }

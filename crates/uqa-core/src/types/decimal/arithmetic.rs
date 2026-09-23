@@ -10,8 +10,7 @@ use num_bigint::BigInt;
 use num_traits::{Signed, Zero};
 
 use super::{
-    align_coefficient, decimal_digit_count, pow10, DecimalRepr, DecimalValue, MAX_DISPLAY_SCALE,
-    MAX_FRACTIONAL_DIGITS,
+    align_coefficient, pow10, DecimalRepr, DecimalValue, MAX_DISPLAY_SCALE, MAX_FRACTIONAL_DIGITS,
 };
 
 impl DecimalValue {
@@ -219,16 +218,10 @@ impl DecimalValue {
     }
 
     pub fn abs(&self) -> Self {
-        match self.repr() {
-            DecimalRepr::Finite { coefficient, scale } => Self::with_repr(DecimalRepr::Finite {
-                coefficient: coefficient.abs(),
-                scale: *scale,
-            }),
-            DecimalRepr::NegativeInfinity | DecimalRepr::PositiveInfinity => {
-                Self::positive_infinity()
-            }
-            DecimalRepr::NaN => Self::nan(),
-        }
+        self.abs_with_control(&crate::memory::ProductionControl::uncontrolled())
+            .expect("ordinary decimal absolute value")
+            .into_uncontrolled()
+            .expect("ordinary decimal owner")
     }
 
     pub fn ceil(&self) -> Self {
@@ -259,98 +252,38 @@ impl DecimalValue {
     }
 
     pub fn fits_precision(&self, precision: u32, scale: i32) -> bool {
-        match self.repr() {
-            DecimalRepr::NaN => true,
-            DecimalRepr::NegativeInfinity | DecimalRepr::PositiveInfinity => false,
-            DecimalRepr::Finite {
-                coefficient,
-                scale: value_scale,
-            } => {
-                let target = if scale >= 0 {
-                    let Ok(scale) = u32::try_from(scale) else {
-                        return false;
-                    };
-                    if scale >= *value_scale {
-                        coefficient * pow10(scale - *value_scale)
-                    } else {
-                        coefficient / pow10(*value_scale - scale)
-                    }
-                } else {
-                    let Some(power) = scale
-                        .checked_neg()
-                        .and_then(|value| u32::try_from(value).ok())
-                        .and_then(|value| value.checked_add(*value_scale))
-                    else {
-                        return false;
-                    };
-                    coefficient / pow10(power)
-                };
-                decimal_digit_count(&target) <= usize::try_from(precision).unwrap_or(usize::MAX)
-            }
-        }
+        self.fits_precision_with_control(
+            precision,
+            scale,
+            &crate::memory::ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary numeric precision")
     }
 
     fn integral_round(&self, rounding: IntegralRounding) -> Self {
-        let DecimalRepr::Finite { coefficient, scale } = self.repr() else {
-            return self.clone();
-        };
-        if *scale == 0 {
-            return self.clone();
-        }
-        let divisor = pow10(*scale);
-        let quotient = coefficient / &divisor;
-        let remainder = coefficient % divisor;
-        let coefficient = match rounding {
-            IntegralRounding::Trunc if !remainder.is_zero() => quotient,
-            IntegralRounding::Ceil if !remainder.is_zero() && coefficient.is_positive() => {
-                quotient + 1
-            }
-            IntegralRounding::Floor if !remainder.is_zero() && coefficient.is_negative() => {
-                quotient - 1
-            }
-            _ => quotient,
-        };
-        Self::with_repr(DecimalRepr::Finite {
-            coefficient,
-            scale: 0,
-        })
+        self.integral_round_with_control(
+            rounding,
+            &crate::memory::ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary decimal integral rounding")
+        .into_uncontrolled()
+        .expect("ordinary decimal owner")
     }
 
     fn quantize(&self, target_scale: i32, round: bool) -> Option<Self> {
-        let DecimalRepr::Finite { coefficient, scale } = self.repr() else {
-            return Some(self.clone());
-        };
-        if target_scale >= 0 {
-            let target_scale = u32::try_from(target_scale).ok()?;
-            if target_scale > MAX_FRACTIONAL_DIGITS {
-                return None;
-            }
-            if target_scale >= *scale {
-                return Self::finite(coefficient * pow10(target_scale - *scale), target_scale);
-            }
-            let divisor = pow10(*scale - target_scale);
-            let coefficient = if round {
-                divide_round_away_from_zero(coefficient, &divisor)?
-            } else {
-                coefficient / divisor
-            };
-            return Self::finite(coefficient, target_scale);
-        }
-
-        let integer_power = u32::try_from(target_scale.checked_neg()?).ok()?;
-        let divisor_power = scale.checked_add(integer_power)?;
-        let divisor = pow10(divisor_power);
-        let rounded = if round {
-            divide_round_away_from_zero(coefficient, &divisor)?
-        } else {
-            coefficient / divisor
-        };
-        Self::finite(rounded * pow10(integer_power), 0)
+        self.quantize_with_control(
+            target_scale,
+            round,
+            &crate::memory::ProductionControl::uncontrolled(),
+        )
+        .ok()??
+        .into_uncontrolled()
+        .ok()
     }
 }
 
 #[derive(Clone, Copy)]
-enum IntegralRounding {
+pub(super) enum IntegralRounding {
     Ceil,
     Floor,
     Trunc,

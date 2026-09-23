@@ -11,6 +11,7 @@ use super::{
     Serialize, Serializer, TemporalValue,
 };
 
+pub(super) mod comparison_control;
 mod copying;
 mod decoding;
 mod retention;

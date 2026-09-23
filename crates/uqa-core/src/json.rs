@@ -7,14 +7,14 @@
 //! Borrowed JSON events share one grammar without choosing a numeric or object representation.
 
 use crate::{
-    memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryError},
+    memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryError, ProductionControl},
     CancellationToken, QueryCancelled,
 };
 
 mod lexical;
 mod string;
 
-pub use string::decode_json_string;
+pub use string::{decode_json_string, decode_json_string_with_control};
 
 #[derive(Debug, thiserror::Error)]
 pub enum JsonReadError {
@@ -97,6 +97,7 @@ pub struct JsonReader<'a, 'c> {
     position: usize,
     stack: Stack,
     cancellation: Option<&'c CancellationToken>,
+    production: Option<ProductionControl<'c>>,
     root_started: bool,
     depth_limit: Option<usize>,
     ignored_string_escapes: bool,
@@ -117,6 +118,7 @@ impl<'a, 'c> JsonReader<'a, 'c> {
             position: 0,
             stack: Stack::Bounded(BudgetedVec::new(memory)),
             cancellation: Some(cancellation),
+            production: None,
             root_started: false,
             depth_limit: None,
             ignored_string_escapes: false,
@@ -129,6 +131,24 @@ impl<'a, 'c> JsonReader<'a, 'c> {
             position: 0,
             stack: Stack::Unbounded(Vec::new()),
             cancellation: None,
+            production: None,
+            root_started: false,
+            depth_limit: None,
+            ignored_string_escapes: false,
+        }
+    }
+
+    /// Read the same borrowed grammar under an ordinary or controlled producer, preserving every active cancellation owner within token scans as well as between events.
+    pub fn with_control(input: &'a str, control: &ProductionControl<'c>) -> Self {
+        Self {
+            input: input.as_bytes(),
+            position: 0,
+            stack: control.budget().map_or_else(
+                || Stack::Unbounded(Vec::new()),
+                |budget| Stack::Bounded(BudgetedVec::new(budget)),
+            ),
+            cancellation: None,
+            production: Some(*control),
             root_started: false,
             depth_limit: None,
             ignored_string_escapes: false,
@@ -270,6 +290,9 @@ impl<'a, 'c> JsonReader<'a, 'c> {
     fn check(&self) -> Result<(), JsonReadError> {
         if let Some(cancellation) = self.cancellation {
             cancellation.check()?;
+        }
+        if let Some(production) = self.production {
+            production.check_cancellation()?;
         }
         Ok(())
     }

@@ -10,7 +10,7 @@ use num_bigint::{BigInt, Sign};
 
 use super::{DecimalRepr, DecimalValue};
 use crate::{
-    memory::{Budgeted, MemoryBudget, MemoryError, MemoryReservation},
+    memory::{Budgeted, MemoryBudget, MemoryError, MemoryReservation, Produced, ProductionControl},
     CancellationToken, ValueRetentionError,
 };
 
@@ -24,6 +24,15 @@ impl DecimalValue {
         parse_with(input, None, &mut || Ok(()))
             .ok()?
             .map(|(value, _)| value)
+    }
+
+    pub fn parse_with_control(
+        input: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<Self>>, ValueRetentionError> {
+        parse_with(input, control.budget(), &mut || control.check())?
+            .map(|(value, memory)| control.finish(value, memory))
+            .transpose()
     }
 
     /// Parse under a shared allowance, reserving decimal digits, coefficient conversion workspace and the boxed result before allocation. Invalid syntax and out-of-range precision return `None`; successful values retain their conservative coefficient charge until dropped.
@@ -124,9 +133,9 @@ fn coefficient(
 fn conversion_bytes(digits: usize) -> Result<usize, MemoryError> {
     if digits == 0 {
         // BigInt::ZERO allocates nothing, but keep the same conservative retained representation charge as every other decimal owner.
-        return Ok(size_of::<DecimalRepr>() + 4 * size_of::<usize>());
+        return Ok(size_of::<DecimalRepr>() + 7 * size_of::<usize>());
     }
-    // num-bigint 0.4.6, biguint/convert.rs::from_radix_digits_be reserves ceil(log2(10) * digits / BigDigit::BITS) limbs, then updates that one Vec in place. A leading carry slot can grow it once; Vec's minimum non-byte growth is four elements. Reserve both old and replacement buffers, and at least the existing four-times-limb retained charge. Four bits per decimal digit is an integer upper bound for both 32-bit and 64-bit BigDigit configurations (src/macros.rs). Normalization only truncates a possible leading zero; any shrink also fits the same overlap allowance. No power, coefficient clone, digit string, or formatting buffer is constructed by this path.
+    // num-bigint 0.4.6, biguint/convert.rs::from_radix_digits_be reserves ceil(log2(10) * digits / BigDigit::BITS) limbs, then updates that one Vec in place. A leading carry slot can grow it once; Vec's minimum non-byte growth is four elements. Reserve both old and replacement buffers, and at least the normalized four-times-limb plus three-limb slack charge. Four bits per decimal digit is an integer upper bound for both 32-bit and 64-bit BigDigit configurations (src/macros.rs). Normalization only truncates a possible leading zero; any shrink also fits the same overlap allowance. No power, coefficient clone, digit string, or formatting buffer is constructed by this path.
     // The growth rule is audited against Rust 1.90's min_non_zero_cap and grow_amortized: https://github.com/rust-lang/rust/blob/1.90.0/library/alloc/src/raw_vec/mod.rs.
     let limb_bits = if cfg!(target_pointer_width = "64") {
         64_usize
@@ -145,7 +154,10 @@ fn conversion_bytes(digits: usize) -> Result<usize, MemoryError> {
     let overlap = limbs
         .checked_add(replacement)
         .ok_or(MemoryError::SizeOverflow)?;
-    let retained = limbs.checked_mul(4).ok_or(MemoryError::SizeOverflow)?;
+    let retained = limbs
+        .checked_mul(4)
+        .and_then(|limbs| limbs.checked_add(3))
+        .ok_or(MemoryError::SizeOverflow)?;
     overlap
         .max(retained)
         .checked_mul(limb_bits / 8)

@@ -7,8 +7,8 @@
 //! Native JSONB parsing can retain its allocations under a caller's shared allowance.
 
 use crate::{
-    json::{decode_json_string, JsonReader},
-    memory::{BudgetedVec, MemoryBudget, MemoryError, MemoryReservation},
+    json::{decode_json_string, decode_json_string_with_control, JsonReader},
+    memory::{BudgetedVec, MemoryBudget, MemoryError, MemoryReservation, ProductionControl},
     CancellationToken,
 };
 
@@ -17,6 +17,7 @@ use super::{JsonNumber, JsonbKeyError};
 pub(super) struct Workspace<'a> {
     memory: Option<MemoryReservation>,
     cancellation: Option<&'a CancellationToken>,
+    production: Option<ProductionControl<'a>>,
 }
 
 impl<'a> Workspace<'a> {
@@ -24,6 +25,7 @@ impl<'a> Workspace<'a> {
         Self {
             memory: None,
             cancellation: None,
+            production: None,
         }
     }
 
@@ -31,10 +33,22 @@ impl<'a> Workspace<'a> {
         Self {
             memory: Some(memory.empty_reservation()),
             cancellation: Some(cancellation),
+            production: None,
+        }
+    }
+
+    pub(super) fn with_control(control: &ProductionControl<'a>) -> Self {
+        Self {
+            memory: control.empty_reservation(),
+            cancellation: None,
+            production: Some(*control),
         }
     }
 
     pub(super) fn check(&self) -> Result<(), JsonbKeyError> {
+        if let Some(control) = self.production {
+            control.check_cancellation()?;
+        }
         if let Some(cancellation) = self.cancellation {
             cancellation.check()?;
         }
@@ -70,6 +84,9 @@ impl<'a> Workspace<'a> {
     }
 
     pub(super) fn reader<'input>(&self, input: &'input str) -> JsonReader<'input, 'a> {
+        if let Some(control) = self.production {
+            return JsonReader::with_control(input, &control);
+        }
         match (&self.memory, self.cancellation) {
             (Some(memory), Some(cancellation)) => {
                 JsonReader::new(input, memory.budget(), cancellation)
@@ -79,6 +96,13 @@ impl<'a> Workspace<'a> {
     }
 
     pub(super) fn string(&mut self, encoded: &[u8]) -> Result<String, JsonbKeyError> {
+        if let Some(control) = self.production {
+            let (value, memory) = decode_json_string_with_control(encoded, &control)?.into_parts();
+            if let Some(memory) = memory {
+                self.retain(memory);
+            }
+            return Ok(value);
+        }
         match (&self.memory, self.cancellation) {
             (Some(memory), Some(cancellation)) => {
                 let (value, retained) =
@@ -98,9 +122,30 @@ impl<'a> Workspace<'a> {
             .and_then(|bytes| bytes.checked_add(8))
             .ok_or(MemoryError::SizeOverflow)?;
         let mut memory = self.reserve(bytes)?;
-        let value = JsonNumber::parse(text).ok_or(JsonbKeyError::InvalidJson)?;
+        let value =
+            JsonNumber::parse(text, &mut || self.check())?.ok_or(JsonbKeyError::InvalidJson)?;
         self.retain_capacity(&mut memory, value.digits.capacity())?;
         Ok(value)
+    }
+
+    pub(super) fn compare_text(
+        &self,
+        left: &str,
+        right: &str,
+    ) -> Result<std::cmp::Ordering, JsonbKeyError> {
+        for (left, right) in left
+            .as_bytes()
+            .chunks(4096)
+            .zip(right.as_bytes().chunks(4096))
+        {
+            self.check()?;
+            let ordering = left.cmp(right);
+            if !ordering.is_eq() {
+                return Ok(ordering);
+            }
+        }
+        self.check()?;
+        Ok(left.len().cmp(&right.len()))
     }
 
     pub(super) fn buffer<T>(&self) -> ParseBuffer<T> {

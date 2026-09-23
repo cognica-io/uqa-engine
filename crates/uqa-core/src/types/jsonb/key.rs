@@ -8,13 +8,11 @@
 
 use crate::{
     cancel::QueryCancelled,
-    memory::{BudgetedVec, MemoryError},
+    memory::{BudgetedVec, MemoryError, ProductionControl},
     CancellationToken,
 };
 
-use super::{
-    jsonb_key_storage_order, type_rank, workspace::Workspace, JsonNumber, JsonbParser, JsonbValue,
-};
+use super::{type_rank, workspace::Workspace, JsonNumber, JsonbParser, JsonbValue};
 
 #[derive(Debug, thiserror::Error)]
 pub enum JsonbKeyError {
@@ -42,12 +40,22 @@ pub fn write_jsonb_comparison_key(
     output: &mut BudgetedVec<u8>,
     cancellation: &CancellationToken,
 ) -> Result<(), JsonbKeyError> {
+    let budget = output.budget().clone();
+    let control = ProductionControl::new(&budget, cancellation, cancellation);
+    write_with_control(text, output, &control)
+}
+
+pub(super) fn write_with_control(
+    text: &str,
+    output: &mut BudgetedVec<u8>,
+    control: &ProductionControl<'_>,
+) -> Result<(), JsonbKeyError> {
     let original = output.len();
     let result = (|| {
-        let mut workspace = Workspace::bounded(output.budget(), cancellation);
+        let mut workspace = Workspace::with_control(control);
         let value = JsonbParser::parse_with(text, &mut workspace)?;
-        encode(&value, true, output, cancellation)?;
-        cancellation.check()?;
+        encode(&value, true, output, control)?;
+        control.check_cancellation()?;
         Ok(())
     })();
     if result.is_err() {
@@ -60,9 +68,9 @@ fn encode(
     value: &JsonbValue,
     root: bool,
     output: &mut BudgetedVec<u8>,
-    cancellation: &CancellationToken,
+    control: &ProductionControl<'_>,
 ) -> Result<(), JsonbKeyError> {
-    cancellation.check()?;
+    control.check_cancellation()?;
     if root && matches!(value, JsonbValue::Array(values) if values.is_empty()) {
         output.push(0)?;
         return Ok(());
@@ -71,26 +79,45 @@ fn encode(
     match value {
         JsonbValue::Null => {}
         JsonbValue::Bool(value) => output.push(u8::from(*value))?,
-        JsonbValue::Number(value) => number(value, output, cancellation)?,
-        JsonbValue::String(value) => text(value.as_bytes(), output, cancellation)?,
+        JsonbValue::Number(value) => number(value, output, control)?,
+        JsonbValue::String(value) => text(value.as_bytes(), output, control)?,
         JsonbValue::Array(values) => {
             length(values.len(), output)?;
             for value in values {
-                encode(value, false, output, cancellation)?;
+                encode(value, false, output, control)?;
             }
         }
         JsonbValue::Object(values) => {
             length(values.len(), output)?;
             let mut ordered = BudgetedVec::new(output.budget());
             for value in values {
-                cancellation.check()?;
+                control.check_cancellation()?;
                 ordered.push(value)?;
             }
-            ordered
-                .sort_unstable_by(|left, right| jsonb_key_storage_order(&left.name, &right.name));
+            crate::ordering::sort_by_with_control(
+                &mut ordered,
+                &mut || control.check_cancellation().map_err(JsonbKeyError::from),
+                |left, right, _| {
+                    let length = left.name.len().cmp(&right.name.len());
+                    if !length.is_eq() {
+                        return Ok(length);
+                    }
+                    super::super::value::comparison_control::compare_bytes(
+                        left.name.as_bytes(),
+                        right.name.as_bytes(),
+                        control,
+                    )
+                    .map_err(|error| match error {
+                        crate::ValueRetentionError::Memory(error) => JsonbKeyError::Memory(error),
+                        crate::ValueRetentionError::Cancelled(error) => {
+                            JsonbKeyError::Cancelled(error)
+                        }
+                    })
+                },
+            )?;
             for field in &*ordered {
-                text(field.name.as_bytes(), output, cancellation)?;
-                encode(&field.value, false, output, cancellation)?;
+                text(field.name.as_bytes(), output, control)?;
+                encode(&field.value, false, output, control)?;
             }
         }
     }
@@ -106,10 +133,10 @@ fn length(length: usize, output: &mut BudgetedVec<u8>) -> Result<(), JsonbKeyErr
 fn text(
     value: &[u8],
     output: &mut BudgetedVec<u8>,
-    cancellation: &CancellationToken,
+    control: &ProductionControl<'_>,
 ) -> Result<(), JsonbKeyError> {
     for chunk in value.chunks(4096) {
-        cancellation.check()?;
+        control.check_cancellation()?;
         for &byte in chunk {
             if byte == 0 {
                 output.extend_from_slice(&[0, 255])?;
@@ -125,7 +152,7 @@ fn text(
 fn number(
     value: &JsonNumber,
     output: &mut BudgetedVec<u8>,
-    cancellation: &CancellationToken,
+    control: &ProductionControl<'_>,
 ) -> Result<(), JsonbKeyError> {
     output.push(u8::from(!value.negative))?;
     let mask = if value.negative { 255 } else { 0 };
@@ -135,7 +162,7 @@ fn number(
     }
     output.extend_from_slice(&rank)?;
     for chunk in value.digits.chunks(4096) {
-        cancellation.check()?;
+        control.check_cancellation()?;
         for &byte in chunk {
             output.push(byte ^ mask)?;
         }

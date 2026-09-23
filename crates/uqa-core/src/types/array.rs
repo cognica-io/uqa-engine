@@ -9,8 +9,9 @@
 use super::Value;
 
 mod elements;
+mod production;
 mod shape;
-pub use elements::{ArrayTraversalError, BudgetedArrayElements};
+pub use elements::{ArrayTraversalError, BudgetedArrayElements, ControlledArrayElements};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArrayValue {
@@ -26,17 +27,23 @@ struct ArrayStorage {
 
 impl ArrayValue {
     pub fn try_new(elements: Vec<Value>) -> Option<Self> {
-        let dimensions = normalized_shape(&elements)?;
-        let lower_bounds = vec![1; dimensions.len()];
-        Some(Self::from_decoded_parts(elements, dimensions, lower_bounds))
+        let control = crate::memory::ProductionControl::uncontrolled();
+        Self::try_new_with_control(control.finish(elements, None).ok()?, &control)
+            .ok()??
+            .into_uncontrolled()
+            .ok()
     }
 
     pub fn with_lower_bounds(elements: Vec<Value>, lower_bounds: Vec<i32>) -> Option<Self> {
-        let dimensions = normalized_shape(&elements)?;
-        if dimensions.len() != lower_bounds.len() {
-            return None;
-        }
-        Some(Self::from_decoded_parts(elements, dimensions, lower_bounds))
+        let control = crate::memory::ProductionControl::uncontrolled();
+        Self::with_lower_bounds_with_control(
+            control.finish(elements, None).ok()?,
+            control.finish(lower_bounds, None).ok()?,
+            &control,
+        )
+        .ok()??
+        .into_uncontrolled()
+        .ok()
     }
 
     /// Validate borrowed input before a tagged decoder transfers its values. Rejected tags must preserve the complete original map.
@@ -143,17 +150,12 @@ impl ArrayValue {
 }
 
 fn normalize_nested_arrays(elements: &mut [Value]) {
-    for value in elements {
-        if matches!(value, Value::Array(_)) {
-            let Value::Array(array) = std::mem::take(value) else {
-                unreachable!("array variant was checked");
-            };
-            *value = Value::List(array.into_elements());
-        }
-        if let Value::List(values) = value {
-            normalize_nested_arrays(values);
-        }
-    }
+    production::normalize(
+        elements,
+        &mut None,
+        &crate::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary array normalization");
 }
 
 fn normalized_shape(elements: &[Value]) -> Option<Vec<usize>> {

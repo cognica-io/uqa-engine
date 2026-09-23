@@ -13,6 +13,7 @@ mod format_budgeted;
 mod parse;
 mod parse_format;
 mod power;
+mod production;
 mod sampling;
 mod transcendental;
 
@@ -89,9 +90,11 @@ impl DecimalValue {
             DecimalRepr::Finite { coefficient, .. } => {
                 let bits = usize::try_from(coefficient.bits()).unwrap_or(usize::MAX);
                 let digits = bits.div_ceil(usize::BITS as usize).max(1);
+                // num-bigint 0.4.6 normalizes when len < capacity / 4. Integer division leaves up to three additional limbs at that boundary.
                 digits
-                    .saturating_mul(std::mem::size_of::<usize>())
                     .saturating_mul(4)
+                    .saturating_add(3)
+                    .saturating_mul(std::mem::size_of::<usize>())
             }
             _ => 0,
         };

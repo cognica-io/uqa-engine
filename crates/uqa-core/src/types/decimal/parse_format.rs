@@ -6,30 +6,23 @@
 
 //! Decimal parsing, display formatting, canonical text, and serde representation.
 
-use num_bigint::BigInt;
-use num_traits::Signed;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::{canonical_finite_parts, DecimalRepr, DecimalValue};
 
 impl DecimalValue {
     pub fn to_sql_string(&self) -> String {
-        match self.repr() {
-            DecimalRepr::Finite { coefficient, scale } => format_finite(coefficient, *scale),
-            DecimalRepr::NegativeInfinity => "-Infinity".into(),
-            DecimalRepr::PositiveInfinity => "Infinity".into(),
-            DecimalRepr::NaN => "NaN".into(),
-        }
+        self.to_sql_string_with_control(&crate::memory::ProductionControl::uncontrolled())
+            .expect("ordinary decimal formatting")
+            .into_uncontrolled()
+            .expect("ordinary decimal text")
     }
 
     pub fn to_canonical_string(&self) -> String {
-        match self.repr() {
-            DecimalRepr::Finite { coefficient, scale } => {
-                let (coefficient, scale) = canonical_finite_parts(coefficient, *scale);
-                format_finite(&coefficient, scale)
-            }
-            _ => self.to_sql_string(),
-        }
+        self.to_canonical_string_with_control(&crate::memory::ProductionControl::uncontrolled())
+            .expect("ordinary decimal formatting")
+            .into_uncontrolled()
+            .expect("ordinary decimal text")
     }
 
     /// Normalized base-10 coefficient and scale. The coefficient is returned as text because `PostgreSQL` numeric coefficients exceed primitive integer widths.
@@ -45,22 +38,6 @@ impl DecimalValue {
 
     pub fn sql_string_len(&self) -> usize {
         self.to_sql_string().len()
-    }
-}
-
-fn format_finite(coefficient: &BigInt, scale: u32) -> String {
-    let negative = coefficient.is_negative();
-    let digits = coefficient.abs().to_str_radix(10);
-    let sign = if negative { "-" } else { "" };
-    if scale == 0 {
-        return format!("{sign}{digits}");
-    }
-    let scale = scale as usize;
-    if digits.len() > scale {
-        let split = digits.len() - scale;
-        format!("{sign}{}.{}", &digits[..split], &digits[split..])
-    } else {
-        format!("{sign}0.{}{digits}", "0".repeat(scale - digits.len()))
     }
 }
 

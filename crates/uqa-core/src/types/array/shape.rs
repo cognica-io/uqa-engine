@@ -34,6 +34,15 @@ pub(super) fn budgeted(
     })
 }
 
+pub(super) fn produced(
+    elements: &[Value],
+    control: &crate::memory::ProductionControl<'_>,
+) -> Result<Option<crate::memory::Produced<Vec<usize>>>, ValueRetentionError> {
+    validate(elements, control.budget(), &mut || control.check())?
+        .map(|(dimensions, memory)| control.finish(dimensions, memory))
+        .transpose()
+}
+
 fn nested(value: &Value) -> Option<&[Value]> {
     match value {
         Value::List(values) => Some(values),

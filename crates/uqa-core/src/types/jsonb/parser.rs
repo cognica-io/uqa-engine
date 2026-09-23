@@ -73,11 +73,15 @@ impl JsonbParser {
                     };
                     let mut fields = fields.finish(workspace);
                     // Keep the last occurrence of each key, then retain lexical key order for the native equality representation. Sorting needs no temporary allocation.
-                    fields.sort_unstable_by(|left, right| {
-                        left.name
-                            .cmp(&right.name)
-                            .then_with(|| right.position.cmp(&left.position))
-                    });
+                    crate::ordering::sort_by_with_control(
+                        &mut fields,
+                        &mut || workspace.check(),
+                        |left, right, _| {
+                            Ok(workspace
+                                .compare_text(&left.name, &right.name)?
+                                .then_with(|| right.position.cmp(&left.position)))
+                        },
+                    )?;
                     fields.dedup_by(|later, earlier| later.name == earlier.name);
                     JsonbValue::Object(fields)
                 }

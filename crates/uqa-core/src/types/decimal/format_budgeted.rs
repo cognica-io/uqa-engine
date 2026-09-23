@@ -10,7 +10,9 @@ use num_traits::{Signed, Zero};
 
 use super::{DecimalRepr, DecimalValue};
 use crate::{
-    memory::{Budgeted, BudgetedString, MemoryBudget, MemoryError},
+    memory::{
+        BudgetedString, MemoryBudget, MemoryError, Produced, ProductionControl, ProductionString,
+    },
     CancellationToken, ValueRetentionError,
 };
 
@@ -23,15 +25,42 @@ impl DecimalValue {
         memory: &MemoryBudget,
         cancellation: &CancellationToken,
     ) -> Result<BudgetedString, ValueRetentionError> {
-        cancellation.check()?;
-        let mut output = BudgetedString::new(memory);
+        let control = ProductionControl::new(memory, cancellation, cancellation);
+        Ok(BudgetedString::from_budgeted(
+            self.to_canonical_string_with_control(&control)?
+                .into_budgeted()
+                .expect("controlled decimal formatter"),
+        ))
+    }
+
+    pub fn to_canonical_string_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<String>, ValueRetentionError> {
+        self.format_with_control(true, control)
+    }
+
+    pub fn to_sql_string_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<String>, ValueRetentionError> {
+        self.format_with_control(false, control)
+    }
+
+    fn format_with_control(
+        &self,
+        canonical: bool,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<String>, ValueRetentionError> {
+        control.check()?;
+        let mut output = ProductionString::new(*control);
         let (coefficient, scale) = match self.repr() {
-            DecimalRepr::Finite { coefficient, scale } if !coefficient.is_zero() => {
+            DecimalRepr::Finite { coefficient, scale } if !canonical || !coefficient.is_zero() => {
                 (coefficient, *scale as usize)
             }
             DecimalRepr::Finite { .. } => {
                 output.push('0')?;
-                return Ok(output);
+                return output.finish();
             }
             special => {
                 output.push_str(match special {
@@ -40,29 +69,38 @@ impl DecimalValue {
                     DecimalRepr::NaN => "NaN",
                     DecimalRepr::Finite { .. } => unreachable!(),
                 })?;
-                return Ok(output);
+                return output.finish();
             }
         };
-        let mut workspace = memory.reserve(radix_workspace_bytes(coefficient.bits())?)?;
+        let mut workspace = control.reserve(radix_workspace_bytes(coefficient.bits())?)?;
         let mut digits = coefficient.magnitude().to_radix_le(10);
-        workspace.grow(digits.capacity().saturating_sub(workspace.bytes()))?;
+        if let Some(workspace) = &mut workspace {
+            workspace.grow(digits.capacity().saturating_sub(workspace.bytes()))?;
+        }
         // Trimming fractional zero digits avoids cloning and repeatedly dividing the coefficient just to normalize its scale.
-        let removed = digits
-            .iter()
-            .take(scale)
-            .take_while(|digit| **digit == 0)
-            .count();
+        let mut removed = 0;
+        if canonical {
+            for digit in digits.iter().take(scale) {
+                control.check()?;
+                if *digit != 0 {
+                    break;
+                }
+                removed += 1;
+            }
+        }
         let scale = scale - removed;
         digits.reverse();
         digits.truncate(digits.len() - removed);
         for chunk in digits.chunks_mut(4096) {
-            cancellation.check()?;
+            control.check()?;
             for digit in chunk {
                 *digit += b'0';
             }
         }
-        let digit_memory = workspace.split(digits.capacity());
-        let digits = Budgeted::new(digits, digit_memory);
+        let digit_memory = workspace
+            .as_mut()
+            .map(|memory| memory.split(digits.capacity()));
+        let digits = control.finish(digits, digit_memory)?;
         drop(workspace);
         let digits = std::str::from_utf8(&digits).expect("ASCII decimal digits");
         let length = digits
@@ -75,38 +113,26 @@ impl DecimalValue {
             output.push('-')?;
         }
         if scale == 0 {
-            append(&mut output, digits, cancellation)?;
+            output.push_str(digits)?;
         } else if digits.len() > scale {
             let split = digits.len() - scale;
-            append(&mut output, &digits[..split], cancellation)?;
+            output.push_str(&digits[..split])?;
             output.push('.')?;
-            append(&mut output, &digits[split..], cancellation)?;
+            output.push_str(&digits[split..])?;
         } else {
             output.push_str("0.")?;
             let mut padding = scale - digits.len();
             while padding != 0 {
-                cancellation.check()?;
+                control.check()?;
                 let count = padding.min(ZEROS.len());
                 output.push_str(&ZEROS[..count])?;
                 padding -= count;
             }
-            append(&mut output, digits, cancellation)?;
+            output.push_str(digits)?;
         }
-        cancellation.check()?;
-        Ok(output)
+        control.check()?;
+        output.finish()
     }
-}
-
-fn append(
-    output: &mut BudgetedString,
-    digits: &str,
-    cancellation: &CancellationToken,
-) -> Result<(), ValueRetentionError> {
-    for chunk in digits.as_bytes().chunks(4096) {
-        cancellation.check()?;
-        output.push_str(std::str::from_utf8(chunk).expect("ASCII decimal digits"))?;
-    }
-    Ok(())
 }
 
 fn radix_workspace_bytes(bits: u64) -> Result<usize, MemoryError> {

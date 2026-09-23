@@ -26,18 +26,19 @@ pub mod types;
 
 pub use cancel::{CancellationToken, QueryCancelled, SQLSTATE_QUERY_CANCELED};
 pub use doc_set::DocSet;
-pub use float_text::format_float_pg;
+pub use float_text::{format_float_pg, format_float_pg_with_control};
 pub use posting_list::{GeneralizedPostingList, PostingList};
 pub use predicate::Predicate;
 pub use ranked_view::RankedView;
 pub use relation::{LogSemiring, Relation, RelationEntry, Semiring};
 pub use relation_identity::RelationIdentity;
 pub use types::{
-    jsonb_equality_key, write_jsonb_comparison_key, write_jsonb_equality_key, ArrayTraversalError,
-    ArrayValue, BudgetedArrayElements, DecimalValue, DocId, Edge, EdgeId, FieldName,
-    GeneralizedPayload, GeneralizedPostingEntry, IndexStats, JsonValueDecoder, JsonbKeyError,
-    PathExpr, PathSegment, Payload, PostingEntry, TemporalValue, TokenOccurrence,
-    TokenOccurrenceError, TokenOffsets, Value, ValueRetentionError, Vertex, VertexId,
+    jsonb_equality_key, jsonb_equality_key_with_control, write_jsonb_comparison_key,
+    write_jsonb_equality_key, ArrayTraversalError, ArrayValue, BudgetedArrayElements,
+    ControlledArrayElements, DecimalValue, DocId, Edge, EdgeId, FieldName, GeneralizedPayload,
+    GeneralizedPostingEntry, IndexStats, JsonValueDecoder, JsonbKeyError, PathExpr, PathSegment,
+    Payload, PostingEntry, TemporalValue, TokenOccurrence, TokenOccurrenceError, TokenOffsets,
+    Value, ValueRetentionError, Vertex, VertexId,
 };
 
 mod scored_entry;

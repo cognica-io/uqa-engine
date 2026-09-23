@@ -13,7 +13,7 @@ mod key;
 mod parser;
 mod workspace;
 
-pub use equality::{jsonb_equality_key, write_jsonb_equality_key};
+pub use equality::{jsonb_equality_key, jsonb_equality_key_with_control, write_jsonb_equality_key};
 pub use key::{write_jsonb_comparison_key, JsonbKeyError};
 use parser::JsonbParser;
 
@@ -25,41 +25,72 @@ struct JsonNumber {
 }
 
 impl JsonNumber {
-    fn parse(text: &str) -> Option<Self> {
+    fn parse(
+        text: &str,
+        check: &mut impl FnMut() -> Result<(), JsonbKeyError>,
+    ) -> Result<Option<Self>, JsonbKeyError> {
+        check()?;
         let (negative, unsigned) = text
             .strip_prefix('-')
             .map_or((false, text), |unsigned| (true, unsigned));
-        let exponent = unsigned
-            .split_once('e')
-            .or_else(|| unsigned.split_once('E'));
-        let (mantissa, exponent) = match exponent {
-            Some((mantissa, exponent)) => (mantissa, exponent.parse::<i64>().ok()?),
-            None => (unsigned, 0_i64),
+        let mut exponent_at = None;
+        for (index, byte) in unsigned.bytes().enumerate() {
+            if index.is_multiple_of(4096) {
+                check()?;
+            }
+            if matches!(byte, b'e' | b'E') {
+                exponent_at = Some(index);
+                break;
+            }
+        }
+        let (mantissa, exponent) = if let Some(index) = exponent_at {
+            let Ok(exponent) = unsigned[index + 1..].parse::<i64>() else {
+                return Ok(None);
+            };
+            (&unsigned[..index], exponent)
+        } else {
+            (unsigned, 0_i64)
         };
         let (integer, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
-        let mut digits = integer
-            .bytes()
-            .chain(fraction.bytes())
-            .skip_while(|digit| *digit == b'0')
-            .collect::<Vec<_>>();
+        let mut digits = Vec::new();
+        for (index, digit) in integer.bytes().chain(fraction.bytes()).enumerate() {
+            if index.is_multiple_of(4096) {
+                check()?;
+            }
+            if digit != b'0' || !digits.is_empty() {
+                digits.push(digit);
+            }
+        }
         if digits.is_empty() {
-            return Some(Self {
+            digits.push(b'0');
+            return Ok(Some(Self {
                 negative: false,
-                digits: vec![b'0'],
+                digits,
                 power: 0,
-            });
+            }));
         }
-        let fraction_len = i64::try_from(fraction.len()).ok()?;
-        let mut power = exponent.checked_sub(fraction_len)?;
+        let Ok(fraction_len) = i64::try_from(fraction.len()) else {
+            return Ok(None);
+        };
+        let Some(mut power) = exponent.checked_sub(fraction_len) else {
+            return Ok(None);
+        };
         while digits.len() > 1 && digits.last() == Some(&b'0') {
+            if digits.len().is_multiple_of(4096) {
+                check()?;
+            }
             digits.pop();
-            power = power.checked_add(1)?;
+            let Some(next) = power.checked_add(1) else {
+                return Ok(None);
+            };
+            power = next;
         }
-        Some(Self {
+        check()?;
+        Ok(Some(Self {
             negative,
             digits,
             power,
-        })
+        }))
     }
 
     fn cmp(&self, other: &Self) -> Ordering {
@@ -124,6 +155,42 @@ pub(super) fn compare_jsonb_text(left: &str, right: &str) -> Ordering {
     match (JsonbParser::parse(left), JsonbParser::parse(right)) {
         (Some(left), Some(right)) => compare_root(&left, &right),
         _ => left.cmp(right),
+    }
+}
+
+pub(super) fn compare_jsonb_text_with_control(
+    left: &str,
+    right: &str,
+    control: &crate::memory::ProductionControl<'_>,
+) -> Result<Ordering, crate::ValueRetentionError> {
+    let Some(budget) = control.budget() else {
+        return Ok(compare_jsonb_text(left, right));
+    };
+    let mut left_key = crate::memory::BudgetedVec::new(budget);
+    let mut right_key = crate::memory::BudgetedVec::new(budget);
+    let left_valid = comparison_key(left, &mut left_key, control)?;
+    let right_valid = comparison_key(right, &mut right_key, control)?;
+    if left_valid && right_valid {
+        crate::types::value::comparison_control::compare_bytes(&left_key, &right_key, control)
+    } else {
+        crate::types::value::comparison_control::compare_bytes(
+            left.as_bytes(),
+            right.as_bytes(),
+            control,
+        )
+    }
+}
+
+fn comparison_key(
+    text: &str,
+    output: &mut crate::memory::BudgetedVec<u8>,
+    control: &crate::memory::ProductionControl<'_>,
+) -> Result<bool, crate::ValueRetentionError> {
+    match key::write_with_control(text, output, control) {
+        Ok(()) => Ok(true),
+        Err(JsonbKeyError::InvalidJson) => Ok(false),
+        Err(JsonbKeyError::Memory(error)) => Err(error.into()),
+        Err(JsonbKeyError::Cancelled(error)) => Err(error.into()),
     }
 }
 
