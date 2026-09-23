@@ -19,6 +19,16 @@ use crate::{InvertedIndex, StorageBackendResult, TokenTermKey};
 
 use super::{read_only_error, ReadOnlySnapshot};
 
+impl ReadOnlySnapshot<dyn InvertedIndex> {
+    /// Erase a captured provider's concrete type after reserving its shared allocation, keeping all producer leases with the immutable index.
+    pub fn from_budgeted_inverted<T: InvertedIndex + 'static>(
+        snapshot: Budgeted<T>,
+    ) -> StorageBackendResult<Self> {
+        let snapshot = ReadOnlySnapshot::from_budgeted(snapshot)?;
+        Ok(Self(snapshot.0, snapshot.1, snapshot.2))
+    }
+}
+
 impl<T: InvertedIndex + ?Sized> ReadOnlySnapshot<T> {
     /// Retain the first selected read control. Generation reservations can be shared without giving an unrelated reader the prior reader's cancellation signal.
     pub fn with_inverted_read_control(
@@ -56,6 +66,13 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
 
     fn analyzer(&self) -> &Analyzer {
         self.0.analyzer()
+    }
+
+    fn default_analyzer_binding(
+        &self,
+    ) -> StorageBackendResult<crate::inverted_index::AnalyzerDefault> {
+        self.check_inverted_read()?;
+        self.0.default_analyzer_binding()
     }
 
     fn add_document(

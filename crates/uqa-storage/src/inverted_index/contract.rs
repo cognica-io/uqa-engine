@@ -57,6 +57,13 @@ pub trait InvertedIndex: Send + Sync {
 
     fn analyzer(&self) -> &Analyzer;
 
+    /// Retain the exact default configuration, resource provider and already resolved revision without forcing deferred compilation. Controlled reconstruction requires this capability instead of copying and recompiling diagnostic configuration.
+    fn default_analyzer_binding(&self) -> StorageBackendResult<super::AnalyzerDefault> {
+        Err(StorageBackendError::Other(
+            "retained default analyzer bindings are not supported by this backend".into(),
+        ))
+    }
+
     fn add_document(
         &mut self,
         doc_id: DocId,

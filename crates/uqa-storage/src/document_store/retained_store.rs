@@ -328,6 +328,20 @@ impl DocumentStore for RetainedDocumentStore {
         Ok(Some(visited))
     }
 
+    fn with_field_ref_controlled(
+        &self,
+        id: DocId,
+        field: &str,
+        control: &StorageReadControl,
+        visitor: &mut dyn FnMut(Option<&Value>) -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<()> {
+        self.control.check()?;
+        control.check()?;
+        visitor(self.document(id).and_then(|row| row.fields().get(field)))?;
+        self.control.check()?;
+        control.check()
+    }
+
     fn field_presence_controlled(
         &self,
         ids: &[DocId],

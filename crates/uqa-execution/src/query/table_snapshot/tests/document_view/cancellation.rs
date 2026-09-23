@@ -60,6 +60,23 @@ impl DocumentStore for CancelOnReturn {
         self.finish(self.rows.get_stored_many(ids))
     }
 
+    fn get_stored_many_controlled(
+        &self,
+        ids: &[DocId],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::RetainedDocumentPage> {
+        self.finish(self.rows.get_stored_many_controlled(ids, control))
+    }
+
+    fn field_presence_controlled(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<bool>> {
+        self.finish(self.rows.field_presence_controlled(ids, fields, control))
+    }
+
     fn get_field(&self, id: DocId, field: &str) -> StorageBackendResult<Option<Value>> {
         self.finish(self.rows.get_field(id, field))
     }

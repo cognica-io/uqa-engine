@@ -30,7 +30,8 @@ use uqa_storage::TokenTermKey;
 pub struct SQLiteInvertedIndex {
     conn: ManagedConnection,
     table: String,
-    bindings: uqa_storage::inverted_index::AnalyzerBindings,
+    bindings: snapshot::IndexBindings,
+    retention_control: uqa_storage::read_control::StorageReadControl,
 }
 
 #[derive(Debug)]
@@ -51,6 +52,7 @@ mod mutation;
 mod native;
 pub(crate) use native::NativeOccurrenceRecords;
 mod queries;
+mod snapshot;
 mod trait_impl;
 
 use clustered::{clustered_result, load_cluster, posting_cursor_from_rows, write_cluster};

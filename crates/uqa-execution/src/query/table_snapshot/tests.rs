@@ -14,13 +14,17 @@ use uqa_storage::{
 };
 
 mod budgets;
+mod catalog;
 mod controlled_ids;
 mod controlled_rows;
 mod copied;
 mod document_view;
 mod id_cursor;
 mod index_projection;
+mod metadata;
 mod owned_defaults;
+mod owned_fields;
+mod owned_rows;
 mod retained;
 
 fn columns(sql: &str) -> Vec<ColumnDef> {
@@ -51,10 +55,13 @@ fn document(values: &[(&str, Value)], xmin: u32) -> StoredDocument {
 fn schema<'a>(columns: &'a [ColumnDef], index: &'a dyn InvertedIndex) -> SnapshotSchema<'a> {
     SnapshotSchema {
         columns: Arc::new(columns.to_vec()),
-        analyzer: index.analyzer(),
         text_fields: &[],
         text_revisions: index,
-        vector_dimensions: BTreeMap::new(),
+        vector_dimensions: {
+            static EMPTY: std::sync::LazyLock<BTreeMap<FieldName, u32>> =
+                std::sync::LazyLock::new(BTreeMap::new);
+            &*EMPTY
+        },
     }
 }
 
@@ -269,7 +276,8 @@ fn adapted_text_vectors_defaults_and_generated_fields_agree_with_rows() {
     let fields = vec!["body".to_string()];
     let mut selected = schema(&target, &index);
     selected.text_fields = &fields;
-    selected.vector_dimensions.insert("v".into(), 2);
+    let dimensions = BTreeMap::from([("v".into(), 2)]);
+    selected.vector_dimensions = &dimensions;
     let view = materialize(
         &source,
         &source_columns,

@@ -109,3 +109,46 @@ fn physical_restore_and_rebuild_fail_without_replacing_retained_readers_or_recor
         assert_eq!(control.memory().used(), 0);
     }
 }
+
+#[test]
+fn occurrence_snapshots_keep_field_metadata_and_reject_capture_at_the_original_limit() {
+    let store = store();
+    let control = read_view(&*store, |read| Ok(read.control().clone())).unwrap();
+    let mut index =
+        KeyValueInvertedIndex::new(store.clone(), "docs", uqa_analysis::whitespace_analyzer());
+    let field = "bound_".repeat(8192);
+    let revision = uqa_analysis::keyword_analyzer().compile().unwrap();
+    index
+        .set_field_analyzer_revision(
+            &field,
+            Arc::clone(&revision),
+            crate::inverted_index::AnalyzerPhase::Both,
+        )
+        .unwrap();
+    let snapshot = index.snapshot().unwrap();
+    let bytes = control.memory().used();
+    assert!(bytes > field.len());
+    let full = control
+        .memory()
+        .reserve(control.memory().limit() - bytes)
+        .unwrap();
+    assert!(matches!(
+        index.snapshot(),
+        Err(StorageBackendError::Memory(_))
+    ));
+    assert_eq!(control.memory().used(), control.memory().limit());
+    drop(full);
+    let nested = snapshot
+        .snapshot_with_control(&StorageReadControl::with_limit(0))
+        .unwrap();
+    assert_eq!(control.memory().used(), bytes);
+    index.remove_field_analyzers(&field).unwrap();
+    drop((snapshot, index, store));
+    assert!(Arc::ptr_eq(
+        &nested.index_analyzer_revision(&field).unwrap(),
+        &revision
+    ));
+    assert_eq!(control.memory().used(), bytes);
+    drop(nested);
+    assert_eq!(control.memory().used(), 0);
+}

@@ -340,12 +340,72 @@ impl DocumentStore for DocumentChanges {
         Ok(rows)
     }
 
+    fn get_stored_many_controlled(
+        &self,
+        ids: &[DocId],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::RetainedDocumentPage> {
+        use uqa_storage::{document_store::read_stored_documents, RetainedStoredDocument};
+        control.check()?;
+        let mut rows = uqa_core::memory::BudgetedVec::new(control.memory());
+        rows.reserve(ids.len())?;
+        let mut index = 0;
+        while index < ids.len() {
+            control.check()?;
+            if let Some((end, source)) = self.source_run(ids, index) {
+                let (page, _memory) =
+                    read_stored_documents(source.as_ref(), &ids[index..end], control)?.into_parts();
+                for row in page {
+                    control.check()?;
+                    rows.push(row)?;
+                }
+                index = end;
+            } else {
+                let row = match self.get(ids[index]) {
+                    Some(Change::Fields(fields, metadata)) => {
+                        Some(RetainedStoredDocument::with_metadata(
+                            fields.retain_with_control(control)?,
+                            *metadata,
+                        ))
+                    }
+                    Some(Change::Deleted) | None => None,
+                    Some(Change::Retained(_)) => unreachable!("retained source run"),
+                };
+                rows.push(row)?;
+                index += 1;
+            }
+        }
+        control.check()?;
+        Ok(rows)
+    }
+
     fn get_metadata(&self, id: DocId) -> StorageBackendResult<Option<DocumentMetadata>> {
         Ok(match self.get(id) {
             Some(Change::Fields(_, metadata)) => Some(*metadata),
             Some(Change::Retained(source)) => return source.get_metadata(id),
             Some(Change::Deleted) | None => None,
         })
+    }
+
+    fn with_field_ref_controlled(
+        &self,
+        id: DocId,
+        field: &str,
+        control: &StorageReadControl,
+        visitor: &mut dyn FnMut(Option<&Value>) -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        match self.get(id) {
+            Some(Change::Retained(source)) => {
+                source.with_field_ref_controlled(id, field, control, visitor)?;
+            }
+            change => visitor(
+                change
+                    .and_then(Change::fields)
+                    .and_then(|fields| fields.get(field)),
+            )?,
+        }
+        control.check()
     }
 
     fn field_presence_controlled(

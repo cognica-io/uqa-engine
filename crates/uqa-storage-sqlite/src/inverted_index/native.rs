@@ -49,6 +49,16 @@ impl OccurrenceStorage for NativeOccurrenceStorage {
 }
 
 impl SQLiteInvertedIndex {
+    pub(super) fn native_retained_index(
+        &self,
+    ) -> StorageBackendResult<Option<Arc<dyn uqa_storage::InvertedIndex>>> {
+        let Some(snapshot) = self.conn.native_snapshot()? else {
+            return Ok(None);
+        };
+        let read = NativeRead::new(&snapshot, &self.table)?;
+        KeyValueInvertedIndex::snapshot_from_read(&read, &self.table, &self.bindings).map(Some)
+    }
+
     pub(super) fn native_index(&self) -> Option<KeyValueInvertedIndex> {
         self.conn.is_native_record_session().then(|| {
             KeyValueInvertedIndex::from_storage(
@@ -57,7 +67,7 @@ impl SQLiteInvertedIndex {
                     table: self.table.clone(),
                 }),
                 self.table.clone(),
-                self.bindings.clone(),
+                (*self.bindings).clone(),
             )
         })
     }

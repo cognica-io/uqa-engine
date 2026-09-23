@@ -160,20 +160,4 @@ impl RetainedDocuments {
             )),
         }
     }
-
-    pub(super) fn selected_ids(
-        &self,
-        ids: &[DocId],
-        private: bool,
-    ) -> StorageBackendResult<BudgetedVec<DocId>> {
-        self.0.control.check()?;
-        let mut selected = BudgetedVec::new(self.0.control.memory());
-        for id in ids {
-            self.0.control.check()?;
-            if self.0.changes.contains_change(*id) == private {
-                selected.push(*id)?;
-            }
-        }
-        Ok(selected)
-    }
 }

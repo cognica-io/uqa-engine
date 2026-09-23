@@ -14,8 +14,8 @@ fn index_field_selection_borrows_names_and_retains_its_bounded_projection() {
     let fields = ["z".repeat(16 << 10), "a".into(), "a".into()];
     let mut schema = schema(&[], &index);
     schema.text_fields = &fields;
-    schema.vector_dimensions.insert("v".into(), 2);
-    schema.vector_dimensions.insert("a".into(), 2);
+    let dimensions = BTreeMap::from([("v".into(), 2), ("a".into(), 2)]);
+    schema.vector_dimensions = &dimensions;
     let control = StorageReadControl::with_limit(1024);
     let selected = index_fields(&schema, &control).unwrap();
     assert_eq!(&*selected, &["a", "v", fields[0].as_str()]);
@@ -166,8 +166,9 @@ fn provider_projection_allowance_remains_live_during_index_reconstruction() {
         let index = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
         let mut schema = schema(&columns, &index);
         let text_fields = ["value".into()];
+        let dimensions = BTreeMap::from([("value".into(), 1024)]);
         let value = if vector {
-            schema.vector_dimensions.insert("value".into(), 1024);
+            schema.vector_dimensions = &dimensions;
             Value::List(vec![Value::Float(1.0); 1024])
         } else {
             schema.text_fields = &text_fields;

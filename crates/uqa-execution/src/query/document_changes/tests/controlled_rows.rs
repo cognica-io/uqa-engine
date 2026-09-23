@@ -43,6 +43,9 @@ impl DocumentStore for ControlledSource {
     fn get_stored(&self, _: DocId) -> StorageBackendResult<Option<StoredDocument>> {
         panic!("uncontrolled row materialization");
     }
+    fn contains_doc_id(&self, id: DocId) -> StorageBackendResult<bool> {
+        self.rows.contains_doc_id(id)
+    }
     fn delete(&mut self, _: DocId) -> StorageBackendResult<()> {
         panic!("write");
     }
@@ -80,6 +83,67 @@ impl DocumentStore for ControlledSource {
         }
         Ok(page)
     }
+}
+
+#[test]
+fn controlled_private_pages_share_owned_fields_and_admit_retained_provider_rows() {
+    let owner = control();
+    let caller = control();
+    let source = Arc::new(ControlledSource::new());
+    let changes =
+        DocumentChanges::from_rows(BTreeMap::from([(1, Some(document(10))), (2, None)]), &owner)
+            .unwrap()
+            .with_retained(source.clone(), selection([(3, true)]), &owner)
+            .unwrap();
+    let page =
+        uqa_storage::document_store::read_stored_documents(&changes, &[1, 3, 99, 1, 2, 3], &caller)
+            .unwrap();
+    for (position, expected) in [
+        Some(document(10)),
+        Some(document(30)),
+        None,
+        Some(document(10)),
+        None,
+        Some(document(30)),
+    ]
+    .iter()
+    .enumerate()
+    {
+        match (&page[position], expected) {
+            (Some(row), Some(expected)) => {
+                assert_eq!(row.fields(), expected.fields());
+                assert_eq!(row.metadata(), expected.metadata());
+            }
+            (None, None) => {}
+            _ => panic!("private selection changed at {position}"),
+        }
+    }
+    assert!(std::ptr::eq(
+        page[0].as_ref().unwrap().fields(),
+        page[3].as_ref().unwrap().fields()
+    ));
+    assert_eq!(source.calls.load(Ordering::Relaxed), 2);
+    let empty = StorageReadControl::with_limit(0);
+    assert!(
+        uqa_storage::document_store::read_stored_documents(&changes, &[], &empty)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(matches!(
+        uqa_storage::document_store::read_stored_documents(&changes, &[1, 3], &empty),
+        Err(StorageBackendError::Memory(_))
+    ));
+    assert_eq!(source.calls.load(Ordering::Relaxed), 2);
+    caller.cancellation().cancel();
+    assert!(matches!(
+        uqa_storage::document_store::read_stored_documents(&changes, &[1], &caller),
+        Err(StorageBackendError::Cancelled(_))
+    ));
+    drop(changes);
+    assert_eq!(owner.memory().used(), 0);
+    assert!(caller.memory().used() > 0);
+    drop(page);
+    assert_eq!(caller.memory().used(), 0);
 }
 
 #[test]

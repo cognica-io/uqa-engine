@@ -127,21 +127,59 @@ impl KeyValueInvertedIndex {
         self.mutate(|view, batch| view.rebuild_documents_inner(batch, documents, cancellation))
     }
 
+    /// Capture a provider's selected occurrence view without first cloning its analyzer bindings or table metadata into an intermediate live index.
+    pub fn snapshot_from_read(
+        read: &dyn KeyValueRead,
+        table: &str,
+        bindings: &AnalyzerBindings,
+    ) -> StorageBackendResult<Arc<dyn InvertedIndex>> {
+        read.control().check()?;
+        let prefixes = super::format::retained_prefixes(table, read.control())?;
+        let borrowed: [&[u8]; 8] = std::array::from_fn(|slot| &prefixes[slot][..]);
+        let source = read.retain(&borrowed)?;
+        Self::snapshot_from_source(source, table, bindings)
+    }
+
     pub(super) fn retained_snapshot(&self) -> StorageBackendResult<Arc<dyn InvertedIndex>> {
-        let source = match &self.source {
-            OccurrenceSource::Retained(_) => self.source.clone(),
-            OccurrenceSource::Live(_) => self.read(|view| {
-                let mut prefixes = super::format::legacy_prefixes(view.table)?;
-                prefixes.push(super::keys::table_prefix(view.table)?);
-                view.store
-                    .retain(&prefixes.iter().map(Vec::as_slice).collect::<Vec<_>>())
-                    .map(OccurrenceSource::Retained)
-            })?,
-        };
-        Ok(Arc::new(Self {
-            source,
-            table: self.table.clone(),
-            bindings: self.bindings.clone(),
-        }))
+        match &self.source {
+            OccurrenceSource::Retained(source) => {
+                Self::snapshot_from_source(Arc::clone(source), &self.table, &self.bindings)
+            }
+            OccurrenceSource::Live(_) => {
+                self.read(|view| Self::snapshot_from_read(view.store, view.table, view.bindings))
+            }
+        }
+    }
+
+    fn snapshot_from_source(
+        source: Arc<dyn KeyValueRead + Send + Sync>,
+        table: &str,
+        bindings: &AnalyzerBindings,
+    ) -> StorageBackendResult<Arc<dyn InvertedIndex>> {
+        use crate::ReadOnlySnapshot;
+        use uqa_core::memory::BudgetedString;
+
+        let control = source.control().clone();
+        control.check()?;
+        let bindings = bindings.retained(&control)?;
+        let mut name = BudgetedString::new(control.memory());
+        name.reserve(table.len())?;
+        for (offset, character) in table.chars().enumerate() {
+            if offset % 1024 == 0 {
+                control.check()?;
+            }
+            name.push(character)?;
+        }
+        let (table, mut memory) = name.into_parts();
+        memory.grow(size_of::<Self>())?;
+        memory.grow(size_of::<ReadOnlySnapshot<dyn InvertedIndex>>())?;
+        let snapshot: Arc<dyn InvertedIndex> = Arc::new(Self {
+            source: OccurrenceSource::Retained(source),
+            table,
+            bindings,
+        });
+        let snapshot = ReadOnlySnapshot::with_retention(snapshot, memory)?
+            .with_inverted_read_control(&control)?;
+        Ok(Arc::new(snapshot))
     }
 }

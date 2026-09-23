@@ -11,7 +11,8 @@ fn rebuilt_vectors_keep_the_original_allowance_and_survive_failed_recapture() {
     let columns = columns("CREATE TABLE t (v VECTOR(1024))");
     let index = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
     let mut schema = schema(&columns, &index);
-    schema.vector_dimensions.insert("v".into(), 1024);
+    let dimensions = BTreeMap::from([("v".into(), 1024)]);
+    schema.vector_dimensions = &dimensions;
     for copied in [false, true] {
         let mut source = MemoryDocumentStore::new();
         source
@@ -202,7 +203,8 @@ fn reconstructed_index_reads_preserve_memory_cancellation_and_serialization_sqls
     let columns = columns("CREATE TABLE t (v VECTOR(2))");
     let index = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
     let mut schema = schema(&columns, &index);
-    schema.vector_dimensions.insert("v".into(), 2);
+    let dimensions = BTreeMap::from([("v".into(), 2)]);
+    schema.vector_dimensions = &dimensions;
     let errors: [(ReadErrorFactory, &str); 3] = [
         (
             || uqa_core::memory::MemoryError::SizeOverflow.into(),

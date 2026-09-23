@@ -8,11 +8,11 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use uqa_analysis::Analyzer;
-use uqa_core::memory::{BudgetedMap, BudgetedVec};
+use uqa_core::memory::{BudgetedMap, BudgetedVec, MemoryReservation};
 use uqa_core::{DocId, FieldName, Value};
+use uqa_sql::schema::retention::RetainedColumns;
 use uqa_sql::{ast::ColumnDef, ColumnType, SQLError};
-use uqa_storage::inverted_index::{AnalyzerBindings, RetainedInvertedIndexBuilder};
+use uqa_storage::inverted_index::RetainedInvertedIndexBuilder;
 use uqa_storage::{read_control::StorageReadControl, vector_index::RetainedVectorIndexBuilder};
 use uqa_storage::{
     DocumentStore, InvertedIndex, RetainedDocumentStoreBuilder, StorageBackendError, VectorIndex,
@@ -20,8 +20,10 @@ use uqa_storage::{
 
 mod documents;
 mod layout;
+mod vector_metadata;
 use super::document_changes::DocumentChanges;
 use layout::RowLayout;
+pub use vector_metadata::{retain_vector_indexes, VectorDimensions};
 
 #[cfg(test)]
 mod tests;
@@ -29,10 +31,9 @@ mod tests;
 /// The selected catalog supplies immutable column definitions, field revisions and registered vector dimensions. The reconstruction does not consult live catalog state.
 pub struct SnapshotSchema<'a> {
     pub columns: Arc<Vec<ColumnDef>>,
-    pub analyzer: &'a Analyzer,
     pub text_fields: &'a [FieldName],
     pub text_revisions: &'a dyn InvertedIndex,
-    pub vector_dimensions: BTreeMap<FieldName, u32>,
+    pub vector_dimensions: &'a dyn VectorDimensions,
 }
 
 pub struct MaterializedTable {
@@ -44,7 +45,7 @@ pub struct MaterializedTable {
 
 struct SnapshotBuilder {
     text: RetainedInvertedIndexBuilder,
-    vectors: BTreeMap<FieldName, RetainedVectorIndexBuilder>,
+    vectors: BudgetedVec<(FieldName, RetainedVectorIndexBuilder, MemoryReservation)>,
     control: StorageReadControl,
 }
 
@@ -58,11 +59,12 @@ pub fn retain(
 ) -> Result<MaterializedTable, SQLError> {
     let cancellation = control.cancellation();
     cancellation.check()?;
+    let columns = RetainedColumns::capture(&schema.columns, control.memory(), cancellation)?;
     let documents = documents::RetainedDocuments::new(
         source,
-        RowLayout::new(source_columns, Arc::clone(&schema.columns), control)
+        RowLayout::new(source_columns, columns.clone(), control)
             .map_err(|error| snapshot_error("base row layout", &error))?,
-        RowLayout::new(&schema.columns, Arc::clone(&schema.columns), control)
+        RowLayout::new(&schema.columns, columns, control)
             .map_err(|error| snapshot_error("private row layout", &error))?,
         changes,
         control,
@@ -101,16 +103,19 @@ fn index_fields<'a>(
 ) -> Result<BudgetedVec<&'a str>, SQLError> {
     control.cancellation().check()?;
     let mut selected = BudgetedMap::new(control.memory());
-    for field in schema
-        .text_fields
-        .iter()
-        .chain(schema.vector_dimensions.keys())
-    {
+    for field in schema.text_fields {
         control.cancellation().check()?;
         selected
             .insert(field.as_str(), ())
             .map_err(|error| snapshot_error("index field selection", &error.into()))?;
     }
+    schema.vector_dimensions.visit(&mut |field, _| {
+        control.cancellation().check()?;
+        selected
+            .insert(field, ())
+            .map_err(|error| snapshot_error("index field selection", &error.into()))?;
+        Ok(())
+    })?;
     let mut fields = BudgetedVec::new(control.memory());
     fields
         .reserve(selected.len())
@@ -206,34 +211,39 @@ pub fn empty(
 impl SnapshotBuilder {
     fn new(schema: &SnapshotSchema<'_>, control: &StorageReadControl) -> Result<Self, SQLError> {
         control.cancellation().check()?;
-        let mut bindings = AnalyzerBindings::new(schema.analyzer.clone());
-        for field in schema.text_fields {
-            bindings
-                .bind_revisions(
-                    field,
-                    schema
-                        .text_revisions
-                        .index_analyzer_revision(field)
-                        .map_err(|error| snapshot_error("index analyzer revision", &error))?,
-                    schema
-                        .text_revisions
-                        .search_analyzer_revision(field)
-                        .map_err(|error| snapshot_error("search analyzer revision", &error))?,
-                )
-                .map_err(|error| snapshot_error("field analyzer revisions", &error.into()))?;
-        }
-        let text = RetainedInvertedIndexBuilder::new(bindings, control)
-            .map_err(|error| snapshot_error("inverted index", &error))?;
-        let vectors = schema
-            .vector_dimensions
-            .iter()
-            .map(|(field, dimensions)| {
-                (
-                    field.clone(),
-                    RetainedVectorIndexBuilder::new(*dimensions, control),
-                )
-            })
-            .collect();
+        let revisions = schema.text_fields.iter().map(|field| {
+            control.check()?;
+            Ok((
+                field.as_str(),
+                schema.text_revisions.index_analyzer_revision(field)?,
+                schema.text_revisions.search_analyzer_revision(field)?,
+            ))
+        });
+        let text = RetainedInvertedIndexBuilder::from_revisions(
+            schema
+                .text_revisions
+                .default_analyzer_binding()
+                .map_err(|error| snapshot_error("default analyzer binding", &error))?,
+            revisions,
+            control,
+        )
+        .map_err(|error| snapshot_error("inverted index", &error))?;
+        let mut vectors = BudgetedVec::new(control.memory());
+        schema.vector_dimensions.visit(&mut |field, dimensions| {
+            control.cancellation().check()?;
+            vectors
+                .reserve(1)
+                .map_err(|error| snapshot_error("vector metadata", &error.into()))?;
+            let (name, memory) = vector_metadata::copy_field(field, control)?;
+            vectors
+                .push((
+                    name,
+                    RetainedVectorIndexBuilder::new(dimensions, control),
+                    memory,
+                ))
+                .map_err(|error| snapshot_error("vector metadata", &error.into()))?;
+            Ok(())
+        })?;
         Ok(Self {
             text,
             vectors,
@@ -246,16 +256,16 @@ impl SnapshotBuilder {
         documents: Box<dyn DocumentStore>,
         document_count: u64,
     ) -> Result<MaterializedTable, SQLError> {
-        let vectors = self
-            .vectors
-            .into_iter()
-            .map(|(field, index)| {
-                let index = index
-                    .finish()
-                    .map_err(|error| snapshot_error("vector index", &error))?;
-                Ok((field, Box::new(index) as Box<dyn VectorIndex>))
-            })
-            .collect::<Result<_, SQLError>>()?;
+        let (builders, _builder_memory) = self.vectors.into_parts();
+        let mut vectors = BTreeMap::new();
+        for (field, index, memory) in builders {
+            self.control.cancellation().check()?;
+            let index = index
+                .finish()
+                .map_err(|error| snapshot_error("vector index", &error))?;
+            let index = vector_metadata::retain_handle(index, memory)?;
+            vectors.insert(field, index);
+        }
         Ok(MaterializedTable {
             documents,
             text: Box::new(
@@ -318,7 +328,7 @@ impl SnapshotBuilder {
         self.text
             .add_document(id, fields)
             .map_err(|error| snapshot_error("inverted index", &error))?;
-        for (field, index) in &mut self.vectors {
+        for (field, index, _) in self.vectors.iter_mut() {
             let Some(value) = value_for(field) else {
                 continue;
             };

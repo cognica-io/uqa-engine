@@ -234,7 +234,7 @@ fn missing_default_payloads_reject_before_copy_and_preserve_nulls_and_absent_row
 }
 
 #[test]
-fn unchanged_owned_column_names_need_no_mapping_allocation() {
+fn unchanged_owned_column_names_still_admit_the_provider_output() {
     let columns = columns("CREATE TABLE t (a INTEGER, b INTEGER)");
     let index = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
     let mut source = MemoryDocumentStore::new();
@@ -253,8 +253,13 @@ fn unchanged_owned_column_names_need_no_mapping_allocation() {
         .memory()
         .reserve(control.memory().limit() - control.memory().used())
         .unwrap();
-    assert_eq!(view.documents.get_stored(1).unwrap(), Some(original));
+    let error = view.documents.get_stored(1).unwrap_err();
+    assert_eq!(
+        snapshot_error("owned provider row", &error).sqlstate(),
+        Some("53200")
+    );
     drop(occupied);
+    assert_eq!(view.documents.get_stored(1).unwrap(), Some(original));
     drop(view);
     assert_eq!(control.memory().used(), 0);
 }

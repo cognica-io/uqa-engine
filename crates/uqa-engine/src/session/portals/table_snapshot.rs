@@ -66,21 +66,14 @@ impl Engine {
         ) -> Result<T, SQLError>,
     ) -> Result<T, SQLError> {
         let columns = metadata.columns.snapshot();
-        let analyzer = metadata.analyzer.snapshot();
         let text_fields = metadata.fts_fields.snapshot();
         let text_revisions = metadata.inverted_index.read();
-        let vector_dimensions = metadata
-            .vector_indexes
-            .read()
-            .iter()
-            .map(|(field, index)| (field.clone(), index.dimensions()))
-            .collect();
+        let vector_dimensions = metadata.vector_indexes.read();
         operation(&uqa_execution::query::table_snapshot::SnapshotSchema {
             columns,
-            analyzer: &analyzer,
             text_fields: &text_fields,
             text_revisions: text_revisions.as_ref(),
-            vector_dimensions,
+            vector_dimensions: &*vector_dimensions,
         })
     }
 
@@ -98,22 +91,10 @@ impl Engine {
             .read()
             .snapshot_with_control(control)
             .map_err(|error| super::portal_snapshot_error("inverted index", &error))?;
-        let vector_indexes = data
-            .vector_indexes
-            .read()
-            .iter()
-            .map(|(field, index)| {
-                index
-                    .snapshot_with_control(control)
-                    .map(|index| {
-                        (
-                            field.clone(),
-                            Box::new(ReadOnlySnapshot::new(index)) as Box<dyn VectorIndex>,
-                        )
-                    })
-                    .map_err(|error| super::portal_snapshot_error("vector index", &error))
-            })
-            .collect::<Result<_, _>>()?;
+        let vector_indexes = uqa_execution::query::table_snapshot::retain_vector_indexes(
+            &data.vector_indexes.read(),
+            control,
+        )?;
         Ok(Self::query_table_with_storage(
             data,
             Box::new(ReadOnlySnapshot::new(document_store)),

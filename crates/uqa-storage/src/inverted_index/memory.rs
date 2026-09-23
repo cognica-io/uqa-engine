@@ -76,6 +76,13 @@ impl InvertedIndex for MemoryInvertedIndex {
         self.bindings.default_configuration()
     }
 
+    fn default_analyzer_binding(
+        &self,
+    ) -> StorageBackendResult<crate::inverted_index::AnalyzerDefault> {
+        self.check_retained_read()?;
+        Ok(self.bindings.default_binding())
+    }
+
     fn add_document(
         &mut self,
         doc_id: DocId,

@@ -36,6 +36,24 @@ impl DocumentStore for ReadOnlySnapshot<dyn DocumentStore> {
         self.0.get_stored_many_controlled(ids, control)
     }
 
+    fn with_field_ref_controlled(
+        &self,
+        id: DocId,
+        field: &str,
+        control: &StorageReadControl,
+        visitor: &mut dyn FnMut(Option<&Value>) -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<()> {
+        if let Some(captured) = &self.2 {
+            captured.check()?;
+        }
+        self.0
+            .with_field_ref_controlled(id, field, control, visitor)?;
+        if let Some(captured) = &self.2 {
+            captured.check()?;
+        }
+        control.check()
+    }
+
     fn field_presence_controlled(
         &self,
         ids: &[DocId],

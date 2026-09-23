@@ -19,7 +19,12 @@ impl MemoryInvertedIndex {
         control.check()?;
         let memory = control.memory().reserve(size_of::<Self>())?;
         let build = |state_memory| -> StorageBackendResult<Arc<dyn InvertedIndex>> {
-            let mut snapshot = self.shared_snapshot();
+            let mut snapshot = Self {
+                bindings: self.bindings.retained(control)?,
+                state: Arc::clone(&self.state),
+                state_memory: None,
+                read_control: None,
+            };
             snapshot.state_memory = Some(state_memory);
             snapshot.read_control = Some(control.clone());
             control.check()?;

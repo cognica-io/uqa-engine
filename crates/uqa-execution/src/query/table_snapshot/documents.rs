@@ -21,6 +21,7 @@ use super::layout::RowLayout;
 use crate::query::document_changes::DocumentChanges;
 
 mod identifiers;
+mod owned;
 pub(super) mod projection;
 
 struct State {
@@ -172,61 +173,25 @@ impl DocumentStore for RetainedDocuments {
 
     fn get_stored(&self, id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
         let mut memory = self.0.control.memory().empty_reservation();
-        self.checked_read(|| {
-            if self.0.changes.contains_change(id) {
-                self.0
-                    .changes
-                    .get_stored(id)?
-                    .map(|row| {
-                        self.0
-                            .layout
-                            .complete_private(row, &mut memory)
-                            .map_err(layout_error)
-                    })
-                    .transpose()
-            } else {
-                self.0
-                    .source
-                    .get_stored(id)?
-                    .map(|row| {
-                        self.0
-                            .layout
-                            .adapt_base(row, &mut memory)
-                            .map_err(layout_error)
-                    })
-                    .transpose()
-            }
-        })
+        self.checked_read(|| self.read_owned_row(id, &mut memory))
     }
 
     fn get_stored_many(
         &self,
         ids: &[DocId],
     ) -> StorageBackendResult<BTreeMap<DocId, StoredDocument>> {
-        // Completed rows stay live while later rows are adapted; share their production allowance until the batch is handed off.
+        // All copied provider fields and completed defaults coexist until the caller receives the batch.
         let mut memory = self.0.control.memory().empty_reservation();
-        let base_ids = self.selected_ids(ids, false)?;
-        let base = self.0.source.get_stored_many(&base_ids)?;
-        drop(base_ids);
         let mut rows = BTreeMap::new();
-        for (id, row) in base {
-            rows.insert(
-                id,
-                self.0
-                    .layout
-                    .adapt_base(row, &mut memory)
-                    .map_err(layout_error)?,
-            );
-        }
-        let private_ids = self.selected_ids(ids, true)?;
-        for (id, row) in self.0.changes.get_stored_many(&private_ids)? {
-            rows.insert(
-                id,
-                self.0
-                    .layout
-                    .complete_private(row, &mut memory)
-                    .map_err(layout_error)?,
-            );
+        for id in ids.iter().copied() {
+            self.0.control.check()?;
+            if rows.contains_key(&id) {
+                continue;
+            }
+            if let Some(row) = self.read_owned_row(id, &mut memory)? {
+                memory.grow(size_of::<(DocId, StoredDocument)>())?;
+                rows.insert(id, row);
+            }
         }
         self.0.control.check()?;
         Ok(rows)
@@ -350,14 +315,7 @@ impl DocumentStore for RetainedDocuments {
         ids: &[DocId],
         fields: &[&str],
     ) -> StorageBackendResult<BTreeMap<DocId, Vec<Value>>> {
-        let mut rows = BTreeMap::new();
-        self.for_each_fields_multi_ref_with_presence(ids, fields, &mut |id, present, values| {
-            if present {
-                rows.insert(id, values.iter().map(|value| (*value).clone()).collect());
-            }
-            true
-        })?;
-        Ok(rows)
+        self.copy_projected_rows(ids, fields)
     }
 
     fn for_each_fields_multi_ref_with_presence(
@@ -384,9 +342,7 @@ impl DocumentStore for RetainedDocuments {
         fields: &[&str],
         visitor: &mut dyn FnMut(DocId, Vec<Value>) -> bool,
     ) -> StorageBackendResult<()> {
-        self.visit_projection(ids, fields, &mut |id, _, values| {
-            visitor(id, values.iter().map(|value| (*value).clone()).collect())
-        })
+        self.visit_owned_projection(ids, fields, visitor)
     }
 
     fn get_shared_fields(

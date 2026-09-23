@@ -13,6 +13,37 @@ use super::super::codec::{
 };
 use super::{keys, other_error, KeyValueBatch, OccurrenceRead, StorageBackendResult};
 
+#[cfg(test)]
+mod tests;
+
+/// The namespace list is fixed; only encoded table bytes allocate, and each prefix uses the reader's canonical controlled encoder.
+pub(super) fn retained_prefixes(
+    table: &str,
+    control: &crate::read_control::StorageReadControl,
+) -> StorageBackendResult<[uqa_core::memory::BudgetedVec<u8>; 8]> {
+    use crate::key_value::{
+        TAG_DOC_LENGTH, TAG_FIELD_STATS, TAG_OCCURRENCE_INDEX, TAG_POSTING,
+        TAG_POSTING_CLUSTER_POSITIONS, TAG_POSTING_CLUSTER_SCORE, TAG_POSTING_DOCUMENT,
+        TAG_REVERSE_POSTING,
+    };
+    let tags = [
+        TAG_POSTING,
+        TAG_POSTING_CLUSTER_SCORE,
+        TAG_POSTING_CLUSTER_POSITIONS,
+        TAG_POSTING_DOCUMENT,
+        TAG_DOC_LENGTH,
+        TAG_FIELD_STATS,
+        TAG_REVERSE_POSTING,
+        TAG_OCCURRENCE_INDEX,
+    ];
+    let mut prefixes =
+        std::array::from_fn(|_| uqa_core::memory::BudgetedVec::new(control.memory()));
+    for (prefix, tag) in prefixes.iter_mut().zip(tags) {
+        *prefix = keys::encoding::controlled(table, tag, None, &[], control)?;
+    }
+    Ok(prefixes)
+}
+
 pub(super) fn legacy_prefixes(table: &str) -> StorageBackendResult<Vec<Vec<u8>>> {
     Ok(vec![
         posting_key_prefix(table)?,

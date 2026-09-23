@@ -6,12 +6,11 @@
 
 //! Column-incarnation mapping distinguishes retained base rows from current private rows.
 
-use std::sync::Arc;
 use uqa_core::{
     memory::{Budgeted, BudgetedMap, BudgetedString, BudgetedVec, MemoryReservation},
     Value,
 };
-use uqa_sql::{ast::ColumnDef, SQLError};
+use uqa_sql::{ast::ColumnDef, schema::retention::RetainedColumns, SQLError};
 use uqa_storage::{read_control::StorageReadControl, StorageBackendResult, StoredDocument};
 
 mod generated;
@@ -19,7 +18,7 @@ mod projection;
 pub(super) use projection::RowProjection;
 
 pub(super) struct RowLayout {
-    columns: Arc<Vec<ColumnDef>>,
+    columns: RetainedColumns,
     source: BudgetedVec<(String, Option<String>)>,
     _names: MemoryReservation,
     control: StorageReadControl,
@@ -28,7 +27,7 @@ pub(super) struct RowLayout {
 impl RowLayout {
     pub(super) fn new(
         source: &[ColumnDef],
-        columns: Arc<Vec<ColumnDef>>,
+        columns: RetainedColumns,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         control.check()?;

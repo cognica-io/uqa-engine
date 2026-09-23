@@ -12,7 +12,7 @@ use uqa_core::{memory::MemoryBudget, TokenOccurrence};
 
 fn builder(control: &StorageReadControl) -> RetainedInvertedIndexBuilder {
     RetainedInvertedIndexBuilder::new(
-        AnalyzerBindings::new(uqa_analysis::whitespace_analyzer()),
+        &AnalyzerBindings::new(uqa_analysis::whitespace_analyzer()),
         control,
     )
     .unwrap()
@@ -89,7 +89,8 @@ fn retained_corpus_preserves_revisions_overlaps_field_counts_and_last_duplicate_
         .bind_revisions("body", revision.clone(), search.clone())
         .unwrap();
     let mut ordinary = MemoryInvertedIndex::with_bindings(bindings.clone());
-    let mut retained = RetainedInvertedIndexBuilder::new(bindings, &control).unwrap();
+    let mut retained = RetainedInvertedIndexBuilder::new(&bindings, &control).unwrap();
+    let binding_bytes = control.memory().used() - corpus_bytes(&retained.index.state);
     for (id, fields) in [
         (7, vec![("body", "a a β"), ("empty", "")]),
         (2, vec![("body", "discarded"), ("body", "a β")]),
@@ -105,7 +106,10 @@ fn retained_corpus_preserves_revisions_overlaps_field_counts_and_last_duplicate_
             )
             .unwrap();
         retained.add_document(id, fields).unwrap();
-        assert_eq!(control.memory().used(), corpus_bytes(&retained.index.state));
+        assert_eq!(
+            control.memory().used(),
+            corpus_bytes(&retained.index.state) + binding_bytes
+        );
     }
     retained.add_document(11, []).unwrap();
     let retained = retained.finish().unwrap();
@@ -311,7 +315,7 @@ fn reconstructed_morphology_keeps_lossless_terms_and_graphs_when_enabled() {
             .unwrap();
         let control = StorageReadControl::with_limit(8 << 20);
         let mut index =
-            RetainedInvertedIndexBuilder::new(AnalyzerBindings::new(config), &control).unwrap();
+            RetainedInvertedIndexBuilder::new(&AnalyzerBindings::new(config), &control).unwrap();
         index.add_document(1, [("body", text)]).unwrap();
         assert_eq!(control.memory().used(), corpus_bytes(&index.index.state));
         let retained = index.finish().unwrap();

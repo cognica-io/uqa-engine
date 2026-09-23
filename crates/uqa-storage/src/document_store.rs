@@ -20,6 +20,8 @@ use crate::read_control::StorageReadControl;
 
 mod controlled_ids;
 pub use controlled_ids::read_document_ids;
+mod controlled_field;
+pub use controlled_field::read_selected_field;
 mod controlled_rows;
 pub use controlled_rows::{read_stored_documents, RetainedDocumentPage};
 mod controlled_presence;
@@ -208,6 +210,17 @@ pub trait DocumentStore: Send + Sync {
         control: &StorageReadControl,
     ) -> StorageBackendResult<BudgetedVec<bool>> {
         controlled_presence::from_controlled_rows(self, doc_ids, fields, control)
+    }
+
+    /// Borrow one selected field, preserving absence versus stored NULL. The visitor runs exactly once while the provider keeps the value and its decoding allowance alive. Immutable stores can lend an existing scalar without allocating a projection or presence page.
+    fn with_field_ref_controlled(
+        &self,
+        doc_id: DocId,
+        field: &str,
+        control: &StorageReadControl,
+        visitor: &mut dyn FnMut(Option<&Value>) -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<()> {
+        controlled_field::visit_selected_field(self, doc_id, field, control, visitor)
     }
 
     /// Replace public fields while preserving metadata already owned by the stored tuple. Engine code that creates a new tuple version must call [`DocumentStore::put_stored`] with the new metadata explicitly.

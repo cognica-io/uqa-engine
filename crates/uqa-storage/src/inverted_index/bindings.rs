@@ -13,6 +13,13 @@ use uqa_analysis::{AnalysisResult, Analyzer, AnalyzerResources, CompiledAnalyzer
 
 use super::AnalyzerPhase;
 
+mod read_only;
+mod retained;
+pub use read_only::RetainedAnalyzerBindings;
+#[cfg(test)]
+mod tests;
+use retained::FieldBindings;
+
 struct DefaultRevision {
     configuration: Analyzer,
     resources: AnalyzerResources,
@@ -43,13 +50,17 @@ struct FieldRevisions {
     search: Arc<CompiledAnalyzer>,
 }
 
+/// The selected default configuration and its lazy, immutable resource resolution. Cloning this handle never copies analyzer diagnostics or reopens resources.
+#[derive(Clone)]
+pub struct AnalyzerDefault(Arc<DefaultRevision>);
+
 /// Index and search revisions are independent. Clones retain the same compiled resources while subsequent field assignments are isolated.
 ///
 /// Infallible provider constructors defer the default configuration's validation to its first successful resolution. That default is then fixed, including synonym contents and dictionary identity. Failed compilation publishes no revision. Explicit field assignment always resolves before changing either side.
 #[derive(Clone)]
 pub struct AnalyzerBindings {
     default: Arc<DefaultRevision>,
-    fields: BTreeMap<String, FieldRevisions>,
+    fields: FieldBindings,
 }
 
 impl std::fmt::Debug for AnalyzerBindings {
@@ -74,8 +85,12 @@ impl AnalyzerBindings {
                 resources,
                 resolved: OnceLock::new(),
             }),
-            fields: BTreeMap::new(),
+            fields: FieldBindings::Live(BTreeMap::new()),
         }
+    }
+
+    pub fn default_binding(&self) -> AnalyzerDefault {
+        AnalyzerDefault(Arc::clone(&self.default))
     }
 
     pub fn default_configuration(&self) -> &Analyzer {
@@ -151,12 +166,12 @@ impl AnalyzerBindings {
             }
             pair
         };
-        self.fields.insert(field.to_owned(), pair);
+        self.fields.live_mut().insert(field.to_owned(), pair);
         Ok(())
     }
 
     pub fn remove(&mut self, field: &str) {
-        self.fields.remove(field);
+        self.fields.live_mut().remove(field);
     }
 
     /// Retain both compiled sides and their shared diagnostic configurations without decoding their descriptors.
@@ -167,7 +182,7 @@ impl AnalyzerBindings {
         search: Arc<CompiledAnalyzer>,
     ) -> AnalysisResult<()> {
         let pair = FieldRevisions { index, search };
-        self.fields.insert(field.to_owned(), pair);
+        self.fields.live_mut().insert(field.to_owned(), pair);
         Ok(())
     }
 }

@@ -36,6 +36,11 @@ impl InvertedIndex for CancelAfterMutation {
     fn analyzer(&self) -> &Analyzer {
         self.index.analyzer()
     }
+    fn default_analyzer_binding(
+        &self,
+    ) -> StorageBackendResult<uqa_storage::inverted_index::AnalyzerDefault> {
+        self.index.default_analyzer_binding()
+    }
     fn add_document(
         &mut self,
         doc: DocId,

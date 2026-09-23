@@ -18,6 +18,16 @@ use uqa_core::{
 pub struct RetainedDocumentFields(Arc<Budgeted<Arc<Document>>>);
 
 impl RetainedDocumentFields {
+    /// Share immutable fields under the invoking allowance. Matching readers reuse their existing lease; a different allowance admits the existing payload before allocating another reader wrapper.
+    pub fn retain_with_control(&self, control: &StorageReadControl) -> StorageBackendResult<Self> {
+        control.check()?;
+        if self.shares_allowance(control) {
+            Ok(self.clone())
+        } else {
+            Self::new(Arc::clone(&**self.0), control)
+        }
+    }
+
     pub(super) fn shares_allowance(&self, control: &StorageReadControl) -> bool {
         self.0.budget().shares_allowance(control.memory())
     }

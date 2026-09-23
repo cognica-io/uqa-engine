@@ -88,6 +88,11 @@ impl<I: Deref<Target = dyn InvertedIndex> + Send + Sync> InvertedIndex for Obser
     fn analyzer(&self) -> &Analyzer {
         self.index.analyzer()
     }
+    fn default_analyzer_binding(
+        &self,
+    ) -> StorageBackendResult<uqa_storage::inverted_index::AnalyzerDefault> {
+        self.index.default_analyzer_binding()
+    }
     fn source_rebuild_required(&self) -> StorageBackendResult<bool> {
         self.index.source_rebuild_required()
     }

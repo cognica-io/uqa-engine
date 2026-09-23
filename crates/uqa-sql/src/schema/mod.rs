@@ -215,3 +215,5 @@ pub mod view_creation;
 pub mod truncate;
 
 pub mod foreign_tables;
+
+pub mod retention;

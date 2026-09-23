@@ -78,6 +78,12 @@ impl InvertedIndex for SQLiteInvertedIndex {
         self.bindings.default_configuration()
     }
 
+    fn default_analyzer_binding(
+        &self,
+    ) -> StorageBackendResult<uqa_storage::inverted_index::AnalyzerDefault> {
+        Ok(self.bindings.default_binding())
+    }
+
     fn add_document(
         &mut self,
         doc_id: DocId,
@@ -697,10 +703,22 @@ impl InvertedIndex for SQLiteInvertedIndex {
     }
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn InvertedIndex>> {
-        if let Some(index) = self.native_index() {
-            return index.snapshot();
+        if let Some(index) = self.native_retained_index()? {
+            return Ok(index);
         }
-        Ok(Arc::new(self.clone()))
+        self.physical_snapshot(&self.retention_control)
+    }
+
+    fn snapshot_with_control(
+        &self,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Arc<dyn InvertedIndex>> {
+        control.check()?;
+        if let Some(index) = self.native_retained_index()? {
+            control.check()?;
+            return Ok(index);
+        }
+        self.physical_snapshot(control)
     }
 
     fn field_names(&self) -> StorageBackendResult<Vec<FieldName>> {
@@ -728,30 +746,30 @@ impl InvertedIndex for SQLiteInvertedIndex {
     ) -> Result<(), String> {
         if let Some(mut index) = self.native_index() {
             index.set_field_analyzer(field, analyzer, phase)?;
-            self.bindings = index.analyzer_bindings().clone();
+            self.bindings = index.analyzer_bindings().clone().into();
             return Ok(());
         }
-        let mut candidate = self.bindings.clone();
+        let mut candidate = (*self.bindings).clone();
         candidate
             .bind(field, &analyzer, phase)
             .map_err(|error| error.to_string())?;
         self.validate_index_revision_change(field, &candidate)
             .map_err(|error| error.to_string())?;
-        self.bindings = candidate;
+        self.bindings = candidate.into();
         Ok(())
     }
 
     fn remove_field_analyzers(&mut self, field: &str) -> Result<(), String> {
         if let Some(mut index) = self.native_index() {
             index.remove_field_analyzers(field)?;
-            self.bindings = index.analyzer_bindings().clone();
+            self.bindings = index.analyzer_bindings().clone().into();
             return Ok(());
         }
-        let mut candidate = self.bindings.clone();
+        let mut candidate = (*self.bindings).clone();
         candidate.remove(field);
         self.validate_index_revision_change(field, &candidate)
             .map_err(|error| error.to_string())?;
-        self.bindings = candidate;
+        self.bindings = candidate.into();
         Ok(())
     }
 
@@ -782,16 +800,16 @@ impl InvertedIndex for SQLiteInvertedIndex {
     ) -> Result<(), String> {
         if let Some(mut index) = self.native_index() {
             index.set_field_analyzer_revision(field, revision, phase)?;
-            self.bindings = index.analyzer_bindings().clone();
+            self.bindings = index.analyzer_bindings().clone().into();
             return Ok(());
         }
-        let mut candidate = self.bindings.clone();
+        let mut candidate = (*self.bindings).clone();
         candidate
             .bind_revision(field, revision, phase)
             .map_err(|error| error.to_string())?;
         self.validate_index_revision_change(field, &candidate)
             .map_err(|error| error.to_string())?;
-        self.bindings = candidate;
+        self.bindings = candidate.into();
         Ok(())
     }
 
@@ -803,16 +821,16 @@ impl InvertedIndex for SQLiteInvertedIndex {
     ) -> Result<(), String> {
         if let Some(mut native) = self.native_index() {
             native.set_field_analyzer_revisions(field, index, search)?;
-            self.bindings = native.analyzer_bindings().clone();
+            self.bindings = native.analyzer_bindings().clone().into();
             return Ok(());
         }
-        let mut candidate = self.bindings.clone();
+        let mut candidate = (*self.bindings).clone();
         candidate
             .bind_revisions(field, index, search)
             .map_err(|error| error.to_string())?;
         self.validate_index_revision_change(field, &candidate)
             .map_err(|error| error.to_string())?;
-        self.bindings = candidate;
+        self.bindings = candidate.into();
         Ok(())
     }
 
@@ -825,11 +843,14 @@ impl InvertedIndex for SQLiteInvertedIndex {
     ) -> StorageBackendResult<()> {
         if let Some(mut index) = self.native_index() {
             index.rebuild_with_analyzer_revision(field, revision, phase, documents)?;
-            self.bindings = index.analyzer_bindings().clone();
+            self.bindings = index.analyzer_bindings().clone().into();
             return Ok(());
         }
         let mut replacement = self.clone();
-        replacement.bindings.bind_revision(field, revision, phase)?;
+        replacement
+            .bindings
+            .live_mut()
+            .bind_revision(field, revision, phase)?;
         replacement.rebuild_documents_inner(documents)?;
         *self = replacement;
         Ok(())
@@ -851,12 +872,15 @@ impl InvertedIndex for SQLiteInvertedIndex {
                 documents,
                 cancellation,
             )?;
-            self.bindings = index.analyzer_bindings().clone();
+            self.bindings = index.analyzer_bindings().clone().into();
             return Ok(());
         }
         cancellation.check()?;
         let mut replacement = self.clone();
-        replacement.bindings.bind_revision(field, revision, phase)?;
+        replacement
+            .bindings
+            .live_mut()
+            .bind_revision(field, revision, phase)?;
         replacement.rebuild_documents_with_cancellation(documents, Some(cancellation))?;
         *self = replacement;
         Ok(())

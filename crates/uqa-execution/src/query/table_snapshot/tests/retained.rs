@@ -476,7 +476,8 @@ fn retained_index_reconstruction_reads_only_indexed_fields() {
     let fields = vec!["body".to_string()];
     let mut selected = schema(&columns, &index);
     selected.text_fields = &fields;
-    selected.vector_dimensions.insert("v".into(), 2);
+    let dimensions = BTreeMap::from([("v".into(), 2)]);
+    selected.vector_dimensions = &dimensions;
     let changes: BTreeMap<_, _> = [(
         2,
         Some(document(

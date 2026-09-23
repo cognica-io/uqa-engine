@@ -257,3 +257,34 @@ fn independent_readers_share_retention_without_replacing_explicit_read_limits_or
     assert_eq!(memory.used(), 0);
     assert_eq!(workspace.memory().used(), 0);
 }
+
+#[test]
+fn controlled_capture_preserves_large_field_bindings_after_source_mutation() {
+    let field = "name_".repeat(8192);
+    let revision = uqa_analysis::keyword_analyzer().compile().unwrap();
+    let mut source = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
+    source
+        .set_field_analyzer_revision(&field, Arc::clone(&revision), AnalyzerPhase::Both)
+        .unwrap();
+    let small = StorageReadControl::with_limit(4096);
+    assert!(matches!(
+        source.snapshot_with_control(&small),
+        Err(StorageBackendError::Memory(_))
+    ));
+    assert_eq!(small.memory().used(), 0);
+    let control = StorageReadControl::with_limit(1 << 20);
+    let snapshot = source.snapshot_with_control(&control).unwrap();
+    let bytes = control.memory().used();
+    assert!(bytes > field.len());
+    let nested = snapshot.snapshot().unwrap();
+    source.remove_field_analyzers(&field).unwrap();
+    drop(source);
+    drop(snapshot);
+    assert!(Arc::ptr_eq(
+        &nested.index_analyzer_revision(&field).unwrap(),
+        &revision
+    ));
+    assert_eq!(control.memory().used(), bytes);
+    drop(nested);
+    assert_eq!(control.memory().used(), 0);
+}

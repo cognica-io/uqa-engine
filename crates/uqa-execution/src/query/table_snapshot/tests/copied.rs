@@ -80,6 +80,11 @@ fn copied_view_shares_selected_defaults_and_preserves_private_tuple_metadata() {
     let schema = schema(&target, &text);
     let definitions = Arc::downgrade(&schema.columns);
     let control = StorageReadControl::with_limit(128 * 1024);
+    let admitted =
+        RetainedColumns::capture(&schema.columns, control.memory(), control.cancellation())
+            .unwrap();
+    let catalog_bytes = admitted.reserved_bytes();
+    drop(admitted);
     let mut source = MemoryDocumentStore::new();
     source
         .put_stored(7, document(&[("old", Value::Int(70))], 41))
@@ -101,7 +106,8 @@ fn copied_view_shares_selected_defaults_and_preserves_private_tuple_metadata() {
     assert_eq!(view.documents.doc_ids().unwrap(), [2, 7]);
     // The selected definition already owns the default; capture keeps that owner instead of producing another default for every row.
     assert!(definitions.upgrade().is_some());
-    assert!(control.memory().used() < 7 * 2048);
+    assert!(control.memory().used() >= catalog_bytes);
+    assert!(control.memory().used() < catalog_bytes + 7 * 2048);
     for (id, value, xmin) in [(2, 20, 43), (7, 70, 41)] {
         assert_eq!(
             view.documents.get_field(id, "id").unwrap(),

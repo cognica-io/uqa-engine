@@ -20,7 +20,7 @@ use uqa_core::memory::{Budgeted, BudgetedString, MemoryError, MemoryReservation}
 mod charge;
 mod staging;
 
-/// Build an immutable text index from borrowed selected fields. Analysis scratch, encoded terms, occurrence/position capacities and live corpus entries share the original allowance. Analyzer bindings and opaque map-node/allocator bookkeeping are outside this payload charge. A rejected document leaves previously appended documents unchanged.
+/// Build an immutable text index from borrowed selected fields. Analysis scratch, encoded terms, occurrence/position capacities and live corpus entries share the original allowance. Analyzer field bindings retain their own controlled containers; opaque corpus map-node/allocator bookkeeping remains outside this payload charge. A rejected document leaves previously appended documents unchanged.
 pub struct RetainedInvertedIndexBuilder {
     index: MemoryInvertedIndex,
     memory: MemoryReservation,
@@ -29,16 +29,32 @@ pub struct RetainedInvertedIndexBuilder {
 
 impl RetainedInvertedIndexBuilder {
     pub fn new(
-        bindings: AnalyzerBindings,
+        bindings: &AnalyzerBindings,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         control.check()?;
         let memory = control.memory().reserve(size_of::<MemoryIndexState>())?;
         Ok(Self {
-            index: MemoryInvertedIndex::with_bindings(bindings),
+            index: MemoryInvertedIndex::with_bindings(bindings.retained(control)?),
             memory,
             control: control.clone(),
         })
+    }
+
+    /// Capture selected compiled revisions and share the source's immutable default binding without cloning diagnostics or resolving resources again.
+    pub fn from_revisions<'a>(
+        default: super::AnalyzerDefault,
+        fields: impl IntoIterator<
+            Item = StorageBackendResult<(
+                &'a str,
+                Arc<uqa_analysis::CompiledAnalyzer>,
+                Arc<uqa_analysis::CompiledAnalyzer>,
+            )>,
+        >,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        let bindings = AnalyzerBindings::from_retained_revisions(default, fields, control)?;
+        Self::new(&bindings, control)
     }
 
     pub fn add_document<'a>(

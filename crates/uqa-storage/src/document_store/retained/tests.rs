@@ -8,6 +8,30 @@ use super::*;
 
 mod owned;
 
+#[test]
+fn retained_field_readers_admit_foreign_allowances_without_copying_payloads() {
+    let owner = StorageReadControl::with_limit(1 << 20);
+    let caller = StorageReadControl::with_limit(1 << 20);
+    let original = RetainedDocumentFields::new(fields(), &owner).unwrap();
+    let baseline = owner.memory().used();
+    let same = original.retain_with_control(&owner).unwrap();
+    assert_eq!(owner.memory().used(), baseline);
+    let foreign = original.retain_with_control(&caller).unwrap();
+    assert!(std::ptr::eq(original.as_ref(), foreign.as_ref()));
+    assert!(caller.memory().used() >= 8192);
+    let limited = StorageReadControl::with_limit(1024);
+    assert!(matches!(
+        original.retain_with_control(&limited),
+        Err(StorageBackendError::Memory(_))
+    ));
+    assert_eq!(limited.memory().used(), 0);
+    drop((same, original));
+    assert_eq!(owner.memory().used(), 0);
+    assert_eq!(foreign["body"], Value::Str("x".into()));
+    drop(foreign);
+    assert_eq!(caller.memory().used(), 0);
+}
+
 fn fields() -> Arc<Document> {
     let mut text = String::with_capacity(8192);
     text.push('x');

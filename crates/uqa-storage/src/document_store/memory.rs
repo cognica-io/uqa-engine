@@ -280,6 +280,23 @@ impl DocumentStore for MemoryDocumentStore {
         Ok(())
     }
 
+    fn with_field_ref_controlled(
+        &self,
+        id: DocId,
+        field: &str,
+        control: &StorageReadControl,
+        visitor: &mut dyn FnMut(Option<&Value>) -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        let value = self
+            .state
+            .documents
+            .get(&id)
+            .and_then(|row| self.field(row, field));
+        visitor(value)?;
+        control.check()
+    }
+
     fn field_presence_controlled(
         &self,
         ids: &[DocId],

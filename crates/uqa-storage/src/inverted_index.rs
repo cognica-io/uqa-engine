@@ -43,7 +43,7 @@ pub use analysis::{
     analyze_query_graph, analyze_query_graph_budgeted, analyze_query_terms,
     analyze_query_terms_budgeted, AnalyzedField, IndexedFieldMetadata,
 };
-pub use bindings::AnalyzerBindings;
+pub use bindings::{AnalyzerBindings, AnalyzerDefault, RetainedAnalyzerBindings};
 pub use changes::{visit_field_replacement, InvertedIndexChange, InvertedIndexChangeVisitor};
 pub use contract::{AnalyzerPhase, InvertedIndex};
 pub use metadata::IndexedFieldRevision;

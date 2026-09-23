@@ -8,6 +8,8 @@ use super::*;
 use crate::catalog::Catalog;
 use uqa_analysis::{standard_analyzer, Analyzer, Tokenizer};
 
+mod retention;
+
 #[test]
 fn evaluated_text_changes_preserve_logical_terms_and_atomicity() {
     uqa_storage::key_value::conformance::verify_inverted_index_changes(&mut idx_with_analyzer(

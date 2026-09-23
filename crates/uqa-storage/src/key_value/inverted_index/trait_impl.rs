@@ -107,6 +107,12 @@ impl InvertedIndex for KeyValueInvertedIndex {
         self.bindings.default_configuration()
     }
 
+    fn default_analyzer_binding(
+        &self,
+    ) -> StorageBackendResult<crate::inverted_index::AnalyzerDefault> {
+        Ok(self.bindings.default_binding())
+    }
+
     fn source_rebuild_required(&self) -> StorageBackendResult<bool> {
         self.read(|view| view.source_rebuild_required())
     }

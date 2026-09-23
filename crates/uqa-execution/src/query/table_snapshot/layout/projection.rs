@@ -208,18 +208,18 @@ impl RowLayout {
             return if self.source.iter().any(|(name, _)| name == field) {
                 Ok(None)
             } else {
-                source.get_field(id, field)
+                self.copy_source_field(source, id, field, memory)
             };
         };
         if let Some(name) = self.source_name(field) {
-            let value = source.get_field(id, name)?;
+            let value = self.copy_source_field(source, id, name, memory)?;
             self.control.check()?;
             if let Some(value) = value {
                 return Ok(Some(value));
             }
         }
         if !self.source.iter().any(|(name, _)| name == field) {
-            let value = source.get_field(id, field)?;
+            let value = self.copy_source_field(source, id, field, memory)?;
             self.control.check()?;
             if let Some(value) = value {
                 return Ok(Some(value));
@@ -238,5 +238,22 @@ impl RowLayout {
         let (value, value_memory) = copied.into_parts();
         memory.absorb(value_memory);
         Ok(Some(value))
+    }
+
+    fn copy_source_field(
+        &self,
+        source: &dyn DocumentStore,
+        id: DocId,
+        field: &str,
+        memory: &mut MemoryReservation,
+    ) -> StorageBackendResult<Option<Value>> {
+        let value =
+            uqa_storage::document_store::read_selected_field(source, id, field, &self.control)?;
+        self.control.check()?;
+        Ok(value.map(|value| {
+            let (value, reservation) = value.into_parts();
+            memory.absorb(reservation);
+            value
+        }))
     }
 }
