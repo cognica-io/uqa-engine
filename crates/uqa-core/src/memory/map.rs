@@ -6,18 +6,38 @@
 
 //! Ordered maps reserve complete AVL nodes before publication, including links and padding.
 
+mod owned;
 mod shared;
 #[cfg(test)]
 mod tests;
 mod tree;
 
+pub use owned::{OwnedMap, OwnedMapIntoIter, OwnedSet, OwnedSetIntoIter, OwnedSetIter};
 pub use shared::{BudgetedSharedMap, BudgetedSharedMapIter};
 
 use std::borrow::Borrow;
 
-use super::{Budgeted, MemoryBudget, MemoryError};
+use super::{Budgeted, MemoryBudget, MemoryError, MemoryReservation};
 
-type OwnedNode<K, V> = Budgeted<Box<Node<K, V>>>;
+struct OwnedNode<K, V> {
+    value: Box<Node<K, V>>,
+    // BudgetedMap nodes carry a lease; OwnedMap leaves admission to its enclosing owner.
+    memory: Option<MemoryReservation>,
+}
+
+impl<K, V> std::ops::Deref for OwnedNode<K, V> {
+    type Target = Box<Node<K, V>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+impl<K, V> OwnedNode<K, V> {
+    fn into_parts(self) -> (Box<Node<K, V>>, Option<MemoryReservation>) {
+        (self.value, self.memory)
+    }
+}
 type Link<K, V> = Option<OwnedNode<K, V>>;
 
 struct Node<K, V> {
@@ -71,7 +91,10 @@ impl<K, V> BudgetedMap<K, V> {
             height: 1,
         });
         Ok(PreparedMapEntry {
-            node: Budgeted::new(node, memory),
+            node: OwnedNode {
+                value: node,
+                memory: Some(memory),
+            },
         })
     }
 
@@ -81,13 +104,7 @@ impl<K, V> BudgetedMap<K, V> {
     }
 
     pub fn iter(&self) -> BudgetedMapIter<'_, K, V> {
-        let mut iter = BudgetedMapIter {
-            stack: [None; MAX_HEIGHT],
-            depth: 0,
-            remaining: self.len,
-        };
-        iter.push_left(self.root.as_ref().map(|node| &***node));
-        iter
+        BudgetedMapIter::new(&self.root, self.len)
     }
 }
 
@@ -116,7 +133,14 @@ impl<K: Ord, V> BudgetedMap<K, V> {
     /// Publish an already reserved entry without allocation. A matching key retains its original key and returns the replaced value. Panics before mutation if the entry belongs to a different allowance.
     pub fn insert_prepared(&mut self, entry: PreparedMapEntry<K, V>) -> Option<V> {
         assert!(
-            self.memory.shares_allowance(entry.node.memory.budget()),
+            self.memory.shares_allowance(
+                entry
+                    .node
+                    .memory
+                    .as_ref()
+                    .expect("prepared node is admitted")
+                    .budget()
+            ),
             "different memory allowances"
         );
         let previous = tree::insert(&mut self.root, entry.node);
@@ -161,6 +185,16 @@ pub struct BudgetedMapIter<'a, K, V> {
 }
 
 impl<'a, K, V> BudgetedMapIter<'a, K, V> {
+    fn new(root: &'a Link<K, V>, len: usize) -> Self {
+        let mut iter = Self {
+            stack: [None; MAX_HEIGHT],
+            depth: 0,
+            remaining: len,
+        };
+        iter.push_left(root.as_ref().map(|node| &***node));
+        iter
+    }
+
     fn push_left(&mut self, mut node: Option<&'a Node<K, V>>) {
         while let Some(current) = node {
             self.stack[self.depth] = Some(current);

@@ -7,20 +7,21 @@
 //! Index analysis retains term keys and occurrence buffers under the source reader's allowance.
 
 use super::{
-    project_index_tokens, AnalysisError, AnalyzedField, BTreeMap, CompiledAnalyzer,
-    IndexedFieldMetadata, StorageBackendError, StorageBackendResult, TokenOccurrence, TokenTerm,
+    project_index_tokens, AnalysisError, AnalyzedField, CompiledAnalyzer, IndexedFieldMetadata,
+    RetainedAnalyzedField, StorageBackendError, StorageBackendResult, TokenOccurrence, TokenTerm,
     TokenTermKey,
 };
-use std::collections::btree_map::Entry;
-use uqa_core::memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryError, MemoryReservation};
+use uqa_core::memory::{
+    Budgeted, BudgetedVec, MemoryBudget, MemoryError, MemoryReservation, OwnedMap,
+};
 
-/// Analyze a complete field and reserve its encoded keys, occurrence capacities and live map entries before allocation. Analysis scratch shares the same allowance and cancellation callback. Opaque map-node slack and allocator bookkeeping are outside the payload charge; the returned reservation follows the decoded field until its owner releases it.
+/// Analyze a complete field and reserve its encoded keys, occurrence capacities and complete ordered nodes before allocation. Analysis scratch shares the same allowance and cancellation callback. Allocator bookkeeping is outside the payload charge; the returned reservation follows the decoded field until its owner releases it.
 pub fn analyze_index_field_budgeted(
     analyzer: &CompiledAnalyzer,
     text: &str,
     memory: &MemoryBudget,
     mut poll: impl FnMut() -> Result<(), AnalysisError>,
-) -> StorageBackendResult<Budgeted<AnalyzedField>> {
+) -> StorageBackendResult<Budgeted<RetainedAnalyzedField>> {
     (|| {
         let stream = analyzer.analyze_tokens_budgeted(text, memory, &mut poll)?;
         let mut terms = Terms::new(memory);
@@ -43,7 +44,7 @@ pub fn analyze_index_field_budgeted(
 
 struct Terms {
     // Destroy every encoded key before releasing the aggregate key and entry reservations.
-    values: BTreeMap<TokenTermKey, BudgetedVec<TokenOccurrence>>,
+    values: OwnedMap<TokenTermKey, BudgetedVec<TokenOccurrence>>,
     keys: MemoryReservation,
     entries: MemoryReservation,
 }
@@ -51,7 +52,7 @@ struct Terms {
 impl Terms {
     fn new(memory: &MemoryBudget) -> Self {
         Self {
-            values: BTreeMap::new(),
+            values: OwnedMap::new(),
             keys: memory.empty_reservation(),
             entries: memory.empty_reservation(),
         }
@@ -64,20 +65,19 @@ impl Terms {
         poll: &mut impl FnMut() -> Result<(), AnalysisError>,
     ) -> StorageBackendResult<()> {
         let key = TokenTermKey::from_term_budgeted(term, self.keys.budget(), poll)?;
-        let (key, key_memory) = key.into_parts();
-        match self.values.entry(key) {
-            Entry::Occupied(mut entry) => entry.get_mut().push(occurrence)?,
-            Entry::Vacant(entry) => {
-                let entry_memory = self
-                    .entries
-                    .budget()
-                    .reserve(size_of::<(TokenTermKey, BudgetedVec<TokenOccurrence>)>())?;
-                let mut occurrences = BudgetedVec::new(self.keys.budget());
-                occurrences.push(occurrence)?;
-                entry.insert(occurrences);
-                self.keys.absorb(key_memory);
-                self.entries.absorb(entry_memory);
-            }
+        if let Some(occurrences) = self.values.get_mut(&*key) {
+            occurrences.push(occurrence)?;
+        } else {
+            let entry_memory = self
+                .entries
+                .budget()
+                .reserve(OwnedMap::<TokenTermKey, BudgetedVec<TokenOccurrence>>::entry_bytes())?;
+            let mut occurrences = BudgetedVec::new(self.keys.budget());
+            occurrences.push(occurrence)?;
+            let (key, key_memory) = key.into_parts();
+            self.values.insert(key, occurrences);
+            self.keys.absorb(key_memory);
+            self.entries.absorb(entry_memory);
         }
         Ok(())
     }
@@ -86,18 +86,18 @@ impl Terms {
         self,
         metadata: IndexedFieldMetadata,
         poll: &mut impl FnMut() -> Result<(), AnalysisError>,
-    ) -> StorageBackendResult<Budgeted<AnalyzedField>> {
+    ) -> StorageBackendResult<Budgeted<RetainedAnalyzedField>> {
         let bytes = self
             .values
             .len()
-            .checked_mul(size_of::<(TokenTermKey, Vec<TokenOccurrence>)>())
+            .checked_mul(OwnedMap::<TokenTermKey, Vec<TokenOccurrence>>::entry_bytes())
             .ok_or(MemoryError::SizeOverflow)?;
         let output_memory = self.keys.budget().reserve(bytes)?;
         // Both map layouts remain charged during conversion; keys and occurrence buffers move without copying. This tuple keeps their reservations alive if publication is cancelled.
         let mut pending = (
             AnalyzedField {
                 length: metadata.length,
-                terms: BTreeMap::new(),
+                terms: OwnedMap::new(),
                 final_offsets: metadata.final_offsets,
                 final_position_increment: metadata.final_position_increment,
             },

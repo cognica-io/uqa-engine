@@ -12,7 +12,7 @@ use uqa_analysis::{
     AnalysisError, AnalyzedText, AnalyzerFingerprint, CompiledAnalyzer, SourceOffsets,
     TokenLengthPolicy, TokenTerm,
 };
-use uqa_core::{TokenOccurrence, TokenOffsets};
+use uqa_core::{memory::OwnedMap, TokenOccurrence, TokenOffsets};
 
 use crate::{StorageBackendError, StorageBackendResult, TokenTermKey};
 
@@ -31,7 +31,7 @@ pub struct IndexedFieldMetadata {
 }
 
 impl IndexedFieldMetadata {
-    pub fn new(analyzer: &CompiledAnalyzer, field: &AnalyzedField) -> Self {
+    pub fn new<T>(analyzer: &CompiledAnalyzer, field: &AnalyzedField<T>) -> Self {
         Self {
             analyzer_fingerprint: analyzer.descriptor().fingerprint(),
             occurrence_format_version: crate::clustered_postings::OCCURRENCE_FORMAT_VERSION,
@@ -44,12 +44,15 @@ impl IndexedFieldMetadata {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AnalyzedField {
+pub struct AnalyzedField<T = BTreeMap<TokenTermKey, Vec<TokenOccurrence>>> {
     pub length: u64,
-    pub terms: BTreeMap<TokenTermKey, Vec<TokenOccurrence>>,
+    pub terms: T,
     pub final_offsets: TokenOffsets,
     pub final_position_increment: u32,
 }
+
+/// Controlled occurrence projection retains complete ordered nodes as well as encoded term and occurrence buffers. Ordinary field analysis keeps its existing map representation.
+pub type RetainedAnalyzedField = AnalyzedField<OwnedMap<TokenTermKey, Vec<TokenOccurrence>>>;
 
 /// Analyze one complete source field with a resolved revision, retaining every emitted graph edge.
 ///

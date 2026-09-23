@@ -7,7 +7,7 @@
 //! Atomic batches stage affected documents with the original global counter context.
 
 use super::{
-    Arc, BTreeMap, BTreeSet, DocId, FieldName, MemoryIndexState, MemoryInvertedIndex,
+    Arc, BTreeMap, BTreeSet, DocId, FieldName, MemoryIndexState, MemoryInvertedIndex, OwnedMap,
     StorageBackendError, StorageBackendResult,
 };
 
@@ -163,7 +163,7 @@ impl MemoryIndexState {
         replacement: &super::StagedMemoryDocument,
     ) -> StorageBackendResult<()> {
         let previous = self.doc_fields.get(&doc_id);
-        for field in previous.into_iter().flat_map(BTreeMap::keys).chain(
+        for field in previous.into_iter().flat_map(OwnedMap::keys).chain(
             replacement
                 .fields
                 .keys()

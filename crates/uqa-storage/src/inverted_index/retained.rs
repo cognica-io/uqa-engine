@@ -7,20 +7,21 @@
 //! Reconstructed text corpora reuse memory-index semantics with one retained payload allowance.
 
 use super::{
-    AnalyzerBindings, BTreeMap, DocId, FieldName, IndexedFieldMetadata, InvertedIndex,
-    MemoryFieldCounters, MemoryIndexState, MemoryInvertedIndex, MemoryReplacementPlan,
-    StagedMemoryDocument,
+    AnalyzerBindings, DocId, FieldName, IndexedFieldMetadata, InvertedIndex, MemoryFieldCounters,
+    MemoryIndexState, MemoryInvertedIndex, MemoryReplacementPlan, StagedMemoryDocument,
 };
 use crate::{
     read_control::StorageReadControl, ReadOnlySnapshot, StorageBackendError, StorageBackendResult,
 };
 use std::sync::Arc;
-use uqa_core::memory::{Budgeted, BudgetedString, MemoryError, MemoryReservation};
+use uqa_core::memory::{
+    Budgeted, BudgetedMap, BudgetedString, MemoryError, MemoryReservation, OwnedMap,
+};
 
 mod charge;
 mod staging;
 
-/// Build an immutable text index from borrowed selected fields. Analysis scratch, encoded terms, occurrence/position capacities and live corpus entries share the original allowance. Analyzer field bindings retain their own controlled containers; opaque corpus map-node/allocator bookkeeping remains outside this payload charge. A rejected document leaves previously appended documents unchanged.
+/// Build an immutable text index from borrowed selected fields. Analysis scratch, encoded terms, occurrence/position capacities and live corpus entries share the original allowance. Corpus map/set nodes use exact owned layouts admitted before publication; analyzer field bindings retain their own controlled containers. Allocator bookkeeping remains outside the payload charge. A rejected document leaves previously appended documents unchanged.
 pub struct RetainedInvertedIndexBuilder {
     index: MemoryInvertedIndex,
     memory: MemoryReservation,
@@ -69,24 +70,22 @@ impl RetainedInvertedIndexBuilder {
             ));
         }
         // Preserve the ordinary map input's ordered, last-value field semantics without copying source strings.
-        let mut borrowed = (BTreeMap::new(), self.control.memory().empty_reservation());
+        let mut borrowed = BudgetedMap::new(self.control.memory());
         for (field, text) in fields {
             self.control.check()?;
-            if !borrowed.0.contains_key(field) {
-                borrowed.1.grow(size_of::<(&str, &str)>())?;
-            }
-            borrowed.0.insert(field, text);
+            borrowed.insert(field, text)?;
         }
-        if borrowed.0.is_empty() {
+        self.control.check()?;
+        if borrowed.is_empty() {
             return Ok(());
         }
-        let staged = staging::stage(&self.index, doc_id, &borrowed.0, &self.control)?;
+        let staged = staging::stage(&self.index, doc_id, &borrowed, &self.control)?;
         drop(borrowed);
         let plan = self.plan(doc_id, &staged.fields)?;
         let charge = charge::new_document(&self.index.state, &staged, &plan, &self.control)?;
         let new_entries = self.control.memory().reserve(charge.new_entries)?;
         self.control.check()?;
-        // Every fallible allocation and validation precedes mutation. The existing application has no old postings to remove for this unique identity.
+        // Reserve every complete owned map/set node before the infallible publication allocates it. Every fallible allocation and validation precedes mutation. The existing application has no old postings to remove for this unique identity.
         let (staged, memory) = staged.into_parts();
         let (plan, plan_memory) = plan.into_parts();
         let mut pending = (staged, plan, memory);
@@ -96,25 +95,19 @@ impl RetainedInvertedIndexBuilder {
             .expect("unpublished text builder owns its corpus")
             .apply_replacement(doc_id, pending.0, pending.1);
         self.memory.absorb(pending.2.split(charge.retained));
-        // Application consumed the staging containers and discarded duplicate global keys before their remaining reservations are released.
+        // Publication moves admitted field/term nodes and frees projection/counter scratch and duplicate global keys before their remaining reservations are released.
         result
     }
 
     fn plan(
         &self,
         doc_id: DocId,
-        fields: &BTreeMap<FieldName, IndexedFieldMetadata>,
+        fields: &OwnedMap<FieldName, IndexedFieldMetadata>,
     ) -> StorageBackendResult<Budgeted<MemoryReplacementPlan>> {
         let mut memory = self.control.memory().reserve(
             fields
                 .len()
-                .checked_mul(size_of::<(FieldName, MemoryFieldCounters)>())
-                .ok_or(MemoryError::SizeOverflow)?,
-        )?;
-        let affected = self.control.memory().reserve(
-            fields
-                .len()
-                .checked_mul(size_of::<&FieldName>())
+                .checked_mul(OwnedMap::<FieldName, MemoryFieldCounters>::entry_bytes())
                 .ok_or(MemoryError::SizeOverflow)?,
         )?;
         let plan = self
@@ -123,7 +116,6 @@ impl RetainedInvertedIndexBuilder {
             .plan_replacement_with_names(doc_id, fields, |name| {
                 copy_name(name, &mut memory, &self.control)
             })?;
-        drop(affected);
         Ok(Budgeted::new(plan, memory))
     }
 

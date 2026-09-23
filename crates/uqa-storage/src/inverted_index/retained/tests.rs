@@ -7,7 +7,8 @@
 use super::*;
 use crate::inverted_index::{AnalyzerPhase, MemoryPosting, PostingKey};
 use crate::TokenTermKey;
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
+use uqa_core::memory::{OwnedMap, OwnedSet};
 use uqa_core::{memory::MemoryBudget, TokenOccurrence};
 
 fn builder(control: &StorageReadControl) -> RetainedInvertedIndexBuilder {
@@ -18,19 +19,32 @@ fn builder(control: &StorageReadControl) -> RetainedInvertedIndexBuilder {
     .unwrap()
 }
 
+fn stage_selected<'a>(
+    index: &MemoryInvertedIndex,
+    doc_id: DocId,
+    fields: impl IntoIterator<Item = (&'a str, &'a str)>,
+    control: &StorageReadControl,
+) -> StorageBackendResult<Budgeted<StagedMemoryDocument>> {
+    let mut borrowed = BudgetedMap::new(control.memory());
+    for (field, text) in fields {
+        borrowed.insert(field, text)?;
+    }
+    staging::stage(index, doc_id, &borrowed, control)
+}
+
 pub(in crate::inverted_index) fn corpus_bytes(state: &MemoryIndexState) -> usize {
     size_of::<MemoryIndexState>()
         + state
             .index
             .iter()
             .map(|((field, term), postings)| {
-                size_of::<(PostingKey, BTreeMap<DocId, MemoryPosting>)>()
+                OwnedMap::<PostingKey, OwnedMap<DocId, MemoryPosting>>::entry_bytes()
                     + field.capacity()
                     + term.allocated_bytes()
                     + postings
                         .values()
                         .map(|posting| {
-                            size_of::<(DocId, MemoryPosting)>()
+                            OwnedMap::<DocId, MemoryPosting>::entry_bytes()
                                 + posting.projection.payload.positions.capacity() * size_of::<u32>()
                                 + posting.occurrences.capacity() * size_of::<TokenOccurrence>()
                         })
@@ -41,11 +55,13 @@ pub(in crate::inverted_index) fn corpus_bytes(state: &MemoryIndexState) -> usize
             .doc_terms
             .values()
             .map(|terms| {
-                size_of::<(DocId, BTreeSet<PostingKey>)>()
+                OwnedMap::<DocId, OwnedSet<PostingKey>>::entry_bytes()
                     + terms
                         .iter()
                         .map(|(field, term)| {
-                            size_of::<PostingKey>() + field.capacity() + term.allocated_bytes()
+                            OwnedSet::<PostingKey>::entry_bytes()
+                                + field.capacity()
+                                + term.allocated_bytes()
                         })
                         .sum::<usize>()
             })
@@ -54,11 +70,12 @@ pub(in crate::inverted_index) fn corpus_bytes(state: &MemoryIndexState) -> usize
             .doc_fields
             .values()
             .map(|fields| {
-                size_of::<(DocId, BTreeMap<FieldName, IndexedFieldMetadata>)>()
+                OwnedMap::<DocId, OwnedMap<FieldName, IndexedFieldMetadata>>::entry_bytes()
                     + fields
                         .keys()
                         .map(|field| {
-                            size_of::<(FieldName, IndexedFieldMetadata)>() + field.capacity()
+                            OwnedMap::<FieldName, IndexedFieldMetadata>::entry_bytes()
+                                + field.capacity()
                         })
                         .sum::<usize>()
             })
@@ -68,7 +85,7 @@ pub(in crate::inverted_index) fn corpus_bytes(state: &MemoryIndexState) -> usize
             .map(|fields| {
                 fields
                     .keys()
-                    .map(|field| size_of::<(FieldName, u64)>() + field.capacity())
+                    .map(|field| OwnedMap::<FieldName, u64>::entry_bytes() + field.capacity())
                     .sum::<usize>()
             })
             .sum::<usize>()
@@ -389,4 +406,162 @@ fn cancellation_and_shared_owner_allocation_failure_release_the_corpus() {
         drop(blocker);
         assert_eq!(memory.used(), 0);
     }
+}
+
+#[test]
+fn complete_node_admission_precedes_document_publication() {
+    let control = StorageReadControl::with_limit(1 << 20);
+    let mut index = builder(&control);
+    index.add_document(1, [("body", "same")]).unwrap();
+    let prior = control.memory().used();
+    let fields = BTreeMap::from([("body", "same new"), ("empty", "")]);
+    let staged = stage_selected(
+        &index.index,
+        2,
+        fields.iter().map(|(&name, &text)| (name, text)),
+        &control,
+    )
+    .unwrap();
+    let plan = index.plan(2, &staged.fields).unwrap();
+    let charge = charge::new_document(&index.index.state, &staged, &plan, &control).unwrap();
+    let expected = OwnedMap::<DocId, OwnedMap<FieldName, IndexedFieldMetadata>>::entry_bytes()
+        + OwnedMap::<DocId, OwnedSet<PostingKey>>::entry_bytes()
+        + 2 * OwnedMap::<DocId, MemoryPosting>::entry_bytes()
+        + OwnedMap::<PostingKey, OwnedMap<DocId, MemoryPosting>>::entry_bytes()
+        + 2 * OwnedMap::<FieldName, u64>::entry_bytes();
+    assert_eq!(charge.new_entries, expected);
+    let blocker = control
+        .memory()
+        .reserve(control.memory().limit() - control.memory().used() - expected + 1)
+        .unwrap();
+    assert!(matches!(
+        control.memory().reserve(charge.new_entries),
+        Err(MemoryError::Limit { .. })
+    ));
+    assert_eq!(index.index.doc_count().unwrap(), 1);
+    assert_eq!(index.index.get_term_freq(1, "body", "same").unwrap(), 1);
+    drop(blocker);
+    drop(plan);
+    drop(staged);
+    assert_eq!(control.memory().used(), prior);
+    index.add_document(2, fields).unwrap();
+    assert_eq!(control.memory().used(), corpus_bytes(&index.index.state));
+    assert_eq!(index.index.doc_count().unwrap(), 2);
+    drop(index);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn staged_field_term_and_plan_nodes_have_complete_leases_before_publication() {
+    let control = StorageReadControl::with_limit(1 << 20);
+    let index = builder(&control);
+    let prior = control.memory().used();
+    let staged = stage_selected(
+        &index.index,
+        1,
+        [("body", "same same new"), ("empty", "")],
+        &control,
+    )
+    .unwrap();
+    let staged_bytes = staged.fields.allocated_bytes()
+        + staged.fields.keys().map(String::capacity).sum::<usize>()
+        + staged.terms.allocated_bytes()
+        + staged
+            .terms
+            .iter()
+            .map(|(field, term)| field.capacity() + term.allocated_bytes())
+            .sum::<usize>()
+        + staged.postings.capacity() * size_of::<(PostingKey, MemoryPosting)>()
+        + staged
+            .postings
+            .iter()
+            .map(|((field, term), posting)| {
+                field.capacity()
+                    + term.allocated_bytes()
+                    + posting.occurrences.capacity() * size_of::<TokenOccurrence>()
+                    + posting.projection.payload.positions.capacity() * size_of::<u32>()
+            })
+            .sum::<usize>();
+    assert_eq!(staged.reserved_bytes(), staged_bytes);
+    assert_eq!(control.memory().used(), prior + staged_bytes);
+    let entry_only = staged.fields.len() * size_of::<(FieldName, MemoryFieldCounters)>();
+    let blocker = control
+        .memory()
+        .reserve(control.memory().limit() - control.memory().used() - entry_only)
+        .unwrap();
+    assert!(matches!(
+        index.plan(1, &staged.fields),
+        Err(StorageBackendError::Memory(MemoryError::Limit { .. }))
+    ));
+    assert_eq!(
+        control.memory().used(),
+        prior + staged_bytes + blocker.bytes()
+    );
+    drop(blocker);
+    let plan = index.plan(1, &staged.fields).unwrap();
+    let plan_bytes = plan.field_counters.allocated_bytes()
+        + plan
+            .field_counters
+            .iter()
+            .map(|(field, counters)| field.capacity() + counters.total_key.capacity())
+            .sum::<usize>();
+    assert_eq!(plan.reserved_bytes(), plan_bytes);
+    assert_eq!(control.memory().used(), prior + staged_bytes + plan_bytes);
+    drop(plan);
+    drop(staged);
+    assert_eq!(control.memory().used(), prior);
+    drop(index);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn borrowed_field_nodes_reject_entry_only_allowance_and_release_on_late_input_cancellation() {
+    let control = StorageReadControl::with_limit(1 << 20);
+    let mut index = builder(&control);
+    let prior = control.memory().used();
+    let blocker = control
+        .memory()
+        .reserve(control.memory().limit() - prior - size_of::<(&str, &str)>())
+        .unwrap();
+    assert!(matches!(
+        index.add_document(1, [("body", "")]),
+        Err(StorageBackendError::Memory(MemoryError::Limit { .. }))
+    ));
+    assert_eq!(control.memory().used(), prior + blocker.bytes());
+    assert_eq!(index.index.doc_count().unwrap(), 0);
+    drop(blocker);
+    let cancellation = control.cancellation().clone();
+    let fields = [("body", ""), ("other", "")]
+        .into_iter()
+        .chain(std::iter::from_fn(move || {
+            cancellation.cancel();
+            None
+        }));
+    assert!(matches!(
+        index.add_document(1, fields),
+        Err(StorageBackendError::Cancelled(_))
+    ));
+    assert_eq!(control.memory().used(), prior);
+    control.cancellation().reset();
+    let cancellation = control.cancellation().clone();
+    let empty = std::iter::from_fn(move || {
+        cancellation.cancel();
+        None
+    });
+    assert!(matches!(
+        index.add_document(1, empty),
+        Err(StorageBackendError::Cancelled(_))
+    ));
+    assert_eq!(control.memory().used(), prior);
+    control.cancellation().reset();
+    index
+        .add_document(1, [("body", "discarded"), ("body", "last")])
+        .unwrap();
+    assert_eq!(
+        index.index.get_term_freq(1, "body", "discarded").unwrap(),
+        0
+    );
+    assert_eq!(index.index.get_term_freq(1, "body", "last").unwrap(), 1);
+    drop(index);
+    assert_eq!(control.memory().used(), 0);
 }

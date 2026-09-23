@@ -6,10 +6,12 @@
 
 use super::*;
 use crate::clustered_postings::PostingReadCursor;
-use crate::inverted_index::{retained::tests::corpus_bytes, AnalyzerPhase};
+use crate::inverted_index::{
+    retained::tests::corpus_bytes, AnalyzerPhase, IndexedFieldMetadata, MemoryPosting, PostingKey,
+};
 use crate::{StorageBackendError, TokenTermKey};
 use std::collections::BTreeMap;
-use uqa_core::memory::{MemoryBudget, MemoryError, MemoryReservation};
+use uqa_core::memory::{MemoryBudget, MemoryError, MemoryReservation, OwnedMap, OwnedSet};
 use uqa_core::CancellationToken;
 
 fn fields(text: &str) -> BTreeMap<String, String> {
@@ -287,4 +289,68 @@ fn controlled_capture_preserves_large_field_bindings_after_source_mutation() {
     assert_eq!(control.memory().used(), bytes);
     drop(nested);
     assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn shared_capture_admits_complete_nodes_and_reuses_the_same_corpus_after_lease_expiry() {
+    let index = seeded();
+    let state = &index.state;
+    let nodes = state.index.allocated_bytes()
+        + state
+            .index
+            .values()
+            .map(OwnedMap::allocated_bytes)
+            .sum::<usize>()
+        + state.doc_fields.allocated_bytes()
+        + state
+            .doc_fields
+            .values()
+            .map(OwnedMap::allocated_bytes)
+            .sum::<usize>()
+        + state.doc_terms.allocated_bytes()
+        + state
+            .doc_terms
+            .values()
+            .map(OwnedSet::allocated_bytes)
+            .sum::<usize>()
+        + state.total_length.allocated_bytes()
+        + state.field_doc_counts.allocated_bytes();
+    let entries = state.index.len() * size_of::<(PostingKey, OwnedMap<u64, MemoryPosting>)>()
+        + state
+            .index
+            .values()
+            .map(|postings| postings.len() * size_of::<(u64, MemoryPosting)>())
+            .sum::<usize>()
+        + state.doc_fields.len() * size_of::<(u64, OwnedMap<String, IndexedFieldMetadata>)>()
+        + state
+            .doc_fields
+            .values()
+            .map(|fields| fields.len() * size_of::<(String, IndexedFieldMetadata)>())
+            .sum::<usize>()
+        + state.doc_terms.len() * size_of::<(u64, OwnedSet<PostingKey>)>()
+        + state
+            .doc_terms
+            .values()
+            .map(|terms| terms.len() * size_of::<PostingKey>())
+            .sum::<usize>()
+        + (state.total_length.len() + state.field_doc_counts.len()) * size_of::<(String, u64)>();
+    assert!(nodes > entries);
+    let entry_only_limit = capture_bytes(&index) - (nodes - entries);
+    let short = StorageReadControl::with_limit(entry_only_limit);
+    assert!(matches!(
+        index.snapshot_with_control(&short),
+        Err(StorageBackendError::Memory(_))
+    ));
+    assert_eq!(short.memory().used(), 0);
+    let control = StorageReadControl::with_limit(capture_bytes(&index));
+    let state_pointer = Arc::as_ptr(&index.state);
+    for _ in 0..2 {
+        let capture = index.snapshot_with_control(&control).unwrap();
+        assert_eq!(Arc::as_ptr(&index.state), state_pointer);
+        assert_eq!(Arc::strong_count(&index.state), 2);
+        assert_eq!(control.memory().used(), capture_bytes(&index));
+        drop(capture);
+        assert_eq!(control.memory().used(), 0);
+        assert_eq!(Arc::strong_count(&index.state), 1);
+    }
 }

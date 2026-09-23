@@ -12,6 +12,16 @@ use uqa_analysis::{
 };
 use uqa_core::TokenOffsets;
 
+fn assert_equivalent(retained: &RetainedAnalyzedField, ordinary: &AnalyzedField) {
+    assert_eq!(retained.length, ordinary.length);
+    assert_eq!(retained.final_offsets, ordinary.final_offsets);
+    assert_eq!(
+        retained.final_position_increment,
+        ordinary.final_position_increment
+    );
+    assert!(retained.terms.iter().eq(ordinary.terms.iter()));
+}
+
 #[test]
 fn retained_fields_keep_graph_overlaps_normalization_and_original_end_state() {
     let config: Analyzer = serde_json::from_str(
@@ -26,7 +36,7 @@ fn retained_fields_keep_graph_overlaps_normalization_and_original_end_state() {
             .unwrap();
         let memory = MemoryBudget::new(1 << 20);
         let field = analyze_index_field_budgeted(&analyzer, "a a", &memory, || Ok(())).unwrap();
-        assert_eq!(*field, analyze_index_field(&analyzer, "a a").unwrap());
+        assert_equivalent(&field, &analyze_index_field(&analyzer, "a a").unwrap());
         assert_eq!(field.length, length);
         assert_eq!(
             field.terms[&TokenTermKey::from_text("a")]
@@ -55,7 +65,7 @@ fn retained_fields_keep_graph_overlaps_normalization_and_original_end_state() {
     let text = "<i>韓&amp;🙂 a the</i>";
     let memory = MemoryBudget::new(1 << 20);
     let field = analyze_index_field_budgeted(&analyzer, text, &memory, || Ok(())).unwrap();
-    assert_eq!(*field, analyze_index_field(&analyzer, text).unwrap());
+    assert_equivalent(&field, &analyze_index_field(&analyzer, text).unwrap());
     assert_eq!(field.length, 2);
     assert_eq!(field.final_position_increment, 1);
     assert_eq!(
@@ -82,7 +92,7 @@ fn retained_fields_keep_graph_overlaps_normalization_and_original_end_state() {
         assert!(field.terms.is_empty());
         assert_eq!(field.length, 0);
         assert_eq!(field.final_position_increment, u32::from(!text.is_empty()));
-        assert_eq!(*field, analyze_index_field(&analyzer, text).unwrap());
+        assert_equivalent(&field, &analyze_index_field(&analyzer, text).unwrap());
         drop(field);
         assert_eq!(memory.used(), 0);
     }
@@ -95,7 +105,7 @@ fn field_quota_rejection_releases_analysis_projection_and_map_conversion_scratch
     let expected = analyze_index_field(&analyzer, text).unwrap();
     let baseline = MemoryBudget::new(1 << 20);
     let field = analyze_index_field_budgeted(&analyzer, text, &baseline, || Ok(())).unwrap();
-    let live = field.terms.len() * size_of::<(TokenTermKey, Vec<TokenOccurrence>)>()
+    let live = field.terms.allocated_bytes()
         + field
             .terms
             .iter()
@@ -113,7 +123,7 @@ fn field_quota_rejection_releases_analysis_projection_and_map_conversion_scratch
         let prior = memory.reserve(7).unwrap();
         match analyze_index_field_budgeted(&analyzer, text, &memory, || Ok(())) {
             Ok(field) => {
-                assert_eq!(*field, expected);
+                assert_equivalent(&field, &expected);
                 assert_eq!(memory.used(), field.reserved_bytes() + 7);
             }
             Err(StorageBackendError::Memory(MemoryError::Limit { .. })) => {}
@@ -193,5 +203,60 @@ fn retained_raw_term_keys_keep_unpaired_utf16_identity_and_occurrence_order() {
     assert_eq!(field.terms.keys().next().unwrap().to_term(), term);
     assert_eq!(memory.used(), field.reserved_bytes());
     drop(field);
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn term_nodes_and_output_conversion_are_admitted_before_allocation() {
+    let memory = MemoryBudget::new(1 << 20);
+    let prior = memory.reserve(7).unwrap();
+    let mut terms = Terms::new(&memory);
+    let occurrence = TokenOccurrence {
+        position: 0,
+        position_length: 1,
+        offsets: None,
+    };
+    let first = TokenTerm::from("a");
+    terms.push(&first, occurrence, &mut || Ok(())).unwrap();
+    let key_pointer = terms.values.keys().next().unwrap().as_bytes().as_ptr();
+    let node_bytes = terms.entries.bytes();
+    assert_eq!(
+        node_bytes,
+        OwnedMap::<TokenTermKey, BudgetedVec<TokenOccurrence>>::entry_bytes()
+    );
+    terms.push(&first, occurrence, &mut || Ok(())).unwrap();
+    assert_eq!(terms.entries.bytes(), node_bytes);
+    assert_eq!(
+        terms.values.keys().next().unwrap().as_bytes().as_ptr(),
+        key_pointer
+    );
+    let retained = memory.used();
+    let next = TokenTerm::from("b");
+    let next_key_bytes = TokenTermKey::from_term(&next).allocated_bytes();
+    let blocker = memory
+        .reserve(memory.limit() - memory.used() - next_key_bytes - node_bytes + 1)
+        .unwrap();
+    assert!(matches!(
+        terms.push(&next, occurrence, &mut || Ok(())),
+        Err(StorageBackendError::Memory(MemoryError::Limit { .. }))
+    ));
+    assert_eq!(terms.values.len(), 1);
+    assert_eq!(terms.values.values().next().unwrap().len(), 2);
+    assert_eq!(memory.used(), retained + blocker.bytes());
+    drop(blocker);
+    let analyzer = uqa_analysis::whitespace_analyzer().compile().unwrap();
+    let metadata =
+        IndexedFieldMetadata::new(&analyzer, &analyze_index_field(&analyzer, "").unwrap());
+    let output_bytes = OwnedMap::<TokenTermKey, Vec<TokenOccurrence>>::entry_bytes();
+    let blocker = memory
+        .reserve(memory.limit() - memory.used() - output_bytes + 1)
+        .unwrap();
+    assert!(matches!(
+        terms.finish(metadata, &mut || Ok(())),
+        Err(StorageBackendError::Memory(MemoryError::Limit { .. }))
+    ));
+    assert_eq!(memory.used(), prior.bytes() + blocker.bytes());
+    drop(blocker);
+    drop(prior);
     assert_eq!(memory.used(), 0);
 }

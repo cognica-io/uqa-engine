@@ -6,11 +6,10 @@
 
 //! Incremental live payload sizes keep shared snapshot admission independent of corpus size.
 
-use std::collections::{btree_map::Entry, BTreeMap};
 use std::sync::{Arc, Weak};
 
 use parking_lot::Mutex;
-use uqa_core::memory::{MemoryError, MemoryReservation};
+use uqa_core::memory::{MemoryError, MemoryReservation, OwnedMap, OwnedSet};
 
 use super::{DocId, FieldName, IndexedFieldMetadata, MemoryIndexState, MemoryPosting, PostingKey};
 use crate::{read_control::StorageReadControl, StorageBackendResult};
@@ -72,7 +71,7 @@ pub(super) fn posting_buffers(posting: &MemoryPosting) -> u128 {
 }
 
 fn posting_size(posting: &MemoryPosting) -> u128 {
-    size_of::<(DocId, MemoryPosting)>() as u128 + posting_buffers(posting)
+    OwnedMap::<DocId, MemoryPosting>::entry_bytes() as u128 + posting_buffers(posting)
 }
 
 fn term_payload(key: &PostingKey) -> u128 {
@@ -80,46 +79,45 @@ fn term_payload(key: &PostingKey) -> u128 {
 }
 
 fn index_key_size(key: &PostingKey) -> u128 {
-    size_of::<(PostingKey, BTreeMap<DocId, MemoryPosting>)>() as u128 + term_payload(key)
+    OwnedMap::<PostingKey, OwnedMap<DocId, MemoryPosting>>::entry_bytes() as u128
+        + term_payload(key)
 }
 
-fn terms_size(terms: &std::collections::BTreeSet<PostingKey>) -> u128 {
-    size_of::<(DocId, std::collections::BTreeSet<PostingKey>)>() as u128
+fn terms_size(terms: &OwnedSet<PostingKey>) -> u128 {
+    OwnedMap::<DocId, OwnedSet<PostingKey>>::entry_bytes() as u128
         + terms
             .iter()
-            .map(|key| size_of::<PostingKey>() as u128 + term_payload(key))
+            .map(|key| OwnedSet::<PostingKey>::entry_bytes() as u128 + term_payload(key))
             .sum::<u128>()
 }
 
-fn fields_size(fields: &BTreeMap<FieldName, IndexedFieldMetadata>) -> u128 {
-    size_of::<(DocId, BTreeMap<FieldName, IndexedFieldMetadata>)>() as u128
+fn fields_size(fields: &OwnedMap<FieldName, IndexedFieldMetadata>) -> u128 {
+    OwnedMap::<DocId, OwnedMap<FieldName, IndexedFieldMetadata>>::entry_bytes() as u128
         + fields
             .keys()
             .map(|field| {
-                size_of::<(FieldName, IndexedFieldMetadata)>() as u128 + field.capacity() as u128
+                OwnedMap::<FieldName, IndexedFieldMetadata>::entry_bytes() as u128
+                    + field.capacity() as u128
             })
             .sum::<u128>()
 }
 
 fn counter_size(capacity: usize) -> u128 {
-    size_of::<(FieldName, u64)>() as u128 + capacity as u128
+    OwnedMap::<FieldName, u64>::entry_bytes() as u128 + capacity as u128
 }
 
 pub(super) fn set_counter(
-    target: &mut BTreeMap<FieldName, u64>,
+    target: &mut OwnedMap<FieldName, u64>,
     field: FieldName,
     value: Option<u64>,
     retention: &mut RetainedPayload,
 ) {
     if let Some(value) = value {
-        match target.entry(field) {
-            Entry::Vacant(entry) => {
-                retention.add(counter_size(entry.key().capacity()));
-                entry.insert(value);
-            }
-            Entry::Occupied(mut entry) => {
-                entry.insert(value);
-            }
+        if let Some(previous) = target.get_mut(&field) {
+            *previous = value;
+        } else {
+            retention.add(counter_size(field.capacity()));
+            target.insert(field, value);
         }
     } else if let Some((field, _)) = target.remove_entry(&field) {
         retention.remove(counter_size(field.capacity()));
@@ -133,16 +131,16 @@ impl MemoryIndexState {
         key: PostingKey,
         posting: MemoryPosting,
     ) {
-        let postings = match self.index.entry(key) {
-            Entry::Vacant(entry) => {
-                self.retention.add(index_key_size(entry.key()));
-                entry.insert(BTreeMap::new())
-            }
-            Entry::Occupied(entry) => entry.into_mut(),
-        };
         self.retention.add(posting_size(&posting));
-        if let Some(previous) = postings.insert(doc_id, posting) {
-            self.retention.remove(posting_size(&previous));
+        if let Some(postings) = self.index.get_mut(&key) {
+            if let Some(previous) = postings.insert(doc_id, posting) {
+                self.retention.remove(posting_size(&previous));
+            }
+        } else {
+            self.retention.add(index_key_size(&key));
+            let mut postings = OwnedMap::new();
+            postings.insert(doc_id, posting);
+            self.index.insert(key, postings);
         }
     }
 
@@ -173,10 +171,7 @@ impl MemoryIndexState {
         drop(self.take_document_terms(doc_id));
     }
 
-    pub(super) fn take_document_terms(
-        &mut self,
-        doc_id: DocId,
-    ) -> Option<std::collections::BTreeSet<PostingKey>> {
+    pub(super) fn take_document_terms(&mut self, doc_id: DocId) -> Option<OwnedSet<PostingKey>> {
         let terms = self.doc_terms.remove(&doc_id);
         if let Some(terms) = &terms {
             self.retention.remove(terms_size(terms));
@@ -187,31 +182,27 @@ impl MemoryIndexState {
     pub(super) fn insert_postings(
         &mut self,
         key: PostingKey,
-        postings: BTreeMap<DocId, MemoryPosting>,
+        postings: OwnedMap<DocId, MemoryPosting>,
     ) {
-        match self.index.entry(key) {
-            Entry::Vacant(entry) => {
-                self.retention.add(
-                    index_key_size(entry.key()) + postings.values().map(posting_size).sum::<u128>(),
-                );
-                entry.insert(postings);
-            }
-            Entry::Occupied(mut entry) => {
-                for (id, posting) in postings {
-                    self.retention.add(posting_size(&posting));
-                    if let Some(previous) = entry.get_mut().insert(id, posting) {
-                        self.retention.remove(posting_size(&previous));
-                    }
+        if let Some(previous) = self.index.get_mut(&key) {
+            for (id, posting) in postings {
+                self.retention.add(posting_size(&posting));
+                if let Some(replaced) = previous.insert(id, posting) {
+                    self.retention.remove(posting_size(&replaced));
                 }
             }
+        } else {
+            self.retention
+                .add(index_key_size(&key) + postings.values().map(posting_size).sum::<u128>());
+            self.index.insert(key, postings);
         }
     }
 
     pub(super) fn insert_document_metadata(
         &mut self,
         doc_id: DocId,
-        fields: BTreeMap<FieldName, IndexedFieldMetadata>,
-        terms: std::collections::BTreeSet<PostingKey>,
+        fields: OwnedMap<FieldName, IndexedFieldMetadata>,
+        terms: OwnedSet<PostingKey>,
     ) {
         self.remove_document_metadata(doc_id);
         self.retention
@@ -231,7 +222,7 @@ impl MemoryIndexState {
             + self.doc_fields.values().map(fields_size).sum::<u128>()
             + [&self.total_length, &self.field_doc_counts]
                 .into_iter()
-                .flat_map(BTreeMap::keys)
+                .flat_map(OwnedMap::keys)
                 .map(|field| counter_size(field.capacity()))
                 .sum::<u128>()
     }

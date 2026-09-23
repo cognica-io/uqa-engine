@@ -10,7 +10,7 @@ use proptest::prelude::*;
 
 use super::*;
 
-fn verify<K: Ord, V>(link: &Link<K, V>) -> (usize, u8) {
+pub(super) fn verify<K: Ord, V>(link: &Link<K, V>) -> (usize, u8) {
     let Some(node) = link else { return (0, 0) };
     let (left, left_height) = verify(&node.left);
     let (right, right_height) = verify(&node.right);

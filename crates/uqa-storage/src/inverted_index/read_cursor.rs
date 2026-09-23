@@ -11,13 +11,13 @@ use super::{
     TokenTermKey,
 };
 use crate::{clustered_postings::PostingReadCursor, read_control::StorageReadControl};
-use std::{collections::BTreeMap, ops::Bound};
-use uqa_core::memory::BudgetedString;
+use std::ops::Bound;
+use uqa_core::memory::{BudgetedString, OwnedMap};
 
 pub(super) struct MemoryPostingReadCursor<'a> {
     index: &'a MemoryInvertedIndex,
     field: &'a str,
-    postings: Option<&'a BTreeMap<DocId, MemoryPosting>>,
+    postings: Option<&'a OwnedMap<DocId, MemoryPosting>>,
     current: Option<PostingScore>,
     frequency: u64,
     control: Option<StorageReadControl>,
@@ -46,10 +46,10 @@ impl<'a> MemoryPostingReadCursor<'a> {
     fn from_postings(
         index: &'a MemoryInvertedIndex,
         field: &'a str,
-        postings: Option<&'a BTreeMap<DocId, MemoryPosting>>,
+        postings: Option<&'a OwnedMap<DocId, MemoryPosting>>,
         control: Option<StorageReadControl>,
     ) -> StorageBackendResult<Self> {
-        let frequency = usize_to_u64(postings.map_or(0, BTreeMap::len), "document frequency")?;
+        let frequency = usize_to_u64(postings.map_or(0, OwnedMap::len), "document frequency")?;
         let mut cursor = Self {
             index,
             field,
@@ -74,7 +74,7 @@ impl<'a> MemoryPostingReadCursor<'a> {
         self.check()?;
         let next = self
             .postings
-            .and_then(|postings| postings.range((start, Bound::Unbounded)).next());
+            .and_then(|postings| postings.first_from(start.as_ref()));
         let current = next
             .map(|(&doc_id, posting)| -> StorageBackendResult<PostingScore> {
                 Ok(PostingScore {
@@ -126,7 +126,7 @@ pub(super) fn controlled_postings<'a>(
     field: &str,
     term: &TokenTermKey,
     control: &StorageReadControl,
-) -> StorageBackendResult<Option<&'a BTreeMap<DocId, MemoryPosting>>> {
+) -> StorageBackendResult<Option<&'a OwnedMap<DocId, MemoryPosting>>> {
     control.check()?;
     let mut field_key = BudgetedString::new(control.memory());
     field_key.reserve(field.len())?;
@@ -150,6 +150,7 @@ pub(super) fn controlled_postings<'a>(
 mod tests {
     use super::*;
     use crate::InvertedIndex;
+    use std::collections::BTreeMap;
     use uqa_core::{
         memory::{MemoryBudget, MemoryError},
         CancellationToken, TokenOccurrence,

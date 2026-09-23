@@ -271,3 +271,39 @@ fn stats_reports_cross_field_total_overflow() {
     let error = idx.stats().unwrap_err();
     assert!(error.to_string().contains("total document length"));
 }
+
+#[test]
+fn replacement_merges_borrowed_field_names_once_in_order() {
+    let mut index = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
+    index
+        .add_document(1, fields([("a", "old"), ("c", "old old"), ("e", "old")]))
+        .unwrap();
+    index.add_document(2, fields([("c", "other")])).unwrap();
+    let staged = index
+        .stage_document(1, fields([("b", "new"), ("c", "new"), ("d", "new new")]))
+        .unwrap();
+    let mut copied = Vec::new();
+    let plan = index
+        .state
+        .plan_replacement_with_names(1, &staged.fields, |field| {
+            copied.push(field.clone());
+            Ok(field.clone())
+        })
+        .unwrap();
+    assert_eq!(copied, ["a", "a", "b", "b", "c", "c", "d", "d", "e", "e"]);
+    assert_eq!(
+        plan.field_counters
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["a", "b", "c", "d", "e"]
+    );
+    Arc::make_mut(&mut index.state)
+        .apply_replacement(1, staged, plan)
+        .unwrap();
+    assert_eq!(index.field_names().unwrap(), ["b", "c", "d"]);
+    assert_eq!(index.total_field_length("c").unwrap(), 2);
+    assert_eq!(index.field_doc_count("c").unwrap(), 2);
+    assert_eq!(index.get_term_freq(2, "c", "other").unwrap(), 1);
+    super::snapshot::tests::assert_accounted(&index);
+}

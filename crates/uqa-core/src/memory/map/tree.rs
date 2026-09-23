@@ -96,7 +96,7 @@ fn take_first<K, V>(link: &mut Link<K, V>) -> OwnedNode<K, V> {
     first
 }
 
-fn into_entry<K, V>(node: OwnedNode<K, V>) -> (K, V) {
+pub(super) fn into_entry<K, V>(node: OwnedNode<K, V>) -> (K, V) {
     let (node, memory) = node.into_parts();
     let entry = unbox_entry(node);
     // The callee has freed the node allocation before its reservation is released.
