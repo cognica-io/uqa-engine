@@ -143,28 +143,7 @@ impl RedbRecordStore {
                         "uninitialized metadata has record data",
                     ));
                 }
-                let mut bytes = [0; 16];
-                getrandom::fill(&mut bytes)
-                    .map_err(|error| redb_error(std::io::Error::other(error.to_string())))?;
-                metadata
-                    .insert("database", bytes.as_slice())
-                    .map_err(redb_error)?;
-                metadata
-                    .insert("format", 43_u64.to_be_bytes().as_slice())
-                    .map_err(redb_error)?;
-                metadata
-                    .insert("allocated", 0_u64.to_be_bytes().as_slice())
-                    .map_err(redb_error)?;
-                metadata
-                    .insert("sequence", 0_u64.to_be_bytes().as_slice())
-                    .map_err(redb_error)?;
-                metadata
-                    .insert(
-                        "receipt_limit",
-                        DEFAULT_RECEIPT_RETENTION_LIMIT.to_be_bytes().as_slice(),
-                    )
-                    .map_err(redb_error)?;
-                DatabaseId::from_bytes(bytes)
+                initialize_record_metadata(&mut metadata)?
             }
         };
         transaction.commit().map_err(redb_error)?;
@@ -431,6 +410,33 @@ fn physical_writer(database: &Database) -> VersionResult<WriteTransaction> {
         .set_durability(Durability::Immediate)
         .map_err(redb_error)?;
     Ok(transaction)
+}
+
+fn initialize_record_metadata(
+    metadata: &mut redb::Table<'_, &'static str, &'static [u8]>,
+) -> VersionResult<DatabaseId> {
+    let mut bytes = [0; 16];
+    getrandom::fill(&mut bytes)
+        .map_err(|error| redb_error(std::io::Error::other(error.to_string())))?;
+    metadata
+        .insert("database", bytes.as_slice())
+        .map_err(redb_error)?;
+    metadata
+        .insert("format", 43_u64.to_be_bytes().as_slice())
+        .map_err(redb_error)?;
+    metadata
+        .insert("allocated", 0_u64.to_be_bytes().as_slice())
+        .map_err(redb_error)?;
+    metadata
+        .insert("sequence", 0_u64.to_be_bytes().as_slice())
+        .map_err(redb_error)?;
+    metadata
+        .insert(
+            "receipt_limit",
+            DEFAULT_RECEIPT_RETENTION_LIMIT.to_be_bytes().as_slice(),
+        )
+        .map_err(redb_error)?;
+    Ok(DatabaseId::from_bytes(bytes))
 }
 
 fn record_table_presence(transaction: &WriteTransaction) -> VersionResult<u8> {

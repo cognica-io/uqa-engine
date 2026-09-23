@@ -26,7 +26,7 @@ impl RedbRecordStore {
         limit: u64,
         control: &StorageReadControl,
     ) -> VersionResult<()> {
-        control.check()?;
+        control.cancellation().check()?;
         if limit == 0 {
             return Err(VersionError::InvalidEncoding(
                 "invalid receipt retention limit",
@@ -40,7 +40,7 @@ impl RedbRecordStore {
                 .insert("receipt_limit", limit.to_be_bytes().as_slice())
                 .map_err(redb_error)?;
         }
-        control.check()?;
+        control.cancellation().check()?;
         transaction.commit().map_err(redb_error)?;
         Ok(())
     }
@@ -52,7 +52,7 @@ pub(super) fn allocate(
     control: &StorageReadControl,
     retain: impl FnOnce(StorageTransactionId) -> VersionResult<()>,
 ) -> VersionResult<StorageTransactionId> {
-    control.check()?;
+    control.cancellation().check()?;
     let transaction = physical_writer(&store.database)?;
     let id = {
         let mut metadata = transaction.open_table(METADATA).map_err(redb_error)?;
@@ -79,7 +79,7 @@ pub(super) fn allocate(
             .map_err(redb_error)?;
         id
     };
-    control.check()?;
+    control.cancellation().check()?;
     transaction.commit().map_err(redb_error)?;
     Ok(id)
 }
@@ -108,7 +108,7 @@ pub(super) fn acknowledge(
     acknowledgement: ReceiptAcknowledgement,
     control: &StorageReadControl,
 ) -> VersionResult<()> {
-    control.check()?;
+    control.cancellation().check()?;
     let id = acknowledgement.transaction();
     store.check_identity(id)?;
     let transaction = physical_writer(&store.database)?;
@@ -124,7 +124,7 @@ pub(super) fn acknowledge(
             return Ok(());
         }
     }
-    control.check()?;
+    control.cancellation().check()?;
     transaction.commit().map_err(redb_error)?;
     Ok(())
 }
@@ -192,7 +192,7 @@ fn reclaim_admitted(
         let mut selected = [(0, false); 256];
         let mut count = 0;
         for entry in receipts.iter().map_err(redb_error)? {
-            control.check()?;
+            control.cancellation().check()?;
             let (allocation, bytes) = entry.map_err(redb_error)?;
             let allocation = allocation.value();
             if allocation > allocated {
@@ -223,7 +223,7 @@ fn reclaim_admitted(
             }
         }
         for &(allocation, delete) in &selected[..count] {
-            control.check()?;
+            control.cancellation().check()?;
             if delete {
                 receipts.remove(allocation).map_err(redb_error)?;
                 removed += 1;
@@ -232,7 +232,7 @@ fn reclaim_admitted(
             }
         }
     }
-    control.check()?;
+    control.cancellation().check()?;
     transaction.commit().map_err(redb_error)?;
     Ok(removed)
 }

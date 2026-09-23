@@ -199,6 +199,77 @@ fn partial_recovery_and_savepoint_deletions_survive_incremental_handoff() {
 }
 
 #[test]
+fn initial_sequence_commit_receipts_survive_singleton_and_record_checkpoints() {
+    for read_only in [false, true] {
+        let control = StorageReadControl::with_limit(128 << 10);
+        let mut graph = SerializableGraph::new(DATABASE, COORDINATOR, control.memory()).unwrap();
+        let actor = graph.admit(read_only, &control).unwrap();
+        let physical = StorageTransactionId::new(DATABASE, 1).unwrap();
+        let fingerprint = crate::mvcc::PreparedRecordCommit::new(&[], &control)
+            .unwrap()
+            .fingerprint();
+        let publication = graph
+            .prepare_publication(actor, physical, fingerprint, &control)
+            .unwrap();
+        let receipt = CommitReceipt {
+            transaction: physical,
+            sequence: CommitSequence::INITIAL,
+            fingerprint,
+        };
+        let committed = CommitStatus::Committed(receipt);
+        assert_eq!(
+            graph.resolve_publication(publication, committed).unwrap(),
+            committed
+        );
+        let encoded = encode(&graph, &control);
+        drop(graph);
+        assert_eq!(control.memory().used(), 0);
+        let mut graph = SerializableGraph::read_checkpoint(
+            DATABASE,
+            COORDINATOR,
+            &mut encoded.as_slice(),
+            &control,
+        )
+        .unwrap();
+        let mut records = Records::new();
+        for keyed in [false, true] {
+            if keyed {
+                graph = handoff(graph, &mut records, &control);
+            }
+            assert_eq!(
+                graph.status(actor).unwrap(),
+                crate::mvcc::SerializableStatus::Committed
+            );
+            assert!(graph.retains_transaction_receipt(physical));
+            graph
+                .validate_persisted_publications(&control, |_| Ok(committed))
+                .unwrap();
+            assert!(matches!(
+                graph.validate_persisted_publications(&control, |_| Ok(CommitStatus::Unknown)),
+                Err(VersionError::UnknownTransaction)
+            ));
+            assert!(matches!(
+                graph.validate_persisted_publications(&control, |_| {
+                    Ok(CommitStatus::Committed(CommitReceipt {
+                        sequence: CommitSequence::from_u64(1),
+                        ..receipt
+                    }))
+                }),
+                Err(VersionError::CommitMismatch)
+            ));
+            assert_eq!(
+                graph
+                    .resolve_publication(publication, CommitStatus::Pending)
+                    .unwrap(),
+                committed
+            );
+        }
+        drop(graph);
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
 fn invalid_record_sets_never_escape_restore_or_consume_retained_allowances() {
     let control = StorageReadControl::with_limit(128 << 10);
     let mut graph = SerializableGraph::new(DATABASE, COORDINATOR, control.memory()).unwrap();

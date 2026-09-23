@@ -99,14 +99,18 @@ fn interrupted_predecessor_restores_upgrade_without_losing_the_original_intent()
                 connection
                     .record_connection()
                     .with(|sqlite| {
-                        let (format, limit, pending): (i64, u64, Option<Vec<u8>>) = sqlite
+                        let (format, limit, pending): (i64, i64, Option<Vec<u8>>) = sqlite
                             .query_row(
                             "SELECT format, receipt_limit, restore_target FROM _uqa_mvcc_metadata",
                             [],
                             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                         )?;
                         assert_eq!(format, 44);
-                        assert_eq!(limit, uqa_storage::mvcc::DEFAULT_RECEIPT_RETENTION_LIMIT);
+                        assert_eq!(
+                            limit,
+                            i64::try_from(uqa_storage::mvcc::DEFAULT_RECEIPT_RETENTION_LIMIT)
+                                .unwrap()
+                        );
                         assert_eq!(pending, None);
                         Ok(())
                     })

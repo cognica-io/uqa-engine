@@ -204,7 +204,7 @@ impl<'a> Walker<'a> {
         self.charge(text.capacity())
     }
 
-    fn optional_text(&mut self, text: &Option<String>) -> Result<()> {
+    fn optional_text(&mut self, text: Option<&String>) -> Result<()> {
         if let Some(text) = text {
             self.text(text)?;
         }
@@ -225,16 +225,16 @@ impl<'a> Walker<'a> {
         Ok(())
     }
 
-    fn optional_expr(&mut self, expr: &'a Option<Expr>) -> Result<()> {
+    fn optional_expr(&mut self, expr: Option<&'a Expr>) -> Result<()> {
         if let Some(expr) = expr {
             self.node(Node::Expr(expr))?;
         }
         Ok(())
     }
 
-    fn optional_boxed_expr(&mut self, expr: &'a Option<Box<Expr>>) -> Result<()> {
+    fn optional_boxed_expr(&mut self, expr: Option<&'a Expr>) -> Result<()> {
         if let Some(expr) = expr {
-            self.boxed(expr.as_ref(), Node::Expr)?;
+            self.boxed(expr, Node::Expr)?;
         }
         Ok(())
     }

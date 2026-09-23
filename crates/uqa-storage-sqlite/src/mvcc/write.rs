@@ -59,10 +59,12 @@ pub(super) fn allocate_with_owner(
     let transaction = admission::begin(connection, control)?;
     native::check_mapping(&transaction, native)?;
     let current = codec::header(&transaction, identity)?;
-    let retained: u64 =
+    let retained: i64 =
         transaction.query_row("SELECT count(*) FROM _uqa_mvcc_transactions", [], |row| {
             row.get(0)
         })?;
+    let retained = u64::try_from(retained)
+        .map_err(|_| VersionError::InvalidEncoding("negative transaction receipt count"))?;
     if retained >= current.receipt_limit {
         return Err(VersionError::ReceiptRetentionExhausted {
             limit: current.receipt_limit,

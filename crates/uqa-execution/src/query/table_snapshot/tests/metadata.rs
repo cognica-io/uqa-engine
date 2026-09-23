@@ -95,7 +95,8 @@ fn reconstructed_default_keeps_the_resolved_revision_after_resources_disappear()
     let control = StorageReadControl::with_limit(4096);
     let view = empty(&selected, &control).unwrap();
     let nested = view.text.snapshot().unwrap();
-    drop((view, selected, index));
+    drop((view, selected));
+    drop(index);
     assert!(Arc::ptr_eq(
         &nested.index_analyzer_revision("unbound").unwrap(),
         &revision

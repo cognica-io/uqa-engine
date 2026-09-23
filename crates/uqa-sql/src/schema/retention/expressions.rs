@@ -35,7 +35,7 @@ impl<'a> Walker<'a> {
                 }
                 self.children(args, Node::Expr)?;
                 self.orders(order_by)?;
-                self.optional_boxed_expr(filter)?;
+                self.optional_boxed_expr(filter.as_deref())?;
             }
             Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
                 self.children(items, Node::Expr)?;
@@ -70,13 +70,13 @@ impl<'a> Walker<'a> {
                 when,
                 else_branch,
             } => {
-                self.optional_boxed_expr(base)?;
+                self.optional_boxed_expr(base.as_deref())?;
                 self.buffer::<(Expr, Expr)>(when.capacity())?;
                 for (condition, value) in when {
                     self.node(Node::Expr(condition))?;
                     self.node(Node::Expr(value))?;
                 }
-                self.optional_boxed_expr(else_branch)?;
+                self.optional_boxed_expr(else_branch.as_deref())?;
             }
             Expr::Cast { expr, ty } => {
                 self.boxed(expr.as_ref(), Node::Expr)?;

@@ -146,11 +146,8 @@ pub(super) fn read(
     let outcome = match tag {
         1 if entry.live() && !entry.doomed => PublicationOutcome::Prepared,
         2 if entry.committed.is_some() => {
-            let sequence = CommitSequence::from_u64(decoder.number()?);
-            if sequence == CommitSequence::INITIAL {
-                return Err(invalid());
-            }
-            PublicationOutcome::Committed(sequence)
+            // A durable empty commit keeps the current sequence, including INITIAL. The publication tag distinguishes a committed receipt from an unresolved outcome.
+            PublicationOutcome::Committed(CommitSequence::from_u64(decoder.number()?))
         }
         3 if entry.aborted => PublicationOutcome::Aborted,
         _ => return Err(invalid()),

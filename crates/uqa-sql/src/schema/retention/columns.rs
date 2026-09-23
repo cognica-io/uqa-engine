@@ -44,17 +44,17 @@ impl<'a> Walker<'a> {
         if let Some(value) = missing_value {
             self.value(value)?;
         }
-        self.optional_text(not_null_name)?;
-        self.optional_text(check_name)?;
-        self.optional_expr(default)?;
-        self.optional_expr(check)?;
+        self.optional_text(not_null_name.as_ref())?;
+        self.optional_text(check_name.as_ref())?;
+        self.optional_expr(default.as_ref())?;
+        self.optional_expr(check.as_ref())?;
         if let Some(AutoIncrement {
             kind: _,
             sequence,
             owner,
         }) = auto_increment
         {
-            self.optional_text(sequence)?;
+            self.optional_text(sequence.as_ref())?;
             if let Some(AutoIncrementOwner { table, column }) = owner {
                 self.text(table)?;
                 self.text(column)?;
@@ -87,10 +87,10 @@ impl<'a> Walker<'a> {
             period: _,
         }) = references
         {
-            self.optional_text(referenced_key)?;
-            self.optional_text(name)?;
+            self.optional_text(referenced_key.as_ref())?;
+            self.optional_text(name.as_ref())?;
             self.text(table)?;
-            self.optional_text(column)?;
+            self.optional_text(column.as_ref())?;
         }
         Ok(())
     }
@@ -192,10 +192,10 @@ impl<'a> Walker<'a> {
             self.texts(argument_targets)?;
             self.buffer::<Option<String>>(argument_sources.capacity())?;
             for source in argument_sources {
-                self.optional_text(source)?;
+                self.optional_text(source.as_ref())?;
             }
             self.texts(parameter_types)?;
-            self.optional_text(return_type)?;
+            self.optional_text(return_type.as_ref())?;
         }
         if let Some(error) = resolution_error {
             match error {

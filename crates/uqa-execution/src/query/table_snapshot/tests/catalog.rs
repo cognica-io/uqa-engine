@@ -50,7 +50,8 @@ fn selected_column_payloads_are_admitted_once_and_survive_nested_readers() {
         .unwrap();
     let nested = view.documents.snapshot().unwrap().snapshot().unwrap();
     assert_eq!(control.memory().used(), control.memory().limit());
-    drop((full, view, columns, schema));
+    drop((full, view, schema));
+    drop(columns);
     assert!(definitions.upgrade().is_some());
     assert!(control.memory().used() >= catalog_bytes);
     drop(nested);
