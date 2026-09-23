@@ -41,6 +41,7 @@ const REJECT_CONSTRAINT: u8 = 8;
 const REJECT_OTHER: u8 = 9;
 const REJECT_DEPENDENCY: u8 = 10;
 const LOSE_CONFLICT_REPLY: u8 = 11;
+const LOSE_ABORT_REPLY_ONCE: u8 = 12;
 
 fn rejected_commit_error(fault: u8) -> Option<uqa_storage::mvcc::VersionError> {
     use uqa_storage::mvcc::{CommitSequence, VersionError};

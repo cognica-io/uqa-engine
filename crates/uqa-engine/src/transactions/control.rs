@@ -134,9 +134,10 @@ impl Engine {
         let mut stack = self.session.transactions.lock();
         match self.rollback_transaction_frame(&mut stack) {
             Ok(()) => error,
-            Err(rollback_error) => SQLError::Internal(format!(
-                "{error}; {context} rollback also failed: {rollback_error}"
-            )),
+            Err(rollback_error) => Self::rollback_cleanup_error(
+                &rollback_error,
+                format!("{error}; {context} rollback also failed: {rollback_error}"),
+            ),
         }
     }
 

@@ -153,7 +153,7 @@ impl Engine {
                     }
                     return Err(match self.rollback_transaction_frame(stack) {
                         Ok(()) => error,
-                        Err(rollback) => SQLError::Internal(format!("{error}; temporary catalog preparation rollback also failed: {rollback}")),
+                        Err(rollback) => Self::rollback_cleanup_error(&rollback, format!("{error}; temporary catalog preparation rollback also failed: {rollback}")),
                     });
                 }
             }
@@ -177,9 +177,10 @@ impl Engine {
         // rollback before its transaction frame and caches can be restored.
         match self.rollback_transaction_frame(stack) {
             Ok(()) => failure,
-            Err(rollback) => SQLError::Internal(format!(
-                "{failure}; statistics preparation rollback also failed: {rollback}"
-            )),
+            Err(rollback) => Self::rollback_cleanup_error(
+                &rollback,
+                format!("{failure}; statistics preparation rollback also failed: {rollback}"),
+            ),
         }
     }
 
@@ -206,9 +207,10 @@ impl Engine {
         };
         Err(match self.rollback_transaction_frame(stack) {
             Ok(()) => violation,
-            Err(rollback_error) => SQLError::Internal(format!(
-                "{violation}; read-only violation rollback also failed: {rollback_error}"
-            )),
+            Err(rollback_error) => Self::rollback_cleanup_error(
+                &rollback_error,
+                format!("{violation}; read-only violation rollback also failed: {rollback_error}"),
+            ),
         })
     }
 
@@ -233,7 +235,7 @@ impl Engine {
                 }
                 Err(match self.rollback_transaction_frame(stack) {
                     Ok(()) => error,
-                    Err(rollback_error) => SQLError::Internal(format!(
+                    Err(rollback_error) => Self::rollback_cleanup_error(&rollback_error, format!(
                         "{error}; notification commit preparation rollback also failed: {rollback_error}"
                     )),
                 })

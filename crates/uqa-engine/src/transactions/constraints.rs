@@ -669,9 +669,12 @@ impl Engine {
             let mut stack = self.session.transactions.lock();
             return Err(match self.rollback_transaction_frame(&mut stack) {
                 Ok(()) => validation_error,
-                Err(rollback_error) => SQLError::Internal(format!(
+                Err(rollback_error) => Self::rollback_cleanup_error(
+                    &rollback_error,
+                    format!(
                     "{validation_error}; deferred constraint rollback also failed: {rollback_error}"
-                )),
+                ),
+                ),
             });
         }
         Ok(())

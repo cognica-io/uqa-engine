@@ -96,13 +96,13 @@ impl Engine {
             }
             Ok(Err(error)) => match self.rollback() {
                 Ok(()) => Err(error),
-                Err(rollback_error) => Err(SQLError::Internal(format!(
+                Err(rollback_error) => Err(Self::rollback_cleanup_error(&rollback_error, format!(
                     "typed row mutation failed: {error}; rollback also failed: {rollback_error}"
                 ))),
             },
             Err(payload) => match self.rollback() {
                 Ok(()) => std::panic::resume_unwind(payload),
-                Err(rollback_error) => Err(SQLError::Internal(format!(
+                Err(rollback_error) => Err(Self::rollback_cleanup_error(&rollback_error, format!(
                     "typed row mutation rollback after panic failed: {rollback_error}; original panic: {}",
                     panic_description(payload.as_ref())
                 ))),

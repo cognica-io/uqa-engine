@@ -180,7 +180,10 @@ impl Engine {
         // leave dirty flags/caches inconsistent when physical cleanup fails.
         while self.transaction_depth() != 0 {
             self.rollback().map_err(|error| {
-                SQLError::Internal(format!("close: rollback open transaction failed: {error}"))
+                Self::rollback_cleanup_error(
+                    &error,
+                    format!("close: rollback open transaction failed: {error}"),
+                )
             })?;
         }
         // Logical catalog and runtime registries are database state shared by

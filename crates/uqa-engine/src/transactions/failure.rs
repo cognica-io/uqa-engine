@@ -82,6 +82,18 @@ fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot 
 }
 
 impl Engine {
+    /// Retain uncertain completion when adding cleanup context, including while the caller holds the transaction stack.
+    pub(super) fn rollback_cleanup_error(rollback: &SQLError, detail: String) -> SQLError {
+        if rollback.sqlstate() == Some("08007") {
+            SQLError::Routine {
+                sqlstate: "08007".into(),
+                message: detail,
+            }
+        } else {
+            SQLError::Internal(detail)
+        }
+    }
+
     pub(crate) fn abort_sql_transaction_after_error(&self, error: SQLError) -> SQLError {
         let cleanup_errors = self.abort_transaction_after_failure();
         if cleanup_errors.is_empty() {

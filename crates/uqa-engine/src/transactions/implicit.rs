@@ -44,7 +44,7 @@ impl Engine {
             }
             Ok(Err(err)) => {
                 if let Err(rollback_err) = scope.rollback() {
-                    return Err(map_transaction_error(SQLError::Internal(format!(
+                    return Err(map_transaction_error(Self::rollback_cleanup_error(&rollback_err, format!(
                         "transaction rollback after error failed: {rollback_err}; original error: {err}"
                     ))));
                 }
@@ -52,10 +52,13 @@ impl Engine {
             }
             Err(payload) => match scope.rollback() {
                 Ok(()) => std::panic::resume_unwind(payload),
-                Err(rollback_err) => Err(map_transaction_error(SQLError::Internal(format!(
+                Err(rollback_err) => Err(map_transaction_error(Self::rollback_cleanup_error(
+                    &rollback_err,
+                    format!(
                     "transaction rollback after panic failed: {rollback_err}; original panic: {}",
                     panic_description(payload.as_ref())
-                )))),
+                ),
+                ))),
             },
         }
     }
@@ -222,7 +225,7 @@ impl Engine {
             let error = map_transaction_error(error);
             return match scope.rollback() {
                 Ok(()) => Err(error),
-                Err(rollback_error) => Err(map_transaction_error(SQLError::Internal(format!(
+                Err(rollback_error) => Err(map_transaction_error(Self::rollback_cleanup_error(&rollback_error, format!(
                     "rollback implicit engine transaction after promotion failure failed: {rollback_error}; original error: {error}"
                 )))),
             };
@@ -235,13 +238,13 @@ impl Engine {
             }
             Ok(Err(error)) => match scope.rollback() {
                 Ok(()) => Err(error),
-                Err(rollback_error) => Err(map_transaction_error(SQLError::Internal(format!(
+                Err(rollback_error) => Err(map_transaction_error(Self::rollback_cleanup_error(&rollback_error, format!(
                     "rollback implicit engine transaction failed: {rollback_error}; original error: {error}"
                 )))),
             },
             Err(payload) => match scope.rollback() {
                 Ok(()) => std::panic::resume_unwind(payload),
-                Err(rollback_error) => Err(map_transaction_error(SQLError::Internal(format!(
+                Err(rollback_error) => Err(map_transaction_error(Self::rollback_cleanup_error(&rollback_error, format!(
                     "rollback implicit engine transaction after panic failed: {rollback_error}; original panic: {}",
                     panic_description(payload.as_ref())
                 )))),
@@ -343,9 +346,9 @@ impl Engine {
             let error = StorageBackendError::backend("prepare implicit storage transaction", error);
             return match scope.rollback() {
                 Ok(()) => Err(error),
-                Err(rollback_error) => Err(StorageBackendError::Other(format!(
+                Err(rollback_error) => Err(StorageBackendError::backend("rollback implicit storage transaction", Self::rollback_cleanup_error(&rollback_error, format!(
                     "rollback implicit engine transaction after promotion failure failed: {rollback_error}; original error: {error}"
-                ))),
+                )))),
             };
         }
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self)));
@@ -358,16 +361,16 @@ impl Engine {
             }
             Ok(Err(error)) => match scope.rollback() {
                 Ok(()) => Err(error),
-                Err(rollback_error) => Err(StorageBackendError::Other(format!(
+                Err(rollback_error) => Err(StorageBackendError::backend("rollback implicit storage transaction", Self::rollback_cleanup_error(&rollback_error, format!(
                     "rollback implicit engine transaction failed: {rollback_error}; original error: {error}"
-                ))),
+                )))),
             },
             Err(payload) => match scope.rollback() {
                 Ok(()) => std::panic::resume_unwind(payload),
-                Err(rollback_error) => Err(StorageBackendError::Other(format!(
+                Err(rollback_error) => Err(StorageBackendError::backend("rollback implicit storage transaction", Self::rollback_cleanup_error(&rollback_error, format!(
                     "rollback implicit engine transaction after panic failed: {rollback_error}; original panic: {}",
                     panic_description(payload.as_ref())
-                ))),
+                )))),
             },
         }
     }
