@@ -55,7 +55,6 @@ fn generated_dispatch_retains_results_from_shared_scalar_families() {
             Value::Str("HELLO".into()),
         ),
         ("sin", vec![Value::Int(0)], Value::Float(0.0)),
-        ("to_hex", vec![Value::Int(255)], Value::Str("ff".into())),
         (
             "regexp_substr",
             vec![Value::Str("é12".into()), Value::Str("[0-9]+".into())],
@@ -101,6 +100,23 @@ fn bound_generated_dispatch_keeps_structural_identity_and_fixed_integer_overflow
     .unwrap();
     assert_eq!(*result, Value::Bool(false));
     drop(result);
+    for (dispatch, expected) in [
+        (FunctionDispatch::ToHexInt4, "ffffffff"),
+        (FunctionDispatch::ToHexInt8, "ffffffffffffffff"),
+    ] {
+        let binding = FunctionBinding::dispatched(dispatch);
+        let result = eval_generated_function_call_with_control(
+            "to_hex",
+            Some(&binding),
+            args(&[Value::Int(-1)], &control),
+            &control,
+        )
+        .unwrap();
+        assert_eq!(*result, Value::Str(expected.into()));
+        assert_eq!(budget.used(), result.reserved_bytes());
+        drop(result);
+        assert_eq!(budget.used(), 0);
+    }
     let mut binding =
         FunctionBinding::dispatched(FunctionDispatch::NumericOperator(NumericOperator::Absolute));
     binding.argument_types = vec!["smallint".into()];

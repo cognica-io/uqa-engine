@@ -33,13 +33,14 @@ on:
           - macos-14
           - windows-latest
       transaction_suite:
-        description: Select all transaction histories or retained resource owners and consumers
+        description: Select all transaction histories, retained resources, or SQL production owners
         required: false
         default: all
         type: choice
         options:
           - all
           - retained-resources
+          - sql-production
       run_nori_allocations:
         description: Run only persistent Nori allocation and output checks when run_rust is false
         required: false
@@ -380,16 +381,16 @@ jobs:
       - name: Lint transaction owners and consumers
         run: >-
           cargo clippy --locked
-          -p uqa-core -p uqa-sql -p uqa-storage -p uqa-storage-sqlite -p uqa-storage-redb
-          -p uqa-execution -p uqa-engine -p uqa-pg-server
-          --lib --tests --features uqa-engine/nori,uqa-engine/kuromoji
+          ${{ inputs.transaction_suite == 'sql-production' && '-p uqa-sql' || '-p uqa-core -p uqa-sql -p uqa-storage -p uqa-storage-sqlite -p uqa-storage-redb -p uqa-execution -p uqa-engine -p uqa-pg-server' }}
+          --lib --tests
+          ${{ inputs.transaction_suite != 'sql-production' && '--features uqa-engine/nori,uqa-engine/kuromoji' || '' }}
           -- -D warnings
       - name: Verify retained owners and actual provider histories
         run: >-
           cargo test --locked --no-fail-fast
-          -p uqa-core -p uqa-sql -p uqa-storage -p uqa-storage-sqlite -p uqa-storage-redb
-          -p uqa-execution -p uqa-engine -p uqa-pg-server
-          --lib --tests --features uqa-engine/nori,uqa-engine/kuromoji --
+          ${{ inputs.transaction_suite == 'sql-production' && '-p uqa-sql' || '-p uqa-core -p uqa-sql -p uqa-storage -p uqa-storage-sqlite -p uqa-storage-redb -p uqa-execution -p uqa-engine -p uqa-pg-server' }}
+          --lib --tests
+          ${{ inputs.transaction_suite != 'sql-production' && '--features uqa-engine/nori,uqa-engine/kuromoji' || '' }} --
           memory:: types::value:: types::array:: types::decimal:: types::jsonb:: types::temporal:: types::tests:: json::tests float_text::
           expr:: type_resolution:: schema::retention:: schema::generated:: assignment:: scalar::
           ast::types::production:: ir::call_arguments::
