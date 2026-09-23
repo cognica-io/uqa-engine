@@ -103,6 +103,31 @@ impl<'a> ProductionControl<'a> {
         Ok(output)
     }
 
+    /// Accept a completed value from an external producer whose construction is outside this resource scope. This admission boundary retains its exposed owned capacities without copying; built-in constructors must instead reserve before allocating. The value precedes its accumulating lease on every error path.
+    pub fn retain_external_value(
+        &self,
+        value: Value,
+    ) -> Result<Produced<Value>, ValueRetentionError> {
+        let mut output = Produced {
+            value,
+            memory: self.empty_reservation(),
+        };
+        self.check()?;
+        if let Some(budget) = self.budget {
+            let memory = output
+                .memory
+                .as_mut()
+                .expect("controlled external value owner");
+            output.value.visit_retained_payload_with_check(
+                budget,
+                || self.check_cancellation(),
+                |bytes| memory.grow(bytes),
+            )?;
+        }
+        self.check()?;
+        Ok(output)
+    }
+
     pub fn copy_value(&self, value: &Value) -> Result<Produced<Value>, ValueRetentionError> {
         self.check()?;
         let result = match self.budget {

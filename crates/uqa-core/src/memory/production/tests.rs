@@ -244,3 +244,44 @@ fn vector_input_owner_is_checked_before_capacity_and_dropped_before_its_lease() 
         assert_eq!(target_budget.peak(), 0);
     }
 }
+
+#[test]
+fn external_value_handoff_retains_exposed_capacities_and_releases_on_error() {
+    let budget = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let mut text = String::with_capacity(512);
+    text.push_str("external");
+    let capacity = text.capacity();
+    let pointer = text.as_ptr();
+    let output = control.retain_external_value(Value::Str(text)).unwrap();
+    assert_eq!(output.reserved_bytes(), capacity);
+    assert_eq!(budget.used(), capacity);
+    assert!(matches!(&*output, Value::Str(text) if text.as_ptr() == pointer));
+    drop(output);
+    assert_eq!(budget.used(), 0);
+    let limited = MemoryBudget::new(256);
+    let control = ProductionControl::new(&limited, &token, &token);
+    let value = Value::List(vec![Value::Str("payload".repeat(128))]);
+    assert!(control.retain_external_value(value).is_err());
+    assert_eq!(limited.used(), 0);
+}
+
+#[test]
+fn external_value_handoff_checks_both_cancellation_scopes() {
+    let budget = MemoryBudget::new(4096);
+    for cancel_original in [false, true] {
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &original, &invoking);
+        if cancel_original {
+            original.cancel();
+        } else {
+            invoking.cancel();
+        }
+        let result =
+            control.retain_external_value(Value::List(vec![Value::Str("external".into())]));
+        assert!(matches!(result, Err(ValueRetentionError::Cancelled(_))));
+        assert_eq!(budget.used(), 0);
+    }
+}

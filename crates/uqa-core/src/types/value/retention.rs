@@ -49,8 +49,17 @@ impl Value {
         budget: &MemoryBudget,
         cancellation: &CancellationToken,
     ) -> Result<MemoryReservation, ValueRetentionError> {
+        self.reserve_retained_payload_with_check(budget, || cancellation.check())
+    }
+
+    /// Admit existing payload capacities while checking the caller's original and invoking scopes through one callback.
+    pub fn reserve_retained_payload_with_check(
+        &self,
+        budget: &MemoryBudget,
+        check: impl FnMut() -> Result<(), QueryCancelled>,
+    ) -> Result<MemoryReservation, ValueRetentionError> {
         let mut memory = budget.empty_reservation();
-        self.visit_retained_payload(budget, cancellation, |bytes| memory.grow(bytes))?;
+        self.visit_retained_payload_with_check(budget, check, |bytes| memory.grow(bytes))?;
         Ok(memory)
     }
 
@@ -61,23 +70,27 @@ impl Value {
         cancellation: &CancellationToken,
     ) -> Result<usize, ValueRetentionError> {
         let mut total = 0_usize;
-        self.visit_retained_payload(budget, cancellation, |bytes| {
-            total = total.checked_add(bytes).ok_or(MemoryError::SizeOverflow)?;
-            Ok(())
-        })?;
+        self.visit_retained_payload_with_check(
+            budget,
+            || cancellation.check(),
+            |bytes| {
+                total = total.checked_add(bytes).ok_or(MemoryError::SizeOverflow)?;
+                Ok(())
+            },
+        )?;
         Ok(total)
     }
 
-    fn visit_retained_payload(
+    pub(crate) fn visit_retained_payload_with_check(
         &self,
         budget: &MemoryBudget,
-        cancellation: &CancellationToken,
+        mut check: impl FnMut() -> Result<(), QueryCancelled>,
         mut visit: impl FnMut(usize) -> Result<(), MemoryError>,
     ) -> Result<(), ValueRetentionError> {
         let mut stack = BudgetedVec::new(budget);
         let mut current = Some((self, 0));
         loop {
-            cancellation.check()?;
+            check()?;
             if let Some((value, name_bytes)) = current.take() {
                 visit(name_bytes)?;
                 let (bytes, children) = match value {
@@ -117,7 +130,7 @@ impl Value {
                 }
             }
             while let Some(children) = stack.last_mut() {
-                cancellation.check()?;
+                check()?;
                 current = children.next();
                 if current.is_some() {
                     break;
