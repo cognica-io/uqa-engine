@@ -86,6 +86,44 @@ impl RetainedDocumentFields {
             Err(fields) => (**fields).as_ref().clone(),
         }
     }
+
+    /// Keep an owned field map under the invoking allowance. Unique fields move with their original payload reservation; shared fields are copied before releasing this reader. Shared wrapper charges end after their values move out of those allocations. A foreign allowance is rejected instead of transferring its charge to another caller.
+    pub fn into_budgeted(
+        self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Budgeted<Document>> {
+        control.check()?;
+        if !self.shares_allowance(control) {
+            return Err(StorageBackendError::Other(
+                "retained document belongs to a different allowance".into(),
+            ));
+        }
+        let shared = match Arc::try_unwrap(self.0) {
+            Ok(fields) => {
+                let (fields, mut memory) = fields.into_parts();
+                drop(memory.split(size_of::<Budgeted<Arc<Document>>>()));
+                return match Arc::try_unwrap(fields) {
+                    Ok(fields) => {
+                        drop(memory.split(size_of::<Document>()));
+                        control.check()?;
+                        Ok(Budgeted::new(fields, memory))
+                    }
+                    Err(fields) => {
+                        let original = Budgeted::new(fields, memory);
+                        super::controlled_rows::copy_fields_budgeted(
+                            original.iter().map(|(name, value)| (name.as_str(), value)),
+                            control,
+                        )
+                    }
+                };
+            }
+            Err(shared) => shared,
+        };
+        super::controlled_rows::copy_fields_budgeted(
+            shared.iter().map(|(name, value)| (name.as_str(), value)),
+            control,
+        )
+    }
 }
 
 pub(super) fn retention_error(error: ValueRetentionError) -> StorageBackendError {
@@ -126,6 +164,18 @@ impl RetainedStoredDocument {
     /// Produce a caller-owned mutable tuple, ending this reader's retained ownership. Unique fields move without copying; retained siblings keep their original payload and lease.
     pub fn into_stored(self) -> StoredDocument {
         StoredDocument::with_metadata(self.fields.into_document(), self.metadata)
+    }
+
+    /// Produce an owned tuple without detaching the field payload reservation. Shared inputs are copied under the same invoking allowance, and tuple metadata moves unchanged.
+    pub fn into_budgeted(
+        self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Budgeted<StoredDocument>> {
+        let (fields, memory) = self.fields.into_budgeted(control)?.into_parts();
+        Ok(Budgeted::new(
+            StoredDocument::with_metadata(fields, self.metadata),
+            memory,
+        ))
     }
 }
 

@@ -50,6 +50,13 @@ pub(super) fn copy_fields<'a>(
     source: impl IntoIterator<Item = (&'a str, &'a Value)>,
     control: &StorageReadControl,
 ) -> StorageBackendResult<RetainedDocumentFields> {
+    RetainedDocumentFields::from_budgeted(copy_fields_budgeted(source, control)?, control)
+}
+
+pub(super) fn copy_fields_budgeted<'a>(
+    source: impl IntoIterator<Item = (&'a str, &'a Value)>,
+    control: &StorageReadControl,
+) -> StorageBackendResult<Budgeted<Document>> {
     // Declaration order keeps copied fields alive only while their payload lease is held.
     let mut memory = control.memory().empty_reservation();
     let mut fields = Document::new();
@@ -78,7 +85,7 @@ pub(super) fn copy_fields<'a>(
         memory.absorb(value_memory);
     }
     control.check()?;
-    RetainedDocumentFields::from_budgeted(Budgeted::new(fields, memory), control)
+    Ok(Budgeted::new(fields, memory))
 }
 
 #[cfg(test)]

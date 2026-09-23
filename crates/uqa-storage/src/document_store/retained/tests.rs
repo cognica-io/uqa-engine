@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod owned;
+
 fn fields() -> Arc<Document> {
     let mut text = String::with_capacity(8192);
     text.push('x');

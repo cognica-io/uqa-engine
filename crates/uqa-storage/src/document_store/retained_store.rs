@@ -46,15 +46,69 @@ impl RetainedDocumentStoreBuilder {
         let memory = value
             .reserve_retained_payload(self.control.memory(), self.control.cancellation())
             .map_err(super::retained::retention_error)?;
-        // Drop pending fields before returning their payload reservation on failure.
-        let pending = (value, memory);
-        self.entries.reserve(1)?;
-        self.control.check()?;
-        let (Value::Map(fields), memory) = pending else {
+        let Value::Map(fields) = value else {
             unreachable!("document field map");
         };
-        self.entries
-            .push((id, StoredDocument::with_metadata(fields, metadata)))?;
+        self.push_document(
+            id,
+            Budgeted::new(StoredDocument::with_metadata(fields, metadata), memory),
+        )
+    }
+
+    /// Adopt a controlled producer's complete tuple and existing payload reservation. The input lease must cover live map entries, field-name capacity and value payloads under this builder's allowance. Entry capacity is reserved while that lease remains live.
+    pub fn add_budgeted_document(
+        &mut self,
+        id: DocId,
+        document: Budgeted<StoredDocument>,
+    ) -> StorageBackendResult<()> {
+        self.control.check()?;
+        if !document.budget().shares_allowance(self.control.memory()) {
+            return Err(StorageBackendError::Other(
+                "retained document input belongs to a different allowance".into(),
+            ));
+        }
+        let (document, mut memory) = document.into_parts();
+        let (fields, metadata) = document.into_parts();
+        let value = Value::Map(fields);
+        let required = value
+            .retained_payload_bytes(self.control.memory(), self.control.cancellation())
+            .map_err(super::retained::retention_error)?;
+        if memory.bytes() < required {
+            return Err(StorageBackendError::Other(
+                "retained document input reservation does not cover its payload".into(),
+            ));
+        }
+        let surplus = memory.bytes() - required;
+        drop(memory.split(surplus));
+        let Value::Map(fields) = value else {
+            unreachable!("document field map");
+        };
+        self.push_document(
+            id,
+            Budgeted::new(StoredDocument::with_metadata(fields, metadata), memory),
+        )
+    }
+
+    /// Transfer a retained tuple into this corpus, copying only when another reader still owns its fields.
+    pub fn add_retained_document(
+        &mut self,
+        id: DocId,
+        document: super::RetainedStoredDocument,
+    ) -> StorageBackendResult<()> {
+        let document = document.into_budgeted(&self.control)?;
+        self.add_budgeted_document(id, document)
+    }
+
+    fn push_document(
+        &mut self,
+        id: DocId,
+        pending: Budgeted<StoredDocument>,
+    ) -> StorageBackendResult<()> {
+        // Drop pending fields before returning their payload reservation on failure.
+        self.entries.reserve(1)?;
+        self.control.check()?;
+        let (document, memory) = pending.into_parts();
+        self.entries.push((id, document))?;
         self.payload.absorb(memory);
         Ok(())
     }

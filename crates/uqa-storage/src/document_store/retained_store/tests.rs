@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod adoption;
+
 fn row(value: Value, xmin: u32) -> StoredDocument {
     StoredDocument::with_metadata(
         BTreeMap::from([("payload".into(), value)]),
