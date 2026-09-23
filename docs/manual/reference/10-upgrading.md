@@ -12,7 +12,11 @@ The 0.2 series includes SQL object and privilege lifecycle changes, durable expr
 
 ## Unreleased SQLite backup restoration
 
-`ManagedConnection::open_restored` and its encrypted/compressed counterparts restore an existing closed native or Key/Value backup using a caller-persisted `DatabaseRestore` source/target request. All destination owners must close first. SQLite main format 43 records a pending transition across the separate main and SSI databases; ordinary opens reject an incomplete transition and the exact original request resumes it. Completed retries preserve later work. Native mapping 9 preserves data addresses, record versions and allocation watermarks while old receipts and SSI identity are retired. See [backups and copies](04-storage-and-security.md#backups-and-copies) for the ownership, cancellation, credential and anchor contracts. Normal restarts use the ordinary open methods and preserve the current history.
+`ManagedConnection::open_restored` and its encrypted/compressed counterparts restore an existing closed native or Key/Value backup using a caller-persisted `DatabaseRestore` source/target request. All destination owners must close first. SQLite main format 44 preserves the pending transition introduced in format 43 across the separate main and SSI databases; ordinary opens reject an incomplete transition and the exact original request resumes it. Completed retries preserve later work. Native mapping 9 preserves data addresses, record versions and allocation watermarks while old receipts and SSI identity are retired. See [backups and copies](04-storage-and-security.md#backups-and-copies) for the ownership, cancellation, credential and anchor contracts. Normal restarts use the ordinary open methods and preserve the current history.
+
+## Unreleased retained text analysis owners
+
+`analyze_index_field_budgeted` returns `Budgeted<RetainedAnalyzedField>`, whose term carrier is Core's exact `OwnedMap`. Explicit retained result annotations should use that alias. Ordinary `AnalyzedField` retains its default `BTreeMap` carrier and ordinary analysis callers keep their existing result type. Retained index corpus and staging nodes are admitted by their owning producers; shared memory-index capture remains independent of corpus size. This source-level change adds no persisted format.
 
 ## Unreleased native record namespace
 
