@@ -79,6 +79,22 @@ impl DocumentStore for ProjectedSource {
         );
         self.rows.field_presence_controlled(ids, fields, control)
     }
+    fn with_field_ref_controlled(
+        &self,
+        id: DocId,
+        field: &str,
+        control: &StorageReadControl,
+        visitor: &mut dyn FnMut(Option<&Value>) -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<()> {
+        assert_ne!(field, "opaque");
+        assert!(!self.borrowing.swap(true, Ordering::Relaxed));
+        self.projections.fetch_add(1, Ordering::Relaxed);
+        let result = self
+            .rows
+            .with_field_ref_controlled(id, field, control, visitor);
+        self.borrowing.store(false, Ordering::Relaxed);
+        result
+    }
     fn for_each_fields_multi_ref_with_presence(
         &self,
         ids: &[DocId],

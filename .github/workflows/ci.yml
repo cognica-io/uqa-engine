@@ -33,7 +33,7 @@ on:
           - macos-14
           - windows-latest
       transaction_suite:
-        description: Select all transaction histories, retained resources, or SQL production owners
+        description: Select transaction histories, retained resources, or a production owner
         required: false
         default: all
         type: choice
@@ -41,6 +41,7 @@ on:
           - all
           - retained-resources
           - sql-production
+          - execution-production
       run_nori_allocations:
         description: Run only persistent Nori allocation and output checks when run_rust is false
         required: false
@@ -381,16 +382,16 @@ jobs:
       - name: Lint transaction owners and consumers
         run: >-
           cargo clippy --locked
-          ${{ inputs.transaction_suite == 'sql-production' && '-p uqa-sql' || '-p uqa-core -p uqa-sql -p uqa-storage -p uqa-storage-sqlite -p uqa-storage-redb -p uqa-execution -p uqa-engine -p uqa-pg-server' }}
+          ${{ inputs.transaction_suite == 'sql-production' && '-p uqa-sql' || inputs.transaction_suite == 'execution-production' && '-p uqa-execution' || '-p uqa-core -p uqa-sql -p uqa-storage -p uqa-storage-sqlite -p uqa-storage-redb -p uqa-execution -p uqa-engine -p uqa-pg-server' }}
           --lib --tests
-          ${{ inputs.transaction_suite != 'sql-production' && '--features uqa-engine/nori,uqa-engine/kuromoji' || '' }}
+          ${{ inputs.transaction_suite != 'sql-production' && (inputs.transaction_suite == 'execution-production' && '--features uqa-analysis/nori,uqa-analysis/kuromoji' || '--features uqa-engine/nori,uqa-engine/kuromoji') || '' }}
           -- -D warnings
       - name: Verify retained owners and actual provider histories
         run: >-
           cargo test --locked --no-fail-fast
-          ${{ inputs.transaction_suite == 'sql-production' && '-p uqa-sql' || '-p uqa-core -p uqa-sql -p uqa-storage -p uqa-storage-sqlite -p uqa-storage-redb -p uqa-execution -p uqa-engine -p uqa-pg-server' }}
+          ${{ inputs.transaction_suite == 'sql-production' && '-p uqa-sql' || inputs.transaction_suite == 'execution-production' && '-p uqa-execution' || '-p uqa-core -p uqa-sql -p uqa-storage -p uqa-storage-sqlite -p uqa-storage-redb -p uqa-execution -p uqa-engine -p uqa-pg-server' }}
           --lib --tests
-          ${{ inputs.transaction_suite != 'sql-production' && '--features uqa-engine/nori,uqa-engine/kuromoji' || '' }} --
+          ${{ inputs.transaction_suite != 'sql-production' && (inputs.transaction_suite == 'execution-production' && '--features uqa-analysis/nori,uqa-analysis/kuromoji' || '--features uqa-engine/nori,uqa-engine/kuromoji') || '' }} --
           memory:: types::value:: types::array:: types::decimal:: types::jsonb:: types::temporal:: types::tests:: json::tests float_text::
           expr:: type_resolution:: schema::retention:: schema::generated:: assignment:: scalar::
           ast::types::production:: ir::call_arguments::

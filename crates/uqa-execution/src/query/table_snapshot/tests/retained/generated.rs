@@ -7,6 +7,7 @@
 use super::*;
 
 fn generated_view(indexed: bool) -> (StorageReadControl, MaterializedTable, Arc<AtomicBool>) {
+    let default_payload_bytes = "unused".len() * (32 << 10);
     let source_columns = columns("CREATE TABLE t (a INTEGER, opaque TEXT)");
     let mut target = source_columns.clone();
     target[0].name = "renamed".into();
@@ -48,7 +49,8 @@ fn generated_view(indexed: bool) -> (StorageReadControl, MaterializedTable, Arc<
             ),
         )
         .unwrap();
-    let control = StorageReadControl::with_limit(16 << 10);
+    // Admit the selected catalog once, leaving less headroom than any opaque row or default.
+    let control = StorageReadControl::with_limit(default_payload_bytes + (64 << 10));
     let cancel_projection = Arc::new(AtomicBool::new(false));
     let retained_source = |rows: &dyn DocumentStore| {
         let mut source = ProjectedSource::new(rows);
@@ -81,6 +83,8 @@ fn generated_view(indexed: bool) -> (StorageReadControl, MaterializedTable, Arc<
         &control,
     )
     .unwrap();
+    assert!(control.memory().used() >= default_payload_bytes);
+    assert!(control.memory().limit() - control.memory().used() < default_payload_bytes);
     source.clear().unwrap();
     private.clear().unwrap();
     (control, view, cancel_projection)

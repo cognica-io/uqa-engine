@@ -7,6 +7,8 @@
 use super::*;
 use uqa_storage::{document_store::read_field_presence, StorageBackendError};
 
+const DEFAULT_PAYLOAD_BYTES: usize = "default".len() * (32 << 10);
+
 fn assert_shared_source(documents: &dyn DocumentStore, expected: *const Value) {
     let shared = documents
         .get_shared_fields(&[1], &["renamed"])
@@ -70,7 +72,8 @@ fn ordinary_defaults_and_renames_borrow_payloads_without_reentering_provider_gua
             },
         )
         .unwrap();
-    let allowance = StorageReadControl::with_limit(16 << 10);
+    // Both catalog defaults are retained, but no second copy of either payload can fit.
+    let allowance = StorageReadControl::with_limit(2 * DEFAULT_PAYLOAD_BYTES + (64 << 10));
     let view = retain(
         Arc::new(source),
         &columns,
@@ -79,6 +82,8 @@ fn ordinary_defaults_and_renames_borrow_payloads_without_reentering_provider_gua
         &allowance,
     )
     .unwrap();
+    assert!(allowance.memory().used() >= 2 * DEFAULT_PAYLOAD_BYTES);
+    assert!(allowance.memory().limit() - allowance.memory().used() < DEFAULT_PAYLOAD_BYTES);
     rows.clear().unwrap();
     drop(rows);
     let retained_bytes = allowance.memory().used();

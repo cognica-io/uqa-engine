@@ -61,7 +61,10 @@ fn generated_scalar_results_keep_the_original_allowance_through_shared_evaluatio
             "regexp_replace(flags => 'g', replacement => 'X', string => label, pattern => 'ab')",
             Value::Str("X X".into()),
         ),
-        ("'[1,4)'::int4range @> 2", Value::Bool(true)),
+        (
+            "'[1,4)'::int4range @> '[2,3)'::int4range",
+            Value::Bool(true),
+        ),
     ] {
         let expression = expression(source, &schema);
         let output = eval_generated_scalar_with_control(&expression, &row, &control).unwrap();
@@ -155,5 +158,25 @@ fn generated_lazy_branches_and_typed_numeric_errors_keep_existing_precedence() {
             .sqlstate(),
         Some("22012")
     );
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn generated_range_element_evaluation_preserves_the_shared_owner_outcome() {
+    let budget = MemoryBudget::new(8192);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let row = ResultRow::new();
+    let expression = expression("'[1,4)'::int4range @> 2", &crate::RowSchema::default());
+    let ordinary = eval_scalar(&expression, &ScalarEvalContext::from_row_lookup(&row, &[]));
+    let generated = eval_generated_scalar_with_control(&expression, &row, &control);
+    match (ordinary, generated) {
+        (Ok(expected), Ok(actual)) => assert_eq!(expected, *actual),
+        (Err(expected), Err(actual)) => {
+            assert_eq!(expected.sqlstate(), actual.sqlstate());
+            assert_eq!(expected.to_string(), actual.to_string());
+        }
+        (ordinary, generated) => panic!("different outcomes: {ordinary:?}, {generated:?}"),
+    }
     assert_eq!(budget.used(), 0);
 }

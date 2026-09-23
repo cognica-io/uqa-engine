@@ -6,11 +6,14 @@
 
 use super::*;
 
-fn defaulted_view() -> (StorageReadControl, MaterializedTable) {
+fn defaulted_view(include_generated: bool) -> (StorageReadControl, MaterializedTable) {
     let source_columns = columns("CREATE TABLE t (a INTEGER)");
     let mut target = source_columns.clone();
     let additions = columns("CREATE TABLE t (first TEXT, second TEXT, computed INTEGER GENERATED ALWAYS AS (a + 1) VIRTUAL)");
     for (ordinal, mut column) in additions.into_iter().enumerate() {
+        if column.generated.is_some() && !include_generated {
+            continue;
+        }
         column.object_id = Some([u8::try_from(ordinal + 8).unwrap(); 16]);
         if column.generated.is_none() {
             column.missing_value = Some(Value::Str("x".repeat(4096)));
@@ -34,7 +37,9 @@ fn defaulted_view() -> (StorageReadControl, MaterializedTable) {
             ),
         )
         .unwrap();
-    let control = StorageReadControl::with_limit(32 << 10);
+    // Catalog payloads and generated preparation remain retained alongside each output.
+    // Individual tests still constrain output headroom to their original 6 or 12 KiB.
+    let control = StorageReadControl::with_limit(64 << 10);
     let changes = DocumentChanges::from_rows(
         BTreeMap::from([(2, Some(document(&[("a", Value::Int(20))], 42)))]),
         &control,
@@ -55,7 +60,8 @@ fn defaulted_view() -> (StorageReadControl, MaterializedTable) {
 
 #[test]
 fn owned_row_defaults_hold_their_combined_allowance_until_completion() {
-    let (control, view) = defaulted_view();
+    // Isolate default copies from the independently tested generated-expression workspace.
+    let (control, view) = defaulted_view(false);
     let nested = view.documents.snapshot().unwrap();
     let retained = control.memory().used();
     let occupied = control
@@ -102,7 +108,7 @@ fn owned_row_defaults_hold_their_combined_allowance_until_completion() {
 
 #[test]
 fn owned_row_batches_keep_completed_defaults_charged_until_handoff() {
-    let (control, view) = defaulted_view();
+    let (control, view) = defaulted_view(false);
     let retained = control.memory().used();
     let occupied = control
         .memory()
@@ -132,7 +138,7 @@ fn owned_row_batches_keep_completed_defaults_charged_until_handoff() {
 
 #[test]
 fn generated_projection_keeps_default_copies_charged_through_the_callback() {
-    let (control, view) = defaulted_view();
+    let (control, view) = defaulted_view(true);
     let retained = control.memory().used();
     let occupied = control
         .memory()
@@ -192,7 +198,7 @@ fn generated_projection_keeps_default_copies_charged_through_the_callback() {
 
 #[test]
 fn missing_default_payloads_reject_before_copy_and_preserve_nulls_and_absent_rows() {
-    let (control, view) = defaulted_view();
+    let (control, view) = defaulted_view(true);
     let retained = control.memory().used();
     let occupied = control
         .memory()
