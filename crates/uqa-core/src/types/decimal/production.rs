@@ -26,6 +26,32 @@ enum Rounding {
 }
 
 impl DecimalValue {
+    pub fn is_integral_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<bool, ValueRetentionError> {
+        control.check()?;
+        match self.repr() {
+            DecimalRepr::Finite { coefficient, scale } => {
+                if *scale == 0 || self.is_zero() {
+                    return Ok(true);
+                }
+                // Divisibility by 10^scale is exactly the condition that every discarded least-significant decimal digit is zero.
+                let digits =
+                    super::format_budgeted::coefficient_digits_with_control(coefficient, control)?;
+                for digit in digits.iter().take(*scale as usize) {
+                    control.check()?;
+                    if *digit != 0 {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            DecimalRepr::NegativeInfinity | DecimalRepr::PositiveInfinity => Ok(true),
+            DecimalRepr::NaN => Ok(false),
+        }
+    }
+
     pub fn abs_with_control(
         &self,
         control: &ProductionControl<'_>,
