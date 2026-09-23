@@ -32,7 +32,7 @@ The [dependency policy](../../scripts/workspace-dependency-policy.json) permits 
 
 ### Runtime access paths
 
-The following inventory identifies existing entry points that must join the new contract. It is an integration checklist, not evidence that those paths already use concurrent transactions. Default native SQLite, SQLite Key/Value and redb now use common record histories and private overlays; complete coverage of the entries below remains an acceptance requirement.
+The following inventory defines the entry points that join the transaction contract. The [completed access-path audit](../plans/0008-concurrent-storage-transactions.md#access-path-audit-deliverable) maps all 17 paths to their implemented transaction/definition boundary and owning regression evidence at `1c0c66f6`, including corrected failed-statement ownership and uncertain cleanup diagnostics. Default native SQLite, SQLite Key/Value and redb use common record histories and private overlays. Resource, process-recovery, upgrade and final provider/platform acceptance remain separate open requirements in the implementation plan.
 
 | Access path | Existing owner/entry point | Required integration |
 | --- | --- | --- |
