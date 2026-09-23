@@ -85,6 +85,7 @@ pub mod set_operation;
 pub mod spill;
 pub mod spill_scan;
 pub mod storage_errors;
+mod temporary_database;
 pub mod type_resolution;
 pub mod window;
 

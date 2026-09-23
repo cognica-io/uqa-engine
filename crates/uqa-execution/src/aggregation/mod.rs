@@ -8,9 +8,9 @@
 
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
-use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Seek, SeekFrom, Write};
 use std::sync::Arc;
+use uqa_storage::temporary_file::TemporaryFile as File;
 
 use crate::{eval_scalar, ScalarEvalContext, ScalarExpr, ScalarOrder, SpillBuffer};
 use uqa_core::{DecimalValue, Value};

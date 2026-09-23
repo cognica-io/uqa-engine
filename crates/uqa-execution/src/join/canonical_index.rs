@@ -7,11 +7,12 @@
 //! Canonical encoded index, disk buckets, match flags, and spill transition.
 
 use std::collections::{BTreeMap, HashMap};
-use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::Path;
+use uqa_storage::temporary_file::TemporaryFile as File;
 
-use tempfile::{Builder as TempBuilder, NamedTempFile, TempDir};
+use tempfile::{Builder as TempBuilder, TempDir};
+use uqa_storage::temporary_file::TemporaryFile as NamedTempFile;
 
 use crate::distinct::EncodedKey;
 use crate::{ExecError, ExecResult};
@@ -198,12 +199,7 @@ impl DiskHashIndex {
         let bucket = u8::try_from(stable_hash(key) % HASH_BUCKETS)
             .map_err(|_| ExecError::Other("join spill bucket exceeds u8".into()))?;
         if !self.buckets.contains_key(&bucket) {
-            let path = self.directory.path().join(format!("bucket-{bucket:02x}"));
-            let file = OpenOptions::new()
-                .create_new(true)
-                .read(true)
-                .write(true)
-                .open(&path)
+            let file = File::new_in(self.directory.path())
                 .map_err(|error| join_io_error("create hash bucket", error))?;
             self.buckets.insert(bucket, file);
         }

@@ -23,6 +23,34 @@ fn dummy_batch(start: usize, n: usize) -> Batch {
 }
 
 #[test]
+fn retained_shared_spill_encrypts_values_and_keeps_its_key_until_the_last_reader() {
+    const SECRET: &str = "retained-shared-mutation-tuple-secret-marker";
+    let schema = RowSchema::new(vec!["payload".into()]);
+    let mut buffer = SpillBuffer::new(0);
+    buffer
+        .push(Batch::from_physical_rows(
+            schema.clone(),
+            vec![PhysicalRow::from_values(vec![Value::Str(SECRET.into())])],
+        ))
+        .unwrap();
+    let path = buffer.spill_path().unwrap().to_owned();
+    let bytes = std::fs::read(&path).unwrap();
+    assert!(!bytes
+        .windows(SECRET.len())
+        .any(|bytes| bytes == SECRET.as_bytes()));
+    let shared = buffer.into_shared(schema).unwrap();
+    let retained = shared.clone();
+    let mut reader = shared.reader().unwrap();
+    drop(shared);
+    drop(retained);
+    assert!(path.exists());
+    let batch = reader.next().unwrap().unwrap();
+    assert_eq!(batch.rows[0].value(0), Some(&Value::Str(SECRET.into())));
+    drop(reader);
+    assert!(!path.exists());
+}
+
+#[test]
 fn low_budget_creates_file_and_round_trips_in_order() {
     let mut buffer = SpillBuffer::new(1);
     assert!(buffer.push(dummy_batch(0, 2)).unwrap());

@@ -4,10 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{IoSlice, Read, Seek, SeekFrom, Write};
+use uqa_storage::temporary_file::BlockTemporaryFile;
 
-use tempfile::NamedTempFile;
+use uqa_storage::temporary_file::TemporaryFile as NamedTempFile;
+
+type OffsetFile = BlockTemporaryFile<8>;
 
 use crate::batch::{PhysicalRow, RowSchema};
 use crate::physical::ExecResult;
@@ -31,7 +33,7 @@ mod tests;
 pub struct IndexedSpill {
     schema: RowSchema,
     data: NamedTempFile,
-    offsets: NamedTempFile,
+    offsets: OffsetFile,
     rows: u64,
     encoded_bytes: u64,
 }
@@ -43,7 +45,7 @@ impl IndexedSpill {
             data: NamedTempFile::new().map_err(|error| {
                 spill_error(format!("failed to create indexed spill data: {error}"))
             })?,
-            offsets: NamedTempFile::new().map_err(|error| {
+            offsets: OffsetFile::new().map_err(|error| {
                 spill_error(format!("failed to create indexed spill offsets: {error}"))
             })?,
             rows: 0,
@@ -108,8 +110,7 @@ impl IndexedSpill {
                 })?;
 
         let write_result = (|| -> std::io::Result<()> {
-            self.data.as_file_mut().write_all(&length.to_le_bytes())?;
-            self.data.as_file_mut().write_all(&payload)?;
+            write_indexed_record(self.data.as_file_mut(), &length.to_le_bytes(), &payload)?;
             self.data.as_file_mut().flush()?;
             self.offsets
                 .as_file_mut()
@@ -234,11 +235,34 @@ impl IndexedSpill {
     }
 }
 
-fn read_indexed_offset(file: &mut File, position: u64) -> ExecResult<u64> {
+fn read_indexed_offset(file: &mut OffsetFile, position: u64) -> ExecResult<u64> {
     file.seek(SeekFrom::Start(position))
         .map_err(|error| spill_error(format!("failed to seek indexed spill offset: {error}")))?;
     let mut encoded = [0_u8; 8];
     file.read_exact(&mut encoded)
         .map_err(|error| spill_error(format!("failed to read indexed spill offset: {error}")))?;
     Ok(u64::from_le_bytes(encoded))
+}
+
+fn write_indexed_record(
+    file: &mut NamedTempFile,
+    length: &[u8; 8],
+    payload: &[u8],
+) -> std::io::Result<()> {
+    let mut buffers = [IoSlice::new(length), IoSlice::new(payload)];
+    let mut remaining = &mut buffers[..];
+    while !remaining.is_empty() {
+        match file.write_vectored(remaining) {
+            Ok(0) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::WriteZero,
+                    "incomplete indexed spill record",
+                ))
+            }
+            Ok(written) => IoSlice::advance_slices(&mut remaining, written),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
