@@ -72,44 +72,7 @@ pub fn function_volatility_with_binding(
     let identity = name.to_ascii_lowercase();
     let lower = builtin_function_dispatch_name(&identity);
 
-    // These implementations either mutate catalog/session state or derive a fresh value on every evaluation.
-    if matches!(
-        lower.as_str(),
-        "random"
-            | "setseed"
-            | "pg_notify"
-            | "pg_notification_queue_usage"
-            | "array_sample"
-            | "nextval"
-            | "currval"
-            | "lastval"
-            | "setval"
-            | "clock_timestamp"
-            | "timeofday"
-            | "gen_random_uuid"
-            | "uuidv4"
-            | "uuidv7"
-            | "create_analyzer"
-            | "drop_analyzer"
-            | "set_table_analyzer"
-            | "graph_create"
-            | "graph_drop"
-            | "create_graph"
-            | "drop_graph"
-            | "graph_exists"
-            | "create_vlabel"
-            | "create_elabel"
-            | "drop_label"
-            | "alter_graph"
-            | "cypher"
-            | "deep_learn"
-            // Retrieval calibration learns and persists parameters on a
-            // cache miss; it therefore is not a read-only scalar operation.
-            | "bayesian_match"
-            | "bayesian_match_with_prior"
-            | "fts_match"
-            | "multi_field_match"
-    ) {
+    if builtin_is_volatile(&lower) {
         return FunctionVolatility::Volatile;
     }
 
@@ -159,6 +122,7 @@ pub fn function_volatility_with_binding(
                 | "pg_get_expr"
                 | "pg_get_partkeydef"
                 | "pg_get_serial_sequence"
+                | "pg_sequence_parameters"
                 | "pg_get_triggerdef"
                 | "pg_get_ruledef"
                 | "pg_get_viewdef"
@@ -176,6 +140,49 @@ pub fn function_volatility_with_binding(
     } else {
         FunctionVolatility::Immutable
     }
+}
+
+// These built-ins mutate catalog/session state or derive a fresh value on every evaluation.
+fn builtin_is_volatile(name: &str) -> bool {
+    matches!(
+        name,
+        "random"
+            | "setseed"
+            | "pg_notify"
+            | "pg_notification_queue_usage"
+            | "array_sample"
+            | "nextval"
+            | "currval"
+            | "lastval"
+            | "setval"
+            | "pg_get_sequence_data"
+            | "pg_sequence_last_value"
+            | "clock_timestamp"
+            | "timeofday"
+            | "gen_random_uuid"
+            | "uuidv4"
+            | "uuidv7"
+            | "create_analyzer"
+            | "drop_analyzer"
+            | "set_table_analyzer"
+            | "graph_create"
+            | "graph_drop"
+            | "create_graph"
+            | "drop_graph"
+            | "graph_exists"
+            | "create_vlabel"
+            | "create_elabel"
+            | "drop_label"
+            | "alter_graph"
+            | "cypher"
+            | "deep_learn"
+            // Retrieval calibration learns and persists parameters on a
+            // cache miss; it therefore is not a read-only scalar operation.
+            | "bayesian_match"
+            | "bayesian_match_with_prior"
+            | "fts_match"
+            | "multi_field_match"
+    )
 }
 
 fn sql_routine_volatility(
@@ -490,6 +497,23 @@ mod tests {
     }
     use crate::ast::FrameMode;
     use crate::{ScalarFrameBound, ScalarWindowFrame, ScalarWindowSpec};
+
+    #[test]
+    fn sequence_introspection_volatility_matches_postgresql() {
+        for (name, expected) in [
+            ("pg_get_sequence_data", FunctionVolatility::Volatile),
+            ("pg_sequence_last_value", FunctionVolatility::Volatile),
+            ("pg_sequence_parameters", FunctionVolatility::Stable),
+        ] {
+            for qualified in [name.to_string(), format!("pg_catalog.{name}")] {
+                assert_eq!(
+                    super::function_volatility(&EmptyCatalog, &qualified, 1),
+                    expected,
+                    "{qualified}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn volatility_inspection_includes_window_frame_expressions() {
