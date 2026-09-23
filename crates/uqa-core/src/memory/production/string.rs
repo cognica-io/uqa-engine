@@ -5,7 +5,10 @@
 //
 
 use super::{Produced, ProductionControl};
-use crate::{memory::BudgetedString, ValueRetentionError};
+use crate::{
+    memory::{BudgetedString, MemoryError},
+    ValueRetentionError,
+};
 
 enum Buffer {
     Ordinary(String),
@@ -66,7 +69,7 @@ impl<'a> ProductionString<'a> {
     pub fn reserve(&mut self, additional: usize) -> Result<(), ValueRetentionError> {
         self.control.check()?;
         match &mut self.buffer {
-            Buffer::Ordinary(value) => value.reserve(additional),
+            Buffer::Ordinary(value) => value.try_reserve(additional).map_err(MemoryError::from)?,
             Buffer::Controlled(value) => value.reserve(additional)?,
         }
         Ok(())
@@ -82,7 +85,10 @@ impl<'a> ProductionString<'a> {
                 end -= 1;
             }
             match &mut self.buffer {
-                Buffer::Ordinary(value) => value.push_str(&text[begin..end]),
+                Buffer::Ordinary(value) => {
+                    value.try_reserve(end - begin).map_err(MemoryError::from)?;
+                    value.push_str(&text[begin..end]);
+                }
                 Buffer::Controlled(value) => value.push_str(&text[begin..end])?,
             }
             begin = end;
@@ -93,7 +99,12 @@ impl<'a> ProductionString<'a> {
     pub fn push(&mut self, character: char) -> Result<(), ValueRetentionError> {
         self.control.check()?;
         match &mut self.buffer {
-            Buffer::Ordinary(value) => value.push(character),
+            Buffer::Ordinary(value) => {
+                value
+                    .try_reserve(character.len_utf8())
+                    .map_err(MemoryError::from)?;
+                value.push(character);
+            }
             Buffer::Controlled(value) => value.push(character)?,
         }
         Ok(())

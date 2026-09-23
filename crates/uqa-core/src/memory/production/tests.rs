@@ -8,6 +8,34 @@ use super::*;
 use crate::memory::MemoryError;
 
 #[test]
+fn impossible_ordinary_capacity_returns_an_error_without_losing_existing_values() {
+    let control = ProductionControl::uncontrolled();
+    let mut text = ProductionString::new(control);
+    text.push_str("retained").unwrap();
+    assert!(matches!(
+        text.reserve(usize::MAX),
+        Err(ValueRetentionError::Memory(MemoryError::Allocation(_)))
+    ));
+    assert_eq!(&*text, "retained");
+    text.push('!').unwrap();
+    assert_eq!(
+        text.finish().unwrap().into_uncontrolled().unwrap(),
+        "retained!"
+    );
+    let mut values = ProductionVec::new(control);
+    values.push_copy(7_u64).unwrap();
+    assert!(matches!(
+        values.reserve(usize::MAX),
+        Err(ValueRetentionError::Memory(MemoryError::Allocation(_)))
+    ));
+    values.push_copy(9).unwrap();
+    assert_eq!(
+        values.finish().unwrap().into_uncontrolled().unwrap(),
+        [7, 9]
+    );
+}
+
+#[test]
 fn ordinary_and_controlled_result_handoffs_cannot_silently_change_ownership() {
     let budget = MemoryBudget::new(4096);
     let cancellation = CancellationToken::new();

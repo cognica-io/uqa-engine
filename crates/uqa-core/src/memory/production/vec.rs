@@ -6,7 +6,7 @@
 
 use super::{Produced, ProductionControl};
 use crate::{
-    memory::{BudgetedVec, MemoryReservation},
+    memory::{BudgetedVec, MemoryError, MemoryReservation},
     ValueRetentionError,
 };
 
@@ -38,7 +38,9 @@ impl<'a, T> ProductionVec<'a, T> {
     pub fn reserve(&mut self, additional: usize) -> Result<(), ValueRetentionError> {
         self.control.check()?;
         match &mut self.buffer {
-            Buffer::Ordinary(values) => values.reserve(additional),
+            Buffer::Ordinary(values) => {
+                values.try_reserve(additional).map_err(MemoryError::from)?;
+            }
             Buffer::Controlled(values) => values.reserve(additional)?,
         }
         Ok(())
