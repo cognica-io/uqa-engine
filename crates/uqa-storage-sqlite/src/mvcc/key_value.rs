@@ -38,14 +38,7 @@ pub(super) fn initialize(
     let identity = initialized.identity;
     let header = codec::header(&transaction, identity)?;
     if header.key_value_mapping {
-        if legacy != Some(2)
-            || schema::definition_matches(&transaction, "_key_value", GUARD)? != Some(true)
-            || schema::definition_matches(&transaction, "_metadata", CATALOG_GUARD)? != Some(true)
-        {
-            return Err(
-                VersionError::InvalidEncoding("incomplete versioned KeyValue format").into(),
-            );
-        }
+        validate_mapping(&transaction)?;
         if initialized.upgraded {
             transaction.commit()?;
         }
@@ -82,6 +75,15 @@ pub(super) fn initialize(
     control.cancellation().check().map_err(VersionError::from)?;
     transaction.commit()?;
     Ok(identity)
+}
+
+pub(super) fn validate_mapping(connection: &Connection) -> PhysicalResult<()> {
+    if schema::definition_matches(connection, "_key_value", GUARD)? != Some(true)
+        || schema::definition_matches(connection, "_metadata", CATALOG_GUARD)? != Some(true)
+    {
+        return Err(VersionError::InvalidEncoding("incomplete versioned KeyValue format").into());
+    }
+    Ok(())
 }
 
 fn validate_legacy(connection: &Connection) -> PhysicalResult<()> {

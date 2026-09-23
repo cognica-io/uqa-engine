@@ -11,10 +11,11 @@ mod codec;
 mod identifiers;
 mod key_value;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
-mod leases;
+pub(crate) mod leases;
 pub mod native;
 mod read;
 mod reclamation;
+pub(crate) mod restore;
 mod retention;
 mod runs;
 mod schema;

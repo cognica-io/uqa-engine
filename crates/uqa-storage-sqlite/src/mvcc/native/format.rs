@@ -91,6 +91,14 @@ fn namespace(connection: &Connection) -> PhysicalResult<NativeRecordNamespace> {
     )?)?))
 }
 
+/// A pending history restore already has its stable namespace; validate it without reopening normal record access.
+pub(in crate::mvcc) fn validate_restoration(connection: &Connection) -> PhysicalResult<()> {
+    validate_format(connection, 9)?;
+    check_mapping_version(connection, 9)?;
+    namespace(connection)?;
+    Ok(())
+}
+
 fn insert_format(connection: &Connection, identity: DatabaseId) -> PhysicalResult<()> {
     connection.execute(
         "INSERT INTO _uqa_mvcc_native_format VALUES (1, 9, 49, ?1)",

@@ -11,6 +11,8 @@ use uqa_storage::mvcc::{DatabaseId, SnapshotRegistry, VersionResult};
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod file;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(super) use file::lease_file;
 
 pub(super) fn registry(
     connection: &crate::ManagedConnection,

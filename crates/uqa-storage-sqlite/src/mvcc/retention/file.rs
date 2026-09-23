@@ -27,7 +27,10 @@ static REGISTRIES: OnceLock<Mutex<Registries>> = OnceLock::new();
 #[cfg(test)]
 mod tests;
 
-pub(super) fn lease_file(path: &Path, identity: DatabaseId) -> VersionResult<NativeLeaseFile> {
+pub(in crate::mvcc) fn lease_file(
+    path: &Path,
+    identity: DatabaseId,
+) -> VersionResult<NativeLeaseFile> {
     let mut sidecar = path.as_os_str().to_owned();
     sidecar.push(".uqa-snapshots");
     NativeLeaseFile::open(

@@ -35,10 +35,10 @@ const LEASE_BASE: u64 = 1 << 20;
 mod tests;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) struct LeaseNamespace {
-    pub(super) magic: [u8; 8],
-    pub(super) database: DatabaseId,
-    pub(super) incarnation: Option<[u8; 16]>,
+pub(crate) struct LeaseNamespace {
+    pub(crate) magic: [u8; 8],
+    pub(crate) database: DatabaseId,
+    pub(crate) incarnation: Option<[u8; 16]>,
 }
 
 struct State {
@@ -53,9 +53,9 @@ static FILES: OnceLock<Mutex<Files>> = OnceLock::new();
 
 /// The registry retains one native descriptor until its last transport and lease are gone. Closing a second descriptor for the same file would release POSIX process locks, including locks owned by another live adapter.
 #[derive(Clone)]
-pub(super) struct NativeLeaseFile(Arc<State>);
+pub(crate) struct NativeLeaseFile(Arc<State>);
 
-pub(super) struct NativeLeaseAdmission(NativeLeaseFile);
+pub(crate) struct NativeLeaseAdmission(NativeLeaseFile);
 
 impl Drop for NativeLeaseAdmission {
     fn drop(&mut self) {
@@ -63,13 +63,14 @@ impl Drop for NativeLeaseAdmission {
     }
 }
 
-struct Lease {
+struct Lease<T> {
     state: Arc<State>,
     slot: u32,
+    _retained: T,
     _memory: MemoryReservation,
 }
 
-impl Drop for Lease {
+impl<T> Drop for Lease<T> {
     fn drop(&mut self) {
         let mut occupied = self.state.occupied.lock();
         // Lease destruction never takes admission or a physical writer. A failed unlock conservatively retains this slot until its descriptor closes.
@@ -84,11 +85,16 @@ fn io_error(error: std::io::Error) -> VersionError {
 }
 
 impl NativeLeaseFile {
-    pub(super) fn open(path: &Path, namespace: LeaseNamespace) -> VersionResult<Self> {
+    pub(crate) fn open(path: &Path, namespace: LeaseNamespace) -> VersionResult<Self> {
+        let uqa_storage::PersistentStorageIdentity::File(path) =
+            uqa_storage::PersistentStorageIdentity::for_database_path(path)?
+        else {
+            unreachable!("native lease file identity")
+        };
         let mut files = FILES.get_or_init(Mutex::default).lock();
         // The map's strong reference also covers the interval between a weak owner's expiration and the completion of its destructor.
         files.retain(|_, state| Arc::strong_count(state) > 1);
-        if let Some(state) = files.get(path) {
+        if let Some(state) = files.get(&path) {
             if state.namespace != namespace {
                 return Err(VersionError::WrongDatabase);
             }
@@ -99,7 +105,7 @@ impl NativeLeaseFile {
             .write(true)
             .create(true)
             .truncate(false)
-            .open(path)
+            .open(&path)
             .map_err(io_error)?;
         let state = Arc::new(State {
             file,
@@ -107,11 +113,11 @@ impl NativeLeaseFile {
             admitted: AtomicBool::new(false),
             occupied: Mutex::new(BTreeMap::new()),
         });
-        files.insert(path.to_owned(), Arc::clone(&state));
+        files.insert(path, Arc::clone(&state));
         Ok(Self(state))
     }
 
-    pub(super) fn admit(
+    pub(crate) fn admit(
         &self,
         control: &StorageReadControl,
     ) -> VersionResult<NativeLeaseAdmission> {
@@ -179,14 +185,24 @@ impl NativeLeaseFile {
     }
 
     /// Retain a tag while admitted. Reusing a free slot never makes its previous tag live again.
-    pub(super) fn retain(
+    pub(crate) fn retain(
         &self,
         tag: u64,
         control: &StorageReadControl,
     ) -> VersionResult<Box<dyn Send + Sync>> {
+        self.retain_with(tag, (), control)
+    }
+
+    /// Keep a physical lifetime owner with a native lease, charging its complete payload before allocation. Its destruction must not acquire SSI or snapshot admission.
+    pub(crate) fn retain_with<T: Send + Sync + 'static>(
+        &self,
+        tag: u64,
+        retained: T,
+        control: &StorageReadControl,
+    ) -> VersionResult<Box<dyn Send + Sync>> {
         let memory = control
             .memory()
-            .reserve(std::mem::size_of::<Lease>() + std::mem::size_of::<(u32, u64)>())?;
+            .reserve(std::mem::size_of::<Lease<T>>() + std::mem::size_of::<(u32, u64)>())?;
         let (_, count) = self.0.header()?;
         let mut occupied = self.0.occupied.lock();
         for slot in 0..SLOT_COUNT {
@@ -220,6 +236,7 @@ impl NativeLeaseFile {
             return Ok(Box::new(Lease {
                 state: Arc::clone(&self.0),
                 slot,
+                _retained: retained,
                 _memory: memory,
             }));
         }
@@ -228,7 +245,7 @@ impl NativeLeaseFile {
         ))
     }
 
-    pub(super) fn visit(
+    pub(crate) fn visit(
         &self,
         control: &StorageReadControl,
         visitor: &mut dyn FnMut(u64) -> VersionResult<()>,

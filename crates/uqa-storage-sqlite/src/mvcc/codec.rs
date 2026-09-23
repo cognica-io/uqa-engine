@@ -31,27 +31,51 @@ pub(super) fn integer(bytes: &[u8]) -> PhysicalResult<u64> {
 }
 
 pub(super) fn header(connection: &Connection, expected: DatabaseId) -> PhysicalResult<Header> {
-    let mut statement = connection.prepare("SELECT format, database_id, allocated, sequence, mapping FROM _uqa_mvcc_metadata WHERE singleton = 1")?;
+    let (identity, header, pending) = restoration_header(connection)?;
+    if identity != expected {
+        return Err(VersionError::WrongDatabase.into());
+    }
+    if pending.is_some() {
+        return Err(crate::SQLiteError::DatabaseRestoreIncomplete.into());
+    }
+    Ok(header)
+}
+
+/// Inspect a durable restore intent before normal record access is allowed. The restore owner must validate its external source/target request and physical schema separately.
+pub(super) fn restoration_header(
+    connection: &Connection,
+) -> PhysicalResult<(DatabaseId, Header, Option<DatabaseId>)> {
+    // Decode the marker before touching fields absent from predecessor schemas, preserving their typed format rejection.
+    let mut statement =
+        connection.prepare("SELECT * FROM _uqa_mvcc_metadata WHERE singleton = 1")?;
     let mut rows = statement.query([])?;
     let row = rows
         .next()?
         .ok_or(VersionError::InvalidEncoding("missing record metadata"))?;
-    if row.get::<_, i64>(0)? != 42 {
+    if row.get::<_, i64>(1)? != 43 {
         return Err(VersionError::InvalidEncoding("unknown record format").into());
     }
-    let database = identity(bytes(row, 1)?)?;
-    if database != expected {
-        return Err(VersionError::WrongDatabase.into());
+    let database = identity(bytes(row, 2)?)?;
+    let pending = match row.get_ref(6)? {
+        ValueRef::Null => None,
+        _ => Some(identity(bytes(row, 6)?)?),
+    };
+    if pending == Some(database) {
+        return Err(VersionError::InvalidRestoreIdentity.into());
     }
-    Ok(Header {
-        allocated: integer(bytes(row, 2)?)?,
-        sequence: CommitSequence::from_u64(integer(bytes(row, 3)?)?),
-        key_value_mapping: match row.get::<_, i64>(4)? {
-            0 => false,
-            1 => true,
-            _ => return Err(VersionError::InvalidEncoding("unknown record mapping").into()),
+    Ok((
+        database,
+        Header {
+            allocated: integer(bytes(row, 3)?)?,
+            sequence: CommitSequence::from_u64(integer(bytes(row, 4)?)?),
+            key_value_mapping: match row.get::<_, i64>(5)? {
+                0 => false,
+                1 => true,
+                _ => return Err(VersionError::InvalidEncoding("unknown record mapping").into()),
+            },
         },
-    })
+        pending,
+    ))
 }
 
 pub(super) fn identity(bytes: &[u8]) -> PhysicalResult<DatabaseId> {

@@ -16,7 +16,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
-use parking_lot::{Condvar, Mutex, RwLock};
+use parking_lot::{Mutex, RwLock};
 use rusqlite::{Connection, OpenFlags};
 use uqa_storage::{mvcc::VersionedKeyValueStore, KeyValueStore, StorageEncryptionKey};
 
@@ -26,6 +26,11 @@ mod identity;
 mod logical;
 mod native;
 mod native_restore;
+pub(crate) mod ownership;
+mod pool;
+mod restore;
+use pool::ConnectionPool;
+pub(crate) use pool::PooledConnection;
 mod serializable;
 mod snapshot;
 use snapshot::PhysicalConnection;
@@ -88,6 +93,10 @@ pub enum SQLiteError {
     MissingCheckedOutConnection,
     #[error("versioned storage requires its logical session; use with_physical only for explicit physical maintenance")]
     LogicalSessionRequired,
+    #[error("database restoration requires all existing owners to close")]
+    DatabaseRestoreBusy,
+    #[error("database restoration is incomplete; resume the original source/target request")]
+    DatabaseRestoreIncomplete,
     #[error("the SQLite session already has a different retention limit")]
     SessionOptionsMismatch,
     #[error("the SQLite session is bound to a different record mapping")]
@@ -166,145 +175,6 @@ impl ConnectionSpec {
                 ManagedConnection::configure_wal_connection(&conn)?;
                 Ok(conn)
             }
-        }
-    }
-}
-
-struct PoolState {
-    idle: Vec<PhysicalConnection>,
-    open: usize,
-}
-
-struct ConnectionPool {
-    memory_identity: Mutex<Option<String>>,
-    serializable_leases: Mutex<Option<Arc<uqa_storage::mvcc::LocalSerializableLeases>>>,
-    serializable_connection: Mutex<Option<(uqa_storage::mvcc::DatabaseId, ManagedConnection)>>,
-    snapshot_registry: Mutex<
-        Option<(
-            uqa_storage::mvcc::DatabaseId,
-            std::sync::Weak<uqa_storage::mvcc::SnapshotRegistry>,
-        )>,
-    >,
-    spec: ConnectionSpec,
-    max_connections: usize,
-    state: Mutex<PoolState>,
-    available: Condvar,
-    /// Stable, never-mutating connection used for `PRAGMA data_version`.
-    /// Every logical session over this pool must compare versions on this
-    /// same connection, and encrypted databases must not repeat key
-    /// derivation merely to create a request-local change monitor.
-    data_version_monitor: Mutex<Option<Connection>>,
-}
-
-impl ConnectionPool {
-    fn new(spec: ConnectionSpec, initial: Connection, max_connections: usize) -> Arc<Self> {
-        Arc::new(Self {
-            memory_identity: Mutex::new(None),
-            serializable_leases: Mutex::new(None),
-            serializable_connection: Mutex::new(None),
-            snapshot_registry: Mutex::new(None),
-            spec,
-            max_connections: max_connections.max(1),
-            state: Mutex::new(PoolState {
-                idle: vec![PhysicalConnection::new(initial)],
-                open: 1,
-            }),
-            available: Condvar::new(),
-            data_version_monitor: Mutex::new(None),
-        })
-    }
-
-    fn checkout(self: &Arc<Self>) -> Result<PooledConnection> {
-        self.checkout_with_cancellation(None)
-    }
-
-    fn checkout_with_cancellation(
-        self: &Arc<Self>,
-        cancellation: Option<&uqa_core::CancellationToken>,
-    ) -> Result<PooledConnection> {
-        loop {
-            if let Some(cancellation) = cancellation {
-                cancellation.check()?;
-            }
-            let mut state = self.state.lock();
-            if let Some(connection) = state.idle.pop() {
-                return Ok(PooledConnection {
-                    pool: Arc::clone(self),
-                    connection: Some(connection),
-                });
-            }
-            if state.open < self.max_connections {
-                state.open += 1;
-                drop(state);
-                return match self.spec.open(false) {
-                    Ok(connection) => Ok(PooledConnection {
-                        pool: Arc::clone(self),
-                        connection: Some(PhysicalConnection::new(connection)),
-                    }),
-                    Err(error) => {
-                        let mut state = self.state.lock();
-                        state.open -= 1;
-                        self.available.notify_one();
-                        Err(error)
-                    }
-                };
-            }
-            if cancellation.is_some() {
-                self.available
-                    .wait_for(&mut state, std::time::Duration::from_millis(10));
-            } else {
-                self.available.wait(&mut state);
-            }
-        }
-    }
-
-    fn checkin(&self, connection: PhysicalConnection) {
-        self.state.lock().idle.push(connection);
-        self.available.notify_one();
-    }
-
-    fn discard(&self) {
-        let mut state = self.state.lock();
-        state.open -= 1;
-        self.available.notify_one();
-    }
-}
-
-pub(crate) struct PooledConnection {
-    pool: Arc<ConnectionPool>,
-    connection: Option<PhysicalConnection>,
-}
-
-impl PooledConnection {
-    pub(crate) fn connection(&self) -> Result<&Connection> {
-        self.connection
-            .as_ref()
-            .map(|physical| &physical.connection)
-            .ok_or(SQLiteError::MissingCheckedOutConnection)
-    }
-
-    fn physical_mut(&mut self) -> Result<&mut PhysicalConnection> {
-        self.connection
-            .as_mut()
-            .ok_or(SQLiteError::MissingCheckedOutConnection)
-    }
-
-    pub(crate) fn connection_mut(&mut self) -> Result<&mut Connection> {
-        self.physical_mut().map(|physical| &mut physical.connection)
-    }
-}
-
-impl Drop for PooledConnection {
-    fn drop(&mut self) {
-        let Some(connection) = self.connection.take() else {
-            return;
-        };
-        let reusable = connection.connection.is_autocommit()
-            || connection.connection.execute_batch("ROLLBACK").is_ok();
-        if reusable {
-            self.pool.checkin(connection);
-        } else {
-            self.pool.discard();
         }
     }
 }
@@ -465,6 +335,12 @@ impl ManagedConnection {
         let compression = compression
             .validate()
             .map_err(SQLiteError::CompressedContainer)?;
+        let owner = ownership::open(
+            path,
+            &uqa_storage::read_control::StorageReadControl::with_limit(
+                uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
+            ),
+        )?;
         match trusted_anchor {
             Some(anchor) => compressed_vfs::register_database_with_anchor(
                 path,
@@ -480,7 +356,7 @@ impl ManagedConnection {
             compression,
             key: key.map(StorageEncryptionKey::new),
         };
-        Self::from_spec(spec, default_pool_connections())
+        Self::from_spec_owned(spec, default_pool_connections(), Some(owner))
     }
 
     pub fn open_in_memory() -> Result<Self> {
@@ -491,12 +367,41 @@ impl ManagedConnection {
     }
 
     fn from_spec(spec: ConnectionSpec, max_connections: usize) -> Result<Self> {
+        let owner = match &spec {
+            ConnectionSpec::File { path, .. }
+                if path.as_os_str().is_empty() || path == Path::new(":memory:") =>
+            {
+                None
+            }
+            ConnectionSpec::File { path, .. }
+            | ConnectionSpec::Auxiliary { path, .. }
+            | ConnectionSpec::Compressed { path, .. } => Some(ownership::open(
+                path,
+                &uqa_storage::read_control::StorageReadControl::with_limit(
+                    uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
+                ),
+            )?),
+            ConnectionSpec::Memory => None,
+        };
+        Self::from_spec_owned(spec, max_connections, owner)
+    }
+
+    fn from_spec_owned(
+        spec: ConnectionSpec,
+        max_connections: usize,
+        owner: Option<Arc<ownership::DatabaseOwner>>,
+    ) -> Result<Self> {
         let initial = spec.open(true)?;
+        crate::mvcc::restore::reject_pending(&initial)?;
         Ok(Self {
-            pool: ConnectionPool::new(spec, initial, max_connections),
+            pool: ConnectionPool::new(spec, initial, max_connections, owner),
             session: Arc::new(SessionState::new()),
             record_access: false,
         })
+    }
+
+    pub(crate) fn database_owner(&self) -> Option<Arc<ownership::DatabaseOwner>> {
+        self.pool.owner.clone()
     }
 
     fn apply_encryption_key(conn: &Connection, key: &str) -> Result<()> {

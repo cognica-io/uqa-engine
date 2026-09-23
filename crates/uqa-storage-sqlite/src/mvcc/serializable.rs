@@ -7,7 +7,10 @@
 //! Atomic, encrypted transport for the common SSI graph across independent `SQLite` processes.
 
 mod liveness;
+mod restore;
 mod schema;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(in crate::mvcc) use liveness::lease_file;
 #[cfg(test)]
 mod tests;
 
@@ -39,16 +42,28 @@ impl SQLiteRecordStore {
         let auxiliary = self
             .connection
             .serializable_connection(self.identity, control)?;
+        let held = SQLiteSerializableAdmission::load(&auxiliary, control, |_| Ok(self.identity))?;
+        held.graph
+            .validate_persisted_publications(control, |transaction| {
+                self.commit_status(transaction, control)
+            })?;
+        Ok(held)
+    }
+}
+
+impl SQLiteSerializableAdmission {
+    fn load(
+        auxiliary: &crate::ManagedConnection,
+        control: &StorageReadControl,
+        identity: impl FnOnce(&Connection) -> PhysicalResult<uqa_storage::mvcc::DatabaseId>,
+    ) -> VersionResult<Self> {
         let connection = auxiliary
             .lease_connection_with_control(control)
             .map_err(|error| Error::from(error).into_version())?;
         let timeout = admission::BusyTimeout::new(&connection).map_err(super::sqlite_error)?;
         begin(&connection, control).map_err(Error::into_version)?;
-        let graph =
-            schema::load(&connection, self.identity, control).map_err(Error::into_version)?;
-        graph.validate_persisted_publications(control, |transaction| {
-            self.commit_status(transaction, control)
-        })?;
+        let identity = identity(&connection).map_err(Error::into_version)?;
+        let graph = schema::load(&connection, identity, control).map_err(Error::into_version)?;
         drop(timeout);
         let milliseconds: u32 = connection
             .pragma_query_value(None, "busy_timeout", |row| row.get(0))
@@ -56,7 +71,7 @@ impl SQLiteRecordStore {
         connection
             .busy_timeout(std::time::Duration::ZERO)
             .map_err(super::sqlite_error)?;
-        Ok(SQLiteSerializableAdmission {
+        Ok(Self {
             connection,
             graph,
             previous_timeout: std::time::Duration::from_millis(u64::from(milliseconds)),

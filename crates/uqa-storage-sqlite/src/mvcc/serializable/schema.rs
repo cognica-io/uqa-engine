@@ -99,6 +99,27 @@ fn initialize(
     Ok(())
 }
 
+/// The caller has loaded and validated the old schema under physical SSI admission. Publish a fresh coordinator in that same transaction.
+pub(super) fn restore(
+    connection: &Connection,
+    database: DatabaseId,
+    control: &StorageReadControl,
+) -> PhysicalResult<()> {
+    let mut coordinator = [0; 16];
+    getrandom::fill(&mut coordinator).map_err(|error| {
+        VersionError::Storage(StorageBackendError::backend(
+            "serializable restore identity",
+            std::io::Error::other(error.to_string()),
+        ))
+    })?;
+    let graph = SerializableGraph::new(database, coordinator, control.memory())?;
+    connection.execute_batch(
+        "DROP TABLE _uqa_serializable_records; DROP TABLE _uqa_serializable_state",
+    )?;
+    initialize(connection, database, coordinator)?;
+    persist(connection, &graph, control)
+}
+
 fn matches_definition(
     connection: &Connection,
     name: &str,

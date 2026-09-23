@@ -20,6 +20,7 @@ use uqa_storage::{
 };
 
 use super::SQLiteRecordStore;
+use crate::connection::ownership::DatabaseOwner;
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 use super::super::leases::{LeaseNamespace, NativeLeaseAdmission, NativeLeaseFile};
@@ -30,8 +31,12 @@ enum Liveness {
         file: NativeLeaseFile,
         _admission: NativeLeaseAdmission,
         live: BudgetedVec<u64>,
+        owner: Option<Arc<DatabaseOwner>>,
     },
-    Local(Arc<LocalSerializableLeases>),
+    Local {
+        leases: Arc<LocalSerializableLeases>,
+        owner: Option<Arc<DatabaseOwner>>,
+    },
 }
 
 impl Liveness {
@@ -42,21 +47,7 @@ impl Liveness {
     ) -> VersionResult<Self> {
         #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
         if let Some(path) = store.connection.database_path() {
-            let uqa_storage::PersistentStorageIdentity::File(path) =
-                uqa_storage::PersistentStorageIdentity::for_database_path(path)?
-            else {
-                unreachable!("database file identity")
-            };
-            let mut sidecar = path.into_os_string();
-            sidecar.push(".uqa-serializable-leases");
-            let file = NativeLeaseFile::open(
-                std::path::Path::new(&sidecar),
-                LeaseNamespace {
-                    magic: *b"UQASSL01",
-                    database: graph.database(),
-                    incarnation: Some(graph.coordinator()),
-                },
-            )?;
+            let file = lease_file(path, graph)?;
             let admission = file.admit(control)?;
             let mut live = BudgetedVec::new(control.memory());
             file.visit(control, &mut |allocation| {
@@ -68,17 +59,44 @@ impl Liveness {
                 file,
                 _admission: admission,
                 live,
+                owner: store.connection.database_owner(),
             });
         }
         #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
         if let Some(path) = store.connection.database_path() {
-            return Ok(Self::Local(local_file_registry(path, control)?));
+            return Ok(Self::Local {
+                leases: local_file_registry(path, control)?,
+                owner: store.connection.database_owner(),
+            });
         }
         let _ = graph;
-        Ok(Self::Local(
-            store.connection.serializable_local_leases(control),
-        ))
+        Ok(Self::Local {
+            leases: store.connection.serializable_local_leases(control),
+            owner: store.connection.database_owner(),
+        })
     }
+}
+
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(in crate::mvcc) fn lease_file(
+    path: &std::path::Path,
+    graph: &SerializableGraph,
+) -> VersionResult<NativeLeaseFile> {
+    let uqa_storage::PersistentStorageIdentity::File(path) =
+        uqa_storage::PersistentStorageIdentity::for_database_path(path)?
+    else {
+        unreachable!("database file identity")
+    };
+    let mut sidecar = path.into_os_string();
+    sidecar.push(".uqa-serializable-leases");
+    NativeLeaseFile::open(
+        std::path::Path::new(&sidecar),
+        LeaseNamespace {
+            magic: *b"UQASSL01",
+            database: graph.database(),
+            incarnation: Some(graph.coordinator()),
+        },
+    )
 }
 
 impl SerializableLeases for Liveness {
@@ -91,7 +109,7 @@ impl SerializableLeases for Liveness {
         Ok(match self {
             #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             Self::Native { live, .. } => live.binary_search(&id.allocation()).is_ok(),
-            Self::Local(leases) => leases.is_alive(id),
+            Self::Local { leases, .. } => leases.is_alive(id),
         })
     }
 
@@ -102,10 +120,12 @@ impl SerializableLeases for Liveness {
     ) -> VersionResult<SerializableParticipant> {
         match self {
             #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
-            Self::Native { file, .. } => {
-                SerializableParticipant::retain(id, file.retain(id.allocation(), control)?, control)
-            }
-            Self::Local(leases) => leases.retain(id, control),
+            Self::Native { file, owner, .. } => SerializableParticipant::retain(
+                id,
+                file.retain_with(id.allocation(), owner.clone(), control)?,
+                control,
+            ),
+            Self::Local { leases, owner } => leases.retain_with(id, owner.clone(), control),
         }
     }
 
@@ -113,7 +133,7 @@ impl SerializableLeases for Liveness {
         match self {
             #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
             Self::Native { .. } => {}
-            Self::Local(leases) => leases.reclaim(),
+            Self::Local { leases, .. } => leases.reclaim(),
         }
     }
 }

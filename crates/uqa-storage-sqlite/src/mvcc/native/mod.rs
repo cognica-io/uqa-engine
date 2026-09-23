@@ -30,6 +30,7 @@ mod vector_guards;
 
 pub(crate) use session::NativeSnapshot;
 
+pub(super) use format::validate_restoration;
 pub(super) use format::{check_mapping, initialize, initialize_in, present, reject_mapped};
 pub(super) use projection::materialize;
 

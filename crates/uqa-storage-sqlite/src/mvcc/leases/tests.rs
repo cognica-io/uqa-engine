@@ -28,6 +28,28 @@ fn tags(file: &NativeLeaseFile, control: &StorageReadControl) -> Vec<u64> {
 }
 
 #[test]
+fn path_aliases_share_one_descriptor_and_cannot_hide_live_leases() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::create_dir(directory.path().join("nested")).unwrap();
+    let path = directory.path().join("leases");
+    let alias = directory.path().join("nested/../leases");
+    let control = StorageReadControl::with_limit(1 << 20);
+    let file = NativeLeaseFile::open(&path, namespace(1)).unwrap();
+    let admission = file.admit(&control).unwrap();
+    let retained = file.retain(81, &control).unwrap();
+    drop(admission);
+    let peer = NativeLeaseFile::open(&alias, namespace(1)).unwrap();
+    assert!(file.shares_descriptor(&peer));
+    let admission = peer.admit(&control).unwrap();
+    assert_eq!(tags(&peer, &control), [81]);
+    drop((admission, peer));
+    let _admission = file.admit(&control).unwrap();
+    assert_eq!(tags(&file, &control), [81]);
+    drop(retained);
+    assert!(tags(&file, &control).is_empty());
+}
+
+#[test]
 fn reusing_a_released_slot_keeps_only_the_new_tag_and_live_peers() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("leases");

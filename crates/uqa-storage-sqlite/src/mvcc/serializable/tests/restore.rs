@@ -134,6 +134,59 @@ fn restoring_a_closed_main_backup_rejects_a_newer_terminal_checkpoint_before_cap
                 matches!(result, Err(VersionError::UnknownTransaction)) && !captured,
                 "mode {mode}, native {native}: admitted a restored main history whose newer auxiliary publication {publication:?} is absent from the authoritative receipts"
             );
+            drop(restored);
+            let request = uqa_storage::mvcc::DatabaseRestore::new(identity).unwrap();
+            let records = restore_closed(&path, mode, native, request, &control);
+            assert_eq!(records.database_id(), request.target());
+            assert!(records
+                .snapshot(&control)
+                .unwrap()
+                .get(&key, &control)
+                .unwrap()
+                .is_none());
+            assert!(matches!(
+                records.commit_status(receipt.transaction, &control),
+                Err(VersionError::WrongDatabase)
+            ));
+            let auxiliary = records.serializable_admission(&control).unwrap();
+            assert_eq!(auxiliary.graph().database(), request.target());
         }
+    }
+}
+
+fn restore_closed(
+    path: &Path,
+    mode: usize,
+    native: bool,
+    request: uqa_storage::mvcc::DatabaseRestore,
+    control: &StorageReadControl,
+) -> SQLiteRecordStore {
+    let restored = match mode {
+        0 => ManagedConnection::open_restored(path, request, control),
+        1 => ManagedConnection::open_encrypted_restored(
+            path,
+            "serializable-transport-test",
+            request,
+            control,
+        ),
+        2 => ManagedConnection::open_compressed_restored(
+            path,
+            crate::SQLiteCompressionOptions::default(),
+            request,
+            control,
+        ),
+        _ => ManagedConnection::open_compressed_encrypted_restored(
+            path,
+            "serializable-transport-test",
+            crate::SQLiteCompressionOptions::default(),
+            request,
+            control,
+        ),
+    }
+    .unwrap();
+    if native {
+        SQLiteRecordStore::for_native(&restored, control).unwrap()
+    } else {
+        SQLiteRecordStore::for_key_value(&restored, control).unwrap()
     }
 }

@@ -95,7 +95,16 @@ impl ManagedConnection {
             }
             return Ok(connection.clone());
         }
-        let connection = if let Some(path) = self.database_path() {
+        let connection = self
+            .open_serializable_connection()
+            .map_err(|error| VersionError::Storage(error.into()))?;
+        *retained = Some((database, connection.clone()));
+        Ok(connection)
+    }
+
+    /// Open the physical SSI database without attaching an incarnation-specific cache entry to the main pool.
+    pub(crate) fn open_serializable_connection(&self) -> crate::Result<Self> {
+        if let Some(path) = self.database_path() {
             let PersistentStorageIdentity::File(path) =
                 PersistentStorageIdentity::for_database_path(path)?
             else {
@@ -103,17 +112,18 @@ impl ManagedConnection {
             };
             let mut auxiliary = path.into_os_string();
             auxiliary.push(".uqa-serializable");
-            Self::open_auxiliary(
-                std::path::Path::new(&auxiliary),
-                self.auxiliary_encryption_key(),
+            Self::from_spec_owned(
+                super::ConnectionSpec::Auxiliary {
+                    path: std::path::PathBuf::from(auxiliary),
+                    key: self.auxiliary_encryption_key(),
+                },
+                super::default_pool_connections(),
+                self.database_owner(),
             )
         } else {
             // The parent pool retains this one physical in-memory database even between record handles.
             Self::open_in_memory()
         }
-        .map_err(|error| VersionError::Storage(error.into()))?;
-        *retained = Some((database, connection.clone()));
-        Ok(connection)
     }
 
     pub(crate) fn lease_connection_with_control(
