@@ -6,7 +6,9 @@
 
 //! Shared string, regex, quoting, and point helpers for scalar built-ins.
 
-use super::{to_f64, value_to_string, Result, SQLError, TemporalValue, Value};
+use super::conversion::to_f64_with_control;
+use super::{value_to_string, Result, SQLError, TemporalValue, Value};
+use uqa_core::memory::ProductionControl;
 
 // --------------------------------------------------------------------
 // JSON helpers
@@ -40,21 +42,28 @@ pub(super) fn typeof_value(v: &Value) -> String {
     }
 }
 
-pub(super) fn point_xy(v: &Value) -> Result<(f64, f64)> {
+pub(super) fn point_xy(v: &Value, control: &ProductionControl<'_>) -> Result<(f64, f64)> {
+    control.check()?;
     match v {
-        Value::List(items) if items.len() == 2 => Ok((to_f64(&items[0])?, to_f64(&items[1])?)),
+        Value::List(items) if items.len() == 2 => Ok((
+            to_f64_with_control(&items[0], control)?,
+            to_f64_with_control(&items[1], control)?,
+        )),
         Value::Str(s) | Value::FixedChar(s) => {
             let cleaned = s.trim_matches(|c: char| c == '(' || c == ')' || c == '[' || c == ']');
-            let parts: Vec<&str> = cleaned.split(',').map(str::trim).collect();
-            if parts.len() != 2 {
+            let mut parts = cleaned.split(',').map(str::trim);
+            let (Some(x), Some(y), None) = (parts.next(), parts.next(), parts.next()) else {
                 return Err(SQLError::TypeMismatch(format!("point: cannot parse {s:?}")));
-            }
-            let x: f64 = parts[0]
+            };
+            control.check()?;
+            let x: f64 = x
                 .parse()
                 .map_err(|e| SQLError::TypeMismatch(format!("point.x: {e}")))?;
-            let y: f64 = parts[1]
+            control.check()?;
+            let y: f64 = y
                 .parse()
                 .map_err(|e| SQLError::TypeMismatch(format!("point.y: {e}")))?;
+            control.check()?;
             Ok((x, y))
         }
         other => Err(SQLError::TypeMismatch(format!(

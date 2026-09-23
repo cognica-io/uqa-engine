@@ -6,112 +6,129 @@
 
 //! `PostgreSQL` array literal parsing, shape validation, and element conversion.
 
-use uqa_core::{ArrayValue, Value};
+use uqa_core::{
+    memory::{Produced, ProductionControl, ProductionString, ProductionVec},
+    ArrayValue, Value, ValueRetentionError,
+};
 
 use crate::error::{Result, SQLError};
 
-use super::cast_value_from;
+use super::cast_value_from_with_control;
+
+type ArrayDimensions = Produced<Vec<(i32, usize)>>;
 
 /// Parse a `PostgreSQL` array literal (`{1,2,3}`, `{"a b",NULL}`,
 /// `{{1,2},{3,4}}`) into nested lists of string/NULL values; the caller
 /// casts elements.
 pub fn parse_pg_array_literal(text: &str) -> Result<ArrayValue> {
-    let mut parser = PgArrayLiteralParser::new(text);
+    parse_pg_array_literal_with_control(text, &ProductionControl::uncontrolled())?
+        .into_uncontrolled()
+        .map_err(|_| SQLError::Internal("ordinary array parse owner".into()))
+}
+
+pub fn parse_pg_array_literal_with_control(
+    text: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<ArrayValue>> {
+    let mut parser = PgArrayLiteralParser::new(text, *control);
     let (declared_dimensions, items) = parser.parse()?;
-    if let Err(error) = array_shape(&items) {
-        return Err(SQLError::Routine {
-            sqlstate: "22P02".into(),
-            message: format!("malformed array literal: \"{text}\" ({})", error.message()),
-        });
+    match array_shape_with_control(&items, control) {
+        Ok(shape) => drop(shape),
+        Err(ShapeProductionError::Shape(error)) => return Err(parser.error(error.message())),
+        Err(ShapeProductionError::Control(error)) => return Err(error.into()),
     }
-    let array = ArrayValue::try_new(items).ok_or_else(|| SQLError::Routine {
-        sqlstate: "22P02".into(),
-        message: format!("malformed array literal: \"{text}\""),
-    })?;
-    let Some(declared_dimensions) = declared_dimensions else {
-        return Ok(array);
-    };
-    let declared_lengths = declared_dimensions
-        .iter()
-        .map(|(_, length)| *length)
-        .collect::<Vec<_>>();
-    if declared_lengths != array.dimensions() {
-        return Err(SQLError::Routine {
-            sqlstate: "22P02".into(),
-            message: format!(
-                "malformed array literal: \"{text}\" (specified array dimensions do not match array contents)"
-            ),
-        });
-    }
-    let lower_bounds = declared_dimensions
-        .into_iter()
-        .map(|(lower, _)| lower)
-        .collect();
-    ArrayValue::with_lower_bounds(array.into_elements(), lower_bounds).ok_or_else(|| {
-        SQLError::Routine {
-            sqlstate: "22P02".into(),
-            message: format!("malformed array literal: \"{text}\""),
+    let array = match &declared_dimensions {
+        Some(declared) => {
+            let mut bounds = ProductionVec::new(*control);
+            bounds.reserve(declared.len())?;
+            for (lower, _) in &**declared {
+                bounds.push_copy(*lower)?;
+            }
+            ArrayValue::with_lower_bounds_with_control(items, bounds.finish()?, control)?
         }
-    })
+        None => ArrayValue::try_new_with_control(items, control)?,
+    }
+    .ok_or_else(|| parser.error("specified array dimensions do not match array contents"))?;
+    if let Some(declared) = declared_dimensions {
+        if !declared
+            .iter()
+            .map(|(_, length)| *length)
+            .eq(array.dimensions().iter().copied())
+        {
+            return Err(parser.error("specified array dimensions do not match array contents"));
+        }
+    }
+    Ok(array)
 }
 
 pub(super) fn cast_array_elements(
     items: &[Value],
     element_type: &str,
     source_element_type: Option<&str>,
-) -> Result<Vec<Value>> {
-    items
-        .iter()
-        .map(|item| match item {
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<Value>>> {
+    let mut output = ProductionVec::new(*control);
+    output.reserve(items.len())?;
+    for item in items {
+        let value = match item {
             Value::List(nested) => {
-                cast_array_elements(nested, element_type, source_element_type).map(Value::List)
+                let (nested, memory) =
+                    cast_array_elements(nested, element_type, source_element_type, control)?
+                        .into_parts();
+                control.finish(Value::List(nested), memory)?
             }
-            other => cast_value_from(other, element_type, source_element_type),
-        })
-        .collect()
+            other => {
+                cast_value_from_with_control(other, element_type, source_element_type, control)?
+            }
+        };
+        output.push_produced(value)?;
+    }
+    Ok(output.finish()?)
 }
 
-pub(super) struct PgArrayLiteralParser<'a> {
+pub(super) struct PgArrayLiteralParser<'a, 'control> {
+    control: ProductionControl<'control>,
     source: &'a str,
     chars: std::iter::Peekable<std::str::Chars<'a>>,
 }
 
-type ParsedArrayLiteral = (Option<Vec<(i32, usize)>>, Vec<Value>);
+type ParsedArrayLiteral = (Option<ArrayDimensions>, Produced<Vec<Value>>);
 
-impl<'a> PgArrayLiteralParser<'a> {
-    fn new(source: &'a str) -> Self {
+impl<'a, 'control> PgArrayLiteralParser<'a, 'control> {
+    fn new(source: &'a str, control: ProductionControl<'control>) -> Self {
         Self {
+            control,
             source,
             chars: source.chars().peekable(),
         }
     }
 
     fn parse(&mut self) -> Result<ParsedArrayLiteral> {
-        self.skip_whitespace();
+        self.skip_whitespace()?;
         let dimensions = self.parse_dimension_declaration()?;
         let items = self.parse_array()?;
-        self.skip_whitespace();
+        self.skip_whitespace()?;
         if self.chars.peek().is_some() {
             return Err(self.error("unexpected content after closing brace"));
         }
         Ok((dimensions, items))
     }
 
-    fn parse_dimension_declaration(&mut self) -> Result<Option<Vec<(i32, usize)>>> {
+    fn parse_dimension_declaration(&mut self) -> Result<Option<ArrayDimensions>> {
         if self.chars.peek() != Some(&'[') {
             return Ok(None);
         }
-        let mut dimensions = Vec::new();
+        let mut dimensions = ProductionVec::new(self.control);
         while self.chars.next_if_eq(&'[').is_some() {
-            self.skip_whitespace();
+            self.skip_whitespace()?;
             let lower = self.parse_dimension_bound()?;
-            self.skip_whitespace();
+            self.skip_whitespace()?;
             if self.chars.next() != Some(':') {
                 return Err(self.error("array dimension must contain `:`"));
             }
-            self.skip_whitespace();
+            self.skip_whitespace()?;
             let upper = self.parse_dimension_bound()?;
-            self.skip_whitespace();
+            self.skip_whitespace()?;
             if self.chars.next() != Some(']') {
                 return Err(self.error("array dimension is missing a closing `]`"));
             }
@@ -132,52 +149,52 @@ impl<'a> PgArrayLiteralParser<'a> {
                 .and_then(|difference| difference.checked_add(1))
                 .and_then(|length| usize::try_from(length).ok())
                 .ok_or_else(|| self.error("array dimension is out of range"))?;
-            dimensions.push((lower, length));
-            self.skip_whitespace();
+            dimensions.push_copy((lower, length))?;
+            self.skip_whitespace()?;
         }
         if self.chars.next() != Some('=') {
             return Err(self.error("array dimensions must be followed by `=`"));
         }
-        self.skip_whitespace();
-        Ok(Some(dimensions))
+        self.skip_whitespace()?;
+        Ok(Some(dimensions.finish()?))
     }
 
     fn parse_dimension_bound(&mut self) -> Result<i32> {
-        let mut text = String::new();
+        let mut text = ProductionString::new(self.control);
         if self
             .chars
             .peek()
             .is_some_and(|character| matches!(character, '+' | '-'))
         {
-            text.push(self.chars.next().expect("peeked array bound sign"));
+            text.push(self.chars.next().expect("peeked array bound sign"))?;
         }
         while self.chars.peek().is_some_and(char::is_ascii_digit) {
-            text.push(self.chars.next().expect("peeked array bound digit"));
+            text.push(self.chars.next().expect("peeked array bound digit"))?;
         }
-        if text.is_empty() || matches!(text.as_str(), "+" | "-") {
+        if text.is_empty() || matches!(&*text, "+" | "-") {
             return Err(self.error("array dimension bound must be an integer"));
         }
         text.parse()
             .map_err(|_| self.error("array dimension bound is out of range"))
     }
 
-    fn parse_array(&mut self) -> Result<Vec<Value>> {
+    fn parse_array(&mut self) -> Result<Produced<Vec<Value>>> {
         if self.chars.next() != Some('{') {
             return Err(self.error("array value must start with `{`"));
         }
-        self.skip_whitespace();
+        self.skip_whitespace()?;
         if self.chars.next_if_eq(&'}').is_some() {
-            return Ok(Vec::new());
+            return Ok(ProductionVec::new(self.control).finish()?);
         }
 
-        let mut items = Vec::new();
+        let mut items = ProductionVec::new(self.control);
         loop {
-            self.skip_whitespace();
-            items.push(self.parse_element()?);
-            self.skip_whitespace();
+            self.skip_whitespace()?;
+            items.push_produced(self.parse_element()?)?;
+            self.skip_whitespace()?;
             match self.chars.next() {
                 Some(',') => {
-                    self.skip_whitespace();
+                    self.skip_whitespace()?;
                     if matches!(self.chars.peek(), None | Some('}')) {
                         return Err(self.error("array contains a missing element"));
                     }
@@ -189,37 +206,43 @@ impl<'a> PgArrayLiteralParser<'a> {
                 None => return Err(self.error("array is missing a closing `}`")),
             }
         }
-        Ok(items)
+        Ok(items.finish()?)
     }
 
-    fn parse_element(&mut self) -> Result<Value> {
+    fn parse_element(&mut self) -> Result<Produced<Value>> {
         match self.chars.peek() {
-            Some('{') => self.parse_array().map(Value::List),
-            Some('"') => self.parse_quoted_element().map(Value::Str),
+            Some('{') => {
+                let (value, memory) = self.parse_array()?.into_parts();
+                Ok(self.control.finish(Value::List(value), memory)?)
+            }
+            Some('"') => {
+                let (value, memory) = self.parse_quoted_element()?.into_parts();
+                Ok(self.control.finish(Value::Str(value), memory)?)
+            }
             Some(',') | Some('}') | None => Err(self.error("array contains a missing element")),
             Some(_) => self.parse_unquoted_element(),
         }
     }
 
-    fn parse_quoted_element(&mut self) -> Result<String> {
+    fn parse_quoted_element(&mut self) -> Result<Produced<String>> {
         let _opening_quote = self.chars.next();
-        let mut value = String::new();
+        let mut value = ProductionString::new(self.control);
         loop {
             match self.chars.next() {
-                Some('"') => return Ok(value),
+                Some('"') => return Ok(value.finish()?),
                 Some('\\') => value.push(
                     self.chars
                         .next()
                         .ok_or_else(|| self.error("quoted element ends with an escape"))?,
-                ),
-                Some(character) => value.push(character),
+                )?,
+                Some(character) => value.push(character)?,
                 None => return Err(self.error("array contains an unterminated quoted element")),
             }
         }
     }
 
-    fn parse_unquoted_element(&mut self) -> Result<Value> {
-        let mut value = String::new();
+    fn parse_unquoted_element(&mut self) -> Result<Produced<Value>> {
+        let mut value = ProductionString::new(self.control);
         let mut significant_len = 0;
         let mut was_escaped = false;
         while let Some(character) = self.chars.peek().copied() {
@@ -234,36 +257,45 @@ impl<'a> PgArrayLiteralParser<'a> {
                         .chars
                         .next()
                         .ok_or_else(|| self.error("array element ends with an escape"))?;
-                    value.push(escaped);
+                    value.push(escaped)?;
                     significant_len = value.len();
                     was_escaped = true;
                 }
                 _ => {
                     let _character = self.chars.next();
-                    value.push(character);
+                    value.push(character)?;
                     if !character.is_whitespace() {
                         significant_len = value.len();
                     }
                 }
             }
         }
-        value.truncate(significant_len);
-        if value.is_empty() {
+        let value = value.finish()?;
+        let significant = &value[..significant_len];
+        if significant.is_empty() {
             return Err(self.error("array contains a missing element"));
         }
-        if !was_escaped && value.eq_ignore_ascii_case("null") {
-            Ok(Value::Null)
+        if !was_escaped && significant.eq_ignore_ascii_case("null") {
+            Ok(self
+                .control
+                .finish(Value::Null, self.control.empty_reservation())?)
         } else {
-            Ok(Value::Str(value))
+            let (mut value, memory) = value.into_parts();
+            value.truncate(significant_len);
+            Ok(self.control.finish(Value::Str(value), memory)?)
         }
     }
 
-    fn skip_whitespace(&mut self) {
+    fn skip_whitespace(&mut self) -> Result<()> {
+        self.control.check()?;
         while self
             .chars
             .next_if(|character| character.is_whitespace())
             .is_some()
-        {}
+        {
+            self.control.check()?;
+        }
+        Ok(())
     }
 
     fn error(&self, detail: &str) -> SQLError {
@@ -290,33 +322,60 @@ impl ArrayShapeError {
 }
 
 pub(super) fn array_shape(items: &[Value]) -> std::result::Result<Vec<usize>, ArrayShapeError> {
-    let mut dimensions = vec![items.len()];
-    let mut nested_shape: Option<Vec<usize>> = None;
+    match array_shape_with_control(items, &ProductionControl::uncontrolled()) {
+        Ok(shape) => Ok(shape.into_uncontrolled().expect("ordinary array shape")),
+        Err(ShapeProductionError::Shape(error)) => Err(error),
+        Err(ShapeProductionError::Control(_)) => unreachable!("ordinary shape production"),
+    }
+}
+
+enum ShapeProductionError {
+    Shape(ArrayShapeError),
+    Control(ValueRetentionError),
+}
+impl From<ValueRetentionError> for ShapeProductionError {
+    fn from(error: ValueRetentionError) -> Self {
+        Self::Control(error)
+    }
+}
+
+fn array_shape_with_control(
+    items: &[Value],
+    control: &ProductionControl<'_>,
+) -> std::result::Result<Produced<Vec<usize>>, ShapeProductionError> {
+    let mut dimensions = ProductionVec::new(*control);
+    dimensions.push_copy(items.len())?;
+    let mut nested_shape: Option<Produced<Vec<usize>>> = None;
     let mut has_scalar = false;
     for item in items {
+        control.check()?;
         if let Value::List(nested) = item {
-            let shape = array_shape(nested)?;
+            let shape = array_shape_with_control(nested, control)?;
             if has_scalar {
-                return Err(ArrayShapeError::MixedNesting);
+                return Err(ShapeProductionError::Shape(ArrayShapeError::MixedNesting));
             }
             if nested_shape
                 .as_ref()
-                .is_some_and(|expected| *expected != shape)
+                .is_some_and(|expected| **expected != *shape)
             {
-                return Err(ArrayShapeError::MismatchedDimensions);
+                return Err(ShapeProductionError::Shape(
+                    ArrayShapeError::MismatchedDimensions,
+                ));
             }
             nested_shape = Some(shape);
         } else {
             if nested_shape.is_some() {
-                return Err(ArrayShapeError::MixedNesting);
+                return Err(ShapeProductionError::Shape(ArrayShapeError::MixedNesting));
             }
             has_scalar = true;
         }
     }
     if let Some(shape) = nested_shape {
-        dimensions.extend(shape);
+        for length in &*shape {
+            dimensions.push_copy(*length)?;
+        }
     }
-    Ok(dimensions)
+    Ok(dimensions.finish()?)
 }
 
 /// Return every dimension of a rectangular array value.

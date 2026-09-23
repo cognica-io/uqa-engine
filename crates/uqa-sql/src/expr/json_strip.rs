@@ -6,7 +6,11 @@
 
 //! `PostgreSQL` 18 signatures and textual JSON handling for null stripping.
 
-use uqa_core::Value;
+use uqa_core::{
+    json::{decode_json_string_with_control, JsonReadError},
+    memory::{Produced, ProductionControl, ProductionString},
+    Value,
+};
 
 use crate::error::{Result, SQLError};
 
@@ -79,14 +83,30 @@ pub(super) fn invalid_json_input(input: &str) -> SQLError {
 }
 
 /// Remove JSON nulls without converting textual `json` through a map-backed value. `PostgreSQL`'s `json` result preserves object order, duplicate keys, and number lexemes while compacting whitespace and decoding JSON string escapes.
+#[cfg(test)]
 pub(super) fn strip_json_nulls_text(input: &str, strip_in_arrays: bool) -> Result<String> {
+    Ok(strip_json_nulls_text_with_control(
+        input,
+        strip_in_arrays,
+        &ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .expect("ordinary JSON stripping has no lease"))
+}
+
+pub(super) fn strip_json_nulls_text_with_control(
+    input: &str,
+    strip_in_arrays: bool,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>> {
     let mut parser = JsonStripParser {
         input,
         position: 0,
         strip_in_arrays,
+        control: *control,
     };
     let rendered = parser.parse_value(0)?;
-    parser.skip_whitespace();
+    parser.skip_whitespace()?;
     if parser.position != input.len() {
         return Err(invalid_json_input(input));
     }
@@ -94,24 +114,26 @@ pub(super) fn strip_json_nulls_text(input: &str, strip_in_arrays: bool) -> Resul
 }
 
 struct RenderedJson {
-    text: String,
+    text: Produced<String>,
     is_null: bool,
 }
 
-struct JsonStripParser<'a> {
+struct JsonStripParser<'a, 'c> {
     input: &'a str,
     position: usize,
     strip_in_arrays: bool,
+    control: ProductionControl<'c>,
 }
 
-impl JsonStripParser<'_> {
+impl JsonStripParser<'_, '_> {
     const MAX_DEPTH: usize = 128;
 
     fn parse_value(&mut self, depth: usize) -> Result<RenderedJson> {
+        self.control.check()?;
         if depth > Self::MAX_DEPTH {
             return Err(invalid_json_input(self.input));
         }
-        self.skip_whitespace();
+        self.skip_whitespace()?;
         match self.peek() {
             Some(b'{') => self.parse_object(depth),
             Some(b'[') => self.parse_array(depth),
@@ -129,29 +151,38 @@ impl JsonStripParser<'_> {
 
     fn parse_object(&mut self, depth: usize) -> Result<RenderedJson> {
         self.position += 1;
-        self.skip_whitespace();
-        let mut fields = Vec::new();
+        self.skip_whitespace()?;
+        let mut fields = ProductionString::new(self.control);
+        fields.push('{')?;
+        let mut emitted = false;
         if self.consume(b'}') {
+            fields.push('}')?;
             return Ok(RenderedJson {
-                text: "{}".into(),
+                text: fields.finish()?,
                 is_null: false,
             });
         }
         loop {
-            self.skip_whitespace();
+            self.skip_whitespace()?;
             if self.peek() != Some(b'"') {
                 return Err(invalid_json_input(self.input));
             }
             let key = self.parse_string()?;
-            self.skip_whitespace();
+            self.skip_whitespace()?;
             if !self.consume(b':') {
                 return Err(invalid_json_input(self.input));
             }
             let value = self.parse_value(depth + 1)?;
             if !value.is_null {
-                fields.push(format!("{key}:{}", value.text));
+                if emitted {
+                    fields.push(',')?;
+                }
+                fields.push_str(&key)?;
+                fields.push(':')?;
+                fields.push_str(&value.text)?;
+                emitted = true;
             }
-            self.skip_whitespace();
+            self.skip_whitespace()?;
             if self.consume(b'}') {
                 break;
             }
@@ -159,28 +190,36 @@ impl JsonStripParser<'_> {
                 return Err(invalid_json_input(self.input));
             }
         }
+        fields.push('}')?;
         Ok(RenderedJson {
-            text: format!("{{{}}}", fields.join(",")),
+            text: fields.finish()?,
             is_null: false,
         })
     }
 
     fn parse_array(&mut self, depth: usize) -> Result<RenderedJson> {
         self.position += 1;
-        self.skip_whitespace();
-        let mut elements = Vec::new();
+        self.skip_whitespace()?;
+        let mut elements = ProductionString::new(self.control);
+        elements.push('[')?;
+        let mut emitted = false;
         if self.consume(b']') {
+            elements.push(']')?;
             return Ok(RenderedJson {
-                text: "[]".into(),
+                text: elements.finish()?,
                 is_null: false,
             });
         }
         loop {
             let value = self.parse_value(depth + 1)?;
             if !self.strip_in_arrays || !value.is_null {
-                elements.push(value.text);
+                if emitted {
+                    elements.push(',')?;
+                }
+                elements.push_str(&value.text)?;
+                emitted = true;
             }
-            self.skip_whitespace();
+            self.skip_whitespace()?;
             if self.consume(b']') {
                 break;
             }
@@ -188,24 +227,29 @@ impl JsonStripParser<'_> {
                 return Err(invalid_json_input(self.input));
             }
         }
+        elements.push(']')?;
         Ok(RenderedJson {
-            text: format!("[{}]", elements.join(",")),
+            text: elements.finish()?,
             is_null: false,
         })
     }
 
-    fn parse_string(&mut self) -> Result<String> {
+    fn parse_string(&mut self) -> Result<Produced<String>> {
         let start = self.position;
         self.position += 1;
         while let Some(byte) = self.peek() {
+            self.control.check()?;
             match byte {
                 b'"' => {
                     self.position += 1;
                     let source = &self.input[start..self.position];
-                    let decoded = serde_json::from_str::<String>(source)
-                        .map_err(|_| invalid_json_input(self.input))?;
-                    return serde_json::to_string(&decoded)
-                        .map_err(|_| invalid_json_input(self.input));
+                    let decoded = decode_json_string_with_control(source.as_bytes(), &self.control)
+                        .map_err(|error| match error {
+                            JsonReadError::InvalidJson => invalid_json_input(self.input),
+                            JsonReadError::Memory(error) => error.into(),
+                            JsonReadError::Cancelled(error) => error.into(),
+                        })?;
+                    return super::json::quote_with_control(&decoded, &self.control);
                 }
                 b'\\' => {
                     self.position += 1;
@@ -226,7 +270,7 @@ impl JsonStripParser<'_> {
         }
         self.position += literal.len();
         Ok(RenderedJson {
-            text: literal.into(),
+            text: self.control.copy_text(literal)?,
             is_null,
         })
     }
@@ -238,13 +282,13 @@ impl JsonStripParser<'_> {
             Some(b'0') => self.position += 1,
             Some(b'1'..=b'9') => {
                 self.position += 1;
-                self.consume_digits();
+                self.consume_digits()?;
             }
             _ => return Err(invalid_json_input(self.input)),
         }
         if self.consume(b'.') {
             let digits = self.position;
-            self.consume_digits();
+            self.consume_digits()?;
             if digits == self.position {
                 return Err(invalid_json_input(self.input));
             }
@@ -255,27 +299,31 @@ impl JsonStripParser<'_> {
                 self.position += 1;
             }
             let digits = self.position;
-            self.consume_digits();
+            self.consume_digits()?;
             if digits == self.position {
                 return Err(invalid_json_input(self.input));
             }
         }
         Ok(RenderedJson {
-            text: self.input[start..self.position].into(),
+            text: self.control.copy_text(&self.input[start..self.position])?,
             is_null: false,
         })
     }
 
-    fn consume_digits(&mut self) {
+    fn consume_digits(&mut self) -> Result<()> {
         while matches!(self.peek(), Some(b'0'..=b'9')) {
+            self.control.check()?;
             self.position += 1;
         }
+        Ok(())
     }
 
-    fn skip_whitespace(&mut self) {
+    fn skip_whitespace(&mut self) -> Result<()> {
         while matches!(self.peek(), Some(b' ' | b'\n' | b'\r' | b'\t')) {
+            self.control.check()?;
             self.position += 1;
         }
+        Ok(())
     }
 
     fn consume(&mut self, expected: u8) -> bool {

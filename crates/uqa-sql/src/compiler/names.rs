@@ -109,6 +109,15 @@ pub(crate) fn validate_create_table_envelope(
 }
 
 pub(crate) fn render_relation_component(component: &str) -> String {
+    let mut output = String::new();
+    write_relation_component(component, &mut output).expect("writing into a String cannot fail");
+    output
+}
+
+pub(crate) fn write_relation_component(
+    component: &str,
+    output: &mut impl std::fmt::Write,
+) -> std::fmt::Result {
     let can_render_bare = component
         .bytes()
         .enumerate()
@@ -118,9 +127,16 @@ pub(crate) fn render_relation_component(component: &str) -> String {
             _ => false,
         });
     if can_render_bare && !component.is_empty() {
-        component.to_string()
+        output.write_str(component)
     } else {
-        format!("\"{}\"", component.replace('"', "\"\""))
+        output.write_char('"')?;
+        for (index, part) in component.split('"').enumerate() {
+            if index != 0 {
+                output.write_str("\"\"")?;
+            }
+            output.write_str(part)?;
+        }
+        output.write_char('"')
     }
 }
 

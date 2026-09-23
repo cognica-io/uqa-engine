@@ -9,7 +9,7 @@
 use super::source::Source;
 use crate::schema::retention::CatalogRetentionError;
 use uqa_core::{
-    memory::{Budgeted, BudgetedString, BudgetedVec, MemoryBudget, MemoryReservation},
+    memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryReservation, ProductionControl},
     CancellationToken, QueryCancelled, Value,
 };
 
@@ -17,26 +17,23 @@ pub(super) type Result<T> = std::result::Result<T, CatalogRetentionError>;
 
 pub(super) struct Control<'a> {
     pub(super) memory: MemoryReservation,
-    original: &'a CancellationToken,
-    invoking: &'a CancellationToken,
+    production: ProductionControl<'a>,
 }
 
 impl<'a> Control<'a> {
     pub(super) fn new(
-        budget: &MemoryBudget,
+        budget: &'a MemoryBudget,
         original: &'a CancellationToken,
         invoking: &'a CancellationToken,
     ) -> Self {
         Self {
             memory: budget.empty_reservation(),
-            original,
-            invoking,
+            production: ProductionControl::new(budget, original, invoking),
         }
     }
 
     pub(super) fn check(&self) -> std::result::Result<(), QueryCancelled> {
-        self.original.check()?;
-        self.invoking.check()
+        self.production.check_cancellation()
     }
 }
 
@@ -105,22 +102,11 @@ impl Lowering<'_> {
             .control
             .as_mut()
             .expect("borrowed AST uses controlled lowering");
-        control.check()?;
-        let mut output = BudgetedString::new(control.memory.budget());
-        output.reserve(text.len())?;
-        let mut begin = 0;
-        while begin < text.len() {
-            control.check()?;
-            let mut end = begin.saturating_add(4096).min(text.len());
-            while !text.is_char_boundary(end) {
-                end -= 1;
-            }
-            output.push_str(&text[begin..end])?;
-            begin = end;
-        }
-        control.check()?;
-        let (output, memory) = output.into_parts();
-        control.memory.absorb(memory);
+        let copied = control.production.copy_text(text)?;
+        let (output, memory) = copied.into_parts();
+        control
+            .memory
+            .absorb(memory.expect("controlled text production"));
         Ok(output)
     }
 
@@ -133,10 +119,11 @@ impl Lowering<'_> {
                     .control
                     .as_mut()
                     .expect("borrowed AST uses controlled lowering");
-                let copied =
-                    value.clone_budgeted_with_check(control.memory.budget(), || control.check())?;
+                let copied = control.production.copy_value(value)?;
                 let (value, memory) = copied.into_parts();
-                control.memory.absorb(memory);
+                control
+                    .memory
+                    .absorb(memory.expect("controlled value production"));
                 Ok(value)
             }
         }

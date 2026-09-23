@@ -47,7 +47,9 @@ pub use common::{
     effective_overload_argument_type_with_params, function_call_argument_signature,
     values_column_types, FunctionCallArgumentSignature,
 };
-pub use equality::{equality_operand_type, foreign_key_operand_type};
+pub use equality::{
+    equality_operand_type, equality_operand_type_with_control, foreign_key_operand_type,
+};
 #[doc(hidden)]
 pub use fixed_builtin::{
     fixed_builtin_return_type, is_function as is_fixed_builtin, resolve_fixed_builtin_call,
@@ -66,7 +68,8 @@ pub use md5::{resolve_md5_overload, ResolvedMd5Overload};
 #[doc(hidden)]
 pub use operators::{
     binary_operator_by_oid, binary_operator_catalog_entry, binary_operator_types,
-    binary_result_type, numeric_operator_types, require_equality_operator,
+    binary_operator_types_with_control, binary_result_type, binary_result_type_with_control,
+    numeric_operator_types, numeric_operator_types_with_control, require_equality_operator,
     require_ordering_operator, unary_minus_catalog_entry, unary_operator_by_oid,
     BinaryOperatorCatalogEntry, NumericOperatorTypes, UnaryOperatorCatalogEntry,
 };

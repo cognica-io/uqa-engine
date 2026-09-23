@@ -11,9 +11,9 @@ use crate::ast::{
 };
 use crate::{schema::ScalarTypeSchema, FunctionTypeResolver, SQLError, SQLParam, ScalarExpr};
 
-use super::super::{common::base_type, resolve_local_builtin_overload, BuiltinFunctionOverload};
-use super::{named_binary_operator_catalog_entry, resolution, UnaryOperatorCatalogEntry};
+use super::{resolution, UnaryOperatorCatalogEntry};
 
+#[derive(Debug)]
 pub struct NumericOperatorTypes {
     pub arguments: Vec<ColumnType>,
     pub result: ColumnType,
@@ -67,88 +67,23 @@ pub(in crate::type_resolution) fn bind_call(
     }
 }
 
+mod production;
+pub use production::numeric_operator_types_with_control;
+
 /// Select a built-in operator using its operands, without consulting the SQL routine namespace.
 pub fn numeric_operator_types(
     operator: NumericOperator,
     arguments: &[Option<ColumnType>],
 ) -> Result<NumericOperatorTypes, SQLError> {
-    if arguments.len() != operator.arity() {
-        return Err(SQLError::Internal(format!(
-            "operator {} expects {} operands, got {}",
-            operator.symbol(),
-            operator.arity(),
-            arguments.len()
-        )));
-    }
-    if let [left, right] = arguments {
-        let [left, right, result] = resolution::named_binary_operator_types(
-            operator.symbol(),
-            left.as_ref(),
-            right.as_ref(),
-        )?;
-        let entry = named_binary_operator_catalog_entry(operator.symbol(), [&left, &right])?;
-        return Ok(NumericOperatorTypes {
-            arguments: vec![left, right],
-            result,
-            oid: entry.oid,
-            function_oid: entry.function_oid,
-        });
-    }
-    let argument = arguments[0]
-        .as_ref()
-        .map(|ty| base_type(ty).without_type_modifiers());
-    let candidates = PREFIX_SIGNATURES
-        .iter()
-        .filter(|&&(name, ..)| name == operator.symbol())
-        .map(|&(_, ty, ..)| {
-            let ty = resolution::catalog_type(ty).expect("static prefix operator type");
-            BuiltinFunctionOverload {
-                name: operator.symbol().into(),
-                argument_names: vec![None],
-                argument_types: vec![ty.clone()],
-                default_arguments: 0,
-                return_type: ty,
-            }
-        })
-        .collect::<Vec<_>>();
-    let selected = resolve_local_builtin_overload(
-        operator.symbol(),
-        None,
-        &[None],
-        std::slice::from_ref(&argument),
-        &candidates,
+    numeric_operator_types_with_control(
+        operator,
+        arguments,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
     )
-    .map_err(|error| {
-        let ambiguous = error.sqlstate() == Some("42725");
-        SQLError::Routine {
-            sqlstate: if ambiguous { "42725" } else { "42883" }.into(),
-            message: format!(
-                "operator {}: {} {}",
-                if ambiguous {
-                    "is not unique"
-                } else {
-                    "does not exist"
-                },
-                operator.symbol(),
-                argument
-                    .as_ref()
-                    .map_or_else(|| "unknown".into(), ColumnType::sql_name)
-            ),
-        }
-    })?;
-    let result = selected.return_type;
-    let (_, _, oid, function_oid) = PREFIX_SIGNATURES
-        .iter()
-        .copied()
-        .find(|&(name, ty, ..)| {
-            name == operator.symbol() && resolution::catalog_type(ty).as_ref() == Some(&result)
-        })
-        .expect("selected prefix operator identity");
-    Ok(NumericOperatorTypes {
-        arguments: vec![result.clone()],
-        result,
-        oid,
-        function_oid,
+    .map(|selected| {
+        selected
+            .into_uncontrolled()
+            .expect("ordinary operator selection has no reservation")
     })
 }
 

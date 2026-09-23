@@ -14,6 +14,7 @@ use crate::{
     SQLError,
 };
 
+pub(crate) mod eligibility;
 pub(super) mod typing;
 
 pub fn prepare_generated_columns(

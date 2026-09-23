@@ -5,6 +5,7 @@
 //
 
 use super::casting::cast_integer;
+use super::json::value_to_json;
 use super::*;
 use crate::ast::Expr;
 
@@ -379,7 +380,12 @@ fn integer_projection_rejects_float_saturation_boundaries() {
         9_223_372_036_854_775_808.0,
     ] {
         assert!(to_i64(&Value::Float(value)).is_err(), "accepted {value}");
-        assert!(cast_integer(&Value::Float(value), "bigint").is_err());
+        assert!(cast_integer(
+            &Value::Float(value),
+            "bigint",
+            &uqa_core::memory::ProductionControl::uncontrolled()
+        )
+        .is_err());
         assert_eq!(coerce_i64(&Value::Float(value)), None);
     }
     assert_eq!(

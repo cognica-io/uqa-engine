@@ -6,19 +6,26 @@
 
 //! OID-family and binary representation conversion.
 
-use uqa_core::Value;
+use uqa_core::{
+    memory::{Produced, ProductionControl, ProductionVec},
+    Value,
+};
 
 use crate::error::{Result, SQLError};
 
-use super::{canonical_cast_source, out_of_range, split_type_modifier, undefined_cast};
+use super::{canonical_cast_source_with_control, out_of_range, text_value, undefined_cast};
 
-pub(super) fn cast_oid(value: &Value, source_ty: Option<&str>) -> Result<Value> {
-    let source = canonical_cast_source(source_ty, value);
+pub(super) fn cast_oid(
+    value: &Value,
+    source_ty: Option<&str>,
+    control: &ProductionControl<'_>,
+) -> Result<Value> {
+    let source = canonical_cast_source_with_control(source_ty, value, control)?;
     match (source.as_str(), value) {
         (
             "unknown" | "text" | "varchar" | "bpchar" | "name",
             Value::Str(text) | Value::FixedChar(text),
-        ) => parse_uint32_input(text, "oid"),
+        ) => parse_uint32_input(text, "oid", control),
         ("int2", Value::Int(value)) => {
             let value = i16::try_from(*value).map_err(|_| out_of_range("smallint"))?;
             Ok(Value::Int(i64::from(i32::from(value) as u32)))
@@ -44,49 +51,74 @@ pub(super) fn cast_oid(value: &Value, source_ty: Option<&str>) -> Result<Value> 
     }
 }
 
-pub(super) fn cast_regclass(value: &Value, source_ty: Option<&str>) -> Result<Value> {
-    let source = canonical_cast_source(source_ty, value);
+pub(super) fn cast_regclass(
+    value: &Value,
+    source_ty: Option<&str>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let source = canonical_cast_source_with_control(source_ty, value, control)?;
     match (source.as_str(), value) {
         (
             "unknown" | "text" | "varchar" | "bpchar" | "name" | "regclass",
             Value::Str(text) | Value::FixedChar(text),
-        ) => Ok(Value::Str(text.clone())),
-        (_, Value::Int(_)) => cast_oid(value, source_ty),
+        ) => text_value(control.copy_text(text)?, false, control),
+        (_, Value::Int(_)) => Ok(control.finish(
+            cast_oid(value, source_ty, control)?,
+            control.empty_reservation(),
+        )?),
         _ => Err(undefined_cast(&source, "regclass")),
     }
 }
 
-pub(super) fn cast_regnamespace(value: &Value, source_ty: Option<&str>) -> Result<Value> {
-    let source = canonical_cast_source(source_ty, value);
+pub(super) fn cast_regnamespace(
+    value: &Value,
+    source_ty: Option<&str>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let source = canonical_cast_source_with_control(source_ty, value, control)?;
     match (source.as_str(), value) {
         (
             "unknown" | "text" | "varchar" | "bpchar" | "name" | "regnamespace",
             Value::Str(text) | Value::FixedChar(text),
-        ) => Ok(Value::Str(text.clone())),
-        (_, Value::Int(_)) => cast_oid(value, source_ty),
+        ) => text_value(control.copy_text(text)?, false, control),
+        (_, Value::Int(_)) => Ok(control.finish(
+            cast_oid(value, source_ty, control)?,
+            control.empty_reservation(),
+        )?),
         _ => Err(undefined_cast(&source, "regnamespace")),
     }
 }
 
-pub(super) fn cast_regrole(value: &Value, source_ty: Option<&str>) -> Result<Value> {
-    let source = canonical_cast_source(source_ty, value);
+pub(super) fn cast_regrole(
+    value: &Value,
+    source_ty: Option<&str>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let source = canonical_cast_source_with_control(source_ty, value, control)?;
     match (source.as_str(), value) {
         (
             "unknown" | "text" | "varchar" | "bpchar" | "name" | "regrole",
             Value::Str(text) | Value::FixedChar(text),
-        ) => Ok(Value::Str(text.clone())),
-        (_, Value::Int(_)) => cast_oid(value, source_ty),
+        ) => text_value(control.copy_text(text)?, false, control),
+        (_, Value::Int(_)) => Ok(control.finish(
+            cast_oid(value, source_ty, control)?,
+            control.empty_reservation(),
+        )?),
         _ => Err(undefined_cast(&source, "regrole")),
     }
 }
 
-pub(super) fn cast_xid(value: &Value, source_ty: Option<&str>) -> Result<Value> {
-    let source = canonical_cast_source(source_ty, value);
+pub(super) fn cast_xid(
+    value: &Value,
+    source_ty: Option<&str>,
+    control: &ProductionControl<'_>,
+) -> Result<Value> {
+    let source = canonical_cast_source_with_control(source_ty, value, control)?;
     match (source.as_str(), value) {
         (
             "unknown" | "text" | "varchar" | "bpchar" | "name",
             Value::Str(text) | Value::FixedChar(text),
-        ) => parse_uint32_input(text, "xid"),
+        ) => parse_uint32_input(text, "xid", control),
         ("xid", Value::Int(value)) => u32::try_from(*value)
             .map(|value| Value::Int(i64::from(value)))
             .map_err(|_| out_of_range("xid")),
@@ -94,27 +126,34 @@ pub(super) fn cast_xid(value: &Value, source_ty: Option<&str>) -> Result<Value> 
     }
 }
 
-pub(super) fn cast_bytea(value: &Value, source_ty: Option<&str>) -> Result<Value> {
-    let source = canonical_cast_source(source_ty, value);
+pub(super) fn cast_bytea(
+    value: &Value,
+    source_ty: Option<&str>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let source = canonical_cast_source_with_control(source_ty, value, control)?;
     match (source.as_str(), value) {
-        ("bytea", Value::Bytes(bytes)) => Ok(Value::Bytes(bytes.clone())),
-        ("int2" | "int4" | "int8", Value::Int(value)) => integer_to_bytea(*value, Some(&source)),
+        ("bytea", Value::Bytes(_)) => Ok(control.copy_value(value)?),
+        ("int2" | "int4" | "int8", Value::Int(value)) => {
+            integer_to_bytea(*value, Some(&source), control)
+        }
         (
             "unknown" | "text" | "varchar" | "bpchar" | "name",
             Value::Str(text) | Value::FixedChar(text),
-        ) => parse_bytea_input(text),
+        ) => parse_bytea_input(text, control),
         _ => Err(undefined_cast(&source, "bytea")),
     }
 }
 
-fn parse_bytea_input(text: &str) -> Result<Value> {
+fn parse_bytea_input(text: &str, control: &ProductionControl<'_>) -> Result<Produced<Value>> {
     if let Some(hex) = text.strip_prefix("\\x") {
         if !hex.len().is_multiple_of(2) {
             return Err(invalid_bytea(
                 "invalid hexadecimal data: odd number of digits",
             ));
         }
-        let mut bytes = Vec::with_capacity(hex.len() / 2);
+        let mut bytes = ProductionVec::new(*control);
+        bytes.reserve(hex.len() / 2)?;
         for pair in hex.as_bytes().chunks_exact(2) {
             let hi = (pair[0] as char)
                 .to_digit(16)
@@ -122,22 +161,23 @@ fn parse_bytea_input(text: &str) -> Result<Value> {
             let lo = (pair[1] as char)
                 .to_digit(16)
                 .ok_or_else(|| invalid_bytea("invalid hexadecimal digit"))?;
-            bytes.push((hi * 16 + lo) as u8);
+            bytes.push_copy((hi * 16 + lo) as u8)?;
         }
-        return Ok(Value::Bytes(bytes));
+        return finish_bytes(bytes.finish()?, control);
     }
 
     let input = text.as_bytes();
-    let mut output = Vec::with_capacity(input.len());
+    let mut output = ProductionVec::new(*control);
+    output.reserve(input.len())?;
     let mut index = 0;
     while index < input.len() {
         if input[index] != b'\\' {
-            output.push(input[index]);
+            output.push_copy(input[index])?;
             index += 1;
             continue;
         }
         if input.get(index + 1) == Some(&b'\\') {
-            output.push(b'\\');
+            output.push_copy(b'\\')?;
             index += 2;
             continue;
         }
@@ -149,10 +189,10 @@ fn parse_bytea_input(text: &str) -> Result<Value> {
         {
             return Err(invalid_bytea("invalid input syntax for type bytea"));
         }
-        output.push((octal[0] - b'0') * 64 + (octal[1] - b'0') * 8 + (octal[2] - b'0'));
+        output.push_copy((octal[0] - b'0') * 64 + (octal[1] - b'0') * 8 + (octal[2] - b'0'))?;
         index += 4;
     }
-    Ok(Value::Bytes(output))
+    finish_bytes(output.finish()?, control)
 }
 
 fn invalid_bytea(message: &str) -> SQLError {
@@ -162,7 +202,10 @@ fn invalid_bytea(message: &str) -> SQLError {
     }
 }
 
-fn parse_uint32_input(text: &str, target: &str) -> Result<Value> {
+fn parse_uint32_input(text: &str, target: &str, control: &ProductionControl<'_>) -> Result<Value> {
+    for _ in text.as_bytes().chunks(4096) {
+        control.check()?;
+    }
     let trimmed = text.trim();
     let digits = trimmed
         .strip_prefix('+')
@@ -192,32 +235,44 @@ fn parse_uint32_input(text: &str, target: &str) -> Result<Value> {
     Ok(Value::Int(i64::from(value)))
 }
 
-fn integer_to_bytea(value: i64, source_ty: Option<&str>) -> Result<Value> {
-    let source = source_ty
-        .map(split_type_modifier)
-        .map(|(base, _)| base)
-        .unwrap_or(std::borrow::Cow::Borrowed("integer"));
-    let bytes = match source.as_ref() {
-        "smallint" | "int2" | "pg_catalog.int2" => i16::try_from(value)
-            .map(i16::to_be_bytes)
-            .map(|bytes| bytes.to_vec())
-            .map_err(|_| out_of_range("smallint"))?,
-        "bigint" | "int8" | "bigserial" | "serial8" | "pg_catalog.int8" => {
-            value.to_be_bytes().to_vec()
+fn integer_to_bytea(
+    value: i64,
+    source_ty: Option<&str>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let (source, _) =
+        crate::ast::split_type_modifier_with_control(source_ty.unwrap_or("integer"), control)?;
+    let bytes = value.to_be_bytes();
+    let slice = match &**source {
+        "smallint" | "int2" | "pg_catalog.int2" => {
+            i16::try_from(value).map_err(|_| out_of_range("smallint"))?;
+            &bytes[6..]
         }
+        "bigint" | "int8" | "bigserial" | "serial8" | "pg_catalog.int8" => &bytes[..],
         "integer" | "int" | "int4" | "serial" | "serial4" | "pg_catalog.int4" => {
-            i32::try_from(value)
-                .map(i32::to_be_bytes)
-                .map(|bytes| bytes.to_vec())
-                .map_err(|_| out_of_range("integer"))?
+            i32::try_from(value).map_err(|_| out_of_range("integer"))?;
+            &bytes[4..]
         }
         other => {
             return Err(SQLError::TypeMismatch(format!(
                 "cannot cast {other} to bytea"
-            )));
+            )))
         }
     };
-    Ok(Value::Bytes(bytes))
+    let mut output = ProductionVec::new(*control);
+    output.reserve(slice.len())?;
+    for byte in slice {
+        output.push_copy(*byte)?;
+    }
+    finish_bytes(output.finish()?, control)
+}
+
+fn finish_bytes(
+    bytes: Produced<Vec<u8>>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let (bytes, memory) = bytes.into_parts();
+    Ok(control.finish(Value::Bytes(bytes), memory)?)
 }
 
 pub(super) fn bytea_to_integer(bytes: &[u8], target: &str) -> Result<i64> {

@@ -6,120 +6,192 @@
 
 //! Scalar coercion, checked numeric conversion, and vector/tensor decoding.
 
-use super::{
-    hex_encode, out_of_range, value_to_json, ArrayValue, DecimalValue, Result, SQLError, Value,
-};
+use super::{out_of_range, ArrayValue, DecimalValue, Result, SQLError, Value};
 
-pub fn value_to_string(v: &Value) -> String {
-    match v {
-        Value::Null => "".into(),
-        Value::Void => "".into(),
-        Value::Int(i) => i.to_string(),
-        Value::Float(f) => uqa_core::format_float_pg(*f),
-        Value::Decimal(d) => d.to_sql_string(),
-        Value::Str(s) => s.clone(),
-        Value::FixedChar(s) => s.trim_end_matches(' ').to_string(),
-        Value::Bool(b) => (if *b { "true" } else { "false" }).into(),
-        Value::Temporal(t) => t.to_sql_string(),
-        Value::Json(text) | Value::JsonB(text) => text.clone(),
-        Value::Array(array) => array_value_to_string(array),
-        Value::List(_) | Value::Map(_) => value_to_json(v).to_string(),
-        Value::Row(values) => composite_value_to_string(values.iter()),
-        Value::Record(fields) => composite_value_to_string(fields.iter().map(|(_, value)| value)),
-        // bytea renders as PostgreSQL hex output in text contexts.
-        Value::Bytes(b) => format!("\\x{}", hex_encode(b)),
-    }
+use uqa_core::memory::{Produced, ProductionControl, ProductionString, ProductionVec};
+
+pub fn value_to_string(value: &Value) -> String {
+    value_to_string_with_control(value, &ProductionControl::uncontrolled())
+        .expect("ordinary value text production")
+        .into_uncontrolled()
+        .expect("ordinary value text")
 }
 
-/// `PostgreSQL`'s legacy `int2vector` and `oidvector` text format is a space-separated vector, not the brace-delimited array format used by their array-like runtime carrier.
+pub fn value_to_string_with_control(
+    value: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>> {
+    control.check()?;
+    Ok(match value {
+        Value::Null | Value::Void => control.copy_text("")?,
+        Value::Int(value) => control.format(format_args!("{value}"))?,
+        Value::Float(value) => uqa_core::format_float_pg_with_control(*value, control)?,
+        Value::Decimal(value) => value.to_sql_string_with_control(control)?,
+        Value::Str(value) | Value::Json(value) | Value::JsonB(value) => control.copy_text(value)?,
+        Value::FixedChar(value) => control.copy_text(value.trim_end_matches(' '))?,
+        Value::Bool(value) => control.copy_text(if *value { "true" } else { "false" })?,
+        Value::Temporal(value) => value.to_sql_string_with_control(control)?,
+        Value::Array(value) => array_value_to_string_with_control(value, control)?,
+        Value::List(_) | Value::Map(_) => {
+            return super::json::format_value_as_json_with_control(value, control)
+        }
+        Value::Row(values) => composite_value_to_string(values.iter(), control)?,
+        Value::Record(fields) => {
+            composite_value_to_string(fields.iter().map(|(_, value)| value), control)?
+        }
+        Value::Bytes(values) => {
+            const HEX: &[u8; 16] = b"0123456789abcdef";
+            let mut text = ProductionString::new(*control);
+            text.push_str("\\x")?;
+            for byte in values {
+                text.push(char::from(HEX[usize::from(byte >> 4)]))?;
+                text.push(char::from(HEX[usize::from(byte & 0xf)]))?;
+            }
+            text.finish()?
+        }
+    })
+}
+
+/// `PostgreSQL`'s legacy vector text format separates values with spaces.
 pub fn vector_value_to_string(value: &Value) -> Option<String> {
+    vector_value_to_string_with_control(value, &ProductionControl::uncontrolled())
+        .expect("ordinary vector formatting")
+        .map(|text| text.into_uncontrolled().expect("ordinary vector text"))
+}
+
+pub(super) fn vector_value_to_string_with_control(
+    value: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<String>>> {
+    control.check()?;
     let elements = match value {
         Value::List(elements) => elements.as_slice(),
         Value::Array(array) if array.dimensions().len() <= 1 => array.elements(),
-        _ => return None,
+        _ => return Ok(None),
     };
-    Some(
-        elements
-            .iter()
-            .map(value_to_string)
-            .collect::<Vec<_>>()
-            .join(" "),
-    )
+    let mut text = ProductionString::new(*control);
+    for (index, value) in elements.iter().enumerate() {
+        if index != 0 {
+            text.push(' ')?;
+        }
+        text.push_str(&value_to_string_with_control(value, control)?)?;
+    }
+    Ok(Some(text.finish()?))
 }
 
 pub fn array_value_to_string(array: &ArrayValue) -> String {
-    let dimensions = if array
-        .lower_bounds()
-        .iter()
-        .any(|lower_bound| *lower_bound != 1)
-    {
-        array
-            .lower_bounds()
-            .iter()
-            .zip(array.dimensions())
-            .map(|(lower, length)| {
-                let upper = i64::from(*lower) + i64::try_from(*length).unwrap_or(i64::MAX) - 1;
-                format!("[{lower}:{upper}]")
-            })
-            .collect::<String>()
-            + "="
-    } else {
-        String::new()
-    };
-    format!("{dimensions}{}", array_elements_to_string(array.elements()))
+    array_value_to_string_with_control(array, &ProductionControl::uncontrolled())
+        .expect("ordinary array formatting")
+        .into_uncontrolled()
+        .expect("ordinary array text")
 }
 
-fn array_elements_to_string(elements: &[Value]) -> String {
-    let rendered = elements
-        .iter()
-        .map(|value| match value {
-            Value::Null => "NULL".to_string(),
-            Value::Bool(value) => if *value { "t" } else { "f" }.to_string(),
-            Value::List(nested) => array_elements_to_string(nested),
-            Value::Array(nested) => array_value_to_string(nested),
+pub(super) fn array_value_to_string_with_control(
+    array: &ArrayValue,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>> {
+    let mut text = ProductionString::new(*control);
+    append_array(&mut text, array, control)?;
+    Ok(text.finish()?)
+}
+
+fn append_array(
+    text: &mut ProductionString<'_>,
+    array: &ArrayValue,
+    control: &ProductionControl<'_>,
+) -> Result<()> {
+    if array.lower_bounds().iter().any(|lower| *lower != 1) {
+        for (lower, length) in array.lower_bounds().iter().zip(array.dimensions()) {
+            let upper = i64::from(*lower) + i64::try_from(*length).unwrap_or(i64::MAX) - 1;
+            text.push_str(&control.format(format_args!("[{lower}:{upper}]"))?)?;
+        }
+        text.push('=')?;
+    }
+    append_array_elements(text, array.elements(), control)
+}
+
+fn append_array_elements(
+    text: &mut ProductionString<'_>,
+    elements: &[Value],
+    control: &ProductionControl<'_>,
+) -> Result<()> {
+    text.push('{')?;
+    for (index, value) in elements.iter().enumerate() {
+        if index != 0 {
+            text.push(',')?;
+        }
+        match value {
+            Value::Null => text.push_str("NULL")?,
+            Value::Bool(value) => text.push_str(if *value { "t" } else { "f" })?,
+            Value::List(values) => append_array_elements(text, values, control)?,
+            Value::Array(array) => append_array(text, array, control)?,
             other => {
-                let text = value_to_string(other);
-                let requires_quotes = text.is_empty()
-                    || text.eq_ignore_ascii_case("null")
-                    || text.chars().any(|character| {
-                        character.is_whitespace()
-                            || matches!(character, ',' | '{' | '}' | '"' | '\\')
-                    });
-                if requires_quotes {
-                    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
-                } else {
-                    text
+                let value = value_to_string_with_control(other, control)?;
+                let mut quoted = value.is_empty() || value.eq_ignore_ascii_case("null");
+                for character in value.chars() {
+                    control.check()?;
+                    quoted |= character.is_whitespace()
+                        || matches!(character, ',' | '{' | '}' | '"' | '\\');
                 }
+                append_escaped(text, &value, quoted, false)?;
             }
-        })
-        .collect::<Vec<_>>();
-    format!("{{{}}}", rendered.join(","))
+        }
+    }
+    text.push('}')?;
+    Ok(())
 }
 
-fn composite_value_to_string<'a>(values: impl IntoIterator<Item = &'a Value>) -> String {
-    let fields = values
-        .into_iter()
-        .map(|value| {
-            if matches!(value, Value::Null) {
-                return String::new();
-            }
-            let text = match value {
-                Value::Bool(true) => "t".to_string(),
-                Value::Bool(false) => "f".to_string(),
-                other => value_to_string(other),
-            };
-            if text.is_empty()
-                || text.bytes().any(|byte| {
-                    matches!(byte, b',' | b'(' | b')' | b'"' | b'\\') || byte.is_ascii_whitespace()
-                })
-            {
-                format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\"\""))
-            } else {
-                text
-            }
-        })
-        .collect::<Vec<_>>();
-    format!("({})", fields.join(","))
+fn composite_value_to_string<'a>(
+    values: impl IntoIterator<Item = &'a Value>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>> {
+    let mut text = ProductionString::new(*control);
+    text.push('(')?;
+    for (index, value) in values.into_iter().enumerate() {
+        if index != 0 {
+            text.push(',')?;
+        }
+        if matches!(value, Value::Null) {
+            continue;
+        }
+        let value = match value {
+            Value::Bool(value) => control.copy_text(if *value { "t" } else { "f" })?,
+            other => value_to_string_with_control(other, control)?,
+        };
+        let mut quoted = value.is_empty();
+        for byte in value.bytes() {
+            control.check()?;
+            quoted |=
+                matches!(byte, b',' | b'(' | b')' | b'"' | b'\\') || byte.is_ascii_whitespace();
+        }
+        append_escaped(&mut text, &value, quoted, true)?;
+    }
+    text.push(')')?;
+    Ok(text.finish()?)
+}
+
+fn append_escaped(
+    text: &mut ProductionString<'_>,
+    value: &str,
+    quoted: bool,
+    composite: bool,
+) -> Result<()> {
+    if !quoted {
+        text.push_str(value)?;
+        return Ok(());
+    }
+    text.push('"')?;
+    for character in value.chars() {
+        if character == '\\' || (character == '"' && !composite) {
+            text.push('\\')?;
+        }
+        if character == '"' && composite {
+            text.push('"')?;
+        }
+        text.push(character)?;
+    }
+    text.push('"')?;
+    Ok(())
 }
 
 pub(super) fn expect_str(args: &[Value], idx: usize) -> Result<String> {
@@ -139,14 +211,20 @@ pub(super) fn string1<F: FnOnce(&str) -> String>(args: &[Value], f: F) -> Result
     Ok(Value::Str(f(&s)))
 }
 
-pub(super) fn float1<F: FnOnce(f64) -> f64>(args: &[Value], name: &str, f: F) -> Result<Value> {
+pub(super) fn float1_with_control<F: FnOnce(f64) -> f64>(
+    args: &[Value],
+    name: &str,
+    f: F,
+    control: &ProductionControl<'_>,
+) -> Result<Value> {
+    control.check()?;
     if args.len() != 1 {
         return Err(SQLError::TypeMismatch(format!("{name} takes 1 arg")));
     }
     if matches!(args[0], Value::Null) {
         return Ok(Value::Null);
     }
-    Ok(Value::Float(f(to_f64(&args[0])?)))
+    Ok(Value::Float(f(to_f64_with_control(&args[0], control)?)))
 }
 
 pub(super) fn initcap_str(s: &str) -> String {
@@ -173,11 +251,16 @@ pub(super) fn initcap_str(s: &str) -> String {
 }
 
 pub(super) fn to_i64(v: &Value) -> Result<i64> {
+    to_i64_with_control(v, &ProductionControl::uncontrolled())
+}
+
+pub(super) fn to_i64_with_control(v: &Value, control: &ProductionControl<'_>) -> Result<i64> {
+    control.check()?;
     match v {
         Value::Int(n) => Ok(*n),
         Value::Float(f) => float_to_i64_trunc(*f),
         Value::Decimal(d) => d
-            .to_i64_trunc()
+            .to_i64_trunc_with_control(control)?
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast {v:?} to integer"))),
         Value::Bool(b) => Ok(i64::from(*b)),
         Value::Str(s) | Value::FixedChar(s) => s
@@ -205,20 +288,37 @@ pub(super) fn allocation_error(label: &str) -> SQLError {
 }
 
 pub(crate) fn to_f64(v: &Value) -> Result<f64> {
-    super::floating::to_float(v, super::FloatWidth::DoublePrecision)
+    to_f64_with_control(v, &ProductionControl::uncontrolled())
 }
 
-pub(super) fn to_decimal(v: &Value) -> Result<DecimalValue> {
-    match v {
-        Value::Decimal(d) => Ok(d.clone()),
-        Value::Int(n) => Ok(DecimalValue::from_i64(*n)),
-        Value::Float(f) => DecimalValue::from_f64_lossy(*f)
-            .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast {v:?} to numeric"))),
-        Value::Bool(b) => Ok(DecimalValue::from_bool(*b)),
-        Value::Str(s) | Value::FixedChar(s) => {
-            DecimalValue::parse(s).ok_or_else(|| SQLError::Routine {
+pub(crate) fn to_f64_with_control(v: &Value, control: &ProductionControl<'_>) -> Result<f64> {
+    super::floating::to_float_with_control(v, super::FloatWidth::DoublePrecision, control)
+}
+
+pub(super) fn to_decimal(value: &Value) -> Result<DecimalValue> {
+    to_decimal_with_control(value, &ProductionControl::uncontrolled())?
+        .into_uncontrolled()
+        .map_err(|_| SQLError::Internal("ordinary numeric production owner".into()))
+}
+
+pub(super) fn to_decimal_with_control(
+    value: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<DecimalValue>> {
+    control.check()?;
+    match value {
+        Value::Decimal(value) => Ok(value.clone_with_control(control)?),
+        Value::Int(value) => Ok(DecimalValue::from_i64_with_control(*value, control)?),
+        Value::Bool(value) => Ok(DecimalValue::from_i64_with_control(
+            i64::from(*value),
+            control,
+        )?),
+        Value::Float(number) => DecimalValue::from_f64_lossy_with_control(*number, control)?
+            .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast {value:?} to numeric"))),
+        Value::Str(text) | Value::FixedChar(text) => {
+            DecimalValue::parse_with_control(text, control)?.ok_or_else(|| SQLError::Routine {
                 sqlstate: "22P02".into(),
-                message: format!("invalid input syntax for type numeric: \"{s}\""),
+                message: format!("invalid input syntax for type numeric: \"{text}\""),
             })
         }
         other => Err(SQLError::TypeMismatch(format!(
@@ -270,12 +370,22 @@ pub(super) fn coerce_i64(v: &Value) -> Option<i64> {
 /// list (used to read vector literals from `ARRAY[...]` or `$N` Vector
 /// params).
 pub fn value_to_vector(v: &Value) -> Result<Vec<f32>> {
+    value_to_vector_with_control(v, &ProductionControl::uncontrolled())?
+        .into_uncontrolled()
+        .map_err(|_| SQLError::Internal("ordinary vector owner".into()))
+}
+
+pub fn value_to_vector_with_control(
+    v: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<f32>>> {
     let items = vector_items(v)?;
-    let mut out = Vec::with_capacity(items.len());
+    let mut out = ProductionVec::new(*control);
+    out.reserve(items.len())?;
     for item in items {
-        out.push(vector_element(item)?);
+        out.push_copy(vector_element_with_control(item, control)?)?;
     }
-    Ok(out)
+    Ok(out.finish()?)
 }
 
 pub(crate) fn vector_items(v: &Value) -> Result<&[Value]> {
@@ -293,11 +403,19 @@ pub(crate) fn vector_items(v: &Value) -> Result<&[Value]> {
 }
 
 pub(crate) fn vector_element(item: &Value) -> Result<f32> {
+    vector_element_with_control(item, &ProductionControl::uncontrolled())
+}
+
+pub(crate) fn vector_element_with_control(
+    item: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<f32> {
+    control.check()?;
     match item {
         Value::Float(f) => numeric_f64_to_f32(*f, item),
         Value::Int(i) => Ok(*i as f32),
         Value::Decimal(d) => numeric_f64_to_f32(
-            d.to_f64().ok_or_else(|| {
+            d.to_f64_with_control(control)?.ok_or_else(|| {
                 SQLError::TypeMismatch(format!("vector element must fit f32, got {item:?}"))
             })?,
             item,
@@ -321,12 +439,22 @@ pub(super) fn numeric_f64_to_f32(value: f64, source: &Value) -> Result<f32> {
 /// vectors. Used by `TENSOR(N)` columns to store chunk embeddings for one
 /// row while still indexing each vector element.
 pub fn value_to_tensor(v: &Value) -> Result<Vec<Vec<f32>>> {
+    value_to_tensor_with_control(v, &ProductionControl::uncontrolled())?
+        .into_uncontrolled()
+        .map_err(|_| SQLError::Internal("ordinary tensor owner".into()))
+}
+
+pub fn value_to_tensor_with_control(
+    v: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<Vec<f32>>>> {
     let items = tensor_items(v)?;
-    let mut out = Vec::with_capacity(items.len());
+    let mut out = ProductionVec::new(*control);
+    out.reserve(items.len())?;
     for item in items {
-        out.push(value_to_vector(item)?);
+        out.push_produced(value_to_vector_with_control(item, control)?)?;
     }
-    Ok(out)
+    Ok(out.finish()?)
 }
 
 pub(crate) fn tensor_items(v: &Value) -> Result<&[Value]> {

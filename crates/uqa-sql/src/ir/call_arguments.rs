@@ -9,7 +9,10 @@
 use super::{ScalarExpr, ScalarOrder};
 use crate::ast::{FunctionBinding, FunctionDispatch};
 use crate::SQLError;
-use uqa_core::Value;
+use uqa_core::{
+    memory::{Produced, ProductionControl, ProductionVec},
+    Value,
+};
 
 /// A SQL call argument after removing the compiler's named and explicit `VARIADIC` syntax markers.
 #[doc(hidden)]
@@ -25,12 +28,28 @@ pub struct ScalarCallArgument<'a> {
 pub fn scalar_call_arguments(
     arguments: &[ScalarExpr],
 ) -> Result<Vec<ScalarCallArgument<'_>>, SQLError> {
-    let mut decoded = Vec::with_capacity(arguments.len());
+    scalar_call_arguments_with_control(arguments, &ProductionControl::uncontrolled()).map(
+        |decoded| {
+            decoded
+                .into_uncontrolled()
+                .expect("ordinary call argument decoding has no reservation")
+        },
+    )
+}
+
+/// Decode the same borrowed markers into an admitted temporary container. Names and expression nodes remain borrowed from the input IR owner.
+pub fn scalar_call_arguments_with_control<'a>(
+    arguments: &'a [ScalarExpr],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<ScalarCallArgument<'a>>>, SQLError> {
+    let mut decoded = ProductionVec::new(*control);
+    decoded.reserve(arguments.len())?;
     for argument in arguments {
-        decoded.push(scalar_call_argument(argument)?);
+        control.check()?;
+        decoded.push_copy(scalar_call_argument(argument)?)?;
     }
     validate_scalar_call_arguments(&decoded)?;
-    Ok(decoded)
+    decoded.finish().map_err(Into::into)
 }
 
 /// Validate cross-argument invariants after individual syntax markers have been decoded, returning whether the call used explicit `VARIADIC` syntax.
@@ -38,25 +57,25 @@ pub fn scalar_call_arguments(
 pub fn validate_scalar_call_arguments(
     arguments: &[ScalarCallArgument<'_>],
 ) -> Result<bool, SQLError> {
-    let variadic_positions = arguments
-        .iter()
-        .enumerate()
-        .filter_map(|(position, argument)| argument.explicit_variadic.then_some(position))
-        .collect::<Vec<_>>();
-    if variadic_positions.len() > 1 {
+    let mut count = 0;
+    let mut last_position = None;
+    for (position, argument) in arguments.iter().enumerate() {
+        if argument.explicit_variadic {
+            count += 1;
+            last_position = Some(position);
+        }
+    }
+    if count > 1 {
         return Err(malformed_call_argument(
             "call contains more than one explicit VARIADIC argument",
         ));
     }
-    if variadic_positions
-        .first()
-        .is_some_and(|position| position + 1 != arguments.len())
-    {
+    if last_position.is_some_and(|position| position + 1 != arguments.len()) {
         return Err(malformed_call_argument(
             "explicit VARIADIC argument must be the final call argument",
         ));
     }
-    Ok(!variadic_positions.is_empty())
+    Ok(count != 0)
 }
 
 /// Decode one compiler-owned call-argument marker. Use [`scalar_call_arguments`] for a complete call so duplicate and ordering invariants are also checked.
@@ -205,3 +224,6 @@ pub fn analyze_expression_call_arguments(
     let explicit_variadic = validate_scalar_call_arguments(&decoded)?;
     Ok((decoded, explicit_variadic))
 }
+
+#[cfg(test)]
+mod production_tests;

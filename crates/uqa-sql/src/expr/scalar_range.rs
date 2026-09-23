@@ -7,10 +7,17 @@
 //! `PostgreSQL` range and multirange scalar functions and lowered operators.
 
 use super::{
-    multirange_from_ranges, parse_multirange, parse_range, value_to_string, CanonicalRange, Result,
-    SQLError, Value,
+    conversion::value_to_string_with_control,
+    range::{
+        multirange_from_produced_ranges, parse_multirange_with_control, parse_range_with_control,
+    },
+    CanonicalMultirange, CanonicalRange, Result, SQLError, Value,
 };
 use crate::ast::{RangeFunctionOperation, RangeSubtype};
+use uqa_core::memory::{Produced, ProductionControl, ProductionString, ProductionVec};
+
+mod sets;
+use sets::RangeSet;
 
 const SUBTYPES: &[RangeSubtype] = &[
     RangeSubtype::Integer,
@@ -22,19 +29,28 @@ const SUBTYPES: &[RangeSubtype] = &[
 ];
 
 pub(super) fn eval_range_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
+    eval_range_functions_with_control(name, args, &ProductionControl::uncontrolled())
+        .map(|result| result.map(|value| value.into_uncontrolled().expect("ordinary range result")))
+}
+
+pub(super) fn eval_range_functions_with_control(
+    name: &str,
+    args: &[Value],
+    control: &ProductionControl<'_>,
+) -> Option<Result<Produced<Value>>> {
     if let Some(subtype) = SUBTYPES
         .iter()
         .copied()
         .find(|subtype| name == subtype.range_name())
     {
-        return Some(range_constructor(subtype, args));
+        return Some(range_constructor(subtype, args, control));
     }
     if let Some(subtype) = SUBTYPES
         .iter()
         .copied()
         .find(|subtype| name == subtype.multirange_name())
     {
-        return Some(multirange_constructor(subtype, args));
+        return Some(multirange_constructor(subtype, args, control));
     }
     None
 }
@@ -45,6 +61,25 @@ pub(super) fn eval_dispatched_range_function(
     multirange: bool,
     args: &[Value],
 ) -> Result<Value> {
+    Ok(eval_dispatched_range_function_with_control(
+        operation,
+        subtype,
+        multirange,
+        args,
+        &ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .expect("ordinary dispatched range result"))
+}
+
+pub(super) fn eval_dispatched_range_function_with_control(
+    operation: RangeFunctionOperation,
+    subtype: RangeSubtype,
+    multirange: bool,
+    args: &[Value],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    control.check()?;
     let operation = match operation {
         RangeFunctionOperation::Lower => "lower",
         RangeFunctionOperation::Upper => "upper",
@@ -60,26 +95,33 @@ pub(super) fn eval_dispatched_range_function(
         RangeFunctionOperation::ContainedBy => "contained_by",
         RangeFunctionOperation::Adjacent => "adjacent",
     };
-    (|| {
-        if args.iter().any(|argument| matches!(argument, Value::Null)) {
-            return Ok(Value::Null);
+    for argument in args {
+        control.check()?;
+        if matches!(argument, Value::Null) {
+            return inline_value(Value::Null, control);
         }
-        match operation {
-            "lower" | "upper" | "isempty" | "lower_inc" | "upper_inc" | "lower_inf"
-            | "upper_inf" => accessor(operation, subtype, multirange, args),
-            "merge" => merge(subtype, multirange, args),
-            "multirange" => multirange_constructor(subtype, args),
-            "overlap" | "contains" | "contained_by" | "adjacent" => {
-                operator(operation, subtype, multirange, args)
-            }
-            _ => Err(SQLError::Internal(format!(
-                "unknown range dispatch operation `{operation}`"
-            ))),
+    }
+    match operation {
+        "lower" | "upper" | "isempty" | "lower_inc" | "upper_inc" | "lower_inf" | "upper_inf" => {
+            accessor(operation, subtype, multirange, args, control)
         }
-    })()
+        "merge" => merge(subtype, multirange, args, control),
+        "multirange" => multirange_constructor(subtype, args, control),
+        "overlap" | "contains" | "contained_by" | "adjacent" => {
+            operator(operation, subtype, multirange, args, control)
+        }
+        _ => Err(SQLError::Internal(format!(
+            "unknown range dispatch operation `{operation}`"
+        ))),
+    }
 }
 
-fn range_constructor(subtype: RangeSubtype, args: &[Value]) -> Result<Value> {
+fn range_constructor(
+    subtype: RangeSubtype,
+    args: &[Value],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    control.check()?;
     if !matches!(args.len(), 2 | 3) {
         return Err(SQLError::TypeMismatch(format!(
             "{} takes 2 or 3 arguments",
@@ -104,43 +146,43 @@ fn range_constructor(subtype: RangeSubtype, args: &[Value]) -> Result<Value> {
             message: format!("invalid range bound flags: \"{bounds}\""),
         });
     }
-    parse_range(
-        &format!(
-            "{}{},{}{}",
-            &bounds[..1],
-            constructor_bound(&args[0]),
-            constructor_bound(&args[1]),
-            &bounds[1..]
-        ),
-        subtype,
-    )
-    .map(|range| Value::Str(range.to_text()))
+    let mut text = ProductionString::new(*control);
+    text.push_str(&bounds[..1])?;
+    text.push_str(&value_to_string_with_control(&args[0], control)?)?;
+    text.push(',')?;
+    text.push_str(&value_to_string_with_control(&args[1], control)?)?;
+    text.push_str(&bounds[1..])?;
+    let text = text.finish()?;
+    let range = parse_range_with_control(&text, subtype, control)?;
+    text_value(range.to_text_with_control(control)?, control)
 }
 
-fn constructor_bound(value: &Value) -> String {
-    match value {
-        Value::Null => String::new(),
-        value => value_to_string(value),
-    }
-}
-
-fn multirange_constructor(subtype: RangeSubtype, args: &[Value]) -> Result<Value> {
-    let mut ranges = Vec::new();
+fn multirange_constructor(
+    subtype: RangeSubtype,
+    args: &[Value],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    control.check()?;
+    let mut ranges = ProductionVec::new(*control);
     for argument in args {
+        control.check()?;
         match argument {
-            Value::Str(text) | Value::FixedChar(text) => ranges.push(parse_range(text, subtype)?),
+            Value::Str(text) | Value::FixedChar(text) => {
+                ranges.push_produced(parse_range_with_control(text, subtype, control)?)?;
+            }
             Value::Array(array) => {
                 for value in array.elements() {
+                    control.check()?;
                     let (Value::Str(text) | Value::FixedChar(text)) = value else {
                         return Err(SQLError::TypeMismatch(format!(
                             "{} variadic input must contain ranges",
                             subtype.multirange_name()
                         )));
                     };
-                    ranges.push(parse_range(text, subtype)?);
+                    ranges.push_produced(parse_range_with_control(text, subtype, control)?)?;
                 }
             }
-            Value::Null => return Ok(Value::Null),
+            Value::Null => return inline_value(Value::Null, control),
             other => {
                 return Err(SQLError::TypeMismatch(format!(
                     "{} requires range arguments, got {other:?}",
@@ -149,9 +191,8 @@ fn multirange_constructor(subtype: RangeSubtype, args: &[Value]) -> Result<Value
             }
         }
     }
-    Ok(Value::Str(
-        multirange_from_ranges(subtype, ranges).to_text(),
-    ))
+    let ranges = multirange_from_produced_ranges(subtype, ranges.finish()?, control)?;
+    text_value(ranges.to_text_with_control(control)?, control)
 }
 
 fn accessor(
@@ -159,64 +200,92 @@ fn accessor(
     subtype: RangeSubtype,
     multirange: bool,
     args: &[Value],
-) -> Result<Value> {
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
     let [argument] = args else {
         return Err(SQLError::TypeMismatch(format!(
             "{operation} takes 1 argument"
         )));
     };
-    let text = range_text(argument)?;
-    let range = if multirange {
-        let multirange = parse_multirange(text, subtype)?;
-        match operation {
-            "lower" | "lower_inc" | "lower_inf" => multirange.ranges().first().cloned(),
-            "upper" | "upper_inc" | "upper_inf" => multirange.ranges().last().cloned(),
-            "isempty" => return Ok(Value::Bool(multirange.ranges().is_empty())),
-            _ => None,
-        }
-    } else {
-        Some(parse_range(text, subtype)?)
-    };
+    let ranges = RangeSet::parse(range_text(argument)?, subtype, multirange, control)?;
     if operation == "isempty" {
-        return Ok(Value::Bool(
-            range.as_ref().is_some_and(CanonicalRange::is_empty),
-        ));
+        return inline_value(
+            Value::Bool(if multirange {
+                ranges.ranges().is_empty()
+            } else {
+                ranges
+                    .ranges()
+                    .first()
+                    .is_some_and(CanonicalRange::is_empty)
+            }),
+            control,
+        );
     }
-    let Some(range) = range.filter(|range| !range.is_empty()) else {
-        return Ok(match operation {
-            "lower" | "upper" => Value::Null,
-            _ => Value::Bool(false),
-        });
+    let range = match operation {
+        "lower" | "lower_inc" | "lower_inf" => ranges.ranges().first(),
+        "upper" | "upper_inc" | "upper_inf" => ranges.ranges().last(),
+        _ => None,
     };
-    Ok(match operation {
-        "lower" => range.lower().cloned().unwrap_or(Value::Null),
-        "upper" => range.upper().cloned().unwrap_or(Value::Null),
-        "lower_inc" => Value::Bool(range.lower().is_some() && range.lower_inclusive()),
-        "upper_inc" => Value::Bool(range.upper().is_some() && range.upper_inclusive()),
-        "lower_inf" => Value::Bool(range.lower().is_none()),
-        "upper_inf" => Value::Bool(range.upper().is_none()),
+    let Some(range) = range.filter(|range| !range.is_empty()) else {
+        return inline_value(
+            match operation {
+                "lower" | "upper" => Value::Null,
+                _ => Value::Bool(false),
+            },
+            control,
+        );
+    };
+    match operation {
+        "lower" | "upper" => {
+            let bound = if operation == "lower" {
+                range.lower()
+            } else {
+                range.upper()
+            };
+            match bound {
+                Some(value) => Ok(control.copy_value(value)?),
+                None => inline_value(Value::Null, control),
+            }
+        }
+        "lower_inc" => inline_value(
+            Value::Bool(range.lower().is_some() && range.lower_inclusive()),
+            control,
+        ),
+        "upper_inc" => inline_value(
+            Value::Bool(range.upper().is_some() && range.upper_inclusive()),
+            control,
+        ),
+        "lower_inf" => inline_value(Value::Bool(range.lower().is_none()), control),
+        "upper_inf" => inline_value(Value::Bool(range.upper().is_none()), control),
         _ => unreachable!(),
-    })
+    }
 }
 
-fn merge(subtype: RangeSubtype, multirange: bool, args: &[Value]) -> Result<Value> {
+fn merge(
+    subtype: RangeSubtype,
+    multirange: bool,
+    args: &[Value],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
     let merged = if multirange {
         let [argument] = args else {
             return Err(SQLError::TypeMismatch(
                 "range_merge(multirange) takes 1 argument".into(),
             ));
         };
-        parse_multirange(range_text(argument)?, subtype)?.merge_cover()
+        parse_multirange_with_control(range_text(argument)?, subtype, control)?
+            .merge_cover_with_control(control)?
     } else {
         let [left, right] = args else {
             return Err(SQLError::TypeMismatch(
                 "range_merge(range, range) takes 2 arguments".into(),
             ));
         };
-        parse_range(range_text(left)?, subtype)?
-            .merge_cover(&parse_range(range_text(right)?, subtype)?)
+        let left = parse_range_with_control(range_text(left)?, subtype, control)?;
+        let right = parse_range_with_control(range_text(right)?, subtype, control)?;
+        left.merge_cover_with_control(&right, control)?
     };
-    Ok(Value::Str(merged.to_text()))
+    text_value(merged.to_text_with_control(control)?, control)
 }
 
 fn operator(
@@ -224,58 +293,25 @@ fn operator(
     subtype: RangeSubtype,
     left_multirange: bool,
     args: &[Value],
-) -> Result<Value> {
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
     let [left, right] = args else {
         return Err(SQLError::TypeMismatch(format!(
             "range {operation} operator takes 2 arguments"
         )));
     };
-    let left = RangeSet::parse(range_text(left)?, subtype, left_multirange)?;
-    let right = RangeSet::parse_auto(range_text(right)?, subtype)?;
-    Ok(Value::Bool(match operation {
-        "overlap" => left.overlaps(&right),
-        "contains" => left.contains(&right),
-        "contained_by" => right.contains(&left),
-        "adjacent" => left.adjacent(&right),
-        _ => unreachable!(),
-    }))
-}
-
-struct RangeSet(Vec<CanonicalRange>);
-
-impl RangeSet {
-    fn parse(text: &str, subtype: RangeSubtype, multirange: bool) -> Result<Self> {
-        if multirange {
-            parse_multirange(text, subtype).map(|value| Self(value.ranges().to_vec()))
-        } else {
-            parse_range(text, subtype).map(|value| Self(vec![value]))
-        }
-    }
-
-    fn parse_auto(text: &str, subtype: RangeSubtype) -> Result<Self> {
-        Self::parse(text, subtype, text.trim_start().starts_with('{'))
-    }
-
-    fn overlaps(&self, other: &Self) -> bool {
-        self.0
-            .iter()
-            .any(|left| other.0.iter().any(|right| left.overlaps(right)))
-    }
-
-    fn contains(&self, other: &Self) -> bool {
-        other
-            .0
-            .iter()
-            .all(|right| self.0.iter().any(|left| left.contains_range(right)))
-    }
-
-    fn adjacent(&self, other: &Self) -> bool {
-        !self.overlaps(other)
-            && self
-                .0
-                .iter()
-                .any(|left| other.0.iter().any(|right| left.adjacent(right)))
-    }
+    let left = RangeSet::parse(range_text(left)?, subtype, left_multirange, control)?;
+    let right = RangeSet::parse_auto(range_text(right)?, subtype, control)?;
+    inline_value(
+        Value::Bool(match operation {
+            "overlap" => left.overlaps(&right, control)?,
+            "contains" => left.contains(&right, control)?,
+            "contained_by" => right.contains(&left, control)?,
+            "adjacent" => left.adjacent(&right, control)?,
+            _ => unreachable!(),
+        }),
+        control,
+    )
 }
 
 fn range_text(value: &Value) -> Result<&str> {
@@ -286,3 +322,16 @@ fn range_text(value: &Value) -> Result<&str> {
         ))),
     }
 }
+
+fn text_value(text: Produced<String>, control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+    let (text, memory) = text.into_parts();
+    Ok(control.finish(Value::Str(text), memory)?)
+}
+
+fn inline_value(value: Value, control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+    debug_assert!(matches!(value, Value::Null | Value::Bool(_)));
+    Ok(control.finish(value, control.empty_reservation())?)
+}
+
+#[cfg(test)]
+mod tests;

@@ -110,3 +110,21 @@ impl From<pg_query::Error> for SQLError {
         }
     }
 }
+
+impl From<uqa_core::memory::MemoryError> for SQLError {
+    fn from(error: uqa_core::memory::MemoryError) -> Self {
+        Self::Routine {
+            sqlstate: "53200".into(),
+            message: error.to_string(),
+        }
+    }
+}
+
+impl From<uqa_core::ValueRetentionError> for SQLError {
+    fn from(error: uqa_core::ValueRetentionError) -> Self {
+        match error {
+            uqa_core::ValueRetentionError::Memory(error) => error.into(),
+            uqa_core::ValueRetentionError::Cancelled(error) => error.into(),
+        }
+    }
+}

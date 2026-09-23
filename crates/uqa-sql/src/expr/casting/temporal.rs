@@ -6,12 +6,12 @@
 
 //! Date, time, timestamp, and interval conversion.
 
-use uqa_core::{TemporalValue, Value};
+use uqa_core::{memory::ProductionControl, TemporalValue, Value, ValueRetentionError};
 
 use crate::ast::{ColumnType, IntervalFields};
 use crate::error::{Result, SQLError};
 
-use super::{canonical_cast_source, undefined_cast, value_to_string};
+use super::{canonical_cast_source_with_control, undefined_cast, value_to_string_with_control};
 
 #[derive(Clone, Copy)]
 pub(super) enum TemporalCastTarget {
@@ -26,15 +26,19 @@ pub(super) enum TemporalCastTarget {
 pub(super) fn cast_temporal(
     v: &Value,
     target: TemporalCastTarget,
-    parse: fn(&str) -> Option<TemporalValue>,
+    parse: fn(
+        &str,
+        &ProductionControl<'_>,
+    ) -> std::result::Result<Option<TemporalValue>, ValueRetentionError>,
     ty: &str,
     precision: Option<&str>,
+    control: &ProductionControl<'_>,
 ) -> Result<Value> {
     let mut value = match v {
         Value::Temporal(value) => cast_temporal_kind(value, target)
             .map(Value::Temporal)
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast {v:?} to {ty}"))),
-        other => parse(&value_to_string(other))
+        other => parse(&value_to_string_with_control(other, control)?, control)?
             .map(Value::Temporal)
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot cast {v:?} to {ty}"))),
     }?;
@@ -76,16 +80,21 @@ fn round_temporal(value: &mut Value, precision: &str, ty: &str) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn cast_interval(value: &Value, ty: &str) -> Result<Value> {
+pub(super) fn cast_interval(
+    value: &Value,
+    ty: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Value> {
     let mut value = cast_temporal(
         value,
         TemporalCastTarget::Interval,
-        TemporalValue::parse_interval,
+        TemporalValue::parse_interval_with_control,
         "interval",
         None,
+        control,
     )?;
-    let ColumnType::IntervalWithFields { fields, precision } = ColumnType::from_sql_name(ty)?
-    else {
+    let column_type = ColumnType::from_sql_name_with_control(ty, control)?;
+    let ColumnType::IntervalWithFields { fields, precision } = &*column_type else {
         return Ok(value);
     };
     let Value::Temporal(TemporalValue::Interval {
@@ -120,34 +129,51 @@ pub(super) fn cast_interval(value: &Value, ty: &str) -> Result<Value> {
         | IntervalFields::MinuteToSecond => {}
     }
     if let Some(precision) = precision {
-        round_temporal(&mut value, &precision.to_string(), "interval")?;
+        round_temporal(
+            &mut value,
+            &control.format(format_args!("{precision}"))?,
+            "interval",
+        )?;
     }
     Ok(value)
 }
 
-pub(super) fn cast_date(v: &Value, source_ty: Option<&str>) -> Result<Value> {
+pub(super) fn cast_date(
+    v: &Value,
+    source_ty: Option<&str>,
+    control: &ProductionControl<'_>,
+) -> Result<Value> {
     match v {
-        Value::Temporal(value) => cast_temporal_kind(value, TemporalCastTarget::Date)
-            .map(Value::Temporal)
-            .ok_or_else(|| undefined_cast(&canonical_cast_source(source_ty, v), "date")),
-        Value::Str(text) | Value::FixedChar(text) => TemporalValue::try_parse_date(text)
-            .map(Value::Temporal)
-            .map_err(|error| {
-                let field_overflow = matches!(
-                    error.kind(),
-                    chrono::format::ParseErrorKind::OutOfRange
-                        | chrono::format::ParseErrorKind::Impossible
-                );
-                SQLError::Routine {
-                    sqlstate: if field_overflow { "22008" } else { "22007" }.into(),
-                    message: if field_overflow {
-                        format!("date/time field value out of range: \"{text}\"")
-                    } else {
-                        format!("invalid input syntax for type date: \"{text}\"")
-                    },
-                }
-            }),
-        _ => Err(undefined_cast(&canonical_cast_source(source_ty, v), "date")),
+        Value::Temporal(value) => match cast_temporal_kind(value, TemporalCastTarget::Date) {
+            Some(value) => Ok(Value::Temporal(value)),
+            None => Err(undefined_cast(
+                &canonical_cast_source_with_control(source_ty, v, control)?,
+                "date",
+            )),
+        },
+        Value::Str(text) | Value::FixedChar(text) => {
+            TemporalValue::try_parse_date_with_control(text, control)?
+                .map(Value::Temporal)
+                .map_err(|error| {
+                    let field_overflow = matches!(
+                        error.kind(),
+                        chrono::format::ParseErrorKind::OutOfRange
+                            | chrono::format::ParseErrorKind::Impossible
+                    );
+                    SQLError::Routine {
+                        sqlstate: if field_overflow { "22008" } else { "22007" }.into(),
+                        message: if field_overflow {
+                            format!("date/time field value out of range: \"{text}\"")
+                        } else {
+                            format!("invalid input syntax for type date: \"{text}\"")
+                        },
+                    }
+                })
+        }
+        _ => Err(undefined_cast(
+            &canonical_cast_source_with_control(source_ty, v, control)?,
+            "date",
+        )),
     }
 }
 

@@ -7,8 +7,19 @@
 //! SQL comparison, three-valued logic, and numeric arithmetic.
 
 use super::{
-    eval, json_delete, time, to_decimal, BinaryOp, DecimalValue, EvalContext, Expr, Result,
-    SQLError, SQLParam, Value,
+    eval, json_delete, time, to_decimal, BinaryOp, EvalContext, Expr, Result, SQLError, SQLParam,
+    Value,
+};
+
+mod comparison;
+
+pub(super) use comparison::{
+    compare, compare_nullable, eval_comparison_op, values_equal, values_equal_nullable,
+};
+pub use comparison::{
+    compare_nullable_with_control, compare_with_control, eval_comparison_truth,
+    eval_comparison_truth_with_control, values_equal_nullable_with_control,
+    values_equal_with_control,
 };
 
 pub(super) fn eval_binary(
@@ -155,37 +166,6 @@ pub fn eval_binary_values_with_integer_width(
     }
 }
 
-/// Comparison operators under SQL three-valued logic: any NULL operand
-/// makes the result NULL.
-pub(super) fn eval_comparison_op(op: BinaryOp, l: &Value, r: &Value) -> Result<Value> {
-    Ok(eval_comparison_truth(op, l, r)?
-        .map(Value::Bool)
-        .unwrap_or(Value::Null))
-}
-
-/// Compare two values without allocating an intermediate [`Value::Bool`].
-///
-/// `None` is SQL UNKNOWN (normally caused by NULL). Predicate executors use
-/// this form so comparisons and boolean composition stay in a compact
-/// tri-state representation throughout the row-filtering hot path.
-#[inline]
-pub fn eval_comparison_truth(op: BinaryOp, l: &Value, r: &Value) -> Result<Option<bool>> {
-    let out = match op {
-        BinaryOp::Equal => values_equal_nullable(l, r),
-        BinaryOp::NotEqual => values_equal_nullable(l, r).map(|equal| !equal),
-        BinaryOp::Less => compare_nullable(l, r)?.map(|ord| ord.is_lt()),
-        BinaryOp::LessEqual => compare_nullable(l, r)?.map(|ord| ord.is_le()),
-        BinaryOp::Greater => compare_nullable(l, r)?.map(|ord| ord.is_gt()),
-        BinaryOp::GreaterEqual => compare_nullable(l, r)?.map(|ord| ord.is_ge()),
-        _ => {
-            return Err(SQLError::Internal(format!(
-                "non-comparison operator {op:?} reached comparison evaluation"
-            )))
-        }
-    };
-    Ok(out)
-}
-
 pub(super) enum EvalOperand<'a> {
     Borrowed(&'a Value),
     Owned(Value),
@@ -279,126 +259,6 @@ pub fn truthy(v: &Value) -> bool {
         Value::Decimal(d) => !d.is_zero(),
         Value::Str(s) | Value::FixedChar(s) => !s.is_empty(),
         _ => true,
-    }
-}
-
-/// Two-valued equality used where SQL treats a NULL comparison as
-/// simply "no match" (CASE base matching, NULLIF, IN-subquery probes).
-pub(super) fn values_equal(a: &Value, b: &Value) -> bool {
-    values_equal_nullable(a, b) == Some(true)
-}
-
-/// Three-valued equality: `None` when either side is NULL (or, for row
-/// values, when element NULLs leave the outcome undecided).
-pub(super) fn values_equal_nullable(a: &Value, b: &Value) -> Option<bool> {
-    match (a, b) {
-        (Value::Null, _) | (_, Value::Null) => None,
-        (
-            Value::Int(_) | Value::Float(_) | Value::Decimal(_),
-            Value::Int(_) | Value::Float(_) | Value::Decimal(_),
-        ) => Some(a.cmp(b) == std::cmp::Ordering::Equal),
-        (Value::Bool(x), Value::Decimal(y)) | (Value::Decimal(y), Value::Bool(x)) => {
-            Some(DecimalValue::from_bool(*x) == *y)
-        }
-        // Temporal equality goes through the ordering key so
-        // `interval '1 mon' = interval '30 days'` holds like in
-        // PostgreSQL (30-day months for comparison purposes).
-        (Value::Temporal(x), Value::Temporal(y)) => Some(x.cmp(y) == std::cmp::Ordering::Equal),
-        (Value::Temporal(x), Value::Str(y)) | (Value::Str(y), Value::Temporal(x)) => Some(
-            x.parse_same_kind(y)
-                .is_some_and(|parsed| x.cmp(&parsed) == std::cmp::Ordering::Equal),
-        ),
-        (Value::FixedChar(x), Value::FixedChar(y)) => {
-            Some(x.trim_end_matches(' ') == y.trim_end_matches(' '))
-        }
-        (Value::FixedChar(x), Value::Str(y)) | (Value::Str(y), Value::FixedChar(x)) => {
-            Some(x.trim_end_matches(' ') == y.trim_end_matches(' '))
-        }
-        // PostgreSQL arrays and stored composite records use total element
-        // equality: corresponding NULLs compare equal.
-        (Value::Array(_), Value::Array(_))
-        | (Value::List(_), Value::List(_))
-        | (Value::Record(_), Value::Record(_)) => Some(a == b),
-        // Anonymous row constructors use SQL three-valued comparison: any
-        // definite mismatch wins, otherwise a NULL field leaves equality
-        // unknown.
-        (Value::Row(xs), Value::Row(ys)) => {
-            if xs.len() != ys.len() {
-                return Some(false);
-            }
-            let mut unknown = false;
-            for (x, y) in xs.iter().zip(ys) {
-                match values_equal_nullable(x, y) {
-                    Some(false) => return Some(false),
-                    Some(true) => {}
-                    None => unknown = true,
-                }
-            }
-            if unknown {
-                None
-            } else {
-                Some(true)
-            }
-        }
-        _ => Some(a == b),
-    }
-}
-
-pub(super) fn compare(a: &Value, b: &Value) -> Result<std::cmp::Ordering> {
-    Ok(compare_nullable(a, b)?.unwrap_or(std::cmp::Ordering::Equal))
-}
-
-/// Three-valued ordering: `None` when a NULL operand (or an undecided
-/// NULL row element) leaves the comparison unknown.
-pub(super) fn compare_nullable(a: &Value, b: &Value) -> Result<Option<std::cmp::Ordering>> {
-    use std::cmp::Ordering;
-    match (a, b) {
-        (Value::Null, _) | (_, Value::Null) => Ok(None),
-        (
-            Value::Int(_) | Value::Float(_) | Value::Decimal(_),
-            Value::Int(_) | Value::Float(_) | Value::Decimal(_),
-        ) => Ok(Some(a.cmp(b))),
-        (Value::Bool(x), Value::Decimal(y)) => Ok(Some(DecimalValue::from_bool(*x).cmp(y))),
-        (Value::Decimal(x), Value::Bool(y)) => Ok(Some(x.cmp(&DecimalValue::from_bool(*y)))),
-        (Value::Str(x), Value::Str(y)) => Ok(Some(x.cmp(y))),
-        (Value::FixedChar(x), Value::FixedChar(y)) => {
-            Ok(Some(x.trim_end_matches(' ').cmp(y.trim_end_matches(' '))))
-        }
-        (Value::FixedChar(x), Value::Str(y)) => {
-            Ok(Some(x.trim_end_matches(' ').cmp(y.trim_end_matches(' '))))
-        }
-        (Value::Str(x), Value::FixedChar(y)) => {
-            Ok(Some(x.trim_end_matches(' ').cmp(y.trim_end_matches(' '))))
-        }
-        (Value::JsonB(_), Value::JsonB(_)) => Ok(Some(a.cmp(b))),
-        (Value::Temporal(x), Value::Temporal(y)) => Ok(Some(x.cmp(y))),
-        (Value::Temporal(x), Value::Str(y)) => x
-            .parse_same_kind(y)
-            .map(|parsed| Some(x.cmp(&parsed)))
-            .ok_or_else(|| SQLError::TypeMismatch(format!("cannot compare {a:?} with {b:?}"))),
-        (Value::Str(x), Value::Temporal(y)) => y
-            .parse_same_kind(x)
-            .map(|parsed| Some(parsed.cmp(y)))
-            .ok_or_else(|| SQLError::TypeMismatch(format!("cannot compare {a:?} with {b:?}"))),
-        (Value::Bool(x), Value::Bool(y)) => Ok(Some(x.cmp(y))),
-        (Value::Array(_), Value::Array(_))
-        | (Value::List(_), Value::List(_))
-        | (Value::Record(_), Value::Record(_)) => Ok(Some(a.cmp(b))),
-        // Anonymous row-constructor ordering is lexicographic, with a NULL
-        // field making the result unknown if reached before a decision.
-        (Value::Row(xs), Value::Row(ys)) => {
-            for (x, y) in xs.iter().zip(ys) {
-                match compare_nullable(x, y)? {
-                    Some(Ordering::Equal) => {}
-                    Some(other) => return Ok(Some(other)),
-                    None => return Ok(None),
-                }
-            }
-            Ok(Some(xs.len().cmp(&ys.len())))
-        }
-        (lhs, rhs) => Err(SQLError::TypeMismatch(format!(
-            "cannot compare {lhs:?} with {rhs:?}"
-        ))),
     }
 }
 

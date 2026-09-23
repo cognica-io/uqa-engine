@@ -6,14 +6,17 @@
 
 use crate::ast::{BinaryOp, ColumnType};
 use crate::SQLError;
+use uqa_core::memory::{Produced, ProductionControl};
 
-use super::common::{base_type, common_numeric_type, merge_optional_types, numeric_rank};
+use super::common::{base_type, common_numeric_type, merge_value_types, numeric_rank};
 
 mod catalog;
 pub(super) mod numeric;
 mod resolution;
-pub use numeric::{numeric_operator_types, NumericOperatorTypes};
-pub use resolution::binary_operator_types;
+pub use numeric::{
+    numeric_operator_types, numeric_operator_types_with_control, NumericOperatorTypes,
+};
+pub use resolution::{binary_operator_types, binary_operator_types_with_control};
 
 #[derive(Debug, Clone)]
 pub struct UnaryOperatorCatalogEntry {
@@ -170,6 +173,17 @@ fn ordering_operator_available(ty: &ColumnType) -> bool {
 }
 
 pub(super) fn unary_minus_result_type(ty: &ColumnType) -> Result<ColumnType, SQLError> {
+    unary_minus_result_type_with_control(ty, &ProductionControl::uncontrolled()).map(|ty| {
+        ty.into_uncontrolled()
+            .expect("ordinary unary type has no reservation")
+    })
+}
+
+pub(super) fn unary_minus_result_type_with_control(
+    ty: &ColumnType,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<ColumnType>, SQLError> {
+    control.check()?;
     match base_type(ty) {
         ty @ (ColumnType::SmallInteger
         | ColumnType::Integer
@@ -177,7 +191,7 @@ pub(super) fn unary_minus_result_type(ty: &ColumnType) -> Result<ColumnType, SQL
         | ColumnType::Real
         | ColumnType::DoublePrecision
         | ColumnType::Numeric { .. }
-        | ColumnType::Interval) => Ok(ty.clone()),
+        | ColumnType::Interval) => ty.clone_with_control(control).map_err(Into::into),
         other => Err(SQLError::TypeMismatch(format!(
             "operator does not exist: - {}",
             other.sql_name()
@@ -191,12 +205,39 @@ pub fn binary_result_type(
     left: Option<&ColumnType>,
     right: Option<&ColumnType>,
 ) -> Result<Option<ColumnType>, SQLError> {
+    binary_result_type_with_control(op, left, right, &ProductionControl::uncontrolled()).map(|ty| {
+        ty.map(|ty| {
+            ty.into_uncontrolled()
+                .expect("ordinary binary result type has no reservation")
+        })
+    })
+}
+
+/// Apply the shared result-type rules with owned output and controlled temporary operator selection.
+#[doc(hidden)]
+pub fn binary_result_type_with_control(
+    op: BinaryOp,
+    left: Option<&ColumnType>,
+    right: Option<&ColumnType>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    control.check()?;
     if left
         .into_iter()
         .chain(right)
         .all(|ty| !matches!(base_type(ty), ColumnType::Vector(_) | ColumnType::Tensor(_)))
     {
-        return binary_operator_types(op, left, right).map(|[_, _, result]| Some(result));
+        let selected = binary_operator_types_with_control(op, left, right, control)?;
+        if control.budget().is_none() {
+            let [_, _, result] = selected
+                .into_uncontrolled()
+                .expect("ordinary operator types");
+            return control.finish(result, None).map(Some).map_err(Into::into);
+        }
+        return selected[2]
+            .clone_with_control(control)
+            .map(Some)
+            .map_err(Into::into);
     }
     if matches!(
         op,
@@ -220,21 +261,37 @@ pub fn binary_result_type(
                 right,
             ));
         }
-        return Ok(Some(ColumnType::Boolean));
+        return control
+            .finish(ColumnType::Boolean, control.empty_reservation())
+            .map(Some)
+            .map_err(Into::into);
     }
     let (Some(left), Some(right)) = (left, right) else {
-        return merge_optional_types(left.cloned(), right.cloned());
+        return merge_value_types(
+            left.map(|ty| ty.clone_with_control(control)).transpose()?,
+            right.map(|ty| ty.clone_with_control(control)).transpose()?,
+            control,
+        );
     };
     let left = base_type(left);
     let right = base_type(right);
     if let Some(ty) = temporal_binary_result_type(op, left, right) {
-        return Ok(Some(ty));
+        return control
+            .finish(ty, control.empty_reservation())
+            .map(Some)
+            .map_err(Into::into);
     }
     if let Some(ty) = common_numeric_type(left, right) {
         if matches!(ty, ColumnType::Real) && left != right {
-            return Ok(Some(ColumnType::DoublePrecision));
+            return control
+                .finish(ColumnType::DoublePrecision, control.empty_reservation())
+                .map(Some)
+                .map_err(Into::into);
         }
-        return Ok(Some(ty));
+        return control
+            .finish(ty, control.empty_reservation())
+            .map(Some)
+            .map_err(Into::into);
     }
     if matches!(left, ColumnType::JsonB)
         && matches!(op, BinaryOp::Subtract)
@@ -242,7 +299,10 @@ pub fn binary_result_type(
             || matches!(right, ColumnType::SmallInteger | ColumnType::Integer)
             || matches!(right, ColumnType::Array(element) if element.is_character_string()))
     {
-        return Ok(Some(ColumnType::JsonB));
+        return control
+            .finish(ColumnType::JsonB, control.empty_reservation())
+            .map(Some)
+            .map_err(Into::into);
     }
     Err(SQLError::Routine {
         sqlstate: "42883".into(),
@@ -321,3 +381,6 @@ fn binary_operator_name(op: BinaryOp) -> &'static str {
         BinaryOp::Divide => "/",
     }
 }
+
+#[cfg(test)]
+mod production_tests;

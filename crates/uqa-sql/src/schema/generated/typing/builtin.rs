@@ -27,6 +27,7 @@ pub(super) fn infer_builtin_function(
     argument_names: &[Option<String>],
     args: &[GenerationType],
 ) -> Result<Option<GenerationType>, SQLError> {
+    crate::schema::generated::eligibility::validate_builtin_name(name)?;
     let result = match name {
         "coalesce" | "greatest" | "least" => {
             require_arity(name, args, 1, usize::MAX)?;
@@ -93,9 +94,6 @@ pub(super) fn infer_builtin_function(
             require_arity(name, args, 1, 2)?;
             require_class(name, args, TypeClass::Text)?;
             GenerationType::Text
-        }
-        "concat" | "concat_ws" | "format" => {
-            return Err(non_immutable_function(name));
         }
         "concat_op" => {
             require_arity(name, args, 2, 2)?;
@@ -207,35 +205,6 @@ pub(super) fn infer_builtin_function(
             require_arity(name, args, 0, 0)?;
             GenerationType::Real
         }
-        "array_sample"
-        | "now"
-        | "current_timestamp"
-        | "current_date"
-        | "clock_timestamp"
-        | "statement_timestamp"
-        | "transaction_timestamp"
-        | "current_time"
-        | "localtime"
-        | "localtimestamp"
-        | "timeofday"
-        | "current_database"
-        | "current_catalog"
-        | "current_user"
-        | "session_user"
-        | "pg_typeof"
-        | "typeof"
-        | "row_to_json"
-        | "to_json"
-        | "to_jsonb"
-        | "json_build_object"
-        | "jsonb_build_object"
-        | "json_build_array"
-        | "jsonb_build_array"
-        | "to_char"
-        | "to_date"
-        | "to_number" => {
-            return Err(non_immutable_function(name));
-        }
         "width_bucket" => {
             require_arity(name, args, 4, 4)?;
             require_class(name, &args[..3], TypeClass::Numeric)?;
@@ -297,11 +266,6 @@ pub(super) fn infer_builtin_function(
             require_arity(name, args, 2, 3)?;
             require_class(name, args, TypeClass::Text)?;
             GenerationType::Array(Box::new(GenerationType::Text))
-        }
-        "string_to_table" | "unnest" | "json_object_keys" | "jsonb_object_keys" => {
-            return Err(SQLError::TypeMismatch(format!(
-                "set-returning function `{name}` is not allowed in a column generation expression"
-            )));
         }
         "quote_ident" => {
             require_signature(name, args, &[TypeClass::Text])?;
