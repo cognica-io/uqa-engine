@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod cancellation;
+
 fn capture(control: &StorageReadControl) -> MaterializedTable {
     let mut source = MemoryDocumentStore::new();
     for id in 1..=3 {

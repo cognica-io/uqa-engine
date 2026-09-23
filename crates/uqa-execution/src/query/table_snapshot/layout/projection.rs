@@ -185,12 +185,16 @@ impl RowLayout {
             };
         };
         if let Some(name) = self.source_name(field) {
-            if let Some(value) = source.get_field(id, name)? {
+            let value = source.get_field(id, name)?;
+            self.control.check()?;
+            if let Some(value) = value {
                 return Ok(Some(value));
             }
         }
         if !self.source.iter().any(|(name, _)| name == field) {
-            if let Some(value) = source.get_field(id, field)? {
+            let value = source.get_field(id, field)?;
+            self.control.check()?;
+            if let Some(value) = value {
                 return Ok(Some(value));
             }
         }
@@ -213,8 +217,8 @@ impl RowLayout {
                 .transpose()
                 .map(Option::flatten);
         }
-        Ok(source
-            .contains_doc_id(id)?
-            .then(|| column.missing_value.clone().unwrap_or(Value::Null)))
+        let present = source.contains_doc_id(id)?;
+        self.control.check()?;
+        Ok(present.then(|| column.missing_value.clone().unwrap_or(Value::Null)))
     }
 }

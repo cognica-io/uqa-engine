@@ -36,6 +36,16 @@ struct State {
 pub(super) struct RetainedDocuments(Arc<Budgeted<State>>);
 
 impl RetainedDocuments {
+    fn checked_read<T>(
+        &self,
+        read: impl FnOnce() -> StorageBackendResult<T>,
+    ) -> StorageBackendResult<T> {
+        self.0.control.check()?;
+        let result = read()?;
+        self.0.control.check()?;
+        Ok(result)
+    }
+
     pub(super) fn new(
         source: Arc<dyn DocumentStore>,
         layout: RowLayout,
@@ -142,20 +152,21 @@ impl DocumentStore for RetainedDocuments {
     }
 
     fn get_stored(&self, id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
-        self.0.control.check()?;
-        if self.0.changes.contains_change(id) {
-            self.0
-                .changes
-                .get_stored(id)?
-                .map(|row| self.0.layout.complete_private(row).map_err(layout_error))
-                .transpose()
-        } else {
-            self.0
-                .source
-                .get_stored(id)?
-                .map(|row| self.0.layout.adapt_base(row).map_err(layout_error))
-                .transpose()
-        }
+        self.checked_read(|| {
+            if self.0.changes.contains_change(id) {
+                self.0
+                    .changes
+                    .get_stored(id)?
+                    .map(|row| self.0.layout.complete_private(row).map_err(layout_error))
+                    .transpose()
+            } else {
+                self.0
+                    .source
+                    .get_stored(id)?
+                    .map(|row| self.0.layout.adapt_base(row).map_err(layout_error))
+                    .transpose()
+            }
+        })
     }
 
     fn get_stored_many(
@@ -176,16 +187,18 @@ impl DocumentStore for RetainedDocuments {
                 self.0.layout.complete_private(row).map_err(layout_error)?,
             );
         }
+        self.0.control.check()?;
         Ok(rows)
     }
 
     fn get_metadata(&self, id: DocId) -> StorageBackendResult<Option<DocumentMetadata>> {
-        self.0.control.check()?;
-        if self.0.changes.contains_change(id) {
-            self.0.changes.get_metadata(id)
-        } else {
-            self.0.source.get_metadata(id)
-        }
+        self.checked_read(|| {
+            if self.0.changes.contains_change(id) {
+                self.0.changes.get_metadata(id)
+            } else {
+                self.0.source.get_metadata(id)
+            }
+        })
     }
 
     fn field_presence_controlled(
@@ -250,20 +263,20 @@ impl DocumentStore for RetainedDocuments {
     }
 
     fn contains_doc_id(&self, id: DocId) -> StorageBackendResult<bool> {
-        self.0.control.check()?;
-        match self.0.changes.change_presence(id) {
+        self.checked_read(|| match self.0.changes.change_presence(id) {
             Some(present) => Ok(present),
             None => self.0.source.contains_doc_id(id),
-        }
+        })
     }
 
     fn get_field(&self, id: DocId, field: &str) -> StorageBackendResult<Option<Value>> {
-        self.0.control.check()?;
-        if self.0.changes.contains_change(id) {
-            self.0.private_layout.base_field(&self.0.changes, id, field)
-        } else {
-            self.0.layout.base_field(self.0.source.as_ref(), id, field)
-        }
+        self.checked_read(|| {
+            if self.0.changes.contains_change(id) {
+                self.0.private_layout.base_field(&self.0.changes, id, field)
+            } else {
+                self.0.layout.base_field(self.0.source.as_ref(), id, field)
+            }
+        })
     }
 
     fn find_doc_id_by_field(
@@ -358,7 +371,7 @@ impl DocumentStore for RetainedDocuments {
                 return Ok(None);
             }
         }
-        let rows = self.0.source.get_shared_fields(ids, &sources)?;
+        let rows = self.checked_read(|| self.0.source.get_shared_fields(ids, &sources))?;
         if rows.as_ref().is_some_and(|rows| {
             rows.iter()
                 .flatten()
@@ -385,7 +398,8 @@ impl DocumentStore for RetainedDocuments {
         let Some(sources) = projection.shared_sources()? else {
             return Ok(None);
         };
-        let rows = self.0.source.next_shared_fields(after, limit, &sources)?;
+        let rows =
+            self.checked_read(|| self.0.source.next_shared_fields(after, limit, &sources))?;
         if rows.as_ref().is_some_and(|rows| {
             rows.iter().any(|(_, row)| {
                 row.with_projected(|values| projection.needs_shared_fallback(values))
