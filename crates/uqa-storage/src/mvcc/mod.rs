@@ -24,6 +24,7 @@ mod overlay;
 mod persistence;
 mod projection;
 mod resolution;
+mod restore;
 mod retention;
 mod serializable;
 mod session;
@@ -53,6 +54,7 @@ pub use persistence::{
     resolve_prepared_receipt, CommitErrorOutcome, CommitFailure, CommitFingerprint, CommitReceipt,
     CommitResult, CommitStatus, DatabaseId, RecordPage, StorageTransactionId, VersionedPersistence,
 };
+pub use restore::DatabaseRestore;
 pub use retention::{
     verify_version_reclamation, ReclamationHorizon, SnapshotLease, SnapshotLeaseTransport,
     SnapshotRegistry,

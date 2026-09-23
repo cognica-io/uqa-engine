@@ -24,6 +24,19 @@ use uqa_storage::{
 
 use super::RedbRecordStore;
 
+pub(super) fn validate_restore(
+    store: &RedbRecordStore,
+    control: &StorageReadControl,
+) -> VersionResult<()> {
+    schema::load(store, control)?
+        .graph
+        .validate_persisted_publications(control, |id| store.commit_status(id, control))
+}
+
+pub(super) fn clear_restored_state(transaction: &redb::WriteTransaction) -> VersionResult<()> {
+    schema::clear_restored_state(transaction)
+}
+
 type Registries = HashMap<usize, (DatabaseId, Weak<LocalSerializableState>)>;
 
 pub(super) fn registry(

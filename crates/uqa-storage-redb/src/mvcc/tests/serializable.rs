@@ -10,6 +10,7 @@ mod migration;
 mod persistence;
 mod process;
 mod recovery;
+mod restore;
 
 use uqa_storage::mvcc::{
     admit_serializable, RecordWrite, SerializableCoordinator, SerializableGraph,

@@ -28,7 +28,7 @@ pub use mvcc::RedbRecordStore;
 pub use uqa_storage::mvcc::{VersionedKeyValueStore as RedbKeyValueStore, VersionedSessionOptions};
 
 use error::redb_error;
-use uqa_storage::read_control::CancellationToken;
+use uqa_storage::read_control::{CancellationToken, StorageReadControl};
 
 /// Shared redb database owner and engine-session factory.
 #[derive(Clone)]
@@ -53,6 +53,31 @@ impl RedbStorage {
         let database = Arc::new(Database::create(path).map_err(redb_error)?);
         let records = RedbRecordStore::new(database)
             .map_err(uqa_storage::mvcc::VersionError::into_storage_error)?;
+        Self::from_records(path, records, options)
+    }
+
+    /// Open a closed, consistent backup as a new database history. Every prior provider, session, snapshot and serializable participant for `path` must be closed; redb's exclusive file ownership enforces this before any restore mutation.
+    ///
+    /// Retain `request` outside the database before calling. Retry that same request after an error because the durable transition may have completed. A retry after completion preserves new receipts and writes. A separate restoration requires a new request. Ordinary reopen uses `open` or `open_with_options` and preserves the existing incarnation and outcomes.
+    pub fn open_restored(
+        path: impl AsRef<Path>,
+        request: uqa_storage::mvcc::DatabaseRestore,
+        options: VersionedSessionOptions,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        control.check()?;
+        let path = path.as_ref();
+        let database = Database::open(path).map_err(redb_error)?;
+        let records = mvcc::restore::open(database, request, control)
+            .map_err(uqa_storage::mvcc::VersionError::into_storage_error)?;
+        Self::from_records(path, records, options)
+    }
+
+    fn from_records(
+        path: &Path,
+        records: RedbRecordStore,
+        options: VersionedSessionOptions,
+    ) -> StorageBackendResult<Self> {
         records
             .migrate_key_value()
             .map_err(uqa_storage::mvcc::VersionError::into_storage_error)?;

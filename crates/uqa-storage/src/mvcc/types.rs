@@ -75,6 +75,8 @@ pub enum VersionError {
     SavepointMissing(crate::StorageSavepointId),
     #[error("transaction allocation must not be zero")]
     InvalidTransactionId,
+    #[error("restoring a backup requires a new database incarnation")]
+    InvalidRestoreIdentity,
     #[error("transaction belongs to another database incarnation")]
     WrongDatabase,
     #[error("transaction allocation space exhausted")]

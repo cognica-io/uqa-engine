@@ -44,6 +44,53 @@ fn legacy(
 }
 
 #[test]
+fn restored_singleton_checkpoint_starts_a_new_coordinator_and_keeps_committed_data() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("legacy-backup.redb");
+    let control = StorageReadControl::with_limit(1 << 20);
+    let (request, original) = {
+        let store = RedbRecordStore::new(Arc::new(Database::create(&path).unwrap())).unwrap();
+        let transaction = store.allocate_transaction(&control).unwrap();
+        let prepared = PreparedRecordCommit::new(
+            &[RecordWrite {
+                key: b"backup",
+                expected: None,
+                value: Some(b"durable"),
+            }],
+            &control,
+        )
+        .unwrap();
+        store.commit(transaction, &prepared, &control).unwrap();
+        let original = legacy(&store, &control);
+        (
+            uqa_storage::mvcc::DatabaseRestore::new(store.identity).unwrap(),
+            original,
+        )
+    };
+    let store =
+        crate::mvcc::restore::open(Database::open(&path).unwrap(), request, &control).unwrap();
+    let participant = actor(&store, &control);
+    assert_ne!(participant.id().coordinator(), original.coordinator());
+    assert_eq!(
+        store
+            .snapshot(&control)
+            .unwrap()
+            .get(b"backup", &control)
+            .unwrap()
+            .unwrap()
+            .value()
+            .map(|value| &***value),
+        Some(b"durable".as_slice())
+    );
+    let transaction = store.database.begin_read().unwrap();
+    assert!(matches!(
+        transaction.open_table(LEGACY),
+        Err(redb::TableError::TableDoesNotExist(_))
+    ));
+    assert!(transaction.open_table(RECORDS).unwrap().len().unwrap() > 1);
+}
+
+#[test]
 fn checkpoint_upgrade_and_reopen_preserve_original_actor_identities() {
     for fail in [false, true] {
         let backend = FaultBackend::default();

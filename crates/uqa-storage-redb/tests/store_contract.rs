@@ -303,3 +303,6 @@ mod logical_sessions;
 
 #[path = "store_contract/japanese.rs"]
 mod japanese;
+
+#[path = "store_contract/restore.rs"]
+mod restore;

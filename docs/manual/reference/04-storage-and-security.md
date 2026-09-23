@@ -120,7 +120,13 @@ Storage formats may evolve before a stable release, so application and database 
 
 ## Backups and copies
 
-Do not copy a live database file with a generic file copy and assume the result is transactionally consistent. Stop writers and close the engine, or use a provider-specific consistent backup method. Copy external rollback anchors and key metadata according to their own recovery procedures, without placing keys inside the database backup.
+Do not copy a live database file with a generic file copy and assume the result is transactionally consistent. Stop writers and close the engine and all retained provider, session, snapshot and participant owners, or use a provider-specific consistent backup method. Copy external rollback anchors and key metadata according to their own recovery procedures, without placing keys inside the database backup.
+
+Development redb MVCC backups have an explicit restore entry point: `RedbStorage::open_restored(path, request, options, control)`. It opens an existing, closed, consistent backup at `path`; copying the backup into place is the caller's responsibility. `options` is the ordinary `VersionedSessionOptions`, and `control` supplies the restore validation's memory allowance and cancellation signal. Close every provider, session, retained snapshot and serializable participant for the destination before copying or calling; any remaining redb owner prevents the restore open. Missing, uninitialized or unrelated database files are rejected.
+
+Before closing the backup source, obtain its identity through `record_store()?.database_id()`. Allocate `uqa_storage::mvcc::DatabaseRestore::new(source)` and persist its `source()` and `target()` identities outside the database before invoking restoration. `DatabaseRestore::from_identities(source, target)` reconstitutes that request and rejects equal identities with `VersionError::InvalidRestoreIdentity`. The target identifies exactly one restoration. Reuse the request after an error because the durable transition may already have completed; a completed retry preserves subsequent writes and receipts. A separate restoration, including copying the same backup again, requires a newly allocated request. Ordinary `open` and `open_with_options` preserve the current history and are the entry points for normal restarts.
+
+Successful redb restoration preserves committed records, their visibility sequences and identifier watermarks while atomically assigning the new incarnation and retiring the old transaction receipts and serializable checkpoint. Old transaction IDs belong to the source incarnation and cannot resolve as transactions in the restored history. A new serializable coordinator is established on admission. This operation does not repair an inconsistent terminal checkpoint or bypass the backup's physical integrity checks.
 
 ## Browser persistence
 

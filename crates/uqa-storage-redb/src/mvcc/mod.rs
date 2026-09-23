@@ -11,6 +11,7 @@ mod identifiers;
 mod migration;
 mod read;
 mod reclamation;
+pub(crate) mod restore;
 mod retention;
 mod serializable;
 #[cfg(test)]

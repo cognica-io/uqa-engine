@@ -21,6 +21,18 @@ const RECORDS: TableDefinition<&[u8], &[u8]> =
 const MARKER: &str = "serializable";
 const MAGIC: &[u8; 8] = b"UQARED02";
 
+/// Called only by the exclusive restore owner, in the transaction replacing the database incarnation and its receipts.
+pub(super) fn clear_restored_state(transaction: &redb::WriteTransaction) -> VersionResult<()> {
+    transaction.delete_table(LEGACY).map_err(redb_error)?;
+    transaction.delete_table(RECORDS).map_err(redb_error)?;
+    transaction
+        .open_table(METADATA)
+        .map_err(redb_error)?
+        .remove(MARKER)
+        .map_err(redb_error)?;
+    Ok(())
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Format {
     Empty,
