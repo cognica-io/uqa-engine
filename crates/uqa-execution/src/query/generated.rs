@@ -6,8 +6,16 @@
 
 //! Physical/logical row conversion for `PostgreSQL` generated columns.
 
+use uqa_core::{
+    memory::{MemoryBudget, MemoryReservation},
+    CancellationToken,
+};
 use uqa_sql::ast::{ColumnDef, GeneratedColumnKind};
-use uqa_sql::{expr::RowLookup, SQLError};
+use uqa_sql::{
+    expr::RowLookup,
+    schema::{ColumnTypeSchema, ScalarTypeSchema},
+    SQLError,
+};
 use uqa_storage::document_store::Document;
 
 pub fn materialize_virtual_generated_columns(
@@ -41,15 +49,31 @@ pub fn materialize_missing_generated_columns(
     columns: &[ColumnDef],
     document: &mut Document,
 ) -> Result<(), SQLError> {
-    materialize_matching_missing_generated_columns(columns, document, |_| true)
+    materialize_matching_missing_generated_columns(columns, document, |_| true, None)
+}
+
+/// Resource scopes for AST-to-IR production. Type binding and evaluated values retain their separate allocation contracts; schema lookup borrows the existing column owner.
+pub(crate) struct GeneratedLoweringControl<'a> {
+    pub(crate) budget: &'a MemoryBudget,
+    pub(crate) original: &'a CancellationToken,
+    pub(crate) invoking: &'a CancellationToken,
+}
+
+pub(crate) fn materialize_missing_generated_columns_with_lowering_control(
+    columns: &[ColumnDef],
+    document: &mut Document,
+    control: &GeneratedLoweringControl<'_>,
+) -> Result<(), SQLError> {
+    materialize_matching_missing_generated_columns(columns, document, |_| true, Some(control))
 }
 
 fn materialize_matching_missing_generated_columns(
     columns: &[ColumnDef],
     document: &mut Document,
     mut selected: impl FnMut(&str) -> bool,
+    lowering: Option<&GeneratedLoweringControl<'_>>,
 ) -> Result<(), SQLError> {
-    let mut schema = None;
+    let schema = ColumnTypeSchema::new(columns);
     for column in columns {
         let Some(generated) = column.generated.as_ref() else {
             continue;
@@ -57,16 +81,13 @@ fn materialize_matching_missing_generated_columns(
         if document.contains_key(&column.name) || !selected(&column.name) {
             continue;
         }
-        let schema = schema.get_or_insert_with(|| {
-            crate::RowSchema::with_types(
-                columns.iter().map(|column| column.name.clone()).collect(),
-                columns
-                    .iter()
-                    .map(|column| Some(column.ty.clone()))
-                    .collect(),
-            )
-        });
-        let value = evaluate_generated_column(schema, generated, document)?;
+        let value = if let Some(control) = lowering {
+            let expression =
+                prepare_generated_column_with_lowering_control(&schema, generated, control)?;
+            evaluate_generated_expression(&expression.scalar, document)?
+        } else {
+            evaluate_generated_column(&schema, generated, document)?
+        };
         document.insert(
             column.name.clone(),
             uqa_sql::assignment::conversion::convert_value_to_column_type(value, &column.ty)?,
@@ -80,13 +101,7 @@ fn materialize_matching_virtual_generated_columns(
     document: &mut Document,
     mut selected: impl FnMut(&str) -> bool,
 ) -> Result<(), SQLError> {
-    let schema = crate::RowSchema::with_types(
-        columns.iter().map(|column| column.name.clone()).collect(),
-        columns
-            .iter()
-            .map(|column| Some(column.ty.clone()))
-            .collect(),
-    );
+    let schema = ColumnTypeSchema::new(columns);
     for column in columns {
         let Some(generated) = column.generated.as_ref() else {
             continue;
@@ -107,7 +122,7 @@ fn materialize_matching_virtual_generated_columns(
 }
 
 fn evaluate_generated_column(
-    schema: &crate::RowSchema,
+    schema: &dyn ScalarTypeSchema,
     generated: &uqa_sql::ast::GeneratedColumn,
     document: &Document,
 ) -> Result<uqa_core::Value, SQLError> {
@@ -116,7 +131,7 @@ fn evaluate_generated_column(
 }
 
 pub(crate) fn prepare_generated_column(
-    schema: &crate::RowSchema,
+    schema: &dyn ScalarTypeSchema,
     generated: &uqa_sql::ast::GeneratedColumn,
 ) -> Result<crate::ScalarExpr, SQLError> {
     let mut expression = uqa_sql::plan::ExpressionPlan::lower((*generated.expression).clone());
@@ -127,6 +142,33 @@ pub(crate) fn prepare_generated_column(
     }
     expression.scalar = crate::bind_type_introspection(expression.scalar, schema, &[]);
     Ok(expression.scalar)
+}
+
+/// Keep the lowering lease through binding and evaluation without claiming ownership of allocations subsequently produced by those owners.
+pub(crate) struct GeneratedExpression {
+    pub(crate) scalar: crate::ScalarExpr,
+    _lowering_memory: MemoryReservation,
+}
+
+pub(crate) fn prepare_generated_column_with_lowering_control(
+    schema: &dyn ScalarTypeSchema,
+    generated: &uqa_sql::ast::GeneratedColumn,
+    control: &GeneratedLoweringControl<'_>,
+) -> Result<GeneratedExpression, SQLError> {
+    let lowered = uqa_sql::plan::ExpressionPlan::lower_column_budgeted(
+        &generated.expression,
+        control.budget,
+        control.original,
+        control.invoking,
+    )?;
+    let (scalar, memory) = lowered.into_parts();
+    let scalar = crate::bind_type_introspection(scalar, schema, &[]);
+    control.original.check()?;
+    control.invoking.check()?;
+    Ok(GeneratedExpression {
+        scalar,
+        _lowering_memory: memory,
+    })
 }
 
 pub(crate) fn evaluate_generated_expression(
@@ -163,3 +205,6 @@ pub fn projection_contains_virtual_generated_column(
             && projection.iter().any(|name| name == &column.name)
     })
 }
+
+#[cfg(test)]
+mod tests;

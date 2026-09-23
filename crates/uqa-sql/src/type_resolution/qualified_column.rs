@@ -9,10 +9,10 @@
 use crate::ast::ColumnType;
 use crate::SQLError;
 
-use crate::RowSchema;
+use crate::schema::ScalarTypeSchema;
 
 pub(super) fn resolve(
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     qualifier: &str,
     column: &str,
 ) -> Result<Option<ColumnType>, SQLError> {

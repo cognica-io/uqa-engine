@@ -9,7 +9,7 @@
 use crate::ast::{
     ColumnType, FunctionBinding, FunctionResolutionError, NumericOperator, OperatorResolutionError,
 };
-use crate::{FunctionTypeResolver, RowSchema, SQLError, SQLParam, ScalarExpr};
+use crate::{schema::ScalarTypeSchema, FunctionTypeResolver, SQLError, SQLParam, ScalarExpr};
 
 use super::super::{common::base_type, resolve_local_builtin_overload, BuiltinFunctionOverload};
 use super::{named_binary_operator_catalog_entry, resolution, UnaryOperatorCatalogEntry};
@@ -25,7 +25,7 @@ pub(in crate::type_resolution) fn bind_call(
     operator: NumericOperator,
     binding: &mut FunctionBinding,
     arguments: &[ScalarExpr],
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) {

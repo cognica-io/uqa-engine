@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use crate::{
     memory::{Budgeted, BudgetedString, BudgetedVec, MemoryBudget, MemoryReservation},
-    ArrayValue, CancellationToken, Value, ValueRetentionError,
+    ArrayValue, CancellationToken, QueryCancelled, Value, ValueRetentionError,
 };
 
 impl Value {
@@ -20,9 +20,16 @@ impl Value {
         budget: &MemoryBudget,
         cancellation: &CancellationToken,
     ) -> Result<Budgeted<Self>, ValueRetentionError> {
-        copy(self, budget, &mut || {
-            cancellation.check().map_err(Into::into)
-        })
+        self.clone_budgeted_with_check(budget, || cancellation.check())
+    }
+
+    /// Copy under the same payload and traversal contract as [`Self::clone_budgeted`], checking all caller-owned cancellation scopes through one callback between children and bounded payload chunks. This supports retained resources whose original caller and current reader both remain cancellation owners.
+    pub fn clone_budgeted_with_check(
+        &self,
+        budget: &MemoryBudget,
+        mut check: impl FnMut() -> Result<(), QueryCancelled>,
+    ) -> Result<Budgeted<Self>, ValueRetentionError> {
+        copy(self, budget, &mut || check().map_err(Into::into))
     }
 }
 

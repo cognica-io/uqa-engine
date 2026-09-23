@@ -247,3 +247,30 @@ fn nested_value_copy_uses_a_charged_traversal_stack_and_preserves_record_order()
     drop(copied);
     assert_eq!(budget.used(), 0);
 }
+
+#[test]
+fn caller_cancellation_callback_checks_both_scopes_during_literal_copy() {
+    let source = Value::Str("한🙂".repeat(10_000));
+    for cancel_original in [true, false] {
+        let budget = MemoryBudget::new(1 << 20);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let mut checks = 0;
+        let result = source.clone_budgeted_with_check(&budget, || {
+            checks += 1;
+            if checks == 7 {
+                if cancel_original {
+                    original.cancel();
+                } else {
+                    invoking.cancel();
+                }
+            }
+            original.check()?;
+            invoking.check()
+        });
+        assert!(matches!(result, Err(ValueRetentionError::Cancelled(_))));
+        assert_eq!(checks, 7);
+        assert_eq!(budget.used(), 0);
+        assert!(budget.peak() > 0);
+    }
+}

@@ -10,7 +10,7 @@ use super::common::{base_type, common_context_expression_type};
 use super::functions::named_argument_value;
 use super::{FunctionTypeResolver, ResolvedFunctionOverload};
 use crate::ast::{ColumnType, FunctionBinding, FunctionDispatch};
-use crate::{scalar_call_arguments, RowSchema, ScalarExpr};
+use crate::{scalar_call_arguments, schema::ScalarTypeSchema, ScalarExpr};
 use crate::{SQLError, SQLParam};
 use uqa_core::Value;
 
@@ -198,7 +198,7 @@ pub(super) fn bind_call(
     name: String,
     binding: &mut Option<FunctionBinding>,
     args: &mut Vec<ScalarExpr>,
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> String {

@@ -11,7 +11,7 @@ use crate::ast::{
 };
 use crate::SQLParam;
 
-use crate::{RowSchema, ScalarExpr};
+use crate::{schema::ScalarTypeSchema, ScalarExpr};
 
 use super::{scalar_type_inner, FunctionTypeResolver};
 
@@ -19,7 +19,7 @@ pub(super) fn bind_call(
     name: String,
     binding: &mut Option<FunctionBinding>,
     args: &[ScalarExpr],
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> String {

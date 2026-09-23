@@ -9,6 +9,7 @@
 use crate::ast::{ColumnType, FunctionBinding};
 use crate::{SQLError, SQLParam};
 
+use crate::schema::ScalarTypeSchema;
 use crate::{RowSchema, ScalarExpr};
 #[cfg(test)]
 use uqa_core::Value;
@@ -192,7 +193,7 @@ impl ResolvedFunctionOverload {
 
 pub fn scalar_type(
     expression: &ScalarExpr,
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
 ) -> Result<Option<ColumnType>, SQLError> {
     scalar_type_inner(expression, schema, params, None)
@@ -200,7 +201,7 @@ pub fn scalar_type(
 
 pub fn scalar_type_with_resolver(
     expression: &ScalarExpr,
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<ColumnType>, SQLError> {
@@ -213,7 +214,7 @@ pub fn scalar_type_with_resolver(
 )]
 pub(super) fn scalar_type_inner(
     expression: &ScalarExpr,
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ColumnType>, SQLError> {
@@ -352,7 +353,10 @@ pub(super) fn scalar_type_inner(
         ScalarExpr::InSubquery { expr, subquery, .. } => {
             let needle = scalar_type_inner(expr, schema, params, resolver)?;
             let candidate = resolver
-                .map(|resolver| resolver.resolve_scalar_subquery_type(*subquery, schema, params))
+                .zip(schema.physical_schema())
+                .map(|(resolver, schema)| {
+                    resolver.resolve_scalar_subquery_type(*subquery, schema, params)
+                })
                 .transpose()?
                 .flatten();
             operators::binary_result_type(
@@ -472,9 +476,11 @@ pub(super) fn scalar_type_inner(
             }
             functions::builtin_function_type_inner(name, None, args, &[], schema, params, resolver)
         }
-        ScalarExpr::ScalarSubquery(subquery) => resolver.map_or(Ok(None), |resolver| {
-            resolver.resolve_scalar_subquery_type(*subquery, schema, params)
-        }),
+        ScalarExpr::ScalarSubquery(subquery) => resolver
+            .zip(schema.physical_schema())
+            .map_or(Ok(None), |(resolver, schema)| {
+                resolver.resolve_scalar_subquery_type(*subquery, schema, params)
+            }),
         ScalarExpr::QualifiedStar(qualifier) if schema.has_qualifier(qualifier) => {
             Ok(Some(ColumnType::Record))
         }

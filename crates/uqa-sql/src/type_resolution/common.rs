@@ -8,6 +8,7 @@ use crate::ast::ColumnType;
 use crate::{SQLError, SQLParam};
 use uqa_core::Value;
 
+use crate::schema::ScalarTypeSchema;
 use crate::{scalar_call_arguments, RowSchema, ScalarExpr};
 
 use super::{scalar_type_inner, FunctionTypeResolver};
@@ -20,7 +21,7 @@ pub type FunctionCallArgumentSignature = (Vec<Option<String>>, Vec<Option<Column
 #[doc(hidden)]
 pub fn function_call_argument_signature(
     arguments: &[ScalarExpr],
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<FunctionCallArgumentSignature, SQLError> {
@@ -94,7 +95,7 @@ pub fn values_column_types(
 /// Resolve an expression participating in `PostgreSQL`'s common-type selection. Bare string and NULL literals retain the parser's `unknown` type until the surrounding VALUES, set operation, CASE, or array context selects a concrete type.
 pub fn common_context_expression_type(
     expression: &ScalarExpr,
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ColumnType>, SQLError> {
@@ -263,7 +264,7 @@ pub fn common_type(left: &ColumnType, right: &ColumnType) -> Result<ColumnType, 
 pub(super) fn case_output_type(
     expression: &ScalarExpr,
     common: &ColumnType,
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<ColumnType, SQLError> {
@@ -304,7 +305,7 @@ pub(super) fn case_output_type(
 fn constant_case_condition(
     base: Option<&ScalarExpr>,
     condition: &ScalarExpr,
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Option<Value> {

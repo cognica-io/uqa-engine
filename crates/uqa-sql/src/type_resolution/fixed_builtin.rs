@@ -12,7 +12,7 @@ use crate::ast::{ColumnType, FunctionBinding, FunctionDispatch};
 use crate::{SQLError, SQLParam};
 use uqa_core::Value;
 
-use crate::{scalar_call_arguments, RowSchema, ScalarExpr};
+use crate::{scalar_call_arguments, schema::ScalarTypeSchema, ScalarExpr};
 
 use super::common::base_type;
 use super::functions::{named_argument, named_argument_value};
@@ -182,7 +182,7 @@ pub(super) fn bind_call(
     name: String,
     binding: &mut Option<FunctionBinding>,
     args: &mut Vec<ScalarExpr>,
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> String {

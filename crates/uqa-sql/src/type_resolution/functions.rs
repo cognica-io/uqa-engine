@@ -8,7 +8,7 @@ use crate::ast::{BinaryOp, ColumnType, FunctionBinding, FunctionDispatch};
 use crate::{SQLError, SQLParam};
 use uqa_core::Value;
 
-use crate::{scalar_call_argument, scalar_call_arguments, RowSchema, ScalarExpr};
+use crate::{scalar_call_argument, scalar_call_arguments, schema::ScalarTypeSchema, ScalarExpr};
 
 use super::common::{
     base_type, common_numeric_type, common_type, merge_optional_types, numeric_type,
@@ -21,7 +21,7 @@ pub fn builtin_function_type(
     name: &str,
     args: &[ScalarExpr],
     order_by: &[crate::ScalarOrder],
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
 ) -> Result<Option<ColumnType>, SQLError> {
     builtin_function_type_inner(name, None, args, order_by, schema, params, None)
@@ -70,7 +70,7 @@ pub(super) fn builtin_function_type_inner(
     binding: Option<&FunctionBinding>,
     args: &[ScalarExpr],
     order_by: &[crate::ScalarOrder],
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ColumnType>, SQLError> {

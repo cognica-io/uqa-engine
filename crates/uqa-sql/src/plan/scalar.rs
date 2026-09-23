@@ -10,243 +10,223 @@ use super::{
     AggregateClassifier, Expr, FrameBound, OrderBy, QueryPlan, ScalarExpr, ScalarFrameBound,
     ScalarOrder, ScalarWindowFrame, ScalarWindowSpec, WindowSpec,
 };
+use crate::schema::retention::CatalogRetentionError;
+use resources::{Control, Lowering, Result};
+use source::{Node, Source};
+use uqa_core::{
+    memory::{Budgeted, MemoryBudget},
+    CancellationToken,
+};
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "plan lowering preserves exhaustive variants and structural identities"
-)]
+mod binding;
+mod resources;
+mod source;
+mod window;
+
+impl super::ExpressionPlan {
+    /// Lower a borrowed, validated column expression directly into admitted scalar IR. Destination strings, value payloads, bindings, vector capacities and boxes acquire the supplied allowance before allocation, and the result retains those leases. Both the retained definition's original cancellation and the invoking reader's cancellation remain active during lowering. This controls AST-to-IR production only; subsequent type binding and evaluation require their own resource contracts. Query children violate the validated column-expression invariant.
+    pub fn lower_column_budgeted(
+        expression: &Expr,
+        budget: &MemoryBudget,
+        original: &CancellationToken,
+        invoking: &CancellationToken,
+    ) -> Result<Budgeted<ScalarExpr>> {
+        let mut lowering = Lowering {
+            control: Some(Control::new(budget, original, invoking)),
+        };
+        let scalar = lowering.expression(
+            Source::Borrowed(expression),
+            &super::NoRegisteredAggregates,
+            &mut Vec::new(),
+        )?;
+        lowering.finish(scalar)
+    }
+}
+
 pub(super) fn lower_scalar_expression(
     expression: Expr,
     aggregates: &dyn AggregateClassifier,
     subqueries: &mut Vec<QueryPlan>,
 ) -> ScalarExpr {
-    match expression {
-        Expr::Star => ScalarExpr::Star,
-        Expr::QualifiedStar(qualifier) => ScalarExpr::QualifiedStar(qualifier),
-        Expr::Default => ScalarExpr::Default,
-        Expr::Column(column) => ScalarExpr::Column(column),
-        Expr::QualifiedColumn { qualifier, column } => {
-            ScalarExpr::QualifiedColumn { qualifier, column }
-        }
-        Expr::InternalColumn(column) => ScalarExpr::InternalColumn(column),
-        Expr::Literal(value) => ScalarExpr::Literal(value),
-        Expr::TypedLiteral { value, ty } => ScalarExpr::TypedLiteral {
-            value,
-            ty,
-            bound_type: None,
-            parameter_index: None,
-        },
-        Expr::Param(index) => ScalarExpr::Param(index),
-        Expr::Func {
-            name,
-            binding,
-            args,
-            distinct,
-            order_by,
-            filter,
-        } => ScalarExpr::Func {
-            name,
-            binding,
-            args: args
-                .into_iter()
-                .map(|argument| lower_scalar_expression(argument, aggregates, subqueries))
-                .collect(),
-            distinct,
-            order_by: order_by
-                .into_iter()
-                .map(|order| lower_scalar_order(order, aggregates, subqueries))
-                .collect(),
-            filter: filter
-                .map(|filter| Box::new(lower_scalar_expression(*filter, aggregates, subqueries))),
-        },
-        Expr::Array(items) => ScalarExpr::Array(
-            items
-                .into_iter()
-                .map(|item| lower_scalar_expression(item, aggregates, subqueries))
-                .collect(),
-        ),
-        Expr::Row(items) => ScalarExpr::Row(
-            items
-                .into_iter()
-                .map(|item| lower_scalar_expression(item, aggregates, subqueries))
-                .collect(),
-        ),
-        Expr::Binary { op, lhs, rhs } => ScalarExpr::Binary {
-            op,
-            lhs: Box::new(lower_scalar_expression(*lhs, aggregates, subqueries)),
-            rhs: Box::new(lower_scalar_expression(*rhs, aggregates, subqueries)),
-        },
-        Expr::UnaryMinus(expression) => ScalarExpr::UnaryMinus(Box::new(lower_scalar_expression(
-            *expression,
-            aggregates,
-            subqueries,
-        ))),
-        Expr::Not(expression) => ScalarExpr::Not(Box::new(lower_scalar_expression(
-            *expression,
-            aggregates,
-            subqueries,
-        ))),
-        Expr::And(items) => ScalarExpr::And(
-            items
-                .into_iter()
-                .map(|item| lower_scalar_expression(item, aggregates, subqueries))
-                .collect(),
-        ),
-        Expr::Or(items) => ScalarExpr::Or(
-            items
-                .into_iter()
-                .map(|item| lower_scalar_expression(item, aggregates, subqueries))
-                .collect(),
-        ),
-        Expr::IsNull { expr, negated } => ScalarExpr::IsNull {
-            expr: Box::new(lower_scalar_expression(*expr, aggregates, subqueries)),
-            negated,
-        },
-        Expr::Between { expr, low, high } => ScalarExpr::Between {
-            expr: Box::new(lower_scalar_expression(*expr, aggregates, subqueries)),
-            low: Box::new(lower_scalar_expression(*low, aggregates, subqueries)),
-            high: Box::new(lower_scalar_expression(*high, aggregates, subqueries)),
-        },
-        Expr::InList {
-            expr,
-            list,
-            negated,
-        } => ScalarExpr::InList {
-            expr: Box::new(lower_scalar_expression(*expr, aggregates, subqueries)),
-            list: list
-                .into_iter()
-                .map(|item| lower_scalar_expression(item, aggregates, subqueries))
-                .collect(),
-            negated,
-        },
-        Expr::WindowCall { name, args, spec } => ScalarExpr::WindowCall {
-            name,
-            args: args
-                .into_iter()
-                .map(|argument| lower_scalar_expression(argument, aggregates, subqueries))
-                .collect(),
-            spec: lower_scalar_window_spec(spec, aggregates, subqueries),
-        },
-        Expr::Case {
-            base,
-            when,
-            else_branch,
-        } => ScalarExpr::Case {
-            base: base.map(|base| Box::new(lower_scalar_expression(*base, aggregates, subqueries))),
-            when: when
-                .into_iter()
-                .map(|(condition, result)| {
-                    (
-                        lower_scalar_expression(condition, aggregates, subqueries),
-                        lower_scalar_expression(result, aggregates, subqueries),
-                    )
-                })
-                .collect(),
-            else_branch: else_branch
-                .map(|branch| Box::new(lower_scalar_expression(*branch, aggregates, subqueries))),
-        },
-        Expr::Cast { expr, ty } => ScalarExpr::Cast {
-            expr: Box::new(lower_scalar_expression(*expr, aggregates, subqueries)),
-            ty,
-        },
-        Expr::ScalarSubquery(query) => {
-            let id = subqueries.len();
-            subqueries.push(QueryPlan::lower_with(*query, aggregates));
-            ScalarExpr::ScalarSubquery(id)
-        }
-        Expr::Exists { body, negated } => {
-            let id = subqueries.len();
-            subqueries.push(QueryPlan::lower_with(*body, aggregates));
-            ScalarExpr::Exists {
-                subquery: id,
-                negated,
+    Lowering { control: None }
+        .expression(Source::Owned(expression), aggregates, subqueries)
+        .expect("owned lowering has no admission failure")
+}
+
+impl Lowering<'_> {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "plan lowering preserves exhaustive variants and structural identities"
+    )]
+    fn expression(
+        &mut self,
+        expression: Source<'_, Expr>,
+        aggregates: &dyn AggregateClassifier,
+        subqueries: &mut Vec<QueryPlan>,
+    ) -> Result<ScalarExpr> {
+        self.check()?;
+        Ok(match expression.node() {
+            Node::Star => ScalarExpr::Star,
+            Node::QualifiedStar(name) => ScalarExpr::QualifiedStar(self.text(name)?),
+            Node::Default => ScalarExpr::Default,
+            Node::Column(name) => ScalarExpr::Column(self.text(name)?),
+            Node::QualifiedColumn { qualifier, column } => ScalarExpr::QualifiedColumn {
+                qualifier: self.text(qualifier)?,
+                column: self.text(column)?,
+            },
+            Node::InternalColumn(column) => ScalarExpr::InternalColumn(column),
+            Node::Literal(value) => ScalarExpr::Literal(self.value(value)?),
+            Node::TypedLiteral { value, ty } => ScalarExpr::TypedLiteral {
+                value: self.value(value)?,
+                ty: self.text(ty)?,
+                bound_type: None,
+                parameter_index: None,
+            },
+            Node::Param(index) => ScalarExpr::Param(index),
+            Node::Func {
+                name,
+                binding,
+                args,
+                distinct,
+                order_by,
+                filter,
+            } => ScalarExpr::Func {
+                name: self.text(name)?,
+                binding: binding.map(|binding| self.binding(binding)).transpose()?,
+                args: self.map(args, |this, argument| {
+                    this.expression(argument, aggregates, subqueries)
+                })?,
+                distinct,
+                order_by: self.map(order_by, |this, order| {
+                    this.order(order, aggregates, subqueries)
+                })?,
+                filter: filter
+                    .map(|filter| self.child(filter, aggregates, subqueries))
+                    .transpose()?,
+            },
+            Node::Array(items) => ScalarExpr::Array(self.map(items, |this, item| {
+                this.expression(item, aggregates, subqueries)
+            })?),
+            Node::Row(items) => ScalarExpr::Row(self.map(items, |this, item| {
+                this.expression(item, aggregates, subqueries)
+            })?),
+            Node::Binary { op, lhs, rhs } => ScalarExpr::Binary {
+                op,
+                lhs: self.child(lhs, aggregates, subqueries)?,
+                rhs: self.child(rhs, aggregates, subqueries)?,
+            },
+            Node::UnaryMinus(expression) => {
+                ScalarExpr::UnaryMinus(self.child(expression, aggregates, subqueries)?)
             }
-        }
-        Expr::InSubquery {
-            expr,
-            body,
-            negated,
-        } => {
-            let expression = Box::new(lower_scalar_expression(*expr, aggregates, subqueries));
-            let id = subqueries.len();
-            subqueries.push(QueryPlan::lower_with(*body, aggregates));
-            ScalarExpr::InSubquery {
-                expr: expression,
-                subquery: id,
-                negated,
+            Node::Not(expression) => {
+                ScalarExpr::Not(self.child(expression, aggregates, subqueries)?)
             }
-        }
+            Node::And(items) => ScalarExpr::And(self.map(items, |this, item| {
+                this.expression(item, aggregates, subqueries)
+            })?),
+            Node::Or(items) => ScalarExpr::Or(self.map(items, |this, item| {
+                this.expression(item, aggregates, subqueries)
+            })?),
+            Node::IsNull { expr, negated } => ScalarExpr::IsNull {
+                expr: self.child(expr, aggregates, subqueries)?,
+                negated,
+            },
+            Node::Between { expr, low, high } => ScalarExpr::Between {
+                expr: self.child(expr, aggregates, subqueries)?,
+                low: self.child(low, aggregates, subqueries)?,
+                high: self.child(high, aggregates, subqueries)?,
+            },
+            Node::InList {
+                expr,
+                list,
+                negated,
+            } => ScalarExpr::InList {
+                expr: self.child(expr, aggregates, subqueries)?,
+                list: self.map(list, |this, item| {
+                    this.expression(item, aggregates, subqueries)
+                })?,
+                negated,
+            },
+            Node::WindowCall { name, args, spec } => ScalarExpr::WindowCall {
+                name: self.text(name)?,
+                args: self.map(args, |this, argument| {
+                    this.expression(argument, aggregates, subqueries)
+                })?,
+                spec: self.window(spec, aggregates, subqueries)?,
+            },
+            Node::Case {
+                base,
+                when,
+                else_branch,
+            } => ScalarExpr::Case {
+                base: base
+                    .map(|base| self.child(base, aggregates, subqueries))
+                    .transpose()?,
+                when: self.map(when, |this, pair| {
+                    let (condition, result) = pair.pair();
+                    Ok((
+                        this.expression(condition, aggregates, subqueries)?,
+                        this.expression(result, aggregates, subqueries)?,
+                    ))
+                })?,
+                else_branch: else_branch
+                    .map(|branch| self.child(branch, aggregates, subqueries))
+                    .transpose()?,
+            },
+            Node::Cast { expr, ty } => ScalarExpr::Cast {
+                expr: self.child(expr, aggregates, subqueries)?,
+                ty: self.text(ty)?,
+            },
+            Node::ScalarSubquery(query) => {
+                ScalarExpr::ScalarSubquery(self.query(query, aggregates, subqueries)?)
+            }
+            Node::Exists { body, negated } => ScalarExpr::Exists {
+                subquery: self.query(body, aggregates, subqueries)?,
+                negated,
+            },
+            Node::InSubquery {
+                expr,
+                body,
+                negated,
+            } => {
+                let expr = self.child(expr, aggregates, subqueries)?;
+                ScalarExpr::InSubquery {
+                    expr,
+                    subquery: self.query(body, aggregates, subqueries)?,
+                    negated,
+                }
+            }
+        })
     }
-}
 
-pub(super) fn lower_scalar_order(
-    order: OrderBy,
-    aggregates: &dyn AggregateClassifier,
-    subqueries: &mut Vec<QueryPlan>,
-) -> ScalarOrder {
-    ScalarOrder {
-        expr: lower_scalar_expression(order.expr, aggregates, subqueries),
-        descending: order.descending,
-        nulls: order.nulls,
+    fn child(
+        &mut self,
+        expression: Source<'_, Box<Expr>>,
+        aggregates: &dyn AggregateClassifier,
+        subqueries: &mut Vec<QueryPlan>,
+    ) -> Result<Box<ScalarExpr>> {
+        self.boxed(|this| this.expression(expression.unbox(), aggregates, subqueries))
     }
-}
 
-pub(super) fn lower_scalar_window_spec(
-    spec: WindowSpec,
-    aggregates: &dyn AggregateClassifier,
-    subqueries: &mut Vec<QueryPlan>,
-) -> ScalarWindowSpec {
-    assert!(
-        spec.reference.is_none(),
-        "named window reference must be resolved before unified-plan lowering"
-    );
-    ScalarWindowSpec {
-        partition_by: spec
-            .partition_by
-            .into_iter()
-            .map(|expression| lower_scalar_expression(expression, aggregates, subqueries))
-            .collect(),
-        order_by: spec
-            .order_by
-            .into_iter()
-            .map(|order| lower_scalar_order(order, aggregates, subqueries))
-            .collect(),
-        frame: spec
-            .frame
-            .map(|frame| lower_scalar_window_frame(frame, aggregates, subqueries)),
-    }
-}
-
-pub(super) fn lower_scalar_window_frame(
-    frame: crate::ast::WindowFrame,
-    aggregates: &dyn AggregateClassifier,
-    subqueries: &mut Vec<QueryPlan>,
-) -> ScalarWindowFrame {
-    ScalarWindowFrame {
-        mode: frame.mode,
-        start: lower_scalar_frame_bound(frame.start, aggregates, subqueries),
-        end: lower_scalar_frame_bound(frame.end, aggregates, subqueries),
-    }
-}
-
-pub(super) fn lower_scalar_frame_bound(
-    bound: FrameBound,
-    aggregates: &dyn AggregateClassifier,
-    subqueries: &mut Vec<QueryPlan>,
-) -> ScalarFrameBound {
-    match bound {
-        FrameBound::UnboundedPreceding => ScalarFrameBound::UnboundedPreceding,
-        FrameBound::UnboundedFollowing => ScalarFrameBound::UnboundedFollowing,
-        FrameBound::CurrentRow => ScalarFrameBound::CurrentRow,
-        FrameBound::Preceding(expression) => ScalarFrameBound::Preceding(Box::new(
-            lower_scalar_expression(*expression, aggregates, subqueries),
-        )),
-        FrameBound::Following(expression) => ScalarFrameBound::Following(Box::new(
-            lower_scalar_expression(*expression, aggregates, subqueries),
-        )),
+    fn query(
+        &self,
+        query: Source<'_, Box<crate::ast::SelectStmt>>,
+        aggregates: &dyn AggregateClassifier,
+        subqueries: &mut Vec<QueryPlan>,
+    ) -> Result<usize> {
+        self.check()?;
+        let Source::Owned(query) = query else {
+            return Err(CatalogRetentionError::UnexpectedSubquery);
+        };
+        let id = subqueries.len();
+        subqueries.push(QueryPlan::lower_with(*query, aggregates));
+        Ok(id)
     }
 }
 
 pub(crate) fn is_builtin_aggregate(name: &str) -> bool {
     crate::ast::is_builtin_aggregate_function(name)
 }
+
+#[cfg(test)]
+mod tests;

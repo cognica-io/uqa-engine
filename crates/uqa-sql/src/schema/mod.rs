@@ -217,3 +217,6 @@ pub mod truncate;
 pub mod foreign_tables;
 
 pub mod retention;
+
+mod type_lookup;
+pub use type_lookup::{ColumnTypeSchema, ScalarTypeSchema};

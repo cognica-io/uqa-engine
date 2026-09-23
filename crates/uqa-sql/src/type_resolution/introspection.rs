@@ -8,7 +8,7 @@ use crate::ast::{ColumnType, FunctionBinding};
 use crate::SQLParam;
 use uqa_core::Value;
 
-use crate::{RowSchema, ScalarExpr};
+use crate::{schema::ScalarTypeSchema, ScalarExpr};
 
 use super::common::{
     base_type, common_context_expression_type, local_routine_name, merge_optional_types,
@@ -21,7 +21,7 @@ use super::{
 /// Bind polymorphic type-introspection calls and common-type coercions while the input schema still carries declared SQL types. Runtime values deliberately do not encode integer widths, varchar identity, or float widths, and selector expressions must return the common SQL type rather than the storage type of the branch selected at runtime.
 pub fn bind_type_introspection(
     expression: ScalarExpr,
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
 ) -> ScalarExpr {
     bind_type_introspection_inner(expression, schema, params, None)
@@ -30,7 +30,7 @@ pub fn bind_type_introspection(
 /// Bind type-introspection calls with access to catalog-backed function and aggregate overloads.
 pub fn bind_type_introspection_with_resolver(
     expression: ScalarExpr,
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> ScalarExpr {
@@ -43,7 +43,7 @@ pub fn bind_type_introspection_with_resolver(
 )]
 fn bind_type_introspection_inner(
     expression: ScalarExpr,
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> ScalarExpr {
@@ -371,7 +371,7 @@ fn bind_catalog_function(
     name: &str,
     binding: &mut Option<FunctionBinding>,
     args: &[ScalarExpr],
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) {
@@ -436,7 +436,7 @@ fn is_common_type_function(name: &str) -> bool {
 
 fn bind_common_type_expressions(
     expressions: &mut [ScalarExpr],
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) {
@@ -450,7 +450,7 @@ fn bind_common_type_expressions(
 
 fn common_expression_type<'a>(
     expressions: impl IntoIterator<Item = &'a ScalarExpr>,
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Option<ColumnType> {
@@ -468,7 +468,7 @@ fn common_expression_type<'a>(
 fn bind_common_type_cast(
     expression: &mut ScalarExpr,
     target: &ColumnType,
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) {
@@ -503,7 +503,7 @@ fn wrap_in_declared_cast(expression: &mut ScalarExpr, source_type: &ColumnType) 
 
 fn bind_type_introspection_items(
     expressions: &mut [ScalarExpr],
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) {
@@ -514,7 +514,7 @@ fn bind_type_introspection_items(
 
 fn bind_type_introspection_in_place(
     expression: &mut ScalarExpr,
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) {
@@ -562,7 +562,7 @@ fn declared_source_wrapper(target: &str, source_type: ColumnType) -> Option<Colu
 
 fn bind_frame_bound(
     bound: &mut crate::ScalarFrameBound,
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) {

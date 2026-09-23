@@ -10,7 +10,7 @@ use crate::ast::ColumnType;
 use crate::{SQLError, SQLParam};
 use uqa_core::Value;
 
-use crate::{RowSchema, ScalarExpr};
+use crate::{schema::ScalarTypeSchema, ScalarExpr};
 
 use super::common::base_type;
 use super::functions::named_argument_value;
@@ -70,7 +70,7 @@ pub(super) fn resolve_operator_type(
 
 pub(super) fn bind_unknown_arguments(
     args: &mut [ScalarExpr],
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) {
