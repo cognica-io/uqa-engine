@@ -573,6 +573,11 @@ pub trait DocumentStore: Send + Sync {
     /// snapshot is isolated from later mutations.
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>>;
 
+    /// Share an already immutable retained view, preserving its selected rows, allocation owners and cancellation boundary. This capability must not capture a new live view or copy row payloads. The default reports that controlled copying is required without invoking the legacy `snapshot` method, whose persistent implementations may share a mutable connection.
+    fn retained_snapshot(&self) -> StorageBackendResult<Option<Arc<dyn DocumentStore>>> {
+        Ok(None)
+    }
+
     /// Independent writable copy used by the in-memory engine transaction
     /// rollback path. Persistent engines restore through their backend
     /// transaction and need not implement this operation.

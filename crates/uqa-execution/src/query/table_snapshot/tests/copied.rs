@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod generated;
+
 #[test]
 fn copied_unindexed_rows_retain_their_allowance_after_nested_capture_and_failed_replacement() {
     let columns = columns("CREATE TABLE t (body TEXT)");
@@ -66,7 +68,7 @@ fn copied_unindexed_rows_retain_their_allowance_after_nested_capture_and_failed_
 }
 
 #[test]
-fn copied_view_charges_adapted_defaults_and_preserves_private_tuple_metadata() {
+fn copied_view_shares_selected_defaults_and_preserves_private_tuple_metadata() {
     let source_columns = columns("CREATE TABLE t (old INTEGER)");
     let mut target = source_columns.clone();
     target[0].name = "id".into();
@@ -75,6 +77,8 @@ fn copied_view_charges_adapted_defaults_and_preserves_private_tuple_metadata() {
     added.missing_value = Some(Value::Str("default".repeat(2048)));
     target.push(added);
     let text = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
+    let schema = schema(&target, &text);
+    let definitions = Arc::downgrade(&schema.columns);
     let control = StorageReadControl::with_limit(128 * 1024);
     let mut source = MemoryDocumentStore::new();
     source
@@ -91,16 +95,13 @@ fn copied_view_charges_adapted_defaults_and_preserves_private_tuple_metadata() {
         &control,
     )
     .unwrap();
-    let view = materialize(
-        &source,
-        &source_columns,
-        &schema(&target, &text),
-        changes,
-        &control,
-    )
-    .unwrap();
+    let view = materialize(&source, &source_columns, &schema, changes, &control).unwrap();
+    drop(schema);
+    drop(target);
     assert_eq!(view.documents.doc_ids().unwrap(), [2, 7]);
-    assert!(control.memory().used() >= 2 * 7 * 2048);
+    // The selected definition already owns the default; capture keeps that owner instead of producing another default for every row.
+    assert!(definitions.upgrade().is_some());
+    assert!(control.memory().used() < 7 * 2048);
     for (id, value, xmin) in [(2, 20, 43), (7, 70, 41)] {
         assert_eq!(
             view.documents.get_field(id, "id").unwrap(),
@@ -117,6 +118,7 @@ fn copied_view_charges_adapted_defaults_and_preserves_private_tuple_metadata() {
         );
     }
     drop(view);
+    assert!(definitions.upgrade().is_none());
     assert_eq!(control.memory().used(), 0);
 }
 

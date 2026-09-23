@@ -8,6 +8,45 @@ use super::*;
 use uqa_core::memory::{Budgeted, MemoryBudget};
 
 #[test]
+fn immutable_document_handoff_preserves_wrapper_leases_and_captured_cancellation() {
+    let control = StorageReadControl::with_limit(4096);
+    let mut builder = crate::RetainedDocumentStoreBuilder::new(&control);
+    builder
+        .add_document(
+            7,
+            StoredDocument::with_metadata(
+                [("value".into(), Value::Int(70))].into(),
+                DocumentMetadata::with_tuple_xmin(41),
+            ),
+        )
+        .unwrap();
+    let source: Arc<dyn DocumentStore> = Arc::new(builder.finish().unwrap());
+    let wrapper =
+        ReadOnlySnapshot::with_retention(source, control.memory().reserve(512).unwrap()).unwrap();
+    let used = control.memory().used();
+    let retained = wrapper.retained_snapshot().unwrap().unwrap();
+    let mut nested = retained.retained_snapshot().unwrap().unwrap();
+    drop(wrapper);
+    drop(retained);
+    assert_eq!(control.memory().used(), used);
+    assert_eq!(nested.get_field(7, "value").unwrap(), Some(Value::Int(70)));
+    assert_eq!(
+        nested.get_metadata(7).unwrap().unwrap().tuple_xmin(),
+        Some(41)
+    );
+    assert!(Arc::get_mut(&mut nested).unwrap().clear().is_err());
+    control.cancellation().cancel();
+    assert!(matches!(
+        nested.retained_snapshot(),
+        Err(crate::StorageBackendError::Cancelled(_))
+    ));
+    assert!(nested.get_stored(7).is_err());
+    assert_eq!(control.memory().used(), used);
+    drop(nested);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn shared_capture_releases_the_value_before_its_allowance_on_failure_and_last_drop() {
     struct Observed(MemoryBudget, Arc<std::sync::atomic::AtomicBool>);
     impl Drop for Observed {

@@ -14,8 +14,7 @@ use uqa_sql::{ast::ColumnDef, ColumnType, SQLError};
 use uqa_storage::inverted_index::{AnalyzerBindings, RetainedInvertedIndexBuilder};
 use uqa_storage::{read_control::StorageReadControl, vector_index::RetainedVectorIndexBuilder};
 use uqa_storage::{
-    DocumentStore, InvertedIndex, RetainedDocumentStoreBuilder, StorageBackendError,
-    StoredDocument, VectorIndex,
+    DocumentStore, InvertedIndex, RetainedDocumentStoreBuilder, StorageBackendError, VectorIndex,
 };
 
 mod documents;
@@ -102,7 +101,7 @@ pub fn retain(
     result.finish(Box::new(documents), document_count)
 }
 
-/// Reconstruct a selected query view without keeping intermediate corpus-sized document maps. Base rows use their original column identities; evaluated private rows already use the selected schema. Each row moves into an immutable Storage corpus that retains its payload and entry-capacity reservation through the last reader. Source decoding, row adaptation and caller-owned read outputs retain their separate allocation boundaries.
+/// Copy a mutable source into a controlled immutable corpus, or share an already retained source. Provider row pages keep their payload reservations through corpus adoption. The existing read adapter maps original column identities and shares evaluated private rows and selected definitions; capture does not construct defaults or unrequested generated values for every row. Text/vector reconstruction evaluates its requested fields. Owned read outputs retain their separate producer boundaries.
 pub fn materialize(
     source: &dyn DocumentStore,
     source_columns: &[ColumnDef],
@@ -112,9 +111,12 @@ pub fn materialize(
 ) -> Result<MaterializedTable, SQLError> {
     let cancellation = control.cancellation();
     cancellation.check()?;
-    let layout = RowLayout::new(source_columns, Arc::clone(&schema.columns), control)
-        .map_err(|error| snapshot_error("row layout", &error))?;
-    let mut result = SnapshotBuilder::new(schema, control)?;
+    if let Some(source) = source
+        .retained_snapshot()
+        .map_err(|error| snapshot_error("retained documents", &error))?
+    {
+        return retain(source, source_columns, schema, changes, control);
+    }
     let mut retained = RetainedDocumentStoreBuilder::new(control);
     let mut after = None;
     loop {
@@ -142,38 +144,30 @@ pub fn materialize(
         if selected.is_empty() {
             continue;
         }
-        let documents = source
-            .get_stored_many(&selected)
-            .map_err(|error| snapshot_error("documents", &error))?;
-        for (id, document) in documents {
+        let (documents, _page_memory) =
+            uqa_storage::document_store::read_stored_documents(source, &selected, control)
+                .map_err(|error| snapshot_error("documents", &error))?
+                .into_parts();
+        for (id, document) in selected.iter().copied().zip(documents) {
             cancellation.check()?;
-            let document = layout.adapt_base(document)?;
-            result.insert(&mut retained, id, document, schema)?;
-        }
-    }
-    for change in changes.into_rows() {
-        cancellation.check()?;
-        let (id, document) = change.map_err(|error| snapshot_error("private documents", &error))?;
-        if let Some(document) = document {
-            result.insert(
-                &mut retained,
-                id,
-                layout.complete_private(document)?,
-                schema,
-            )?;
+            if let Some(document) = document {
+                retained
+                    .add_retained_document(id, document)
+                    .map_err(|error| snapshot_error("document", &error))?;
+            }
         }
     }
     cancellation.check()?;
     let documents = retained
         .finish()
         .map_err(|error| snapshot_error("documents", &error))?;
-    let document_count = u64::try_from(
-        documents
-            .len()
-            .map_err(|error| snapshot_error("document count", &error))?,
+    retain(
+        Arc::new(documents),
+        source_columns,
+        schema,
+        changes,
+        control,
     )
-    .map_err(|_| SQLError::Internal("query snapshot document count overflow".into()))?;
-    result.finish(Box::new(documents), document_count)
 }
 
 pub fn empty(
@@ -249,19 +243,6 @@ impl SnapshotBuilder {
             vectors,
             document_count,
         })
-    }
-
-    fn insert(
-        &mut self,
-        documents: &mut RetainedDocumentStoreBuilder,
-        id: DocId,
-        document: StoredDocument,
-        schema: &SnapshotSchema<'_>,
-    ) -> Result<(), SQLError> {
-        self.index_fields(id, |field| document.fields().get(field), schema)?;
-        documents
-            .add_document(id, document)
-            .map_err(|error| snapshot_error("document", &error))
     }
 
     fn index_projection(

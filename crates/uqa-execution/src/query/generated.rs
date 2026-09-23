@@ -41,21 +41,40 @@ pub fn materialize_missing_generated_columns(
     columns: &[ColumnDef],
     document: &mut Document,
 ) -> Result<(), SQLError> {
-    let schema = crate::RowSchema::with_types(
-        columns.iter().map(|column| column.name.clone()).collect(),
-        columns
-            .iter()
-            .map(|column| Some(column.ty.clone()))
-            .collect(),
-    );
+    materialize_matching_missing_generated_columns(columns, document, |_| true)
+}
+
+pub(crate) fn materialize_missing_generated_column(
+    columns: &[ColumnDef],
+    document: &mut Document,
+    field: &str,
+) -> Result<(), SQLError> {
+    materialize_matching_missing_generated_columns(columns, document, |name| name == field)
+}
+
+fn materialize_matching_missing_generated_columns(
+    columns: &[ColumnDef],
+    document: &mut Document,
+    mut selected: impl FnMut(&str) -> bool,
+) -> Result<(), SQLError> {
+    let mut schema = None;
     for column in columns {
         let Some(generated) = column.generated.as_ref() else {
             continue;
         };
-        if document.contains_key(&column.name) {
+        if document.contains_key(&column.name) || !selected(&column.name) {
             continue;
         }
-        let value = evaluate_generated_column(&schema, generated, document)?;
+        let schema = schema.get_or_insert_with(|| {
+            crate::RowSchema::with_types(
+                columns.iter().map(|column| column.name.clone()).collect(),
+                columns
+                    .iter()
+                    .map(|column| Some(column.ty.clone()))
+                    .collect(),
+            )
+        });
+        let value = evaluate_generated_column(schema, generated, document)?;
         document.insert(
             column.name.clone(),
             uqa_sql::assignment::conversion::convert_value_to_column_type(value, &column.ty)?,

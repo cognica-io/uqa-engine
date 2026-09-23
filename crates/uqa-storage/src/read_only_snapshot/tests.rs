@@ -29,6 +29,7 @@ fn document_adapter_preserves_shared_projections_and_rejects_writes() {
     .unwrap();
     let snapshot = live.snapshot().unwrap();
     let mut retained = ReadOnlySnapshot::new(Arc::clone(&snapshot));
+    assert!(retained.retained_snapshot().unwrap().is_none());
     let direct = snapshot
         .get_shared_fields(&[7], &["body"])
         .unwrap()

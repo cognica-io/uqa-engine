@@ -58,10 +58,17 @@ impl DocumentStore for ControlledSource {
     }
     fn get_stored_many(
         &self,
-        ids: &[DocId],
+        _: &[DocId],
     ) -> StorageBackendResult<BTreeMap<DocId, StoredDocument>> {
+        panic!("copied snapshots must use controlled whole-row pages")
+    }
+    fn get_stored_many_controlled(
+        &self,
+        ids: &[DocId],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::RetainedDocumentPage> {
         self.row_reads.fetch_add(ids.len(), Ordering::Relaxed);
-        self.rows.get_stored_many(ids)
+        self.rows.get_stored_many_controlled(ids, control)
     }
     fn contains_doc_id(&self, id: DocId) -> StorageBackendResult<bool> {
         self.rows.contains_doc_id(id)

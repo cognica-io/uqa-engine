@@ -10,10 +10,12 @@ use std::sync::Arc;
 use uqa_core::CancellationToken;
 use uqa_storage::{
     DocumentMetadata, MemoryDocumentStore, MemoryInvertedIndex, StorageBackendResult,
+    StoredDocument,
 };
 
 mod budgets;
 mod controlled_ids;
+mod controlled_rows;
 mod copied;
 mod document_view;
 mod id_cursor;
@@ -139,11 +141,18 @@ impl DocumentStore for PagedSource {
     }
     fn get_stored_many(
         &self,
-        ids: &[DocId],
+        _: &[DocId],
     ) -> StorageBackendResult<BTreeMap<DocId, StoredDocument>> {
+        panic!("copied snapshots must use controlled whole-row pages")
+    }
+    fn get_stored_many_controlled(
+        &self,
+        ids: &[DocId],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::RetainedDocumentPage> {
         assert!(ids.len() <= crate::DEFAULT_BATCH_SIZE);
         self.requested.lock().extend_from_slice(ids);
-        self.rows.get_stored_many(ids)
+        self.rows.get_stored_many_controlled(ids, control)
     }
     fn delete(&mut self, id: DocId) -> StorageBackendResult<()> {
         self.rows.delete(id)

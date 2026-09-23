@@ -145,9 +145,17 @@ impl RowLayout {
             return source
                 .get_stored(id)?
                 .map(|row| {
-                    self.adapt_base(row)
-                        .map(|mut row| row.fields_mut().remove(field))
-                        .map_err(Self::error)
+                    (|| {
+                        let mut row = self.complete_defaults(self.remap_base(row)?)?;
+                        crate::query::generated::materialize_missing_generated_column(
+                            &self.columns,
+                            row.fields_mut(),
+                            field,
+                        )?;
+                        self.control.cancellation().check()?;
+                        Ok(row.fields_mut().remove(field))
+                    })()
+                    .map_err(Self::error)
                 })
                 .transpose()
                 .map(Option::flatten);

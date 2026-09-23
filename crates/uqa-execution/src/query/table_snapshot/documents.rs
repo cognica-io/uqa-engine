@@ -398,4 +398,8 @@ impl DocumentStore for RetainedDocuments {
         self.0.control.check()?;
         Ok(Arc::new(self.clone()))
     }
+
+    fn retained_snapshot(&self) -> StorageBackendResult<Option<Arc<dyn DocumentStore>>> {
+        self.snapshot().map(Some)
+    }
 }

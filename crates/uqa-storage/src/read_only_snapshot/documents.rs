@@ -222,4 +222,17 @@ impl DocumentStore for ReadOnlySnapshot<dyn DocumentStore> {
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>> {
         Ok(Arc::new(self.clone()))
     }
+
+    fn retained_snapshot(&self) -> StorageBackendResult<Option<Arc<dyn DocumentStore>>> {
+        if let Some(control) = &self.2 {
+            control.check()?;
+        }
+        Ok(self.0.retained_snapshot()?.map(|snapshot| {
+            Arc::new(Self(
+                snapshot,
+                self.1.as_ref().map(Arc::clone),
+                self.2.clone(),
+            )) as Arc<dyn DocumentStore>
+        }))
+    }
 }

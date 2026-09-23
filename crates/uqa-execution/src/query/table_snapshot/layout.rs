@@ -68,10 +68,11 @@ impl RowLayout {
         })
     }
 
-    pub(super) fn adapt_base(
-        &self,
-        mut document: StoredDocument,
-    ) -> Result<StoredDocument, SQLError> {
+    pub(super) fn adapt_base(&self, document: StoredDocument) -> Result<StoredDocument, SQLError> {
+        self.complete_private(self.remap_base(document)?)
+    }
+
+    fn remap_base(&self, mut document: StoredDocument) -> Result<StoredDocument, SQLError> {
         self.control.cancellation().check()?;
         // Remove every source slot before installing targets so rename chains and name reuse cannot overwrite another column incarnation.
         let fields = document.fields_mut();
@@ -90,13 +91,23 @@ impl RowLayout {
             self.control.cancellation().check()?;
             fields.insert(target.to_string(), value);
         }
-        self.complete_private(document)
+        Ok(document)
     }
 
     pub(super) fn complete_private(
         &self,
-        mut document: StoredDocument,
+        document: StoredDocument,
     ) -> Result<StoredDocument, SQLError> {
+        let mut document = self.complete_defaults(document)?;
+        crate::query::generated::materialize_missing_generated_columns(
+            &self.columns,
+            document.fields_mut(),
+        )?;
+        self.control.cancellation().check()?;
+        Ok(document)
+    }
+
+    fn complete_defaults(&self, mut document: StoredDocument) -> Result<StoredDocument, SQLError> {
         self.control.cancellation().check()?;
         let fields = document.fields_mut();
         for column in self.columns.iter() {
@@ -108,7 +119,6 @@ impl RowLayout {
                 );
             }
         }
-        crate::query::generated::materialize_missing_generated_columns(&self.columns, fields)?;
         self.control.cancellation().check()?;
         Ok(document)
     }
