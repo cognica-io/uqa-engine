@@ -179,10 +179,10 @@ fn acknowledged_receipts_outlive_terminal_leases_and_overlapping_serializable_hi
     let control = control();
     let connection = ManagedConnection::open_in_memory().unwrap();
     let store = SQLiteRecordStore::new(&connection).unwrap();
-    let (older, _) = store
+    let (older, ()) = store
         .admit_serializable(false, &control, || Ok(()))
         .unwrap();
-    let (writer, _) = store
+    let (writer, ()) = store
         .admit_serializable(false, &control, || Ok(()))
         .unwrap();
     let owner = store.allocate_managed_transaction(&control).unwrap();
@@ -283,7 +283,7 @@ fn managed_abandonment_retains_prepared_ssi_evidence_until_its_last_actor_releas
     let control = control();
     let connection = ManagedConnection::open_in_memory().unwrap();
     let store = SQLiteRecordStore::new(&connection).unwrap();
-    let (actor, _) = store
+    let (actor, ()) = store
         .admit_serializable(false, &control, || Ok(()))
         .unwrap();
     let owner = store.allocate_managed_transaction(&control).unwrap();

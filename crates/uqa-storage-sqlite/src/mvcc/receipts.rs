@@ -24,7 +24,7 @@ use uqa_storage::{
 use super::{admission, codec, native, write, PhysicalResult, SQLiteRecordStore};
 
 impl SQLiteRecordStore {
-    /// Set the shared database's maximum retained receipt count. Pending, unacknowledged and SSI-referenced receipts all count. Lowering the limit preserves existing entries and prevents allocation until release/reclamation makes room. The default is 65,536 entries; zero and values above SQLite's positive i64 range are rejected.
+    /// Set the shared database's maximum retained receipt count. Pending, unacknowledged and SSI-referenced receipts all count. Lowering the limit preserves existing entries and prevents allocation until release/reclamation makes room. The default is 65,536 entries; zero and values above `SQLite`'s positive i64 range are rejected.
     pub fn set_receipt_retention_limit(
         &self,
         limit: u64,

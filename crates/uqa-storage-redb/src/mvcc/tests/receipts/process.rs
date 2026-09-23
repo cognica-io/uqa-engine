@@ -26,41 +26,45 @@ impl Drop for Process {
     }
 }
 
+fn retain_child_receipts(path: std::ffi::OsString) -> ! {
+    let store = RedbRecordStore::new(Arc::new(Database::create(path).unwrap())).unwrap();
+    let control = StorageReadControl::with_limit(1 << 20);
+    store.set_receipt_retention_limit(4, &control).unwrap();
+    let pending = store.allocate_managed_transaction(&control).unwrap();
+    let committed = store.allocate_managed_transaction(&control).unwrap();
+    let aborted = store.allocate_managed_transaction(&control).unwrap();
+    let manual = store.allocate_transaction(&control).unwrap();
+    let prepared = PreparedRecordCommit::new(
+        &[RecordWrite {
+            key: b"committed",
+            expected: None,
+            value: Some(b"survives-owner-death"),
+        }],
+        &control,
+    )
+    .unwrap();
+    store
+        .commit(committed.transaction(), &prepared, &control)
+        .unwrap();
+    store.abort(aborted.transaction(), &control).unwrap();
+    println!(
+        "ready:{}:{}:{}:{}",
+        pending.transaction().allocation(),
+        committed.transaction().allocation(),
+        aborted.transaction().allocation(),
+        manual.allocation()
+    );
+    std::io::stdout().flush().unwrap();
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input).unwrap();
+    drop((pending, committed, aborted));
+    panic!("the parent must terminate this process with its receipt owners retained");
+}
+
 #[test]
 fn killed_database_owner_releases_only_managed_receipts_and_preserves_committed_records() {
     if let Some(path) = std::env::var_os(PATH_ENV) {
-        let store = RedbRecordStore::new(Arc::new(Database::create(path).unwrap())).unwrap();
-        let control = StorageReadControl::with_limit(1 << 20);
-        store.set_receipt_retention_limit(4, &control).unwrap();
-        let pending = store.allocate_managed_transaction(&control).unwrap();
-        let committed = store.allocate_managed_transaction(&control).unwrap();
-        let aborted = store.allocate_managed_transaction(&control).unwrap();
-        let manual = store.allocate_transaction(&control).unwrap();
-        let prepared = PreparedRecordCommit::new(
-            &[RecordWrite {
-                key: b"committed",
-                expected: None,
-                value: Some(b"survives-owner-death"),
-            }],
-            &control,
-        )
-        .unwrap();
-        store
-            .commit(committed.transaction(), &prepared, &control)
-            .unwrap();
-        store.abort(aborted.transaction(), &control).unwrap();
-        println!(
-            "ready:{}:{}:{}:{}",
-            pending.transaction().allocation(),
-            committed.transaction().allocation(),
-            aborted.transaction().allocation(),
-            manual.allocation()
-        );
-        std::io::stdout().flush().unwrap();
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input).unwrap();
-        drop((pending, committed, aborted));
-        panic!("the parent must terminate this process with its receipt owners retained");
+        retain_child_receipts(path);
     }
 
     let directory = tempfile::tempdir().unwrap();
