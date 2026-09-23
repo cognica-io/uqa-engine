@@ -13,34 +13,19 @@ use uqa_analysis::{AnalysisResult, Analyzer, AnalyzerResources, CompiledAnalyzer
 
 use super::AnalyzerPhase;
 
-#[derive(Debug, Clone)]
-struct Revision {
-    compiled: Arc<CompiledAnalyzer>,
-    configuration: Arc<Analyzer>,
-}
-
-impl Revision {
-    fn new(compiled: Arc<CompiledAnalyzer>) -> AnalysisResult<Self> {
-        Ok(Self {
-            configuration: Arc::new(compiled.descriptor().configuration()?),
-            compiled,
-        })
-    }
-}
-
 struct DefaultRevision {
     configuration: Analyzer,
     resources: AnalyzerResources,
-    resolved: OnceLock<Revision>,
+    resolved: OnceLock<Arc<CompiledAnalyzer>>,
 }
 
 impl DefaultRevision {
-    fn resolve(&self) -> AnalysisResult<&Revision> {
+    fn resolve(&self) -> AnalysisResult<&Arc<CompiledAnalyzer>> {
         if let Some(revision) = self.resolved.get() {
             return Ok(revision);
         }
         // Resource callbacks run without a binding lock. Concurrent resolution publishes one immutable winner.
-        let revision = Revision::new(self.resources.compile(&self.configuration)?)?;
+        let revision = self.resources.compile(&self.configuration)?;
         let _ = self.resolved.set(revision);
         Ok(self.resolved.get().expect("resolved default was published"))
     }
@@ -48,14 +33,14 @@ impl DefaultRevision {
     fn configuration(&self) -> &Analyzer {
         self.resolved
             .get()
-            .map_or(&self.configuration, |revision| &revision.configuration)
+            .map_or(&self.configuration, |revision| revision.configuration())
     }
 }
 
 #[derive(Debug, Clone)]
 struct FieldRevisions {
-    index: Revision,
-    search: Revision,
+    index: Arc<CompiledAnalyzer>,
+    search: Arc<CompiledAnalyzer>,
 }
 
 /// Index and search revisions are independent. Clones retain the same compiled resources while subsequent field assignments are isolated.
@@ -100,14 +85,14 @@ impl AnalyzerBindings {
     pub fn index_configuration(&self, field: &str) -> &Analyzer {
         self.fields.get(field).map_or_else(
             || self.default.configuration(),
-            |pair| &pair.index.configuration,
+            |pair| pair.index.configuration(),
         )
     }
 
     pub fn search_configuration(&self, field: &str) -> &Analyzer {
         self.fields.get(field).map_or_else(
             || self.default.configuration(),
-            |pair| &pair.search.configuration,
+            |pair| pair.search.configuration(),
         )
     }
 
@@ -116,7 +101,7 @@ impl AnalyzerBindings {
             Some(pair) => &pair.index,
             None => self.default.resolve()?,
         };
-        Ok(revision.compiled.clone())
+        Ok(Arc::clone(revision))
     }
 
     pub fn search_revision(&self, field: &str) -> AnalysisResult<Arc<CompiledAnalyzer>> {
@@ -124,7 +109,7 @@ impl AnalyzerBindings {
             Some(pair) => &pair.search,
             None => self.default.resolve()?,
         };
-        Ok(revision.compiled.clone())
+        Ok(Arc::clone(revision))
     }
 
     pub fn bind(
@@ -144,11 +129,10 @@ impl AnalyzerBindings {
         compiled: Arc<CompiledAnalyzer>,
         phase: AnalyzerPhase,
     ) -> AnalysisResult<()> {
-        let revision = Revision::new(compiled)?;
         let pair = if phase == AnalyzerPhase::Both {
             FieldRevisions {
-                index: revision.clone(),
-                search: revision,
+                index: Arc::clone(&compiled),
+                search: compiled,
             }
         } else {
             let mut pair = if let Some(pair) = self.fields.get(field) {
@@ -161,8 +145,8 @@ impl AnalyzerBindings {
                 }
             };
             match phase {
-                AnalyzerPhase::Index => pair.index = revision,
-                AnalyzerPhase::Search => pair.search = revision,
+                AnalyzerPhase::Index => pair.index = compiled,
+                AnalyzerPhase::Search => pair.search = compiled,
                 AnalyzerPhase::Both => unreachable!("both sides handled above"),
             }
             pair
@@ -175,17 +159,14 @@ impl AnalyzerBindings {
         self.fields.remove(field);
     }
 
-    /// Resolve both diagnostic configurations before publishing either retained side.
+    /// Retain both compiled sides and their shared diagnostic configurations without decoding their descriptors.
     pub fn bind_revisions(
         &mut self,
         field: &str,
         index: Arc<CompiledAnalyzer>,
         search: Arc<CompiledAnalyzer>,
     ) -> AnalysisResult<()> {
-        let pair = FieldRevisions {
-            index: Revision::new(index)?,
-            search: Revision::new(search)?,
-        };
+        let pair = FieldRevisions { index, search };
         self.fields.insert(field.to_owned(), pair);
         Ok(())
     }

@@ -9,6 +9,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use uqa_analysis::Analyzer;
+use uqa_core::memory::{BudgetedMap, BudgetedVec};
 use uqa_core::{DocId, FieldName, Value};
 use uqa_sql::{ast::ColumnDef, ColumnType, SQLError};
 use uqa_storage::inverted_index::{AnalyzerBindings, RetainedInvertedIndexBuilder};
@@ -74,14 +75,7 @@ pub fn retain(
             .map_err(|error| snapshot_error("document count", &error))?,
     )
     .map_err(|_| SQLError::Internal("query snapshot document count overflow".into()))?;
-    let fields = schema
-        .text_fields
-        .iter()
-        .chain(schema.vector_dimensions.keys())
-        .map(String::as_str)
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
+    let fields = index_fields(schema, control)?;
     if fields.is_empty() {
         return result.finish(Box::new(documents), document_count);
     }
@@ -99,6 +93,35 @@ pub fn retain(
     }
     cancellation.check()?;
     result.finish(Box::new(documents), document_count)
+}
+
+fn index_fields<'a>(
+    schema: &'a SnapshotSchema<'_>,
+    control: &StorageReadControl,
+) -> Result<BudgetedVec<&'a str>, SQLError> {
+    control.cancellation().check()?;
+    let mut selected = BudgetedMap::new(control.memory());
+    for field in schema
+        .text_fields
+        .iter()
+        .chain(schema.vector_dimensions.keys())
+    {
+        control.cancellation().check()?;
+        selected
+            .insert(field.as_str(), ())
+            .map_err(|error| snapshot_error("index field selection", &error.into()))?;
+    }
+    let mut fields = BudgetedVec::new(control.memory());
+    fields
+        .reserve(selected.len())
+        .map_err(|error| snapshot_error("index field projection", &error.into()))?;
+    for (field, ()) in selected.iter() {
+        control.cancellation().check()?;
+        fields
+            .push(*field)
+            .map_err(|error| snapshot_error("index field projection", &error.into()))?;
+    }
+    Ok(fields)
 }
 
 /// Copy a mutable source into a controlled immutable corpus, or share an already retained source. Provider row pages keep their payload reservations through corpus adoption. The existing read adapter maps original column identities and shares evaluated private rows and selected definitions; capture does not construct defaults or unrequested generated values for every row. Text/vector reconstruction evaluates its requested fields. Owned read outputs retain their separate producer boundaries.

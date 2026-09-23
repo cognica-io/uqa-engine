@@ -8,6 +8,48 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use uqa_core::memory::Budgeted;
 
+#[test]
+fn index_field_selection_borrows_names_and_retains_its_bounded_projection() {
+    let index = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
+    let fields = ["z".repeat(16 << 10), "a".into(), "a".into()];
+    let mut schema = schema(&[], &index);
+    schema.text_fields = &fields;
+    schema.vector_dimensions.insert("v".into(), 2);
+    schema.vector_dimensions.insert("a".into(), 2);
+    let control = StorageReadControl::with_limit(1024);
+    let selected = index_fields(&schema, &control).unwrap();
+    assert_eq!(&*selected, &["a", "v", fields[0].as_str()]);
+    assert!(std::ptr::eq(selected[2], fields[0].as_str()));
+    let retained = control.memory().used();
+    assert!(retained > 0);
+    let occupied = control
+        .memory()
+        .reserve(control.memory().limit() - retained)
+        .unwrap();
+    let error = index_fields(&schema, &control).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("53200"));
+    assert_eq!(control.memory().used(), control.memory().limit());
+    assert_eq!(&*selected, &["a", "v", fields[0].as_str()]);
+    drop(occupied);
+    control.cancellation().cancel();
+    assert_eq!(
+        index_fields(&schema, &control).unwrap_err().sqlstate(),
+        Some("57014")
+    );
+    control.cancellation().reset();
+    assert_eq!(control.memory().used(), retained);
+    drop(selected);
+    assert_eq!(control.memory().used(), 0);
+
+    let names: Vec<_> = (0..128).map(|index| format!("field_{index}")).collect();
+    schema.text_fields = &names;
+    assert_eq!(
+        index_fields(&schema, &control).unwrap_err().sqlstate(),
+        Some("53200")
+    );
+    assert_eq!(control.memory().used(), 0);
+}
+
 #[derive(Clone)]
 struct DecodingSource {
     rows: Arc<MemoryDocumentStore>,

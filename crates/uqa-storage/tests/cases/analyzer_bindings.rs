@@ -10,6 +10,79 @@ use uqa_analysis::{keyword_analyzer, whitespace_analyzer, AnalyzerLimits, Analyz
 use uqa_storage::{AnalyzerBindingOwner, AnalyzerPhase, FieldAnalyzerBinding};
 
 #[test]
+fn retained_field_bindings_share_compiled_diagnostics_until_the_last_reader_drops() {
+    use std::sync::Arc;
+    use uqa_storage::inverted_index::AnalyzerBindings;
+
+    let resources = AnalyzerResources::new(AnalyzerLimits {
+        max_cached_analyzers: 0,
+        ..AnalyzerLimits::default()
+    });
+    let index = resources
+        .compile(&uqa_analysis::standard_analyzer("english"))
+        .unwrap();
+    let search = resources.compile(&keyword_analyzer()).unwrap();
+    let index_lifetime = Arc::downgrade(&index);
+    let search_lifetime = Arc::downgrade(&search);
+    let mut bindings = AnalyzerBindings::with_resources(whitespace_analyzer(), resources);
+    bindings
+        .bind_revisions("body", Arc::clone(&index), Arc::clone(&search))
+        .unwrap();
+    bindings
+        .bind_revision("title", Arc::clone(&index), AnalyzerPhase::Both)
+        .unwrap();
+    for configuration in [
+        bindings.index_configuration("body"),
+        bindings.index_configuration("title"),
+        bindings.search_configuration("title"),
+    ] {
+        assert!(std::ptr::eq(configuration, index.configuration()));
+    }
+    assert!(std::ptr::eq(
+        bindings.search_configuration("body"),
+        search.configuration()
+    ));
+    let default = bindings.index_revision("unassigned").unwrap();
+    assert!(std::ptr::eq(
+        bindings.default_configuration(),
+        default.configuration()
+    ));
+    let retained = bindings.clone();
+    bindings
+        .bind_revision("body", Arc::clone(&search), AnalyzerPhase::Both)
+        .unwrap();
+    bindings.remove("title");
+    assert!(std::ptr::eq(
+        retained.index_configuration("body"),
+        index.configuration()
+    ));
+    assert!(std::ptr::eq(
+        bindings.index_configuration("body"),
+        search.configuration()
+    ));
+    drop((bindings, index, search, default));
+    assert_eq!(
+        retained
+            .index_configuration("body")
+            .analyze("The cats and")
+            .unwrap(),
+        ["cat"]
+    );
+    assert_eq!(
+        retained
+            .search_configuration("body")
+            .analyze("The cats and")
+            .unwrap(),
+        ["The cats and"]
+    );
+    assert!(index_lifetime.upgrade().is_some());
+    assert!(search_lifetime.upgrade().is_some());
+    drop(retained);
+    assert!(index_lifetime.upgrade().is_none());
+    assert!(search_lifetime.upgrade().is_none());
+}
+
+#[test]
 fn japanese_analyzers_require_lossless_revision_storage_when_their_feature_is_available() {
     use uqa_storage::inverted_index::{validate_linear_analyzer, validate_linear_revision};
     let config = serde_json::from_value::<uqa_analysis::Analyzer>(serde_json::json!({

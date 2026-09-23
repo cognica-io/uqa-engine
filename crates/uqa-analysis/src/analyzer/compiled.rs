@@ -20,6 +20,7 @@ use crate::{
 #[derive(Debug)]
 pub struct CompiledAnalyzer {
     descriptor: Arc<AnalyzerDescriptor>,
+    configuration: Analyzer,
     char_filters: Vec<PreparedCharFilter<'static>>,
     tokenizer: PreparedTokenizer,
     token_filters: Vec<PreparedTokenFilter<'static>>,
@@ -98,23 +99,32 @@ impl CompiledAnalyzer {
                 filter.prepare().map(PreparedTokenFilter::into_owned)
             })
             .collect::<AnalysisResult<_>>()?;
+        let normalization = crate::normalization::PreparedNormalization::new(
+            config.normalization.as_ref(),
+            #[cfg(feature = "nori")]
+            nori.normalizer,
+            #[cfg(feature = "kuromoji")]
+            kuromoji.normalizer,
+        )?;
         Ok(Self {
             descriptor,
+            configuration: config,
             char_filters,
             tokenizer,
             token_filters,
-            normalization: crate::normalization::PreparedNormalization::new(
-                config.normalization.as_ref(),
-                #[cfg(feature = "nori")]
-                nori.normalizer,
-                #[cfg(feature = "kuromoji")]
-                kuromoji.normalizer,
-            )?,
+            normalization,
         })
     }
 
     pub fn descriptor(&self) -> &Arc<AnalyzerDescriptor> {
         &self.descriptor
+    }
+
+    /// Borrow the resolved diagnostic configuration retained with this immutable revision.
+    ///
+    /// This shares preparation's configuration without decoding the descriptor or resolving external resources again.
+    pub fn configuration(&self) -> &Analyzer {
+        &self.configuration
     }
 
     /// Analyze with independent output/source state and no expression compilation or file resolution.
