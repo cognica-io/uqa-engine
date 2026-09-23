@@ -7,8 +7,8 @@
 //! Scoped transaction callbacks and implicit transaction lifecycle.
 
 use super::{
-    panic_description, Engine, SQLError, SQLParam, SQLResult, StorageBackendError,
-    StorageBackendResult, TransactionIntent, TransactionScope,
+    panic_description, BackendTransactionMode, Engine, SQLError, SQLParam, SQLResult,
+    StorageBackendError, StorageBackendResult, TransactionIntent, TransactionScope,
 };
 
 impl Engine {
@@ -296,6 +296,36 @@ impl Engine {
             }
         }
         Ok(())
+    }
+
+    /// Automatic maintenance must release its relation locks instead of waiting behind a serialized writer that may need to upgrade those same locks.
+    pub(crate) fn try_prepare_storage_maintenance_writer(&self) -> StorageBackendResult<bool> {
+        let mark = self
+            .session
+            .transactions
+            .lock()
+            .first()
+            .filter(|frame| frame.backend_mode == BackendTransactionMode::Deferred)
+            .map(|frame| frame.begin_lock_mark);
+        if let Some(mark) = mark {
+            let admitted = self
+                .row_locks
+                .try_acquire_relation(
+                    self.session_id,
+                    self.row_locks.backend_writer_key(),
+                    crate::row_locks::RelationLockMode::AccessExclusive,
+                    mark,
+                    &self.runtime.cancellation,
+                )
+                .map_err(|error| {
+                    StorageBackendError::backend("maintenance writer admission", error)
+                })?;
+            if !admitted {
+                return Ok(false);
+            }
+        }
+        self.prepare_storage_maintenance_writer()?;
+        Ok(true)
     }
 
     fn with_implicit_storage_transaction_inner<R>(

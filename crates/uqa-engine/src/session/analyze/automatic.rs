@@ -121,7 +121,9 @@ impl Engine {
                 return Ok(false);
             }
             let name = target.name.as_str();
-            engine.prepare_storage_maintenance_writer()?;
+            if !engine.try_prepare_storage_maintenance_writer()? {
+                return Ok(false);
+            }
             let Some(table) = engine.try_table(name)? else {
                 return Ok(false);
             };

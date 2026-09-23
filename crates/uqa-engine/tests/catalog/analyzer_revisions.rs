@@ -44,7 +44,9 @@ impl Backend {
 }
 
 fn execute(engine: &Engine, sql: &str) {
-    engine.sql(sql, &[]).unwrap();
+    engine
+        .sql(sql, &[])
+        .unwrap_or_else(|error| panic!("{sql}: {error}"));
 }
 
 fn hits(engine: &Engine, table: &str, field: &str, term: &str) -> Vec<i64> {

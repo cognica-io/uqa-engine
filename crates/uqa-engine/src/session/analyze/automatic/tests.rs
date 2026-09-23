@@ -34,6 +34,68 @@ fn sessions() -> (tempfile::TempDir, Engine, Engine) {
 }
 
 #[test]
+fn automatic_statistics_yield_to_a_serialized_writer_before_ddl_upgrade() {
+    use std::sync::Arc;
+    use uqa_storage_sqlite::{Catalog, ManagedConnection, SQLiteStorageBackend};
+
+    let directory = tempfile::tempdir().unwrap();
+    let connection = ManagedConnection::open(&directory.path().join("serialized.db")).unwrap();
+    let writer = Engine::from_persistent_backends(
+        Arc::new(Catalog::open(connection.clone()).unwrap()),
+        Arc::new(SQLiteStorageBackend::new(connection)),
+    )
+    .unwrap();
+    writer.release_automatic_statistics_client();
+    writer
+        .session
+        .statistics_worker
+        .store(true, Ordering::Release);
+    writer
+        .sql(
+            "CREATE TABLE t (id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1)",
+            &[],
+        )
+        .unwrap();
+    let worker = writer.new_session().unwrap();
+    worker.release_automatic_statistics_client();
+    worker
+        .session
+        .statistics_worker
+        .store(true, Ordering::Release);
+    assert!(!writer.versioned_backend_transactions());
+    assert!(!worker.versioned_backend_transactions());
+    writer.sql("BEGIN; INSERT INTO t VALUES (2)", &[]).unwrap();
+    let cancellation = worker.cancellation_token();
+    let (finished, completion) = std::sync::mpsc::sync_channel(1);
+    let task = std::thread::spawn(move || {
+        let result = worker.run_automatic_analyze("public.t");
+        finished.send(()).unwrap();
+        (worker, result)
+    });
+    let completed = completion
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .is_ok();
+    if !completed {
+        cancellation.cancel();
+        writer.sql("ROLLBACK", &[]).unwrap();
+    }
+    let (worker, result) = task.join().unwrap();
+    assert!(
+        completed,
+        "automatic statistics waited behind the application's serialized writer"
+    );
+    assert!(
+        !result.unwrap(),
+        "contended automatic statistics must remain pending"
+    );
+    writer
+        .sql("CREATE INDEX t_id_idx ON t (id); COMMIT", &[])
+        .unwrap();
+    assert!(worker.run_automatic_analyze("public.t").unwrap());
+    assert_eq!(worker.column_stats("t").unwrap()["id"].row_count, 2);
+}
+
+#[test]
 fn sampling_read_snapshot_allows_writes_and_rejects_obsolete_statistics() {
     let (_directory, writer, worker) = sessions();
     let backend = worker.storage.backend.as_ref().unwrap();

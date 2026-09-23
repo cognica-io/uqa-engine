@@ -401,6 +401,7 @@ jobs:
           tests::storage_consistency:: table_storage::documents::tests::
           transactions::tests::mutation_failures:: state::catalog_cell::tests::
           storage::sessions::commit_resolution::
+          session::analyze::
           sql_generated_columns:: queries::sql_cursor::secure_temporary:: concurrent_transactions::
           ${{ inputs.transaction_suite == 'all' && 'transaction_lifecycle::pg18_cursors:: sessions::concurrent_writes:: sessions::native_publication:: redb_backend:: sqlite_key_value_backend:: storage::transaction_lifecycle::pg18_isolation:: storage::sessions::serializable_observations:: storage::sessions::concurrent_inserts::' || '' }}
           --skip snapshot_creation_does_not_scale_with_document_count
