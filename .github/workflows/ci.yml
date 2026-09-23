@@ -392,6 +392,7 @@ jobs:
           --lib --tests --features uqa-engine/nori,uqa-engine/kuromoji --
           memory:: types::value:: types::array:: types::decimal:: types::jsonb:: types::temporal:: types::tests:: json::tests float_text::
           expr:: type_resolution:: schema::retention:: schema::generated:: assignment:: scalar::
+          ast::types::production:: ir::call_arguments::
           document_store:: inverted_index:: key_value::tests::index_retention::
           mvcc:: mvcc_sessions:: analyzer_bindings:: analyzer_revisions:: occurrences:: field_metadata:: japanese::
           temporary_file:: vector_index::collection:: compound:: logical_sessions:: restore::
