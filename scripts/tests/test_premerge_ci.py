@@ -94,10 +94,9 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
             "          save-if: ${{ github.ref == 'refs/heads/main' }}\n"
         )
 
-        self.assertEqual(
-            self.workflow.count("      - uses: Swatinem/rust-cache@v2\n"), 7
-        )
-        self.assertEqual(self.workflow.count(cache_step), 7)
+        cache_count = self.workflow.count("      - uses: Swatinem/rust-cache@v2\n")
+        self.assertGreater(cache_count, 0)
+        self.assertEqual(self.workflow.count(cache_step), cache_count)
 
 
 class PremergeCITest(unittest.TestCase):

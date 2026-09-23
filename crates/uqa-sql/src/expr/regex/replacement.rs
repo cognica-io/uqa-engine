@@ -148,7 +148,7 @@ fn postgres_replacement(
     output.finish().map_err(Into::into)
 }
 
-/// Both native interpolation passes use this already allocated string. The first appends only literal replacement text (at most replacement.len() bytes); the second uses the exact length selected by the same native parser. Neither call may grow the admitted capacity. Field order keeps the buffer within its lease during error unwinding.
+/// Both native interpolation passes use this already allocated string. The first appends only literal replacement text (at most `replacement.len()` bytes); the second uses the exact length selected by the same native parser. Neither call may grow the admitted capacity. Field order keeps the buffer within its lease during error unwinding.
 struct InterpolationBuffer {
     value: String,
     memory: Option<MemoryReservation>,

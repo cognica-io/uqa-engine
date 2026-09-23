@@ -107,14 +107,15 @@ pub fn lock_would_block(error: &std::io::Error) -> bool {
 
 #[cfg(windows)]
 fn windows_overlapped(offset: u64) -> windows_sys::Win32::System::IO::OVERLAPPED {
-    let mut overlapped = windows_sys::Win32::System::IO::OVERLAPPED::default();
-    overlapped.Anonymous = windows_sys::Win32::System::IO::OVERLAPPED_0 {
-        Anonymous: windows_sys::Win32::System::IO::OVERLAPPED_0_0 {
-            Offset: offset as u32,
-            OffsetHigh: (offset >> 32) as u32,
+    windows_sys::Win32::System::IO::OVERLAPPED {
+        Anonymous: windows_sys::Win32::System::IO::OVERLAPPED_0 {
+            Anonymous: windows_sys::Win32::System::IO::OVERLAPPED_0_0 {
+                Offset: offset as u32,
+                OffsetHigh: (offset >> 32) as u32,
+            },
         },
-    };
-    overlapped
+        ..Default::default()
+    }
 }
 
 #[cfg(windows)]
