@@ -31,7 +31,7 @@ impl Engine {
             return Err(SQLError::UnknownColumn(field.to_string()));
         };
         let pl = uqa_execution::serializable::vector::search_knn(
-            index.as_ref(),
+            index,
             self.serializable_table_read(table)?.as_ref(),
             &t.columns.snapshot(),
             field,
@@ -70,7 +70,7 @@ impl Engine {
             .get(field)
             .ok_or_else(|| SQLError::UnknownColumn(field.to_string()))?;
         let raw = uqa_execution::serializable::vector::search_knn(
-            index.as_ref(),
+            index,
             self.serializable_table_read(table)?.as_ref(),
             &table_state.columns.snapshot(),
             field,
@@ -159,7 +159,7 @@ impl Engine {
                 });
             }
             let raw = uqa_execution::serializable::vector::search_knn(
-                index.as_ref(),
+                index,
                 engine.serializable_table_state_read(table)?.as_ref(),
                 &table.columns.snapshot(),
                 field,

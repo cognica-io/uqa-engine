@@ -131,7 +131,9 @@ impl Engine {
             *table.document_store.write() = document_store;
             *table.storage_generation.write() = table_snapshot.storage_generation;
             *table.inverted_index.write() = inverted_index;
-            *table.vector_indexes.write() = vector_indexes;
+            *table.vector_indexes.write().live_mut().map_err(|error| {
+                Self::storage_tx_error("ROLLBACK vector registrations", &error)
+            })? = vector_indexes;
             table
                 .fts_fields
                 .write()

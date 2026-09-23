@@ -23,7 +23,8 @@ fn empty_capture_shares_default_and_retains_selected_field_metadata() {
     let documents = view.documents.snapshot().unwrap();
     let vector = view.vectors.values().next().unwrap().snapshot().unwrap();
     drop(view);
-    assert_eq!(control.memory().used(), bytes);
+    assert!(control.memory().used() > 0);
+    assert!(control.memory().used() < bytes);
     drop((text, documents));
     assert!(control.memory().used() > dimensions.first_key_value().unwrap().0.len());
     drop(vector);
@@ -131,7 +132,8 @@ fn direct_vector_capture_admits_names_and_keeps_them_through_nested_readers() {
     assert_eq!(control.memory().used(), bytes);
     drop((source, captured));
     assert_eq!(nested.dimensions(), 2);
-    assert_eq!(control.memory().used(), bytes);
+    assert!(control.memory().used() > field.len());
+    assert!(control.memory().used() < bytes);
     drop(nested);
     assert_eq!(control.memory().used(), 0);
     assert_eq!(source_control.memory().used(), 0);

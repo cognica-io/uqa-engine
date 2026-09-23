@@ -6,16 +6,17 @@
 
 //! Query-table row adaptation and reconstruction from a retained base and evaluated private rows.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use uqa_core::memory::{BudgetedMap, BudgetedVec, MemoryReservation};
 use uqa_core::{DocId, FieldName, Value};
-use uqa_sql::schema::retention::RetainedColumns;
-use uqa_sql::{ast::ColumnDef, ColumnType, SQLError};
+use uqa_sql::{ast::ColumnDef, schema::retention::RetainedColumns, ColumnType, SQLError};
 use uqa_storage::inverted_index::RetainedInvertedIndexBuilder;
-use uqa_storage::{read_control::StorageReadControl, vector_index::RetainedVectorIndexBuilder};
 use uqa_storage::{
-    DocumentStore, InvertedIndex, RetainedDocumentStoreBuilder, StorageBackendError, VectorIndex,
+    read_control::StorageReadControl,
+    vector_index::{RetainedVectorIndexBuilder, RetainedVectorIndexesBuilder, VectorIndexes},
+};
+use uqa_storage::{
+    DocumentStore, InvertedIndex, RetainedDocumentStoreBuilder, StorageBackendError,
 };
 
 mod documents;
@@ -39,7 +40,7 @@ pub struct SnapshotSchema<'a> {
 pub struct MaterializedTable {
     pub documents: Box<dyn DocumentStore>,
     pub text: Box<dyn InvertedIndex>,
-    pub vectors: BTreeMap<FieldName, Box<dyn VectorIndex>>,
+    pub vectors: VectorIndexes,
     pub document_count: u64,
 }
 
@@ -257,14 +258,15 @@ impl SnapshotBuilder {
         document_count: u64,
     ) -> Result<MaterializedTable, SQLError> {
         let (builders, _builder_memory) = self.vectors.into_parts();
-        let mut vectors = BTreeMap::new();
+        let mut vectors = RetainedVectorIndexesBuilder::new(&self.control);
         for (field, index, memory) in builders {
             self.control.cancellation().check()?;
             let index = index
                 .finish()
                 .map_err(|error| snapshot_error("vector index", &error))?;
-            let index = vector_metadata::retain_handle(index, memory)?;
-            vectors.insert(field, index);
+            vectors
+                .insert_admitted(field, index, memory)
+                .map_err(|error| snapshot_error("vector index metadata", &error))?;
         }
         Ok(MaterializedTable {
             documents,
@@ -273,7 +275,9 @@ impl SnapshotBuilder {
                     .finish()
                     .map_err(|error| snapshot_error("inverted index", &error))?,
             ),
-            vectors,
+            vectors: vectors
+                .finish()
+                .map_err(|error| snapshot_error("vector indexes", &error))?,
             document_count,
         })
     }

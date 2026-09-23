@@ -17,11 +17,15 @@ use uqa_core::{DocId, Payload, PostingEntry, PostingList};
 
 use crate::{StorageBackendError, StorageBackendResult};
 
+mod collection;
 mod config;
 mod memory_snapshot;
 pub mod query;
 pub(crate) mod retained;
 
+pub use collection::{
+    RetainedVectorIndexesBuilder, VectorIndexSource, VectorIndexes, VectorIndexesIter,
+};
 pub use config::{HNSWIndexParams, IVFIndexParams, VectorIndexOpenMode, VectorIndexSpec};
 pub use retained::{RetainedVectorIndex, RetainedVectorIndexBuilder};
 

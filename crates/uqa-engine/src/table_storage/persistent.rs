@@ -54,7 +54,7 @@ impl Engine {
             let idx = self.build_vector_index_for_restore(table_name, &field, dimensions, spec)?;
             rebound.insert(field, idx);
         }
-        *table.vector_indexes.write() = rebound;
+        *table.vector_indexes.write().live_mut()? = rebound;
         Ok(())
     }
 

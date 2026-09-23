@@ -66,7 +66,9 @@ fn rebuilt_vectors_keep_the_original_allowance_and_survive_failed_recapture() {
                 .collect::<Vec<_>>(),
             [1]
         );
-        assert_eq!(control.memory().used(), retained);
+        // The individual index keeps its payload; the dropped table no longer owns vector collection nodes.
+        assert!(control.memory().used() > 0);
+        assert!(control.memory().used() < retained);
         drop(nested);
         drop(text);
         drop(documents);

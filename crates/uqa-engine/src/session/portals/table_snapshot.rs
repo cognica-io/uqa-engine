@@ -6,7 +6,7 @@
 
 //! Retained table state keeps the selected storage owner's snapshot handles.
 
-use super::{DocumentStore, Engine, InvertedIndex, SQLError, TableState, VectorIndex};
+use super::{DocumentStore, Engine, InvertedIndex, SQLError, TableState};
 use uqa_storage::ReadOnlySnapshot;
 
 impl Engine {
@@ -92,7 +92,7 @@ impl Engine {
             .snapshot_with_control(control)
             .map_err(|error| super::portal_snapshot_error("inverted index", &error))?;
         let vector_indexes = uqa_execution::query::table_snapshot::retain_vector_indexes(
-            &data.vector_indexes.read(),
+            &*data.vector_indexes.read(),
             control,
         )?;
         Ok(Self::query_table_with_storage(
@@ -111,7 +111,7 @@ impl Engine {
         metadata: &std::sync::Arc<TableState>,
         document_store: Box<dyn DocumentStore>,
         inverted_index: Box<dyn InvertedIndex>,
-        vector_indexes: std::collections::BTreeMap<crate::FieldName, Box<dyn VectorIndex>>,
+        vector_indexes: uqa_storage::vector_index::VectorIndexes,
         doc_count: u64,
         doc_count_dirty: bool,
     ) -> std::sync::Arc<TableState> {

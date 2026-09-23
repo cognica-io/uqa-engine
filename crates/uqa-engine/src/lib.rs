@@ -565,7 +565,7 @@ pub(crate) struct TableState {
     storage_generation: RwLock<[u8; 16]>,
     pub(crate) document_store: RwLock<Box<dyn DocumentStore>>,
     inverted_index: RwLock<Box<dyn InvertedIndex>>,
-    vector_indexes: RwLock<BTreeMap<FieldName, Box<dyn VectorIndex>>>,
+    vector_indexes: RwLock<uqa_storage::vector_index::VectorIndexes>,
     fts_fields: state::CatalogCell<Vec<FieldName>>,
     /// Column schema captured at CREATE TABLE / ALTER TABLE time, driving auto-id allocation and ALTER COLUMN bookkeeping.
     columns: state::CatalogCell<Vec<uqa_sql::ast::ColumnDef>>,

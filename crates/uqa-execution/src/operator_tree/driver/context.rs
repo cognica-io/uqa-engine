@@ -20,11 +20,11 @@ use uqa_sql::{
 };
 use uqa_storage::{
     document_store::Document, CatalogIndexRow, DocumentStore, InvertedIndex, StorageBackendResult,
-    VectorIndex,
 };
 
 pub type TextIndexRead<'a> = Box<dyn Deref<Target = Box<dyn InvertedIndex>> + 'a>;
-pub type VectorIndexRead<'a> = Box<dyn Deref<Target = BTreeMap<String, Box<dyn VectorIndex>>> + 'a>;
+pub type VectorIndexRead<'a> =
+    Box<dyn Deref<Target = uqa_storage::vector_index::VectorIndexes> + 'a>;
 
 pub trait RetrievalIndexState: Send + Sync {
     fn columns(&self) -> Arc<Vec<ColumnDef>>;

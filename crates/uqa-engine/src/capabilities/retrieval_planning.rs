@@ -18,11 +18,11 @@ use uqa_planner::{
     ColumnStats,
 };
 use uqa_sql::SQLError;
-use uqa_storage::{InvertedIndex, VectorIndex};
+use uqa_storage::InvertedIndex;
 
 struct TableStatistics(Arc<TableState>);
 struct TextRead<'a>(RwLockReadGuard<'a, Box<dyn InvertedIndex>>);
-struct VectorRead<'a>(RwLockReadGuard<'a, BTreeMap<String, Box<dyn VectorIndex>>>);
+struct VectorRead<'a>(RwLockReadGuard<'a, uqa_storage::vector_index::VectorIndexes>);
 impl TextStatisticsRead for TextRead<'_> {
     fn field_names(&self) -> Result<Option<Vec<String>>, String> {
         self.0

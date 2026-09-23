@@ -188,7 +188,7 @@ impl Engine {
             storage_generation: RwLock::new(schema.storage_generation),
             document_store: RwLock::new(docs),
             inverted_index: RwLock::new(inv),
-            vector_indexes: RwLock::new(vectors),
+            vector_indexes: RwLock::new(vectors.into()),
             fts_fields: crate::state::CatalogCell::new(schema.fts_fields),
             columns_declared: crate::state::CatalogCell::new(
                 constraints.columns_declared.unwrap_or(!columns.is_empty()),

@@ -230,7 +230,7 @@ impl Engine {
             storage_generation: RwLock::new(crate::new_table_storage_generation()?),
             document_store: RwLock::new(docs),
             inverted_index: RwLock::new(inv),
-            vector_indexes: RwLock::new(BTreeMap::new()),
+            vector_indexes: RwLock::new(uqa_storage::vector_index::VectorIndexes::default()),
             fts_fields: crate::state::CatalogCell::new(fts_fields),
             columns: crate::state::CatalogCell::new(Vec::new()),
             columns_declared: crate::state::CatalogCell::new(false),
@@ -355,7 +355,7 @@ impl Engine {
             .ok_or_else(|| StorageBackendError::Other(format!("table `{table}` does not exist")))?;
         let field = field.into();
         let idx = self.build_vector_index_for_restore(table, &field, dimensions, spec)?;
-        t.vector_indexes.write().insert(field, idx);
+        t.vector_indexes.write().live_mut()?.insert(field, idx);
         Ok(true)
     }
 
@@ -424,10 +424,15 @@ impl Engine {
             Self::backfill_vector_index(&t, &field, idx.as_mut())?;
         }
         idx.initialize()?;
-        let old = t.vector_indexes.write().insert(field.clone(), idx);
+        let old = t
+            .vector_indexes
+            .write()
+            .live_mut()?
+            .insert(field.clone(), idx);
         if persist_schema && self.is_persistent() {
             if let Err(err) = self.try_save_table_schema(&table_name, &t) {
-                let mut indexes = t.vector_indexes.write();
+                let mut vectors = t.vector_indexes.write();
+                let indexes = vectors.live_mut()?;
                 indexes.remove(&field);
                 if let Some(old) = old {
                     indexes.insert(field, old);
@@ -563,7 +568,10 @@ impl Engine {
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
-        let mut idxs = t.vector_indexes.write();
+        let mut registrations = t.vector_indexes.write();
+        let idxs = registrations.live_mut().map_err(|error| {
+            uqa_execution::storage_errors::storage_error("write vector registrations", &error)
+        })?;
         let Some(idx) = idxs.get_mut(field) else {
             return Err(SQLError::TypeMismatch(format!(
                 "vector field `{table}.{field}` is not registered"
@@ -615,7 +623,10 @@ impl Engine {
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
-        let mut idxs = t.vector_indexes.write();
+        let mut registrations = t.vector_indexes.write();
+        let idxs = registrations.live_mut().map_err(|error| {
+            uqa_execution::storage_errors::storage_error("write vector registrations", &error)
+        })?;
         let Some(idx) = idxs.get_mut(field) else {
             return Err(SQLError::TypeMismatch(format!(
                 "vector field `{table}.{field}` is not registered"

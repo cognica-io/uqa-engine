@@ -19,11 +19,10 @@ use uqa_sql::{
 };
 use uqa_storage::{
     document_store::Document, CatalogIndexRow, StorageBackendError, StorageBackendResult,
-    VectorIndex,
 };
 pub type SchemaWrite<'a, T> = Box<dyn DerefMut<Target = Vec<T>> + 'a>;
 pub type VectorIndexesWrite<'a> =
-    Box<dyn DerefMut<Target = BTreeMap<String, Box<dyn VectorIndex>>> + 'a>;
+    Box<dyn DerefMut<Target = uqa_storage::vector_index::VectorIndexes> + 'a>;
 pub type IndexRowsRead<'a> =
     Box<dyn Deref<Target = BTreeMap<RelationIdentity, CatalogIndexRow>> + 'a>;
 pub type IndexRowsWrite<'a> =
@@ -130,7 +129,7 @@ pub fn drop_column(
     state.remove_text_field(column);
     {
         let mut vectors = state.write_vector_indexes();
-        if let Some(mut index) = vectors.remove(column) {
+        if let Some(mut index) = vectors.live_mut()?.remove(column) {
             index.clear()?;
         }
     }

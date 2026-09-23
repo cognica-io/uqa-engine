@@ -6,11 +6,11 @@
 
 use super::*;
 use parking_lot::Mutex;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::CancellationToken;
 use uqa_storage::{
     DocumentMetadata, MemoryDocumentStore, MemoryInvertedIndex, StorageBackendResult,
-    StoredDocument,
+    StoredDocument, VectorIndex,
 };
 
 mod budgets;

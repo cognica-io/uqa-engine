@@ -138,7 +138,7 @@ impl Engine {
         let Some(t) = self.try_table(table)? else {
             return Ok(false);
         };
-        if let Some(mut idx) = t.vector_indexes.write().remove(column) {
+        if let Some(mut idx) = t.vector_indexes.write().live_mut()?.remove(column) {
             idx.clear()?;
         }
         for index_name in self.vector_catalog_index_names_for_column(&table_name, column)? {
@@ -304,7 +304,8 @@ impl Engine {
         }
         self.rename_column_analyzer_assignments(&table_name, from, to);
         let vector_dimensions = {
-            let mut vs = t.vector_indexes.write();
+            let mut vectors = t.vector_indexes.write();
+            let vs = vectors.live_mut()?;
             if let Some(mut idx) = vs.remove(from) {
                 let dimensions = idx.dimensions();
                 idx.clear()?;

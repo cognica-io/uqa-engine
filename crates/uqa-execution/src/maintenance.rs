@@ -80,7 +80,7 @@ fn rewrite_full_vacuum_table(
     };
     table.clear_documents()?;
     table.clear_text_index()?;
-    for index in table.vector_indexes().values_mut() {
+    for index in table.vector_indexes().live_mut()?.values_mut() {
         index.clear()?;
     }
     context.storage.clear_btree_indexes(table_name)?;

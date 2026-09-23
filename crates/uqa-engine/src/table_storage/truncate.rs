@@ -116,7 +116,18 @@ impl Engine {
                 t.inverted_index.write().as_mut(),
                 doc_id,
             )?;
-            for idx in t.vector_indexes.write().values_mut() {
+            for idx in t
+                .vector_indexes
+                .write()
+                .live_mut()
+                .map_err(|error| {
+                    uqa_execution::storage_errors::storage_error(
+                        "write vector registrations",
+                        &error,
+                    )
+                })?
+                .values_mut()
+            {
                 idx.as_mut().delete(doc_id).map_err(|error| {
                     SQLError::Internal(format!("delete indexed vector: {error}"))
                 })?;
