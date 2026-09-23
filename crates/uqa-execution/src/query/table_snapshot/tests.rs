@@ -24,6 +24,7 @@ mod index_projection;
 mod metadata;
 mod owned_defaults;
 mod owned_fields;
+mod owned_generated;
 mod owned_rows;
 mod retained;
 

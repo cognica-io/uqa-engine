@@ -8,12 +8,12 @@
 
 use super::RowLayout;
 use crate::query::generated::{
-    evaluate_generated_expression, prepare_generated_column_with_lowering_control,
-    GeneratedLoweringControl,
+    evaluate_generated_expression_with_control, prepare_generated_column_with_control,
+    GeneratedControl,
 };
 use crate::query::table_snapshot::documents::projection::visit_source_projection;
 use uqa_core::{
-    memory::{BudgetedMap, BudgetedVec},
+    memory::{BudgetedMap, BudgetedVec, MemoryReservation, ProductionControl},
     DocId, Value,
 };
 use uqa_sql::{ast::ColumnDef, expr::RowLookup, schema::ColumnTypeSchema, SQLError};
@@ -40,18 +40,25 @@ impl RowLayout {
         source: &dyn DocumentStore,
         id: DocId,
         column: &ColumnDef,
+        memory: &mut MemoryReservation,
     ) -> StorageBackendResult<Option<Value>> {
+        assert!(self.control.memory().shares_allowance(memory.budget()));
         self.control.check()?;
+        let production = ProductionControl::new(
+            self.control.memory(),
+            self.control.cancellation(),
+            self.control.cancellation(),
+        );
         let present = source.contains_doc_id(id)?;
         self.control.check()?;
         if !present {
             return Ok(None);
         }
         let schema = ColumnTypeSchema::new(&self.columns);
-        let expression = prepare_generated_column_with_lowering_control(
+        let expression = prepare_generated_column_with_control(
             &schema,
             column.generated.as_ref().expect("selected generated field"),
-            &GeneratedLoweringControl {
+            &GeneratedControl {
                 budget: self.control.memory(),
                 original: self.control.cancellation(),
                 invoking: self.control.cancellation(),
@@ -89,10 +96,10 @@ impl RowLayout {
                         values,
                     };
                     output = Some(
-                        evaluate_generated_expression(&expression.scalar, &row)
+                        evaluate_generated_expression_with_control(&expression.scalar, &row, &production)
                             .and_then(|value| {
-                                uqa_sql::assignment::conversion::convert_value_to_column_type(
-                                    value, &column.ty,
+                                uqa_sql::assignment::conversion::convert_value_to_column_type_with_control(
+                                    value, &column.ty, &production,
                                 )
                             })
                             .map_err(Self::error),
@@ -105,6 +112,13 @@ impl RowLayout {
         let output = output.transpose()?;
         read?;
         self.control.check()?;
-        Ok(output)
+        Ok(output.map(|value| {
+            let (value, allocation) = value
+                .into_budgeted()
+                .expect("controlled generated field retains its allowance")
+                .into_parts();
+            memory.absorb(allocation);
+            value
+        }))
     }
 }

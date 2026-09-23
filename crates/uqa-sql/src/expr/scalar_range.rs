@@ -55,6 +55,7 @@ pub(super) fn eval_range_functions_with_control(
     None
 }
 
+#[cfg(test)]
 pub(super) fn eval_dispatched_range_function(
     operation: RangeFunctionOperation,
     subtype: RangeSubtype,

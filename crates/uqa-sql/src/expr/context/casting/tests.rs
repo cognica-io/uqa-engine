@@ -23,21 +23,31 @@ fn standalone_catalog_casts_keep_oid_output_and_array_lower_bounds() {
     assert_eq!(*zero, Value::Str("-".into()));
     assert_eq!(budget.used(), zero.reserved_bytes());
     drop(zero);
-    let roles = cast_value_with_type_resolution_with_control(
-        &Value::Str("[-1:0]={0,42}".into()),
-        None,
-        "regrole[]",
-        None,
-        &control,
-    )
-    .unwrap();
-    let Value::Array(array) = &*roles else {
-        panic!("role array")
-    };
-    assert_eq!(array.lower_bounds(), &[-1]);
-    assert_eq!(array.elements(), &[Value::Int(0), Value::Int(42)]);
-    assert_eq!(budget.used(), roles.reserved_bytes());
-    drop(roles);
+    let catalog = Catalog::default();
+    for (engine, expected) in [
+        (None, [Value::Str("0".into()), Value::Str("42".into())]),
+        (
+            Some(&catalog as &dyn EngineHook),
+            [Value::Int(0), Value::Int(42)],
+        ),
+    ] {
+        let roles = cast_value_with_type_resolution_with_control(
+            &Value::Str("[-1:0]={0,42}".into()),
+            None,
+            "regrole[]",
+            engine,
+            &control,
+        )
+        .unwrap();
+        let Value::Array(array) = &*roles else {
+            panic!("role array")
+        };
+        assert_eq!(array.lower_bounds(), &[-1]);
+        assert_eq!(array.elements(), &expected);
+        assert_eq!(budget.used(), roles.reserved_bytes());
+        drop(roles);
+        assert_eq!(budget.used(), 0);
+    }
     let input = Value::Array(
         ArrayValue::with_lower_bounds(
             vec![
@@ -115,7 +125,7 @@ impl EngineHook for Catalog<'_> {
         Ok(Some(Value::Str(text)))
     }
 
-    fn resolve_regrole(&self, _: &str) -> Result<Option<i64>> {
+    fn resolve_regrole(&self, name: &str) -> Result<Option<i64>> {
         if let Some(token) = self.cancel_on_input {
             token.cancel();
         }
@@ -125,7 +135,11 @@ impl EngineHook for Catalog<'_> {
                 message: "catalog input denied".into(),
             });
         }
-        Ok(None)
+        Ok(match name {
+            "0" => Some(0),
+            "42" => Some(42),
+            _ => None,
+        })
     }
 
     fn resolve_regtype_output(

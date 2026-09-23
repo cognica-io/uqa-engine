@@ -44,11 +44,6 @@ pub(super) fn eval_array_functions_with_control(
         .then(|| eval_array_function(name, args, false, control))
 }
 
-pub(super) fn eval_dispatched_json_array_sort(args: &[Value]) -> Result<Value> {
-    eval_dispatched_json_array_sort_with_control(args, &ProductionControl::uncontrolled())
-        .map(ordinary)
-}
-
 pub(super) fn eval_dispatched_json_array_sort_with_control(
     args: &[Value],
     control: &ProductionControl<'_>,

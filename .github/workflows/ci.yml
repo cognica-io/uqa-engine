@@ -334,6 +334,8 @@ jobs:
     name: concurrent transactions ${{ matrix.label }}
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_transactions }}
     runs-on: ${{ matrix.os }}
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
     timeout-minutes: 180
     strategy:
       fail-fast: false
@@ -341,10 +343,13 @@ jobs:
         include:
           - label: Linux
             os: ubuntu-24.04
+            rustflags: "-D warnings -C linker-features=-lld"
           - label: macOS
             os: macos-14
+            rustflags: "-D warnings"
           - label: Windows
             os: windows-latest
+            rustflags: "-D warnings"
     defaults:
       run:
         shell: bash

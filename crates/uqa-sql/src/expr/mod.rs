@@ -108,7 +108,9 @@ pub use call_arguments::{
     call_argument_value, evaluate_call_args, validate_named_argument_order,
     validate_named_argument_order_with_control, variadic_argument_value, wrap_variadic_argument,
 };
-pub use call_dispatch::{eval_builtin_function_call, eval_function_call};
+pub use call_dispatch::{
+    eval_builtin_function_call, eval_function_call, eval_generated_function_call_with_control,
+};
 pub use context::{
     cast_value_with_type_resolution, cast_value_with_type_resolution_with_control,
     coercion_type_name, format_regtype_value, format_regtype_value_with_control, EngineHook,

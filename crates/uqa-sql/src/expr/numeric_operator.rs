@@ -131,24 +131,6 @@ pub(super) fn eval_ast_operator(
     eval_numeric_operator(operator, &values, &types)
 }
 
-pub(super) fn eval_bound_operator(
-    operator: NumericOperator,
-    binding: &FunctionBinding,
-    arguments: &[Value],
-) -> Result<Value> {
-    eval_bound_operator_with_control(
-        operator,
-        binding,
-        arguments,
-        &ProductionControl::uncontrolled(),
-    )
-    .map(|value| {
-        value
-            .into_uncontrolled()
-            .expect("ordinary bound numeric result")
-    })
-}
-
 pub(super) fn eval_bound_operator_with_control(
     operator: NumericOperator,
     binding: &FunctionBinding,

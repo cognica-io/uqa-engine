@@ -117,10 +117,11 @@ impl RowLayout {
         memory: &mut MemoryReservation,
     ) -> Result<StoredDocument, SQLError> {
         let mut document = self.complete_defaults(document, memory)?;
-        crate::query::generated::materialize_missing_generated_columns_with_lowering_control(
+        crate::query::generated::materialize_missing_generated_columns_with_control(
             &self.columns,
             document.fields_mut(),
-            &crate::query::generated::GeneratedLoweringControl {
+            memory,
+            &crate::query::generated::GeneratedControl {
                 budget: self.control.memory(),
                 original: self.control.cancellation(),
                 invoking: self.control.cancellation(),

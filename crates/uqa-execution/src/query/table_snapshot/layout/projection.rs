@@ -226,7 +226,7 @@ impl RowLayout {
             }
         }
         if column.generated.is_some() {
-            return self.generated_field(source, id, column);
+            return self.generated_field(source, id, column, memory);
         }
         let present = source.contains_doc_id(id)?;
         self.control.check()?;

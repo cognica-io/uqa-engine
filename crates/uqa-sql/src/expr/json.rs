@@ -318,17 +318,6 @@ fn ordinary(name: &str, args: &[Value]) -> Result<Value> {
     .expect("ordinary JSON has no lease"))
 }
 
-pub(super) fn json_extract_operator(args: &[Value], as_text: bool, path: bool) -> Result<Value> {
-    Ok(json_extract_operator_with_control(
-        args,
-        as_text,
-        path,
-        &uqa_core::memory::ProductionControl::uncontrolled(),
-    )?
-    .into_uncontrolled()
-    .expect("ordinary JSON extraction has no lease"))
-}
-
 fn json_array_index(len: usize, key: &str) -> Option<usize> {
     let index = key.parse::<i64>().ok()?;
     let normalized = if index < 0 { len as i64 + index } else { index };

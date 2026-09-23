@@ -9,7 +9,7 @@
 use std::borrow::Cow;
 
 use uqa_core::{
-    memory::{Produced, ProductionControl, ProductionVec},
+    memory::{Produced, ProductionControl, ProductionString, ProductionVec},
     Value,
 };
 
@@ -20,12 +20,32 @@ use super::context::EvalContext;
 use super::evaluator::eval;
 
 pub(super) fn normalized_function_name(name: &str) -> Cow<'_, str> {
+    normalized_function_name_with_control(name, &ProductionControl::uncontrolled())
+        .expect("ordinary function name normalization")
+        .into_uncontrolled()
+        .expect("ordinary function name has no retained owner")
+}
+
+pub(super) fn normalized_function_name_with_control<'a>(
+    name: &'a str,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Cow<'a, str>>> {
+    control.check()?;
     let stripped = name.strip_prefix("pg_catalog.").unwrap_or(name);
-    if stripped.bytes().any(|byte| byte.is_ascii_uppercase()) {
-        Cow::Owned(stripped.to_ascii_lowercase())
-    } else {
-        Cow::Borrowed(stripped)
+    if !stripped.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        return control
+            .finish(Cow::Borrowed(stripped), control.empty_reservation())
+            .map_err(Into::into);
     }
+    let mut output = ProductionString::new(*control);
+    output.reserve(stripped.len())?;
+    for character in stripped.chars() {
+        output.push(character.to_ascii_lowercase())?;
+    }
+    let (output, memory) = output.finish()?.into_parts();
+    control
+        .finish(Cow::Owned(output), memory)
+        .map_err(Into::into)
 }
 
 fn binding_dispatch(binding: Option<&FunctionBinding>) -> Option<FunctionDispatch> {

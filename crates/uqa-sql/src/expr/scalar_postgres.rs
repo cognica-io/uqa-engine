@@ -59,6 +59,7 @@ pub(super) fn eval_postgres_functions_with_control(
     super::regex::evaluate(name, args, control)
 }
 
+#[cfg(test)]
 pub(super) fn eval_dispatched_postgres_function(
     dispatch: FunctionDispatch,
     args: &[Value],

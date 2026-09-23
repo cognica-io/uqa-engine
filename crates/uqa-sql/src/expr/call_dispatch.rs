@@ -19,7 +19,9 @@ use super::random;
 use super::scalar_dispatch::{eval_scalar_function, eval_sequence_function};
 
 mod named;
+mod production;
 use named::builtin_named_args;
+pub use production::eval_generated_function_call_with_control;
 
 /// Execute a scalar function after its argument expressions have already been evaluated.
 ///

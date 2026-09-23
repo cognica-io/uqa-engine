@@ -95,12 +95,27 @@ pub fn resolve_fixed_builtin_call(
 #[doc(hidden)]
 #[must_use]
 pub fn fixed_builtin_return_type(binding: &FunctionBinding) -> Option<ColumnType> {
-    registry::bound_signature(
+    fixed_builtin_return_type_with_control(
         binding,
         &uqa_core::memory::ProductionControl::uncontrolled(),
     )
     .expect("ordinary fixed binding lookup cannot be cancelled or limited")
-    .map(|signature| signature.return_type.clone())
+    .map(|ty| ty.into_uncontrolled().expect("ordinary fixed result type"))
+}
+
+/// Resolve the same fixed result descriptor while temporary signature names and copied type payloads retain the caller's allowance.
+pub fn fixed_builtin_return_type_with_control(
+    binding: &FunctionBinding,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+    registry::bound_signature(binding, control)?
+        .map(|signature| {
+            signature
+                .return_type
+                .clone_with_control(control)
+                .map_err(Into::into)
+        })
+        .transpose()
 }
 
 pub(super) fn resolve_type(

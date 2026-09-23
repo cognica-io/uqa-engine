@@ -271,26 +271,49 @@ pub fn eval_bound_builtin_function_call(
         .into_iter()
         .map(|(_, value)| value)
         .collect::<Vec<_>>();
-    if let Some(result) = scalar_postgres::eval_dispatched_postgres_function(dispatch, &evaluated) {
+    eval_dispatched_builtin_with_control(
+        binding,
+        dispatch,
+        &evaluated,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .map(|value| {
+        value
+            .into_uncontrolled()
+            .expect("ordinary dispatched builtin result")
+    })
+}
+
+pub(super) fn eval_dispatched_builtin_with_control(
+    binding: &FunctionBinding,
+    dispatch: FunctionDispatch,
+    evaluated: &[Value],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<Value>> {
+    if let Some(result) = scalar_postgres::eval_dispatched_postgres_function_with_control(
+        dispatch, evaluated, control,
+    ) {
         return result;
     }
     match dispatch {
         FunctionDispatch::NumericOperator(operator) => {
-            super::numeric_operator::eval_bound_operator(operator, binding, &evaluated)
+            super::numeric_operator::eval_bound_operator_with_control(
+                operator, binding, evaluated, control,
+            )
         }
         FunctionDispatch::JsonExtract { as_text, path } => {
-            super::json::json_extract_operator(&evaluated, as_text, path)
+            super::json::json_extract_operator_with_control(evaluated, as_text, path, control)
         }
         FunctionDispatch::ArraySortJson => {
-            scalar_array::eval_dispatched_json_array_sort(&evaluated)
+            scalar_array::eval_dispatched_json_array_sort_with_control(evaluated, control)
         }
         FunctionDispatch::Range {
             operation,
             subtype,
             multirange,
-        } => {
-            scalar_range::eval_dispatched_range_function(operation, subtype, multirange, &evaluated)
-        }
+        } => scalar_range::eval_dispatched_range_function_with_control(
+            operation, subtype, multirange, evaluated, control,
+        ),
         FunctionDispatch::NamedArgument | FunctionDispatch::VariadicArgument => Err(
             SQLError::Internal("call-argument syntax marker reached scalar execution".into()),
         ),
