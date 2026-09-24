@@ -39,7 +39,7 @@ pub(super) fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<Up
             .val
             .as_ref()
             .ok_or_else(|| SQLError::Internal("UPDATE assignment without value".into()))?;
-        assignments.push((rt.name.clone(), compile_expr(value)?));
+        assignments.push((compile_assignment_target(rt)?, compile_expr(value)?));
     }
     let r#where = stmt
         .where_clause
@@ -66,6 +66,46 @@ pub(super) fn compile_update(stmt: &pg_query::protobuf::UpdateStmt) -> Result<Up
         from,
         returning,
         returning_aliases,
+    })
+}
+
+pub(super) fn compile_assignment_target(
+    target: &pg_query::protobuf::ResTarget,
+) -> Result<crate::ast::AssignmentTarget> {
+    use crate::ast::{AssignmentStep, AssignmentTarget};
+    let mut indirection = Vec::with_capacity(target.indirection.len());
+    for step in &target.indirection {
+        indirection.push(match step.node.as_ref() {
+            Some(NodeEnum::String(field)) => AssignmentStep::Field(field.sval.clone()),
+            Some(NodeEnum::AIndices(index)) if index.is_slice => AssignmentStep::Slice {
+                lower: index
+                    .lidx
+                    .as_deref()
+                    .map(compile_expr)
+                    .transpose()?
+                    .map(Box::new),
+                upper: index
+                    .uidx
+                    .as_deref()
+                    .map(compile_expr)
+                    .transpose()?
+                    .map(Box::new),
+            },
+            Some(NodeEnum::AIndices(index)) => {
+                AssignmentStep::Index(Box::new(compile_expr(index.uidx.as_deref().ok_or_else(
+                    || SQLError::Internal("assignment subscript has no index".into()),
+                )?)?))
+            }
+            other => {
+                return Err(SQLError::Internal(format!(
+                    "malformed assignment indirection: {other:?}"
+                )))
+            }
+        });
+    }
+    Ok(AssignmentTarget {
+        column: target.name.clone(),
+        indirection,
     })
 }
 

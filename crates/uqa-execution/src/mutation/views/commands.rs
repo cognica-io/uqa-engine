@@ -19,13 +19,11 @@ use crate::query::{sources::build_join_spill_with_ctes, CteScope};
 use crate::{OwnedPhysicalRow, PhysicalRow, RowSchema};
 use std::collections::BTreeSet;
 use uqa_core::Value;
-pub use uqa_sql::semantics::view_mutation::{
-    coerce_view_value, target_columns, ViewMutationTarget as ViewDmlTarget,
-};
 use uqa_sql::semantics::view_mutation::{
     required_view_delete_columns, required_view_update_columns, resolve_view_target,
     view_qualification_references_target,
 };
+pub use uqa_sql::semantics::view_mutation::{target_columns, ViewMutationTarget as ViewDmlTarget};
 use uqa_sql::semantics::{
     mutation_qualifiers::validate_dml_expression_qualifiers,
     returning::validate_returning_alias_relations,
@@ -170,6 +168,7 @@ fn evaluate_insert_rule_column<S: Clone + Send + Sync + 'static>(
     assignment: &MutationAssignmentContext<'_, S>,
     target: &ViewDmlTarget,
     positions: &[usize],
+    columns: &[uqa_sql::ast::AssignmentTarget<ScalarExpr>],
     expressions: &[ScalarExpr],
     column: &str,
     values: &mut [Option<Value>],
@@ -184,22 +183,31 @@ fn evaluate_insert_rule_column<S: Clone + Send + Sync + 'static>(
     if let Some(value) = values[target_position].as_ref() {
         return Ok(value.clone());
     }
-    let value = if let Some(input_position) = positions
+    let mut value = Value::Null;
+    for (input_position, _) in positions
         .iter()
-        .position(|position| *position == target_position)
+        .enumerate()
+        .filter(|(_, position)| **position == target_position)
     {
         let expression = expressions.get(input_position).ok_or_else(|| {
             SQLError::Internal("view rule INSERT input lost its expression".into())
         })?;
-        if matches!(expression, ScalarExpr::Default) {
-            Value::Null
-        } else {
-            eval_mutation_expr(assignment.expressions, scope, expression, None, params)?
-        }
-    } else {
-        Value::Null
-    };
-    let value = coerce_view_value(assignment.assignment, target, target_position, value)?;
+        value = crate::mutation::assignment::eval_typed_assignment(
+            *assignment,
+            scope,
+            crate::mutation::assignment::TypedAssignmentTarget {
+                target: &columns[input_position],
+                ty: target.types[target_position].as_ref(),
+                current: Some(&value),
+                final_column_write: !columns[input_position + 1..]
+                    .iter()
+                    .any(|next| next.column == columns[input_position].column),
+            },
+            expression,
+            None,
+            params,
+        )?;
+    }
     values[target_position] = Some(value.clone());
     Ok(value)
 }
@@ -212,6 +220,7 @@ fn evaluate_insert_rule_columns<S: Clone + Send + Sync + 'static>(
     assignment: &MutationAssignmentContext<'_, S>,
     target: &ViewDmlTarget,
     positions: &[usize],
+    columns: &[uqa_sql::ast::AssignmentTarget<ScalarExpr>],
     expressions: &[ScalarExpr],
     required: &BTreeSet<String>,
     values: &mut [Option<Value>],
@@ -223,6 +232,7 @@ fn evaluate_insert_rule_columns<S: Clone + Send + Sync + 'static>(
             assignment,
             target,
             positions,
+            columns,
             expressions,
             column,
             values,
@@ -248,7 +258,7 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
     stmt: &InsertPlan,
     target: &ViewDmlTarget,
     positions: &[usize],
-    columns: &[String],
+    columns: &[uqa_sql::ast::AssignmentTarget<ScalarExpr>],
     implicit_columns: bool,
     params: &[SQLParam],
     ctes: &CteScope<S>,
@@ -302,6 +312,7 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
                 read_assignment,
                 target,
                 positions,
+                columns,
                 expressions,
                 column,
                 values,
@@ -319,6 +330,7 @@ fn run_suppressed_view_insert_rules<S: Clone + Send + Sync + 'static>(
             read_assignment,
             target,
             positions,
+            columns,
             expressions,
             required,
             values,

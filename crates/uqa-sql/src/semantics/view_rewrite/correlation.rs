@@ -450,7 +450,9 @@ pub(super) fn merge_matched_subquery_ids(plan: &MergePlan) -> BTreeSet<usize> {
             } => {
                 ids.extend(collect_expression_subquery_ids(condition.iter()));
                 ids.extend(collect_expression_subquery_ids(
-                    assignments.iter().map(|assignment| &assignment.value),
+                    assignments
+                        .iter()
+                        .flat_map(crate::plan::AssignmentPlan::expressions),
                 ));
             }
             MergeWhenPlan::DeleteMatched { condition }
@@ -473,7 +475,9 @@ pub(super) fn merge_target_only_subquery_ids(plan: &MergePlan) -> BTreeSet<usize
             } => {
                 ids.extend(collect_expression_subquery_ids(condition.iter()));
                 ids.extend(collect_expression_subquery_ids(
-                    assignments.iter().map(|assignment| &assignment.value),
+                    assignments
+                        .iter()
+                        .flat_map(crate::plan::AssignmentPlan::expressions),
                 ));
             }
             MergeWhenPlan::DeleteNotMatchedBySource { condition }
@@ -498,8 +502,11 @@ pub(super) fn insert_conflict_subquery_ids(plan: &InsertPlan) -> BTreeSet<usize>
     else {
         return BTreeSet::new();
     };
-    let mut ids =
-        collect_expression_subquery_ids(assignments.iter().map(|assignment| &assignment.value));
+    let mut ids = collect_expression_subquery_ids(
+        assignments
+            .iter()
+            .flat_map(crate::plan::AssignmentPlan::expressions),
+    );
     ids.extend(collect_expression_subquery_ids(
         predicate.iter().map(Box::as_ref),
     ));
@@ -508,7 +515,9 @@ pub(super) fn insert_conflict_subquery_ids(plan: &InsertPlan) -> BTreeSet<usize>
 
 pub(super) fn update_ordinary_subquery_ids(plan: &UpdatePlan) -> BTreeSet<usize> {
     let mut ids = collect_expression_subquery_ids(
-        plan.assignments.iter().map(|assignment| &assignment.value),
+        plan.assignments
+            .iter()
+            .flat_map(crate::plan::AssignmentPlan::expressions),
     );
     ids.extend(collect_expression_subquery_ids(plan.predicate.iter()));
     ids
@@ -641,7 +650,9 @@ pub(super) fn validate_update_expressions(
         include_excluded: false,
     };
     for assignment in &plan.assignments {
-        validate_view_expression(&assignment.value, layer, ordinary_scope)?;
+        for expression in assignment.expressions() {
+            validate_view_expression(expression, layer, ordinary_scope)?;
+        }
     }
     if let Some(predicate) = &plan.predicate {
         validate_view_expression(predicate, layer, ordinary_scope)?;
@@ -791,7 +802,9 @@ pub(super) fn validate_merge_expressions(
                     validate_view_expression(condition, layer, matched_scope)?;
                 }
                 for assignment in assignments {
-                    validate_view_expression(&assignment.value, layer, matched_scope)?;
+                    for expression in assignment.expressions() {
+                        validate_view_expression(expression, layer, matched_scope)?;
+                    }
                 }
             }
             MergeWhenPlan::DeleteMatched { condition }
@@ -808,7 +821,9 @@ pub(super) fn validate_merge_expressions(
                     validate_view_expression(condition, layer, target_only_scope)?;
                 }
                 for assignment in assignments {
-                    validate_view_expression(&assignment.value, layer, target_only_scope)?;
+                    for expression in assignment.expressions() {
+                        validate_view_expression(expression, layer, target_only_scope)?;
+                    }
                 }
             }
             MergeWhenPlan::DeleteNotMatchedBySource { condition }
@@ -880,7 +895,9 @@ pub(super) fn validate_insert_expressions(
                 include_excluded: true,
             };
             for assignment in assignments {
-                validate_view_expression(&assignment.value, layer, scope)?;
+                for expression in assignment.expressions() {
+                    validate_view_expression(expression, layer, scope)?;
+                }
             }
             if let Some(predicate) = predicate {
                 validate_view_expression(predicate, layer, scope)?;

@@ -34,12 +34,12 @@ pub use relation::{LogSemiring, Relation, RelationEntry, Semiring};
 pub use relation_identity::RelationIdentity;
 pub use types::{
     jsonb_equality_key, jsonb_equality_key_with_control, write_jsonb_comparison_key,
-    write_jsonb_equality_key, ArrayTraversalError, ArrayValue, BudgetedArrayElements,
-    ControlledArrayElements, DecimalValue, DocId, Edge, EdgeId, FieldName, GeneralizedPayload,
-    GeneralizedPostingEntry, IndexStats, JsonValueDecoder, JsonbKeyError, LegacyVectorKind,
-    LegacyVectorValue, PathExpr, PathSegment, Payload, PostingEntry, TemporalValue,
-    TokenOccurrence, TokenOccurrenceError, TokenOffsets, Value, ValueRetentionError, Vertex,
-    VertexId,
+    write_jsonb_equality_key, ArrayAssignmentError, ArrayTraversalError, ArrayValue,
+    BudgetedArrayElements, ControlledArrayElements, DecimalValue, DocId, Edge, EdgeId, FieldName,
+    GeneralizedPayload, GeneralizedPostingEntry, IndexStats, JsonValueDecoder, JsonbKeyError,
+    LegacyVectorKind, LegacyVectorValue, PathExpr, PathSegment, Payload, PostingEntry,
+    TemporalValue, TokenOccurrence, TokenOccurrenceError, TokenOffsets, Value, ValueRetentionError,
+    Vertex, VertexId,
 };
 
 mod scored_entry;

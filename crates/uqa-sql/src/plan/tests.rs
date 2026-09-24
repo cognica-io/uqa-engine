@@ -246,3 +246,5 @@ fn query_scalar_rewriter_visits_every_node_once() {
     assert_eq!(visits.len(), 17);
     assert!(visits.values().all(|visits| *visits == 1), "{visits:?}");
 }
+
+mod assignment_targets;

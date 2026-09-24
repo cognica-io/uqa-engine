@@ -130,6 +130,13 @@ pub(super) fn rewrite_command_scalars(
 ) {
     match command {
         CommandPlan::Insert(plan) => {
+            for expression in plan
+                .columns
+                .iter_mut()
+                .flat_map(crate::ast::AssignmentTarget::expressions_mut)
+            {
+                rewrite_scalar(expression, rewrite);
+            }
             for cte in &mut plan.ctes {
                 match &mut cte.body {
                     super::CtePlanBody::Query(query) => rewrite_query_scalars(query, rewrite),
@@ -239,9 +246,17 @@ pub(super) fn rewrite_command_scalars(
                         rewrite_optional_scalar(condition, rewrite);
                     }
                     MergeWhenPlan::InsertNotMatched {
-                        condition, values, ..
+                        condition,
+                        columns,
+                        values,
                     } => {
                         rewrite_optional_scalar(condition, rewrite);
+                        for expression in columns
+                            .iter_mut()
+                            .flat_map(crate::ast::AssignmentTarget::expressions_mut)
+                        {
+                            rewrite_scalar(expression, rewrite);
+                        }
                         for value in values {
                             rewrite_scalar(value, rewrite);
                         }
@@ -332,7 +347,9 @@ pub(super) fn rewrite_assignments(
     rewrite: &mut dyn FnMut(&mut ScalarExpr),
 ) {
     for assignment in assignments {
-        rewrite_scalar(&mut assignment.value, rewrite);
+        for expression in assignment.expressions_mut() {
+            rewrite_scalar(expression, rewrite);
+        }
     }
 }
 

@@ -7,7 +7,7 @@
 //! Top-level SQL statement lowering and command naming.
 
 use super::model::NoRegisteredAggregates;
-use super::query::{lower_assignments, lower_ctes, lower_merge_when};
+use super::query::{lower_assignments, lower_ctes, lower_merge_when, lower_targets};
 use super::rewrite::{rewrite_command_scalars, rewrite_query_scalars};
 use super::scalar::lower_scalar_expression;
 use super::{
@@ -127,7 +127,7 @@ impl UnifiedPlan {
                     target_privilege_subject: None,
                     target_qualifier: statement.target_qualifier,
                     include_descendants: statement.include_descendants,
-                    columns: statement.columns,
+                    columns: lower_targets(statement.columns, aggregates, &mut subqueries),
                     ctes,
                     rows,
                     source,

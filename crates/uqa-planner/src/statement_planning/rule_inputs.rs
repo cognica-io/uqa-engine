@@ -152,13 +152,23 @@ fn prune_rule_inputs(
                     .source_column_names(&table, true)?
                     .unwrap_or_default()
             } else {
-                plan.columns.clone()
+                plan.columns
+                    .iter()
+                    .map(|target| target.column.clone())
+                    .collect()
             };
             let positions = columns
                 .iter()
                 .enumerate()
                 .filter_map(|(position, column)| required.contains(column).then_some(position))
                 .collect::<BTreeSet<_>>();
+            for (position, target) in plan.columns.iter_mut().enumerate() {
+                if !positions.contains(&position) {
+                    for expression in target.expressions_mut() {
+                        *expression = ScalarExpr::Literal(Value::Null);
+                    }
+                }
+            }
             for row in &mut plan.rows {
                 for (position, expression) in row.iter_mut().enumerate() {
                     if !positions.contains(&position) {
@@ -180,8 +190,10 @@ fn prune_rule_inputs(
         }
         CommandPlan::Update(plan) => {
             for assignment in &mut plan.assignments {
-                if !required.contains(&assignment.column) {
-                    assignment.value = ScalarExpr::Literal(Value::Null);
+                if !required.contains(&assignment.target.column) {
+                    for expression in assignment.expressions_mut() {
+                        *expression = ScalarExpr::Literal(Value::Null);
+                    }
                 }
             }
             if !requires_rows {

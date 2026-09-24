@@ -34,7 +34,7 @@ pub fn rewrite_update_to_base(
         statement
             .assignments
             .iter()
-            .map(|assignment| assignment.column.as_str()),
+            .map(|assignment| assignment.target.column.as_str()),
     )?;
     let source_schema = dml_source_schema(
         services,
@@ -143,7 +143,7 @@ pub fn rewrite_update_to_base(
                 assigned_columns: plan
                     .assignments
                     .iter()
-                    .map(|assignment| assignment.column.clone())
+                    .map(|assignment| assignment.target.column.clone())
                     .collect(),
                 input_columns: Vec::new(),
             });
@@ -197,7 +197,16 @@ pub fn rewrite_update_to_base(
             source: source_schema.as_ref(),
             include_excluded: false,
         };
-        for AssignmentPlan { column, value } in &mut plan.assignments {
+        for AssignmentPlan { target, value } in &mut plan.assignments {
+            for expression in target.expressions_mut() {
+                rewrite_target_expression(
+                    services,
+                    expression,
+                    &layer,
+                    ordinary_scope,
+                    &mut plan.subqueries,
+                )?;
+            }
             rewrite_target_expression(
                 services,
                 value,
@@ -206,13 +215,13 @@ pub fn rewrite_update_to_base(
                 &mut plan.subqueries,
             )?;
             if !layer_suppresses && !rewrite_suppressed {
-                *column = writable_column(&layer, column, "UPDATE")?;
+                target.column = writable_column(&layer, &target.column, "UPDATE")?;
             }
         }
         let mapped = plan
             .assignments
             .iter()
-            .map(|assignment| assignment.column.clone())
+            .map(|assignment| assignment.target.clone())
             .collect::<Vec<_>>();
         validate_mapped_columns(&mapped, duplicate_assignment)?;
         if let Some(predicate) = &mut plan.predicate {
@@ -269,7 +278,7 @@ pub fn rewrite_update_to_base(
     let input_columns = plan
         .assignments
         .iter()
-        .map(|assignment| assignment.column.clone())
+        .map(|assignment| assignment.target.column.clone())
         .collect::<Vec<_>>();
     for update_plan in &mut plan.view_rule_update_plans {
         update_plan.input_columns.clone_from(&input_columns);
@@ -277,7 +286,9 @@ pub fn rewrite_update_to_base(
     if let Some(source) = source_schema.as_ref() {
         let target_width = dml_target_width(services, &plan.table)?;
         for assignment in &mut plan.assignments {
-            bind_unqualified_source_positions(&mut assignment.value, source, target_width);
+            for expression in assignment.expressions_mut() {
+                bind_unqualified_source_positions(expression, source, target_width);
+            }
         }
         if let Some(predicate) = &mut plan.predicate {
             bind_unqualified_source_positions(predicate, source, target_width);

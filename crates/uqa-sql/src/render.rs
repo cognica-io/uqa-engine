@@ -720,10 +720,54 @@ fn render_function_alias(
     }
 }
 
-fn assignments_sql(assignments: &[(String, Expr)]) -> String {
+fn assignment_target_sql(target: &crate::ast::AssignmentTarget) -> String {
+    use crate::ast::AssignmentStep;
+    let mut sql = ident(&target.column);
+    for step in &target.indirection {
+        match step {
+            AssignmentStep::Field(field) => {
+                sql.push('.');
+                sql.push_str(&ident(field));
+            }
+            AssignmentStep::Index(index) => {
+                sql.push('[');
+                sql.push_str(&expr_sql(index));
+                sql.push(']');
+            }
+            AssignmentStep::Slice { lower, upper } => {
+                sql.push('[');
+                if let Some(lower) = lower {
+                    sql.push_str(&expr_sql(lower));
+                }
+                sql.push(':');
+                if let Some(upper) = upper {
+                    sql.push_str(&expr_sql(upper));
+                }
+                sql.push(']');
+            }
+        }
+    }
+    sql
+}
+
+fn assignment_targets_sql(targets: &[crate::ast::AssignmentTarget]) -> String {
+    targets
+        .iter()
+        .map(assignment_target_sql)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn assignments_sql(assignments: &[(crate::ast::AssignmentTarget, Expr)]) -> String {
     assignments
         .iter()
-        .map(|(column, expression)| format!("{} = {}", ident(column), expr_sql(expression)))
+        .map(|(target, expression)| {
+            format!(
+                "{} = {}",
+                assignment_target_sql(target),
+                expr_sql(expression)
+            )
+        })
         .collect::<Vec<_>>()
         .join(", ")
 }

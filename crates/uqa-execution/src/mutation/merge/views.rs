@@ -21,7 +21,7 @@ use uqa_core::Value;
 use uqa_sql::{
     plan::{MergePlan, MergeWhenPlan, ViewCheckPlan},
     semantics::view_mutation::{
-        coerce_view_value, resolve_view_target, target_columns, ViewMutationTarget as ViewDmlTarget,
+        resolve_view_target, target_columns, ViewMutationTarget as ViewDmlTarget,
     },
     SQLError, SQLParam, SQLResult, ScalarExpr,
 };
@@ -236,17 +236,22 @@ fn selected_clause_action<S: Clone + 'static>(
                 .clone()
                 .ok_or_else(|| SQLError::Internal("view MERGE update lost OLD".into()))?;
             let mut new = old.clone();
-            for assignment in assignments {
+            for (assignment_index, assignment) in assignments.iter().enumerate() {
                 let position = input
                     .target
                     .columns
                     .iter()
-                    .position(|column| column == &assignment.column)
-                    .ok_or_else(|| SQLError::UnknownColumn(assignment.column.clone()))?;
+                    .position(|column| column == &assignment.target.column)
+                    .ok_or_else(|| SQLError::UnknownColumn(assignment.target.column.clone()))?;
                 let value = evaluate_view_assignment(
                     input.assignment,
                     input.target,
                     position,
+                    &assignment.target,
+                    Some(&new[position]),
+                    !assignments[assignment_index + 1..]
+                        .iter()
+                        .any(|next| next.target.column == assignment.target.column),
                     &assignment.value,
                     input.action_row,
                     input.params,
@@ -259,7 +264,7 @@ fn selected_clause_action<S: Clone + 'static>(
                 new,
                 updated_columns: assignments
                     .iter()
-                    .map(|assignment| assignment.column.clone())
+                    .map(|assignment| assignment.target.column.clone())
                     .collect(),
             })
         }
@@ -283,22 +288,27 @@ fn selected_clause_action<S: Clone + 'static>(
 
 fn build_view_merge_insert<S: Clone + 'static>(
     input: &ActionSelection<'_, S>,
-    explicit_columns: &[String],
+    explicit_columns: &[uqa_sql::ast::AssignmentTarget<ScalarExpr>],
     expressions: &[ScalarExpr],
 ) -> Result<SelectedViewMergeAction, SQLError> {
     let columns = target_columns(input.target, explicit_columns, "INSERT")?;
     let mut new = vec![Value::Null; input.target.columns.len()];
-    for (column, expression) in columns.iter().zip(expressions) {
+    for (index, (column, expression)) in columns.iter().zip(expressions).enumerate() {
         let position = input
             .target
             .columns
             .iter()
-            .position(|candidate| candidate == column)
-            .ok_or_else(|| SQLError::UnknownColumn(column.clone()))?;
+            .position(|candidate| candidate == &column.column)
+            .ok_or_else(|| SQLError::UnknownColumn(column.column.clone()))?;
         new[position] = evaluate_view_assignment(
             input.assignment,
             input.target,
             position,
+            column,
+            Some(&new[position]),
+            !columns[index + 1..]
+                .iter()
+                .any(|next| next.column == column.column),
             expression,
             input.action_row,
             input.params,
@@ -308,21 +318,35 @@ fn build_view_merge_insert<S: Clone + 'static>(
     Ok(SelectedViewMergeAction::Insert { new })
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "preserves original MERGE input and composed view target"
+)]
 fn evaluate_view_assignment<S: Clone + 'static>(
     assignment: MutationAssignmentContext<'_, S>,
     target: &ViewDmlTarget,
     position: usize,
+    assignment_target: &uqa_sql::ast::AssignmentTarget<ScalarExpr>,
+    current: Option<&Value>,
+    final_column_write: bool,
     expression: &ScalarExpr,
     row: &OwnedPhysicalRow,
     params: &[SQLParam],
     ctes: &CteScope<S>,
 ) -> Result<Value, SQLError> {
-    let value = if matches!(expression, ScalarExpr::Default) {
-        Value::Null
-    } else {
-        eval_mutation_expr(assignment.expressions, ctes, expression, Some(row), params)?
-    };
-    coerce_view_value(assignment.assignment, target, position, value)
+    crate::mutation::assignment::eval_typed_assignment(
+        assignment,
+        ctes,
+        crate::mutation::assignment::TypedAssignmentTarget {
+            target: assignment_target,
+            ty: target.types[position].as_ref(),
+            current,
+            final_column_write,
+        },
+        expression,
+        Some(row),
+        params,
+    )
 }
 
 struct ViewMergeActionContext<'a, S: Clone + 'static> {

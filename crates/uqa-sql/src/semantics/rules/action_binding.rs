@@ -457,6 +457,19 @@ fn bind_rule_statement_body(
     })
 }
 
+fn bind_assignment_target(
+    target: &crate::ast::AssignmentTarget,
+    resolver: &mut dyn VariableResolver,
+    scope: &RuleBindingScope,
+    context: &RuleBindingContext<'_>,
+) -> Result<crate::ast::AssignmentTarget, SQLError> {
+    let mut target = target.clone();
+    for expression in target.expressions_mut() {
+        *expression = bind_rule_expr_with_scope(expression, resolver, scope, context)?;
+    }
+    Ok(target)
+}
+
 fn bind_update(
     update: &UpdateStmt,
     resolver: &mut dyn VariableResolver,
@@ -482,7 +495,7 @@ fn bind_update(
         .iter()
         .map(|(column, expr)| {
             Ok((
-                column.clone(),
+                bind_assignment_target(column, resolver, &expression_scope, &context)?,
                 bind_rule_expr_with_scope(expr, resolver, &expression_scope, &context)?,
             ))
         })

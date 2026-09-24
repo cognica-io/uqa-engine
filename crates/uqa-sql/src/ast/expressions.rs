@@ -525,11 +525,22 @@ fn upgrade_projections(projections: &mut [Projection]) -> bool {
     })
 }
 
-fn upgrade_assignments(assignments: &mut [(String, Expr)]) -> bool {
+fn upgrade_targets(targets: &mut [super::AssignmentTarget]) -> bool {
+    targets
+        .iter_mut()
+        .flat_map(super::AssignmentTarget::expressions_mut)
+        .fold(false, |changed, expression| {
+            expression.upgrade_legacy_serialized_dispatches() | changed
+        })
+}
+
+fn upgrade_assignments(assignments: &mut [(super::AssignmentTarget, Expr)]) -> bool {
     assignments
         .iter_mut()
-        .fold(false, |changed, (_, expression)| {
-            expression.upgrade_legacy_serialized_dispatches() | changed
+        .fold(false, |changed, (target, expression)| {
+            upgrade_targets(std::slice::from_mut(target))
+                | expression.upgrade_legacy_serialized_dispatches()
+                | changed
         })
 }
 
@@ -620,8 +631,10 @@ impl MergeWhen {
                 assignments,
             } => upgrade_optional(condition) | upgrade_assignments(assignments),
             Self::InsertNotMatched {
-                condition, values, ..
-            } => upgrade_optional(condition) | upgrade_exprs(values),
+                condition,
+                columns,
+                values,
+            } => upgrade_optional(condition) | upgrade_targets(columns) | upgrade_exprs(values),
             Self::DeleteMatched { condition }
             | Self::DeleteNotMatchedBySource { condition }
             | Self::NothingMatched { condition }
@@ -650,6 +663,7 @@ impl Statement {
             }
             Self::Insert(insert) => {
                 let mut changed = upgrade_ctes(&mut insert.with);
+                changed |= upgrade_targets(&mut insert.columns);
                 changed |= upgrade_rows(&mut insert.rows);
                 if let Some(source) = &mut insert.select_source {
                     changed |= source.upgrade_legacy_serialized_dispatches();

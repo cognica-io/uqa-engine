@@ -32,12 +32,12 @@ pub fn bind_stored_merge_target_columns(
             match action {
                 MergeWhen::UpdateMatched { assignments, .. }
                 | MergeWhen::UpdateNotMatchedBySource { assignments, .. } => {
-                    targets.extend(assignments.iter().map(|(name, _)| name.clone()));
+                    targets.extend(assignments.iter().map(|(target, _)| target.column.clone()));
                     coerced_targets.extend(
                         assignments
                             .iter()
                             .filter(|(_, expression)| !matches!(expression, Expr::Default))
-                            .map(|(name, _)| name.clone()),
+                            .map(|(target, _)| target.column.clone()),
                     );
                 }
                 MergeWhen::InsertNotMatched {
@@ -47,17 +47,17 @@ pub fn bind_stored_merge_target_columns(
                         *columns = definitions
                             .iter()
                             .take(values.len())
-                            .map(|column| column.name.clone())
+                            .map(|column| column.name.clone().into())
                             .collect();
                         changed = true;
                     }
-                    targets.extend(columns.iter().cloned());
+                    targets.extend(columns.iter().map(|target| target.column.clone()));
                     coerced_targets.extend(
                         columns
                             .iter()
                             .zip(values.iter())
                             .filter(|(_, expression)| !matches!(expression, Expr::Default))
-                            .map(|(name, _)| name.clone()),
+                            .map(|(target, _)| target.column.clone()),
                     );
                 }
                 _ => {}
@@ -130,8 +130,8 @@ pub fn normalize_stored_merge_target_columns(
                 MergeWhen::UpdateMatched { assignments, .. }
                 | MergeWhen::UpdateNotMatchedBySource { assignments, .. } => {
                     assignments.retain_mut(|(name, _)| {
-                        if let Some(current) = name_for(name) {
-                            *name = current;
+                        if let Some(current) = name_for(&name.column) {
+                            name.column = current;
                             true
                         } else {
                             false
@@ -143,12 +143,13 @@ pub fn normalize_stored_merge_target_columns(
                 } => {
                     let mut surviving = Vec::new();
                     let mut expressions = Vec::new();
-                    for (column, expression) in std::mem::take(columns)
+                    for (mut column, expression) in std::mem::take(columns)
                         .into_iter()
                         .zip(std::mem::take(values))
                     {
-                        if let Some(current) = name_for(&column) {
-                            surviving.push(current);
+                        if let Some(current) = name_for(&column.column) {
+                            column.column = current;
+                            surviving.push(column);
                             expressions.push(expression);
                         }
                     }

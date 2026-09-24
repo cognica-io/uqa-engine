@@ -43,7 +43,7 @@ pub fn analyze_prepared_command_schema(
                         predicate,
                     } => assignments
                         .iter()
-                        .map(|assignment| &assignment.value)
+                        .flat_map(crate::plan::AssignmentPlan::expressions)
                         .chain(predicate.as_deref())
                         .collect::<Vec<_>>(),
                     crate::plan::ConflictActionPlan::Nothing => Vec::new(),

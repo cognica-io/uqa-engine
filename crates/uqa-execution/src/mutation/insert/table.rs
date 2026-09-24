@@ -23,7 +23,6 @@ use crate::{
         command_scope::MutationOverlayScope,
         conflict::update::InsertConflictLocks,
         errors::dml_storage_error,
-        expressions::eval_mutation_expr,
         identity::{
             insert_identity_columns, persist_auto_increment_identity,
             prepare_auto_increment_identity, prepare_insert_identity,
@@ -37,7 +36,7 @@ use crate::{
     query::{statement::consumer::QueryOutputMode, CteScope},
 };
 use std::{collections::BTreeSet, rc::Rc, sync::Arc};
-use uqa_sql::assignment::columns::validate_mutation_columns;
+use uqa_sql::assignment::columns::validate_mutation_targets;
 use uqa_sql::{
     plan::{ConflictActionPlan, ConflictPlan, InsertPlan, QueryPlan},
     semantics::{
@@ -135,29 +134,29 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
         ..
     }) = stmt.on_conflict.as_ref()
     {
-        validate_mutation_columns(
+        validate_mutation_targets(
             assignment.columns,
             &stmt.table,
-            assignments
-                .iter()
-                .map(|assignment| assignment.column.as_str()),
+            assignments.iter().map(|assignment| &assignment.target),
             "INSERT ON CONFLICT DO UPDATE",
+            false,
         )?;
         Some(
             assignments
                 .iter()
-                .map(|assignment| assignment.column.clone())
+                .map(|assignment| assignment.target.column.clone())
                 .collect::<Vec<_>>(),
         )
     } else {
         None
     };
     if stmt.view_rule_relations.is_empty() && !stmt.columns.is_empty() {
-        validate_mutation_columns(
+        validate_mutation_targets(
             assignment.columns,
             &stmt.table,
-            stmt.columns.iter().map(String::as_str),
+            stmt.columns.iter(),
             "INSERT",
+            true,
         )?;
     }
     uqa_sql::semantics::returning::validate_insert_returning(
@@ -400,22 +399,27 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             }
 
             let implicit_columns = stmt.columns.is_empty();
-            let columns: Vec<String> = if implicit_columns {
-                // INSERT without explicit column list: project the table schema.
-                preparation
-                    .returning
-                    .catalog
-                    .try_table_columns(&stmt.table)
-                    .map_err(|error| dml_storage_error("INSERT", error))?
-            } else {
-                stmt.columns.clone()
-            };
+            let columns: Vec<uqa_sql::ast::AssignmentTarget<uqa_sql::ScalarExpr>> =
+                if implicit_columns {
+                    // INSERT without explicit column list: project the table schema.
+                    preparation
+                        .returning
+                        .catalog
+                        .try_table_columns(&stmt.table)
+                        .map_err(|error| dml_storage_error("INSERT", error))?
+                        .into_iter()
+                        .map(Into::into)
+                        .collect()
+                } else {
+                    stmt.columns.clone()
+                };
             if view_original_query {
-                validate_mutation_columns(
+                validate_mutation_targets(
                     assignment.columns,
                     &stmt.table,
-                    columns.iter().map(String::as_str),
+                    columns.iter(),
                     "INSERT",
+                    true,
                 )?;
             }
 
@@ -468,26 +472,34 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     {
                         None
                     } else if !view_original_query {
-                        let value = eval_mutation_expr(
-                            read_assignment.expressions,
+                        let ty =
+                            view_rule_insert_column_type(mutation.rules.views.rewrite, stmt, i)?;
+                        Some(crate::mutation::assignment::eval_typed_assignment(
+                            read_assignment,
                             &snapshot_scope,
+                            crate::mutation::assignment::TypedAssignmentTarget {
+                                target: col,
+                                ty: ty.as_ref(),
+                                current: document.get(&col.column),
+                                final_column_write: !columns[i + 1..]
+                                    .iter()
+                                    .any(|next| next.column == col.column),
+                            },
                             &row[i],
                             None,
                             params,
-                        )?;
-                        match view_rule_insert_column_type(mutation.rules.views.rewrite, stmt, i)? {
-                    Some(ty) => Some(uqa_sql::assignment::conversion::convert_value_to_column_type_with_context(
-                        assignment.assignment, value, &ty,
-                    )?),
-                    None => Some(value),
-                }
+                        )?)
                     } else {
                         eval_mutation_assignment(
                             read_assignment,
                             &snapshot_scope,
                             MutationAssignmentTarget {
                                 table: &stmt.table,
-                                column: col,
+                                target: col,
+                                current: document.get(&col.column),
+                                final_column_write: !columns[i + 1..]
+                                    .iter()
+                                    .any(|next| next.column == col.column),
                                 action: "INSERT",
                             },
                             &row[i],
@@ -496,7 +508,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         )?
                     };
                     if let Some(value) = value {
-                        document.insert(col.clone(), value);
+                        document.insert(col.column.clone(), value);
                     }
                 }
                 if has_any_insert_rules {

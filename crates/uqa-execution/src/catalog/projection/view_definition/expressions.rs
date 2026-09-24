@@ -10,7 +10,7 @@ use std::fmt::Write as _;
 
 use crate::{ScalarFrameBound, ScalarWindowSpec};
 use uqa_core::Value;
-use uqa_sql::ast::{BinaryOp, Expr, FrameMode, FunctionBinding};
+use uqa_sql::ast::{BinaryOp, Expr, FrameMode, FunctionBinding, FunctionDispatch};
 use uqa_sql::ir::ScalarExpr;
 use uqa_sql::plan::QueryPlan;
 
@@ -288,6 +288,12 @@ impl Deparser<'_> {
         scope: &Scope,
         subqueries: &[QueryPlan],
     ) -> Result<String, SQLError> {
+        if let Some(
+            dispatch @ (FunctionDispatch::ArraySubscripts | FunctionDispatch::ArraySlices),
+        ) = binding.and_then(|binding| binding.dispatch)
+        {
+            return self.array_subscripts(dispatch, args, scope, subqueries);
+        }
         if let Some(uqa_sql::ast::FunctionDispatch::NumericOperator(operator)) =
             binding.and_then(|binding| binding.dispatch)
         {

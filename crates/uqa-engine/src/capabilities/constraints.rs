@@ -11,8 +11,9 @@ use uqa_core::{DocId, PostingList, Predicate, Value};
 use uqa_execution::catalog::security::schema::SchemaAclPrivilege;
 use uqa_execution::{
     mutation::constraints::context::{
-        ConstraintCatalog, ConstraintContext, ConstraintTransactions, MutationIndexRead,
-        MutationNamespace, MutationRead,
+        ConstraintCatalog, ConstraintContext, ConstraintDiagnosticContext,
+        ConstraintDiagnosticSource, ConstraintTransactions, MutationIndexRead, MutationNamespace,
+        MutationRead,
     },
     row_locks::LockAcquire,
 };
@@ -34,6 +35,15 @@ impl Engine {
             namespace: self,
             referrers: self,
             partitions: self.partition_context(),
+            diagnostics: self,
+        }
+    }
+}
+impl ConstraintDiagnosticSource for Engine {
+    fn diagnostic_context(&self) -> ConstraintDiagnosticContext<'_> {
+        ConstraintDiagnosticContext {
+            catalog: self.catalog_execution(),
+            authorization: self.table_authorization_context(),
         }
     }
 }

@@ -20,6 +20,7 @@ use uqa_sql::{
     },
     SQLError,
 };
+#[derive(Clone, Copy)]
 pub struct TableAuthorizationContext<'a> {
     pub names: &'a dyn RoleReferenceNames,
     pub roles: &'a dyn RoleCatalogGuards,
@@ -27,6 +28,39 @@ pub struct TableAuthorizationContext<'a> {
     pub schemas: &'a dyn RelationOwnerSchemas,
 }
 impl TableAuthorizationContext<'_> {
+    /// Expression keys require table SELECT; plain keys may use SELECT on every key column. Included columns do not participate in the diagnostic.
+    pub fn can_view_index_key(
+        &self,
+        name: &str,
+        keys: &[uqa_sql::ast::IndexKey],
+    ) -> Result<bool, SQLError> {
+        let (_, table) = self.bound_table_for_security(name)?;
+        let bound = table.security();
+        let roles = self.roles.role_definitions();
+        let memberships = self.roles.role_memberships();
+        let security = bound.resolve(&roles).map_err(SQLError::Internal)?;
+        let subject = self.names.current_role();
+        let check = TablePrivilegeCheck {
+            privilege: TableAclPrivilege::Select,
+            grant_option: false,
+        };
+        Ok(
+            role_has_privilege(&security, &subject, check, &roles, &memberships)
+                || keys.iter().all(|key| {
+                    key.column().is_some_and(|column| {
+                        column_privilege_check(
+                            &security,
+                            column,
+                            &subject,
+                            check,
+                            &roles,
+                            &memberships,
+                        )
+                    })
+                }),
+        )
+    }
+
     pub fn ensure_table_privilege(
         &self,
         name: &str,

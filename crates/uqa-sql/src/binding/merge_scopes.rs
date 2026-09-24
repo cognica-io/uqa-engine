@@ -69,12 +69,21 @@ impl SchemaScope {
                     condition,
                     assignments
                         .iter()
-                        .map(|assignment| &assignment.value)
+                        .flat_map(crate::plan::AssignmentPlan::expressions)
                         .collect::<Vec<_>>(),
                 ),
                 MergeWhenPlan::InsertNotMatched {
-                    condition, values, ..
-                } => (condition, values.iter().collect()),
+                    condition,
+                    columns,
+                    values,
+                } => (
+                    condition,
+                    columns
+                        .iter()
+                        .flat_map(crate::ast::AssignmentTarget::expressions)
+                        .chain(values)
+                        .collect(),
+                ),
                 MergeWhenPlan::DeleteMatched { condition }
                 | MergeWhenPlan::DeleteNotMatchedBySource { condition }
                 | MergeWhenPlan::NothingMatched { condition }

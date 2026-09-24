@@ -21,6 +21,11 @@ pub(super) fn bind_insert(
     let mut output = insert.clone();
     output.with = bind_ctes(&insert.with, resolver, inherited, context)?;
     let context = context.with_ctes(&insert.with)?;
+    output.columns = insert
+        .columns
+        .iter()
+        .map(|target| super::bind_assignment_target(target, resolver, inherited, &context))
+        .collect::<Result<_, _>>()?;
     output.rows = insert
         .rows
         .iter()
@@ -65,7 +70,12 @@ pub(super) fn bind_insert(
                             .iter()
                             .map(|(column, expr)| {
                                 Ok((
-                                    column.clone(),
+                                    super::bind_assignment_target(
+                                        column,
+                                        resolver,
+                                        &conflict_scope,
+                                        &context,
+                                    )?,
                                     bind_rule_expr_with_scope(
                                         expr,
                                         resolver,

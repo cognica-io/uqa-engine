@@ -713,7 +713,12 @@ pub fn validate_rule_action_reference_scopes(
         Statement::Select(select) => validate_rule_select_scopes(catalog, select),
         Statement::Insert(insert) => {
             validate_rule_ctes(catalog, &insert.with)?;
-            for expr in insert.rows.iter().flatten() {
+            for expr in insert
+                .columns
+                .iter()
+                .flat_map(crate::ast::AssignmentTarget::expressions)
+                .chain(insert.rows.iter().flatten())
+            {
                 validate_rule_expr_scopes(catalog, expr)?;
             }
             if let Some(select) = &insert.select_source {
@@ -733,7 +738,10 @@ pub fn validate_rule_action_reference_scopes(
                 {
                     let reference = assignments
                         .iter()
-                        .find_map(|(_, expr)| {
+                        .flat_map(|(target, value)| {
+                            target.expressions().chain(std::iter::once(value))
+                        })
+                        .find_map(|expr| {
                             let mut shadowed = std::collections::BTreeSet::new();
                             shadowed.insert(insert.target_qualifier.to_ascii_lowercase());
                             first_rule_row_reference_in_expr(expr, &shadowed)
@@ -748,7 +756,9 @@ pub fn validate_rule_action_reference_scopes(
                     if let Some(qualifier) = reference {
                         return Err(invalid_rule_action_reference(&qualifier));
                     }
-                    for (_, expr) in assignments {
+                    for expr in assignments.iter().flat_map(|(target, value)| {
+                        target.expressions().chain(std::iter::once(value))
+                    }) {
                         validate_rule_expr_scopes(catalog, expr)?;
                     }
                     if let Some(r#where) = r#where {
@@ -769,7 +779,7 @@ pub fn validate_rule_action_reference_scopes(
             for expr in update
                 .assignments
                 .iter()
-                .map(|(_, expr)| expr)
+                .flat_map(|(target, value)| target.expressions().chain(std::iter::once(value)))
                 .chain(update.r#where.iter())
                 .chain(update.returning.iter().map(|projection| &projection.expr))
             {

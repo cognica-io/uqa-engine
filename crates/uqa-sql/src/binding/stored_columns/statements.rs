@@ -62,8 +62,11 @@ impl StoredColumnBinder<'_> {
                     assignments,
                 } => {
                     for (column, expression) in assignments {
-                        if self.mode.is_rename() && !dropped_targets.contains(column) {
-                            self.bind_target_name(column, &target);
+                        if self.mode.is_rename() && !dropped_targets.contains(&column.column) {
+                            self.bind_target_name(&mut column.column, &target);
+                        }
+                        for expression in column.expressions_mut() {
+                            self.bind_expr(expression, &scopes, &context)?;
                         }
                         self.bind_expr(expression, &scopes, &context)?;
                     }
@@ -79,14 +82,15 @@ impl StoredColumnBinder<'_> {
                             .output
                             .iter()
                             .take(values.len())
-                            .map(|column| column.current_name.clone())
+                            .map(|column| column.current_name.clone().into())
                             .collect();
                     }
-                    if self.mode.is_rename() {
-                        for column in columns {
-                            if !dropped_targets.contains(column) {
-                                self.bind_target_name(column, &target);
-                            }
+                    for column in columns {
+                        if self.mode.is_rename() && !dropped_targets.contains(&column.column) {
+                            self.bind_target_name(&mut column.column, &target);
+                        }
+                        for expression in column.expressions_mut() {
+                            self.bind_expr(expression, &scopes, &context)?;
                         }
                     }
                     for expression in values {

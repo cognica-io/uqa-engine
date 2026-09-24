@@ -74,7 +74,7 @@ struct BoundInsertContract<'a> {
     target_relation_bound: bool,
     target_qualifier: &'a str,
     include_descendants: bool,
-    columns: &'a [String],
+    columns: &'a [crate::ast::AssignmentTarget],
     with: &'a [crate::ast::CTE],
     select_source: Option<&'a SelectStmt>,
     on_conflict: Option<&'a OnConflict>,

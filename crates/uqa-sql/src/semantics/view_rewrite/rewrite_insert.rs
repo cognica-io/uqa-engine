@@ -29,7 +29,10 @@ pub fn rewrite_insert_to_base(
     validate_public_view_targets(
         services,
         &statement.table,
-        statement.columns.iter().map(String::as_str),
+        statement
+            .columns
+            .iter()
+            .map(|target| target.column.as_str()),
     )?;
     validate_public_insert_contract(services, statement)?;
     let Some(initial_layer) = automatic_view_layer(services, &statement.table)? else {
@@ -174,7 +177,7 @@ pub fn rewrite_insert_to_base(
                 .columns
                 .iter()
                 .take(width)
-                .map(|column| column.name.clone())
+                .map(|column| column.name.clone().into())
                 .collect::<Vec<_>>()
         } else {
             plan.columns.clone()
@@ -183,14 +186,21 @@ pub fn rewrite_insert_to_base(
             supplied_columns.clone()
         } else {
             supplied_columns
-                .iter()
-                .map(|column| writable_column(&layer, column, "INSERT"))
+                .clone()
+                .into_iter()
+                .map(|mut target| {
+                    target.column = writable_column(&layer, &target.column, "INSERT")?;
+                    Ok::<_, SQLError>(target)
+                })
                 .collect::<Result<Vec<_>, _>>()?
         };
         if has_view_rules {
             plan.view_rule_insert_plans.push(ViewRuleInsertPlan {
                 relation: layer.canonical_name.clone(),
-                supplied_columns,
+                supplied_columns: supplied_columns
+                    .into_iter()
+                    .map(|target| target.column)
+                    .collect(),
                 input_columns: Vec::new(),
             });
         }
@@ -231,18 +241,21 @@ pub fn rewrite_insert_to_base(
                     include_excluded: true,
                 };
                 for assignment in assignments.iter_mut() {
-                    assignment.column = writable_column(&layer, &assignment.column, "UPDATE")?;
-                    rewrite_target_expression(
-                        services,
-                        &mut assignment.value,
-                        &layer,
-                        scope,
-                        &mut plan.subqueries,
-                    )?;
+                    assignment.target.column =
+                        writable_column(&layer, &assignment.target.column, "UPDATE")?;
+                    for expression in assignment.expressions_mut() {
+                        rewrite_target_expression(
+                            services,
+                            expression,
+                            &layer,
+                            scope,
+                            &mut plan.subqueries,
+                        )?;
+                    }
                 }
                 let mapped = assignments
                     .iter()
-                    .map(|assignment| assignment.column.clone())
+                    .map(|assignment| assignment.target.clone())
                     .collect::<Vec<_>>();
                 validate_mapped_columns(&mapped, duplicate_assignment)?;
                 if let Some(predicate) = predicate {
@@ -290,7 +303,11 @@ pub fn rewrite_insert_to_base(
         }
     }
     for insert_plan in &mut plan.view_rule_insert_plans {
-        insert_plan.input_columns.clone_from(&plan.columns);
+        insert_plan.input_columns = plan
+            .columns
+            .iter()
+            .map(|target| target.column.clone())
+            .collect();
     }
     Ok(plan)
 }

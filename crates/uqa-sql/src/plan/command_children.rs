@@ -117,6 +117,11 @@ impl CommandPlan {
         let mut expressions = Vec::new();
         match self {
             Self::Insert(plan) => {
+                expressions.extend(
+                    plan.columns
+                        .iter()
+                        .flat_map(crate::ast::AssignmentTarget::expressions),
+                );
                 expressions.extend(plan.rows.iter().flatten());
                 if let Some(conflict) = &plan.on_conflict {
                     expressions.extend(&conflict.expressions);
@@ -126,7 +131,11 @@ impl CommandPlan {
                         predicate,
                     } = &conflict.action
                     {
-                        expressions.extend(assignments.iter().map(|assignment| &assignment.value));
+                        expressions.extend(
+                            assignments
+                                .iter()
+                                .flat_map(super::AssignmentPlan::expressions),
+                        );
                         expressions.extend(predicate.as_deref());
                     }
                 }
@@ -134,7 +143,11 @@ impl CommandPlan {
                 expressions.extend(plan.view_checks.iter().map(|check| &check.predicate));
             }
             Self::Update(plan) => {
-                expressions.extend(plan.assignments.iter().map(|assignment| &assignment.value));
+                expressions.extend(
+                    plan.assignments
+                        .iter()
+                        .flat_map(super::AssignmentPlan::expressions),
+                );
                 expressions.extend(plan.predicate.as_ref());
                 expressions.extend(plan.returning.iter().map(|projection| &projection.expr));
                 expressions.extend(plan.view_checks.iter().map(|check| &check.predicate));
@@ -157,13 +170,23 @@ impl CommandPlan {
                             assignments,
                         } => {
                             expressions.extend(condition.as_ref());
-                            expressions
-                                .extend(assignments.iter().map(|assignment| &assignment.value));
+                            expressions.extend(
+                                assignments
+                                    .iter()
+                                    .flat_map(super::AssignmentPlan::expressions),
+                            );
                         }
                         MergeWhenPlan::InsertNotMatched {
-                            condition, values, ..
+                            condition,
+                            columns,
+                            values,
                         } => {
                             expressions.extend(condition.as_ref());
+                            expressions.extend(
+                                columns
+                                    .iter()
+                                    .flat_map(crate::ast::AssignmentTarget::expressions),
+                            );
                             expressions.extend(values);
                         }
                         MergeWhenPlan::DeleteMatched { condition }
@@ -193,6 +216,11 @@ impl CommandPlan {
         let mut expressions = Vec::new();
         match self {
             Self::Insert(plan) => {
+                expressions.extend(
+                    plan.columns
+                        .iter_mut()
+                        .flat_map(crate::ast::AssignmentTarget::expressions_mut),
+                );
                 expressions.extend(plan.rows.iter_mut().flatten());
                 if let Some(conflict) = &mut plan.on_conflict {
                     expressions.extend(&mut conflict.expressions);
@@ -205,7 +233,7 @@ impl CommandPlan {
                         expressions.extend(
                             assignments
                                 .iter_mut()
-                                .map(|assignment| &mut assignment.value),
+                                .flat_map(super::AssignmentPlan::expressions_mut),
                         );
                         expressions.extend(predicate.as_deref_mut());
                     }
@@ -225,7 +253,7 @@ impl CommandPlan {
                 expressions.extend(
                     plan.assignments
                         .iter_mut()
-                        .map(|assignment| &mut assignment.value),
+                        .flat_map(super::AssignmentPlan::expressions_mut),
                 );
                 expressions.extend(plan.predicate.as_mut());
                 expressions.extend(
@@ -264,13 +292,20 @@ impl CommandPlan {
                             expressions.extend(
                                 assignments
                                     .iter_mut()
-                                    .map(|assignment| &mut assignment.value),
+                                    .flat_map(super::AssignmentPlan::expressions_mut),
                             );
                         }
                         MergeWhenPlan::InsertNotMatched {
-                            condition, values, ..
+                            condition,
+                            columns,
+                            values,
                         } => {
                             expressions.extend(condition.as_mut());
+                            expressions.extend(
+                                columns
+                                    .iter_mut()
+                                    .flat_map(crate::ast::AssignmentTarget::expressions_mut),
+                            );
                             expressions.extend(values);
                         }
                         MergeWhenPlan::DeleteMatched { condition }

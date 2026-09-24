@@ -106,7 +106,7 @@ pub fn try_run_point_update<S: Clone + 'static>(
             &stmt
                 .assignments
                 .iter()
-                .map(|assignment| assignment.column.clone())
+                .map(|assignment| assignment.target.column.clone())
                 .collect::<Vec<_>>(),
         ),
     )?;
@@ -183,14 +183,14 @@ pub fn row_independent_update_values<S: Clone + 'static>(
         stmt.relations_bound,
     )?;
     for assignment in &stmt.assignments {
-        if !expr_is_row_independent(&assignment.value) {
+        if !assignment.target.is_whole_column() || !expr_is_row_independent(&assignment.value) {
             return Ok(None);
         }
         let value = coerce_to_column_type(
             context.assignment.assignment,
             context.assignment.columns,
             &stmt.table,
-            &assignment.column,
+            &assignment.target.column,
             eval_mutation_expr(
                 context.assignment.expressions,
                 &ctes,
@@ -202,13 +202,13 @@ pub fn row_independent_update_values<S: Clone + 'static>(
         if let Some(ty @ (ColumnType::Vector(_) | ColumnType::Tensor(_))) = context
             .constraints
             .catalog
-            .column_type(&stmt.table, &assignment.column)
+            .column_type(&stmt.table, &assignment.target.column)
             .map_err(|err| dml_storage_error("UPDATE", err))?
         {
             let values = index_vectors_for_type(&value, &ty)?;
-            vectors.insert(assignment.column.clone(), values);
+            vectors.insert(assignment.target.column.clone(), values);
         }
-        updates.insert(assignment.column.clone(), value);
+        updates.insert(assignment.target.column.clone(), value);
     }
     Ok(Some((updates, vectors)))
 }

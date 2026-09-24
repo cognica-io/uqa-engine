@@ -138,13 +138,17 @@ fn build_conflict_update<S: Clone + 'static>(
         }
     }
     let mut updated_doc = existing_doc.clone();
-    for assignment in assignments {
+    for (position, assignment) in assignments.iter().enumerate() {
         let value = eval_mutation_assignment(
             context.assignment,
             scope,
             MutationAssignmentTarget {
                 table,
-                column: &assignment.column,
+                target: &assignment.target,
+                current: updated_doc.get(&assignment.target.column),
+                final_column_write: !assignments[position + 1..]
+                    .iter()
+                    .any(|next| next.target.column == assignment.target.column),
                 action: "INSERT ON CONFLICT DO UPDATE",
             },
             &assignment.value,
@@ -152,9 +156,9 @@ fn build_conflict_update<S: Clone + 'static>(
             params,
         )?;
         if let Some(value) = value {
-            updated_doc.insert(assignment.column.clone(), value);
+            updated_doc.insert(assignment.target.column.clone(), value);
         } else {
-            updated_doc.remove(&assignment.column);
+            updated_doc.remove(&assignment.target.column);
         }
     }
     Ok(BuiltConflictUpdate::Update {
@@ -213,7 +217,7 @@ impl InsertConflictLocks {
                             &existing.table,
                             &assignments
                                 .iter()
-                                .map(|assignment| assignment.column.clone())
+                                .map(|assignment| assignment.target.column.clone())
                                 .collect::<Vec<_>>(),
                         ),
                     )? {
@@ -346,7 +350,7 @@ impl InsertConflictLocks {
             } => {
                 let updated_columns = assignments
                     .iter()
-                    .map(|assignment| assignment.column.clone())
+                    .map(|assignment| assignment.target.column.clone())
                     .collect::<Vec<_>>();
                 let Some(triggered_document) = crate::mutation::triggers::fire_before_row_triggers(
                     &context.triggers,

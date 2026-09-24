@@ -49,7 +49,7 @@ impl MergeStatementEvents {
                 _ => None,
             })
             .flatten()
-            .map(|assignment| assignment.column.clone())
+            .map(|assignment| assignment.target.column.clone())
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();

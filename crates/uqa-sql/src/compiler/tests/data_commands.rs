@@ -130,7 +130,10 @@ fn insert_with_array_literal() {
         panic!("not INSERT");
     };
     assert_eq!(i.table, "docs");
-    assert_eq!(i.columns, vec!["id", "title", "embedding"]);
+    assert_eq!(
+        i.columns,
+        vec!["id".into(), "title".into(), "embedding".into()]
+    );
     assert_eq!(i.rows.len(), 1);
     assert_eq!(i.rows[0].len(), 3);
     match &i.rows[0][2] {

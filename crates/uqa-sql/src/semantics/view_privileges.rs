@@ -57,14 +57,7 @@ fn validate_columns(
     available: &[String],
     requested: &[String],
 ) -> Result<(), SQLError> {
-    let mut seen = BTreeSet::new();
     for column in requested {
-        if !seen.insert(column) {
-            return Err(SQLError::Routine {
-                sqlstate: "42701".into(),
-                message: format!("column \"{column}\" specified more than once"),
-            });
-        }
         if !available.contains(column) {
             return Err(SQLError::UnknownColumn(format!("{name}.{column}")));
         }
@@ -72,12 +65,25 @@ fn validate_columns(
     Ok(())
 }
 
+fn validate_insert_columns(statement: &InsertPlan, available: &[String]) -> Result<(), SQLError> {
+    crate::assignment::targets::validate_repeated_targets(&statement.columns, true)?;
+    validate_columns(
+        &statement.table,
+        available,
+        &statement
+            .columns
+            .iter()
+            .map(|target| target.column.clone())
+            .collect::<Vec<_>>(),
+    )
+}
+
 pub fn ensure_insert(
     services: &dyn ViewPrivilegeCatalog,
     statement: &InsertPlan,
 ) -> Result<RoleReference, SQLError> {
     let (view, available) = view_target(services, &statement.table)?;
-    validate_columns(&statement.table, &available, &statement.columns)?;
+    validate_insert_columns(statement, &available)?;
     let subject = privilege_subject(services, statement.target_privilege_subject.as_ref());
     let default_values = statement.source.is_none()
         && statement.columns.is_empty()
@@ -103,7 +109,11 @@ pub fn ensure_insert(
                 |width| available.iter().take(width).cloned().collect(),
             )
         } else {
-            statement.columns.clone()
+            statement
+                .columns
+                .iter()
+                .map(|target| target.column.clone())
+                .collect()
         };
         for column in columns {
             services.ensure_view_column_privilege_for(
@@ -136,8 +146,12 @@ pub fn ensure_insert(
     {
         let update_columns = assignments
             .iter()
-            .map(|assignment| assignment.column.clone())
+            .map(|assignment| assignment.target.column.clone())
             .collect::<Vec<_>>();
+        crate::assignment::targets::validate_repeated_targets(
+            assignments.iter().map(|assignment| &assignment.target),
+            false,
+        )?;
         validate_columns(&statement.table, &available, &update_columns)?;
         for column in &update_columns {
             services.ensure_view_column_privilege_for(
@@ -148,7 +162,11 @@ pub fn ensure_insert(
                 TableAclPrivilege::Update,
             )?;
         }
-        expressions.extend(assignments.iter().map(|assignment| &assignment.value));
+        expressions.extend(
+            assignments
+                .iter()
+                .flat_map(crate::plan::AssignmentPlan::expressions),
+        );
         expressions.extend(predicate.iter().map(Box::as_ref));
         conflict_columns.as_slice()
     } else {
@@ -174,8 +192,15 @@ pub fn ensure_update(
     let columns = statement
         .assignments
         .iter()
-        .map(|assignment| assignment.column.clone())
+        .map(|assignment| assignment.target.column.clone())
         .collect::<Vec<_>>();
+    crate::assignment::targets::validate_repeated_targets(
+        statement
+            .assignments
+            .iter()
+            .map(|assignment| &assignment.target),
+        false,
+    )?;
     validate_columns(&statement.table, &available, &columns)?;
     let subject = privilege_subject(services, statement.target_privilege_subject.as_ref());
     for column in &columns {
@@ -190,7 +215,7 @@ pub fn ensure_update(
     let expressions = statement
         .assignments
         .iter()
-        .map(|assignment| &assignment.value)
+        .flat_map(crate::plan::AssignmentPlan::expressions)
         .chain(statement.predicate.iter())
         .chain(
             statement
@@ -259,14 +284,22 @@ pub fn ensure_merge(
             MergeWhenPlan::InsertNotMatched {
                 columns, values, ..
             } => {
-                validate_columns(&statement.target, &available, columns)?;
+                crate::assignment::targets::validate_repeated_targets(columns, true)?;
+                validate_columns(
+                    &statement.target,
+                    &available,
+                    &columns
+                        .iter()
+                        .map(|target| target.column.clone())
+                        .collect::<Vec<_>>(),
+                )?;
                 if columns.is_empty() && values.is_empty() {
                     requires_any_insert = true;
                 } else {
-                    let columns = if columns.is_empty() {
+                    let columns: Vec<String> = if columns.is_empty() {
                         available.iter().take(values.len()).cloned().collect()
                     } else {
-                        columns.clone()
+                        columns.iter().map(|target| target.column.clone()).collect()
                     };
                     column_privileges.extend(
                         columns
@@ -279,8 +312,12 @@ pub fn ensure_merge(
             | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
                 let columns = assignments
                     .iter()
-                    .map(|assignment| assignment.column.clone())
+                    .map(|assignment| assignment.target.column.clone())
                     .collect::<Vec<_>>();
+                crate::assignment::targets::validate_repeated_targets(
+                    assignments.iter().map(|assignment| &assignment.target),
+                    false,
+                )?;
                 validate_columns(&statement.target, &available, &columns)?;
                 column_privileges.extend(
                     columns
@@ -346,12 +383,23 @@ pub fn merge_privilege_expressions(stmt: &MergePlan) -> Vec<&crate::ScalarExpr> 
                 assignments,
             } => {
                 expressions.extend(condition.iter());
-                expressions.extend(assignments.iter().map(|assignment| &assignment.value));
+                expressions.extend(
+                    assignments
+                        .iter()
+                        .flat_map(crate::plan::AssignmentPlan::expressions),
+                );
             }
             MergeWhenPlan::InsertNotMatched {
-                condition, values, ..
+                condition,
+                columns,
+                values,
             } => {
                 expressions.extend(condition.iter());
+                expressions.extend(
+                    columns
+                        .iter()
+                        .flat_map(crate::ast::AssignmentTarget::expressions),
+                );
                 expressions.extend(values);
             }
             MergeWhenPlan::DeleteMatched { condition }

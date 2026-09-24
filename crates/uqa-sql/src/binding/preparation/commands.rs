@@ -7,6 +7,8 @@
 //! Mutation parameter coercion and RETURNING descriptions at preparation time.
 
 use super::{error, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
+use crate::assignment::targets;
+use crate::ast::AssignmentTarget;
 use crate::plan::{AssignmentPlan, CommandPlan, ConflictActionPlan, MergeWhenPlan};
 
 impl Preparation<'_> {
@@ -41,13 +43,20 @@ impl Preparation<'_> {
         let subqueries = command.scalar_subqueries();
         match command {
             CommandPlan::Insert(insert) => {
+                targets::validate_repeated_targets(&insert.columns, true)?;
                 validate_target_columns(&insert.table, insert.columns.iter(), &target)?;
                 for row in &insert.rows {
                     self.insert_row(row, &insert.columns, &target, &input, subqueries)?;
                 }
                 if let Some(source) = &insert.source {
                     let mut output = self.query_output(source, None, true)?;
-                    self.insert_values(&mut output.types, &insert.columns, &target)?;
+                    self.insert_values(
+                        &mut output.types,
+                        &insert.columns,
+                        &target,
+                        &input,
+                        subqueries,
+                    )?;
                 }
                 if let Some(conflict) = &insert.on_conflict {
                     for expression in &conflict.expressions {
@@ -63,7 +72,7 @@ impl Preparation<'_> {
                     {
                         validate_target_columns(
                             &insert.table,
-                            assignments.iter().map(|assignment| &assignment.column),
+                            assignments.iter().map(|assignment| &assignment.target),
                             &target,
                         )?;
                         let excluded = RowSchema::with_qualified_types(
@@ -86,7 +95,7 @@ impl Preparation<'_> {
                     update
                         .assignments
                         .iter()
-                        .map(|assignment| &assignment.column),
+                        .map(|assignment| &assignment.target),
                     &target,
                 )?;
                 if let Some(predicate) = &update.predicate {
@@ -159,7 +168,7 @@ impl Preparation<'_> {
                 | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
                     validate_target_columns(
                         &merge.target,
-                        assignments.iter().map(|assignment| &assignment.column),
+                        assignments.iter().map(|assignment| &assignment.target),
                         target,
                     )?;
                     self.assignments(assignments, target, input, subqueries)?;
@@ -183,12 +192,19 @@ impl Preparation<'_> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
+        targets::validate_repeated_targets(
+            assignments.iter().map(|assignment| &assignment.target),
+            false,
+        )?;
         let mut values = assignments
             .iter()
             .map(|assignment| self.expression(&assignment.value, input, subqueries))
             .collect::<Result<Vec<_>, _>>()?;
         for (assignment, value) in assignments.iter().zip(&mut values) {
-            self.assignment(value, &assignment.column, target)?;
+            if matches!(assignment.value, ScalarExpr::Default) {
+                targets::validate_assignment_default(&assignment.target)?;
+            }
+            self.assignment(value, &assignment.target, target, input, subqueries)?;
         }
         Ok(())
     }
@@ -196,7 +212,7 @@ impl Preparation<'_> {
     fn insert_row(
         &mut self,
         row: &[ScalarExpr],
-        columns: &[String],
+        columns: &[crate::ast::AssignmentTarget<ScalarExpr>],
         target: &RowSchema,
         input: &RowSchema,
         subqueries: &[QueryPlan],
@@ -205,19 +221,32 @@ impl Preparation<'_> {
             .iter()
             .map(|expression| self.expression(expression, input, subqueries))
             .collect::<Result<Vec<_>, _>>()?;
-        self.insert_values(&mut values, columns, target)
+        for (expression, target) in row.iter().zip(columns) {
+            if matches!(expression, ScalarExpr::Default) {
+                targets::validate_assignment_default(target)?;
+            }
+        }
+        self.insert_values(&mut values, columns, target, input, subqueries)
     }
 
     fn insert_values(
         &mut self,
         values: &mut [ExpressionType],
-        columns: &[String],
+        columns: &[crate::ast::AssignmentTarget<ScalarExpr>],
         target: &RowSchema,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
-        let names = if columns.is_empty() {
-            target.columns()
+        targets::validate_repeated_targets(columns, true)?;
+        let names: Vec<AssignmentTarget<ScalarExpr>> = if columns.is_empty() {
+            target
+                .columns()
+                .iter()
+                .cloned()
+                .map(AssignmentTarget::from)
+                .collect::<Vec<_>>()
         } else {
-            columns
+            columns.to_vec()
         };
         if values.len() > names.len() {
             return Err(error(
@@ -232,7 +261,7 @@ impl Preparation<'_> {
             ));
         }
         for (value, column) in values.iter_mut().zip(names) {
-            self.assignment(value, column, target)?;
+            self.assignment(value, &column, target, input, subqueries)?;
         }
         Ok(())
     }
@@ -240,46 +269,56 @@ impl Preparation<'_> {
     fn assignment(
         &mut self,
         value: &mut ExpressionType,
-        column: &str,
+        assignment: &AssignmentTarget<ScalarExpr>,
         target: &RowSchema,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
+        let column = &assignment.column;
         if target.columns_are_open(None) && target.unqualified_position(column).is_none() {
-            return Ok(());
+            return targets::validate_assignment_type(assignment, None);
         }
         let index = target
             .columns()
             .iter()
             .position(|name| name == column)
             .ok_or_else(|| error("42703", format!("column \"{column}\" does not exist")))?;
-        let Some(ty) = target.column_type(index) else {
-            return Ok(());
+        let Some(declared) = target.column_type(index) else {
+            return targets::validate_assignment_type(assignment, None);
         };
-        self.parameters.coerce_unknown(value, ty)?;
-        if let Some(source) = &value.ty {
-            if !crate::assignment_type_compatible(source, ty) {
+        let required = targets::assignment_value_type(assignment, declared)?;
+        for bound in assignment.expressions() {
+            let mut ty = self.expression(bound, input, subqueries)?;
+            self.parameters
+                .coerce_unknown(&mut ty, &crate::ColumnType::Integer)?;
+            if ty.ty.as_ref().is_some_and(|ty| {
+                !crate::assignment_type_compatible(ty, &crate::ColumnType::Integer)
+            }) {
                 return Err(error(
                     "42804",
-                    format!(
-                        "column \"{column}\" is of type {} but expression is of type {}",
-                        ty.sql_name(),
-                        source.sql_name()
-                    ),
+                    "array subscript must have type integer".into(),
                 ));
             }
+            if let ScalarExpr::Literal(value @ uqa_core::Value::Str(_)) = bound {
+                crate::expr::cast_value(value, "integer")?;
+            }
         }
-        Ok(())
+        self.parameters.coerce_unknown(value, &required)?;
+        targets::validate_assignment_source(assignment, &required, value.ty.as_ref())?;
+        targets::validate_assignment_result(assignment, declared)
     }
 }
 
 fn validate_target_columns<'a>(
     table: &str,
-    columns: impl Iterator<Item = &'a String>,
+    columns: impl Iterator<Item = &'a AssignmentTarget<ScalarExpr>>,
     target: &RowSchema,
 ) -> Result<(), SQLError> {
     if target.columns_are_open(None) {
         return Ok(());
     }
-    for column in columns {
+    for assignment in columns {
+        let column = &assignment.column;
         if !target.columns().contains(column) {
             let identity =
                 crate::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
