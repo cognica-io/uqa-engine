@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use uqa_core::memory::BudgetedVec;
 
 use super::{
-    end_position, PendingNotification, MAX_NOTIFICATION_CHANNEL_BYTES,
+    end_position, NotificationListenerRow, PendingNotification, MAX_NOTIFICATION_CHANNEL_BYTES,
     MAX_NOTIFICATION_PAYLOAD_BYTES,
 };
 use crate::{
@@ -20,11 +20,24 @@ use crate::{
     read_control::StorageReadControl,
 };
 
-const MAGIC: &[u8] = b"UQA notification publication 1\n";
+mod subscription;
+pub use subscription::NotificationSubscriptionView;
+
+const MAGIC: &[u8] = b"UQA notification publication 2\n";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NotificationPublicationStart {
+    pub registry_id: [u8; 16],
+    pub publication_sequence: u64,
+    pub first_sequence: u64,
+    pub first_position: u64,
+    pub process_id: i32,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NotificationPublicationHeader {
     pub registry_id: [u8; 16],
+    pub publication_sequence: u64,
     pub first_sequence: u64,
     pub next_sequence: u64,
     pub first_position: u64,
@@ -44,22 +57,29 @@ pub struct NotificationPublication {
     bytes: Arc<BudgetedVec<u8>>,
     header: NotificationPublicationHeader,
     messages_offset: usize,
+    subscription: Option<subscription::Subscription>,
     fingerprint: [u8; 32],
 }
 
 impl NotificationPublication {
     pub fn encode(
-        registry_id: [u8; 16],
-        first_sequence: u64,
-        first_position: u64,
-        process_id: i32,
+        start: NotificationPublicationStart,
         messages: &[PendingNotification],
+        listener: Option<&NotificationListenerRow>,
         control: &StorageReadControl,
     ) -> VersionResult<Self> {
         control.cancellation().check()?;
+        let NotificationPublicationStart {
+            registry_id,
+            publication_sequence,
+            first_sequence,
+            first_position,
+            process_id,
+        } = start;
         let count = u64::try_from(messages.len()).map_err(|_| invalid())?;
         validate_header(
             registry_id,
+            publication_sequence,
             first_sequence,
             first_position,
             process_id,
@@ -73,6 +93,7 @@ impl NotificationPublication {
         }
         bytes.push(b'\n')?;
         for value in [
+            publication_sequence,
             first_sequence,
             first_position,
             u64::try_from(process_id).map_err(|_| invalid())?,
@@ -97,14 +118,17 @@ impl NotificationPublication {
                 bytes.extend_from_slice(field.as_bytes())?;
             }
         }
+        subscription::encode(&mut bytes, listener, process_id, control)?;
         let view = NotificationPublicationView::decode(&bytes, control)?;
         let header = view.header;
         let messages_offset = view.messages_offset;
         let fingerprint = view.fingerprint();
+        let subscription = view.subscription;
         Ok(Self {
             bytes: Arc::new(bytes),
             header,
             messages_offset,
+            subscription,
             fingerprint,
         })
     }
@@ -131,6 +155,7 @@ impl NotificationPublication {
             bytes: self.bytes(),
             header: self.header,
             messages_offset: self.messages_offset,
+            subscription: self.subscription,
         }
     }
 }
@@ -141,6 +166,7 @@ pub struct NotificationPublicationView<'a> {
     bytes: &'a [u8],
     header: NotificationPublicationHeader,
     messages_offset: usize,
+    subscription: Option<subscription::Subscription>,
 }
 
 impl<'a> NotificationPublicationView<'a> {
@@ -157,12 +183,14 @@ impl<'a> NotificationPublicationView<'a> {
         if cursor.take(1)? != b"\n" {
             return Err(invalid());
         }
+        let publication_sequence = cursor.number(b'\n')?;
         let first_sequence = cursor.number(b'\n')?;
         let first_position = cursor.number(b'\n')?;
         let process_id = i32::try_from(cursor.number(b'\n')?).map_err(|_| invalid())?;
         let count = cursor.number(b'\n')?;
         let next_sequence = validate_header(
             registry_id,
+            publication_sequence,
             first_sequence,
             first_position,
             process_id,
@@ -181,13 +209,21 @@ impl<'a> NotificationPublicationView<'a> {
                 return Err(invalid());
             }
         }
-        if !cursor.rest.is_empty() {
+        let subscription = subscription::decode(&mut cursor, bytes.len(), control)?;
+        if !cursor.rest.is_empty() || (count == 0 && subscription.is_none()) {
+            return Err(invalid());
+        }
+        if subscription.is_some_and(|subscription| {
+            let subscription = subscription.view(bytes);
+            subscription.next_sequence > first_sequence || subscription.position > first_position
+        }) {
             return Err(invalid());
         }
         Ok(Self {
             bytes,
             header: NotificationPublicationHeader {
                 registry_id,
+                publication_sequence,
                 first_sequence,
                 next_sequence,
                 first_position,
@@ -195,6 +231,7 @@ impl<'a> NotificationPublicationView<'a> {
                 process_id,
             },
             messages_offset,
+            subscription,
         })
     }
 
@@ -204,6 +241,11 @@ impl<'a> NotificationPublicationView<'a> {
 
     pub fn fingerprint(&self) -> [u8; 32] {
         Sha256::digest(self.bytes).into()
+    }
+
+    pub fn subscription(&self) -> Option<NotificationSubscriptionView<'a>> {
+        self.subscription
+            .map(|subscription| subscription.view(self.bytes))
     }
 
     pub fn messages(&self) -> impl Iterator<Item = VersionResult<NotificationMessageRef<'a>>> + 'a {
@@ -223,6 +265,7 @@ impl<'a> NotificationPublicationView<'a> {
 
 fn validate_header(
     registry: [u8; 16],
+    publication_sequence: u64,
     sequence: u64,
     position: u64,
     process_id: i32,
@@ -231,7 +274,7 @@ fn validate_header(
     let next_sequence = sequence.checked_add(count).ok_or_else(invalid)?;
     if registry == [0; 16]
         || process_id <= 0
-        || count == 0
+        || publication_sequence >= i64::MAX as u64
         || i64::try_from(next_sequence).is_err()
         || i64::try_from(position).is_err()
     {

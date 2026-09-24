@@ -11,7 +11,7 @@ mod publication;
 mod registry;
 pub use publication::{
     NotificationMessageRef, NotificationPublication, NotificationPublicationHeader,
-    NotificationPublicationView,
+    NotificationPublicationStart, NotificationPublicationView, NotificationSubscriptionView,
 };
 pub use registry::{NotificationListenerRow, NotificationQueueEntry, NotificationQueueState};
 

@@ -260,14 +260,15 @@ fn idle_poll_reconciles_an_interrupted_notification_commit_marker() {
     exec(&listener, "LISTEN recovery_events");
 
     let registry = notification_registry_path(&database);
-    let connection = Connection::open(&registry).unwrap();
-    assert_eq!(
-        connection
-            .execute("UPDATE listeners SET transaction_open = 1", [])
-            .unwrap(),
-        1
-    );
-    drop(connection);
+    let registry_owner =
+        uqa_storage_sqlite::notifications::NotificationRegistry::open(&database, None).unwrap();
+    let transaction = registry_owner.begin().unwrap();
+    let mut listeners = transaction.listeners().unwrap();
+    assert_eq!(listeners.len(), 1);
+    listeners[0].transaction_open = true;
+    transaction.save_listener(&listeners[0]).unwrap();
+    transaction.commit().unwrap();
+    drop(registry_owner);
 
     exec(
         &sender,

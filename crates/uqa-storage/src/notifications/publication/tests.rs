@@ -7,10 +7,25 @@
 use super::*;
 
 const RECORD: &str = concat!(
-    "UQA notification publication 1\n",
-    "abababababababababababababababab\n17\n8180\n42\n2\n",
-    "6:events3:one7:한:글9:line\n:끝"
+    "UQA notification publication 2\n",
+    "abababababababababababababababab\n11\n17\n8180\n42\n2\n",
+    "6:events3:one7:한:글9:line\n:끝\n0\n"
 );
+
+fn start(
+    registry_id: [u8; 16],
+    first_sequence: u64,
+    first_position: u64,
+    process_id: i32,
+) -> NotificationPublicationStart {
+    NotificationPublicationStart {
+        registry_id,
+        publication_sequence: 11,
+        first_sequence,
+        first_position,
+        process_id,
+    }
+}
 
 fn messages() -> [PendingNotification; 2] {
     [
@@ -26,7 +41,7 @@ fn messages() -> [PendingNotification; 2] {
 }
 
 fn encode(control: &StorageReadControl) -> VersionResult<NotificationPublication> {
-    NotificationPublication::encode([0xab; 16], 17, 8_180, 42, &messages(), control)
+    NotificationPublication::encode(start([0xab; 16], 17, 8_180, 42), &messages(), None, control)
 }
 
 #[test]
@@ -36,6 +51,7 @@ fn publication_matches_independent_framing_and_page_boundary_expectations() {
     assert_eq!(publication.bytes(), RECORD.as_bytes());
     let expected_header = NotificationPublicationHeader {
         registry_id: [0xab; 16],
+        publication_sequence: 11,
         first_sequence: 17,
         next_sequence: 19,
         first_position: 8_180,
@@ -103,7 +119,7 @@ fn every_truncated_record_and_trailing_data_are_rejected() {
 fn malformed_header_lengths_and_counts_fail_without_allocation() {
     let control = StorageReadControl::with_limit(0);
     let changes = [
-        ("publication 1", "publication 2"),
+        ("publication 2", "publication 1"),
         (
             "abababababababababababababababab",
             "00000000000000000000000000000000",
@@ -149,7 +165,8 @@ fn field_limits_count_utf8_bytes_and_allow_the_largest_valid_payload() {
         payload: "p".repeat(7_999),
     };
     let publication =
-        NotificationPublication::encode([1; 16], 0, 0, 1, &[largest], &control).unwrap();
+        NotificationPublication::encode(start([1; 16], 0, 0, 1), &[largest], None, &control)
+            .unwrap();
     assert_eq!(publication.header().end_position, 8_080);
     let item = publication.view().messages().next().unwrap().unwrap();
     assert_eq!(item.channel.len(), 63);
@@ -174,7 +191,12 @@ fn field_limits_count_utf8_bytes_and_allow_the_largest_valid_payload() {
         },
     ] {
         assert!(matches!(
-            NotificationPublication::encode([1; 16], 0, 0, 1, &[invalid_message], &control),
+            NotificationPublication::encode(
+                start([1; 16], 0, 0, 1),
+                &[invalid_message],
+                None,
+                &control
+            ),
             Err(VersionError::InvalidEncoding(_))
         ));
         assert_eq!(control.memory().used(), 0);
@@ -189,9 +211,13 @@ fn identities_and_position_arithmetic_cannot_wrap() {
         payload: String::new(),
     }];
     let maximum = i64::MAX as u64;
-    let publication =
-        NotificationPublication::encode([1; 16], maximum - 1, 0, i32::MAX, &smallest, &control)
-            .unwrap();
+    let publication = NotificationPublication::encode(
+        start([1; 16], maximum - 1, 0, i32::MAX),
+        &smallest,
+        None,
+        &control,
+    )
+    .unwrap();
     assert_eq!(publication.header().next_sequence, maximum);
     drop(publication);
     for (registry, sequence, position, process) in [
@@ -205,14 +231,17 @@ fn identities_and_position_arithmetic_cannot_wrap() {
     ] {
         assert!(matches!(
             NotificationPublication::encode(
-                registry, sequence, position, process, &smallest, &control
+                start(registry, sequence, position, process),
+                &smallest,
+                None,
+                &control
             ),
             Err(VersionError::InvalidEncoding(_))
         ));
         assert_eq!(control.memory().used(), 0);
     }
     assert!(matches!(
-        NotificationPublication::encode([1; 16], 0, 0, 1, &[], &control),
+        NotificationPublication::encode(start([1; 16], 0, 0, 1), &[], None, &control),
         Err(VersionError::InvalidEncoding(_))
     ));
 }
@@ -258,4 +287,154 @@ fn publication_fingerprint_distinguishes_payloads_with_the_same_identity() {
     let changed = NotificationPublicationView::decode(changed.as_bytes(), &control).unwrap();
     assert_eq!(original.header(), changed.header());
     assert_ne!(original.fingerprint(), changed.fingerprint());
+}
+
+fn listener(channels: Vec<String>) -> NotificationListenerRow {
+    NotificationListenerRow {
+        owner_id: [0xcd; 16],
+        session_id: u64::MAX,
+        process_id: 42,
+        wake_port: 1234,
+        channels,
+        transaction_open: false,
+        next_sequence: 9,
+        position: 40,
+    }
+}
+
+#[test]
+fn subscription_only_publications_borrow_listen_and_unlisten_without_advancing_messages() {
+    for channels in [vec!["events".into(), "한글".into()], Vec::new()] {
+        let listener = listener(channels.clone());
+        let control = StorageReadControl::with_limit(4096);
+        let publication = NotificationPublication::encode(
+            start([0xab; 16], 17, 8180, 42),
+            &[],
+            Some(&listener),
+            &control,
+        )
+        .unwrap();
+        let suffix = if channels.is_empty() {
+            "0\n"
+        } else {
+            "2\n6:events6:한글"
+        };
+        let expected = format!(
+            "UQA notification publication 2\nabababababababababababababababab\n11\n17\n8180\n42\n0\n\n1\ncdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\n18446744073709551615\n1234\n9\n40\n{suffix}"
+        );
+        assert_eq!(publication.bytes(), expected.as_bytes());
+        assert_eq!(
+            publication.header().first_sequence,
+            publication.header().next_sequence
+        );
+        assert_eq!(
+            publication.header().first_position,
+            publication.header().end_position
+        );
+        let borrowed = StorageReadControl::with_limit(0);
+        let view = NotificationPublicationView::decode(publication.bytes(), &borrowed).unwrap();
+        assert_eq!(view.messages().count(), 0);
+        let subscription = view.subscription().unwrap();
+        assert_eq!(subscription.owner_id, listener.owner_id);
+        assert_eq!(subscription.session_id, listener.session_id);
+        assert_eq!(subscription.wake_port, listener.wake_port);
+        assert_eq!(subscription.next_sequence, listener.next_sequence);
+        assert_eq!(subscription.position, listener.position);
+        assert_eq!(
+            subscription
+                .channels()
+                .collect::<VersionResult<Vec<_>>>()
+                .unwrap(),
+            channels
+        );
+        assert!(matches!(
+            subscription.channels_json(&borrowed),
+            Err(VersionError::Memory(_))
+        ));
+        assert_eq!(borrowed.memory().used(), 0);
+        let json_control = StorageReadControl::with_limit(4096);
+        let json = subscription.channels_json(&json_control).unwrap();
+        let expected_json = if channels.is_empty() {
+            "[]"
+        } else {
+            r#"["events","한글"]"#
+        };
+        assert_eq!(json.as_ref(), expected_json.as_bytes());
+        drop(json);
+        assert_eq!(json_control.memory().used(), 0);
+        let mut later = start([0xab; 16], 17, 8180, 42);
+        later.publication_sequence += 1;
+        let later = NotificationPublication::encode(later, &[], Some(&listener), &control).unwrap();
+        assert_ne!(later.fingerprint(), publication.fingerprint());
+    }
+}
+
+#[test]
+fn subscription_framing_rejects_truncation_malformed_fields_and_exhausted_identity() {
+    let control = StorageReadControl::with_limit(4096);
+    let publication = NotificationPublication::encode(
+        start([0xab; 16], 17, 8180, 42),
+        &messages(),
+        Some(&listener(vec!["events".into()])),
+        &control,
+    )
+    .unwrap();
+    let borrowed = StorageReadControl::with_limit(0);
+    for end in 0..publication.bytes().len() {
+        assert!(
+            NotificationPublicationView::decode(&publication.bytes()[..end], &borrowed).is_err(),
+            "prefix {end}"
+        );
+    }
+    let record = std::str::from_utf8(publication.bytes()).unwrap();
+    for (from, to) in [
+        ("\n11\n", "\n9223372036854775807\n"),
+        ("\n1\ncd", "\n2\ncd"),
+        (
+            "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+            "00000000000000000000000000000000",
+        ),
+        ("\n1234\n", "\n0\n"),
+        ("\n1234\n", "\n65536\n"),
+        ("\n9\n", "\n9223372036854775808\n"),
+        ("\n40\n", "\n9223372036854775808\n"),
+        ("\n40\n1\n", "\n40\n2\n"),
+        ("\n40\n1\n6:events", "\n40\n1\n0:"),
+    ] {
+        let malformed = record.replacen(from, to, 1);
+        assert_ne!(record, malformed);
+        assert!(
+            NotificationPublicationView::decode(malformed.as_bytes(), &borrowed).is_err(),
+            "{from:?} -> {to:?}"
+        );
+    }
+    for changed in [
+        NotificationListenerRow {
+            owner_id: [0; 16],
+            ..listener(Vec::new())
+        },
+        NotificationListenerRow {
+            process_id: 43,
+            ..listener(Vec::new())
+        },
+        NotificationListenerRow {
+            transaction_open: true,
+            ..listener(Vec::new())
+        },
+        NotificationListenerRow {
+            wake_port: 0,
+            ..listener(Vec::new())
+        },
+        listener(vec![String::new()]),
+        listener(vec!["c".repeat(64)]),
+    ] {
+        assert!(NotificationPublication::encode(
+            start([0xab; 16], 17, 8180, 42),
+            &[],
+            Some(&changed),
+            &control
+        )
+        .is_err());
+    }
+    assert_eq!(borrowed.memory().used(), 0);
 }

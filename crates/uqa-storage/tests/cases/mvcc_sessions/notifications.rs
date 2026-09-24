@@ -6,19 +6,24 @@
 
 use super::*;
 use uqa_storage::notifications::{
-    NotificationPublication, NotificationPublicationStore, PendingNotification,
+    NotificationPublication, NotificationPublicationStart, NotificationPublicationStore,
+    PendingNotification,
 };
 
 fn publication(payload: &str, sequence: u64) -> NotificationPublication {
     NotificationPublication::encode(
-        [1; 16],
-        sequence,
-        sequence * 20,
-        42,
+        NotificationPublicationStart {
+            registry_id: [1; 16],
+            publication_sequence: sequence,
+            first_sequence: sequence,
+            first_position: sequence * 20,
+            process_id: 42,
+        },
         &[PendingNotification {
             channel: "events".into(),
             payload: payload.into(),
         }],
+        None,
         &StorageReadControl::with_limit(4_096),
     )
     .unwrap()

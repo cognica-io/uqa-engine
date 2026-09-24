@@ -6,6 +6,7 @@
 
 //! Physical notification registry transactions and encrypted connection ownership.
 
+mod publication;
 mod schema;
 #[cfg(test)]
 mod tests;
@@ -40,6 +41,7 @@ impl NotificationRegistry {
 pub struct NotificationRegistryTransaction {
     connection: SQLiteConnectionLease,
     finished: bool,
+    poisoned: bool,
 }
 
 impl NotificationRegistryTransaction {
@@ -268,6 +270,11 @@ impl NotificationRegistryTransaction {
     }
 
     pub fn commit(mut self) -> Result<(), StorageBackendError> {
+        if self.poisoned {
+            return Err(StorageBackendError::Other(
+                "cannot commit notification registry after failed publication rollback".into(),
+            ));
+        }
         self.connection
             .execute_batch("COMMIT")
             .map_err(|error| registry_error("commit registry transaction", &error))?;
@@ -298,6 +305,7 @@ fn open_registry_transaction(
             "lease asynchronous notification registry connection: {error}"
         ))
     })?;
+    schema::register_writer(&connection).map_err(StorageBackendError::Other)?;
     connection
         .busy_timeout(REGISTRY_BUSY_TIMEOUT)
         .map_err(|error| registry_error("set registry busy timeout", &error))?;
@@ -307,10 +315,13 @@ fn open_registry_transaction(
     connection
         .execute_batch("BEGIN IMMEDIATE")
         .map_err(|error| registry_error("begin registry transaction", &error))?;
-    Ok(NotificationRegistryTransaction {
+    let transaction = NotificationRegistryTransaction {
         connection,
         finished: false,
-    })
+        poisoned: false,
+    };
+    schema::validate_writer(&transaction.connection).map_err(StorageBackendError::Other)?;
+    Ok(transaction)
 }
 
 fn sqlite_integer(value: u64, label: &str) -> Result<i64, StorageBackendError> {

@@ -6,7 +6,10 @@
 
 //! Shared acceptance schedules for disposable provider sessions with notification publication.
 
-use super::{NotificationPublication, NotificationPublicationStore, PendingNotification};
+use super::{
+    NotificationPublication, NotificationPublicationStart, NotificationPublicationStore,
+    PendingNotification,
+};
 use crate::{
     read_control::StorageReadControl, PersistentStorageSession, StorageBackendError,
     StorageBackendResult, StorageSavepointId,
@@ -21,10 +24,13 @@ fn control() -> StorageReadControl {
 
 fn publication(sequence: u64) -> StorageBackendResult<NotificationPublication> {
     NotificationPublication::encode(
-        [7; 16],
-        sequence,
-        sequence * 8_192,
-        42,
+        NotificationPublicationStart {
+            registry_id: [7; 16],
+            publication_sequence: sequence,
+            first_sequence: sequence,
+            first_position: sequence * 8_192,
+            process_id: 42,
+        },
         &[
             PendingNotification {
                 channel: "events".into(),
@@ -35,6 +41,7 @@ fn publication(sequence: u64) -> StorageBackendResult<NotificationPublication> {
                 payload: String::new(),
             },
         ],
+        None,
         &control(),
     )
     .map_err(crate::mvcc::VersionError::into_storage_error)
