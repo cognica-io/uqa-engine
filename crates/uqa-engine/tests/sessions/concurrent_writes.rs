@@ -223,19 +223,25 @@ fn independent_engines_share_concurrent_commits_and_savepoint_undo() {
     }
 }
 
-#[test]
-fn encrypted_and_compressed_files_preserve_the_concurrent_sql_schedule() {
-    for mode in [
+#[rstest::rstest]
+#[case::native(false)]
+#[case::key_value(true)]
+fn encrypted_and_compressed_files_preserve_the_concurrent_sql_schedule(
+    #[case] key_value: bool,
+    #[values(
         FileMode::Encrypted,
         FileMode::Compressed,
-        FileMode::CompressedEncrypted,
-    ] {
-        for layout in [Layout::NativeFile(mode), Layout::KeyValueFile(mode)] {
-            for probe in [false, true] {
-                verify(layout, probe, false);
-            }
-        }
-    }
+        FileMode::CompressedEncrypted
+    )]
+    mode: FileMode,
+    #[values(false, true)] probe: bool,
+) {
+    let layout = if key_value {
+        Layout::KeyValueFile(mode)
+    } else {
+        Layout::NativeFile(mode)
+    };
+    verify(layout, probe, false);
 }
 
 #[test]

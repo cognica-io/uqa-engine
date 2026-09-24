@@ -158,6 +158,10 @@ module_name_repetitions = "allow"
 # computed scores; tests use explicit epsilon comparisons.
 float_cmp = "allow"
 
+# Optimize the dependency's memory-hard key derivation in tests while retaining the full encryption parameters and ordinary workspace debug/overflow checks.
+[profile.test.package.argon2]
+opt-level = 3
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
