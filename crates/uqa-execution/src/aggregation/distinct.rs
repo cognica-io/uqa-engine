@@ -7,8 +7,8 @@
 //! Budgeted DISTINCT tracking with disk fallback.
 
 use super::{
-    read_bounded_json_spill_record, BTreeSet, BufReader, BufWriter, DecimalValue, SQLError, Seek,
-    SeekFrom, Value, Write,
+    read_bounded_json_spill_record, BTreeSet, BufReader, BufWriter, SQLError, Seek, SeekFrom,
+    Value, Write,
 };
 
 pub struct DistinctTracker {
@@ -221,19 +221,10 @@ pub fn value_as_f64(v: &Value) -> Result<f64, SQLError> {
 
 pub fn value_lt(a: &Value, b: &Value) -> bool {
     match (a, b) {
-        (Value::Int(x), Value::Int(y)) => x < y,
-        (Value::Float(x), Value::Float(y)) => x < y,
-        (Value::Int(x), Value::Float(y)) => (*x as f64) < *y,
-        (Value::Float(x), Value::Int(y)) => *x < (*y as f64),
-        (Value::Decimal(x), Value::Decimal(y)) => x < y,
-        (Value::Int(x), Value::Decimal(y)) => DecimalValue::from_i64(*x) < *y,
-        (Value::Decimal(x), Value::Int(y)) => *x < DecimalValue::from_i64(*y),
-        (Value::Float(x), Value::Decimal(y)) => {
-            DecimalValue::from_f64_lossy(*x).is_some_and(|x| x < *y)
-        }
-        (Value::Decimal(x), Value::Float(y)) => {
-            DecimalValue::from_f64_lossy(*y).is_some_and(|y| *x < y)
-        }
+        (
+            Value::Int(_) | Value::Float(_) | Value::Decimal(_),
+            Value::Int(_) | Value::Float(_) | Value::Decimal(_),
+        ) => a < b,
         (Value::Str(x), Value::Str(y)) => x < y,
         (Value::FixedChar(x), Value::FixedChar(y)) => x.trim_end() < y.trim_end(),
         (Value::Bytes(x), Value::Bytes(y)) => x < y,
