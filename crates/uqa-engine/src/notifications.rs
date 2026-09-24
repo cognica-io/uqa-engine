@@ -788,6 +788,9 @@ impl crate::TransactionFrame {
 }
 
 #[cfg(test)]
+mod recovery_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

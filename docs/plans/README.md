@@ -13,6 +13,7 @@ Files in this directory record staged implementation work. A living plan must de
 | [`0007-kuromoji-analyzer.md`](0007-kuromoji-analyzer.md) | Active | Update with each logical Kuromoji implementation unit that changes ownership, interfaces, reference inputs, completion status, verification evidence, or remaining acceptance gates. |
 | [`0008-concurrent-storage-transactions.md`](0008-concurrent-storage-transactions.md) | Active | Update with each concurrent-storage implementation unit that changes interfaces, ownership, provider coverage, migration, isolation or acceptance evidence; common records, private changes, snapshot reads and redb record persistence are implemented, while SQLite, legacy store routing and SQL integration remain pending. |
 | [`0009-nori-index-retention.md`](0009-nori-index-retention.md) | Complete | Preserve the unchanged allocation gates, fixed owner contracts and full CI evidence merged in PR #149. |
+| [`0011-committed-notification-recovery.md`](0011-committed-notification-recovery.md) | Active | Update the committed-notification intent, provider atomicity, publication/reclamation ownership and deterministic sender-loss acceptance as #129 is corrected. |
 
 The PostgreSQL 18 plan contains a compact ledger generated from `tests/parity/pg18/manifest.json`. `python3 tests/parity/pg18/run_diff.py --validate-manifest` rejects any manifest change whose plan ledger was not updated in the same change, so the readable plan and machine-readable accounting cannot silently diverge again.
 
