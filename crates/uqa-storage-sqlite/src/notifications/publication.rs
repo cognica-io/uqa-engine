@@ -42,6 +42,38 @@ fn state(connection: &Connection) -> StorageBackendResult<PublicationState> {
 }
 
 impl NotificationRegistry {
+    /// Observe committed work without taking the registry writer. A racing publication is picked up by the next poll; admission rechecks all state before applying changes.
+    pub fn poll_needed(
+        &self,
+        store: &dyn NotificationPublicationStore,
+        local_owners: &[[u8; 16]],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        let mut pending = false;
+        store.visit_notification_publication(control, &mut |publication| {
+            pending = publication.is_some();
+            Ok(())
+        })?;
+        if pending || local_owners.is_empty() {
+            return Ok(pending);
+        }
+        let connection = self.connection.lease_connection()?;
+        super::schema::validate_writer(&connection).map_err(StorageBackendError::Other)?;
+        let mut statement = connection.prepare_cached(
+            "SELECT EXISTS (SELECT 1 FROM listeners, queue_state WHERE queue_state.singleton = 1 AND listeners.owner_id = ?1 AND listeners.transaction_open = 0 AND listeners.next_sequence < queue_state.next_sequence)",
+        ).map_err(|error| registry_error("prepare committed polling state", &error))?;
+        for owner in local_owners {
+            control.check()?;
+            if statement
+                .query_row([owner.as_slice()], |row| row.get::<_, bool>(0))
+                .map_err(|error| registry_error("read committed polling state", &error))?
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     /// Recover any committed slot before admitting another publisher. Each recovery commits its queue acknowledgement before conditionally clearing the main-store slot. A concurrent cleanup or publisher cannot make a stale acknowledgement delete a newer intent.
     pub fn begin_recovered(
         &self,

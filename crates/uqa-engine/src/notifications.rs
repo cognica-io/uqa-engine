@@ -127,6 +127,9 @@ mod cross_process {
         pub(super) const fn recovery_initialized(&self) -> bool {
             false
         }
+        pub(super) fn poll_needed(&self, _local_owners: &[[u8; 16]]) -> Result<bool, SQLError> {
+            Err(unsupported())
+        }
         pub(super) fn begin_registry_transaction(
             &self,
         ) -> Result<CrossProcessRegistryTransaction, SQLError> {

@@ -305,6 +305,23 @@ impl CrossProcessCoordinator {
         self.recovery.lock().is_some()
     }
 
+    pub(super) fn poll_needed(&self, local_owners: &[[u8; 16]]) -> Result<bool, SQLError> {
+        let Some(recovery) = self.recovery.lock().clone() else {
+            return Ok(false);
+        };
+        let store = recovery
+            .backend
+            .notification_publications()
+            .ok_or_else(|| {
+                SQLError::Internal(
+                    "notification recovery session omitted atomic publication".into(),
+                )
+            })?;
+        self.registry
+            .poll_needed(store, local_owners, &recovery.control)
+            .map_err(registry_error)
+    }
+
     pub(super) fn create_listener_lease(&self) -> Result<ListenerLease, SQLError> {
         for _ in 0..16 {
             let mut owner_id = [0_u8; 16];

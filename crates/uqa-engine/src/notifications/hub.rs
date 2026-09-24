@@ -135,9 +135,13 @@ impl NotificationHub {
                     payload: entry.payload,
                 })
                 .collect::<Vec<_>>();
-            listener.next_sequence = queue_state.next_sequence;
-            listener.position = queue_state.head_position;
-            Self::save_cross_listener(registry, listener)?;
+            if listener.next_sequence != queue_state.next_sequence
+                || listener.position != queue_state.head_position
+            {
+                listener.next_sequence = queue_state.next_sequence;
+                listener.position = queue_state.head_position;
+                Self::save_cross_listener(registry, listener)?;
+            }
             if !notifications.is_empty() {
                 deliveries.push(PreparedDelivery {
                     session_id: *session_id,
@@ -188,8 +192,9 @@ impl NotificationHub {
                             "committed asynchronous notification listener {session_id} is missing"
                         ))
                     })?;
-                if !transaction_open {
+                if !transaction_open && listener.transaction_open {
                     listener.transaction_open = false;
+                    Self::save_cross_listener(registry, listener)?;
                 }
             }
         }
@@ -249,6 +254,13 @@ impl NotificationHub {
         };
         if !cross.recovery_initialized() {
             return Ok(());
+        }
+        if transaction_state.is_none() {
+            let owners = Self::local_owner_ids(&self.state.lock());
+            if !cross.poll_needed(&owners)? {
+                *self.cross_error.lock() = None;
+                return Ok(());
+            }
         }
         let transaction = cross.begin_registry_transaction()?;
         let _gate = self.commit_gate.lock();

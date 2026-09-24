@@ -59,6 +59,81 @@ fn is_pending(session: &PersistentStorageSession) -> bool {
 }
 
 #[test]
+fn idle_poll_reads_committed_work_while_another_registry_writer_is_admitted() {
+    for native in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("polling.db");
+        let provider = provider(&database, native);
+        let session = provider.open_session().unwrap();
+        let store = session.backend.notification_publications().unwrap();
+        let registry = NotificationRegistry::open(&database, None).unwrap();
+        let row = listener();
+        let transaction = registry.begin().unwrap();
+        transaction.save_listener(&row).unwrap();
+        transaction.commit().unwrap();
+
+        let writer = registry.begin().unwrap();
+        writer
+            .append_entries(&[NotificationQueueEntry {
+                sequence: 0,
+                process_id: 43,
+                channel: "events".into(),
+                payload: "committed only".into(),
+            }])
+            .unwrap();
+        writer
+            .save_queue_state(NotificationQueueState {
+                next_sequence: 1,
+                head_position: 32,
+            })
+            .unwrap();
+        assert!(!registry
+            .poll_needed(store, &[row.owner_id], &control())
+            .unwrap());
+        writer.commit().unwrap();
+        assert!(registry
+            .poll_needed(store, &[row.owner_id], &control())
+            .unwrap());
+        assert!(!registry.poll_needed(store, &[[2; 16]], &control()).unwrap());
+        assert!(!registry.poll_needed(store, &[], &control()).unwrap());
+
+        let transaction = registry.begin().unwrap();
+        let mut row = row;
+        row.transaction_open = true;
+        transaction.save_listener(&row).unwrap();
+        transaction.commit().unwrap();
+        assert!(!registry
+            .poll_needed(store, &[row.owner_id], &control())
+            .unwrap());
+    }
+}
+
+#[test]
+fn polling_without_local_listeners_still_detects_committed_cleanup() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("cleanup.db");
+    let provider = provider(&database, true);
+    let session = provider.open_session().unwrap();
+    let store = session.backend.notification_publications().unwrap();
+    let registry = NotificationRegistry::open(&database, None).unwrap();
+    session.backend.begin_transaction().unwrap();
+    let mut prepared = registry.begin().unwrap();
+    let publication = prepared
+        .prepare_publication(42, &pending(), None, &control())
+        .unwrap();
+    store.stage_notification_publication(&publication).unwrap();
+    session.backend.commit_transaction().unwrap();
+    drop(prepared);
+    assert!(registry.poll_needed(store, &[], &control()).unwrap());
+    registry
+        .begin_recovered(store, &control())
+        .unwrap()
+        .commit()
+        .unwrap();
+    assert!(!registry.poll_needed(store, &[], &control()).unwrap());
+}
+
+#[test]
 fn committed_data_recovers_exactly_one_publication_on_both_sides_of_registry_commit() {
     for native in [false, true] {
         for registry_committed in [false, true] {
