@@ -6,13 +6,20 @@
 
 //! Transactional SQL asynchronous-notification coordination.
 
+mod completion;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod cross_process;
 mod hub;
 
 #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
 mod cross_process {
+    use std::sync::Arc;
     use uqa_sql::SQLError;
+    use uqa_storage::{
+        notifications::{NotificationPublication, PendingNotification},
+        read_control::StorageReadControl,
+        PersistentStorageBackend,
+    };
 
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
     pub(super) struct CrossProcessQueueState {
@@ -53,21 +60,19 @@ mod cross_process {
     pub(super) struct CrossProcessRegistryTransaction;
 
     impl CrossProcessRegistryTransaction {
+        pub(super) fn prepare_publication(
+            &mut self,
+            _process_id: i32,
+            _pending: &[PendingNotification],
+            _listener: Option<&CrossProcessListenerRow>,
+            _control: &StorageReadControl,
+        ) -> Result<NotificationPublication, SQLError> {
+            Err(unsupported())
+        }
+        pub(super) const fn pending_acknowledgement(&self) -> Option<[u8; 32]> {
+            None
+        }
         pub(super) fn queue_state(&self) -> Result<CrossProcessQueueState, SQLError> {
-            Err(unsupported())
-        }
-
-        pub(super) fn save_queue_state(
-            &self,
-            _state: CrossProcessQueueState,
-        ) -> Result<(), SQLError> {
-            Err(unsupported())
-        }
-
-        pub(super) fn append_entries(
-            &self,
-            _entries: &[CrossProcessQueueEntry],
-        ) -> Result<(), SQLError> {
             Err(unsupported())
         }
 
@@ -109,6 +114,19 @@ mod cross_process {
     pub(super) struct CrossProcessCoordinator;
 
     impl CrossProcessCoordinator {
+        pub(super) fn initialize_recovery(
+            &self,
+            _backend: &Arc<dyn PersistentStorageBackend>,
+            _control: &StorageReadControl,
+        ) -> Result<(), SQLError> {
+            Err(unsupported())
+        }
+        pub(super) fn recovery_control(&self) -> Result<StorageReadControl, SQLError> {
+            Err(unsupported())
+        }
+        pub(super) const fn recovery_initialized(&self) -> bool {
+            false
+        }
         pub(super) fn begin_registry_transaction(
             &self,
         ) -> Result<CrossProcessRegistryTransaction, SQLError> {
@@ -147,8 +165,8 @@ use std::time::{Duration, Instant};
 
 use crate::Engine;
 use cross_process::{
-    CrossProcessCoordinator, CrossProcessListenerRow, CrossProcessQueueEntry,
-    CrossProcessQueueState, CrossProcessRegistryTransaction, ListenerLease,
+    CrossProcessCoordinator, CrossProcessListenerRow, CrossProcessQueueState,
+    CrossProcessRegistryTransaction, ListenerLease,
 };
 use parking_lot::{Condvar, Mutex, MutexGuard};
 use uqa_sql::SQLError;
@@ -225,18 +243,29 @@ struct PreparedDelivery {
     notifications: Vec<SQLNotification>,
 }
 
-struct CrossNotificationCommit {
+pub(super) struct CrossNotificationCommit {
     registry: Option<CrossProcessRegistryTransaction>,
     new_lease: Option<ListenerLease>,
-    deliveries: Vec<PreparedDelivery>,
+    publication: Option<uqa_storage::notifications::NotificationPublication>,
+    previous_publication: Option<[u8; 32]>,
     wake_ports: Vec<u16>,
     warning: Option<String>,
 }
 
+#[derive(Clone, Copy)]
+struct CrossNotificationRequest<'a> {
+    session_id: u64,
+    process_id: i32,
+    channels: &'a [String],
+    pending: &'a [PendingNotification],
+    control: &'a uqa_storage::read_control::StorageReadControl,
+    durable_publication: bool,
+}
+
 struct PreparedCrossSubscription {
     new_lease: Option<ListenerLease>,
-    owner_id: Option<[u8; 16]>,
     listeners: Vec<CrossProcessListenerRow>,
+    subscription: Option<CrossProcessListenerRow>,
 }
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
@@ -252,6 +281,16 @@ struct CrossProcessState {
 struct CrossProcessState;
 
 impl CrossProcessState {
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+    fn initialized_coordinator(&self) -> Option<Arc<CrossProcessCoordinator>> {
+        self.coordinator.lock().clone()
+    }
+
+    #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
+    fn initialized_coordinator(&self) -> Option<Arc<CrossProcessCoordinator>> {
+        None
+    }
+
     #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
     fn registry(
         &self,
@@ -306,7 +345,13 @@ impl CrossProcessState {
 
 pub(super) struct NotificationCommitGuard<'a> {
     _gate: MutexGuard<'a, ()>,
-    cross: Option<CrossNotificationCommit>,
+    cross: Option<Box<CrossNotificationCommit>>,
+}
+
+impl NotificationCommitGuard<'_> {
+    pub(super) fn retain(self) -> Option<Box<CrossNotificationCommit>> {
+        self.cross
+    }
 }
 
 #[derive(Default)]
@@ -535,94 +580,6 @@ impl Engine {
         self.notification_hub.begin_transaction(self.session_id)
     }
 
-    pub(super) fn begin_notification_commit<'a>(
-        &'a self,
-        outer: bool,
-        transaction: &crate::TransactionFrame,
-    ) -> Result<Option<NotificationCommitGuard<'a>>, SQLError> {
-        if !outer {
-            return Ok(None);
-        }
-        let current_channels = self.session.state.read().listened_channels.clone();
-        if current_channels.is_empty()
-            && transaction.pending_listen_actions.is_empty()
-            && transaction.pending_notifications.is_empty()
-        {
-            return Ok(None);
-        }
-        let final_channels = transaction.final_listened_channels(&current_channels);
-        let cross = self
-            .notification_hub
-            .cross
-            .as_ref()
-            .map(CrossProcessState::coordinator)
-            .transpose()?;
-        let registry = cross
-            .as_ref()
-            .map(|cross| cross.begin_registry_transaction())
-            .transpose()?;
-        let commit = self.notification_hub.commit_gate.lock();
-        let prepared = if let (Some(cross), Some(registry)) = (cross, registry) {
-            Some(self.notification_hub.prepare_cross_commit(
-                &cross,
-                registry,
-                self.session_id,
-                self.backend_process_id(),
-                &final_channels,
-                &transaction.pending_notifications,
-            )?)
-        } else {
-            self.notification_hub.validate_commit(
-                &commit,
-                self.session_id,
-                &final_channels,
-                &transaction.pending_notifications,
-            )?;
-            None
-        };
-        Ok(Some(NotificationCommitGuard {
-            _gate: commit,
-            cross: prepared,
-        }))
-    }
-
-    pub(super) fn commit_notification_state(
-        &self,
-        commit: NotificationCommitGuard<'_>,
-        transaction: &crate::TransactionFrame,
-    ) -> Result<(), SQLError> {
-        let current_channels = self.session.state.read().listened_channels.clone();
-        let channels = transaction.final_listened_channels(&current_channels);
-        let session = NotificationSessionCommit {
-            session_id: self.session_id,
-            process_id: self.backend_process_id(),
-            channels: channels.clone(),
-            queue: &self.runtime.notifications,
-            wake: &self.runtime.notification_wake,
-            notices: &self.runtime.notices,
-            pending: &transaction.pending_notifications,
-        };
-        let NotificationCommitGuard { _gate: gate, cross } = commit;
-        match cross {
-            Some(prepared) => {
-                if let Err(error) = self
-                    .notification_hub
-                    .finalize_cross_commit(gate, prepared, session)
-                {
-                    return Err(match self.notification_hub.rollback_session(self.session_id) {
-                        Ok(()) => error,
-                        Err(recovery_error) => SQLError::Internal(format!(
-                            "{error}; restore asynchronous notification listener after commit failure: {recovery_error}"
-                        )),
-                    });
-                }
-            }
-            None => self.notification_hub.commit_session(&gate, session),
-        }
-        self.session.state.write().listened_channels = channels;
-        Ok(())
-    }
-
     pub(super) fn rollback_notification_state(&self) -> Result<(), SQLError> {
         self.notification_hub.rollback_session(self.session_id)
     }
@@ -653,6 +610,7 @@ impl Engine {
     }
 
     pub(crate) fn notification_queue_usage(&self) -> Result<f64, SQLError> {
+        self.prepare_notification_recovery()?;
         self.notification_hub.usage()
     }
 

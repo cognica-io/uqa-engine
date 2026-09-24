@@ -342,6 +342,8 @@ struct TransactionFrame {
         Vec<uqa_execution::mutation::triggers::DeferredConstraintTriggerEvent>,
     pending_listen_actions: Vec<PendingListenAction>,
     pending_notifications: Vec<PendingNotification>,
+    pending_notification_commit:
+        parking_lot::Mutex<Option<Box<notifications::CrossNotificationCommit>>>,
     constraint_modes: ConstraintModeState,
     /// Values allocated by `nextval` or installed by `setval` are not rolled back in `PostgreSQL`, except that allocations made against a transactionally changed sequence definition roll back with that definition. Every active frame records values by definition generation so transaction, savepoint, and PL/pgSQL exception rollback can reapply exactly the generation owned by the rollback target while preserving the latest session `currval` and `lastval` effects.
     nontransactional_sequence_values: NontransactionalSequenceValues,
@@ -724,6 +726,9 @@ impl Drop for Engine {
                 if backend.in_transaction() {
                     let _ = backend.rollback_transaction();
                 }
+            }
+            for frame in self.session.transactions.lock().iter() {
+                drop(frame.pending_notification_commit.lock().take());
             }
             self.row_locks.close_temporary_roles(self.session_id);
             self.row_locks.release_session(self.session_id);

@@ -514,6 +514,34 @@ impl Engine {
         )
     }
 
+    pub(super) fn prepare_notification_writer(
+        &self,
+        stack: &mut Vec<TransactionFrame>,
+    ) -> Result<(), SQLError> {
+        let Some(backend) = self
+            .storage
+            .backend
+            .as_ref()
+            .filter(|backend| !backend.transaction_model().is_versioned())
+        else {
+            return Ok(());
+        };
+        let Some(frame) = stack.last() else {
+            return Ok(());
+        };
+        if !self.prepares_persistent_notification(frame)
+            || backend.transaction_has_written().map_err(|error| {
+                Self::storage_tx_error("inspect notification publication writer", &error)
+            })?
+        {
+            return Ok(());
+        }
+        // SQL read-only validation precedes this auxiliary writer reservation. No user statement is rerun, and the original session's detached SQL snapshot remains retained until completion.
+        self.restart_unwritten_backend_reader(stack)?;
+        self.acquire_backend_writer_lock(0)?;
+        self.replace_unwritten_backend_transaction(stack, false, "reserve notification publication")
+    }
+
     fn replace_unwritten_backend_transaction(
         &self,
         stack: &mut Vec<TransactionFrame>,

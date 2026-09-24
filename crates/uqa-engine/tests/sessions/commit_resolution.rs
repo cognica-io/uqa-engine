@@ -8,6 +8,8 @@
 
 #[path = "commit_resolution/conflicts.rs"]
 mod conflicts;
+#[path = "commit_resolution/notifications.rs"]
+mod notifications;
 #[path = "commit_resolution/serializable.rs"]
 mod serializable;
 
