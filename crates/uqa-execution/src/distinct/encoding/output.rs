@@ -20,6 +20,10 @@ pub(super) trait KeyOutput {
         false
     }
 
+    fn legacy_temporal_reservation(&self) -> bool {
+        false
+    }
+
     fn check(&self) -> ExecResult<()> {
         if let Some(control) = self.control() {
             control.check().map_err(resource_error)?;

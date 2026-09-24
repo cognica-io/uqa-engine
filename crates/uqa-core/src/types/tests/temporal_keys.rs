@@ -8,6 +8,97 @@
 
 use super::TemporalValue;
 
+fn equality_key(value: &TemporalValue) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    value
+        .write_equality_key(|part| {
+            bytes.extend_from_slice(part);
+            Ok::<_, std::convert::Infallible>(())
+        })
+        .unwrap();
+    bytes
+}
+
+#[test]
+fn temporal_order_and_keys_match_postgresql_in_both_directions() {
+    use std::cmp::Ordering;
+    use std::collections::BTreeSet;
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("pg18_temporal.json")).unwrap();
+    for group in fixture["types"].as_array().unwrap() {
+        let values: Vec<_> = group["values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|text| {
+                if group["kind"] == "time" {
+                    TemporalValue::parse_time(text.as_str().unwrap())
+                } else {
+                    TemporalValue::parse_time_tz(text.as_str().unwrap())
+                }
+                .unwrap()
+            })
+            .collect();
+        for pair in group["comparisons"].as_array().unwrap() {
+            let left = &values[pair[0].as_u64().unwrap() as usize];
+            let right = &values[pair[1].as_u64().unwrap() as usize];
+            let expected = if pair[2] == true {
+                Ordering::Equal
+            } else if pair[3] == true {
+                Ordering::Less
+            } else {
+                Ordering::Greater
+            };
+            assert_eq!(pair[4], expected == Ordering::Greater);
+            assert_eq!(left.cmp(right), expected, "{left:?}, {right:?}");
+            assert_eq!(key(left).cmp(&key(right)), expected, "{left:?}, {right:?}");
+            assert_eq!(equality_key(left) == equality_key(right), pair[2] == true);
+            assert_eq!(left == right, pair[2] == true);
+            let control = crate::memory::ProductionControl::uncontrolled();
+            assert_eq!(
+                crate::Value::Temporal(left.clone())
+                    .cmp_with_control(&crate::Value::Temporal(right.clone()), &control)
+                    .unwrap(),
+                expected
+            );
+        }
+        for left in &values {
+            for middle in &values {
+                for right in &values {
+                    if left <= middle && middle <= right {
+                        assert!(left <= right, "{left:?} <= {middle:?} <= {right:?}");
+                    }
+                }
+            }
+        }
+        let ascending: BTreeSet<_> = values.iter().cloned().collect();
+        let descending: BTreeSet<_> = values.iter().rev().cloned().collect();
+        assert_eq!(ascending, descending);
+        for value in &values {
+            assert!(ascending.contains(value));
+        }
+        let representatives = group["comparisons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|pair| {
+                pair[2] == true
+                    && pair[0] == pair[1]
+                    && !group["comparisons"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|earlier| {
+                            earlier[0] == pair[0]
+                                && earlier[1].as_u64() < pair[1].as_u64()
+                                && earlier[2] == true
+                        })
+            })
+            .count();
+        assert_eq!(ascending.len(), representatives);
+    }
+}
+
 fn key(value: &TemporalValue) -> Vec<u8> {
     let mut key = Vec::new();
     value

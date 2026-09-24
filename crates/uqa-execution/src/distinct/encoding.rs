@@ -21,8 +21,6 @@ use traversal::{Children, Frames};
 
 use crate::{ExecError, ExecResult};
 
-pub(super) const MICROS_PER_DAY: i128 = 86_400_000_000;
-
 pub(crate) type EncodedKey = SmallVec<[u8; 64]>;
 
 /// Hash a borrowed positional SQL row in its canonical equality domain.
@@ -339,45 +337,11 @@ fn encode_float_numeric(value: f64, output: &mut impl KeyOutput) -> ExecResult<(
 
 fn encode_temporal(value: &TemporalValue, output: &mut impl KeyOutput) -> ExecResult<()> {
     output.push_byte(4)?;
-    match value {
-        TemporalValue::Date { days } => {
-            output.push_byte(0)?;
-            output.extend_bytes(&days.to_be_bytes())?;
-        }
-        TemporalValue::Time { micros } => {
-            output.push_byte(1)?;
-            let normalized = i128::from(*micros).rem_euclid(MICROS_PER_DAY);
-            output.extend_bytes(&normalized.to_be_bytes())?;
-        }
-        TemporalValue::TimeTz {
-            micros,
-            offset_minutes,
-        } => {
-            output.push_byte(2)?;
-            let normalized = (i128::from(*micros) - i128::from(*offset_minutes) * 60_000_000)
-                .rem_euclid(MICROS_PER_DAY);
-            output.extend_bytes(&normalized.to_be_bytes())?;
-        }
-        TemporalValue::Timestamp { micros } => {
-            output.push_byte(3)?;
-            output.extend_bytes(&micros.to_be_bytes())?;
-        }
-        TemporalValue::TimestampTz { micros } => {
-            output.push_byte(4)?;
-            output.extend_bytes(&micros.to_be_bytes())?;
-        }
-        TemporalValue::Interval {
-            months,
-            days,
-            micros,
-        } => {
-            output.push_byte(5)?;
-            let normalized = (i128::from(*months) * 30 + i128::from(*days)) * MICROS_PER_DAY
-                + i128::from(*micros);
-            output.extend_bytes(&normalized.to_be_bytes())?;
-        }
+    if output.legacy_temporal_reservation() {
+        value.write_legacy_reservation_key(|bytes| output.extend_bytes(bytes))
+    } else {
+        value.write_equality_key(|bytes| output.extend_bytes(bytes))
     }
-    Ok(())
 }
 
 fn encode_bytes(bytes: &[u8], output: &mut impl KeyOutput) -> ExecResult<()> {
@@ -399,3 +363,6 @@ fn encoding_error(message: impl Into<String>) -> ExecError {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod temporal_tests;
