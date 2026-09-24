@@ -173,3 +173,66 @@ fn numeric_comparisons_preserve_search_filters_over_inherited_tables() {
         );
     }
 }
+
+#[test]
+fn nonfinite_float_columns_and_arrays_survive_indexes_and_reopen() {
+    for provider in 0..3 {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("nonfinite.db");
+        {
+            let engine = open(provider, &path);
+            engine.sql("CREATE TABLE nonfinite_values(id integer PRIMARY KEY, f double precision, a double precision[])", &[]).unwrap();
+            engine.sql("INSERT INTO nonfinite_values VALUES (1,'NaN',ARRAY['NaN'::float8]), (2,'Infinity',ARRAY['Infinity'::float8]), (3,'-Infinity',ARRAY['-Infinity'::float8]), (4,NULL,ARRAY[NULL::float8])", &[]).unwrap();
+            engine
+                .sql("CREATE INDEX nonfinite_index ON nonfinite_values(f)", &[])
+                .unwrap();
+        }
+        let engine = open(provider, &path);
+        let rows = engine.sql("SELECT id,f,f IS NULL AS missing,a[1] = f AS same FROM nonfinite_values ORDER BY id", &[]).unwrap().rows;
+        for (position, row) in rows.iter().enumerate() {
+            assert_eq!(row["missing"], Value::Bool(position == 3));
+            assert_eq!(
+                row["same"],
+                if position == 3 {
+                    Value::Null
+                } else {
+                    Value::Bool(true)
+                }
+            );
+            if position < 3 {
+                let Value::Float(value) = row["f"] else {
+                    panic!("lost float carrier: provider {provider}, row {row:?}")
+                };
+                match position {
+                    0 => assert!(value.is_nan()),
+                    1 => assert_eq!(value, f64::INFINITY),
+                    _ => assert_eq!(value, f64::NEG_INFINITY),
+                }
+            } else {
+                assert_eq!(row["f"], Value::Null);
+            }
+        }
+        assert_eq!(rows.len(), 4);
+        assert_eq!(
+            scalar(
+                &engine,
+                "SELECT id FROM nonfinite_values WHERE f = 'NaN'::float8"
+            ),
+            Value::Int(1)
+        );
+        assert_eq!(
+            scalar(
+                &engine,
+                "SELECT id FROM nonfinite_values WHERE f = 'Infinity'::float8"
+            ),
+            Value::Int(2)
+        );
+        assert_eq!(
+            scalar(
+                &engine,
+                "SELECT id FROM nonfinite_values WHERE f = '-Infinity'::float8"
+            ),
+            Value::Int(3)
+        );
+    }
+}

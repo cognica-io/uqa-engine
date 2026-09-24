@@ -11,8 +11,8 @@ use super::{
     execute_query_block_operator_output, expand_from_star_columns,
     expr_contains_jsonpath_fts_match, expr_is_jsonpath_fts_match, facet_projection_fields,
     flatten_and_filter_parts, post_retrieval_score_top_k, projection_columns,
-    score_limited_text_filter, score_order_top_k, AccessPathPlan, CteScope, FacetExecution,
-    QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError, SQLParam, ScalarExpr,
+    score_limited_text_filter, score_order_top_k, AccessPathPlan, BoundSingleRelation, CteScope,
+    FacetExecution, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError, SQLParam, ScalarExpr,
     ScoredDocumentSource, ScoredInput, SingleRelation, SourceContext, SourceProjection,
     TABLE_OID_COLUMN,
 };
@@ -23,19 +23,22 @@ use super::{
 )]
 pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'a, S>,
-    relation: SingleRelation<'_>,
-    schema: &crate::RowSchema,
+    bound_relation: BoundSingleRelation<'_>,
     block: &'a QueryBlockPlan,
     stmt: &'a QueryBlockPlan,
     params: &'a [SQLParam],
     ctes: &'a CteScope<S>,
     output_mode: QueryOutputMode<'a>,
 ) -> Result<QueryOutput, SQLError> {
-    let SingleRelation {
-        reference_name,
-        relation_name: table,
-        qualifier,
-    } = relation;
+    let BoundSingleRelation {
+        relation:
+            SingleRelation {
+                reference_name,
+                relation_name: table,
+                qualifier,
+            },
+        schema,
+    } = bound_relation;
     let catalog = ctes.catalog_read_view()?;
     let resolution = ctes.relation_name_resolution()?;
     let table_snapshot = catalog

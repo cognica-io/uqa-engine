@@ -9,10 +9,10 @@
 use super::{Serialize, Serializer, TaggedBytes};
 
 pub(super) fn serialize<S: Serializer>(value: f64, serializer: S) -> Result<S::Ok, S::Error> {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
     if value.is_finite() || !serializer.is_human_readable() {
         return serializer.serialize_f64(value);
     }
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut hex = [b'0'; 16];
     for (index, byte) in value.to_bits().to_be_bytes().into_iter().enumerate() {
         hex[index * 2] = DIGITS[usize::from(byte >> 4)];
