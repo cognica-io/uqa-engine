@@ -13,6 +13,43 @@ fn decimal(text: &str) -> Value {
 }
 
 #[test]
+fn grouped_expression_slots_match_the_complete_key_before_its_inputs() {
+    let input = ScalarExpr::Column("n".into());
+    let computed = ScalarExpr::Binary {
+        op: crate::ast::BinaryOp::Add,
+        lhs: Box::new(input.clone()),
+        rhs: Box::new(ScalarExpr::Literal(decimal("1.0"))),
+    };
+    let relation = crate::ast::InternalRelationId::allocate();
+    let rewritten =
+        compile_group_slots(&computed, &[input, computed.clone()], relation, 3).unwrap();
+    assert_eq!(rewritten, ScalarExpr::InternalColumn(relation.column(4)));
+}
+
+#[test]
+fn absent_group_keys_become_null_without_changing_aggregate_arguments() {
+    let plan = crate::plan::UnifiedPlan::lower(crate::compile(
+        "SELECT n + 1.0 AS shifted, sum(n + 1.0) FROM t GROUP BY GROUPING SETS ((n, n + 1.0), (n)) HAVING n + 1.0 IS NULL"
+    ).unwrap().remove(0));
+    let crate::plan::UnifiedPlan::Query(query) = plan else {
+        unreachable!()
+    };
+    let crate::plan::RelationalPlan::QueryBlock(statement) = query.root else {
+        unreachable!()
+    };
+    let active =
+        select_grouping_set(&|_: &str| false, &statement, &statement.grouping_sets[1]).unwrap();
+    assert!(matches!(
+        active.projections[0].expr,
+        ScalarExpr::Literal(Value::Null)
+    ));
+    assert_eq!(active.projections[1].expr, statement.projections[1].expr);
+    assert!(
+        matches!(active.having, Some(ScalarExpr::IsNull { expr, negated: false }) if matches!(*expr, ScalarExpr::Literal(Value::Null)))
+    );
+}
+
+#[test]
 fn decimal_literal_identity_matches_its_clone_without_erasing_scale() {
     for text in ["1.0", "1.00", "1e0", "1.00e1", "-0.00", "NaN", "Infinity"] {
         let expression = ScalarExpr::Literal(decimal(text));

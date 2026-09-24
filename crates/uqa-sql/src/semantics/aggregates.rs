@@ -306,5 +306,6 @@ pub fn expr_references_columns(expr: &ScalarExpr) -> bool {
 
 mod slots;
 pub use slots::{
-    aggregate_slot_index, compile_having_aggregate_slots, compile_projection_aggregate_slots,
+    aggregate_slot_index, compile_group_slots, compile_having_aggregate_slots,
+    compile_projection_aggregate_slots, select_grouping_set,
 };

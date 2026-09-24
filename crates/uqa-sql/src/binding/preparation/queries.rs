@@ -163,6 +163,12 @@ impl Preparation<'_> {
             block.offset.as_ref(),
             &block.subqueries,
         )?;
+        crate::semantics::grouping_sets::validate_grouped_expressions(
+            self.routines,
+            block,
+            &source,
+            &self.parameters.values(),
+        )?;
         if !preserve_unknown {
             self.resolve_targets(&mut output)?;
         }

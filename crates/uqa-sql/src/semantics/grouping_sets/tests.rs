@@ -50,6 +50,36 @@ fn input() -> RowSchema {
 }
 
 #[test]
+fn grouped_literal_validation_matches_postgresql_before_evaluation() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../aggregates/pg18_literals.json")).unwrap();
+    let schema = RowSchema::with_identities(
+        vec!["n".into()],
+        vec![crate::ColumnIdentity::qualified("t", "n")],
+        vec![Some(ColumnType::Integer)],
+    );
+    let mut differences = Vec::new();
+    for case in fixture["cases"].as_array().unwrap() {
+        let sql = case["sql"].as_str().unwrap();
+        if sql.starts_with("PREPARE ") {
+            continue;
+        }
+        let result = validate_grouped_expressions(&Catalog, &block(sql), &schema, &[]);
+        match (case["sqlstate"].as_str(), result) {
+            (None, Ok(())) => {}
+            (Some(expected), Err(error))
+                if error.sqlstate() == Some(expected)
+                    && error.to_string() == case["message"].as_str().unwrap() => {}
+            (expected, actual) => differences.push(format!(
+                "{}: expected {expected:?}, got {actual:?}",
+                case["name"]
+            )),
+        }
+    }
+    assert!(differences.is_empty(), "{}", differences.join("\n"));
+}
+
+#[test]
 fn grouping_input_names_precede_aggregate_and_scalar_output_aliases() {
     for sql in [
         "SELECT min(id) AS first_id, count(*) AS n FROM t GROUP BY n",

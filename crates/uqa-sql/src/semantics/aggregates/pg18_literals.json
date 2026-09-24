@@ -507,6 +507,126 @@
       "sql": "PREPARE literal_group(numeric,numeric) AS SELECT n + $1 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + $2 ORDER BY shifted; EXECUTE literal_group(1.0,1.0)",
       "sqlstate": "42803",
       "message": "column \"t.n\" must appear in the GROUP BY clause or be used in an aggregate function"
+    },
+    {
+      "name": "ordinal_group_column",
+      "sql": "SELECT n, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY 1 ORDER BY 1",
+      "columns": [
+        "n",
+        "tally"
+      ],
+      "rows": [
+        [
+          "10",
+          "2"
+        ],
+        [
+          "20",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "ordinal_group_expression",
+      "sql": "SELECT n + 1.0 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY 1 ORDER BY 1",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11.0",
+          "2"
+        ],
+        [
+          "21.0",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "empty_input_identical",
+      "sql": "SELECT n + 1.0 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t WHERE false GROUP BY n + 1.0 ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": []
+    },
+    {
+      "name": "computed_group_having_rollup",
+      "sql": "SELECT n + 1.0 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY ROLLUP(n + 1.0) HAVING n + 1.0 IS NOT NULL ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11.0",
+          "2"
+        ],
+        [
+          "21.0",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "computed_group_having_missing_key",
+      "sql": "SELECT n, n + 1.0 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY GROUPING SETS ((n, n + 1.0), (n)) HAVING n + 1.0 IS NULL ORDER BY n",
+      "columns": [
+        "n",
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "10",
+          null,
+          "2"
+        ],
+        [
+          "20",
+          null,
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "unknown_cast_typmod",
+      "sql": "SELECT n + '1.0'::numeric(3,1) AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1.0::numeric(3,1) ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11.0",
+          "2"
+        ],
+        [
+          "21.0",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "unknown_cast_typmod_identical",
+      "sql": "SELECT n + '1.0'::numeric(3,1) AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + '1.0'::numeric(3,1) ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11.0",
+          "2"
+        ],
+        [
+          "21.0",
+          "1"
+        ]
+      ]
     }
   ]
 }

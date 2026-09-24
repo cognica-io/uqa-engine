@@ -14,8 +14,11 @@ use uqa_core::Value;
 
 use crate::{plan::QueryBlockPlan, FunctionTypeResolver, SQLError, SQLParam};
 
+mod expressions;
 mod names;
 pub use names::{bind_grouping_names, resolve_grouping_expression};
+mod validation;
+pub use validation::validate_grouped_expressions;
 #[cfg(test)]
 mod tests;
 
@@ -31,7 +34,8 @@ pub fn prepare_grouping_sets(
     }
 
     let mut prepared = statement.clone();
-    let changed = bind_grouping_names(engine, &mut prepared, schema, params)?;
+    let mut changed = bind_grouping_names(engine, &mut prepared, schema, params)?;
+    changed |= expressions::bind_grouping_expressions(engine, &mut prepared, schema, params)?;
     if !prepared.group_distinct {
         return Ok(changed.then_some(prepared));
     }
@@ -163,9 +167,17 @@ fn normalize_expression(
                 )?),
             }
         }
-        ScalarExpr::UnaryMinus(expression) => ScalarExpr::UnaryMinus(Box::new(
-            normalize_expression(engine, *expression, schema, params)?,
-        )),
+        ScalarExpr::UnaryMinus(expression) => {
+            let expression = normalize_expression(engine, *expression, schema, params)?;
+            if let ScalarExpr::Literal(
+                value @ (Value::Int(_) | Value::Float(_) | Value::Decimal(_)),
+            ) = &expression
+            {
+                ScalarExpr::Literal(crate::expr::negate_value(value, None)?)
+            } else {
+                ScalarExpr::UnaryMinus(Box::new(expression))
+            }
+        }
         ScalarExpr::Not(expression) => ScalarExpr::Not(Box::new(normalize_expression(
             engine,
             *expression,
@@ -265,6 +277,35 @@ fn normalize_expression(
             let expression = normalize_expression(engine, *expr, schema, params)?;
             if source_type.as_ref() == Some(&target_type) {
                 expression
+            } else if let ScalarExpr::Literal(value @ Value::Str(_)) = &expression {
+                let input_type = if matches!(
+                    target_type.without_temporal_modifiers(),
+                    ColumnType::Interval
+                ) {
+                    target_type.clone()
+                } else {
+                    target_type.without_type_modifiers()
+                };
+                let value = crate::expr::cast_value(value, &input_type.sql_name())?;
+                let input = normalize_expression(
+                    engine,
+                    ScalarExpr::TypedLiteral {
+                        value,
+                        ty: input_type.sql_name(),
+                        bound_type: Some(input_type.clone()),
+                        parameter_index: None,
+                    },
+                    schema,
+                    params,
+                )?;
+                if input_type == target_type {
+                    input
+                } else {
+                    ScalarExpr::Cast {
+                        expr: Box::new(input),
+                        ty: target_type.sql_name(),
+                    }
+                }
             } else if let ScalarExpr::Literal(Value::Null) = expression {
                 ScalarExpr::TypedLiteral {
                     value: Value::Null,

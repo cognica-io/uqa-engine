@@ -130,7 +130,7 @@ impl SchemaScope {
                 params,
             )?;
         }
-        Ok(())
+        crate::semantics::grouping_sets::validate_grouped_expressions(engine, block, source, params)
     }
 
     pub(super) fn validate_set_operation_clauses(
