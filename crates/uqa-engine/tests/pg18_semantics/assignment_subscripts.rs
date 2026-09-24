@@ -51,6 +51,79 @@ fn rows(result: SQLResult) -> serde_json::Value {
 
 const STORED: &str = "SELECT id, value::text AS value, array_dims(value) AS dimensions FROM assignment_target ORDER BY id";
 
+#[test]
+fn unknown_literal_view_columns_reject_subscripts_before_rewrite() {
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE VIEW assignment_unknown AS SELECT NULL AS value",
+            &[],
+        )
+        .unwrap();
+    engine.sql("CREATE RULE assignment_unknown_update AS ON UPDATE TO assignment_unknown DO INSTEAD NOTHING", &[]).unwrap();
+    let error = engine
+        .sql("UPDATE assignment_unknown SET value[1] = 9", &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42804"));
+    assert_eq!(
+        error.to_string(),
+        "cannot subscript type text because it does not support subscripting"
+    );
+}
+
+#[test]
+fn untyped_callback_view_rejects_partial_assignments_before_effects() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let engine = Engine::new();
+    let effects = Arc::new(AtomicUsize::new(0));
+    let captured = Arc::clone(&effects);
+    engine
+        .register_scalar_function("assignment_effect", move |_: &[Value]| {
+            captured.fetch_add(1, Ordering::SeqCst);
+            Ok(Value::Int(9))
+        })
+        .unwrap();
+    engine
+        .register_scalar_function("assignment_untyped_array", |_: &[Value]| {
+            Ok(Value::Array(
+                uqa_core::ArrayValue::try_new(vec![Value::Int(1), Value::Int(2)]).unwrap(),
+            ))
+        })
+        .unwrap();
+    for sql in [
+        "CREATE VIEW assignment_untyped AS SELECT assignment_untyped_array() AS value",
+        "CREATE FUNCTION assignment_receive() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM assignment_effect(); RETURN NEW; END $$",
+        "CREATE TRIGGER assignment_receive INSTEAD OF INSERT OR UPDATE ON assignment_untyped FOR EACH ROW EXECUTE FUNCTION assignment_receive()",
+    ] {
+        engine.sql(sql, &[]).unwrap();
+    }
+    for sql in [
+        "UPDATE assignment_untyped SET value[1] = assignment_effect()",
+        "UPDATE assignment_untyped SET value[1:2] = ARRAY[assignment_effect()] WHERE false",
+        "INSERT INTO assignment_untyped (value[1]) VALUES (assignment_effect())",
+        "INSERT INTO assignment_untyped (value[1]) SELECT assignment_effect()",
+        "MERGE INTO assignment_untyped USING (VALUES (1)) AS s(id) ON true WHEN MATCHED THEN UPDATE SET value[1] = assignment_effect()",
+        "MERGE INTO assignment_untyped USING (VALUES (1)) AS s(id) ON false WHEN NOT MATCHED THEN INSERT (value[1]) VALUES (assignment_effect())",
+    ] {
+        for prepared in [false, true] {
+            let sql = if prepared {
+                format!("PREPARE assignment_untyped_probe AS {sql}")
+            } else {
+                sql.to_owned()
+            };
+            let error = engine.sql(&sql, &[]).unwrap_err();
+            assert_eq!(error.sqlstate(), Some("42804"), "{sql}: {error}");
+            assert_eq!(error.to_string(), "cannot subscript type unknown because it does not support subscripting", "{sql}");
+            assert_eq!(effects.load(Ordering::SeqCst), 0, "{sql}");
+        }
+    }
+    engine
+        .sql("UPDATE assignment_untyped SET value = ARRAY[9]", &[])
+        .unwrap();
+    assert_eq!(effects.load(Ordering::SeqCst), 1);
+}
+
 #[rstest::rstest]
 #[case::element("element")]
 #[case::element_null("element_null")]

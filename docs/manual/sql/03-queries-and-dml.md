@@ -333,6 +333,8 @@ Array element and slice targets are accepted in INSERT, UPDATE, ON CONFLICT DO U
 
 Bounds and right-hand expressions read the original row. Repeated partial targets compose in statement order, and an array domain checks the completed column value. Partial INSERT targets start from a NULL array instead of the whole-column default. Assigning a NULL slice to a NULL array produces an empty array; assigning a NULL element stores a NULL element. Whole-column and partial assignments to the same column in one statement are rejected.
 
+Partial targets require a declared container type. A view column whose native callback has no declared result type rejects subscripted assignment with SQLSTATE `42804` before evaluating bounds, right-hand expressions or triggers; whole-column assignment to that untyped column remains available.
+
 ```sql execute
 CREATE TABLE manual_array_targets (id integer PRIMARY KEY, readings integer[] DEFAULT ARRAY[100, 200]);
 INSERT INTO manual_array_targets (id, readings[2]) VALUES (1, 20);

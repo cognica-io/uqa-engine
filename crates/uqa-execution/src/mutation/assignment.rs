@@ -140,6 +140,7 @@ pub fn eval_typed_assignment<S: Clone + 'static>(
     if default {
         uqa_sql::assignment::targets::validate_assignment_default(target.target)?;
     }
+    uqa_sql::assignment::targets::validate_assignment_type(target.target, target.ty)?;
     let schema = RowSchema::default();
     let hook = services.expressions.expressions.bind_scope(ctes.clone());
     let source = crate::scalar_type_with_resolver(
@@ -181,6 +182,7 @@ pub fn coerce_typed_assignment<S: Clone + 'static>(
     row: Option<&OwnedPhysicalRow>,
     params: &[SQLParam],
 ) -> Result<Value, SQLError> {
+    uqa_sql::assignment::targets::validate_assignment_type(target.target, target.ty)?;
     match target.ty {
         Some(ty) => subscripts::assign_typed_value(
             services,

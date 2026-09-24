@@ -12,11 +12,25 @@ use crate::{
 };
 use std::collections::BTreeMap;
 
+#[cfg(test)]
+mod tests;
+
 fn error(code: &str, message: String) -> SQLError {
     SQLError::Routine {
         sqlstate: code.into(),
         message,
     }
+}
+
+/// Whole-column writes may target an open schema. Partial writes require a declared container type before evaluating bounds or values.
+pub fn validate_assignment_type<E>(
+    target: &AssignmentTarget<E>,
+    declared: Option<&ColumnType>,
+) -> Result<(), SQLError> {
+    if declared.is_none() && !target.is_whole_column() {
+        array_assignment_type(target, &ColumnType::Named("unknown".into()))?;
+    }
+    Ok(())
 }
 
 /// Repeated partial targets compose, but a whole-column write cannot share its destination.

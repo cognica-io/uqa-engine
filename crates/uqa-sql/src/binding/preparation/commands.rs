@@ -276,7 +276,7 @@ impl Preparation<'_> {
     ) -> Result<(), SQLError> {
         let column = &assignment.column;
         if target.columns_are_open(None) && target.unqualified_position(column).is_none() {
-            return Ok(());
+            return targets::validate_assignment_type(assignment, None);
         }
         let index = target
             .columns()
@@ -284,7 +284,7 @@ impl Preparation<'_> {
             .position(|name| name == column)
             .ok_or_else(|| error("42703", format!("column \"{column}\" does not exist")))?;
         let Some(declared) = target.column_type(index) else {
-            return Ok(());
+            return targets::validate_assignment_type(assignment, None);
         };
         let required = targets::assignment_value_type(assignment, declared)?;
         for bound in assignment.expressions() {
