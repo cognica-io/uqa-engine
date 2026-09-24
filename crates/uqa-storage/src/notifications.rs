@@ -6,11 +6,35 @@
 
 //! Notification payloads and bounded queue page accounting.
 
+pub mod conformance;
 mod publication;
 pub use publication::{
     NotificationMessageRef, NotificationPublication, NotificationPublicationHeader,
     NotificationPublicationView,
 };
+
+/// Fresh committed publication access is independent of the caller's SQL snapshot. Publication is an auxiliary effect of its current transaction, not a user-data write.
+pub trait NotificationPublicationStore: Send + Sync {
+    fn stage_notification_publication(
+        &self,
+        publication: &NotificationPublication,
+    ) -> crate::StorageBackendResult<()>;
+
+    fn visit_notification_publication(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+        visit: &mut dyn FnMut(
+            Option<NotificationPublicationView<'_>>,
+        ) -> crate::StorageBackendResult<()>,
+    ) -> crate::StorageBackendResult<()>;
+
+    /// Clear only the acknowledged fingerprint through autonomous committed state. The caller must serialize queue acknowledgement and new publication and supply uncancelled completion control.
+    fn acknowledge_notification_publication(
+        &self,
+        fingerprint: [u8; 32],
+        control: &crate::read_control::StorageReadControl,
+    ) -> crate::StorageBackendResult<()>;
+}
 
 pub const MAX_NOTIFICATION_CHANNEL_BYTES: usize = 64;
 pub const MAX_NOTIFICATION_PAYLOAD_BYTES: usize = 8_000;

@@ -35,6 +35,12 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         self.store.retention_control()
     }
 
+    fn notification_publications(
+        &self,
+    ) -> Option<&dyn crate::notifications::NotificationPublicationStore> {
+        self.store.notification_publications()
+    }
+
     fn serializable_session(&self) -> Option<&dyn crate::mvcc::SerializableSession> {
         self.store.serializable_session()
     }

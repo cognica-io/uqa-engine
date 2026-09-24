@@ -168,6 +168,10 @@ pub trait VersionedPersistence: Send + Sync {
         &crate::key_value::KeyValueOccurrenceRecords
     }
 
+    fn notification_record_layout(&self) -> &dyn super::NotificationRecordLayout {
+        &crate::key_value::KeyValueNotificationRecords
+    }
+
     fn maintenance_record_layout(&self) -> &dyn super::MaintenanceRecordLayout {
         &crate::key_value::KeyValueMaintenanceRecords
     }

@@ -31,6 +31,7 @@ mod pool;
 mod restore;
 use pool::ConnectionPool;
 pub(crate) use pool::PooledConnection;
+mod notifications;
 mod serializable;
 mod snapshot;
 use snapshot::PhysicalConnection;

@@ -113,6 +113,11 @@ impl NotificationPublication {
         &self.bytes
     }
 
+    /// Retain the immutable encoded record and its original memory admission.
+    pub fn shared_bytes(&self) -> Arc<BudgetedVec<u8>> {
+        Arc::clone(&self.bytes)
+    }
+
     pub const fn header(&self) -> NotificationPublicationHeader {
         self.header
     }

@@ -292,6 +292,13 @@ pub trait PersistentStorageBackend: Send + Sync {
         None
     }
 
+    /// Atomic auxiliary notification publication and fresh committed recovery. Session wrappers must forward this capability.
+    fn notification_publications(
+        &self,
+    ) -> Option<&dyn crate::notifications::NotificationPublicationStore> {
+        None
+    }
+
     /// Original participant admission and logical observations, shared with the paired catalog transaction. Retained readers preserve original attribution without owning completion. Wrappers must forward this capability; SQL access-path coverage remains the execution owner's responsibility.
     fn serializable_session(&self) -> Option<&dyn crate::mvcc::SerializableSession> {
         None
@@ -532,10 +539,7 @@ pub trait PersistentStorageBackend: Send + Sync {
     /// Whether this session currently owns a pinned storage transaction.
     fn in_transaction(&self) -> bool;
 
-    /// Whether the current transaction has performed a physical write.
-    ///
-    /// The engine uses this to enforce read-only statement transactions even
-    /// for writes made through catalog/index helpers it did not classify.
+    /// Whether the current transaction changed user data, catalog or index state. Engine uses this to enforce read-only statement transactions, including unclassified helper writes. Typed auxiliary notification publication is excluded and never grants ordinary write access.
     fn transaction_has_written(&self) -> StorageBackendResult<bool>;
 
     /// Backend commit generation visible to this session, when available.

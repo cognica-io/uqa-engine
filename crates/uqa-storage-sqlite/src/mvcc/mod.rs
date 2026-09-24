@@ -277,6 +277,13 @@ impl VersionedPersistence for SQLiteRecordStore {
             &uqa_storage::key_value::KeyValueOccurrenceRecords
         }
     }
+    fn notification_record_layout(&self) -> &dyn uqa_storage::mvcc::NotificationRecordLayout {
+        match self.native.as_ref() {
+            Some(namespace) => namespace,
+            None => &uqa_storage::key_value::KeyValueNotificationRecords,
+        }
+    }
+
     fn maintenance_record_layout(&self) -> &dyn uqa_storage::mvcc::MaintenanceRecordLayout {
         if self.native.is_some() {
             &native::NativeMaintenanceRecords

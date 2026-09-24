@@ -36,6 +36,8 @@ mod hnsw_records;
 mod index_view;
 mod ivf_records;
 mod maintenance_records;
+mod notification_records;
+pub use notification_records::KeyValueNotificationRecords;
 pub(crate) mod record_json;
 pub use maintenance_records::KeyValueMaintenanceRecords;
 mod vector_records;
@@ -267,6 +269,13 @@ pub trait KeyValueStore: Send + Sync {
         None
     }
 
+    /// Atomic auxiliary notification publication and fresh committed recovery. Session wrappers must forward this capability.
+    fn notification_publications(
+        &self,
+    ) -> Option<&dyn crate::notifications::NotificationPublicationStore> {
+        None
+    }
+
     /// Original participant admission and logical observations. Wrappers must forward this capability, including original attribution on retained read-only sessions; capability presence does not establish complete SQL SSI support.
     fn serializable_session(&self) -> Option<&dyn crate::mvcc::SerializableSession> {
         None
@@ -470,6 +479,7 @@ pub trait KeyValueStore: Send + Sync {
 
     fn in_transaction(&self) -> bool;
 
+    /// Report ordinary record and derived-index writes, excluding typed auxiliary notification effects. Ordinary writes remain forbidden in read-only transactions.
     fn transaction_has_written(&self) -> StorageBackendResult<bool>;
 
     fn change_version(&self) -> StorageBackendResult<Option<u64>> {

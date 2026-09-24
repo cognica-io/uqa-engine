@@ -35,6 +35,7 @@ struct Savepoint {
     committed: Arc<dyn CommittedRecordSnapshot>,
     changes: PrivateRecordChanges,
     serializable: Option<crate::mvcc::SerializableWriteMark>,
+    notification: Option<Arc<crate::mvcc::notifications::NotificationEffect>>,
 }
 
 pub(super) struct Transaction {
@@ -52,6 +53,7 @@ pub(super) struct Transaction {
     savepoints: BudgetedVec<Savepoint>,
     serializable: Option<super::SerializableReadContext>,
     completion: Option<crate::mvcc::TransactionOutcome>,
+    notification: Option<Arc<crate::mvcc::notifications::NotificationEffect>>,
 }
 
 impl Transaction {
@@ -87,7 +89,24 @@ impl Transaction {
             savepoints: BudgetedVec::new(control.memory()),
             serializable: None,
             completion: None,
+            notification: None,
         }
+    }
+
+    pub(super) fn stage_notification(
+        &mut self,
+        effect: Arc<crate::mvcc::notifications::NotificationEffect>,
+    ) -> VersionResult<()> {
+        if self
+            .notification
+            .as_ref()
+            .is_some_and(|current| current.same_publication(&effect))
+        {
+            return Ok(());
+        }
+        self.unsealed()?;
+        self.notification = Some(effect);
+        Ok(())
     }
 
     pub(super) fn view(&self) -> VersionResult<MergedRecordSnapshot> {
@@ -293,12 +312,14 @@ impl Transaction {
         let graph_position = self.graph.len();
         let vector_position = self.vector.len();
         let requirement_position = self.requirements.len();
+        let notification = self.notification.clone();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(self)));
         if !matches!(&result, Ok(Ok(_))) {
             self.changes.rollback_to_savepoint(id)?;
             truncate_retained(&mut self.graph, graph_position);
             truncate_retained(&mut self.vector, vector_position);
             truncate_retained(&mut self.requirements, requirement_position);
+            self.notification = notification;
         }
         self.changes.release_savepoint(id)?;
         match result {
@@ -327,6 +348,7 @@ impl Transaction {
             committed: Arc::clone(&self.committed),
             changes: self.changes.share_owner(),
             serializable,
+            notification: self.notification.clone(),
         })?;
         Ok(())
     }
@@ -376,6 +398,7 @@ impl Transaction {
         savepoint.changes.rollback_to_savepoint(savepoint.id)?;
         self.changes = savepoint.changes.share_owner();
         self.committed = Arc::clone(&savepoint.committed);
+        self.notification.clone_from(&savepoint.notification);
         truncate_retained(&mut self.graph, self.savepoints[position].graph_position);
         truncate_retained(&mut self.vector, self.savepoints[position].vector_position);
         truncate_retained(
@@ -422,6 +445,7 @@ impl Transaction {
         if prepared.records().is_empty()
             && prepared.graph.is_none()
             && prepared.vector.is_none()
+            && prepared.notification.is_none()
             && !prepared.has_requirements()
         {
             return Ok(None);
@@ -498,6 +522,7 @@ impl Transaction {
             .with_requirements(&self.requirements, control)?
             .with_graph_effects(self.committed.sequence(), &self.graph, control)?
             .with_vector_effects(self.committed.sequence(), &self.vector, control)
+            .map(|prepared| prepared.with_notification_effect(self.notification.as_ref()))
     }
 
     fn prepare_effects(

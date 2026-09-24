@@ -16,6 +16,7 @@ mod graph_lookup;
 mod key;
 mod layout;
 mod maintenance;
+mod notifications;
 pub(super) use maintenance::NativeMaintenanceRecords;
 mod occurrence_guards;
 mod owners;

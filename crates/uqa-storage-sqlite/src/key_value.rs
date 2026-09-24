@@ -91,6 +91,12 @@ impl KeyValueStore for SQLiteKeyValueStore {
         Some(self.records.retention_control())
     }
 
+    fn notification_publications(
+        &self,
+    ) -> Option<&dyn uqa_storage::notifications::NotificationPublicationStore> {
+        Some(&self.conn)
+    }
+
     fn serializable_session(&self) -> Option<&dyn uqa_storage::mvcc::SerializableSession> {
         Some(&self.conn)
     }
