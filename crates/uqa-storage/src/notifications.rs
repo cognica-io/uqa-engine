@@ -6,6 +6,12 @@
 
 //! Notification payloads and bounded queue page accounting.
 
+mod publication;
+pub use publication::{
+    NotificationMessageRef, NotificationPublication, NotificationPublicationHeader,
+    NotificationPublicationView,
+};
+
 pub const MAX_NOTIFICATION_CHANNEL_BYTES: usize = 64;
 pub const MAX_NOTIFICATION_PAYLOAD_BYTES: usize = 8_000;
 pub const NOTIFICATION_QUEUE_PAGE_BYTES: u64 = 8_192;
@@ -20,10 +26,18 @@ pub struct PendingNotification {
 }
 
 pub fn notification_end_position(position: u64, notification: &PendingNotification) -> u64 {
+    end_position(
+        position,
+        notification.channel.len(),
+        notification.payload.len(),
+    )
+}
+
+fn end_position(position: u64, channel_bytes: usize, payload_bytes: usize) -> u64 {
     let content = NOTIFICATION_ENTRY_HEADER_BYTES
-        .saturating_add(notification.channel.len() as u64)
+        .saturating_add(channel_bytes as u64)
         .saturating_add(1)
-        .saturating_add(notification.payload.len() as u64)
+        .saturating_add(payload_bytes as u64)
         .saturating_add(1);
     let length = content.saturating_add(3) & !3;
     let offset = position % NOTIFICATION_QUEUE_PAGE_BYTES;

@@ -2,7 +2,7 @@
 
 Status: Active; three-provider loss reproduced and shared queue ownership verified; atomic recovery remains pending.
 
-Issue: [#129](https://github.com/cognica-io/uqa-engine/issues/129). Initial source: merged main `b2a94f3c`. Work branch: `fix/committed-notification-recovery`. No additional PR opens while PR #151 is active.
+Issue: [#129](https://github.com/cognica-io/uqa-engine/issues/129). Initial source: merged main `b2a94f3c`. Work branch: `fix/committed-notification-recovery`. PR #151 has merged; no additional PR opens while the next correction, PR #152, is active.
 
 ## Reproduced boundary
 
@@ -57,5 +57,7 @@ Audit receiver cursors at the same boundary: a sender-owned deferred in-memory d
 ## Current acceptance
 
 The source reproduction is executed and fails in the expected place for all three providers. Shared notification payloads, page alignment and queue-capacity calculations now live in `uqa-storage::notifications`; Engine imports that owner instead of maintaining its own implementation. The unchanged layout regression moved with the algorithm. That owner test, the Engine warning test and all three registry owner tests pass in Linux Docker. Strict all-target Storage/SQL/Execution/Engine Clippy and dependency/ownership/harness checks pass for this extraction.
+
+The common-storage immutable publication codec now retains one shared admitted buffer and decodes borrowed payloads without a second message allocation. Its versioned UTF-8 framing records the registry incarnation, original sender and sequence/page boundaries; a fingerprint distinguishes different payloads under the same publication identity. All nine notification-owner checks pass in Linux Docker, including independently written bytes and page expectations, every truncated prefix, malformed/overflowed fields, maximum byte lengths, cancellation, quota cleanup and clone lifetime. Strict all-target Storage/SQL/Execution/Engine Clippy and the ownership, dependency, harness, header and file-limit checks also pass. The codec is not yet connected to physical publication.
 
 Atomic intent persistence and recovery, passing sender-loss regressions, independent-process acceptance, reclamation/encryption checks and final review remain. Existing successful notification tests establish ordinary behavior only and do not close the recovered-publication requirement.
