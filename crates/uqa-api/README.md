@@ -23,6 +23,14 @@ It is designed for applications that need more than a relational table but do no
 - Use the same SQL result and parameter shapes against a local or Cloud UQA node through authenticated Rust, Python, Node.js, and browser HTTP engines.
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
+## Current main (unreleased)
+
+The `main` branch supports overlapping SQL write transactions on default native SQLite, SQLite Key/Value, and redb. One session can commit independent changes while another keeps uncommitted changes; the latter's commit or rollback preserves the first session's committed work. Shared full-text and vector indexes and durable graph/catalog state participate in atomic publication.
+
+Create an independent session with `Engine::new_session()` for each SQL conversation; cloning an `Arc<Engine>` still shares one session. UQA coordinates transaction snapshots, private changes, savepoints, and conflicts above the storage providers. SQLite and redb still serialize physical commits, and redb sessions share one provider that exclusively owns the database file. See the [concurrent transaction design](https://github.com/cognica-io/uqa-engine/blob/main/docs/design/concurrent-storage-transactions.md) and [completed acceptance plan](https://github.com/cognica-io/uqa-engine/blob/main/docs/plans/0008-concurrent-storage-transactions.md) for the verified scope.
+
+These changes are not included in the 0.3.8 packages shown below. Opening a supported older database with `main` upgrades its persistent formats; earlier binaries cannot reopen the upgraded database. Keep a pre-upgrade backup made with all database owners closed, and read the [MVCC upgrade requirements](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/reference/10-upgrading.md#unreleased-mvcc-writer-compatibility), [backup restoration contract](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/reference/04-storage-and-security.md#backups-and-copies), and [unreleased history](https://github.com/cognica-io/uqa-engine/blob/main/HISTORY.md#unreleased) before upgrading.
+
 ## New in 0.3.8
 
 Version 0.3.8 preserves JSONB types through `->` and `#>` extraction, so expressions such as `basis::jsonb->'query' = '{}'::jsonb` work on both empty and populated tables. Text extraction with `->>` and `#>>` continues to return text.
@@ -190,7 +198,7 @@ Python and Node.js provide matching `local` and `cloud` project constructors; br
 
 `Engine::new()` keeps data in memory, while `Engine::open(path)` and `usql --db <path>` use the default persistent SQLite backend. Persistent engines restore schemas, documents, text postings, graphs, scoring parameters, models, views, and statistics when reopened.
 
-`uqa-storage` owns provider-independent contracts and shared data structures, while `uqa-storage-sqlite` owns SQLite connections, catalogs, indexes, transactions, graph persistence, and compressed storage. Rust callers using concrete storage types must use the [updated provider imports](https://github.com/cognica-io/uqa-engine/blob/v0.3.8/docs/manual/reference/10-upgrading.md#sqlite-provider-ownership). This ownership change preserves the database format and engine SQL API.
+`uqa-storage` owns provider-independent contracts and shared data structures, while `uqa-storage-sqlite` owns SQLite connections, catalogs, indexes, transactions, graph persistence, and compressed storage. Rust callers using concrete storage types must use the [updated provider imports](https://github.com/cognica-io/uqa-engine/blob/v0.3.8/docs/manual/reference/10-upgrading.md#sqlite-provider-ownership).
 
 Applications that want a pure-Rust single-file store can compose the engine with `uqa-storage-redb`. The provider owns the database, and every `Engine::new_session()` receives independent transaction state over the same file.
 
@@ -325,7 +333,9 @@ Contributor checks, benchmark build gates, and repository conventions are docume
 | [Vector indexes](https://github.com/cognica-io/uqa-engine/blob/v0.3.8/docs/design/vector-indexes.md) | Brute-force, IVF, and HNSW behavior, parameters, persistence, and correctness contracts |
 | [Vector-search benchmark](https://github.com/cognica-io/uqa-engine/blob/v0.3.8/benchmarks/vector-search/README.md) | Reproducing vector latency, throughput, construction cost, recall, and accuracy reports |
 | [Engine state ownership](https://github.com/cognica-io/uqa-engine/blob/v0.3.8/docs/design/engine-state-ownership.md) | Session isolation, locks, epochs, and publication rules |
+| [Concurrent storage transactions](https://github.com/cognica-io/uqa-engine/blob/main/docs/design/concurrent-storage-transactions.md) | Overlapping logical writes, snapshots, conflicts, atomic publication, and provider ownership |
 | [Key/Value storage](https://github.com/cognica-io/uqa-engine/blob/v0.3.8/docs/design/kv-storage-backends.md) | Swappable provider contract, redb behavior, transactions, and current capability limits |
+| [Upgrade guide](https://github.com/cognica-io/uqa-engine/blob/v0.3.8/docs/manual/reference/10-upgrading.md) | Package updates, Rust API changes, persistent format upgrades, and backup restoration |
 | [Compressed VFS security](https://github.com/cognica-io/uqa-engine/blob/v0.3.8/docs/design/compressed-vfs-security.md) | Encryption format, authenticated metadata, rollback limits, and deployment guidance |
 | [Performance](https://github.com/cognica-io/uqa-engine/blob/v0.3.8/docs/design/performance.md) | Reproducible baselines, regression gates, bottlenecks, and benchmark limitations |
 | [Parity fixtures](https://github.com/cognica-io/uqa-engine/blob/v0.3.8/docs/design/parity.md) | SQL, relevance, and vector-calibration compatibility fixtures |
