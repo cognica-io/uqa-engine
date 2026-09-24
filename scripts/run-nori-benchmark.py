@@ -30,6 +30,7 @@ ANALYSIS_SUPPORT = ROOT / "crates/uqa-analysis/benches/nori/cancellation.rs"
 WASM_TARGET = "wasm32-unknown-emscripten"
 WASM_FLAGS = "-C link-arg=-sALLOW_MEMORY_GROWTH=1 -C link-arg=-sMAXIMUM_MEMORY=2147483648 -C link-arg=-sDEFAULT_TO_CXX -C link-arg=-sSTACK_SIZE=5242880"
 PROTOCOL = {"samples": 7, "cold_samples": 3, "warmup": 2, "pilot": 1, "clock": "per_batch", "sample_ms": 75}
+ALLOCATION_PROTOCOL = {"allocation_samples": 1, "samples": 0, "warmup": 0, "timed_operations_per_sample": 0}
 ALLOCATION_KEYS = ("count_total", "count_retained", "count_peak", "bytes_total", "bytes_retained", "bytes_peak")
 SHARING = ("cached_name_resolve_64_shared_handles", "cached_identity_resolve_64_shared_handles")
 
@@ -81,9 +82,11 @@ def cpu_model() -> str:
     return platform.processor() or "unknown"
 
 
-def measurements(report: dict) -> dict[str, dict]:
-    if report.get("schema_version") != 1 or report.get("protocol") != PROTOCOL:
+def measurements(report: dict, *, allocation_only: bool = False) -> dict[str, dict]:
+    if report.get("schema_version") != 1 or report.get("protocol") != (ALLOCATION_PROTOCOL if allocation_only else PROTOCOL):
         raise RuntimeError("unsupported Nori measurement schema or sampling protocol")
+    if allocation_only and any(type(value) is not int for value in report["protocol"].values()):
+        raise RuntimeError("invalid allocation-only sampling protocol")
     if report.get("threads") != 1 or report.get("pointer_bits") not in (32, 64):
         raise RuntimeError("Nori measurements require one thread and a known pointer width")
     cases = json.loads(CORPUS.read_text())["cases"]
@@ -94,18 +97,22 @@ def measurements(report: dict) -> dict[str, dict]:
     if set(indexed) != expected or len(entries) != len(expected):
         raise RuntimeError("missing, duplicate, or unknown Nori measurements")
     for name, entry in indexed.items():
-        timing = entry["timing"]
-        sample_count = PROTOCOL["cold_samples"] if name == "cold_decode_validate_drop" else PROTOCOL["samples"]
-        elapsed, iterations = timing["elapsed_ns"], timing["iterations"]
-        if len(elapsed) != sample_count or len(iterations) != sample_count:
-            raise RuntimeError(f"incomplete timing samples: {name}")
-        if any(type(value) is not int or value <= 0 for value in elapsed + iterations):
-            raise RuntimeError(f"invalid timing samples: {name}")
-        if any(value < PROTOCOL["sample_ms"] * 1_000_000 for value in elapsed):
-            raise RuntimeError(f"short timing sample: {name}")
-        median = statistics.median(left / right for left, right in zip(elapsed, iterations))
-        if not math.isfinite(timing["median_ns"]) or not math.isclose(median, timing["median_ns"], rel_tol=1e-12):
-            raise RuntimeError(f"incorrect timing estimator: {name}")
+        if allocation_only:
+            if "timing" in entry or "timing_scope" in report:
+                raise RuntimeError("allocation-only verification cannot contain timing observations")
+        else:
+            timing = entry["timing"]
+            sample_count = PROTOCOL["cold_samples"] if name == "cold_decode_validate_drop" else PROTOCOL["samples"]
+            elapsed, iterations = timing["elapsed_ns"], timing["iterations"]
+            if len(elapsed) != sample_count or len(iterations) != sample_count:
+                raise RuntimeError(f"incomplete timing samples: {name}")
+            if any(type(value) is not int or value <= 0 for value in elapsed + iterations):
+                raise RuntimeError(f"invalid timing samples: {name}")
+            if any(value < PROTOCOL["sample_ms"] * 1_000_000 for value in elapsed):
+                raise RuntimeError(f"short timing sample: {name}")
+            median = statistics.median(left / right for left, right in zip(elapsed, iterations))
+            if not math.isfinite(timing["median_ns"]) or not math.isclose(median, timing["median_ns"], rel_tol=1e-12):
+                raise RuntimeError(f"incorrect timing estimator: {name}")
         allocation = entry["allocation"]
         if set(allocation) != set(ALLOCATION_KEYS) or any(type(value) is not int or value < 0 for value in allocation.values()):
             raise RuntimeError(f"invalid allocation counters: {name}")
@@ -127,8 +134,10 @@ def measurements(report: dict) -> dict[str, dict]:
     return indexed
 
 
-def check(report: dict, limits: dict, baseline: dict | None = None) -> dict:
-    entries = measurements(report)
+def check(report: dict, limits: dict, baseline: dict | None = None, *, allocation_only: bool = False) -> dict:
+    if allocation_only and baseline is not None:
+        raise RuntimeError("allocation-only verification cannot compare timing baselines")
+    entries = measurements(report, allocation_only=allocation_only)
     if limits.get("schema_version") != 1:
         raise RuntimeError("unsupported Nori resource limit schema")
     for key in ("corpus_sha256", "bundle_sha256", "bundle_bytes", "allocation_counter"):
@@ -278,10 +287,10 @@ def execute_benchmark(target: str, package: str, benchmark: str, features: str, 
     return report
 
 
-def run(target: str) -> dict:
+def run(target: str, *, allocation_only: bool = False) -> dict:
     report = execute_benchmark(target, "uqa-analysis", "nori", "nori", ("uqa-analysis", "uqa-core", "uqa-nori-data"),
-                               (ANALYSIS_SUPPORT,))
-    measurements(report)
+                               (ANALYSIS_SUPPORT,), arguments=("--allocation-only",) if allocation_only else ())
+    measurements(report, allocation_only=allocation_only)
     return report
 
 
@@ -293,20 +302,23 @@ def main() -> int:
     parser.add_argument("--limits", type=pathlib.Path, default=LIMITS)
     parser.add_argument("--baseline", type=pathlib.Path, help="compare timing on the same host/toolchain")
     parser.add_argument("--measure-only", action="store_true", help="collect candidate evidence without accepting it as a passing gate")
+    parser.add_argument("--allocation-only", action="store_true", help="verify allocation and output without timing samples")
     args = parser.parse_args()
     if args.measure_only and args.baseline:
         parser.error("--baseline requires the reviewed gate")
+    if args.allocation_only and args.baseline:
+        parser.error("--allocation-only cannot compare timing baselines")
     protected = [CORPUS, args.limits, ANALYSIS_BENCHMARK, ANALYSIS_SUPPORT] + ([args.baseline] if args.baseline else [])
     if args.output.resolve() in [path.resolve() for path in protected]:
         parser.error("output must not overwrite benchmark sources, the corpus, reviewed limits, or timing baseline")
-    report = json.loads(args.report.read_text()) if args.report else run(args.target)
-    measurements(report)
+    report = json.loads(args.report.read_text()) if args.report else run(args.target, allocation_only=args.allocation_only)
+    measurements(report, allocation_only=args.allocation_only)
     report["gate"] = {"allocation_and_output_passed": False, "timing_compared": False}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     if not args.measure_only:
         baseline = json.loads(args.baseline.read_text()) if args.baseline else None
-        report["gate"] = check(report, json.loads(args.limits.read_text()), baseline)
+        report["gate"] = check(report, json.loads(args.limits.read_text()), baseline, allocation_only=args.allocation_only)
         args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     print(f"Nori {'candidate measurement' if args.measure_only else 'gate passed'}: {args.output}")
     return 0

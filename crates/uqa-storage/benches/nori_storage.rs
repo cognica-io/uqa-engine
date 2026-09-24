@@ -106,38 +106,47 @@ fn graph_fingerprint(index: &MemoryInvertedIndex, documents: u64) -> String {
 fn probe(
     name: &str,
     documents: u64,
+    allocation_only: bool,
     setup: impl Fn() -> MemoryInvertedIndex,
     mutate: impl Fn(&mut MemoryInvertedIndex),
 ) -> Value {
-    let mut elapsed_ns = Vec::with_capacity(SAMPLES);
-    opt_out(|| {
-        let mut warmup = setup();
-        mutate(&mut warmup);
-        drop(warmup);
-        for _ in 0..SAMPLES {
-            let mut index = setup();
-            let start = Instant::now();
-            mutate(black_box(&mut index));
-            elapsed_ns.push(start.elapsed().as_nanos() as u64);
-            drop(index);
-        }
-    });
+    let mut elapsed_ns = Vec::new();
+    if !allocation_only {
+        elapsed_ns.reserve(SAMPLES);
+        opt_out(|| {
+            let mut warmup = setup();
+            mutate(&mut warmup);
+            drop(warmup);
+            for _ in 0..SAMPLES {
+                let mut index = setup();
+                let start = Instant::now();
+                mutate(black_box(&mut index));
+                elapsed_ns.push(start.elapsed().as_nanos() as u64);
+                drop(index);
+            }
+        });
+    }
     let mut index = setup();
     let info = measure(|| mutate(&mut index));
     let fingerprint = graph_fingerprint(&index, documents);
-    let mut ordered = elapsed_ns.clone();
-    ordered.sort_unstable();
     eprintln!("measured {name}");
-    json!({
+    let mut row = json!({
         "name": name, "documents_after": documents,
-        "elapsed_ns": elapsed_ns, "median_ns": ordered[SAMPLES / 2],
         "allocation": allocation(info), "graph_sha256": fingerprint,
         "field_length": index.total_field_length("body").unwrap(),
         "posting_count": index.posting_count(Some("body")).unwrap(),
-    })
+    });
+    if !allocation_only {
+        let mut ordered = elapsed_ns.clone();
+        ordered.sort_unstable();
+        row["elapsed_ns"] = json!(elapsed_ns);
+        row["median_ns"] = json!(ordered[SAMPLES / 2]);
+    }
+    row
 }
 
 fn main() {
+    let allocation_only = std::env::args_os().any(|argument| argument == "--allocation-only");
     let corpus: Corpus = serde_json::from_str(CORPUS).unwrap();
     let texts: Vec<_> = corpus
         .cases
@@ -150,6 +159,7 @@ fn main() {
         measurements.push(probe(
             &format!("build_points/{count}"),
             count,
+            allocation_only,
             || fresh(&revision),
             |index| add_points(index, count, &texts),
         ));
@@ -160,21 +170,24 @@ fn main() {
         measurements.push(probe(
             &format!("append_batch_16/{count}"),
             count + APPEND_DOCUMENTS,
+            allocation_only,
             || seed.clone(),
             |index| append_batch(index, count, APPEND_DOCUMENTS, &texts),
         ));
     }
-    println!(
-        "{}",
-        json!({
-            "schema_version": 1, "owner": "uqa-storage", "target_arch": std::env::consts::ARCH,
-            "target_os": std::env::consts::OS, "pointer_bits": usize::BITS, "threads": 1,
-            "protocol": {"samples": SAMPLES, "warmup": 1, "timed_operations_per_sample": 1},
-            "timing_scope": "input construction and index mutation; seed cloning, destruction and graph validation excluded",
-            "allocation_scope": "current-thread Rust allocator requests during mutation; net includes released seed allocations; excludes static bundle, base index, stack and host heap",
-            "corpus_sha256": format!("{:x}", Sha256::digest(CORPUS.as_bytes())),
-            "analyzer_fingerprint": revision.descriptor().fingerprint().to_string(),
-            "measurements": measurements,
-        })
-    );
+    let mut report = json!({
+        "schema_version": 1, "owner": "uqa-storage", "target_arch": std::env::consts::ARCH,
+        "target_os": std::env::consts::OS, "pointer_bits": usize::BITS, "threads": 1,
+        "allocation_scope": "current-thread Rust allocator requests during mutation; net includes released seed allocations; excludes static bundle, base index, stack and host heap",
+        "corpus_sha256": format!("{:x}", Sha256::digest(CORPUS.as_bytes())),
+        "analyzer_fingerprint": revision.descriptor().fingerprint().to_string(),
+        "measurements": measurements,
+    });
+    report["protocol"] = if allocation_only {
+        json!({"allocation_samples": 1, "samples": 0, "warmup": 0, "timed_operations_per_sample": 0})
+    } else {
+        report["timing_scope"] = json!("input construction and index mutation; seed cloning, destruction and graph validation excluded");
+        json!({"samples": SAMPLES, "warmup": 1, "timed_operations_per_sample": 1})
+    };
+    println!("{report}");
 }

@@ -28,6 +28,7 @@ LIMITS = ROOT / "benchmarks/nori/phrase-limits.json"
 BENCHMARK = ROOT / "crates/uqa-operators/benches/nori_phrase.rs"
 OWNERS = ("uqa-operators", "uqa-scoring", "uqa-fusion", "uqa-storage", "uqa-analysis", "uqa-core", "uqa-nori-data")
 PROTOCOL = {"samples": 7, "warmup": 1, "timed_operations_per_sample": 1}
+ALLOCATION_PROTOCOL = {"allocation_samples": 1, "samples": 0, "warmup": 0, "timed_operations_per_sample": 0}
 STAGES = ("match_graph", "analysis_and_match")
 MODES = ("None", "Discard", "Mixed")
 DOCUMENTS = 2048
@@ -49,12 +50,14 @@ def same_rows(left: list, right: list) -> bool:
         for a, b in zip(left, right))
 
 
-def measurements(report: dict) -> dict:
+def measurements(report: dict, *, allocation_only: bool = False) -> dict:
     if report.get("schema_version") != 1 or report.get("owner") != "uqa-operators":
         raise RuntimeError("unsupported phrase measurement schema or owner")
     fixture = cases()
-    if report.get("protocol") != PROTOCOL or report.get("threads") != 1 or report.get("pointer_bits") not in (32, 64):
+    if report.get("protocol") != (ALLOCATION_PROTOCOL if allocation_only else PROTOCOL) or report.get("threads") != 1 or report.get("pointer_bits") not in (32, 64):
         raise RuntimeError("invalid phrase sampling protocol or target")
+    if allocation_only and any(type(value) is not int for value in report["protocol"].values()):
+        raise RuntimeError("invalid allocation-only sampling protocol")
     if report.get("documents") != DOCUMENTS + len(fixture) or report.get("memory_limit") != 256 * 1024 * 1024:
         raise RuntimeError("changed phrase fixture size or query allowance")
     if report.get("corpus_sha256") != common.digest(common.CORPUS):
@@ -79,13 +82,17 @@ def measurements(report: dict) -> dict:
             raise RuntimeError(f"invalid phrase analyzer identity: {name}")
         if fingerprints.setdefault(mode, fingerprint) != fingerprint:
             raise RuntimeError(f"inconsistent phrase analyzer identity: {mode}")
-        samples = row["elapsed_ns"]
-        if len(samples) != PROTOCOL["samples"] or any(type(value) is not int or value <= 0 for value in samples):
-            raise RuntimeError(f"invalid phrase timing samples: {name}")
-        if type(row.get("median_ns")) is not int or row["median_ns"] != statistics.median(samples):
-            raise RuntimeError(f"invalid phrase timing estimator: {name}")
-        if row.get("verified_samples") != PROTOCOL["samples"] + 2:
-            raise RuntimeError(f"missing repeated phrase output verification: {name}")
+        if allocation_only:
+            if "elapsed_ns" in row or "median_ns" in row or "timing_scope" in report:
+                raise RuntimeError("allocation-only verification cannot contain timing observations")
+        else:
+            samples = row["elapsed_ns"]
+            if len(samples) != PROTOCOL["samples"] or any(type(value) is not int or value <= 0 for value in samples):
+                raise RuntimeError(f"invalid phrase timing samples: {name}")
+            if type(row.get("median_ns")) is not int or row["median_ns"] != statistics.median(samples):
+                raise RuntimeError(f"invalid phrase timing estimator: {name}")
+        if type(row.get("verified_samples")) is not int or row["verified_samples"] != (1 if allocation_only else PROTOCOL["samples"] + 2):
+            raise RuntimeError(f"missing phrase output verification: {name}")
         allocation = row["allocation"]
         if set(allocation) != ALLOCATION_KEYS or any(type(value) is not int for value in allocation.values()):
             raise RuntimeError(f"invalid phrase allocation counters: {name}")
@@ -117,8 +124,10 @@ def measurements(report: dict) -> dict:
     return indexed
 
 
-def check(report: dict, limits: dict, baseline: dict | None = None) -> dict:
-    rows = measurements(report)
+def check(report: dict, limits: dict, baseline: dict | None = None, *, allocation_only: bool = False) -> dict:
+    if allocation_only and baseline is not None:
+        raise RuntimeError("allocation-only verification cannot compare timing baselines")
+    rows = measurements(report, allocation_only=allocation_only)
     if limits.get("schema_version") != 1 or limits.get("corpus_sha256") != report["corpus_sha256"]:
         raise RuntimeError("unsupported phrase limit schema or corpus")
     ceilings = limits["allocation_ceilings"][str(report["pointer_bits"])]
@@ -167,21 +176,25 @@ def main() -> int:
     parser.add_argument("--limits", type=pathlib.Path, default=LIMITS)
     parser.add_argument("--measure-only", action="store_true")
     parser.add_argument("--baseline", type=pathlib.Path)
+    parser.add_argument("--allocation-only", action="store_true", help="verify allocation and output without timing samples")
     args = parser.parse_args()
     if args.measure_only and args.baseline:
         parser.error("--baseline requires reviewed gates")
+    if args.allocation_only and args.baseline:
+        parser.error("--allocation-only cannot compare timing baselines")
     protected = [args.limits, common.CORPUS, BENCHMARK] + ([args.baseline] if args.baseline else [])
     if args.output.resolve() in [path.resolve() for path in protected]:
         parser.error("output must not overwrite reviewed limits, corpus, benchmark source, or baseline")
     report = json.loads(args.report.read_text()) if args.report else common.execute_benchmark(
-        args.target, "uqa-operators", "nori_phrase", "uqa-analysis/nori", OWNERS)
-    measurements(report)
+        args.target, "uqa-operators", "nori_phrase", "uqa-analysis/nori", OWNERS,
+        arguments=("--allocation-only",) if args.allocation_only else ())
+    measurements(report, allocation_only=args.allocation_only)
     report["gate"] = {"allocation_and_rows_passed": False, "timing_compared": False}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     if not args.measure_only:
         baseline = json.loads(args.baseline.read_text()) if args.baseline else None
-        report["gate"] = check(report, json.loads(args.limits.read_text()), baseline)
+        report["gate"] = check(report, json.loads(args.limits.read_text()), baseline, allocation_only=args.allocation_only)
         args.output.write_text(json.dumps(report, indent=2) + "\n")
     print(f"Nori phrase {'candidate measurement' if args.measure_only else 'gate passed'}: {args.output}")
     return 0

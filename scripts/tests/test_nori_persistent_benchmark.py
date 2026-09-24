@@ -331,15 +331,29 @@ class NoriPersistentBenchmarkTest(unittest.TestCase):
         native = (ROOT / ".github/workflows/ci.yml").read_text()
         job = native.split("  nori-benchmark:\n", 1)[1].split("  gate:\n", 1)[0]
         self.assertIn("inputs.run_rust || inputs.run_nori_allocations", job)
-        timed = job.split("      - name: Measure native analysis", 1)[1].split("      - name: Verify SQLite", 1)[0]
-        self.assertIn("if: ${{ github.event_name == 'push' || inputs.run_rust }}", timed)
-        for provider in ("SQLite", "redb"):
-            step = job.split(f"      - name: Verify {provider} allocation and reopened outputs\n", 1)[1].split("      - ", 1)[0]
+        names = (
+            "native analysis allocations and token outputs",
+            "native indexing allocations and graph outputs",
+            "native phrase allocations and scored outputs",
+            "SQLite allocation and reopened outputs",
+            "redb allocation and reopened outputs",
+        )
+        for name in names:
+            step = job.split(f"      - name: Verify {name}\n", 1)[1].split("      - ", 1)[0]
             self.assertIn("if: ${{ !cancelled() }}", step)
             self.assertIn("--allocation-only", step)
             self.assertNotIn("--measure-only", step)
             self.assertNotIn("continue-on-error", step)
         self.assertNotIn("commit_allocation_order", job)
+
+        wasm = (ROOT / ".github/workflows/javascript-bindings.yml").read_text()
+        for name in ("analysis allocations and token outputs", "indexing allocations and graph outputs",
+                     "SQLite allocation and reopened outputs", "phrase allocations and scored outputs"):
+            step = wasm.split(f"      - name: Verify WASM {name}\n", 1)[1].split("      - ", 1)[0]
+            self.assertIn("if: ${{ !cancelled() && inputs.run_nori_measurements }}", step)
+            self.assertIn("--allocation-only", step)
+            self.assertIn("--target wasm", step)
+            self.assertNotIn("continue-on-error", step)
 
 if __name__ == "__main__":
     unittest.main()

@@ -35,6 +35,31 @@ def fixture():
 
 
 class NoriIndexBenchmarkTest(unittest.TestCase):
+    def test_allocation_only_preserves_output_and_allocation_gates_without_timing(self):
+        report, limits = fixture()
+        report["protocol"] = dict(benchmark.ALLOCATION_PROTOCOL)
+        report.pop("timing_scope")
+        for row in report["measurements"]:
+            row.pop("elapsed_ns")
+            row.pop("median_ns")
+        self.assertTrue(benchmark.check(report, limits, allocation_only=True)["allocation_and_graph_passed"])
+        with self.assertRaisesRegex(RuntimeError, "cannot compare timing"):
+            benchmark.check(report, limits, copy.deepcopy(report), allocation_only=True)
+        report["measurements"][0]["allocation"]["bytes_total"] += 1
+        with self.assertRaisesRegex(RuntimeError, "allocation regression"):
+            benchmark.check(report, limits, allocation_only=True)
+
+    def test_allocation_only_rejects_timing_observations(self):
+        report, limits = fixture()
+        report["protocol"] = dict(benchmark.ALLOCATION_PROTOCOL)
+        report.pop("timing_scope")
+        for row in report["measurements"]:
+            row.pop("elapsed_ns")
+            row.pop("median_ns")
+        report["timing_scope"] = "uncontrolled timing"
+        with self.assertRaisesRegex(RuntimeError, "timing observations"):
+            benchmark.check(report, limits, allocation_only=True)
+
     def test_reviewed_limits_cover_both_pointer_widths_and_every_workload(self):
         limits = json.loads(benchmark.LIMITS.read_text())
         self.assertEqual(set(limits["allocation_ceilings"]), {"32", "64"})
