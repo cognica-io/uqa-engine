@@ -30,11 +30,14 @@ fn tables(seed: &Session, ty: &str, initial: Option<&str>) {
     }
 }
 
-#[test]
-fn empty_container_index_ranges_observe_only_matching_future_keys() {
+#[rstest::rstest]
+fn empty_container_index_ranges_observe_only_matching_future_keys(
+    #[values(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)] case_index: usize,
+    #[values(false, true)] conflict: bool,
+) {
     let integers = || array(vec![Value::Int(1), Value::Int(2)]);
     let vector = || Value::List(vec![Value::Int(1), Value::Int(2)]);
-    for (ty, predicate, matching, outside) in [
+    let cases = [
         (
             "INTEGER[]",
             Predicate::Equals(integers()),
@@ -110,22 +113,21 @@ fn empty_container_index_ranges_observe_only_matching_future_keys() {
             "ARRAY[NULL]::integer[]",
             "NULL",
         ),
-    ] {
-        for (value, conflict) in [(matching, true), (outside, false)] {
-            let (_directory, sessions) = fixtures();
-            for seed in sessions {
-                tables(&seed, ty, None);
-                let a = seed.sibling();
-                let b = seed.sibling();
-                a.begin();
-                b.begin();
-                assert_eq!(index_only(&a, "left_items", &predicate), 0);
-                assert_eq!(index_only(&b, "right_items", &predicate), 0);
-                a.sql(&format!("INSERT INTO right_items VALUES (1, {value}, 0)"));
-                b.sql(&format!("INSERT INTO left_items VALUES (1, {value}, 0)"));
-                finish(&a, &b, conflict);
-            }
-        }
+    ];
+    let (ty, predicate, matching, outside) = &cases[case_index];
+    let value = if conflict { matching } else { outside };
+    let (_directory, sessions) = fixtures();
+    for seed in sessions {
+        tables(&seed, ty, None);
+        let a = seed.sibling();
+        let b = seed.sibling();
+        a.begin();
+        b.begin();
+        assert_eq!(index_only(&a, "left_items", predicate), 0);
+        assert_eq!(index_only(&b, "right_items", predicate), 0);
+        a.sql(&format!("INSERT INTO right_items VALUES (1, {value}, 0)"));
+        b.sql(&format!("INSERT INTO left_items VALUES (1, {value}, 0)"));
+        finish(&a, &b, conflict);
     }
 }
 

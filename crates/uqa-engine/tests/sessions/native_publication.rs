@@ -126,78 +126,85 @@ fn assert_original(engine: &Engine) {
     assert_eq!(scalar_int(engine, "SELECT count(*) AS n FROM cypher('atomic_graph', $$ MATCH (n) RETURN id(n) $$) AS result(id agtype)", "n"), 0);
 }
 
-#[test]
-fn native_mutation_family_failures_preserve_sibling_and_reopened_state_without_replay() {
-    use NativeRecordFamily as Family;
+#[rstest::rstest]
+#[case::plain(0)]
+#[case::encrypted(1)]
+#[case::compressed(2)]
+#[case::compressed_encrypted(3)]
+fn native_mutation_family_failures_preserve_sibling_and_reopened_state_without_replay(
+    #[case] mode: usize,
+    #[values(
+        NativeRecordFamily::Documents,
+        NativeRecordFamily::BtreeIndexEntries,
+        NativeRecordFamily::OccurrenceDocuments,
+        NativeRecordFamily::Vectors,
+        NativeRecordFamily::IVFAssignments,
+        NativeRecordFamily::Schemas,
+        NativeRecordFamily::Tables,
+        NativeRecordFamily::Analyzers,
+        NativeRecordFamily::Models,
+        NativeRecordFamily::Metadata,
+        NativeRecordFamily::TableFieldAnalyzers,
+        NativeRecordFamily::GraphVertices,
+        NativeRecordFamily::GraphMembership,
+        NativeRecordFamily::Views,
+        NativeRecordFamily::Sequences,
+        NativeRecordFamily::CatalogIndexes
+    )]
+    family: NativeRecordFamily,
+) {
     let directory = tempfile::tempdir().unwrap();
-    for mode in 0..4 {
-        for family in [
-            Family::Documents,
-            Family::BtreeIndexEntries,
-            Family::OccurrenceDocuments,
-            Family::Vectors,
-            Family::IVFAssignments,
-            Family::Schemas,
-            Family::Tables,
-            Family::Analyzers,
-            Family::Models,
-            Family::Metadata,
-            Family::TableFieldAnalyzers,
-            Family::GraphVertices,
-            Family::GraphMembership,
-            Family::Views,
-            Family::Sequences,
-            Family::CatalogIndexes,
-        ] {
-            let path = directory.path().join(format!("{mode}-{}.db", family.id()));
-            let connection = connection(&path, mode);
-            let root = engine(&connection);
-            create_cross_store_table(&root);
-            root.sql("INSERT INTO docs VALUES (1, 'original', ARRAY[1.0, 0.0]); CREATE ROLE atomic_reader", &[]).unwrap();
-            root.create_graph("atomic_graph").unwrap();
-            let calls = Arc::new(AtomicUsize::new(0));
-            let callback = Arc::clone(&calls);
-            root.register_scalar_function_with_options(
-                "mutation_probe",
-                super::SQLFunctionOptions::read_only(super::SQLFunctionVolatility::Volatile),
-                move |_: &[Value]| {
-                    callback.fetch_add(1, Ordering::AcqRel);
-                    Ok(Value::Int(2))
-                },
-            )
-            .unwrap();
-            let observer = root.new_session().unwrap();
-            prepare(&root);
-            assert_eq!(calls.load(Ordering::Acquire), 1);
-            assert_original(&observer);
-            connection.with_physical(|physical| {
-                physical.execute_batch(&format!("CREATE TRIGGER reject_native_publication BEFORE INSERT ON {} BEGIN SELECT RAISE(ABORT, 'injected native publication failure'); END", family.layout().table))?;
-                Ok(())
-            }).unwrap();
-            let error = root.commit().unwrap_err();
-            assert_ne!(error.sqlstate(), Some("08007"));
-            assert!(
-                error
-                    .to_string()
-                    .contains("injected native publication failure"),
-                "mode {mode}, {family:?}: {error}"
-            );
-            assert_eq!(calls.load(Ordering::Acquire), 1);
-            assert_original(&observer);
-            connection
-                .with_physical(|physical| {
-                    physical.execute_batch("DROP TRIGGER reject_native_publication")?;
-                    Ok(())
-                })
-                .unwrap();
-            if root.transaction_depth() > 0 {
-                root.rollback().unwrap();
-            }
-            assert_original(&root);
-            drop((observer, root, connection));
-            let reopened_connection = self::connection(&path, mode);
-            let reopened = engine(&reopened_connection);
-            assert_original(&reopened);
-        }
+    let path = directory.path().join(format!("{mode}-{}.db", family.id()));
+    let connection = connection(&path, mode);
+    let root = engine(&connection);
+    create_cross_store_table(&root);
+    root.sql(
+        "INSERT INTO docs VALUES (1, 'original', ARRAY[1.0, 0.0]); CREATE ROLE atomic_reader",
+        &[],
+    )
+    .unwrap();
+    root.create_graph("atomic_graph").unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let callback = Arc::clone(&calls);
+    root.register_scalar_function_with_options(
+        "mutation_probe",
+        super::SQLFunctionOptions::read_only(super::SQLFunctionVolatility::Volatile),
+        move |_: &[Value]| {
+            callback.fetch_add(1, Ordering::AcqRel);
+            Ok(Value::Int(2))
+        },
+    )
+    .unwrap();
+    let observer = root.new_session().unwrap();
+    prepare(&root);
+    assert_eq!(calls.load(Ordering::Acquire), 1);
+    assert_original(&observer);
+    connection.with_physical(|physical| {
+        physical.execute_batch(&format!("CREATE TRIGGER reject_native_publication BEFORE INSERT ON {} BEGIN SELECT RAISE(ABORT, 'injected native publication failure'); END", family.layout().table))?;
+        Ok(())
+    }).unwrap();
+    let error = root.commit().unwrap_err();
+    assert_ne!(error.sqlstate(), Some("08007"));
+    assert!(
+        error
+            .to_string()
+            .contains("injected native publication failure"),
+        "mode {mode}, {family:?}: {error}"
+    );
+    assert_eq!(calls.load(Ordering::Acquire), 1);
+    assert_original(&observer);
+    connection
+        .with_physical(|physical| {
+            physical.execute_batch("DROP TRIGGER reject_native_publication")?;
+            Ok(())
+        })
+        .unwrap();
+    if root.transaction_depth() > 0 {
+        root.rollback().unwrap();
     }
+    assert_original(&root);
+    drop((observer, root, connection));
+    let reopened_connection = self::connection(&path, mode);
+    let reopened = engine(&reopened_connection);
+    assert_original(&reopened);
 }

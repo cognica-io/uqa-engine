@@ -308,19 +308,69 @@ fn metadata_query_failures_abort_only_the_active_savepoint() {
     }
 }
 
-#[test]
-fn catalog_queries_do_not_manufacture_user_row_dependencies() {
-    for read in CatalogRead::ALL {
-        let (_directory, sessions) = catalog_fixtures();
-        for a in sessions {
-            let b = a.sibling();
-            a.sql("BEGIN ISOLATION LEVEL SERIALIZABLE");
-            read.read(&a.engine).unwrap();
-            b.sql("BEGIN ISOLATION LEVEL SERIALIZABLE; SELECT v FROM right_t; UPDATE left_t SET v = 2; COMMIT");
-            a.sql("UPDATE right_t SET v = 2; COMMIT");
-            assert_eq!(a.sql("SELECT v FROM left_t").rows[0]["v"], Value::Int(2));
-            assert_eq!(a.sql("SELECT v FROM right_t").rows[0]["v"], Value::Int(2));
-        }
+#[rstest::rstest]
+fn catalog_queries_do_not_manufacture_user_row_dependencies(
+    #[values(
+        CatalogRead::HasTable,
+        CatalogRead::TryHasTable,
+        CatalogRead::Columns,
+        CatalogRead::TryColumns,
+        CatalogRead::HasColumn,
+        CatalogRead::TryHasColumn,
+        CatalogRead::Names,
+        CatalogRead::Description,
+        CatalogRead::TryDescription,
+        CatalogRead::Indexes,
+        CatalogRead::HasIndex,
+        CatalogRead::Index,
+        CatalogRead::HasSchema,
+        CatalogRead::HasNamespace,
+        CatalogRead::Schemas,
+        CatalogRead::SchemaTables,
+        CatalogRead::CurrentSchema,
+        CatalogRead::CurrentSchemas,
+        CatalogRead::Sequences,
+        CatalogRead::SequenceSnapshot,
+        CatalogRead::TrySequenceSnapshot,
+        CatalogRead::SequenceState,
+        CatalogRead::View,
+        CatalogRead::Views,
+        CatalogRead::Analyzers,
+        CatalogRead::AnalyzeText,
+        CatalogRead::FieldAnalyzer,
+        CatalogRead::AnalyzerConfiguration,
+        CatalogRead::ForeignServer,
+        CatalogRead::ForeignTable,
+        CatalogRead::ForeignServers,
+        CatalogRead::ForeignTables,
+        CatalogRead::ForeignColumns,
+        CatalogRead::Default,
+        CatalogRead::TryDefault,
+        CatalogRead::Checks,
+        CatalogRead::TryChecks,
+        CatalogRead::CheckDefinitions,
+        CatalogRead::ForeignKeys,
+        CatalogRead::TryForeignKeys,
+        CatalogRead::Referrers,
+        CatalogRead::TryReferrers,
+        CatalogRead::UniqueColumns,
+        CatalogRead::TryUniqueColumns,
+        CatalogRead::Keys,
+        CatalogRead::TryKeys,
+        CatalogRead::Model,
+        CatalogRead::PredictFeatures
+    )]
+    read: CatalogRead,
+) {
+    let (_directory, sessions) = catalog_fixtures();
+    for a in sessions {
+        let b = a.sibling();
+        a.sql("BEGIN ISOLATION LEVEL SERIALIZABLE");
+        read.read(&a.engine).unwrap();
+        b.sql("BEGIN ISOLATION LEVEL SERIALIZABLE; SELECT v FROM right_t; UPDATE left_t SET v = 2; COMMIT");
+        a.sql("UPDATE right_t SET v = 2; COMMIT");
+        assert_eq!(a.sql("SELECT v FROM left_t").rows[0]["v"], Value::Int(2));
+        assert_eq!(a.sql("SELECT v FROM right_t").rows[0]["v"], Value::Int(2));
     }
 }
 
