@@ -25,7 +25,7 @@ struct Node<K, V> {
     height: u8,
 }
 
-/// An immutable ordered map with logarithmic lookup and insertion. Cloning shares a root without copying entries or allocating. Updates reserve copied search paths before allocation; unchanged entries and subtrees keep their original reservations until their last root is dropped. Keys and values retain their separately owned payloads.
+/// A persistent ordered map with logarithmic lookup and insertion. Cloning shares a root without copying entries or allocating. Updates reserve the complete insertion before mutation, reuse unique nodes and copy shared paths; unchanged entries and subtrees keep their original reservations until their last root is dropped. Keys and values retain their separately owned payloads.
 pub struct BudgetedSharedMap<K, V> {
     root: Link<K, V>,
     len: usize,
@@ -88,13 +88,16 @@ impl<K: Ord, V> BudgetedSharedMap<K, V> {
 
     /// Return a new root containing the supplied key and value, leaving this root unchanged even if reservation fails. Matching keys are replaced together with their values; neither type needs to implement `Clone`.
     pub fn with_insert(&self, key: K, value: V) -> Result<Self, MemoryError> {
-        let entry = Budgeted::new((key, value), self.memory.empty_reservation()).into_shared()?;
-        let (root, added) = tree::insert(&self.root, entry, &self.memory)?;
-        Ok(Self {
-            root: Some(root),
-            len: self.len + usize::from(added),
-            memory: self.memory.clone(),
-        })
+        let mut candidate = self.clone();
+        candidate.try_insert(key, value)?;
+        Ok(candidate)
+    }
+
+    /// Reserve the complete insertion before changing this root, reusing unique nodes and copying only shared paths. Reservation failure preserves this root; existing clones remain unchanged. Matching keys and values are replaced together without requiring `Clone`.
+    pub fn try_insert(&mut self, key: K, value: V) -> Result<(), MemoryError> {
+        let added = tree::insert(&mut self.root, key, value, &self.memory)?;
+        self.len += usize::from(added);
+        Ok(())
     }
 
     /// Visit keys in order, seeking the lower bound without traversing earlier entries or allocating a traversal buffer.

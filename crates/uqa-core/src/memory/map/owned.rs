@@ -105,6 +105,18 @@ impl<K: Ord, V> OwnedMap<K, V> {
         previous
     }
 
+    /// Move entries from `other` without allocating replacement nodes. Collisions retain this map's original key and node, replacing only the value.
+    pub fn append(&mut self, other: Self) {
+        if self.is_empty() {
+            *self = other;
+            return;
+        }
+        let mut entries = other.into_iter();
+        while let Some(node) = entries.next_node() {
+            self.len += usize::from(tree::insert(&mut self.root, node).is_none());
+        }
+    }
+
     pub fn remove<Q: Ord + ?Sized>(&mut self, key: &Q) -> Option<V>
     where
         K: Borrow<Q>,
@@ -209,17 +221,22 @@ impl<K, V> OwnedMapIntoIter<K, V> {
             self.depth += 1;
         }
     }
+
+    fn next_node(&mut self) -> Option<OwnedNode<K, V>> {
+        self.depth = self.depth.checked_sub(1)?;
+        let mut node = self.stack[self.depth].take().expect("owned traversal node");
+        self.push_left(node.value.right.take());
+        node.value.height = 1;
+        self.remaining -= 1;
+        Some(node)
+    }
 }
 
 impl<K, V> Iterator for OwnedMapIntoIter<K, V> {
     type Item = (K, V);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.depth = self.depth.checked_sub(1)?;
-        let mut node = self.stack[self.depth].take().expect("owned traversal node");
-        self.push_left(node.value.right.take());
-        self.remaining -= 1;
-        Some(tree::into_entry(node))
+        self.next_node().map(tree::into_entry)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

@@ -64,7 +64,7 @@ impl RetainedInvertedIndexBuilder {
         fields: impl IntoIterator<Item = (&'a str, &'a str)>,
     ) -> StorageBackendResult<()> {
         self.control.check()?;
-        if self.index.state.doc_fields.contains_key(&doc_id) {
+        if self.index.state.documents.contains_key(&doc_id) {
             return Err(StorageBackendError::Other(
                 "retained text input repeats a document".into(),
             ));
@@ -95,7 +95,7 @@ impl RetainedInvertedIndexBuilder {
             .expect("unpublished text builder owns its corpus")
             .apply_replacement(doc_id, pending.0, pending.1);
         self.memory.absorb(pending.2.split(charge.retained));
-        // Publication moves admitted field/term nodes and frees projection/counter scratch and duplicate global keys before their remaining reservations are released.
+        // Publication moves admitted field nodes and term buffers, then frees counter scratch and duplicate global keys before their remaining reservations are released.
         result
     }
 

@@ -9,9 +9,12 @@
 use std::sync::{Arc, Weak};
 
 use parking_lot::Mutex;
-use uqa_core::memory::{MemoryError, MemoryReservation, OwnedMap, OwnedSet};
+use uqa_core::memory::{MemoryError, MemoryReservation, OwnedMap};
 
-use super::{DocId, FieldName, IndexedFieldMetadata, MemoryIndexState, MemoryPosting, PostingKey};
+use super::{
+    DocId, FieldName, IndexedFieldMetadata, MemoryDocument, MemoryFieldCounters, MemoryIndexState,
+    MemoryPosting, PostingKey,
+};
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 
 #[derive(Debug, Default)]
@@ -67,7 +70,6 @@ impl RetainedPayload {
 
 pub(super) fn posting_buffers(posting: &MemoryPosting) -> u128 {
     posting.occurrences.capacity() as u128 * size_of::<uqa_core::TokenOccurrence>() as u128
-        + posting.projection.payload.positions.capacity() as u128 * size_of::<u32>() as u128
 }
 
 fn posting_size(posting: &MemoryPosting) -> u128 {
@@ -83,33 +85,35 @@ fn index_key_size(key: &PostingKey) -> u128 {
         + term_payload(key)
 }
 
-fn terms_size(terms: &OwnedSet<PostingKey>) -> u128 {
-    OwnedMap::<DocId, OwnedSet<PostingKey>>::entry_bytes() as u128
-        + terms
-            .iter()
-            .map(|key| OwnedSet::<PostingKey>::entry_bytes() as u128 + term_payload(key))
-            .sum::<u128>()
+fn terms_size(terms: &Vec<PostingKey>) -> u128 {
+    terms.capacity() as u128 * size_of::<PostingKey>() as u128
+        + terms.iter().map(term_payload).sum::<u128>()
 }
 
 fn fields_size(fields: &OwnedMap<FieldName, IndexedFieldMetadata>) -> u128 {
-    OwnedMap::<DocId, OwnedMap<FieldName, IndexedFieldMetadata>>::entry_bytes() as u128
-        + fields
-            .keys()
-            .map(|field| {
-                OwnedMap::<FieldName, IndexedFieldMetadata>::entry_bytes() as u128
-                    + field.capacity() as u128
-            })
-            .sum::<u128>()
+    fields
+        .keys()
+        .map(|field| {
+            OwnedMap::<FieldName, IndexedFieldMetadata>::entry_bytes() as u128
+                + field.capacity() as u128
+        })
+        .sum::<u128>()
+}
+
+fn document_size(document: &MemoryDocument) -> u128 {
+    OwnedMap::<DocId, MemoryDocument>::entry_bytes() as u128
+        + fields_size(&document.fields)
+        + terms_size(&document.terms)
 }
 
 fn counter_size(capacity: usize) -> u128 {
-    OwnedMap::<FieldName, u64>::entry_bytes() as u128 + capacity as u128
+    OwnedMap::<FieldName, MemoryFieldCounters>::entry_bytes() as u128 + capacity as u128
 }
 
 pub(super) fn set_counter(
-    target: &mut OwnedMap<FieldName, u64>,
+    target: &mut OwnedMap<FieldName, MemoryFieldCounters>,
     field: FieldName,
-    value: Option<u64>,
+    value: Option<MemoryFieldCounters>,
     retention: &mut RetainedPayload,
 ) {
     if let Some(value) = value {
@@ -165,18 +169,15 @@ impl MemoryIndexState {
     }
 
     pub(super) fn remove_document_metadata(&mut self, doc_id: DocId) {
-        if let Some(fields) = self.doc_fields.remove(&doc_id) {
-            self.retention.remove(fields_size(&fields));
-        }
-        drop(self.take_document_terms(doc_id));
+        drop(self.take_document_metadata(doc_id));
     }
 
-    pub(super) fn take_document_terms(&mut self, doc_id: DocId) -> Option<OwnedSet<PostingKey>> {
-        let terms = self.doc_terms.remove(&doc_id);
-        if let Some(terms) = &terms {
-            self.retention.remove(terms_size(terms));
+    pub(super) fn take_document_metadata(&mut self, doc_id: DocId) -> Option<MemoryDocument> {
+        let document = self.documents.remove(&doc_id);
+        if let Some(document) = &document {
+            self.retention.remove(document_size(document));
         }
-        terms
+        document
     }
 
     pub(super) fn insert_postings(
@@ -185,12 +186,13 @@ impl MemoryIndexState {
         postings: OwnedMap<DocId, MemoryPosting>,
     ) {
         if let Some(previous) = self.index.get_mut(&key) {
-            for (id, posting) in postings {
-                self.retention.add(posting_size(&posting));
-                if let Some(replaced) = previous.insert(id, posting) {
-                    self.retention.remove(posting_size(&replaced));
+            for (id, posting) in &postings {
+                self.retention.add(posting_size(posting));
+                if let Some(replaced) = previous.get(id) {
+                    self.retention.remove(posting_size(replaced));
                 }
             }
+            previous.append(postings);
         } else {
             self.retention
                 .add(index_key_size(&key) + postings.values().map(posting_size).sum::<u128>());
@@ -202,13 +204,12 @@ impl MemoryIndexState {
         &mut self,
         doc_id: DocId,
         fields: OwnedMap<FieldName, IndexedFieldMetadata>,
-        terms: OwnedSet<PostingKey>,
+        terms: Vec<PostingKey>,
     ) {
         self.remove_document_metadata(doc_id);
-        self.retention
-            .add(fields_size(&fields) + terms_size(&terms));
-        self.doc_fields.insert(doc_id, fields);
-        self.doc_terms.insert(doc_id, terms);
+        let document = MemoryDocument { fields, terms };
+        self.retention.add(document_size(&document));
+        self.documents.insert(doc_id, document);
     }
 
     fn payload_size(&self) -> u128 {
@@ -218,11 +219,10 @@ impl MemoryIndexState {
                 index_key_size(key) + postings.values().map(posting_size).sum::<u128>()
             })
             .sum::<u128>()
-            + self.doc_terms.values().map(terms_size).sum::<u128>()
-            + self.doc_fields.values().map(fields_size).sum::<u128>()
-            + [&self.total_length, &self.field_doc_counts]
-                .into_iter()
-                .flat_map(OwnedMap::keys)
+            + self.documents.values().map(document_size).sum::<u128>()
+            + self
+                .field_counters
+                .keys()
                 .map(|field| counter_size(field.capacity()))
                 .sum::<u128>()
     }
@@ -232,10 +232,8 @@ impl Clone for MemoryIndexState {
     fn clone(&self) -> Self {
         let mut state = Self {
             index: self.index.clone(),
-            doc_terms: self.doc_terms.clone(),
-            doc_fields: self.doc_fields.clone(),
-            total_length: self.total_length.clone(),
-            field_doc_counts: self.field_doc_counts.clone(),
+            documents: self.documents.clone(),
+            field_counters: self.field_counters.clone(),
             doc_count: self.doc_count,
             retention: RetainedPayload::default(),
         };

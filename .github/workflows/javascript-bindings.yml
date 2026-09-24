@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       run_nori_measurements:
-        description: Run the existing Nori measurements only when separately authorized for the host
+        description: Run WASM Nori allocation and output checks without timing samples
         required: false
         type: boolean
         default: false
@@ -126,16 +126,30 @@ jobs:
           for language in nori kuromoji; do
             python3 scripts/verify-morphology-browser.py --language "$language" --output "output/playwright/${language}-enabled/report.json"
           done
-      - name: Measure WASM analysis and indexing with reviewed allocation ceilings
-        if: ${{ inputs.run_nori_measurements }}
+      - name: Verify WASM analysis allocations and token outputs
+        if: ${{ !cancelled() && inputs.run_nori_measurements }}
         env:
           RUSTFLAGS: ""
           CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS: "-D warnings"
-        run: |
-          python3 scripts/run-nori-benchmark.py --target wasm --output target/benchmark-runs/nori-wasm.json
-          python3 scripts/run-nori-index-benchmark.py --target wasm --output target/benchmark-runs/nori-index-wasm.json
-          python3 scripts/run-nori-persistent-benchmark.py --provider sqlite --target wasm --output target/benchmark-runs/nori-sqlite-wasm.json --allocation-only
-          python3 scripts/run-nori-phrase-benchmark.py --target wasm --output target/benchmark-runs/nori-phrase-wasm.json
+        run: python3 scripts/run-nori-benchmark.py --target wasm --output target/benchmark-runs/nori-wasm.json --allocation-only
+      - name: Verify WASM indexing allocations and graph outputs
+        if: ${{ !cancelled() && inputs.run_nori_measurements }}
+        env:
+          RUSTFLAGS: ""
+          CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS: "-D warnings"
+        run: python3 scripts/run-nori-index-benchmark.py --target wasm --output target/benchmark-runs/nori-index-wasm.json --allocation-only
+      - name: Verify WASM SQLite allocation and reopened outputs
+        if: ${{ !cancelled() && inputs.run_nori_measurements }}
+        env:
+          RUSTFLAGS: ""
+          CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS: "-D warnings"
+        run: python3 scripts/run-nori-persistent-benchmark.py --provider sqlite --target wasm --output target/benchmark-runs/nori-sqlite-wasm.json --allocation-only
+      - name: Verify WASM phrase allocations and scored outputs
+        if: ${{ !cancelled() && inputs.run_nori_measurements }}
+        env:
+          RUSTFLAGS: ""
+          CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS: "-D warnings"
+        run: python3 scripts/run-nori-phrase-benchmark.py --target wasm --output target/benchmark-runs/nori-phrase-wasm.json --allocation-only
       - uses: actions/upload-artifact@v4
         if: ${{ always() && inputs.run_nori_measurements }}
         with:

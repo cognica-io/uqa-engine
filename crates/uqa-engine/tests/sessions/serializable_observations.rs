@@ -94,29 +94,44 @@ impl Session {
     }
 }
 
+fn prepare_tables(session: &Session) {
+    session.sql("CREATE TABLE left_t (id INTEGER PRIMARY KEY, v INTEGER)");
+    session.sql("CREATE TABLE right_t (id INTEGER PRIMARY KEY, v INTEGER)");
+    session.sql("INSERT INTO left_t VALUES (1, 1)");
+    session.sql("INSERT INTO right_t VALUES (1, 1)");
+}
+
+fn fixture(provider: usize) -> (tempfile::TempDir, Session) {
+    let directory = tempfile::tempdir().unwrap();
+    let session = empty_fixture(provider, directory.path());
+    prepare_tables(&session);
+    (directory, session)
+}
+
 fn fixtures() -> (tempfile::TempDir, Vec<Session>) {
     let (directory, sessions) = empty_fixtures();
     for session in &sessions {
-        session.sql("CREATE TABLE left_t (id INTEGER PRIMARY KEY, v INTEGER)");
-        session.sql("CREATE TABLE right_t (id INTEGER PRIMARY KEY, v INTEGER)");
-        session.sql("INSERT INTO left_t VALUES (1, 1)");
-        session.sql("INSERT INTO right_t VALUES (1, 1)");
+        prepare_tables(session);
     }
     (directory, sessions)
 }
 
-fn empty_fixtures() -> (tempfile::TempDir, Vec<Session>) {
-    let directory = tempfile::tempdir().unwrap();
-    let providers: Vec<Box<dyn PersistentStorageProvider>> = vec![
-        Box::new(SQLiteStorageProvider::new(
+fn empty_fixture(provider: usize, directory: &std::path::Path) -> Session {
+    let provider: Box<dyn PersistentStorageProvider> = match provider {
+        0 => Box::new(SQLiteStorageProvider::new(
             ManagedConnection::open_in_memory().unwrap(),
         )),
-        Box::new(SQLiteKeyValueStorage::open_in_memory().unwrap()),
-        Box::new(RedbStorage::open(directory.path().join("observations.redb")).unwrap()),
-    ];
-    let sessions = providers
-        .into_iter()
-        .map(|provider| Session::new(provider.open_session().unwrap()))
+        1 => Box::new(SQLiteKeyValueStorage::open_in_memory().unwrap()),
+        2 => Box::new(RedbStorage::open(directory.join("observations.redb")).unwrap()),
+        _ => unreachable!("unknown observation fixture provider"),
+    };
+    Session::new(provider.open_session().unwrap())
+}
+
+fn empty_fixtures() -> (tempfile::TempDir, Vec<Session>) {
+    let directory = tempfile::tempdir().unwrap();
+    let sessions = (0..3)
+        .map(|provider| empty_fixture(provider, directory.path()))
         .collect();
     (directory, sessions)
 }

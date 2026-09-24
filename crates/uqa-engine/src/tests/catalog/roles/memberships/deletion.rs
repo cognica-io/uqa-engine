@@ -14,75 +14,70 @@ fn prepare(first: &Engine, second: &Engine, isolation: &str) {
     );
 }
 
-#[test]
-fn target_and_grantor_deletion_waits_follow_both_command_orders_and_transaction_undo() {
-    for provider in 0..3 {
-        for isolation in ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] {
-            for endpoint in ["target", "grantor"] {
-                for drop_first in [false, true] {
-                    for finish in ["COMMIT", "ROLLBACK", "ROLLBACK TO undo; COMMIT"] {
-                        let (directory, first, second) = sessions(provider);
-                        prepare(&first, &second, isolation);
-                        let lock = role_lock(&first, endpoint);
-                        sql(&first, "BEGIN; SAVEPOINT undo");
-                        let drop_statement = format!("DROP ROLE {endpoint}");
-                        let grant =
-                            "SET LOCAL ROLE grantor; GRANT target TO member WITH INHERIT TRUE";
-                        sql(&first, if drop_first { &drop_statement } else { grant });
-                        let (second, result) = after_wait(
-                            &first,
-                            second,
-                            if drop_first { grant } else { &drop_statement },
-                            lock,
-                            finish,
-                        );
-                        let expected = if finish == "COMMIT" && endpoint == "grantor" {
-                            if drop_first {
-                                "42704"
-                            } else {
-                                "2BP01"
-                            }
-                        } else {
-                            "00000"
-                        };
-                        if expected == "00000" {
-                            result.unwrap();
-                            sql(&second, "COMMIT");
-                        } else {
-                            assert_eq!(
-                                result.unwrap_err().sqlstate(),
-                                Some(expected),
-                                "{provider}/{isolation}/{endpoint}/{drop_first}/{finish}"
-                            );
-                            sql(&second, "ROLLBACK");
-                        }
-                        let rows = membership_rows(&first);
-                        let granted = first
-                            .durable
-                            .role_memberships
-                            .read()
-                            .values()
-                            .any(|row| row.member.name == "member");
-                        assert_eq!(
-                            granted,
-                            if drop_first {
-                                expected == "00000"
-                            } else {
-                                finish == "COMMIT" && endpoint == "grantor"
-                            }
-                        );
-                        let expected_count = if expected == "00000" { 2 } else { 1 };
-                        assert_eq!(sql(&first, "SELECT v FROM t").rows.len(), expected_count);
-                        drop(second);
-                        drop(first);
-                        let reopened = reopen(provider, &directory.path().join("table-locks.db"));
-                        assert_eq!(membership_rows(&reopened), rows);
-                        assert_eq!(sql(&reopened, "SELECT v FROM t").rows.len(), expected_count);
-                    }
-                }
-            }
+#[rstest::rstest]
+fn target_and_grantor_deletion_waits_follow_both_command_orders_and_transaction_undo(
+    #[values(0, 1, 2)] provider: usize,
+    #[values("READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE")] isolation: &str,
+    #[values("target", "grantor")] endpoint: &str,
+    #[values(false, true)] drop_first: bool,
+    #[values("COMMIT", "ROLLBACK", "ROLLBACK TO undo; COMMIT")] finish: &str,
+) {
+    let (directory, first, second) = sessions(provider);
+    prepare(&first, &second, isolation);
+    let lock = role_lock(&first, endpoint);
+    sql(&first, "BEGIN; SAVEPOINT undo");
+    let drop_statement = format!("DROP ROLE {endpoint}");
+    let grant = "SET LOCAL ROLE grantor; GRANT target TO member WITH INHERIT TRUE";
+    sql(&first, if drop_first { &drop_statement } else { grant });
+    let (second, result) = after_wait(
+        &first,
+        second,
+        if drop_first { grant } else { &drop_statement },
+        lock,
+        finish,
+    );
+    let expected = if finish == "COMMIT" && endpoint == "grantor" {
+        if drop_first {
+            "42704"
+        } else {
+            "2BP01"
         }
+    } else {
+        "00000"
+    };
+    if expected == "00000" {
+        result.unwrap();
+        sql(&second, "COMMIT");
+    } else {
+        assert_eq!(
+            result.unwrap_err().sqlstate(),
+            Some(expected),
+            "{provider}/{isolation}/{endpoint}/{drop_first}/{finish}"
+        );
+        sql(&second, "ROLLBACK");
     }
+    let rows = membership_rows(&first);
+    let granted = first
+        .durable
+        .role_memberships
+        .read()
+        .values()
+        .any(|row| row.member.name == "member");
+    assert_eq!(
+        granted,
+        if drop_first {
+            expected == "00000"
+        } else {
+            finish == "COMMIT" && endpoint == "grantor"
+        }
+    );
+    let expected_count = if expected == "00000" { 2 } else { 1 };
+    assert_eq!(sql(&first, "SELECT v FROM t").rows.len(), expected_count);
+    drop(second);
+    drop(first);
+    let reopened = reopen(provider, &directory.path().join("table-locks.db"));
+    assert_eq!(membership_rows(&reopened), rows);
+    assert_eq!(sql(&reopened, "SELECT v FROM t").rows.len(), expected_count);
 }
 
 #[test]

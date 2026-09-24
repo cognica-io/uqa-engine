@@ -164,10 +164,21 @@ impl PrivateRecordChanges {
             }
         }
         let identity = PrivateRecordRevision::allocate()?;
+        if let [write] = writes {
+            control.cancellation().check()?;
+            state.records.try_insert(
+                write.shared_key(),
+                Change {
+                    write: write.clone(),
+                    identity,
+                },
+            )?;
+            return Ok(());
+        }
         let mut records = state.records.clone();
         for write in writes {
             control.cancellation().check()?;
-            records = records.with_insert(
+            records.try_insert(
                 write.shared_key(),
                 Change {
                     write: write.clone(),

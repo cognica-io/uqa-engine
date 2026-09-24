@@ -436,14 +436,9 @@ pub trait InvertedIndex: Send + Sync {
             .collect()
     }
 
-    /// Visit every posting entry for `(field, term)` in ascending
-    /// doc-id order without handing out an owned list.
+    /// Visit every legacy unique-position projection for `(field, term)` in ascending doc-id order without handing out an owned list.
     ///
-    /// [`InvertedIndex::get_posting_list`] deep-copies each entry's
-    /// payload (positions vector included), which costs one heap
-    /// allocation per matching document. Read-only scoring walks use
-    /// this instead; backends whose postings already live in memory
-    /// override it to iterate in place.
+    /// Occurrence-backed providers may materialize each entry during its callback. Frequency-only scoring should use [`InvertedIndex::for_each_term_freq`] to avoid building position buffers; graph consumers use the occurrence interfaces to preserve multiplicity.
     fn for_each_posting(
         &self,
         field: &str,

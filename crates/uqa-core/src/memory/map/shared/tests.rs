@@ -29,19 +29,23 @@ fn verify<K: Ord, V>(link: &Link<K, V>) -> (usize, u8) {
 proptest! {
     #[test]
     fn retained_roots_match_independent_ordered_maps(
-        operations in prop::collection::vec((any::<bool>(), 0_u8..80, any::<i32>()), 1..160)
+        operations in prop::collection::vec((any::<bool>(), any::<bool>(), 0_u8..80, any::<i32>()), 1..160)
     ) {
         let budget = MemoryBudget::new(1 << 20);
         let mut map = BudgetedSharedMap::new(&budget);
         let mut expected = BTreeMap::new();
         let mut retained = Vec::new();
-        for (capture, key, value) in operations {
+        for (capture, mutate, key, value) in operations {
             if capture {
                 let used = budget.used();
                 retained.push((map.clone(), expected.clone()));
                 prop_assert_eq!(budget.used(), used);
             }
-            map = map.with_insert(key, value).unwrap();
+            if mutate {
+                map.try_insert(key, value).unwrap();
+            } else {
+                map = map.with_insert(key, value).unwrap();
+            }
             expected.insert(key, value);
             prop_assert_eq!(map.len(), expected.len());
             prop_assert_eq!(map.is_empty(), expected.is_empty());
@@ -58,6 +62,90 @@ proptest! {
         }
         prop_assert_eq!(budget.used(), 0);
     }
+}
+
+#[test]
+fn private_insertions_and_rotations_need_only_the_new_entry_and_node_allowance() {
+    fn addresses(
+        link: &Link<usize, usize>,
+        found: &mut BTreeMap<usize, *const Node<usize, usize>>,
+    ) {
+        if let Some(node) = link {
+            found.insert(node.entry.0, std::ptr::from_ref(&***node));
+            addresses(&node.left, found);
+            addresses(&node.right, found);
+        }
+    }
+    for keys in [(0..128).collect::<Vec<_>>(), (0..128).rev().collect()] {
+        let budget = MemoryBudget::new(1 << 20);
+        let mut map = BudgetedSharedMap::new(&budget);
+        let additional =
+            size_of::<Budgeted<Node<usize, usize>>>() + size_of::<Budgeted<(usize, usize)>>();
+        let mut previous = BTreeMap::new();
+        for key in keys {
+            let blocker = budget
+                .reserve(budget.limit() - budget.used() - additional)
+                .unwrap();
+            map.try_insert(key, key).unwrap();
+            drop(blocker);
+            let mut current = BTreeMap::new();
+            addresses(&map.root, &mut current);
+            for (key, pointer) in &previous {
+                assert_eq!(
+                    current[key], *pointer,
+                    "private nodes must move rather than be copied"
+                );
+            }
+            previous = current;
+            assert_eq!(verify(&map.root).0, map.len());
+            assert_eq!(budget.used(), additional * map.len());
+        }
+        drop(map);
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
+fn unique_replacement_reuses_its_entry_without_additional_allowance() {
+    let budget = MemoryBudget::new(4096);
+    let mut map = BudgetedSharedMap::new(&budget);
+    map.try_insert(1, 10).unwrap();
+    let pointer = std::ptr::from_ref(map.get(&1).unwrap());
+    let before = budget.used();
+    let blocker = budget.reserve(budget.limit() - before).unwrap();
+    map.try_insert(1, 20).unwrap();
+    assert_eq!(map.len(), 1);
+    assert_eq!(map.get(&1), Some(&20));
+    assert_eq!(std::ptr::from_ref(map.get(&1).unwrap()), pointer);
+    drop(blocker);
+    assert_eq!(budget.used(), before);
+    drop(map);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn failed_private_insertion_preserves_candidate_and_published_roots() {
+    let budget = MemoryBudget::new(1 << 16);
+    let published = BudgetedSharedMap::new(&budget).with_insert(1, 10).unwrap();
+    let before = budget.used();
+    let mut candidate = published.with_insert(2, 20).unwrap();
+    let candidate_before = budget.used();
+    let blocker = budget.reserve(budget.limit() - budget.used()).unwrap();
+    assert!(matches!(
+        candidate.try_insert(3, 30),
+        Err(MemoryError::Limit { .. })
+    ));
+    assert_eq!(published.len(), 1);
+    assert_eq!(published.get(&1), Some(&10));
+    assert!(published.get(&2).is_none());
+    assert_eq!(candidate.get(&2), Some(&20));
+    assert!(candidate.get(&3).is_none());
+    drop(blocker);
+    assert_eq!(budget.used(), candidate_before);
+    drop(candidate);
+    assert_eq!(budget.used(), before);
+    drop(published);
+    assert_eq!(budget.used(), 0);
 }
 
 #[test]
@@ -150,29 +238,39 @@ fn failed_path_and_rotation_reservations_preserve_roots_and_release_candidates()
         ([10, 30], 20),
         ([10, 20], 30),
     ] {
-        for allowance in (0..2048).step_by(16) {
-            let budget = MemoryBudget::new(1 << 16);
-            let mut map = BudgetedSharedMap::new(&budget);
-            for key in initial {
-                map = map.with_insert(key, key).unwrap();
-            }
-            let before = budget.used();
-            let held = budget.reserve(budget.limit() - before - allowance).unwrap();
-            match map.with_insert(next, next) {
-                Ok(candidate) => {
-                    successes += 1;
-                    assert_eq!(verify(&candidate.root).0, 3);
-                    assert_eq!(candidate.get(&next), Some(&next));
+        for retain in [false, true] {
+            for allowance in (0..2048).step_by(16) {
+                let budget = MemoryBudget::new(1 << 16);
+                let mut map = BudgetedSharedMap::new(&budget);
+                for key in initial {
+                    map.try_insert(key, key).unwrap();
                 }
-                Err(MemoryError::Limit { .. }) => failures += 1,
-                Err(error) => panic!("unexpected insertion error: {error}"),
+                let retained = retain.then(|| map.clone());
+                let before = budget.used();
+                let held = budget.reserve(budget.limit() - before - allowance).unwrap();
+                match map.try_insert(next, next) {
+                    Ok(()) => {
+                        successes += 1;
+                        assert_eq!(verify(&map.root).0, 3);
+                        assert_eq!(map.get(&next), Some(&next));
+                    }
+                    Err(MemoryError::Limit { .. }) => {
+                        failures += 1;
+                        assert_eq!(verify(&map.root).0, 2);
+                        assert!(map.get(&next).is_none());
+                        assert_eq!(budget.used(), before + held.bytes());
+                    }
+                    Err(error) => panic!("unexpected insertion error: {error}"),
+                }
+                if let Some(retained) = &retained {
+                    assert_eq!(retained.len(), 2);
+                    assert!(retained.get(&next).is_none());
+                }
+                drop(held);
+                drop(map);
+                drop(retained);
+                assert_eq!(budget.used(), 0);
             }
-            assert_eq!(map.len(), 2);
-            assert!(map.get(&next).is_none());
-            drop(held);
-            assert_eq!(budget.used(), before);
-            drop(map);
-            assert_eq!(budget.used(), 0);
         }
     }
     assert!(failures > 1 && successes > 1);

@@ -62,9 +62,17 @@ fn probe(
     name: &str,
     case_index: usize,
     cases: usize,
+    allocation_only: bool,
     run: impl Fn() -> Budgeted<Vec<ScoredEntry>>,
 ) -> Value {
-    let first = run();
+    let mut counted = None;
+    let first = if allocation_only {
+        let mut retained = None;
+        counted = Some(measure(|| retained = Some(run())));
+        retained.unwrap()
+    } else {
+        run()
+    };
     assert!(first
         .iter()
         .any(|row| row.doc_id == DOCUMENTS + case_index as u64));
@@ -88,34 +96,45 @@ fn probe(
             assert_eq!(row.score.to_bits(), score);
         }
     };
-    let mut elapsed_ns = Vec::with_capacity(SAMPLES);
-    opt_out(|| {
-        for _ in 0..SAMPLES {
-            let start = Instant::now();
-            let rows = black_box(run());
-            elapsed_ns.push(start.elapsed().as_nanos() as u64);
-            verify(&rows);
-        }
+    let mut elapsed_ns = Vec::new();
+    if !allocation_only {
+        elapsed_ns.reserve(SAMPLES);
+        opt_out(|| {
+            for _ in 0..SAMPLES {
+                let start = Instant::now();
+                let rows = black_box(run());
+                elapsed_ns.push(start.elapsed().as_nanos() as u64);
+                verify(&rows);
+            }
+        });
+    }
+    let info = counted.unwrap_or_else(|| {
+        let mut retained = None;
+        let info = measure(|| retained = Some(run()));
+        verify(retained.as_ref().unwrap());
+        info
     });
-    let mut retained = None;
-    let info = measure(|| retained = Some(run()));
-    verify(retained.as_ref().unwrap());
-    drop(retained);
-    let mut ordered = elapsed_ns.clone();
-    ordered.sort_unstable();
     eprintln!("measured {name}");
-    json!({
-        "name": name, "elapsed_ns": elapsed_ns, "median_ns": ordered[SAMPLES / 2],
-        "verified_samples": SAMPLES + 2,
+    let mut row = json!({
+        "name": name,
+        "verified_samples": if allocation_only { 1 } else { SAMPLES + 2 },
         "allocation": {
             "count_total": info.count_total, "count_peak": info.count_max, "count_retained": info.count_current,
             "bytes_total": info.bytes_total, "bytes_peak": info.bytes_max, "bytes_retained": info.bytes_current,
         },
         "rows": expected.iter().map(|&(id, bits)| json!([id, f64::from_bits(bits)])).collect::<Vec<_>>(),
-    })
+    });
+    if !allocation_only {
+        let mut ordered = elapsed_ns.clone();
+        ordered.sort_unstable();
+        row["elapsed_ns"] = json!(elapsed_ns);
+        row["median_ns"] = json!(ordered[SAMPLES / 2]);
+    }
+    row
 }
 
 fn main() {
+    let allocation_only = std::env::args_os().any(|argument| argument == "--allocation-only");
     let corpus: Value = serde_json::from_str(CORPUS).unwrap();
     let cases = corpus["cases"].as_array().unwrap();
     let cancellation = CancellationToken::new();
@@ -157,7 +176,7 @@ fn main() {
                         score_phrase_budgeted(&index, "body", &query, &scoring, &budget).unwrap()
                     }
                 };
-                let mut row = probe(&name, case_index, cases.len(), run);
+                let mut row = probe(&name, case_index, cases.len(), allocation_only, run);
                 row["query_occurrences"] = json!(query.len());
                 row["query_sha256"] = json!(format!("{:x}", Sha256::digest(text.as_bytes())));
                 row["analyzer_fingerprint"] =
@@ -166,17 +185,19 @@ fn main() {
             }
         }
     }
-    println!(
-        "{}",
-        json!({
-            "schema_version": 1, "owner": "uqa-operators", "target_arch": std::env::consts::ARCH,
-            "target_os": std::env::consts::OS, "pointer_bits": usize::BITS, "threads": 1,
-            "protocol": {"samples": SAMPLES, "warmup": 1, "timed_operations_per_sample": 1},
-            "documents": DOCUMENTS + cases.len() as u64, "memory_limit": MEMORY_LIMIT,
-            "corpus_sha256": format!("{:x}", Sha256::digest(CORPUS.as_bytes())),
-            "timing_scope": "query-owned budgets, graph matching and BM25 scoring; analysis_and_match also includes complete phrase analysis and lossless key projection; excludes dictionary/index setup, verification and final result drop",
-            "allocation_scope": "current-thread Rust allocator requests with scored results retained; excludes dictionary, index, pre-analyzed match_graph input, stack and host heap",
-            "measurements": measurements,
-        })
-    );
+    let mut report = json!({
+        "schema_version": 1, "owner": "uqa-operators", "target_arch": std::env::consts::ARCH,
+        "target_os": std::env::consts::OS, "pointer_bits": usize::BITS, "threads": 1,
+        "documents": DOCUMENTS + cases.len() as u64, "memory_limit": MEMORY_LIMIT,
+        "corpus_sha256": format!("{:x}", Sha256::digest(CORPUS.as_bytes())),
+        "allocation_scope": "current-thread Rust allocator requests with scored results retained; excludes dictionary, index, pre-analyzed match_graph input, stack and host heap",
+        "measurements": measurements,
+    });
+    report["protocol"] = if allocation_only {
+        json!({"allocation_samples": 1, "samples": 0, "warmup": 0, "timed_operations_per_sample": 0})
+    } else {
+        report["timing_scope"] = json!("query-owned budgets, graph matching and BM25 scoring; analysis_and_match also includes complete phrase analysis and lossless key projection; excludes dictionary/index setup, verification and final result drop");
+        json!({"samples": SAMPLES, "warmup": 1, "timed_operations_per_sample": 1})
+    };
+    println!("{report}");
 }

@@ -7,10 +7,10 @@
 //! Immutable source staging and complete persisted document/cluster reads.
 
 use super::{
-    analyze_index_field, decode_occurrence_cluster, decode_term_keys, decode_u64_value, keys,
-    other_error, AnalyzerBindings, BTreeMap, DocId, DocumentFields, FieldName, FieldSnapshot,
-    FieldStats, IndexedFieldMetadata, IndexedFieldRevision, OccurrencePosting, OccurrenceRead,
-    StagedDocuments, StorageBackendResult, TokenTermKey,
+    decode_occurrence_cluster, decode_term_keys, decode_u64_value, keys, other_error,
+    AnalyzerBindings, BTreeMap, DocId, DocumentFields, FieldName, FieldSnapshot, FieldStats,
+    IndexedFieldMetadata, IndexedFieldRevision, OccurrencePosting, OccurrenceRead, StagedDocuments,
+    StorageBackendResult, TokenTermKey,
 };
 
 #[cfg(test)]
@@ -110,14 +110,30 @@ impl OccurrenceRead<'_> {
                     revisions.insert(field.clone(), self.bindings.index_revision(&field)?);
                 }
                 let revision = &revisions[&field];
-                let analyzed = match cancellation {
-                    Some(cancellation) => crate::inverted_index::analyze_index_field_cancellable(
-                        revision,
-                        &text,
-                        cancellation,
-                    )?,
-                    None => analyze_index_field(revision, &text)?,
-                };
+                let analyzed = crate::inverted_index::analyze_index_field_with_scratch(
+                    revision,
+                    &text,
+                    self.store.control().memory(),
+                    || {
+                        self.store
+                            .control()
+                            .cancellation()
+                            .check()
+                            .and_then(|()| {
+                                cancellation.map_or(Ok(()), uqa_core::CancellationToken::check)
+                            })
+                            .map_err(|_| uqa_analysis::AnalysisError::Cancelled)
+                    },
+                )
+                .map_err(|error| match error {
+                    crate::StorageBackendError::Analysis(uqa_analysis::AnalysisError::Memory(
+                        memory,
+                    )) => crate::StorageBackendError::Memory(memory),
+                    crate::StorageBackendError::Analysis(
+                        uqa_analysis::AnalysisError::Cancelled,
+                    ) => crate::StorageBackendError::Cancelled(uqa_core::QueryCancelled),
+                    other => other,
+                })?;
                 let metadata = IndexedFieldMetadata::new(revision, &analyzed);
                 snapshot.insert(
                     field,

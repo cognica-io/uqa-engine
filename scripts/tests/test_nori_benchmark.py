@@ -57,6 +57,34 @@ def fixture():
 
 
 class NoriBenchmarkTest(unittest.TestCase):
+    def test_allocation_only_preserves_output_and_allocation_gates_without_timing(self):
+        report, limits = fixture()
+        report["protocol"] = dict(benchmark.ALLOCATION_PROTOCOL)
+        report.pop("timing_scope")
+        for row in report["measurements"]:
+            row.pop("timing")
+        self.assertTrue(benchmark.check(report, limits, allocation_only=True)["allocation_and_output_passed"])
+        for key, value in report["protocol"].items():
+            invalid = copy.deepcopy(report)
+            invalid["protocol"][key] = bool(value)
+            with self.subTest(key=key), self.assertRaisesRegex(RuntimeError, "sampling protocol"):
+                benchmark.check(invalid, limits, allocation_only=True)
+        with self.assertRaisesRegex(RuntimeError, "cannot compare timing"):
+            benchmark.check(report, limits, copy.deepcopy(report), allocation_only=True)
+        report["measurements"][0]["allocation"]["bytes_total"] += 1
+        with self.assertRaisesRegex(RuntimeError, "allocation regression"):
+            benchmark.check(report, limits, allocation_only=True)
+
+    def test_allocation_only_rejects_timing_observations(self):
+        report, limits = fixture()
+        report["protocol"] = dict(benchmark.ALLOCATION_PROTOCOL)
+        report.pop("timing_scope")
+        for row in report["measurements"]:
+            row.pop("timing")
+        report["timing_scope"] = "uncontrolled timing"
+        with self.assertRaisesRegex(RuntimeError, "timing observations"):
+            benchmark.check(report, limits, allocation_only=True)
+
     def test_generated_reports_are_rejected_but_contracts_remain_allowed(self):
         script = "scripts/check-public-repository-hygiene.sh"
         with tempfile.TemporaryDirectory() as temporary:

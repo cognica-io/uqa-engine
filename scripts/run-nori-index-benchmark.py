@@ -130,21 +130,25 @@ def main() -> int:
     parser.add_argument("--limits", type=pathlib.Path, default=LIMITS)
     parser.add_argument("--measure-only", action="store_true")
     parser.add_argument("--baseline", type=pathlib.Path)
+    parser.add_argument("--allocation-only", action="store_true", help="verify one allocation/output sample per workload without timing")
     args = parser.parse_args()
     if args.measure_only and args.baseline:
         parser.error("--baseline requires reviewed gates")
+    if args.allocation_only and args.baseline:
+        parser.error("--allocation-only cannot compare timing baselines")
     protected = [args.limits, common.CORPUS] + ([args.baseline] if args.baseline else [])
     if args.output.resolve() in [path.resolve() for path in protected]:
         parser.error("output must not overwrite reviewed limits, the corpus, or timing baseline")
     report = json.loads(args.report.read_text()) if args.report else common.execute_benchmark(
-        args.target, "uqa-storage", "nori_storage", "uqa-analysis/nori", OWNERS)
-    measurements(report)
+        args.target, "uqa-storage", "nori_storage", "uqa-analysis/nori", OWNERS,
+        arguments=("--allocation-only",) if args.allocation_only else ())
+    measurements(report, allocation_only=args.allocation_only)
     report["gate"] = {"allocation_and_graph_passed": False, "timing_compared": False}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     if not args.measure_only:
         baseline = json.loads(args.baseline.read_text()) if args.baseline else None
-        report["gate"] = check(report, json.loads(args.limits.read_text()), baseline)
+        report["gate"] = check(report, json.loads(args.limits.read_text()), baseline, allocation_only=args.allocation_only)
         args.output.write_text(json.dumps(report, indent=2) + "\n")
     print(f"Nori indexing {'candidate measurement' if args.measure_only else 'gate passed'}: {args.output}")
     return 0

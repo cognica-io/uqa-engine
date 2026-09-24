@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use uqa_analysis::Analyzer;
-use uqa_core::memory::{OwnedMap, OwnedSet};
+use uqa_core::memory::OwnedMap;
 use uqa_core::{DocId, FieldName, IndexStats, Payload, PostingEntry, PostingList, TokenOccurrence};
 
 use crate::TokenTermKey;
@@ -24,6 +24,7 @@ use crate::block_max_index::BlockMaxScorer;
 use crate::clustered_postings::{MaterializedPostingCursor, PostingCursor, PostingScore};
 
 mod analysis;
+pub(crate) use analysis::analyze_index_field_with_scratch;
 mod batch;
 mod bindings;
 mod changes;
@@ -119,61 +120,74 @@ impl Clone for MemoryInvertedIndex {
 struct MemoryIndexState {
     /// `(field, term) -> doc_id -> entry (positions inside the doc)`
     index: OwnedMap<PostingKey, OwnedMap<DocId, MemoryPosting>>,
-    /// Reverse index for `remove_document` so we touch only relevant
-    /// `(field, term)` posting maps instead of scanning the whole index.
-    doc_terms: OwnedMap<DocId, OwnedSet<PostingKey>>,
-    /// Exact revision, normalization length, and original source end state for each document field.
-    doc_fields: OwnedMap<DocId, OwnedMap<FieldName, IndexedFieldMetadata>>,
-    /// Sum of field lengths across all docs, per field.
-    total_length: OwnedMap<FieldName, u64>,
-    /// Number of documents with indexed content per field, maintained
-    /// incrementally so per-query BM25 statistics never walk
-    /// `doc_fields` (O(corpus) at query time otherwise).
-    field_doc_counts: OwnedMap<FieldName, u64>,
+    /// Field metadata and reverse posting keys share one document owner.
+    documents: OwnedMap<DocId, MemoryDocument>,
+    /// Length and document totals share one field owner; BM25 statistics never scan the corpus.
+    field_counters: OwnedMap<FieldName, MemoryFieldCounters>,
     doc_count: u64,
     retention: footprint::RetainedPayload,
 }
 
 type PostingKey = (FieldName, TokenTermKey);
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MemoryDocument {
+    /// Exact revision, normalization length and original source end state for each field.
+    fields: OwnedMap<FieldName, IndexedFieldMetadata>,
+    /// Ordered unique keys restrict removal to this document's postings.
+    terms: Vec<PostingKey>,
+}
+
 #[derive(Debug, Clone)]
 struct MemoryPosting {
-    projection: PostingEntry,
+    doc_id: DocId,
     occurrences: Vec<TokenOccurrence>,
 }
 
 impl MemoryPosting {
-    fn new(doc_id: DocId, occurrences: Vec<TokenOccurrence>, mut positions: Vec<u32>) -> Self {
-        positions.sort_unstable();
-        positions.dedup();
+    fn new(doc_id: DocId, occurrences: Vec<TokenOccurrence>) -> Self {
+        debug_assert!(occurrences
+            .windows(2)
+            .all(|pair| pair[0].position <= pair[1].position));
         Self {
-            projection: PostingEntry::new(
-                doc_id,
-                Payload {
-                    positions,
-                    score: 0.0,
-                    fields: BTreeMap::new(),
-                },
-            ),
+            doc_id,
             occurrences,
         }
+    }
+
+    fn projection(&self) -> PostingEntry {
+        // Analysis emits nondecreasing positions. The legacy projection discards duplicate positions, while scoring and phrase matching retain every occurrence.
+        let mut positions: Vec<_> = self
+            .occurrences
+            .iter()
+            .map(|occurrence| occurrence.position)
+            .collect();
+        positions.dedup();
+        PostingEntry::new(
+            self.doc_id,
+            Payload {
+                positions,
+                score: 0.0,
+                fields: BTreeMap::new(),
+            },
+        )
     }
 }
 
 struct StagedMemoryDocument {
     fields: OwnedMap<FieldName, IndexedFieldMetadata>,
-    terms: OwnedSet<PostingKey>,
+    terms: Vec<PostingKey>,
     postings: Vec<(PostingKey, MemoryPosting)>,
 }
 
 struct MemoryReplacementPlan {
-    old_terms: OwnedSet<PostingKey>,
+    old_terms: Vec<PostingKey>,
     next_doc_count: u64,
     field_counters: OwnedMap<FieldName, MemoryFieldCounters>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct MemoryFieldCounters {
-    total_key: FieldName,
     total: u64,
     docs: u64,
 }
@@ -222,7 +236,7 @@ impl MemoryInvertedIndex {
         cancellation: Option<&uqa_core::CancellationToken>,
     ) -> StorageBackendResult<StagedMemoryDocument> {
         let mut metadata = OwnedMap::new();
-        let mut terms = OwnedSet::new();
+        let mut terms = Vec::new();
         let mut postings = Vec::new();
         for (field, text) in fields {
             if let Some(cancellation) = cancellation {
@@ -239,14 +253,14 @@ impl MemoryInvertedIndex {
                 field.clone(),
                 IndexedFieldMetadata::new(&revision, &analyzed),
             );
+            terms.reserve(analyzed.terms.len());
             for (term, occurrences) in analyzed.terms {
                 if let Some(cancellation) = cancellation {
                     cancellation.check()?;
                 }
-                let positions = occurrences.iter().map(|item| item.position).collect();
                 let key = (field.clone(), term);
-                terms.insert(key.clone());
-                postings.push((key, MemoryPosting::new(doc_id, occurrences, positions)));
+                terms.push(key.clone());
+                postings.push((key, MemoryPosting::new(doc_id, occurrences)));
             }
         }
         Ok(StagedMemoryDocument {
@@ -258,6 +272,16 @@ impl MemoryInvertedIndex {
 }
 
 impl MemoryIndexState {
+    fn document(&self, doc_id: DocId) -> StorageBackendResult<Option<&MemoryDocument>> {
+        let document = self.documents.get(&doc_id);
+        if document.is_some_and(|document| document.fields.is_empty()) {
+            return Err(StorageBackendError::Other(format!(
+                "inverted-index document {doc_id} has inconsistent reverse-index state"
+            )));
+        }
+        Ok(document)
+    }
+
     fn plan_replacement(
         &self,
         doc_id: DocId,
@@ -272,18 +296,15 @@ impl MemoryIndexState {
         new_fields: &OwnedMap<FieldName, IndexedFieldMetadata>,
         mut copy_name: impl FnMut(&FieldName) -> StorageBackendResult<FieldName>,
     ) -> StorageBackendResult<MemoryReplacementPlan> {
-        let has_terms = self.doc_terms.contains_key(&doc_id);
-        if has_terms != self.doc_fields.contains_key(&doc_id) {
-            return Err(StorageBackendError::Other(format!(
-                "inverted-index document {doc_id} has inconsistent reverse-index state"
-            )));
-        }
-        let old_terms = self.doc_terms.get(&doc_id).cloned().unwrap_or_default();
+        let previous = self.document(doc_id)?;
+        let old_terms = previous
+            .map(|document| document.terms.clone())
+            .unwrap_or_default();
         let empty_fields = OwnedMap::new();
-        let old_fields = self.doc_fields.get(&doc_id).unwrap_or(&empty_fields);
+        let old_fields = previous.map_or(&empty_fields, |document| &document.fields);
         let next_doc_count = self
             .doc_count
-            .checked_sub(u64::from(has_terms))
+            .checked_sub(u64::from(previous.is_some()))
             .ok_or_else(|| counter_error("document count"))?
             .checked_add(u64::from(!new_fields.is_empty()))
             .ok_or_else(|| counter_error("document count"))?;
@@ -320,19 +341,17 @@ impl MemoryIndexState {
             let old_length = old_fields.get(field).map_or(0, |metadata| metadata.length);
             let new_length = new_fields.get(field).map_or(0, |metadata| metadata.length);
             let total = self
-                .total_length
+                .field_counters
                 .get(field)
-                .copied()
-                .unwrap_or(0)
+                .map_or(0, |counters| counters.total)
                 .checked_sub(old_length)
                 .ok_or_else(|| counter_error("total field length"))?
                 .checked_add(new_length)
                 .ok_or_else(|| counter_error("total field length"))?;
             let field_docs = self
-                .field_doc_counts
+                .field_counters
                 .get(field)
-                .copied()
-                .unwrap_or(0)
+                .map_or(0, |counters| counters.docs)
                 .checked_sub(u64::from(old_fields.contains_key(field)))
                 .ok_or_else(|| counter_error("field document count"))?
                 .checked_add(u64::from(new_fields.contains_key(field)))
@@ -340,7 +359,6 @@ impl MemoryIndexState {
             field_counters.insert(
                 copy_name(field)?,
                 MemoryFieldCounters {
-                    total_key: copy_name(field)?,
                     total,
                     docs: field_docs,
                 },
@@ -365,15 +383,9 @@ impl MemoryIndexState {
         self.remove_document_metadata(doc_id);
         for (field, counters) in plan.field_counters {
             footprint::set_counter(
-                &mut self.total_length,
-                counters.total_key,
-                (counters.docs != 0).then_some(counters.total),
-                &mut self.retention,
-            );
-            footprint::set_counter(
-                &mut self.field_doc_counts,
+                &mut self.field_counters,
                 field,
-                (counters.docs != 0).then_some(counters.docs),
+                (counters.docs != 0).then_some(counters),
                 &mut self.retention,
             );
         }

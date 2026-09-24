@@ -33,10 +33,8 @@ fn seeded() -> MemoryInvertedIndex {
 
 fn assert_state(left: &MemoryInvertedIndex, right: &MemoryInvertedIndex) {
     assert_eq!(left.state.doc_count, right.state.doc_count);
-    assert_eq!(left.state.total_length, right.state.total_length);
-    assert_eq!(left.state.field_doc_counts, right.state.field_doc_counts);
-    assert_eq!(left.state.doc_fields, right.state.doc_fields);
-    assert_eq!(left.state.doc_terms, right.state.doc_terms);
+    assert_eq!(left.state.field_counters, right.state.field_counters);
+    assert_eq!(left.state.documents, right.state.documents);
     assert_eq!(
         format!("{:?}", left.state.index),
         format!("{:?}", right.state.index)
@@ -48,11 +46,6 @@ fn batches_preserve_untouched_posting_allocations() {
     let mut index = seeded();
     let key = ("body".into(), crate::TokenTermKey::from_text("shared"));
     let occurrences = index.state.index[&key][&99].occurrences.as_ptr();
-    let positions = index.state.index[&key][&99]
-        .projection
-        .payload
-        .positions
-        .as_ptr();
     index.try_add_documents(Vec::new()).unwrap();
     assert_eq!(
         index.state.index[&key][&99].occurrences.as_ptr(),
@@ -65,14 +58,6 @@ fn batches_preserve_untouched_posting_allocations() {
         index.state.index[&key][&99].occurrences.as_ptr(),
         occurrences
     );
-    assert_eq!(
-        index.state.index[&key][&99]
-            .projection
-            .payload
-            .positions
-            .as_ptr(),
-        positions
-    );
     assert_eq!(index.doc_count().unwrap(), 4);
     assert_eq!(index.doc_freq("body", "old").unwrap(), 0);
     assert_eq!(index.doc_freq("body", "new").unwrap(), 2);
@@ -84,8 +69,10 @@ fn late_document_and_field_counter_failures_publish_nothing() {
         let mut index = seeded();
         if field_overflow {
             Arc::make_mut(&mut index.state)
-                .total_length
-                .insert("body".into(), u64::MAX - 1);
+                .field_counters
+                .get_mut("body")
+                .unwrap()
+                .total = u64::MAX - 1;
         } else {
             Arc::make_mut(&mut index.state).doc_count = u64::MAX - 1;
         }
@@ -107,7 +94,11 @@ fn corrupt_affected_postings_or_reverse_metadata_publish_nothing() {
     for missing_field in [false, true] {
         let mut index = seeded();
         if missing_field {
-            Arc::make_mut(&mut index.state).doc_fields.remove(&2);
+            Arc::make_mut(&mut index.state)
+                .documents
+                .get_mut(&2)
+                .unwrap()
+                .fields = OwnedMap::new();
         } else {
             Arc::make_mut(&mut index.state)
                 .index

@@ -20,15 +20,25 @@ use crate::{
     read_control::StorageReadControl,
 };
 
-struct Participant {
+struct Participant<T> {
     id: SerializableTransactionId,
-    _retained: Box<dyn Send + Sync>,
+    _retained: T,
     _memory: MemoryReservation,
+}
+
+trait ParticipantLease: Send + Sync {
+    fn id(&self) -> SerializableTransactionId;
+}
+
+impl<T: Send + Sync> ParticipantLease for Participant<T> {
+    fn id(&self) -> SerializableTransactionId {
+        self.id
+    }
 }
 
 /// All clones retain the original participant's liveness through nested execution and pinned data views. The provider exposes this handle only after admission is retained. Lease release never acquires SSI admission or resolves a logical transaction. A final retained physical owner may subsequently perform its provider's ordinary close.
 #[derive(Clone)]
-pub struct SerializableParticipant(Arc<Participant>);
+pub struct SerializableParticipant(Arc<dyn ParticipantLease>);
 
 impl SerializableParticipant {
     pub fn retain(
@@ -36,9 +46,17 @@ impl SerializableParticipant {
         lease: Box<dyn Send + Sync>,
         control: &StorageReadControl,
     ) -> VersionResult<Self> {
+        Self::retain_value(id, lease, control)
+    }
+
+    fn retain_value<T: Send + Sync + 'static>(
+        id: SerializableTransactionId,
+        lease: T,
+        control: &StorageReadControl,
+    ) -> VersionResult<Self> {
         let memory = control
             .memory()
-            .reserve(std::mem::size_of::<Participant>() + 2 * std::mem::size_of::<usize>())?;
+            .reserve(std::mem::size_of::<Participant<T>>() + 2 * std::mem::size_of::<usize>())?;
         Ok(Self(Arc::new(Participant {
             id,
             _retained: lease,
@@ -47,19 +65,25 @@ impl SerializableParticipant {
     }
 
     pub fn id(&self) -> SerializableTransactionId {
-        self.0.id
+        self.0.id()
     }
 }
 
 struct LocalEntry {
     id: SerializableTransactionId,
-    lease: Weak<Participant>,
+    lease: Weak<dyn ParticipantLease>,
 }
 
 struct LocalLeaseOwner<T> {
-    _registry: Arc<LocalSerializableLeases>,
+    registry: Arc<LocalSerializableLeases>,
     _retained: T,
-    _memory: MemoryReservation,
+}
+
+impl<T> Drop for LocalLeaseOwner<T> {
+    fn drop(&mut self) {
+        // This private list lock never enters SSI/provider admission or closes physical owners. Participant construction occurs outside it, so failed publication can release its lease here too.
+        self.registry.reclaim();
+    }
 }
 
 /// Liveness for an exclusively owned database or one browser/in-memory owner. File-backed multiprocess providers must use native leases instead. The entries and their capacity share the owner's allowance; live handles retain the registry through their lease payload.
@@ -86,6 +110,14 @@ impl LocalSerializableLeases {
         control: &StorageReadControl,
     ) -> VersionResult<SerializableParticipant> {
         control.check()?;
+        let participant = SerializableParticipant::retain_value(
+            id,
+            LocalLeaseOwner {
+                registry: Arc::clone(self),
+                _retained: retained,
+            },
+            control,
+        )?;
         let mut entries = self.0.lock();
         prune(&mut entries);
         if entries.is_empty() {
@@ -98,18 +130,6 @@ impl LocalSerializableLeases {
                 "duplicate serializable participant lease",
             ))?;
         entries.reserve(1)?;
-        let memory = control
-            .memory()
-            .reserve(std::mem::size_of::<LocalLeaseOwner<T>>())?;
-        let participant = SerializableParticipant::retain(
-            id,
-            Box::new(LocalLeaseOwner {
-                _registry: Arc::clone(self),
-                _retained: retained,
-                _memory: memory,
-            }),
-            control,
-        )?;
         entries.push(LocalEntry {
             id,
             lease: Arc::downgrade(&participant.0),

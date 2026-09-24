@@ -46,7 +46,7 @@ on:
           - sql-production
           - execution-production
       run_nori_allocations:
-        description: Run only persistent Nori allocation and output checks when run_rust is false
+        description: Run all native Nori allocation and output checks when run_rust is false
         required: false
         default: false
         type: boolean
@@ -270,13 +270,15 @@ jobs:
           cache-bin: false
           cache-targets: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Measure native analysis and indexing with reviewed allocation ceilings
-        if: ${{ github.event_name == 'push' || inputs.run_rust }}
-        run: |
-          mkdir -p target/benchmark-runs
-          python3 scripts/run-nori-benchmark.py --output target/benchmark-runs/nori-native.json
-          python3 scripts/run-nori-index-benchmark.py --output target/benchmark-runs/nori-index-native.json
-          python3 scripts/run-nori-phrase-benchmark.py --output target/benchmark-runs/nori-phrase-native.json
+      - name: Verify native analysis allocations and token outputs
+        if: ${{ !cancelled() }}
+        run: python3 scripts/run-nori-benchmark.py --output target/benchmark-runs/nori-native.json --allocation-only
+      - name: Verify native indexing allocations and graph outputs
+        if: ${{ !cancelled() }}
+        run: python3 scripts/run-nori-index-benchmark.py --output target/benchmark-runs/nori-index-native.json --allocation-only
+      - name: Verify native phrase allocations and scored outputs
+        if: ${{ !cancelled() }}
+        run: python3 scripts/run-nori-phrase-benchmark.py --output target/benchmark-runs/nori-phrase-native.json --allocation-only
       - name: Verify SQLite allocation and reopened outputs
         if: ${{ !cancelled() }}
         run: python3 scripts/run-nori-persistent-benchmark.py --provider sqlite --output target/benchmark-runs/nori-sqlite-native.json --allocation-only

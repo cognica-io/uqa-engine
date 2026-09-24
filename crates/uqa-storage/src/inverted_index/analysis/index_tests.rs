@@ -7,6 +7,43 @@
 use super::*;
 
 #[test]
+fn shared_scratch_keeps_its_allowance_through_projection_and_releases_on_failure() {
+    let analyzer = uqa_analysis::whitespace_analyzer().compile().unwrap();
+    let input = "alpha beta alpha";
+    let memory = uqa_core::memory::MemoryBudget::new(1 << 20);
+    let mut last_poll_used = 0;
+    let field = analyze_index_field_with_scratch(&analyzer, input, &memory, || {
+        last_poll_used = memory.used();
+        Ok(())
+    })
+    .unwrap();
+    assert!(
+        last_poll_used > 0,
+        "projection retains the token stream allowance"
+    );
+    assert_eq!(memory.used(), 0);
+    assert_eq!(field, analyze_index_field(&analyzer, input).unwrap());
+    let blocked = memory.reserve(memory.limit()).unwrap();
+    assert!(matches!(
+        analyze_index_field_with_scratch(&analyzer, input, &memory, || Ok(())),
+        Err(StorageBackendError::Analysis(AnalysisError::Memory(_)))
+    ));
+    assert_eq!(memory.used(), blocked.bytes());
+    drop(blocked);
+    assert!(matches!(
+        analyze_index_field_with_scratch(&analyzer, input, &memory, || {
+            if memory.used() > 0 {
+                Err(AnalysisError::Cancelled)
+            } else {
+                Ok(())
+            }
+        }),
+        Err(StorageBackendError::Analysis(AnalysisError::Cancelled))
+    ));
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn cancellation_covers_analysis_and_complete_occurrence_projection() {
     let analyzer = uqa_analysis::whitespace_analyzer().compile().unwrap();
     let input = "한국 😀 repeated repeated ".repeat(256);

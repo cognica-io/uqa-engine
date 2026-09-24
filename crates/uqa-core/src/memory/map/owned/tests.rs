@@ -17,6 +17,26 @@ use std::{
 
 proptest! {
     #[test]
+    fn appending_preserves_nodes_and_matches_ordered_map_collision_semantics(
+        left in prop::collection::vec((0_u8..100, any::<i32>()), 0..200),
+        right in prop::collection::vec((0_u8..100, any::<i32>()), 0..200),
+    ) {
+        let mut expected: BTreeMap<_, _> = left.iter().copied().collect();
+        expected.extend(right.iter().copied());
+        let mut target: OwnedMap<_, _> = left.into_iter().collect();
+        let source: OwnedMap<_, _> = right.into_iter().collect();
+        let mut addresses: BTreeMap<_, _> = source.iter()
+            .map(|(key, value)| (*key, std::ptr::from_ref(value))).collect();
+        addresses.extend(target.iter().map(|(key, value)| (*key, std::ptr::from_ref(value))));
+        target.append(source);
+        prop_assert!(target.iter().eq(expected.iter()));
+        prop_assert_eq!(super::super::tests::verify(&target.root).0, target.len());
+        for (key, value) in &target {
+            prop_assert_eq!(std::ptr::from_ref(value), addresses[key]);
+        }
+    }
+
+    #[test]
     fn ordinary_mutations_share_balancing_and_exact_layout_with_admitted_maps(
         operations in prop::collection::vec((0_u8..3, 0_u8..100, any::<i32>()), 0..300)
     ) {
@@ -46,6 +66,31 @@ proptest! {
         drop(admitted);
         assert_eq!(budget.used(), 0);
     }
+}
+
+#[test]
+fn appending_releases_replaced_values_once_and_preserves_the_original_key() {
+    struct Value(Arc<AtomicUsize>);
+    impl Drop for Value {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    let drops = Arc::new(AtomicUsize::new(0));
+    let mut key = String::with_capacity(128);
+    key.push_str("alpha");
+    let pointer = key.as_ptr();
+    let mut target: OwnedMap<_, _> = [(key, Value(Arc::clone(&drops)))].into_iter().collect();
+    let source = ["alpha", "omega"]
+        .into_iter()
+        .map(|key| (key.to_owned(), Value(Arc::clone(&drops))))
+        .collect();
+    target.append(source);
+    assert_eq!(target.keys().next().unwrap().as_ptr(), pointer);
+    assert_eq!(drops.load(Ordering::Relaxed), 1);
+    assert_eq!(target.len(), 2);
+    drop(target);
+    assert_eq!(drops.load(Ordering::Relaxed), 3);
 }
 
 #[test]

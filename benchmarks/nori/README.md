@@ -7,14 +7,15 @@ The original synthetic corpus in `crates/uqa-analysis/benches/nori/corpus.json` 
 ## Reproduce and check
 
 ```sh
-python3 scripts/run-nori-benchmark.py --output target/benchmark-runs/nori-native.json
-python3 scripts/run-nori-benchmark.py --target wasm --output target/benchmark-runs/nori-wasm.json
-python3 scripts/run-nori-benchmark.py --output target/benchmark-runs/nori-native-repeat.json --baseline target/benchmark-runs/nori-native.json
+python3 scripts/run-nori-benchmark.py --allocation-only --output target/benchmark-runs/nori-native.json
+python3 scripts/run-nori-benchmark.py --allocation-only --target wasm --output target/benchmark-runs/nori-wasm.json
 ```
+
+`--allocation-only` verifies one allocation sample per workload and the same complete expected outputs without warmups, pilots, clocks or timing samples. Reports identify this protocol explicitly, contain no timing fields, and cannot be compared with a timing baseline. Native CI runs analysis, indexing, phrase, SQLite and redb checks independently; a failure cannot hide later checks. Selected WASM checks use the same untimed mode. Allocation ceilings and output fixtures are unchanged.
 
 WASM requires the `wasm32-unknown-emscripten` Rust target, Emscripten, Node.js, and Python 3.10 or newer for Emscripten. The runner uses the same Rust benchmark in Node's WASM runtime, with memory growth, a 2 GiB maximum linear memory, and a 5 MiB stack. Set additional WASM compiler options with `CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS`; nonempty global Rust flags override required target linker options and are rejected. The runner removes empty `RUSTFLAGS` and `CARGO_ENCODED_RUSTFLAGS` from its child environment because Cargo gives their presence precedence over target flags even when they contain no options. Native execution supports the repository's Python 3.9 tooling baseline.
 
-Run measurements sequentially on an otherwise idle machine. The `bench` profile inherits release optimization, thin LTO, one codegen unit, and debug information. Reports include exact CPU, OS, Rust/Node/Emscripten versions, flags, executable sizes and hashes, runtime source and lockfile hashes, bundle and corpus hashes, and Git/worktree identity. Benchmark executable sizes include instrumentation and debug information; they are not distribution artifact sizes.
+Optional timing collection omits `--allocation-only`; an explicit `--baseline` must refer to another timing report, never an allocation-only report. Timing acceptance requires the controlled-host policy below. Run timing measurements sequentially on that controlled host. The `bench` profile inherits release optimization, thin LTO, one codegen unit, and debug information. Reports include exact CPU, OS, Rust/Node/Emscripten versions, flags, executable sizes and hashes, runtime source and lockfile hashes, bundle and corpus hashes, and Git/worktree identity. Benchmark executable sizes include instrumentation and debug information; they are not distribution artifact sizes.
 
 Each timed operation creates and destroys its result. Two warmups and one pilot choose a batch size; seven samples each run for at least 75 ms, and dictionary decoding uses three samples. The timer runs between batches to avoid per-call clock overhead on cache hits. The estimator is the median of each sample's elapsed time divided by its operation count; raw elapsed times and counts remain in the report. Cold decoding means a new decoded model with validation and destruction on each operation, with warmed code and encoded-input pages; it excludes process startup and disk/network transfer.
 

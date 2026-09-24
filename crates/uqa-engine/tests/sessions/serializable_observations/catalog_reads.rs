@@ -218,64 +218,70 @@ impl CatalogError {
     }
 }
 
+fn prepare_catalog(session: &Session) {
+    session.sql("CREATE SEQUENCE catalog_s; CREATE VIEW catalog_v AS SELECT 1 AS n; CREATE SERVER catalog_server FOREIGN DATA WRAPPER memory_fdw; CREATE FOREIGN TABLE catalog_foreign (id INTEGER) SERVER catalog_server");
+    session
+        .engine
+        .save_model(
+            "catalog_model",
+            &uqa_ml::DeepModel {
+                layers: vec![
+                    uqa_ml::DeepLayerSpec::Input { dimensions: 1 },
+                    uqa_ml::DeepLayerSpec::Dense {
+                        weights: vec![1.0],
+                        bias: vec![0.0],
+                        input_channels: 1,
+                        output_channels: 1,
+                    },
+                    uqa_ml::DeepLayerSpec::Softmax,
+                ],
+                alpha: 0.0,
+                gating: uqa_ml::GatingSpec::None,
+            },
+        )
+        .unwrap();
+}
+
 fn catalog_fixtures() -> (tempfile::TempDir, Vec<Session>) {
     let (directory, sessions) = fixtures();
     for session in &sessions {
-        session.sql("CREATE SEQUENCE catalog_s; CREATE VIEW catalog_v AS SELECT 1 AS n; CREATE SERVER catalog_server FOREIGN DATA WRAPPER memory_fdw; CREATE FOREIGN TABLE catalog_foreign (id INTEGER) SERVER catalog_server");
-        session
-            .engine
-            .save_model(
-                "catalog_model",
-                &uqa_ml::DeepModel {
-                    layers: vec![
-                        uqa_ml::DeepLayerSpec::Input { dimensions: 1 },
-                        uqa_ml::DeepLayerSpec::Dense {
-                            weights: vec![1.0],
-                            bias: vec![0.0],
-                            input_channels: 1,
-                            output_channels: 1,
-                        },
-                        uqa_ml::DeepLayerSpec::Softmax,
-                    ],
-                    alpha: 0.0,
-                    gating: uqa_ml::GatingSpec::None,
-                },
-            )
-            .unwrap();
+        prepare_catalog(session);
     }
     (directory, sessions)
 }
 
-#[test]
-fn first_catalog_query_retains_the_data_snapshot_through_savepoint_undo() {
-    let (_directory, sessions) = catalog_fixtures();
-    for a in sessions {
-        let b = a.sibling();
-        for isolation in ["REPEATABLE READ", "SERIALIZABLE"] {
-            for read in CatalogRead::ALL {
-                a.sql(&format!(
-                    "BEGIN ISOLATION LEVEL {isolation}; SAVEPOINT before_read"
-                ));
-                assert!(participant(&a).is_none());
-                b.sql("UPDATE left_t SET v = 2 WHERE id = 1");
-                read.read(&a.engine).unwrap();
-                let original = participant(&a);
-                b.sql("UPDATE left_t SET v = 3 WHERE id = 1");
-                a.sql("ROLLBACK TO before_read");
-                assert_eq!(
-                    a.sql("SELECT v FROM left_t").rows[0]["v"],
-                    Value::Int(2),
-                    "{isolation}: {read:?} did not retain the first query's snapshot"
-                );
-                assert_eq!(
-                    original.is_some(),
-                    isolation == "SERIALIZABLE",
-                    "{isolation}: {read:?} did not use the expected admission"
-                );
-                assert_eq!(participant(&a), original);
-                a.sql("COMMIT");
-                assert_eq!(a.sql("SELECT v FROM left_t").rows[0]["v"], Value::Int(3));
-            }
+#[rstest::rstest]
+fn first_catalog_query_retains_the_data_snapshot_through_savepoint_undo(
+    #[values(0, 1, 2)] provider: usize,
+) {
+    let (_directory, a) = fixture(provider);
+    prepare_catalog(&a);
+    // Keep both isolation levels and all catalog reads on the same session so repeated snapshot and participant lifetimes remain covered.
+    let b = a.sibling();
+    for isolation in ["REPEATABLE READ", "SERIALIZABLE"] {
+        for read in CatalogRead::ALL {
+            a.sql(&format!(
+                "BEGIN ISOLATION LEVEL {isolation}; SAVEPOINT before_read"
+            ));
+            assert!(participant(&a).is_none());
+            b.sql("UPDATE left_t SET v = 2 WHERE id = 1");
+            read.read(&a.engine).unwrap();
+            let original = participant(&a);
+            b.sql("UPDATE left_t SET v = 3 WHERE id = 1");
+            a.sql("ROLLBACK TO before_read");
+            assert_eq!(
+                a.sql("SELECT v FROM left_t").rows[0]["v"],
+                Value::Int(2),
+                "{isolation}: {read:?} did not retain the first query's snapshot"
+            );
+            assert_eq!(
+                original.is_some(),
+                isolation == "SERIALIZABLE",
+                "{isolation}: {read:?} did not use the expected admission"
+            );
+            assert_eq!(participant(&a), original);
+            a.sql("COMMIT");
+            assert_eq!(a.sql("SELECT v FROM left_t").rows[0]["v"], Value::Int(3));
         }
     }
 }

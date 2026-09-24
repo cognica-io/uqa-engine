@@ -93,22 +93,31 @@ fn timing<T>(mut run: impl FnMut() -> T, samples: usize) -> Value {
     result
 }
 
-fn cold_dictionary() -> Value {
+fn cold_dictionary(allocation_only: bool) -> Value {
     let decode = || {
         NoriDictionary::from_bytes(uqa_nori_data::BUNDLE, DictionaryLimits::default())
             .expect("decode pinned dictionary")
     };
-    let timings = timing(decode, 3);
+    let timings = (!allocation_only).then(|| timing(decode, 3));
     let mut retained = None;
     let info = measure(|| retained = Some(decode()));
     let model = retained.take().expect("retained dictionary");
     assert_eq!(model.known_word_count(), 816_283);
     assert_eq!(model.surface_count(), 774_582);
     drop(model);
-    json!({"name": "cold_decode_validate_drop", "timing": timings, "allocation": allocation(info)})
+    let mut row = json!({"name": "cold_decode_validate_drop", "allocation": allocation(info)});
+    if let Some(timings) = timings {
+        row["timing"] = timings;
+    }
+    row
 }
 
-fn shared_dictionary(resources: &NoriResources, request: &DictionaryRequest, name: &str) -> Value {
+fn shared_dictionary(
+    resources: &NoriResources,
+    request: &DictionaryRequest,
+    name: &str,
+    allocation_only: bool,
+) -> Value {
     let first = resources.load_default().expect("cached dictionary");
     let mut handles = Vec::with_capacity(64);
     let info = measure(|| {
@@ -120,18 +129,25 @@ fn shared_dictionary(resources: &NoriResources, request: &DictionaryRequest, nam
     });
     assert_eq!(info.bytes_current, 0);
     assert_eq!(info.count_current, 0);
-    json!({
+    let mut row = json!({
         "name": name,
         "handles": handles.len(),
         "allocation": allocation(info),
-        "timing": timing(|| resources.load(request).expect("cached dictionary"), SAMPLES),
-    })
+    });
+    if !allocation_only {
+        row["timing"] = timing(
+            || resources.load(request).expect("cached dictionary"),
+            SAMPLES,
+        );
+    }
+    row
 }
 
 fn analyze_case(
     case: &Case,
     stage: &str,
     mode: DecompoundMode,
+    allocation_only: bool,
     run: impl Fn() -> NoriOutput,
 ) -> Value {
     let output = run();
@@ -145,7 +161,7 @@ fn analyze_case(
         "{stage}/{} leaked allocations",
         case.name
     );
-    json!({
+    let mut row = json!({
         "name": format!("{stage}/{mode:?}/{}", case.name),
         "input_bytes": case.text.len(),
         "input_utf16": case.text.encode_utf16().count(),
@@ -153,8 +169,11 @@ fn analyze_case(
         "output_sha256": output_sha256,
         "tokens": tokens,
         "allocation": allocation(info),
-        "timing": timing(run, SAMPLES),
-    })
+    });
+    if !allocation_only {
+        row["timing"] = timing(run, SAMPLES);
+    }
+    row
 }
 
 fn main() {
@@ -162,7 +181,8 @@ fn main() {
         println!("{}", cancellation::run());
         return;
     }
-    let mut results = vec![cold_dictionary()];
+    let allocation_only = std::env::args_os().any(|argument| argument == "--allocation-only");
+    let mut results = vec![cold_dictionary(allocation_only)];
     eprintln!("measured cold dictionary loading");
     let resources = NoriResources::default();
     let resolved = resources.load_default().expect("bundled dictionary");
@@ -170,11 +190,13 @@ fn main() {
         &resources,
         &DictionaryRequest::Name(DEFAULT_NORI_DICTIONARY.into()),
         "cached_name_resolve_64_shared_handles",
+        allocation_only,
     ));
     results.push(shared_dictionary(
         &resources,
         &DictionaryRequest::Sha256(resolved.sha256()),
         "cached_identity_resolve_64_shared_handles",
+        allocation_only,
     ));
     eprintln!("measured shared dictionary resolution");
     let corpus: Corpus = serde_json::from_str(CORPUS).expect("fixed corpus");
@@ -191,32 +213,46 @@ fn main() {
             };
             let tokenizer = KoreanTokenizer::new(resolved.model().clone(), None, options).unwrap();
             let analyzer = KoreanAnalyzer::new(resolved.model().clone(), None, options).unwrap();
-            results.push(analyze_case(&case, "tokenizer", mode, || {
-                tokenizer
-                    .tokenize(black_box(&case.text))
-                    .expect("tokenization")
-            }));
-            results.push(analyze_case(&case, "analyzer", mode, || {
-                analyzer.analyze(black_box(&case.text)).expect("analysis")
-            }));
+            results.push(analyze_case(
+                &case,
+                "tokenizer",
+                mode,
+                allocation_only,
+                || {
+                    tokenizer
+                        .tokenize(black_box(&case.text))
+                        .expect("tokenization")
+                },
+            ));
+            results.push(analyze_case(
+                &case,
+                "analyzer",
+                mode,
+                allocation_only,
+                || analyzer.analyze(black_box(&case.text)).expect("analysis"),
+            ));
         }
         eprintln!("measured {}", case.name);
     }
-    println!(
-        "{}",
-        json!({
-            "schema_version": 1,
-            "target_arch": std::env::consts::ARCH,
-            "target_os": std::env::consts::OS,
-            "pointer_bits": usize::BITS,
-            "threads": 1,
-        "protocol": {"samples": SAMPLES, "cold_samples": 3, "warmup": WARMUP, "pilot": 1, "clock": "per_batch", "sample_ms": SAMPLE_TIME.as_millis()},
-            "allocation_counter": "0.8.1; current-thread Rust System allocator requests; excludes stack, static bundle, allocator metadata and host JS heap",
-            "timing_scope": "create and drop each result; warmed code and input pages; counter updates disabled",
-            "bundle_bytes": uqa_nori_data::BUNDLE.len(),
-            "bundle_sha256": uqa_nori_data::BUNDLE_SHA256,
-            "corpus_sha256": format!("{:x}", Sha256::digest(CORPUS.as_bytes())),
-            "measurements": results,
-        })
-    );
+    let mut report = json!({
+        "schema_version": 1,
+        "target_arch": std::env::consts::ARCH,
+        "target_os": std::env::consts::OS,
+        "pointer_bits": usize::BITS,
+        "threads": 1,
+        "allocation_counter": "0.8.1; current-thread Rust System allocator requests; excludes stack, static bundle, allocator metadata and host JS heap",
+        "bundle_bytes": uqa_nori_data::BUNDLE.len(),
+        "bundle_sha256": uqa_nori_data::BUNDLE_SHA256,
+        "corpus_sha256": format!("{:x}", Sha256::digest(CORPUS.as_bytes())),
+        "measurements": results,
+    });
+    report["protocol"] = if allocation_only {
+        json!({"allocation_samples": 1, "samples": 0, "warmup": 0, "timed_operations_per_sample": 0})
+    } else {
+        report["timing_scope"] = json!(
+            "create and drop each result; warmed code and input pages; counter updates disabled"
+        );
+        json!({"samples": SAMPLES, "cold_samples": 3, "warmup": WARMUP, "pilot": 1, "clock": "per_batch", "sample_ms": SAMPLE_TIME.as_millis()})
+    };
+    println!("{report}");
 }

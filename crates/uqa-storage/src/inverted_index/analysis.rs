@@ -94,16 +94,24 @@ pub fn analyze_index_field_cancellable(
 fn analyze_index_field_with_poll(
     analyzer: &CompiledAnalyzer,
     text: &str,
+    poll: impl FnMut() -> Result<(), AnalysisError>,
+) -> StorageBackendResult<AnalyzedField> {
+    analyze_index_field_with_scratch(
+        analyzer,
+        text,
+        &uqa_core::memory::MemoryBudget::new(usize::MAX),
+        poll,
+    )
+}
+
+/// Reuse the provider's analysis scratch allowance through token projection. The ordinary returned field keeps its caller-owned map representation; retained field ownership uses `analyze_index_field_budgeted`.
+pub(crate) fn analyze_index_field_with_scratch(
+    analyzer: &CompiledAnalyzer,
+    text: &str,
+    memory: &uqa_core::memory::MemoryBudget,
     mut poll: impl FnMut() -> Result<(), AnalysisError>,
 ) -> StorageBackendResult<AnalyzedField> {
-    let output = analyzer
-        .analyze_tokens_budgeted(
-            text,
-            &uqa_core::memory::MemoryBudget::new(usize::MAX),
-            &mut poll,
-        )?
-        .into_parts()
-        .0;
+    let output = analyzer.analyze_tokens_budgeted(text, memory, &mut poll)?;
     let mut terms = BTreeMap::<TokenTermKey, Vec<TokenOccurrence>>::new();
     let metadata = project_index_tokens(analyzer, &output, &mut poll, |term, occurrence, _| {
         terms

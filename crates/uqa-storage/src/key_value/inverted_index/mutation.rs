@@ -8,9 +8,9 @@
 
 use super::super::codec::u64_value;
 use super::{
-    cluster_id, encode_occurrence_cluster_controlled, encode_term_keys, keys, other_error,
-    BTreeMap, ClusterChanges, DocId, DocumentFields, FieldName, FieldStats, KeyValueBatch,
-    OccurrencePosting, OccurrenceRead, StorageBackendResult, TokenTermKey,
+    cluster_id, encode_occurrence_cluster_controlled, keys, other_error, BTreeMap, ClusterChanges,
+    DocId, DocumentFields, FieldName, FieldStats, KeyValueBatch, OccurrencePosting, OccurrenceRead,
+    StorageBackendResult, TokenTermKey,
 };
 use crate::inverted_index::{
     visit_field_replacement, InvertedIndexChange, InvertedIndexChangeVisitor,
@@ -107,10 +107,9 @@ impl OccurrenceRead<'_> {
                 &keys::document_key(self.table, keys::LENGTH, doc_id, field)?,
                 &u64_value(snapshot.metadata.length),
             )?;
-            let terms = snapshot.terms.keys().cloned().collect::<Vec<_>>();
             batch.put(
                 &keys::document_key(self.table, keys::DOCUMENT, doc_id, field)?,
-                &encode_term_keys(&terms)?,
+                &crate::clustered_postings::encode_term_key_refs(snapshot.terms.keys())?,
             )?;
         }
         Ok(())
@@ -170,7 +169,7 @@ impl OccurrenceRead<'_> {
         mut visit: Option<&mut InvertedIndexChangeVisitor<'_>>,
     ) -> StorageBackendResult<()> {
         self.require_graph_format()?;
-        let mut staged = self.stage_documents(documents, false)?;
+        let staged = self.stage_documents(documents, false)?;
         let mut previous = BTreeMap::new();
         let mut totals = BTreeMap::<FieldName, FieldStats>::new();
         let mut changes = ClusterChanges::new();
@@ -208,32 +207,13 @@ impl OccurrenceRead<'_> {
             }
             previous.insert(*doc_id, old);
         }
-        for (doc_id, fields) in &mut staged {
+        for fields in staged.values() {
             Self::add_field_statistics(&mut totals, fields)?;
-            for (field, snapshot) in fields {
-                for (term, occurrences) in &mut snapshot.terms {
-                    changes
-                        .entry((field.clone(), term.clone(), cluster_id(*doc_id)))
-                        .or_default()
-                        .insert(
-                            *doc_id,
-                            Some(OccurrencePosting {
-                                doc_id: *doc_id,
-                                doc_length: snapshot.metadata.length,
-                                occurrences: std::mem::take(occurrences),
-                            }),
-                        );
-                }
-            }
         }
         if totals.is_empty() {
             return Ok(());
         }
         self.invalidate_accelerators(batch)?;
-        for ((field, term, cluster), updates) in changes {
-            let merged = merge_cluster_changes(self.load_cluster(&field, &term, cluster)?, updates);
-            self.put_cluster(batch, &field, &term, cluster, &merged)?;
-        }
         for (doc_id, fields) in previous {
             batch.delete_prefix(&keys::document_prefix(self.table, keys::DOCUMENT, doc_id)?)?;
             batch.delete_prefix(&keys::document_prefix(self.table, keys::LENGTH, doc_id)?)?;
@@ -241,8 +221,28 @@ impl OccurrenceRead<'_> {
                 batch.delete(&keys::metadata_key(self.table, field, doc_id)?)?;
             }
         }
-        for (doc_id, fields) in &staged {
-            self.put_document(batch, *doc_id, fields)?;
+        for (doc_id, fields) in staged {
+            // Encode reverse keys while borrowed, then move their owners into the coalesced posting changes. The enclosing provider batch publishes both atomically.
+            self.put_document(batch, doc_id, &fields)?;
+            for (field, snapshot) in fields {
+                for (term, occurrences) in snapshot.terms {
+                    changes
+                        .entry((field.clone(), term, cluster_id(doc_id)))
+                        .or_default()
+                        .insert(
+                            doc_id,
+                            Some(OccurrencePosting {
+                                doc_id,
+                                doc_length: snapshot.metadata.length,
+                                occurrences,
+                            }),
+                        );
+                }
+            }
+        }
+        for ((field, term, cluster), updates) in changes {
+            let merged = merge_cluster_changes(self.load_cluster(&field, &term, cluster)?, updates);
+            self.put_cluster(batch, &field, &term, cluster, &merged)?;
         }
         self.put_field_statistics(batch, totals)?;
         batch.replace_occurrence_record(
