@@ -71,7 +71,7 @@ fn empty_temporal_text_ranges_retain_future_matches() {
 }
 
 #[test]
-fn absent_temporal_unique_updates_keep_native_equality() {
+fn absent_temporal_unique_updates_keep_postgresql_equality() {
     for (ty, probe, same, different) in [
         (
             "DATE",
@@ -86,10 +86,16 @@ fn absent_temporal_unique_updates_keep_native_equality() {
             "TIME '12:00:00.123457'",
         ),
         (
+            "TIME(6)",
+            "TIME '00:00:00'",
+            "TIME '00:00:00'",
+            "TIME '24:00:00'",
+        ),
+        (
             "TIMETZ(6)",
             "TIMETZ '12:00:00+00'",
-            "TIMETZ '12:00:00+00'",
-            "TIMETZ '14:00:00+00'",
+            "TIMETZ '12:00:00+00:00'",
+            "TIMETZ '13:00:00+01'",
         ),
         (
             "TIMESTAMP(6)",

@@ -107,6 +107,8 @@ mod string_binary_lengths;
 mod strings_and_bytea;
 #[path = "pg18_semantics/temporal.rs"]
 mod temporal;
+#[path = "pg18_semantics/temporal_comparisons.rs"]
+mod temporal_comparisons;
 #[path = "pg18_semantics/three_valued_logic.rs"]
 mod three_valued_logic;
 #[path = "pg18_semantics/to_reg_lookups.rs"]
