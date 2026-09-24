@@ -42,11 +42,14 @@ pub mod source_projection;
 
 pub mod locking;
 
+pub mod document_changes;
 pub mod document_projection;
+pub mod exact_lookup;
 pub mod generated;
 pub mod local_table;
 pub mod scored_input;
 pub mod table_read;
+pub mod table_snapshot;
 
 pub mod collection;
 pub mod consumer;

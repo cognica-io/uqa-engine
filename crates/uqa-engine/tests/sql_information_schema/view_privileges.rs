@@ -613,7 +613,7 @@ fn view_acl_changes_follow_transactions_external_refresh_and_temporary_lifetime(
 
 #[test]
 fn legacy_view_column_metadata_is_migrated_before_acl_state_can_reference_it() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("legacy-view-acl.db");
@@ -636,7 +636,8 @@ fn legacy_view_column_metadata_is_migrated_before_acl_state_can_reference_it() {
         .unwrap()
     };
     {
-        let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+        let catalog =
+            crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
         let mut views = catalog.load_views().unwrap();
         let view = views
             .iter_mut()
@@ -653,7 +654,8 @@ fn legacy_view_column_metadata_is_migrated_before_acl_state_can_reference_it() {
     );
     drop(engine);
 
-    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
     let migrated = catalog
         .load_views()
         .unwrap()
@@ -663,7 +665,10 @@ fn legacy_view_column_metadata_is_migrated_before_acl_state_can_reference_it() {
     assert!(migrated
         .definition_json
         .contains(r#""output_columns":["id","value"]"#));
-    assert!(migrated.column_acls.contains_key("id"));
+    let uqa_storage::RelationSecurityRow::Bound(security) = migrated.security else {
+        panic!("migrated view security must retain identities")
+    };
+    assert!(security.column_acls.contains_key("id"));
     drop(catalog);
 
     let reopened = Engine::open(&database).unwrap();
@@ -676,7 +681,7 @@ fn legacy_view_column_metadata_is_migrated_before_acl_state_can_reference_it() {
 
 #[test]
 fn broken_view_acl_grant_chains_are_rejected_during_open() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("broken-view-acl.db");
@@ -690,19 +695,27 @@ fn broken_view_acl_grant_chains_are_rejected_during_open() {
         );
     }
     {
-        let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+        let catalog =
+            crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
         let mut views = catalog.load_views().unwrap();
         let view = views
             .iter_mut()
             .find(|view| view.relation.qualified_name() == "view_acl.items")
             .unwrap();
-        view.acl
+        let roles = uqa_execution::catalog::security::roles::persistence::restore(&catalog)
+            .unwrap()
+            .roles;
+        let uqa_storage::RelationSecurityRow::Bound(security) = &mut view.security else {
+            panic!("bound view security")
+        };
+        security
+            .acl
             .as_mut()
             .unwrap()
             .iter_mut()
-            .find(|entry| entry.role == "view_acl_reader")
+            .find(|entry| entry.role == Some(roles["view_acl_reader"].identity()))
             .unwrap()
-            .grantor = Some("view_acl_delegate".into());
+            .grantor = roles["view_acl_delegate"].identity();
         catalog.save_view(view).unwrap();
     }
 

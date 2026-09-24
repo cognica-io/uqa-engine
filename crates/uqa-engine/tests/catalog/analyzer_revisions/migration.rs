@@ -10,7 +10,7 @@ use super::{execute, fixture, hits, synonym_file, Engine, Path, TempDir, KEYWORD
 use uqa_storage_sqlite::{Catalog, ManagedConnection};
 
 fn legacy_catalog(database: &Path, directory: &Path) {
-    let engine = Engine::open(database).unwrap();
+    let engine = crate::native_storage::legacy_engine(database);
     fixture(&engine);
     execute(&engine, "INSERT INTO docs VALUES (1, 'seed')");
     drop(engine);
@@ -56,7 +56,8 @@ fn legacy_analyzers_rebuild_from_source_once_and_freeze_both_explicit_sides() {
     legacy_catalog(&database, directory.path());
     let engine = Engine::open(&database).unwrap();
     assert_eq!(hits(&engine, "docs", "body", "query"), [1]);
-    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
     assert_eq!(catalog.load_analyzer_descriptors().unwrap().len(), 2);
     assert_eq!(
         catalog.load_table_field_analyzer_bindings().unwrap().len(),
@@ -122,9 +123,9 @@ fn failed_analyzer_assignment_restores_the_complete_previous_binding_and_posting
     engine.register_named_analyzer("whole", KEYWORD).unwrap();
     execute(&engine, "INSERT INTO docs VALUES (1, 'Alpha Beta')");
     let connection = ManagedConnection::open(&database).unwrap();
-    let catalog = Catalog::open(connection.clone()).unwrap();
+    let catalog = crate::native_storage::catalog(connection.clone()).unwrap();
     let before = catalog.load_table_field_analyzer_bindings().unwrap();
-    connection.with(|db| {
+    connection.with_physical(|db| {
         db.execute_batch("CREATE TRIGGER reject_binding BEFORE INSERT ON _table_field_analyzers BEGIN SELECT RAISE(ABORT, 'forced assignment failure'); END;")?;
         Ok(())
     }).unwrap();
@@ -149,7 +150,7 @@ fn failed_analyzer_assignment_restores_the_complete_previous_binding_and_posting
 fn corrupt_binding_is_rejected_before_any_legacy_analyzer_is_migrated() {
     let directory = TempDir::new().unwrap();
     let database = directory.path().join("corrupt.db");
-    let engine = Engine::open(&database).unwrap();
+    let engine = crate::native_storage::legacy_engine(&database);
     fixture(&engine);
     drop(engine);
     let connection = ManagedConnection::open(&database).unwrap();

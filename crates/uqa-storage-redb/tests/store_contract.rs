@@ -7,6 +7,15 @@
 use uqa_storage::{KeyValueStore, PersistentStorageProvider};
 use uqa_storage_redb::RedbStorage;
 
+#[path = "store_contract/documents.rs"]
+mod documents;
+#[path = "store_contract/graph_identifiers.rs"]
+mod graph_identifiers;
+#[path = "store_contract/guards.rs"]
+mod guards;
+#[path = "store_contract/sequences.rs"]
+mod sequences;
+
 fn push_legacy_string(key: &mut Vec<u8>, value: &str) {
     key.extend_from_slice(&u32::try_from(value.len()).unwrap().to_be_bytes());
     key.extend_from_slice(value.as_bytes());
@@ -282,5 +291,18 @@ fn redb_rolls_back_legacy_posting_migration_after_staged_writes() {
 #[path = "store_contract/controlled.rs"]
 mod controlled;
 
+#[path = "store_contract/identifiers.rs"]
+mod identifiers;
+#[path = "store_contract/mvcc.rs"]
+mod mvcc;
+
+#[path = "store_contract/compound.rs"]
+mod compound;
+#[path = "store_contract/logical_sessions.rs"]
+mod logical_sessions;
+
 #[path = "store_contract/japanese.rs"]
 mod japanese;
+
+#[path = "store_contract/restore.rs"]
+mod restore;

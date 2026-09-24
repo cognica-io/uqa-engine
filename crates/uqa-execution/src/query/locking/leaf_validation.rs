@@ -275,7 +275,7 @@ pub(super) fn classify_table_leaf<S: Clone + Send + Sync + 'static>(
     if catalog.table(resolution, name)?.is_some() {
         return Ok(LockLeafKind::Base);
     }
-    let lockable = virtual_row_lockable(resolution, name).unwrap_or(false);
+    let lockable = virtual_row_lockable(catalog, resolution, name)?.unwrap_or(false);
     Ok(LockLeafKind::Virtual { lockable })
 }
 

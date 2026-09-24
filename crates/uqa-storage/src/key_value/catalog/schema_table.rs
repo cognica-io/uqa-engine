@@ -6,29 +6,34 @@
 
 //! Metadata, schema, table, column, and owned-data lifecycle.
 
-use super::super::occurrence_keys as occurrence;
-use super::analyzers::{field_binding_key, field_binding_prefix};
+use super::analyzers::field_binding_key;
 use super::occurrence_lifecycle::{drop_occurrence_field, rename_occurrence_field};
-use super::physical_indexes::{
-    drop_field_indexes, drop_table_indexes, rename_field_indexes, rename_table_indexes,
-};
+use super::physical_indexes::{drop_field_indexes, rename_field_indexes};
 use super::{
-    apply_relation_migrations, batch_put_or_keep_existing, batch_rekey_prefix,
-    batch_rekey_prefix_or_keep_existing, catalog_index_references_column,
-    catalog_index_rename_column, collect_relation_migrations, column_stats_key,
-    column_stats_prefix, decode_relation_key, decode_stored_document_value, decode_string,
+    apply_relation_migrations, batch_put_or_keep_existing, batch_rekey_prefix_or_keep_existing,
+    catalog_index_references_column, catalog_index_rename_column, collect_relation_migrations,
+    column_stats_key, decode_relation_key, decode_stored_document_value, decode_string,
     decode_value, doc_length_key, doc_length_key_prefix, document_key_prefix,
-    encode_stored_document_value, encode_value, field_stats_key, field_stats_key_prefix,
-    key_with_tag, posting_cluster_positions_field_prefix, posting_cluster_positions_key_prefix,
-    posting_cluster_score_field_prefix, posting_cluster_score_key_prefix, posting_document_key,
-    posting_document_key_prefix, posting_field_prefix, posting_key_prefix, read_str, read_u64,
+    encode_stored_document_value, encode_value, field_stats_key, key_with_tag,
+    posting_cluster_positions_field_prefix, posting_cluster_score_field_prefix,
+    posting_document_key, posting_document_key_prefix, posting_field_prefix, read_str, read_u64,
     relation_key, reverse_posting_key, reverse_posting_key_prefix, single_str_key, string_value,
-    table_field_analyzer_field_prefix, table_field_analyzer_prefix, validate_relation_parents,
-    vector_field_prefix, vector_key_prefix, CatalogFacade, KeyValueBatch, KeyValueCatalog,
-    RelationIdentity, RelationKind, StorageBackendError, StorageBackendResult, StoredCatalogIndex,
-    StoredRelation, TableSchema, TAG_CATALOG_INDEX, TAG_METADATA, TAG_RELATION, TAG_SCHEMA,
-    TAG_TABLE,
+    table_field_analyzer_field_prefix, validate_relation_parents, vector_field_prefix,
+    CatalogFacade, KeyValueBatch, KeyValueCatalog, RelationKind, StorageBackendError,
+    StorageBackendResult, StoredCatalogIndex, TAG_CATALOG_INDEX, TAG_METADATA, TAG_RELATION,
+    TAG_SCHEMA,
 };
+
+fn observe_graph_scope_clear(batch: &mut dyn KeyValueBatch) -> StorageBackendResult<()> {
+    if batch.serializable_participant().is_some() {
+        let namespace =
+            crate::catalog::graph_identifiers::GraphIdentifierNamespace::new(None, [0; 16]);
+        batch.observe_serializable_write(crate::catalog::graph_observations::scope_lifetime(
+            namespace,
+        ))?;
+    }
+    Ok(())
+}
 
 fn rename_document_scoped_fts_fields(
     catalog: &KeyValueCatalog,
@@ -96,15 +101,84 @@ fn rename_document_scoped_fts_fields(
 }
 
 impl KeyValueCatalog {
+    pub(super) fn metadata_with_prefix_impl(
+        &self,
+        prefix: &str,
+    ) -> StorageBackendResult<Vec<(String, String)>> {
+        crate::key_value::index_view::read_view(self.store.as_ref(), |read| {
+            let mut entries = Vec::new();
+            read.visit_prefix(&[TAG_METADATA], &mut |key, value| {
+                let name = read_str(key, &mut 1)?;
+                if name.starts_with(prefix) {
+                    entries.push((
+                        name,
+                        std::str::from_utf8(value)
+                            .map_err(|error| {
+                                StorageBackendError::Other(format!(
+                                    "invalid UTF-8 metadata value: {error}"
+                                ))
+                            })?
+                            .to_owned(),
+                    ));
+                }
+                Ok(())
+            })?;
+            Ok(entries)
+        })
+    }
     pub(super) fn set_metadata_impl(&self, key: &str, value: &str) -> StorageBackendResult<()> {
+        let identifiers = self.store.identifier_allocator().is_some();
         if let Some(graph) = key.strip_prefix("graph_label_registry::") {
-            let mut batch = self.store.batch();
-            self.invalidate_graph_path_data(batch.as_mut(), graph)?;
-            batch.put(&single_str_key(TAG_METADATA, key)?, &string_value(value))?;
-            return batch.commit();
+            return self.store.with_mutation(&mut |read, batch| {
+                super::graph_view::GraphRead { read, identifiers }.observe_label_registry_change(
+                    batch,
+                    graph,
+                    Some(value),
+                )?;
+                if identifiers {
+                    let view = super::graph_view::GraphRead { read, identifiers };
+                    view.fence_definition(batch, graph)?;
+                    view.observe_registry(batch, graph, value)?;
+                }
+                Self::invalidate_graph_path_data(read, batch, graph)?;
+                batch.put(&single_str_key(TAG_METADATA, key)?, &string_value(value))
+            });
+        }
+        if key == "graph_identifier_generation" && identifiers {
+            return self.store.with_mutation(&mut |_, batch| {
+                observe_graph_scope_clear(batch)?;
+                batch.fence_record(&single_str_key(
+                    TAG_METADATA,
+                    "graph_identifier_data_revision",
+                )?)?;
+                batch.put(&single_str_key(TAG_METADATA, key)?, &string_value(value))
+            });
         }
         self.store
             .put(&single_str_key(TAG_METADATA, key)?, &string_value(value))
+    }
+
+    pub(super) fn delete_metadata_impl(&self, key: &str) -> StorageBackendResult<()> {
+        let identifiers = self.store.identifier_allocator().is_some();
+        self.store.with_mutation(&mut |read, batch| {
+            if let Some(graph) = key.strip_prefix("graph_label_registry::") {
+                super::graph_view::GraphRead { read, identifiers }
+                    .observe_label_registry_change(batch, graph, None)?;
+                if identifiers {
+                    super::graph_view::GraphRead { read, identifiers }
+                        .fence_definition(batch, graph)?;
+                }
+                Self::invalidate_graph_path_data(read, batch, graph)?;
+            }
+            if key == "graph_identifier_generation" && identifiers {
+                observe_graph_scope_clear(batch)?;
+                batch.fence_record(&single_str_key(
+                    TAG_METADATA,
+                    "graph_identifier_data_revision",
+                )?)?;
+            }
+            batch.delete(&single_str_key(TAG_METADATA, key)?)
+        })
     }
 
     pub(super) fn get_metadata_impl(&self, key: &str) -> StorageBackendResult<Option<String>> {
@@ -112,6 +186,27 @@ impl KeyValueCatalog {
             .get(&single_str_key(TAG_METADATA, key)?)?
             .map(decode_string)
             .transpose()
+    }
+
+    pub(super) fn metadata_has_private_changes_impl(
+        &self,
+        name: &str,
+    ) -> StorageBackendResult<bool> {
+        self.named_record_has_private_changes(TAG_METADATA, name)
+    }
+
+    pub(super) fn named_record_has_private_changes(
+        &self,
+        tag: u8,
+        name: &str,
+    ) -> StorageBackendResult<bool> {
+        if !self.store.transaction_model().is_versioned() {
+            return Ok(false);
+        }
+        let key = single_str_key(tag, name)?;
+        crate::key_value::index_view::read_view(self.store.as_ref(), |read| {
+            Ok(read.revision(&[&key])?.has_private_changes())
+        })
     }
 
     pub(super) fn migrate_relation_namespace_impl(&self) -> StorageBackendResult<()> {
@@ -125,7 +220,7 @@ impl KeyValueCatalog {
         schema: &crate::catalog::SchemaRow,
     ) -> StorageBackendResult<()> {
         self.store.put(
-            &single_str_key(TAG_SCHEMA, &schema.name)?,
+            &single_str_key(TAG_SCHEMA, schema.name())?,
             &encode_value(schema)?,
         )
     }
@@ -148,209 +243,21 @@ impl KeyValueCatalog {
         for (key, value) in self.store.scan_prefix(&key_with_tag(TAG_SCHEMA))? {
             let mut offset = 1;
             let name = read_str(&key, &mut offset)?;
-            let schema = decode_value::<crate::catalog::SchemaRow>(&value)
-                .or_else(|_| decode_string(value).map(crate::catalog::SchemaRow::legacy))?;
-            if schema.name != name {
+            let schema = if value == string_value(&name) {
+                crate::catalog::SchemaRow::legacy(&name)
+            } else {
+                decode_value::<crate::catalog::SchemaRow>(&value)?
+            };
+            if schema.name() != name {
                 return Err(StorageBackendError::Other(format!(
                     "schema catalog key `{name}` disagrees with stored name `{}`",
-                    schema.name
+                    schema.name()
                 )));
             }
             rows.push(schema);
         }
-        rows.sort_by(|left, right| left.name.cmp(&right.name));
+        rows.sort_by(|left, right| left.name().cmp(right.name()));
         Ok(rows)
-    }
-
-    pub(super) fn save_table_impl(&self, schema: &TableSchema) -> StorageBackendResult<()> {
-        let mut batch = self.store.batch();
-        self.claim_relation(batch.as_mut(), &schema.relation, RelationKind::Table)?;
-        batch.put(
-            &relation_key(TAG_TABLE, &schema.relation)?,
-            &encode_value(schema)?,
-        )?;
-        batch.commit()
-    }
-
-    pub(super) fn load_tables_impl(&self) -> StorageBackendResult<Vec<TableSchema>> {
-        let mut rows = self
-            .store
-            .scan_prefix(&key_with_tag(TAG_TABLE))?
-            .into_iter()
-            .map(|(key, value)| {
-                let relation = decode_relation_key(&key)?;
-                let schema = decode_value::<TableSchema>(&value)?;
-                if schema.relation != relation {
-                    return Err(StorageBackendError::Other(format!(
-                        "table catalog key `{}` disagrees with stored relation `{}`",
-                        relation.qualified_name(),
-                        schema.relation.qualified_name()
-                    )));
-                }
-                Ok(schema)
-            })
-            .collect::<StorageBackendResult<Vec<_>>>()?;
-        rows.sort_by(|a, b| a.relation.cmp(&b.relation));
-        Ok(rows)
-    }
-
-    pub(super) fn drop_table_impl(&self, name: &str) -> StorageBackendResult<()> {
-        let relation =
-            RelationIdentity::from_legacy_name(name).map_err(StorageBackendError::Other)?;
-        let mut batch = self.store.batch();
-        self.drop_catalog_indexes_for_table_in_batch(batch.as_mut(), &relation.qualified_name())?;
-        batch.delete(&relation_key(TAG_TABLE, &relation)?)?;
-        self.release_relation(batch.as_mut(), &relation, RelationKind::Table)?;
-        batch.commit()
-    }
-
-    pub(super) fn drop_table_and_data_impl(&self, name: &str) -> StorageBackendResult<()> {
-        let relation =
-            RelationIdentity::from_legacy_name(name).map_err(StorageBackendError::Other)?;
-        let storage_names = relation.canonical_and_legacy_public_names();
-        let mut batch = self.store.batch();
-        self.drop_catalog_indexes_for_table_in_batch(batch.as_mut(), &relation.qualified_name())?;
-        batch.delete(&relation_key(TAG_TABLE, &relation)?)?;
-        self.release_relation(batch.as_mut(), &relation, RelationKind::Table)?;
-        for storage_name in &storage_names {
-            batch.delete_prefix(&document_key_prefix(storage_name)?)?;
-            batch.delete_prefix(&posting_key_prefix(storage_name)?)?;
-            batch.delete_prefix(&occurrence::table_prefix(storage_name)?)?;
-            batch.delete_prefix(&posting_cluster_score_key_prefix(storage_name)?)?;
-            batch.delete_prefix(&posting_cluster_positions_key_prefix(storage_name)?)?;
-            batch.delete_prefix(&posting_document_key_prefix(storage_name)?)?;
-            batch.delete_prefix(&doc_length_key_prefix(storage_name)?)?;
-            batch.delete_prefix(&field_stats_key_prefix(storage_name)?)?;
-            batch.delete_prefix(&reverse_posting_key_prefix(storage_name)?)?;
-            batch.delete_prefix(&vector_key_prefix(storage_name)?)?;
-            batch.delete_prefix(&column_stats_prefix(storage_name)?)?;
-            batch.delete_prefix(&table_field_analyzer_prefix(storage_name)?)?;
-            batch.delete_prefix(&field_binding_prefix(storage_name)?)?;
-            drop_table_indexes(batch.as_mut(), storage_name)?;
-        }
-        batch.commit()
-    }
-
-    pub(super) fn purge_table_data_impl(&self, name: &str) -> StorageBackendResult<()> {
-        let relation =
-            RelationIdentity::from_legacy_name(name).map_err(StorageBackendError::Other)?;
-        let mut batch = self.store.batch();
-        for storage_name in relation.canonical_and_legacy_public_names() {
-            batch.delete_prefix(&document_key_prefix(&storage_name)?)?;
-            batch.delete_prefix(&posting_key_prefix(&storage_name)?)?;
-            batch.delete_prefix(&occurrence::table_prefix(&storage_name)?)?;
-            batch.delete_prefix(&posting_cluster_score_key_prefix(&storage_name)?)?;
-            batch.delete_prefix(&posting_cluster_positions_key_prefix(&storage_name)?)?;
-            batch.delete_prefix(&posting_document_key_prefix(&storage_name)?)?;
-            batch.delete_prefix(&doc_length_key_prefix(&storage_name)?)?;
-            batch.delete_prefix(&field_stats_key_prefix(&storage_name)?)?;
-            batch.delete_prefix(&reverse_posting_key_prefix(&storage_name)?)?;
-            batch.delete_prefix(&vector_key_prefix(&storage_name)?)?;
-            batch.delete_prefix(&column_stats_prefix(&storage_name)?)?;
-            drop_table_indexes(batch.as_mut(), &storage_name)?;
-        }
-        batch.commit()
-    }
-
-    pub(super) fn rename_table_data_impl(&self, from: &str, to: &str) -> StorageBackendResult<()> {
-        let from_relation =
-            RelationIdentity::from_legacy_name(from).map_err(StorageBackendError::Other)?;
-        let to_relation =
-            RelationIdentity::from_legacy_name(to).map_err(StorageBackendError::Other)?;
-        if from_relation == to_relation {
-            return Ok(());
-        }
-        if from_relation.schema != to_relation.schema {
-            return Err(StorageBackendError::Other(
-                "moving a table between schemas is not supported by the catalog".into(),
-            ));
-        }
-        self.require_schema_exists(&to_relation)?;
-        let from_key = relation_key(TAG_TABLE, &from_relation)?;
-        let to_key = relation_key(TAG_TABLE, &to_relation)?;
-        if self.store.get(&to_key)?.is_some()
-            || self
-                .store
-                .get(&relation_key(TAG_RELATION, &to_relation)?)?
-                .is_some()
-        {
-            return Err(StorageBackendError::Other(format!(
-                "relation `{}` already exists",
-                to_relation.qualified_name()
-            )));
-        }
-        let value = self
-            .store
-            .get(&from_key)?
-            .ok_or_else(|| StorageBackendError::Other(format!("table `{from}` does not exist")))?;
-        let mut batch = self.store.batch();
-        let mut schema = decode_value::<TableSchema>(&value)?;
-        schema.relation = to_relation.clone();
-        batch.put(&to_key, &encode_value(&schema)?)?;
-        batch.delete(&from_key)?;
-        self.release_relation(batch.as_mut(), &from_relation, RelationKind::Table)?;
-        batch.put(
-            &relation_key(TAG_RELATION, &to_relation)?,
-            &encode_value(&StoredRelation {
-                kind: RelationKind::Table,
-            })?,
-        )?;
-        for (old_prefix, new_prefix) in [
-            (document_key_prefix(from)?, document_key_prefix(to)?),
-            (posting_key_prefix(from)?, posting_key_prefix(to)?),
-            (
-                occurrence::table_prefix(from)?,
-                occurrence::table_prefix(to)?,
-            ),
-            (
-                posting_cluster_score_key_prefix(from)?,
-                posting_cluster_score_key_prefix(to)?,
-            ),
-            (
-                posting_cluster_positions_key_prefix(from)?,
-                posting_cluster_positions_key_prefix(to)?,
-            ),
-            (
-                posting_document_key_prefix(from)?,
-                posting_document_key_prefix(to)?,
-            ),
-            (doc_length_key_prefix(from)?, doc_length_key_prefix(to)?),
-            (field_stats_key_prefix(from)?, field_stats_key_prefix(to)?),
-            (
-                reverse_posting_key_prefix(from)?,
-                reverse_posting_key_prefix(to)?,
-            ),
-            (vector_key_prefix(from)?, vector_key_prefix(to)?),
-            (column_stats_prefix(from)?, column_stats_prefix(to)?),
-            (field_binding_prefix(from)?, field_binding_prefix(to)?),
-            (
-                table_field_analyzer_prefix(from)?,
-                table_field_analyzer_prefix(to)?,
-            ),
-        ] {
-            batch_rekey_prefix(
-                self.store.as_ref(),
-                batch.as_mut(),
-                &old_prefix,
-                &new_prefix,
-            )?;
-        }
-        rename_table_indexes(self.store.as_ref(), batch.as_mut(), from, to)?;
-        for row in self.load_catalog_indexes()? {
-            if row.table_name == from {
-                batch.put(
-                    &relation_key(TAG_CATALOG_INDEX, &row.relation)?,
-                    &encode_value(&StoredCatalogIndex {
-                        index_type: row.index_type,
-                        table_name: to.to_string(),
-                        columns_json: row.columns_json,
-                        parameters_json: row.parameters_json,
-                        definition_json: row.definition_json,
-                    })?,
-                )?;
-            }
-        }
-        batch.commit()
     }
 
     pub(super) fn drop_column_data_impl(

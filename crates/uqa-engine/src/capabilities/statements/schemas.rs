@@ -51,6 +51,9 @@ impl SchemaStatementInputs<StatementReadSnapshot> for Engine {
     fn vacuum_execution_context(&self) -> uqa_execution::maintenance::VacuumContext<'_> {
         Engine::vacuum_execution_context(self)
     }
+    fn table_lock_context(&self) -> uqa_execution::statement::table_locks::TableLockContext<'_> {
+        Engine::table_lock_context(self)
+    }
     fn truncate_context(&self) -> uqa_execution::schema::truncate::TruncateContext<'_> {
         Engine::truncate_context(self)
     }

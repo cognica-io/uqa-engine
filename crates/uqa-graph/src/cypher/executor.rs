@@ -106,6 +106,8 @@ pub enum CypherError {
     MissingLabelRelation(String),
     #[error("storage error: {0}")]
     Storage(String),
+    #[error("storage error: {0}")]
+    Backend(#[source] crate::GraphStorageError),
     #[error("serialization failure: {0}")]
     SerializationFailure(String),
 }
@@ -125,11 +127,18 @@ impl From<agtype::AgtypeConversionError> for CypherError {
 impl From<crate::store::GraphStoreError> for CypherError {
     fn from(err: crate::store::GraphStoreError) -> Self {
         match err {
+            crate::store::GraphStoreError::Backend(source) => Self::Backend(source),
             crate::store::GraphStoreError::SerializationFailure(message) => {
                 Self::SerializationFailure(message)
             }
             other => Self::Storage(other.to_string()),
         }
+    }
+}
+
+impl From<uqa_storage::StorageBackendError> for CypherError {
+    fn from(error: uqa_storage::StorageBackendError) -> Self {
+        Self::Backend(error.into())
     }
 }
 

@@ -12,13 +12,17 @@ use super::super::{
     },
     SequenceState,
 };
-use crate::catalog::{
-    sequence::restoration::SequencePersistenceRead,
-    sequence_introspection::SequenceIntrospectionCatalog,
-};
+use crate::catalog::sequence::snapshot::SequenceSnapshotSource;
+use crate::row_locks::binding::RelationLockSession;
 use std::{collections::BTreeMap, ops::DerefMut};
 use uqa_core::RelationIdentity;
-use uqa_sql::{catalog::security::sequence_inquiry::SequencePrivilegeInquiry, SQLError};
+use uqa_sql::{
+    catalog::{
+        security::sequence_inquiry::SequencePrivilegeInquiry,
+        sequence_functions::value_error::SequenceValueError,
+    },
+    SQLError,
+};
 use uqa_storage::{CatalogFacade, PersistentStorageSession, StorageBackendResult};
 pub type SequenceStatesWrite<'a> =
     Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, SequenceState>> + 'a>;
@@ -34,7 +38,7 @@ pub trait SequenceSessionWrite {
     fn last_mut(&mut self) -> &mut Option<SessionLastSequenceReference>;
 }
 pub trait SequenceValueRuntime {
-    fn persistence(&self) -> SequencePersistenceRead<'_>;
+    fn cancellation(&self) -> &uqa_core::CancellationToken;
     fn states_write(&self) -> SequenceStatesWrite<'_>;
     fn caches(&self) -> SequenceCachesWrite<'_>;
     fn session_read(&self) -> Box<dyn SequenceSessionRead + '_>;
@@ -51,8 +55,21 @@ pub trait SequenceValueRuntime {
         defines_lastval: bool,
     );
 }
+
+pub type SequenceValueOperation<'a> = Box<dyn FnOnce() -> Result<i64, SequenceValueError> + 'a>;
+
+pub trait SequenceValueTransactions {
+    fn with_value_transaction(
+        &self,
+        operation: SequenceValueOperation<'_>,
+    ) -> Result<i64, SequenceValueError>;
+    fn transaction_lock_mark(&self) -> u32;
+}
+
 pub struct SequenceValueContext<'a> {
-    pub sequences: &'a dyn SequenceIntrospectionCatalog,
+    pub locks: &'a dyn RelationLockSession,
+    pub transactions: &'a dyn SequenceValueTransactions,
+    pub snapshots: &'a dyn SequenceSnapshotSource,
     pub privileges: SequencePrivilegeInquiry<'a>,
     pub runtime: &'a dyn SequenceValueRuntime,
     pub storage: Option<&'a dyn CatalogFacade>,

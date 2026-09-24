@@ -17,8 +17,11 @@ use crate::{Engine, GraphTransactionOverlay, SQLError};
 
 type GraphHandles = BTreeMap<String, Arc<GraphStoreHandle>>;
 
-fn snapshot_error(error: impl std::fmt::Display) -> SQLError {
-    SQLError::Internal(format!("capture physical graph snapshot: {error}"))
+fn snapshot_error(error: impl std::error::Error + Send + Sync + 'static) -> SQLError {
+    uqa_execution::storage_errors::storage_error(
+        "capture physical graph snapshot",
+        &super::graph_store_error(error),
+    )
 }
 
 impl Engine {
@@ -60,8 +63,8 @@ impl Engine {
     ) -> Result<(), SQLError> {
         let GraphStoreHandle::Persistent(write) = self.new_graph_store().map_err(snapshot_error)?
         else {
-            return Err(snapshot_error(
-                "a fixed graph snapshot requires persistent storage",
+            return Err(SQLError::Internal(
+                "a fixed graph snapshot requires persistent storage".into(),
             ));
         };
         let store = write.with_read_snapshot(snapshot);
@@ -84,14 +87,23 @@ impl Engine {
         name: &str,
         create: bool,
     ) -> StorageBackendResult<Option<GraphStoreHandle>> {
+        self.observe_graph_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::NamedGraph,
+            Some(name),
+        )?;
         if let Some(overlay) = &self.session.state.read().graph_overlay {
-            return Ok((create || overlay.names.contains(name))
-                .then(|| GraphStoreHandle::Persistent(overlay.store.fork_for_mutation())));
+            return (create || overlay.names.contains(name))
+                .then(|| {
+                    self.bind_graph_reader(GraphStoreHandle::Persistent(
+                        overlay.store.fork_for_mutation(),
+                    ))
+                })
+                .transpose();
         }
         let existing = self.durable.graphs.read().get(name).cloned();
         match existing {
-            Some(store) => Ok(Some(store.as_ref().clone())),
-            None if create => self.new_graph_store().map(Some),
+            Some(store) => self.bind_graph_reader(store.as_ref().clone()).map(Some),
+            None if create => self.bind_graph_reader(self.new_graph_store()?).map(Some),
             None => Ok(None),
         }
     }
@@ -102,6 +114,7 @@ impl Engine {
         &self,
         candidate: GraphStoreHandle,
     ) -> StorageBackendResult<Arc<GraphStoreHandle>> {
+        let candidate = candidate.without_serializable_read();
         if self.session.state.read().graph_overlay.is_some() {
             let names = Arc::new(
                 candidate
@@ -112,8 +125,8 @@ impl Engine {
             );
             let live = Arc::new(self.new_graph_store()?);
             let GraphStoreHandle::Persistent(store) = candidate else {
-                return Err(super::graph_store_error(
-                    "persistent graph mutation produced a memory store",
+                return Err(uqa_storage::StorageBackendError::Other(
+                    "persistent graph mutation produced a memory store".into(),
                 ));
             };
             self.session.state.write().graph_overlay = Some(GraphTransactionOverlay {
@@ -164,11 +177,13 @@ impl Engine {
             && backend.supports_concurrent_pinned_read_and_write()
             && !backend.transaction_has_written().map_err(snapshot_error)?
         {
-            let snapshot: Arc<Engine> = self.open_independent_pinned_read_snapshot()?.into();
+            let snapshot: Arc<Engine> = self.open_retained_pinned_read_snapshot()?.into();
             let GraphStoreHandle::Persistent(store) =
                 snapshot.new_graph_store().map_err(snapshot_error)?
             else {
-                return Err(snapshot_error("persistent cursor has no graph storage"));
+                return Err(SQLError::Internal(
+                    "persistent cursor has no graph storage".into(),
+                ));
             };
             store.retain_resource(snapshot)
         } else {
@@ -193,7 +208,9 @@ impl Engine {
             .tempdir()
             .map_err(snapshot_error)?;
         let mut key = [0u8; 32];
-        getrandom::fill(&mut key).map_err(snapshot_error)?;
+        getrandom::fill(&mut key).map_err(|error| {
+            SQLError::Internal(format!("generate retained graph snapshot key: {error}"))
+        })?;
         let mut encoded_key = String::with_capacity(64);
         for byte in key {
             write!(&mut encoded_key, "{byte:02x}").map_err(snapshot_error)?;
@@ -221,7 +238,9 @@ impl Engine {
                     let mut after = None;
                     loop {
                         self.runtime.cancellation.check().map_err(|error| {
-                            uqa_graph::GraphStoreError::Storage(error.to_string())
+                            uqa_graph::GraphStoreError::from(
+                                uqa_storage::StorageBackendError::from(error),
+                            )
                         })?;
                         let page = source.vertex_id_page(name, after, 256)?;
                         if page.is_empty() {
@@ -238,7 +257,9 @@ impl Engine {
                                 id,
                                 &vertex.label,
                                 &serde_json::to_string(&vertex.properties).map_err(|error| {
-                                    uqa_graph::GraphStoreError::Storage(error.to_string())
+                                    uqa_graph::GraphStoreError::from(
+                                        uqa_storage::StorageBackendError::from(error),
+                                    )
                                 })?,
                             )?;
                             catalog.save_graph_membership("vertex", id, name)?;
@@ -247,7 +268,9 @@ impl Engine {
                     after = None;
                     loop {
                         self.runtime.cancellation.check().map_err(|error| {
-                            uqa_graph::GraphStoreError::Storage(error.to_string())
+                            uqa_graph::GraphStoreError::from(
+                                uqa_storage::StorageBackendError::from(error),
+                            )
                         })?;
                         let page = source.edge_id_page(name, after, 256)?;
                         if page.is_empty() {
@@ -269,7 +292,9 @@ impl Engine {
                                 edge.target_id,
                                 &edge.label,
                                 &serde_json::to_string(&edge.properties).map_err(|error| {
-                                    uqa_graph::GraphStoreError::Storage(error.to_string())
+                                    uqa_graph::GraphStoreError::from(
+                                        uqa_storage::StorageBackendError::from(error),
+                                    )
                                 })?,
                             )?;
                             catalog.save_graph_membership("edge", id, name)?;

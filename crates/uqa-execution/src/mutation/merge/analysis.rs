@@ -26,7 +26,7 @@ pub fn merge_analysis_scope<S: Clone>(
     stmt: &MergePlan,
     inherited: Option<&CteScope<S>>,
 ) -> Result<CteScope<S>, SQLError> {
-    let mut scope = scopes.command_scope(stmt.statement_privilege_subject.as_deref(), false)?;
+    let mut scope = scopes.command_scope(stmt.statement_privilege_subject.as_ref(), false)?;
     if let Some(parent) = inherited {
         scope.inherit_cte_bindings(parent);
     }
@@ -53,7 +53,7 @@ pub(super) fn ensure_merge_privileges<S: Clone + 'static>(
     ensure_target_table_select_for_expressions(
         TargetSelectPrivilegeRequest {
             table: &stmt.target,
-            privilege_subject: stmt.target_privilege_subject.as_deref(),
+            privilege_subject: stmt.target_privilege_subject.as_ref(),
             target_qualifier: &stmt.target_qualifier,
             returning_aliases: &stmt.returning_aliases,
             expressions: &expressions,

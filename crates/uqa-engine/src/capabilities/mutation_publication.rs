@@ -20,6 +20,7 @@ use uqa_storage::document_store::Document;
 impl Engine {
     pub(crate) fn mutation_publication_context(&self) -> PublicationContext<'_> {
         PublicationContext {
+            observations: self,
             storage: self,
             text: self,
             history: self,
@@ -33,11 +34,11 @@ impl MutationIdentifiers for Engine {
     fn allocate_next_id(&self, table: &str) -> Result<DocId, SQLError> {
         Engine::allocate_next_id(self, table)
     }
-    fn advance_next_id(&self, table: &str, doc_id: DocId) -> Result<(), String> {
-        Engine::advance_next_id(self, table, doc_id).map_err(|e| e.to_string())
+    fn advance_next_id(&self, table: &str, doc_id: DocId) -> uqa_storage::StorageBackendResult<()> {
+        Engine::advance_next_id(self, table, doc_id)
     }
-    fn persist_next_id(&self, table: &str) -> Result<(), String> {
-        Engine::persist_next_id(self, table).map_err(|e| e.to_string())
+    fn persist_next_id(&self, table: &str) -> uqa_storage::StorageBackendResult<()> {
+        Engine::persist_next_id(self, table)
     }
 }
 impl MutationStorage for Engine {
@@ -144,5 +145,24 @@ impl Engine {
             constraints: self.constraint_execution_context(),
             triggers: self.trigger_execution_context(),
         }
+    }
+}
+
+use uqa_execution::serializable::SerializableWrites;
+use uqa_sql::ast::RelationPersistence;
+use uqa_storage::mvcc::SerializableSession;
+
+impl SerializableWrites for Engine {
+    fn serializable_session(&self) -> Option<&dyn SerializableSession> {
+        self.storage.backend.as_ref()?.serializable_session()
+    }
+
+    fn serializable_cancellation(&self) -> &uqa_core::CancellationToken {
+        &self.runtime.cancellation
+    }
+
+    fn serializable_write_object(&self, table: &str) -> Result<Option<[u8; 16]>, SQLError> {
+        let table = self.require_table(table)?;
+        Ok((table.persistence != RelationPersistence::Temporary).then_some(table.object_id()))
     }
 }

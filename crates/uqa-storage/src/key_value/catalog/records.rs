@@ -33,12 +33,10 @@ pub(super) struct StoredForeignServer {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(super) struct StoredForeignTable {
     pub(super) security_version: u8,
-    pub(super) role_owner: String,
-    pub(super) acl: Option<Vec<crate::catalog::TableAclEntry>>,
-    pub(super) column_acls: std::collections::BTreeMap<String, Vec<crate::catalog::TableAclEntry>>,
+    #[serde(flatten)]
+    pub(super) security: crate::RelationSecurityRow,
     pub(super) server_name: String,
     pub(super) columns_json: String,
     pub(super) options_json: String,
@@ -68,11 +66,8 @@ pub(super) struct StoredRelation {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct StoredView {
-    pub(super) role_owner: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) acl: Option<Vec<crate::catalog::TableAclEntry>>,
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub(super) column_acls: std::collections::BTreeMap<String, Vec<crate::catalog::TableAclEntry>>,
+    #[serde(flatten)]
+    pub(super) security: crate::RelationSecurityRow,
     pub(super) definition_json: String,
 }
 
@@ -125,10 +120,8 @@ pub(super) struct StoredColumnStats {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct StoredSequence {
-    #[serde(default = "legacy_sequence_role_owner")]
-    pub(super) role_owner: String,
-    #[serde(default)]
-    pub(super) acl: Option<Vec<crate::catalog::SequenceAclEntry>>,
+    #[serde(flatten)]
+    pub(super) security: crate::catalog::SequenceSecurityRow,
     #[serde(default)]
     pub(super) object_id: [u8; 16],
     #[serde(default)]
@@ -154,8 +147,4 @@ pub(super) const fn legacy_sequence_called() -> bool {
 
 pub(super) fn legacy_sequence_persistence() -> String {
     "p".into()
-}
-
-pub(super) fn legacy_sequence_role_owner() -> String {
-    "uqa".into()
 }

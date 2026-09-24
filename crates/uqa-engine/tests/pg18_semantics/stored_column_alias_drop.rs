@@ -227,7 +227,7 @@ fn remove_source_bindings(value: &mut serde_json::Value) -> usize {
 
 #[test]
 fn stored_column_alias_drop_migrates_legacy_sources_without_rebinding_on_reopen() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("alias-migration.db");
@@ -235,7 +235,8 @@ fn stored_column_alias_drop_migrates_legacy_sources_without_rebinding_on_reopen(
     create_alias_lifecycle(&engine);
     drop(engine);
     {
-        let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+        let catalog =
+            crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
         let encoded = catalog.get_metadata("sql_functions_json").unwrap().unwrap();
         let mut definitions: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         assert_eq!(remove_source_bindings(&mut definitions), 3);
@@ -255,7 +256,8 @@ fn stored_column_alias_drop_migrates_legacy_sources_without_rebinding_on_reopen(
     let engine = Engine::open(&database).unwrap();
     assert_eq!(alias_value(&engine, read), Value::Int(52));
     drop(engine);
-    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
     let encoded = catalog.get_metadata("sql_functions_json").unwrap().unwrap();
     let mut definitions: serde_json::Value = serde_json::from_str(&encoded).unwrap();
     assert_eq!(remove_source_bindings(&mut definitions), 3);
@@ -264,7 +266,7 @@ fn stored_column_alias_drop_migrates_legacy_sources_without_rebinding_on_reopen(
 #[test]
 fn stored_column_alias_drop_migrates_regclass_constants_before_sequence_rename() {
     use uqa_sql::ast::{ColumnDef, Expr};
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("alias-regclass-migration.db");
@@ -272,7 +274,8 @@ fn stored_column_alias_drop_migrates_regclass_constants_before_sequence_rename()
     engine.sql("CREATE SEQUENCE alias_migration_sequence; CREATE TABLE alias_migration_source(a regclass GENERATED ALWAYS AS ('alias_migration_sequence'::regclass) STORED,x integer); INSERT INTO alias_migration_source(x) VALUES(42); CREATE FUNCTION alias_migration_reader() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT s.kept FROM alias_migration_source s(da,kept) ORDER BY s.kept LIMIT 1; END", &[]).unwrap();
     drop(engine);
     {
-        let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+        let catalog =
+            crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
         let mut tables = catalog.load_tables().unwrap();
         let table = tables
             .iter_mut()

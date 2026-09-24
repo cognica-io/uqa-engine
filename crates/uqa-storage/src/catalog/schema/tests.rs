@@ -1,0 +1,93 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+use super::*;
+
+#[test]
+fn schema_records_distinguish_legacy_names_from_current_role_references() {
+    let old = SchemaRow::legacy("public");
+    let current = SchemaRow::bootstrap("public");
+    for row in [&old, &current] {
+        let encoded = serde_json::to_string(row).unwrap();
+        assert_eq!(serde_json::from_str::<SchemaRow>(&encoded).unwrap(), *row);
+    }
+    let encoded = serde_json::to_value(&current).unwrap();
+    assert_eq!(encoded["schema_security_format"], 1);
+    assert_eq!(encoded["role_owner"]["oid"], 10);
+    assert!(encoded["acl"][1]["role"].is_null());
+    assert!(serde_json::from_value::<LegacySchemaRow>(encoded).is_err());
+    assert_eq!(
+        serde_json::from_str::<SchemaRow>(r#"{"name":"ordinary"}"#).unwrap(),
+        SchemaRow::legacy("ordinary")
+    );
+}
+
+#[test]
+fn malformed_or_unknown_schema_records_never_fall_back_to_legacy_defaults() {
+    let original = serde_json::to_value(SchemaRow::bootstrap("public")).unwrap();
+    for version in [
+        serde_json::Value::Null,
+        serde_json::json!(2),
+        serde_json::json!("1"),
+    ] {
+        let mut value = original.clone();
+        value["schema_security_format"] = version;
+        value["role_owner"] = serde_json::json!("uqa");
+        value["acl"] = serde_json::Value::Null;
+        assert!(serde_json::from_value::<SchemaRow>(value).is_err());
+    }
+    let mut missing_owner = original.clone();
+    missing_owner.as_object_mut().unwrap().remove("role_owner");
+    assert!(serde_json::from_value::<SchemaRow>(missing_owner).is_err());
+    let mut mixed = original;
+    mixed["acl"][0]["role"] = serde_json::json!("uqa");
+    assert!(serde_json::from_value::<SchemaRow>(mixed).is_err());
+}
+
+#[test]
+fn namespace_tuple_format_preserves_full_oid_and_rejects_missing_or_invalid_identity() {
+    let mut row = BoundSchemaRow::bootstrap("s");
+    row.tuple = Some(SchemaTupleIdentity {
+        oid: i64::from(u32::MAX),
+        object_id: [7; 16],
+        revision: [8; 16],
+    });
+    let row = SchemaRow::Bound(row);
+    let encoded = serde_json::to_value(&row).unwrap();
+    assert_eq!(encoded["schema_security_format"], 2);
+    assert_eq!(
+        serde_json::from_value::<SchemaRow>(encoded.clone()).unwrap(),
+        row
+    );
+    for field in ["oid", "object_id", "revision"] {
+        let mut invalid = encoded.clone();
+        invalid["tuple"].as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<SchemaRow>(invalid).is_err());
+    }
+    for invalid_tuple in [
+        serde_json::Value::Null,
+        serde_json::json!({"oid": 0, "object_id": vec![7; 16], "revision": vec![8; 16]}),
+        serde_json::json!({"oid": 30_001, "object_id": vec![0; 16], "revision": vec![8; 16]}),
+        serde_json::json!({"oid": 30_001, "object_id": vec![7; 16], "revision": vec![0; 16]}),
+    ] {
+        let mut invalid = encoded.clone();
+        invalid["tuple"] = invalid_tuple;
+        assert!(serde_json::from_value::<SchemaRow>(invalid).is_err());
+    }
+    let mut missing = encoded.clone();
+    missing.as_object_mut().unwrap().remove("tuple");
+    assert!(serde_json::from_value::<SchemaRow>(missing).is_err());
+    let mut wrong_version = encoded;
+    wrong_version["schema_security_format"] = serde_json::json!(1);
+    assert!(serde_json::from_value::<SchemaRow>(wrong_version).is_err());
+    let mut missing_format = serde_json::to_value(&row).unwrap();
+    missing_format
+        .as_object_mut()
+        .unwrap()
+        .remove("schema_security_format");
+    missing_format["role_owner"] = serde_json::json!("uqa");
+    assert!(serde_json::from_value::<SchemaRow>(missing_format).is_err());
+}

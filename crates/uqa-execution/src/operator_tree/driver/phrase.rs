@@ -13,6 +13,7 @@ use super::{
 use uqa_core::memory::{Budgeted, BudgetedVec};
 use uqa_operators::phrase::{score_phrase_budgeted, PhraseBudget, PhraseError};
 use uqa_scoring::{BM25Params, ScoringMode};
+use uqa_storage::InvertedIndex;
 
 impl PhysicalRetrievalDriver<'_> {
     pub(super) fn execute_phrase(
@@ -97,7 +98,11 @@ impl PhysicalRetrievalDriver<'_> {
             .map_err(|error| operator_execution_error("resolve phrase index", error))?
             .ok_or_else(|| SQLError::UnknownTable(self.table.into()))?;
         let index = state.inverted_index();
-        let index = index.as_ref().as_ref();
+        let index = crate::serializable::text::ObservedTextIndex::new(
+            index.as_ref().as_ref(),
+            self.context.relations.serializable_read(self.table)?,
+            state.columns(),
+        );
         let revision = index
             .search_analyzer_revision(field)
             .map_err(|error| operator_execution_error("resolve phrase analyzer revision", error))?;
@@ -113,7 +118,7 @@ impl PhysicalRetrievalDriver<'_> {
             },
         )
         .map_err(|error| phrase_sql_error(PhraseError::Storage(error)))?;
-        score_phrase_budgeted(index, field, &graph, mode, budget)
+        score_phrase_budgeted(&index, field, &graph, mode, budget)
             .map(|rows| (rows, graph.len()))
             .map_err(phrase_sql_error)
     }
@@ -139,6 +144,10 @@ fn phrase_sql_error(error: PhraseError) -> SQLError {
                 sqlstate: "22023".into(),
                 message: error.to_string(),
             }
+        }
+        PhraseError::Storage(error) => crate::storage_errors::storage_error("phrase", &error),
+        PhraseError::Scoring(uqa_scoring::TextSearchError::Storage { action, source }) => {
+            crate::storage_errors::storage_error(action, &source)
         }
         error => operator_execution_error("phrase", error),
     }

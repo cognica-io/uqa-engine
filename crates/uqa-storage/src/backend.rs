@@ -57,6 +57,35 @@ impl StorageBackendError {
 
 pub type StorageBackendResult<T> = std::result::Result<T, StorageBackendError>;
 
+/// Process-local identity of one storage transaction context. Clone it for handles sharing that context; allocate a new identity for each independent session. This is not a durable database or transaction ID.
+#[derive(Clone, Debug)]
+pub struct StorageSessionAffinity(Arc<()>);
+
+impl StorageSessionAffinity {
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Arc::new(()))
+    }
+}
+
+impl Default for StorageSessionAffinity {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PartialEq for StorageSessionAffinity {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for StorageSessionAffinity {}
+
+#[derive(Debug, thiserror::Error)]
+#[error("catalog and data backend must share one storage transaction context")]
+pub struct StorageSessionMismatch;
+
 /// Opaque transaction checkpoint identity. SQL savepoint names remain engine metadata and are never forwarded into a backend namespace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StorageSavepointId(u64);
@@ -169,12 +198,48 @@ fn resolve_final_symlinks(path: &Path) -> StorageBackendResult<PathBuf> {
     }
 }
 
+/// How a catalog/backend pair retains writes between SQL commands. This contract is independent of the physical database's single-writer commit admission.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StorageTransactionModel {
+    #[default]
+    ProviderSerialized,
+    /// Private writes, retained readers and savepoints share this database incarnation. Command refresh must preserve evaluated writes and commit must validate their original revisions.
+    VersionedConcurrent { database: crate::mvcc::DatabaseId },
+}
+
+impl StorageTransactionModel {
+    pub fn is_versioned(self) -> bool {
+        matches!(self, Self::VersionedConcurrent { .. })
+    }
+}
+
 impl PersistentStorageSession {
     pub fn new(
         catalog: Arc<dyn CatalogFacade>,
         backend: Arc<dyn PersistentStorageBackend>,
     ) -> Self {
         Self { catalog, backend }
+    }
+
+    /// Check the transaction model, database incarnation and session affinity before restoration, migration or attachment. Versioned pairs require a matching reported affinity and backend write cancellation; serialized pairs may omit both capabilities.
+    pub fn validate_transaction_affinity(&self) -> StorageBackendResult<()> {
+        let affinity = self.backend.transaction_affinity();
+        let model = self.backend.transaction_model();
+        if self.catalog.transaction_affinity() != affinity
+            || self.catalog.transaction_model() != model
+            || (model.is_versioned() && affinity.is_none())
+        {
+            return Err(StorageBackendError::backend(
+                "session",
+                StorageSessionMismatch,
+            ));
+        }
+        if model.is_versioned() && self.backend.write_cancellation().is_none() {
+            return Err(StorageBackendError::Other(
+                "versioned storage backend does not expose write cancellation".into(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -185,6 +250,22 @@ impl PersistentStorageSession {
 /// `SQLite`, redb, and application-defined Key/Value stores.
 pub trait PersistentStorageProvider: Send + Sync {
     fn open_session(&self) -> StorageBackendResult<PersistentStorageSession>;
+
+    /// Open an autonomous session whose writes can be cancelled by the caller. Versioned factories and wrappers must preserve their catalog/backend pair and forward this construction capability.
+    fn open_session_with_cancellation(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        cancellation.check()?;
+        let session = self.open_session()?;
+        if session.backend.transaction_model().is_versioned() {
+            return Err(StorageBackendError::Other(
+                "cancellable independent storage sessions are not implemented by this provider"
+                    .into(),
+            ));
+        }
+        Ok(session)
+    }
 
     /// Open handles for initial Engine restoration. Providers may defer catalog schema preparation until `CatalogFacade::initialize_storage` runs inside the owning transaction; ordinary session factories must return an initialized catalog.
     fn open_initial_session(&self) -> StorageBackendResult<PersistentStorageSession> {
@@ -206,6 +287,62 @@ pub trait PersistentStorageProvider: Send + Sync {
 
 /// Factory plus transaction surface for persistent table/index storage.
 pub trait PersistentStorageBackend: Send + Sync {
+    /// Shared allowance for this session's private state and retained query resources. Versioned wrappers must forward it; nested retained readers keep the original allowance rather than granting another limit.
+    fn retention_control(&self) -> Option<crate::read_control::StorageReadControl> {
+        None
+    }
+
+    /// Original participant admission and logical observations, shared with the paired catalog transaction. Retained readers preserve original attribution without owning completion. Wrappers must forward this capability; SQL access-path coverage remains the execution owner's responsibility.
+    fn serializable_session(&self) -> Option<&dyn crate::mvcc::SerializableSession> {
+        None
+    }
+
+    /// Cancellation for this session's physical write admission and publication. Retained reads and rollback cleanup must remain usable after cancellation. Versioned wrappers must forward the underlying token.
+    fn write_cancellation(&self) -> Option<uqa_core::CancellationToken> {
+        None
+    }
+
+    /// Create an independent transaction context whose writes share the invoking execution's cancellation. Versioned providers must implement this without rebinding another session's token.
+    fn open_session_with_cancellation(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        cancellation.check()?;
+        if self.transaction_model().is_versioned() {
+            return Err(StorageBackendError::Other(
+                "cancellable independent storage sessions are not implemented by this backend"
+                    .into(),
+            ));
+        }
+        self.open_session()
+    }
+
+    /// Bind an independent read-only catalog/backend pair to this exact committed/private view before restoration. Both handles must retain the original snapshot and logical reader attribution without taking ownership of transaction completion. Versioned wrappers must forward this capability.
+    fn open_retained_read_session(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        cancellation.check()?;
+        Err(StorageBackendError::Other(
+            "retained read sessions are not implemented by this storage backend".into(),
+        ))
+    }
+
+    /// Transaction ownership shared with the paired catalog. Legacy providers retain serialized Engine writer admission; versioned providers keep private writes and support command refresh without ending the transaction.
+    fn transaction_model(&self) -> StorageTransactionModel {
+        StorageTransactionModel::ProviderSerialized
+    }
+
+    /// Durable identifier allocation independent of logical transaction undo. A missing capability retains serialized allocation; it cannot establish support for concurrent writers. Wrappers must forward the underlying capability.
+    fn identifier_allocator(&self) -> Option<&dyn crate::mvcc::IdentifierAllocator> {
+        None
+    }
+
+    /// Identity shared with the paired catalog's transaction context. Wrappers must delegate this when their underlying backend reports an identity.
+    fn transaction_affinity(&self) -> Option<StorageSessionAffinity> {
+        None
+    }
+
     /// Return the stable database identity for independently constructed engines over this backend. File identities also enable cross-process row-lock coordination.
     fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {
         Ok(None)
@@ -274,6 +411,21 @@ pub trait PersistentStorageBackend: Send + Sync {
 
     fn btree_index_fields(&self, _table: &str) -> StorageBackendResult<Vec<crate::ValueIndexKey>> {
         Ok(Vec::new())
+    }
+
+    /// Read one previously evaluated key on the caller's retained transaction boundary, without loading the posting collection. An unbuilt index is distinct from an absent row and a stored NULL.
+    fn read_btree_index_entry(
+        &self,
+        _table: &str,
+        _field: &crate::ValueIndexKey,
+        _doc_id: DocId,
+    ) -> StorageBackendResult<crate::ValueIndexEntry> {
+        if self.persists_btree_indexes() {
+            return Err(crate::StorageBackendError::Other(
+                "point reads of stored B-tree entries are not implemented for this backend".into(),
+            ));
+        }
+        Ok(crate::ValueIndexEntry::Unbuilt)
     }
 
     /// Fields whose persisted posting support was found inconsistent during a
@@ -367,6 +519,16 @@ pub trait PersistentStorageBackend: Send + Sync {
         self.begin_transaction()
     }
 
+    /// Advance command visibility without ending the active logical transaction or replaying its writes. SQL isolation controls when this is permitted. Providers without logical snapshot refresh reject the request.
+    fn refresh_transaction_snapshot(
+        &self,
+        _cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "transaction snapshot refresh is not supported by this backend".into(),
+        ))
+    }
+
     /// Whether this session currently owns a pinned storage transaction.
     fn in_transaction(&self) -> bool;
 
@@ -403,11 +565,10 @@ pub trait PersistentStorageBackend: Send + Sync {
     fn rollback_to_savepoint(&self, id: StorageSavepointId) -> StorageBackendResult<()>;
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod identity_tests {
     use super::*;
 
-    #[cfg(unix)]
     #[test]
     fn dangling_database_symlink_keeps_the_target_identity_after_creation() {
         use std::os::unix::fs::symlink;

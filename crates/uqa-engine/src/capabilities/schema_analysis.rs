@@ -34,7 +34,7 @@ impl uqa_sql::schema::SchemaExpressionCatalog for Engine {
         Engine::registered_runtime_function_volatility(self, name)
     }
     fn schema_expression_columns(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, SQLError> {
-        self.try_describe_table(table)
+        self.describe_table_in_execution(table)
             .map_err(|error| SQLError::Internal(error.to_string()))
     }
 }
@@ -51,18 +51,34 @@ impl uqa_sql::schema::inheritance::InheritanceCatalog for Engine {
             .map_err(|error| error.to_string())
     }
     fn check_definitions(&self, table: &str) -> Result<Vec<uqa_sql::ast::TableCheck>, String> {
-        self.try_check_constraint_definitions(table)
+        self.check_constraint_definitions_in_execution(table)
             .map_err(|error| error.to_string())
     }
 }
 
 impl uqa_sql::schema::indexes::names::IndexNameCatalog for Engine {
+    fn automatic_constraint_names(
+        &self,
+        table: &str,
+    ) -> Result<std::collections::BTreeSet<String>, SQLError> {
+        self.schema_publication_context()
+            .constraint_names()
+            .automatic_names(table)
+    }
+    fn existing_constraint_names(
+        &self,
+        table: &str,
+    ) -> Result<std::collections::BTreeSet<String>, SQLError> {
+        self.schema_publication_context()
+            .constraint_names()
+            .existing_names(table)
+    }
     fn existing_constraint_keys(
         &self,
         table: &str,
     ) -> Result<Vec<uqa_sql::ast::TableKeyConstraint>, SQLError> {
         if self.try_resolve_bound_table_name(table)?.is_some() {
-            self.try_key_constraints(table)
+            self.key_constraints_in_execution(table)
                 .map_err(|error| SQLError::Internal(error.to_string()))
         } else {
             Ok(Vec::new())

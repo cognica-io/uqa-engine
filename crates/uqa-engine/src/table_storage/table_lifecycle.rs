@@ -8,6 +8,10 @@
 
 use super::{table_not_found, Engine, RelationIdentity, StorageBackendResult};
 
+fn table_metadata_error(error: uqa_sql::SQLError) -> uqa_storage::StorageBackendError {
+    uqa_storage::StorageBackendError::backend("table metadata query", error)
+}
+
 impl Engine {
     /// Drop a table from the catalog and release its in-memory state.
     /// Returns `true` if the table existed.
@@ -16,9 +20,13 @@ impl Engine {
     }
 
     pub(crate) fn try_drop_table(&self, name: &str) -> StorageBackendResult<bool> {
-        self.with_implicit_storage_transaction(|engine| {
-            engine.table_removal_context().drop_table(name)
+        self.with_implicit_definition_transaction(|engine| {
+            uqa_execution::schema::removal::direct::drop_table(
+                &engine.relation_removal_context(),
+                name,
+            )
         })
+        .map_err(|error| uqa_storage::StorageBackendError::backend("DROP TABLE", error))
     }
 
     pub(crate) fn drop_temporary_table_on_commit_inner(
@@ -34,6 +42,14 @@ impl Engine {
     }
 
     pub fn try_has_table(&self, name: &str) -> StorageBackendResult<bool> {
+        self.with_direct_query_snapshot(
+            true,
+            |engine| engine.has_table_in_execution(name),
+            table_metadata_error,
+        )
+    }
+
+    pub(crate) fn has_table_in_execution(&self, name: &str) -> StorageBackendResult<bool> {
         Ok(self.try_resolve_table_name(name)?.is_some())
     }
 
@@ -47,6 +63,17 @@ impl Engine {
     }
 
     pub fn try_table_columns(&self, table: &str) -> StorageBackendResult<Vec<String>> {
+        self.with_direct_query_snapshot(
+            true,
+            |engine| engine.table_columns_in_execution(table),
+            table_metadata_error,
+        )
+    }
+
+    pub(crate) fn table_columns_in_execution(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Vec<String>> {
         let table_state = self
             .try_table(table)?
             .ok_or_else(|| table_not_found(table))?;
@@ -77,6 +104,18 @@ impl Engine {
     }
 
     pub fn try_table_has_column(&self, table: &str, column: &str) -> StorageBackendResult<bool> {
+        self.with_direct_query_snapshot(
+            true,
+            |engine| engine.table_has_column_in_execution(table, column),
+            table_metadata_error,
+        )
+    }
+
+    pub(crate) fn table_has_column_in_execution(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> StorageBackendResult<bool> {
         let t = self
             .try_table(table)?
             .ok_or_else(|| table_not_found(table))?;
@@ -151,6 +190,10 @@ impl Engine {
 
     /// Sorted list of every registered table name.
     pub fn table_names(&self) -> StorageBackendResult<Vec<String>> {
+        self.with_direct_query_snapshot(true, Self::table_names_in_execution, table_metadata_error)
+    }
+
+    pub(crate) fn table_names_in_execution(&self) -> StorageBackendResult<Vec<String>> {
         self.synchronize_table_catalog()?;
         Ok(self
             .storage
@@ -171,6 +214,17 @@ impl Engine {
     }
 
     pub fn try_describe_table(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Option<Vec<uqa_sql::ast::ColumnDef>>> {
+        self.with_direct_query_snapshot(
+            true,
+            |engine| engine.describe_table_in_execution(table),
+            table_metadata_error,
+        )
+    }
+
+    pub(crate) fn describe_table_in_execution(
         &self,
         table: &str,
     ) -> StorageBackendResult<Option<Vec<uqa_sql::ast::ColumnDef>>> {
@@ -235,6 +289,16 @@ impl Engine {
     }
 
     pub fn try_column_default_expr(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> StorageBackendResult<Option<uqa_sql::ast::Expr>> {
+        self.with_catalog_read_snapshot(|engine| {
+            engine.column_default_expr_in_execution(table, column)
+        })
+    }
+
+    pub(crate) fn column_default_expr_in_execution(
         &self,
         table: &str,
         column: &str,

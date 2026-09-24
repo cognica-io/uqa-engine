@@ -209,6 +209,33 @@ fn filter_propagates_expression_errors() {
 }
 
 #[test]
+fn zero_limit_does_not_open_a_blocking_child() {
+    for limit in [0, 1] {
+        let scan = boxed_scan(vec!["x".into()], vec![row([("x", Value::Int(1))])]);
+        let sort = Sort::new(
+            scan,
+            vec![SortKey {
+                expr: bin(
+                    BinaryOp::Divide,
+                    col("x"),
+                    ScalarExpr::Literal(Value::Int(0)),
+                ),
+                descending: false,
+                nulls_first: None,
+            }],
+            vec![],
+        );
+        let mut source = Limit::new(Box::new(sort), 0, Some(limit));
+        let result = run_to_rows(&mut source);
+        if limit == 0 {
+            assert!(result.unwrap().1.is_empty());
+        } else {
+            assert!(result.unwrap_err().to_string().contains("division by zero"));
+        }
+    }
+}
+
+#[test]
 fn limit_with_offset() {
     let scan = boxed_scan(
         vec!["x".into()],

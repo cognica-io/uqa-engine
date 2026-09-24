@@ -131,7 +131,7 @@ impl RegisteredAggregateBuffer {
             return Ok(());
         }
         self.rows.sort_by(compare_registered_aggregate_records);
-        let mut run = tempfile::NamedTempFile::new().map_err(|err| {
+        let mut run = uqa_storage::temporary_file::TemporaryFile::new().map_err(|err| {
             SQLError::Internal(format!(
                 "failed to create registered aggregate spill file: {err}"
             ))
@@ -236,7 +236,7 @@ impl RegisteredAggregateRunReader {
 }
 
 pub fn read_registered_aggregate_record(
-    reader: &mut BufReader<File>,
+    reader: &mut impl std::io::BufRead,
     max_record_bytes: usize,
 ) -> Result<Option<RegisteredAggregateRecord>, SQLError> {
     let Some(record) =
@@ -256,7 +256,7 @@ pub fn merge_registered_aggregate_runs(runs: Vec<JsonSpillRun>) -> Result<JsonSp
         .iter()
         .map(RegisteredAggregateRunReader::file)
         .collect::<Result<Vec<_>, _>>()?;
-    let mut output = tempfile::NamedTempFile::new().map_err(|error| {
+    let mut output = uqa_storage::temporary_file::TemporaryFile::new().map_err(|error| {
         SQLError::Internal(format!(
             "failed to create registered aggregate merge run: {error}"
         ))

@@ -18,6 +18,10 @@ use uqa_sql::{
 /// Session transaction observations and the existing rollback/abort boundary.
 pub trait StatementTransactions {
     fn transaction_depth(&self) -> usize;
+    /// A commit has sealed its effects but its durable outcome is unresolved. Statement cleanup must preserve that attempt instead of treating it as an ordinary aborted transaction.
+    fn commit_resolution_pending(&self) -> bool {
+        false
+    }
     fn current_transaction_is_read_only(&self) -> bool;
     fn mark_transaction_snapshot_set(&self);
     fn abort_after_error(&self, error: SQLError) -> SQLError;
@@ -44,7 +48,7 @@ pub fn abort_explicit_statement_error(
     transactions: &dyn StatementTransactions,
     error: SQLError,
 ) -> SQLError {
-    if transactions.transaction_depth() == 0 {
+    if transactions.transaction_depth() == 0 || transactions.commit_resolution_pending() {
         error
     } else {
         transactions.abort_after_error(error)
@@ -66,7 +70,7 @@ pub fn rollback_after_statement_error<T>(
     transactions: &dyn StatementTransactions,
     statement_error: SQLError,
 ) -> Result<T, SQLError> {
-    if transactions.transaction_depth() == 0 {
+    if transactions.transaction_depth() == 0 || transactions.commit_resolution_pending() {
         return Err(statement_error);
     }
     match transactions.rollback() {

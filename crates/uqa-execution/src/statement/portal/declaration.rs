@@ -13,8 +13,10 @@ use crate::{
     query::{
         binding::analyze_query_plan_schema,
         locking::{lock_query_relations, query_has_row_locks, validate_query_row_locks},
+        statement::directional_support::query_plan_backward_scan_support,
     },
     statement::context::session::StatementPortals,
+    BackwardScanSupport,
 };
 use uqa_sql::{
     plan::{CommandPlan, QueryPlan, UnifiedPlan},
@@ -107,12 +109,18 @@ fn open_plpgsql_command_portal<S: Clone + Send + Sync + 'static>(
     inputs
         .state
         .open_pending_command_session_portal(SessionPortalCommandDeclaration {
-            name: name.to_string(),
+            metadata: uqa_sql::catalog::session::CursorMetadata {
+                name: name.to_string(),
+                source_sql: inputs.source_sql.map(Into::into),
+                is_holdable: false,
+                is_binary: false,
+                is_scrollable: scroll.unwrap_or(false),
+                created_at_micros: inputs.created_at_micros,
+            },
             command: Box::new(command.clone()),
             params: params.to_vec(),
             columns: schema.columns().to_vec(),
             column_types: schema.column_types().to_vec(),
-            scrollable: scroll.unwrap_or(false),
             null_returning_values,
         })
 }
@@ -188,17 +196,47 @@ fn prepare_session_portal<S: Clone + Send + Sync + 'static>(
     inputs
         .state
         .open_pending_session_portal(SessionPortalDeclaration {
-            name: name.to_string(),
+            metadata: uqa_sql::catalog::session::CursorMetadata {
+                name: name.to_string(),
+                source_sql: inputs.source_sql.map(Into::into),
+                is_holdable: hold,
+                is_binary: binary,
+                is_scrollable: query_scrollable(
+                    inputs.routines,
+                    inputs.queries.query_context().source.volatility,
+                    query,
+                    params,
+                    &ctes,
+                    scroll,
+                )?,
+                created_at_micros: inputs.created_at_micros,
+            },
             query: query.clone(),
             params: params.to_vec(),
             columns: schema.columns().to_vec(),
             column_types: schema.column_types().to_vec(),
-            scrollable: scroll.unwrap_or(!has_row_locks),
-            holdable: hold,
-            binary,
         })?;
     Ok(())
 }
+
+fn query_scrollable<S: Clone>(
+    routines: &dyn uqa_sql::routines::RoutineResolution,
+    volatility: &dyn uqa_sql::semantics::volatility::VolatilityCatalog,
+    query: &QueryPlan,
+    params: &[SQLParam],
+    ctes: &crate::query::CteScope<S>,
+    requested: Option<bool>,
+) -> Result<bool, SQLError> {
+    if let Some(requested) = requested {
+        return Ok(requested);
+    }
+    Ok(!query_has_row_locks(query)
+        && query_plan_backward_scan_support(routines, volatility, query, params, ctes)?
+            == BackwardScanSupport::Native)
+}
+
+#[cfg(test)]
+mod tests;
 
 fn cursor_command_returning_schema<S: Clone + 'static>(
     inputs: &PortalExecutionContext<'_, S>,

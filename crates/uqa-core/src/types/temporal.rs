@@ -7,6 +7,12 @@
 //! SQL temporal values, parsing, formatting, and total ordering.
 
 use super::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Ordering, Timelike};
+use crate::{
+    memory::{ProductionControl, ProductionString},
+    ValueRetentionError,
+};
+
+mod production;
 
 pub(super) const MICROS_PER_SECOND: i64 = 1_000_000;
 pub(super) const MICROS_PER_DAY: i64 = 86_400 * MICROS_PER_SECOND;
@@ -59,15 +65,15 @@ impl TemporalValue {
     }
 
     pub fn parse_time(input: &str) -> Option<Self> {
-        parse_time_micros(input.trim()).map(|micros| Self::Time { micros })
+        Self::parse_time_with_control(input, &ProductionControl::uncontrolled())
+            .ok()
+            .flatten()
     }
 
     pub fn parse_time_tz(input: &str) -> Option<Self> {
-        let (time, offset_minutes) = split_offset_suffix(input.trim())?;
-        parse_time_micros(time.trim()).map(|micros| Self::TimeTz {
-            micros,
-            offset_minutes,
-        })
+        Self::parse_time_tz_with_control(input, &ProductionControl::uncontrolled())
+            .ok()
+            .flatten()
     }
 
     pub fn parse_timestamp(input: &str) -> Option<Self> {
@@ -116,14 +122,8 @@ impl TemporalValue {
     }
 
     pub fn parse_same_kind(&self, input: &str) -> Option<Self> {
-        match self {
-            Self::Date { .. } => Self::parse_date(input),
-            Self::Time { .. } => Self::parse_time(input),
-            Self::TimeTz { .. } => Self::parse_time_tz(input),
-            Self::Timestamp { .. } => Self::parse_timestamp(input),
-            Self::TimestampTz { .. } => Self::parse_timestamp_tz(input),
-            Self::Interval { .. } => Self::parse_interval(input),
-        }
+        self.parse_same_kind_with_control(input, &ProductionControl::uncontrolled())
+            .expect("ordinary temporal kind parser")
     }
 
     /// Parse a `PostgreSQL` interval literal (`'1 day'`, `'90 minutes'`,
@@ -131,31 +131,26 @@ impl TemporalValue {
     /// Fractional quantities cascade into the next-smaller unit exactly
     /// like `PostgreSQL` (`'1.5 mons'` -> `1 mon 15 days`).
     pub fn parse_interval(input: &str) -> Option<Self> {
-        parse_interval_literal(input)
+        Self::parse_interval_with_control(input, &ProductionControl::uncontrolled())
+            .ok()
+            .flatten()
     }
 
     pub fn to_sql_string(&self) -> String {
-        match self {
-            Self::Date { days } => epoch_date()
-                .checked_add_signed(Duration::days(i64::from(*days)))
-                .map_or_else(|| days.to_string(), |date| date.to_string()),
-            Self::Time { micros } => format_time_micros(*micros),
-            Self::TimeTz {
-                micros,
-                offset_minutes,
-            } => format!(
-                "{}{}",
-                format_time_micros(*micros),
-                format_offset(*offset_minutes)
-            ),
-            Self::Timestamp { micros } => format_timestamp_micros(*micros, false),
-            Self::TimestampTz { micros } => format_timestamp_micros(*micros, true),
-            Self::Interval {
-                months,
-                days,
-                micros,
-            } => format_interval(*months, *days, *micros),
-        }
+        self.to_sql_string_with_control(&ProductionControl::uncontrolled())
+            .expect("ordinary temporal formatting")
+            .into_uncontrolled()
+            .expect("ordinary temporal text")
+    }
+
+    /// Append a key whose lexicographic order follows the native temporal comparator. The caller controls output allocation and errors; no intermediate key is allocated.
+    pub fn write_comparison_key<E>(
+        &self,
+        mut write: impl FnMut(&[u8]) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let (kind, rank) = self.sort_key();
+        write(&[kind])?;
+        write(&((rank as u128) ^ (1_u128 << 127)).to_be_bytes())
     }
 
     fn sort_key(&self) -> (u8, i128) {
@@ -224,13 +219,18 @@ fn parse_naive_time(input: &str) -> Option<NaiveTime> {
     None
 }
 
-fn parse_time_micros(input: &str) -> Option<i64> {
+fn parse_time_micros(
+    input: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Option<i64>, ValueRetentionError> {
     if let Some(suffix) = input.strip_prefix("24:") {
-        let time = parse_naive_time(&format!("00:{suffix}"))?;
-        return (time.num_seconds_from_midnight() == 0 && time.nanosecond() == 0)
-            .then_some(MICROS_PER_DAY);
+        let text = control.format(format_args!("00:{suffix}"))?;
+        return Ok(parse_naive_time(&text).and_then(|time| {
+            (time.num_seconds_from_midnight() == 0 && time.nanosecond() == 0)
+                .then_some(MICROS_PER_DAY)
+        }));
     }
-    parse_naive_time(input).map(time_to_micros)
+    Ok(parse_naive_time(input).map(time_to_micros))
 }
 
 fn parse_naive_datetime(input: &str) -> Option<NaiveDateTime> {
@@ -293,132 +293,25 @@ fn parse_offset_minutes(offset: &str) -> Option<i32> {
     Some(sign * (hours * 60 + minutes))
 }
 
-fn format_time_micros(micros: i64) -> String {
-    if micros == MICROS_PER_DAY {
-        return "24:00:00".into();
-    }
-    let normalized = micros.rem_euclid(MICROS_PER_DAY);
-    let seconds = normalized / MICROS_PER_SECOND;
-    let micros = normalized % MICROS_PER_SECOND;
-    let (Ok(seconds), Some(nanos)) = (
-        u32::try_from(seconds),
-        micros
-            .checked_mul(1_000)
-            .and_then(|value| u32::try_from(value).ok()),
-    ) else {
-        return normalized.to_string();
-    };
-    let Some(time) = NaiveTime::from_num_seconds_from_midnight_opt(seconds, nanos) else {
-        return normalized.to_string();
-    };
-    let mut out = time.format("%H:%M:%S").to_string();
-    if micros != 0 {
-        let mut frac = format!("{micros:06}");
-        while frac.ends_with('0') {
-            frac.pop();
-        }
-        out.push('.');
-        out.push_str(&frac);
-    }
-    out
-}
-
-fn format_offset(offset_minutes: i32) -> String {
-    let sign = if offset_minutes < 0 { '-' } else { '+' };
-    let abs = offset_minutes.abs();
-    if abs % 60 == 0 {
-        format!("{sign}{:02}", abs / 60)
-    } else {
-        format!("{sign}{:02}:{:02}", abs / 60, abs % 60)
-    }
-}
-
-fn format_timestamp_micros(micros: i64, utc: bool) -> String {
-    let Some(dt) = DateTime::from_timestamp_micros(micros) else {
-        return micros.to_string();
-    };
-    let mut out = dt.naive_utc().format("%Y-%m-%d %H:%M:%S").to_string();
-    let frac = micros.rem_euclid(MICROS_PER_SECOND);
-    if frac != 0 {
-        let mut text = format!("{frac:06}");
-        while text.ends_with('0') {
-            text.pop();
-        }
-        out.push('.');
-        out.push_str(&text);
-    }
-    if utc {
-        // PostgreSQL renders timestamptz in the session time zone; the
-        // engine pins UTC, which psql shows as a `+00` suffix.
-        out.push_str("+00");
-    }
-    out
-}
-
-/// Render an interval the way `PostgreSQL`'s default (`postgres`)
-/// `IntervalStyle` does: `1 year 2 mons 3 days 04:05:06`, per-field
-/// signs, and an explicit `+` on a positive field that follows a
-/// negative one (`-1 days +03:00:00`).
-fn format_interval(months: i32, days: i32, micros: i64) -> String {
-    use std::fmt::Write as _;
-    let years = months / 12;
-    let months = months % 12;
-    let mut out = String::new();
-    let mut is_before = false;
-    let push_unit = |out: &mut String, value: i32, unit: &str, is_before: &mut bool| {
-        if value == 0 {
-            return;
-        }
-        if !out.is_empty() {
-            out.push(' ');
-        }
-        if *is_before && value > 0 {
-            out.push('+');
-        }
-        out.push_str(&value.to_string());
-        out.push(' ');
-        out.push_str(unit);
-        if value != 1 {
-            out.push('s');
-        }
-        *is_before = *is_before || value < 0;
-    };
-    push_unit(&mut out, years, "year", &mut is_before);
-    push_unit(&mut out, months, "mon", &mut is_before);
-    push_unit(&mut out, days, "day", &mut is_before);
-    if micros != 0 || out.is_empty() {
-        if !out.is_empty() {
-            out.push(' ');
-        }
-        if micros < 0 {
-            out.push('-');
-        } else if is_before {
-            out.push('+');
-        }
-        let abs = micros.unsigned_abs();
-        let hours = abs / 3_600_000_000;
-        let minutes = (abs % 3_600_000_000) / 60_000_000;
-        let seconds = (abs % 60_000_000) / 1_000_000;
-        let frac = abs % 1_000_000;
-        let _ = write!(out, "{hours:02}:{minutes:02}:{seconds:02}");
-        if frac != 0 {
-            let mut text = format!("{frac:06}");
-            while text.ends_with('0') {
-                text.pop();
-            }
-            out.push('.');
-            out.push_str(&text);
-        }
-    }
-    out
-}
-
 /// Parse a `PostgreSQL` interval literal into `(months, days, micros)`.
+fn parse_interval_literal(
+    input: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Option<TemporalValue>, ValueRetentionError> {
+    let mut text = ProductionString::new(*control);
+    for character in input.trim().chars() {
+        text.push(character.to_ascii_lowercase())?;
+    }
+    let value = parse_interval_tokens(&text, control);
+    control.check()?;
+    Ok(value)
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "preserves temporal token error order"
 )]
-fn parse_interval_literal(input: &str) -> Option<TemporalValue> {
+fn parse_interval_tokens(input: &str, control: &ProductionControl<'_>) -> Option<TemporalValue> {
     #[derive(Default)]
     struct Acc {
         months: i64,
@@ -515,19 +408,21 @@ fn parse_interval_literal(input: &str) -> Option<TemporalValue> {
         }
     }
 
-    let mut text = input.trim().to_ascii_lowercase();
+    let mut text = input;
     let mut negate_all = false;
     if let Some(stripped) = text.strip_suffix("ago") {
         negate_all = true;
-        text = stripped.trim_end().to_string();
+        text = stripped.trim_end();
     }
     if text.is_empty() {
         return None;
     }
     let mut acc = Acc::default();
-    let tokens: Vec<&str> = text.split_whitespace().collect();
     let mut pending: Option<f64> = None;
-    for token in &tokens {
+    for token in text.split_whitespace() {
+        if control.check_cancellation().is_err() {
+            return None;
+        }
         if let Some(rest) = parse_interval_time_token(token) {
             // `HH:MM[:SS[.frac]]` (or `[+-]HH:MM...`) time-of-day part.
             // A bare number right before it is a day count
@@ -610,12 +505,13 @@ fn parse_interval_time_token(token: &str) -> Option<i64> {
         b'+' => (1, &token[1..]),
         _ => (1, token),
     };
-    let parts: Vec<&str> = body.split(':').collect();
-    if !(2..=3).contains(&parts.len()) {
+    let mut parts = body.split(':');
+    let hours: i64 = parts.next()?.parse().ok()?;
+    let minutes: i64 = parts.next()?.parse().ok()?;
+    let seconds = parts.next();
+    if parts.next().is_some() {
         return None;
     }
-    let hours: i64 = parts[0].parse().ok()?;
-    let minutes: i64 = parts[1].parse().ok()?;
     if !(0..60).contains(&minutes) {
         return None;
     }
@@ -623,8 +519,8 @@ fn parse_interval_time_token(token: &str) -> Option<i64> {
         .checked_mul(3_600)?
         .checked_mul(MICROS_PER_SECOND)?
         .checked_add(minutes.checked_mul(60)?.checked_mul(MICROS_PER_SECOND)?)?;
-    if parts.len() == 3 {
-        let seconds: f64 = parts[2].parse().ok()?;
+    if let Some(seconds) = seconds {
+        let seconds: f64 = seconds.parse().ok()?;
         if !(0.0..60.0).contains(&seconds) {
             return None;
         }

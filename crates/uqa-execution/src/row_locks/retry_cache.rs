@@ -260,7 +260,7 @@ impl DiskRetryCache {
             .map_err(|error| {
                 SQLError::Internal(format!("create row-lock retry cache directory: {error}"))
             })?;
-        let connection = rusqlite::Connection::open(directory.path().join("cache.sqlite"))
+        let connection = crate::temporary_database::open(&directory.path().join("cache.sqlite"))
             .map_err(|error| SQLError::Internal(format!("open row-lock retry cache: {error}")))?;
         connection
             .execute_batch(
@@ -338,6 +338,13 @@ fn decode_value(encoded: &[u8]) -> Result<Value, SQLError> {
 mod tests {
     use super::*;
 
+    fn cache_directory(disk: &DiskRetryCache) -> std::path::PathBuf {
+        std::path::Path::new(disk.connection.path().expect("persistent retry cache"))
+            .parent()
+            .expect("private cache directory")
+            .to_path_buf()
+    }
+
     #[test]
     fn failed_retry_cache_migration_preserves_memory_entries() {
         let key = b"row".to_vec();
@@ -349,6 +356,7 @@ mod tests {
             disk: None,
         };
         let disk = DiskRetryCache::new().unwrap();
+        let path = cache_directory(&disk);
         disk.connection
             .execute("DROP TABLE retry_cache", [])
             .unwrap();
@@ -357,5 +365,23 @@ mod tests {
         assert_eq!(state.memory.get(&key), Some(&value));
         assert_eq!(state.memory_bytes, key.len() + value.len());
         assert!(state.disk.is_none());
+        assert!(!path.exists());
+    }
+
+    #[cfg(not(target_os = "emscripten"))]
+    #[test]
+    fn committed_retry_images_are_encrypted_and_removed_with_the_owner() {
+        const SECRET: &[u8] = b"private-committed-row-retry-secret-marker";
+        let mut disk = DiskRetryCache::new().unwrap();
+        let path = cache_directory(&disk);
+        disk.insert_all(&HashMap::from([(b"row".to_vec(), SECRET.to_vec())]))
+            .unwrap();
+        assert_eq!(disk.lookup(b"row").unwrap().as_deref(), Some(SECRET));
+        for entry in std::fs::read_dir(&path).unwrap() {
+            let bytes = std::fs::read(entry.unwrap().path()).unwrap();
+            assert!(!bytes.windows(SECRET.len()).any(|bytes| bytes == SECRET));
+        }
+        drop(disk);
+        assert!(!path.exists());
     }
 }

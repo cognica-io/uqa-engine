@@ -367,6 +367,19 @@ fn assert_inherited_member_manages_owned_routines(engine: &Engine) {
         )
         .unwrap();
     engine.sql("SET ROLE inherited_owner_member", &[]).unwrap();
+    let error = engine
+        .sql(
+            "ALTER FUNCTION owner_transfer_probe() OWNER TO owner_transfer_target",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42501"));
+    assert!(error
+        .to_string()
+        .contains("permission denied for schema public"));
+    engine
+        .sql("RESET ROLE; GRANT CREATE ON SCHEMA public TO owner_transfer_target; SET ROLE inherited_owner_member", &[])
+        .unwrap();
     engine
         .sql(
             "ALTER FUNCTION owner_transfer_probe() OWNER TO owner_transfer_target",

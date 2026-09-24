@@ -25,75 +25,93 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
-fn nearest_and_other_ivf_centroid(conn: &ManagedConnection, query: &[f32]) -> (i64, i64) {
+fn nearest_and_other_ivf_centroid(conn: &rusqlite::Connection, query: &[f32]) -> (i64, i64) {
     let mut query = query.to_vec();
     normalise(&mut query);
-    conn.with(|conn| {
-        let mut stmt = conn.prepare(
+    let mut stmt = conn
+        .prepare(
             "SELECT centroid_id, vector FROM _ivf_centroids
               WHERE table_name = 'public.articles' AND field = 'embedding'
               ORDER BY centroid_id",
-        )?;
-        let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Vec<u8>>(1)?)))?;
-        let mut centroids = Vec::new();
-        for row in rows {
-            let (id, blob) = row?;
-            let mut centroid = blob_to_vector(&blob);
-            normalise(&mut centroid);
-            centroids.push((id, centroid));
-        }
-        assert!(centroids.len() >= 2);
-        let nearest = centroids
-            .iter()
-            .max_by(|(_, a), (_, b)| {
-                dot(&query, a)
-                    .partial_cmp(&dot(&query, b))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .map(|(id, _)| *id)
-            .unwrap();
-        let other = centroids
-            .iter()
-            .map(|(id, _)| *id)
-            .find(|id| *id != nearest)
-            .unwrap();
-        Ok((nearest, other))
-    })
-    .unwrap()
+        )
+        .unwrap();
+    let rows = stmt
+        .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Vec<u8>>(1)?)))
+        .unwrap();
+    let mut centroids = Vec::new();
+    for row in rows {
+        let (id, blob) = row.unwrap();
+        let mut centroid = blob_to_vector(&blob);
+        normalise(&mut centroid);
+        centroids.push((id, centroid));
+    }
+    assert!(centroids.len() >= 2);
+    let nearest = centroids
+        .iter()
+        .max_by(|(_, a), (_, b)| {
+            dot(&query, a)
+                .partial_cmp(&dot(&query, b))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(id, _)| *id)
+        .unwrap();
+    let other = centroids
+        .iter()
+        .map(|(id, _)| *id)
+        .find(|id| *id != nearest)
+        .unwrap();
+    (nearest, other)
 }
 
-fn make_doc_two_the_only_nearest_ivf_candidate(conn: &ManagedConnection, query: &[f32]) {
-    let (nearest, other) = nearest_and_other_ivf_centroid(conn, query);
-    conn.with(|conn| {
-        conn.execute(
-            "DELETE FROM _ivf_assignments
-              WHERE table_name = 'public.articles' AND field = 'embedding'",
-            [],
-        )?;
-        conn.execute(
-            &format!(
-                "INSERT INTO _ivf_assignments
-                    (table_name, field, doc_id, centroid_id)
-                 VALUES ('public.articles', 'embedding', 1, {other})"
-            ),
-            [],
-        )?;
-        conn.execute(
-            &format!(
-                "INSERT INTO _ivf_assignments
-                    (table_name, field, doc_id, centroid_id)
-                 VALUES ('public.articles', 'embedding', 2, {nearest})"
-            ),
-            [],
-        )?;
-        Ok(())
-    })
-    .unwrap();
+fn make_doc_two_the_only_nearest_ivf_candidate(path: &Path, query: &[f32]) {
+    use rusqlite::types::ValueRef::{Integer, Text};
+    use uqa_storage::{
+        mvcc::{VersionedKeyValueStore, VersionedSessionOptions},
+        read_control::StorageReadControl,
+        KeyValueStore,
+    };
+    use uqa_storage_sqlite::mvcc::native::{NativeRecord, NativeRecordFamily, NativeRecordOwner};
+
+    let (nearest, other) =
+        nearest_and_other_ivf_centroid(&rusqlite::Connection::open(path).unwrap(), query);
+    let connection = ManagedConnection::open(path).unwrap();
+    let table = native_storage::catalog(connection.clone())
+        .unwrap()
+        .load_tables()
+        .unwrap()
+        .into_iter()
+        .find(|table| table.relation.qualified_name() == "public.articles")
+        .unwrap();
+    let options = VersionedSessionOptions::default();
+    let control = StorageReadControl::with_limit(options.retained_bytes);
+    let records = uqa_storage_sqlite::SQLiteRecordStore::for_native(&connection, &control).unwrap();
+    let store = VersionedKeyValueStore::new(Arc::new(records), None, options);
+    let mut batch = store.batch();
+    for (document, centroid) in [(1, other), (2, nearest)] {
+        let record = NativeRecord::encode(
+            NativeRecordFamily::IVFAssignments,
+            NativeRecordOwner::Object {
+                identity: table.object_id,
+                generation: table.storage_generation,
+            },
+            &[
+                Text(b"public.articles"),
+                Text(b"embedding"),
+                Integer(document),
+                Integer(0),
+                Integer(centroid),
+            ],
+            &control,
+        )
+        .unwrap();
+        batch.put(record.key(), record.row()).unwrap();
+    }
+    batch.commit().unwrap();
 }
 
-fn stored_vector(conn: &ManagedConnection, doc_id: DocId) -> Vec<f32> {
-    conn.with(|conn| {
-        let blob: Vec<u8> = conn.query_row(
+fn stored_vector(conn: &rusqlite::Connection, doc_id: DocId) -> Vec<f32> {
+    let blob: Vec<u8> = conn
+        .query_row(
             "SELECT vector FROM _vectors
               WHERE table_name = 'public.articles'
                 AND field = 'embedding'
@@ -102,10 +120,9 @@ fn stored_vector(conn: &ManagedConnection, doc_id: DocId) -> Vec<f32> {
               LIMIT 1",
             [doc_id as i64],
             |r| r.get(0),
-        )?;
-        Ok(blob_to_vector(&blob))
-    })
-    .unwrap()
+        )
+        .unwrap();
+    blob_to_vector(&blob)
 }
 
 #[test]
@@ -125,6 +142,7 @@ fn run_analyze_populates_column_stats() {
             not_null: false,
             not_null_explicit: false,
             not_null_name: None,
+            not_null_identity: None,
             not_null_validated: true,
             not_null_no_inherit: false,
             not_null_is_local: true,
@@ -139,6 +157,7 @@ fn run_analyze_populates_column_stats() {
             check_no_inherit: false,
             check_is_local: true,
             check_object_id: None,
+            check_catalog_oid: None,
             references: None,
         }];
     }
@@ -416,25 +435,23 @@ fn hnsw_is_a_distinct_persistent_index_and_survives_reopen() {
             3
         );
     }
-    let connection = ManagedConnection::open(&database).unwrap();
-    let (kind, nodes): (String, i64) = connection
-        .with(|conn| {
-            Ok((
-                conn.query_row(
-                    "SELECT index_type FROM _catalog_indexes
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    let kind: String = connection
+        .query_row(
+            "SELECT index_type FROM _catalog_indexes
                       WHERE schema_name = 'public'
                         AND relation_name = 'articles_embedding_hnsw'",
-                    [],
-                    |row| row.get(0),
-                )?,
-                conn.query_row(
-                    "SELECT COUNT(*) FROM _hnsw_nodes
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let nodes: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM _hnsw_nodes
                       WHERE table_name = 'public.articles' AND field = 'embedding'",
-                    [],
-                    |row| row.get(0),
-                )?,
-            ))
-        })
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
     assert_eq!(kind, "hnsw");
     assert_eq!(nodes, 3);
@@ -458,7 +475,7 @@ fn sqlite_reopen_repairs_legacy_hnsw_alias_backed_by_ivf() {
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("legacy-hnsw-alias.db");
     {
-        let engine = Engine::open(&database).unwrap();
+        let engine = native_storage::legacy_engine(&database);
         engine
             .sql(
                 "CREATE TABLE articles (id INTEGER PRIMARY KEY, embedding VECTOR(2))",
@@ -545,8 +562,7 @@ fn sqlite_ivf_restore_reuses_persisted_assignments() {
         )
         .unwrap();
 
-        let conn = ManagedConnection::open(&db).unwrap();
-        make_doc_two_the_only_nearest_ivf_candidate(&conn, &[1.0, 0.0]);
+        make_doc_two_the_only_nearest_ivf_candidate(&db, &[1.0, 0.0]);
     }
 
     let reopened = Engine::open(&db).unwrap();
@@ -579,22 +595,14 @@ fn sqlite_ivf_create_index_reuses_existing_persistent_vectors() {
     .unwrap();
 
     let conn = ManagedConnection::open(&db).unwrap();
-    conn.with(|conn| {
-        conn.execute(
-            "UPDATE _documents
-                SET body = json_set(body, '$.embedding', json('[0.0, 1.0]'))
-              WHERE table_name = 'public.articles' AND doc_id = 1",
-            [],
-        )?;
-        conn.execute(
-            "UPDATE _documents
-                SET body = json_set(body, '$.embedding', json('[1.0, 0.0]'))
-              WHERE table_name = 'public.articles' AND doc_id = 2",
-            [],
-        )?;
-        Ok(())
-    })
-    .unwrap();
+    conn.bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
+        .unwrap();
+    let mut documents = uqa_storage_sqlite::SQLiteDocumentStore::new(conn, "public.articles");
+    for (id, embedding) in [(1, [0.0, 1.0]), (2, [1.0, 0.0])] {
+        let mut document = documents.get(id).unwrap().unwrap();
+        document.insert("embedding".into(), vector(&embedding));
+        documents.put(id, document).unwrap();
+    }
 
     eng.sql(
         "CREATE INDEX articles_embedding_ivf ON articles USING ivf (embedding) \
@@ -603,8 +611,9 @@ fn sqlite_ivf_create_index_reuses_existing_persistent_vectors() {
     )
     .unwrap();
 
-    assert_eq!(stored_vector(&conn, 1), vec![1.0, 0.0]);
-    assert_eq!(stored_vector(&conn, 2), vec![0.0, 1.0]);
+    let persisted = rusqlite::Connection::open(&db).unwrap();
+    assert_eq!(stored_vector(&persisted, 1), vec![1.0, 0.0]);
+    assert_eq!(stored_vector(&persisted, 2), vec![0.0, 1.0]);
 }
 
 #[test]

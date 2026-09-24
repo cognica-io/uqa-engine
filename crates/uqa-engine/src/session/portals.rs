@@ -8,18 +8,17 @@
 
 mod fetch;
 mod statement_snapshot;
+mod table_snapshot;
 mod worker;
 pub(crate) use statement_snapshot::StatementReadSnapshot;
 
 use crate::{
-    AnalyzerPhase, DocumentStore, Engine, EpochCoordinator, InvertedIndex, MemoryDocumentStore,
-    MemoryInvertedIndex, MemoryVectorIndex, PinnedPortalTransactionControl, QueryRuntime,
-    RelationIdentity, RuntimeExtensions, SQLError, SQLResult, SessionPortalCatalogSnapshot,
-    SessionPortalCommandDeclaration, SessionPortalData, SessionPortalDeclaration,
-    SessionPortalMaterialization, SessionPortalPosition, SessionPortalRestart,
-    SessionPortalSQLFunctionSnapshots, SessionPortalState, SessionPortalTableSnapshots,
-    SessionPortalTransactionOverlay, SessionPortalViewSnapshots, StorageContext, StoredDocument,
-    TableState, Value, VectorIndex,
+    DocumentStore, Engine, EpochCoordinator, InvertedIndex, PinnedPortalTransactionControl,
+    QueryRuntime, RelationIdentity, RuntimeExtensions, SQLError, SQLResult,
+    SessionPortalCatalogSnapshot, SessionPortalCommandDeclaration, SessionPortalData,
+    SessionPortalDeclaration, SessionPortalMaterialization, SessionPortalPosition,
+    SessionPortalRestart, SessionPortalSQLFunctionSnapshots, SessionPortalState,
+    SessionPortalTableSnapshots, SessionPortalViewSnapshots, StorageContext, TableState, Value,
 };
 use fetch::{
     ensure_portal_rows_for_fetch, fetch_directional_query_portal, fetch_indices,
@@ -27,6 +26,7 @@ use fetch::{
 };
 use uqa_sql::ast::{CursorDirection, FetchCursorStmt};
 
+use uqa_execution::query::document_changes::{DocumentChanges, DocumentSelection};
 use uqa_sql::binding::portals::SessionPortalTableDependencies;
 
 type SessionPortalTableSource = (
@@ -37,10 +37,7 @@ type SessionPortalTableSource = (
 
 impl Engine {
     pub(crate) fn allocate_session_portal_name(&self) -> String {
-        let mut next = self.session.next_portal_id.lock();
-        let name = format!("<unnamed portal {}>", *next);
-        *next += 1;
-        name
+        self.session.portal_registry.allocate_name()
     }
 
     fn allocate_session_portal_transaction_origin(&self) -> u64 {
@@ -55,23 +52,20 @@ impl Engine {
         declaration: SessionPortalDeclaration,
     ) -> Result<(), SQLError> {
         let SessionPortalDeclaration {
-            name,
+            metadata,
             mut query,
             params,
             columns,
             column_types,
-            scrollable,
-            holdable,
-            binary,
         } = declaration;
+        let name = metadata.name.clone();
+        let scrollable = metadata.is_scrollable;
+        let holdable = metadata.is_holdable;
         let table_dependencies =
             uqa_sql::binding::portals::prepare_query(&self.portal_binding_context(), &mut query)?;
         let snapshot_gate = self
             .row_locks
             .begin_change_snapshot(&self.runtime.cancellation)?;
-        let transaction_overlay = self.capture_session_portal_transaction_overlay()?;
-        snapshot_gate.baseline()?;
-        drop(snapshot_gate);
         let table_sources = {
             let stack = self.session.transactions.lock();
             let fixed_snapshot = stack
@@ -79,10 +73,12 @@ impl Engine {
                 .and_then(|frame| frame.fixed_snapshot.as_ref());
             self.capture_session_portal_table_sources(fixed_snapshot, &table_dependencies)
         };
-        let table_snapshots = Self::detach_session_portal_table_snapshots(
-            table_sources,
-            transaction_overlay.as_ref(),
-        )?;
+        let transaction_overlay =
+            self.capture_session_portal_transaction_overlay(&table_sources)?;
+        snapshot_gate.baseline()?;
+        drop(snapshot_gate);
+        let table_snapshots =
+            self.detach_session_portal_table_snapshots(table_sources, transaction_overlay)?;
         let mut catalog_snapshot = self.durable.snapshot();
         catalog_snapshot.graphs = self.freeze_graph_read_handles(
             table_dependencies.graphs.as_ref(),
@@ -100,10 +96,8 @@ impl Engine {
             catalog_snapshot: std::sync::Arc::clone(&catalog_snapshot),
         });
         let transaction_origin = self.allocate_session_portal_transaction_origin();
+        let registration = self.session.portal_registry.register(metadata)?;
         let mut portals = self.session.portals.lock();
-        if portals.contains_key(&name) {
-            return Err(cursor_error(&name, "already exists", "42P03"));
-        }
         portals.insert(
             name,
             SessionPortalState {
@@ -124,7 +118,7 @@ impl Engine {
                 holdable,
                 pinned_transaction_control: PinnedPortalTransactionControl::MakeHoldable,
                 pin_count: 0,
-                _binary: binary,
+                _registration: registration,
             },
         );
         Ok(())
@@ -135,19 +129,18 @@ impl Engine {
         declaration: SessionPortalCommandDeclaration,
     ) -> Result<(), SQLError> {
         let SessionPortalCommandDeclaration {
-            name,
+            metadata,
             command,
             params,
             columns,
             column_types,
-            scrollable,
             null_returning_values,
         } = declaration;
+        let name = metadata.name.clone();
+        let scrollable = metadata.is_scrollable;
         let transaction_origin = self.allocate_session_portal_transaction_origin();
+        let registration = self.session.portal_registry.register(metadata)?;
         let mut portals = self.session.portals.lock();
-        if portals.contains_key(&name) {
-            return Err(cursor_error(&name, "already exists", "42P03"));
-        }
         portals.insert(
             name,
             SessionPortalState {
@@ -164,17 +157,14 @@ impl Engine {
                 holdable: false,
                 pinned_transaction_control: PinnedPortalTransactionControl::Reject,
                 pin_count: 0,
-                _binary: false,
+                _registration: registration,
             },
         );
         Ok(())
     }
 
     pub(crate) fn ensure_session_portal_available(&self, name: &str) -> Result<(), SQLError> {
-        if self.session.portals.lock().contains_key(name) {
-            return Err(cursor_error(name, "already exists", "42P03"));
-        }
-        Ok(())
+        self.session.portal_registry.ensure_available(name)
     }
 
     pub(crate) fn pin_session_portal(&self, name: &str) -> Result<(), SQLError> {
@@ -359,19 +349,22 @@ impl Engine {
     }
 
     fn detach_session_portal_table_snapshots(
+        &self,
         sources: Vec<SessionPortalTableSource>,
-        transaction_overlay: &std::collections::BTreeMap<
-            String,
-            std::collections::BTreeMap<crate::DocId, Option<StoredDocument>>,
-        >,
+        mut transaction_overlay: std::collections::BTreeMap<String, DocumentChanges>,
     ) -> Result<SessionPortalTableSnapshots, SQLError> {
         let mut snapshots = std::collections::BTreeMap::new();
         for (relation, data, metadata) in sources {
             let canonical = relation.qualified_name();
-            let changes = transaction_overlay.get(&canonical);
+            // A live source already includes this session's evaluated private writes.
+            let changes = if std::sync::Arc::ptr_eq(&data, &metadata) {
+                None
+            } else {
+                transaction_overlay.remove(&canonical)
+            };
             snapshots.insert(
                 relation,
-                Self::detach_query_table(&data, &metadata, changes)?,
+                self.detach_query_table(&data, &metadata, changes)?,
             );
         }
         Ok(std::sync::Arc::new(snapshots))
@@ -390,261 +383,114 @@ impl Engine {
             .map(|(relation, table)| (relation.clone(), std::sync::Arc::clone(table)))
             .collect::<Vec<_>>();
         for (relation, table) in live_tables {
-            snapshots.insert(relation, Self::detach_query_table(&table, &table, None)?);
+            snapshots.insert(relation, self.detach_query_table(&table, &table, None)?);
         }
         Ok(std::sync::Arc::new(snapshots))
     }
 
-    fn detached_documents(
-        data: &std::sync::Arc<TableState>,
-        changes: Option<&std::collections::BTreeMap<crate::DocId, Option<StoredDocument>>>,
-    ) -> Result<std::collections::BTreeMap<crate::DocId, StoredDocument>, SQLError> {
-        let source_store = data.document_store.read();
-        let doc_ids = source_store
-            .doc_ids()
-            .map_err(|error| portal_snapshot_error("document ids", &error))?;
-        let mut documents = source_store
-            .get_stored_many(&doc_ids)
-            .map_err(|error| portal_snapshot_error("documents", &error))?;
-        drop(source_store);
-        if let Some(changes) = changes {
-            for (doc_id, document) in changes {
-                match document {
-                    Some(document) => {
-                        documents.insert(*doc_id, document.clone());
-                    }
-                    None => {
-                        documents.remove(doc_id);
-                    }
-                }
-            }
-        }
-        Ok(documents)
-    }
-
-    fn detached_inverted_index(
-        data: &std::sync::Arc<TableState>,
-        analyzer: &crate::Analyzer,
-        fts_fields: &[crate::FieldName],
-        documents: &std::collections::BTreeMap<crate::DocId, StoredDocument>,
-    ) -> Result<MemoryInvertedIndex, SQLError> {
-        let mut inverted_index = MemoryInvertedIndex::new(analyzer.clone());
-        {
-            let source_index = data.inverted_index.read();
-            for field in fts_fields {
-                inverted_index
-                    .set_field_analyzer_revision(
-                        field,
-                        source_index
-                            .index_analyzer_revision(field)
-                            .map_err(|error| {
-                                portal_snapshot_error("index analyzer revision", &error)
-                            })?,
-                        AnalyzerPhase::Index,
-                    )
-                    .map_err(|error| portal_snapshot_error("index analyzer", &error))?;
-                inverted_index
-                    .set_field_analyzer_revision(
-                        field,
-                        source_index
-                            .search_analyzer_revision(field)
-                            .map_err(|error| {
-                                portal_snapshot_error("search analyzer revision", &error)
-                            })?,
-                        AnalyzerPhase::Search,
-                    )
-                    .map_err(|error| portal_snapshot_error("search analyzer", &error))?;
-            }
-        }
-        for (doc_id, document) in documents {
-            let fields = fts_fields
-                .iter()
-                .filter_map(|field| match document.fields().get(field) {
-                    Some(Value::Str(value)) => Some((field.clone(), value.clone())),
-                    _ => None,
-                })
-                .collect();
-            inverted_index
-                .add_document(*doc_id, fields)
-                .map_err(|error| portal_snapshot_error("inverted index", &error))?;
-        }
-        Ok(inverted_index)
-    }
-
-    fn detached_vector_indexes(
-        metadata: &std::sync::Arc<TableState>,
-        documents: &std::collections::BTreeMap<crate::DocId, StoredDocument>,
-    ) -> Result<std::collections::BTreeMap<crate::FieldName, Box<dyn VectorIndex>>, SQLError> {
-        let mut vector_indexes: std::collections::BTreeMap<crate::FieldName, Box<dyn VectorIndex>> =
-            std::collections::BTreeMap::new();
-        for (field, source_index) in metadata.vector_indexes.read().iter() {
-            let mut index = MemoryVectorIndex::new(source_index.dimensions());
-            for (doc_id, document) in documents {
-                let Some(value) = document.fields().get(field) else {
-                    continue;
-                };
-                if let Some(vectors) = Self::field_index_vectors(metadata, field, value)? {
-                    index
-                        .add_many(*doc_id, vectors)
-                        .map_err(|error| portal_snapshot_error("vector index", &error))?;
-                }
-            }
-            vector_indexes.insert(field.clone(), Box::new(index));
-        }
-        Ok(vector_indexes)
-    }
-
     pub(crate) fn detach_query_table(
+        &self,
         data: &std::sync::Arc<TableState>,
         metadata: &std::sync::Arc<TableState>,
-        changes: Option<&std::collections::BTreeMap<crate::DocId, Option<StoredDocument>>>,
+        changes: Option<DocumentChanges>,
     ) -> Result<std::sync::Arc<TableState>, SQLError> {
-        let documents = Self::detached_documents(data, changes)?;
-        Self::detached_query_table_from_documents(data, metadata, &documents)
+        let control = self.query_retention_control()?;
+        if std::sync::Arc::ptr_eq(data, metadata)
+            && changes
+                .as_ref()
+                .is_none_or(|changes| !changes.has_changes())
+            && (self.storage.backend.is_none() || self.versioned_backend_transactions())
+        {
+            return Self::retain_query_table(data, &control);
+        }
+        let source_columns = data.columns.snapshot();
+        let source = data.document_store.read();
+        let storage = Self::with_query_snapshot_schema(metadata, |schema| {
+            if self.storage.backend.is_none() || self.versioned_backend_transactions() {
+                return uqa_execution::query::table_snapshot::retain(
+                    source
+                        .snapshot()
+                        .map_err(|error| portal_snapshot_error("documents", &error))?,
+                    &source_columns,
+                    schema,
+                    changes.unwrap_or_default(),
+                    &control,
+                );
+            }
+            uqa_execution::query::table_snapshot::materialize(
+                source.as_ref(),
+                &source_columns,
+                schema,
+                changes.unwrap_or_default(),
+                &control,
+            )
+        })?;
+        Ok(Self::query_table_with_storage(
+            metadata,
+            storage.documents,
+            storage.text,
+            storage.vectors,
+            storage.document_count,
+            false,
+        ))
     }
 
     pub(crate) fn detach_empty_query_table(
+        &self,
         metadata: &std::sync::Arc<TableState>,
     ) -> Result<std::sync::Arc<TableState>, SQLError> {
-        Self::detached_query_table_from_documents(
+        let control = self.query_retention_control()?;
+        let storage = Self::with_query_snapshot_schema(metadata, |schema| {
+            uqa_execution::query::table_snapshot::empty(schema, &control)
+        })?;
+        Ok(Self::query_table_with_storage(
             metadata,
-            metadata,
-            &std::collections::BTreeMap::new(),
-        )
-    }
-
-    fn detached_query_table_from_documents(
-        data: &std::sync::Arc<TableState>,
-        metadata: &std::sync::Arc<TableState>,
-        documents: &std::collections::BTreeMap<crate::DocId, StoredDocument>,
-    ) -> Result<std::sync::Arc<TableState>, SQLError> {
-        let data_columns = data.columns.read().clone();
-        let metadata_columns = metadata.columns.read().clone();
-        let metadata_by_id = metadata_columns
-            .iter()
-            .filter_map(|column| column.object_id.map(|object_id| (object_id, column)))
-            .collect::<std::collections::BTreeMap<_, _>>();
-        let mut adapted_documents = std::collections::BTreeMap::new();
-        for (doc_id, source_document) in documents {
-            let mut document = source_document.clone();
-            let fields = document.fields_mut();
-            for source_column in &data_columns {
-                let target = source_column
-                    .object_id
-                    .and_then(|object_id| metadata_by_id.get(&object_id).copied())
-                    .or_else(|| {
-                        metadata_columns.iter().find(|target| {
-                            target.name == source_column.name
-                                && (source_column.object_id.is_none() || target.object_id.is_none())
-                        })
-                    });
-                let Some(target) = target else {
-                    fields.remove(&source_column.name);
-                    continue;
-                };
-                if target.name != source_column.name {
-                    if let Some(value) = fields.remove(&source_column.name) {
-                        fields.entry(target.name.clone()).or_insert(value);
-                    }
-                }
-            }
-            for target in &metadata_columns {
-                if target.generated.is_none() && !fields.contains_key(&target.name) {
-                    fields.insert(
-                        target.name.clone(),
-                        target.missing_value.clone().unwrap_or(Value::Null),
-                    );
-                }
-            }
-            crate::generated::materialize_missing_generated_columns(&metadata_columns, fields)?;
-            adapted_documents.insert(*doc_id, document);
-        }
-        let mut document_store = MemoryDocumentStore::new();
-        for (doc_id, document) in &adapted_documents {
-            document_store
-                .put_stored(*doc_id, document.clone())
-                .map_err(|error| portal_snapshot_error("memory document", &error))?;
-        }
-        let analyzer = metadata.analyzer.read().clone();
-        let fts_fields = metadata.fts_fields.read().clone();
-        let inverted_index =
-            Self::detached_inverted_index(metadata, &analyzer, &fts_fields, &adapted_documents)?;
-        let vector_indexes = Self::detached_vector_indexes(metadata, &adapted_documents)?;
-
-        Ok(std::sync::Arc::new(TableState {
-            lifecycle_id: std::sync::atomic::AtomicU64::new(metadata.lifecycle_id()),
-            object_id: metadata.object_id(),
-            security: crate::state::CatalogCell::new(metadata.security()),
-            storage_generation: parking_lot::RwLock::new(metadata.storage_generation()),
-            document_store: parking_lot::RwLock::new(Box::new(document_store)),
-            inverted_index: parking_lot::RwLock::new(Box::new(inverted_index)),
-            vector_indexes: parking_lot::RwLock::new(vector_indexes),
-            fts_fields: crate::state::CatalogCell::new(fts_fields),
-            columns: crate::state::CatalogCell::new(metadata_columns),
-            columns_declared: crate::state::CatalogCell::from_snapshot(
-                metadata.columns_declared.snapshot(),
-            ),
-            next_id: parking_lot::Mutex::new(*metadata.next_id.lock()),
-            analyzer: crate::state::CatalogCell::new(analyzer),
-            column_stats: crate::state::CatalogCell::from_snapshot(
-                metadata.column_stats.snapshot(),
-            ),
-            column_stats_loaded: std::sync::atomic::AtomicBool::new(
-                metadata
-                    .column_stats_loaded
-                    .load(std::sync::atomic::Ordering::Acquire),
-            ),
-            column_stats_dirty: std::sync::atomic::AtomicBool::new(
-                metadata
-                    .column_stats_dirty
-                    .load(std::sync::atomic::Ordering::Acquire),
-            ),
-            table_checks: crate::state::CatalogCell::from_snapshot(
-                metadata.table_checks.snapshot(),
-            ),
-            foreign_keys: crate::state::CatalogCell::from_snapshot(
-                metadata.foreign_keys.snapshot(),
-            ),
-            key_constraints: crate::state::CatalogCell::from_snapshot(
-                metadata.key_constraints.snapshot(),
-            ),
-            hierarchy: crate::state::CatalogCell::from_snapshot(metadata.hierarchy.snapshot()),
-            value_indexes: parking_lot::RwLock::new(std::collections::BTreeMap::new()),
-            doc_count_cache: std::sync::atomic::AtomicU64::new(
-                u64::try_from(adapted_documents.len()).unwrap_or(u64::MAX),
-            ),
-            doc_count_dirty: std::sync::atomic::AtomicBool::new(false),
-            persistence: metadata.persistence,
-            on_commit: metadata.on_commit,
-        }))
+            storage.documents,
+            storage.text,
+            storage.vectors,
+            0,
+            false,
+        ))
     }
 
     fn capture_session_portal_transaction_overlay(
         &self,
-    ) -> Result<SessionPortalTransactionOverlay, SQLError> {
-        let relation_names = self
-            .storage
-            .tables
-            .read()
+        sources: &[SessionPortalTableSource],
+    ) -> Result<std::collections::BTreeMap<String, DocumentChanges>, SQLError> {
+        let relation_names = sources
             .iter()
-            .map(|(relation, table)| (table.storage_generation(), relation.qualified_name()))
+            .filter(|(_, data, metadata)| !std::sync::Arc::ptr_eq(data, metadata))
+            .map(|(relation, _, metadata)| {
+                (metadata.storage_generation(), relation.qualified_name())
+            })
             .collect::<std::collections::BTreeMap<_, _>>();
+        if relation_names.is_empty() {
+            return Ok(std::collections::BTreeMap::new());
+        }
+        let control = self.query_retention_control()?;
         let desired = {
             let stack = self.session.transactions.lock();
-            let mut desired = std::collections::BTreeMap::<
-                String,
-                std::collections::BTreeMap<crate::DocId, bool>,
-            >::new();
+            let mut desired = std::collections::BTreeMap::<String, DocumentSelection>::new();
             for change in stack.iter().flat_map(|frame| frame.row_changes.iter()) {
                 if let Some(table) = relation_names.get(&change.source_generation) {
-                    desired.entry(table.clone()).or_default().insert(
-                        change.pending.key.doc_id,
-                        !matches!(
-                            change.pending.kind,
-                            crate::row_locks::PendingRowChangeKind::Delete
-                                | crate::row_locks::PendingRowChangeKind::Rewrite(_)
-                        ),
-                    );
+                    desired
+                        .entry(table.clone())
+                        .or_insert_with(|| DocumentSelection::new(&control))
+                        .insert(
+                            change.pending.key.doc_id,
+                            !matches!(
+                                change.pending.kind,
+                                crate::row_locks::PendingRowChangeKind::Delete
+                                    | crate::row_locks::PendingRowChangeKind::Rewrite(_)
+                            ),
+                            &control,
+                        )
+                        .map_err(|error| {
+                            uqa_execution::storage_errors::storage_error(
+                                "select portal rows",
+                                &error,
+                            )
+                        })?;
                 }
                 if let crate::row_locks::PendingRowChangeKind::Rewrite(successor) =
                     change.pending.kind
@@ -655,8 +501,14 @@ impl Engine {
                     {
                         desired
                             .entry(table.clone())
-                            .or_default()
-                            .insert(successor.doc_id, true);
+                            .or_insert_with(|| DocumentSelection::new(&control))
+                            .insert(successor.doc_id, true, &control)
+                            .map_err(|error| {
+                                uqa_execution::storage_errors::storage_error(
+                                    "select portal rows",
+                                    &error,
+                                )
+                            })?;
                     }
                 }
             }
@@ -665,27 +517,12 @@ impl Engine {
         let mut overlay = std::collections::BTreeMap::new();
         for (table_name, desired_documents) in desired {
             let table = self.require_table(&table_name)?;
-            let present = desired_documents
-                .iter()
-                .filter_map(|(doc_id, present)| present.then_some(*doc_id))
-                .collect::<Vec<_>>();
-            let documents = table
-                .document_store
-                .read()
-                .get_stored_many(&present)
-                .map_err(|error| portal_snapshot_error("transaction documents", &error))?;
             overlay.insert(
                 table_name,
-                desired_documents
-                    .into_iter()
-                    .map(|(doc_id, present)| {
-                        let document = present.then(|| documents.get(&doc_id).cloned()).flatten();
-                        (doc_id, document)
-                    })
-                    .collect(),
+                self.capture_query_document_changes(&table, desired_documents)?,
             );
         }
-        Ok(std::sync::Arc::new(overlay))
+        Ok(overlay)
     }
 }
 
@@ -760,6 +597,9 @@ fn cursor_error(name: &str, message: &str, sqlstate: &str) -> SQLError {
     }
 }
 
-fn portal_snapshot_error(component: &str, error: &impl std::fmt::Display) -> SQLError {
-    SQLError::Internal(format!("capture cursor {component} snapshot: {error}"))
+fn portal_snapshot_error(component: &str, error: &uqa_storage::StorageBackendError) -> SQLError {
+    uqa_execution::storage_errors::storage_error(
+        &format!("capture cursor {component} snapshot"),
+        error,
+    )
 }

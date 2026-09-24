@@ -20,10 +20,15 @@ impl Engine {
         catalog: &dyn CatalogFacade,
         mode: super::CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
-        self.restore_sequences_from_catalog(catalog)?;
-        self.restore_domains_from_catalog(catalog)?;
-        self.restore_roles_from_metadata(catalog)?;
-        self.restore_database_security_from_metadata(catalog)?;
+        self.restore_sequences_from_catalog(catalog, mode.allows_migration())?;
+        let domains = self.restore_domains_from_catalog(catalog, mode.allows_migration())?;
+        *self.durable.system_relation_security.write() =
+            uqa_execution::catalog::security::system_relations::restore(
+                catalog,
+                &self.durable.roles.read(),
+                mode.allows_migration(),
+            )?;
+        self.restore_database_security_from_metadata(catalog, mode.allows_migration())?;
         // Install definition-only routine placeholders before any stored expression is rebound. Final compilation waits until every row-producing relation registry is present, which also permits views and routines to bind each other without recursive catalog synchronization.
         let pending_sql_functions =
             self.install_sql_function_restore_placeholders(catalog, mode)?;
@@ -43,7 +48,8 @@ impl Engine {
             .restore_triggers_from_metadata(catalog, mode.allows_migration())?;
         self.event_restore_context()
             .restore_rules_from_metadata(catalog, mode.allows_migration())?;
-        self.restore_catalog_indexes_from_catalog(catalog)?;
+        self.restore_catalog_indexes_from_catalog(catalog, mode)?;
+        self.finish_domain_restoration(catalog, domains)?;
         self.restore_path_indexes_from_catalog(catalog)?;
         Ok(())
     }
@@ -53,149 +59,47 @@ impl Engine {
         catalog: &dyn CatalogFacade,
         mode: super::CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
-        let mut servers = BTreeMap::new();
-        for (name, fdw_type, options_json) in catalog.load_foreign_servers()? {
-            let options: BTreeMap<String, String> = serde_json::from_str(&options_json)?;
-            servers.insert(
-                name.clone(),
-                uqa_fdw::ForeignServer {
-                    name,
-                    fdw_type,
-                    options,
-                },
-            );
-        }
-        let mut tables = BTreeMap::new();
-        let mut securities = BTreeMap::new();
-        for row in catalog.load_foreign_tables()? {
-            let relation_name = row.relation.qualified_name();
-            if !servers.contains_key(&row.server_name) {
-                return Err(StorageBackendError::Other(format!(
-                    "foreign table `{}` references missing server `{}`",
-                    relation_name, row.server_name
-                )));
-            }
-            let options: BTreeMap<String, String> = serde_json::from_str(&row.options_json)?;
-            let (mut table, legacy_schema) = crate::fdw::StoredForeignTable::from_catalog(
-                relation_name.clone(),
-                row.server_name.clone(),
-                options,
-                &row.columns_json,
-            )?;
-            if table.object_id == [0; 16] {
-                return Err(StorageBackendError::Other(format!(
-                    "foreign table `{relation_name}` has no object identity and requires an initial-open migration"
-                )));
-            }
-            let schema_before_binding = table.schema_json()?;
-            self.foreign_schema_context()
-                .prepare_stored_foreign_table_schema(
-                    &relation_name,
-                    &mut table.columns,
-                    &mut table.checks,
-                )
-                .map_err(|error| {
-                    StorageBackendError::Other(format!(
-                        "restore foreign table `{relation_name}` schema: {error}"
-                    ))
-                })?;
-            let schema_after_binding = table.schema_json()?;
-            let schema_requires_migration =
-                legacy_schema || schema_before_binding != schema_after_binding;
-            if !self.durable.roles.read().contains_key(&row.role_owner) {
-                return Err(StorageBackendError::Other(format!(
-                    "foreign table `{relation_name}` references missing owner role `{}`",
-                    row.role_owner
-                )));
-            }
-            let security = crate::state::TableSecurity {
-                role_owner: row.role_owner,
-                acl: row.acl,
-                column_acls: row.column_acls,
-            };
-            let column_names = table
-                .columns
-                .iter()
-                .map(|column| column.name.clone())
-                .collect::<Vec<_>>();
-            uqa_sql::catalog::security::table::validate_table_security_invariants(
-                &security,
-                Some(&column_names),
-                &self.durable.roles.read(),
-            )
-            .map_err(|error| {
-                StorageBackendError::Other(format!(
-                    "foreign table `{relation_name}` has invalid security metadata: {error}"
-                ))
-            })?;
-            self.validate_implicit_sequence_owners_for_columns(
-                &relation_name,
-                table.object_id,
-                &table.columns,
-            )?;
-            if schema_requires_migration {
-                if !mode.allows_migration() {
-                    return Err(StorageBackendError::Other(format!(
-                        "schema expressions on foreign table `{relation_name}` require an initial-open migration"
-                    )));
-                }
-                catalog.save_foreign_table(&table.catalog_row(&row.relation, &security)?)?;
-            }
-            tables.insert(row.relation.clone(), table);
-            securities.insert(row.relation, security);
-        }
-        *self.durable.foreign_servers.write() = servers;
-        *self.durable.foreign_tables.write() = tables;
-        *self.durable.foreign_table_security.write() = securities;
+        let restored = uqa_execution::catalog::foreign::restoration::restore(
+            &uqa_execution::catalog::foreign::restoration::ForeignRestoreContext {
+                schema: self.foreign_schema_context(),
+                sequences: self.sequence_owner_publication_context(),
+                roles: self,
+            },
+            catalog,
+            mode.allows_migration(),
+        )?;
+        *self.durable.foreign_servers.write() = restored.servers;
+        *self.durable.foreign_tables.write() = restored.tables;
+        *self.durable.foreign_table_security.write() = restored.security;
         Ok(())
     }
 
     fn restore_catalog_indexes_from_catalog(
         &self,
         catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
-        for row in catalog.load_catalog_indexes()? {
-            crate::catalog_indexes::index_definition(&row)?;
-            let table = crate::RelationIdentity::from_legacy_name(&row.table_name)
-                .map_err(StorageBackendError::Other)?;
-            if row.relation.schema != table.schema {
-                return Err(StorageBackendError::Other(format!(
-                    "catalog index `{}` belongs to schema `{}` but references table `{}` in schema `{}`",
-                    row.relation.qualified_name(),
-                    row.relation.schema,
-                    row.table_name,
-                    table.schema
-                )));
-            }
-            if !self.storage.tables.read().contains_key(&table) {
-                return Err(StorageBackendError::Other(format!(
-                    "catalog index `{}` references missing table `{}`",
-                    row.relation.qualified_name(),
-                    row.table_name
-                )));
-            }
-            let conflicting_kind = if self.storage.tables.read().contains_key(&row.relation) {
-                Some("table")
-            } else if self.durable.views.read().contains_key(&row.relation) {
-                Some("view")
-            } else if self.durable.sequences.read().contains_key(&row.relation) {
-                Some("sequence")
-            } else if self
-                .durable
-                .foreign_tables
-                .read()
-                .contains_key(&row.relation)
-            {
-                Some("foreign table")
-            } else {
-                None
-            };
-            if let Some(kind) = conflicting_kind {
-                return Err(StorageBackendError::Other(format!(
-                    "catalog index `{}` conflicts with existing {kind}",
-                    row.relation.qualified_name()
-                )));
-            }
+        let mut resolution = self.session_execution_view().relation_name_resolution();
+        resolution.set_lookup_mode(crate::capabilities::RelationLookupMode::Bound);
+        let rows = uqa_execution::schema::indexes::restoration::restore(
+            catalog,
+            &self.catalog_read_view(),
+            &resolution,
+            mode.allows_migration(),
+        )?;
+        for (relation, columns, constraints) in rows.schemas {
+            let state = uqa_execution::schema::publication::TableSchemaCatalog::table_state(
+                self,
+                &relation.qualified_name(),
+            )?
+            .ok_or_else(|| StorageBackendError::Other("restored index owner disappeared".into()))?;
+            state.publish_constraints(columns, constraints);
+        }
+        uqa_execution::schema::indexes::registry::build_restored_partition_indexes(
+            &self.index_registry_context(),
+            &rows.builds,
+        )?;
+        for row in rows.rows {
             self.durable
                 .catalog_indexes
                 .write()

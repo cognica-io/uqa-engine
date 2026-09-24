@@ -11,13 +11,6 @@ use crate::catalog::{CatalogReadView, RelationNameResolution};
 use uqa_sql::ast::{ColumnDef as SQLColumnDef, ColumnType};
 use uqa_sql::SQLError;
 
-pub fn all_schema_names(
-    catalog: &CatalogReadView,
-    resolution: &RelationNameResolution,
-) -> Result<Vec<String>, SQLError> {
-    Ok(catalog.all_schema_names(resolution))
-}
-
 pub fn view_columns_for(
     context: &CatalogContext<'_>,
     catalog: &CatalogReadView,
@@ -42,6 +35,7 @@ pub fn view_columns_for(
             not_null: false,
             not_null_explicit: false,
             not_null_name: None,
+            not_null_identity: None,
             not_null_validated: true,
             not_null_no_inherit: false,
             not_null_is_local: true,
@@ -56,6 +50,7 @@ pub fn view_columns_for(
             check_no_inherit: false,
             check_is_local: true,
             check_object_id: None,
+            check_catalog_oid: None,
             references: None,
         })
         .collect())

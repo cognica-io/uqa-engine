@@ -10,7 +10,7 @@
 //! scans, but the compact `(table, field, doc_id, value)` rows live in `SQLite`.
 //! Reopening an engine hydrates the B-tree from these rows instead of parsing
 //! every full document again. Writes replace the affected postings in the
-//! active `SQLite` transaction as the document mutation.
+//! same managed transaction as the document mutation, including a bound logical native session.
 
 use std::collections::BTreeMap;
 
@@ -20,6 +20,10 @@ use uqa_core::{ArrayValue, DecimalValue, DocId, TemporalValue, Value};
 
 use super::{ManagedConnection, Result, SQLiteError};
 use crate::value_index_key::SQLiteValueIndexKey;
+
+mod native;
+pub(crate) use native::columns::change_column as change_native_column;
+pub(crate) use native::delete_document as delete_native_document_entries;
 
 fn encode_doc_id(doc_id: DocId) -> Result<i64> {
     i64::try_from(doc_id).map_err(|_| {
@@ -147,6 +151,9 @@ impl SQLiteBTreeIndexStore {
     }
 
     pub fn fields(&self, table: &str) -> Result<Vec<uqa_storage::ValueIndexKey>> {
+        if let Some(snapshot) = self.conn.native_snapshot()? {
+            return native::fields(&snapshot, table);
+        }
         self.conn.with(|conn| {
             let mut stmt = conn.prepare_cached(
                 "SELECT field FROM _btree_indexes
@@ -166,6 +173,9 @@ impl SQLiteBTreeIndexStore {
     }
 
     pub fn repairs(&self) -> Result<Vec<(String, uqa_storage::ValueIndexKey)>> {
+        if let Some(snapshot) = self.conn.native_snapshot()? {
+            return native::repairs(&snapshot);
+        }
         self.conn.with(|conn| {
             let mut stmt = conn.prepare_cached(
                 "SELECT table_name, field FROM _btree_index_repairs ORDER BY table_name, field",
@@ -186,6 +196,15 @@ impl SQLiteBTreeIndexStore {
     }
 
     pub fn clear_repair(&self, table: &str, field: &uqa_storage::ValueIndexKey) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                native::clear_repair(snapshot, batch, table, field)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|conn| {
             conn.execute(
                 "DELETE FROM _btree_index_repairs
@@ -196,6 +215,40 @@ impl SQLiteBTreeIndexStore {
         })
     }
 
+    /// Read one stored key without rebuilding or reevaluating its expression. Both metadata and entry come from the same retained native or connection read.
+    pub fn read_entry(
+        &self,
+        table: &str,
+        field: &uqa_storage::ValueIndexKey,
+        doc_id: DocId,
+    ) -> Result<uqa_storage::ValueIndexEntry> {
+        if let Some(snapshot) = self.conn.native_snapshot()? {
+            return native::read_entry(&snapshot, table, field, doc_id);
+        }
+        let id = encode_doc_id(doc_id)?;
+        self.conn.with(|conn| {
+            let encoded = conn
+                .prepare_cached(
+                    "SELECT entry.value_json FROM _btree_indexes AS definition
+                     LEFT JOIN _btree_index_entries AS entry
+                       ON entry.table_name = definition.table_name
+                      AND entry.field = definition.field AND entry.doc_id = ?3
+                     WHERE definition.table_name = ?1 AND definition.field = ?2",
+                )?
+                .query_row(params![table, SQLiteValueIndexKey(field), id], |row| {
+                    row.get::<_, Option<String>>(0)
+                })
+                .optional()?;
+            match encoded {
+                None => Ok(uqa_storage::ValueIndexEntry::Unbuilt),
+                Some(None) => Ok(uqa_storage::ValueIndexEntry::Absent),
+                Some(Some(value)) => {
+                    decode_value(&value).map(uqa_storage::ValueIndexEntry::Present)
+                }
+            }
+        })
+    }
+
     /// Load a complete persisted index. `None` means this field has not been
     /// built yet and the engine must backfill it from the document store once.
     pub fn load(
@@ -203,6 +256,9 @@ impl SQLiteBTreeIndexStore {
         table: &str,
         field: &uqa_storage::ValueIndexKey,
     ) -> Result<Option<Vec<(DocId, Value)>>> {
+        if let Some(snapshot) = self.conn.native_snapshot()? {
+            return native::load(&snapshot, table, field);
+        }
         self.conn.with(|conn| {
             let exists = conn
                 .prepare_cached(
@@ -255,6 +311,15 @@ impl SQLiteBTreeIndexStore {
         stale_doc_ids: &[DocId],
         missing: &[(DocId, Value)],
     ) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                native::repair(snapshot, batch, table, field, stale_doc_ids, missing)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         let stale_doc_ids = stale_doc_ids
             .iter()
             .map(|doc_id| encode_doc_id(*doc_id))
@@ -309,6 +374,15 @@ impl SQLiteBTreeIndexStore {
         table: &str,
         indexes: &[(&uqa_storage::ValueIndexKey, &[(DocId, Value)])],
     ) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                native::replace_many(snapshot, batch, table, indexes)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         let encoded = indexes
             .iter()
             .map(|(field, values)| {
@@ -362,6 +436,15 @@ impl SQLiteBTreeIndexStore {
         doc_id: DocId,
         values: Option<&BTreeMap<uqa_storage::ValueIndexKey, Value>>,
     ) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                native::apply_write(snapshot, batch, table, doc_id, values)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         let doc_id = encode_doc_id(doc_id)?;
         let encoded = values
             .map(|values| {
@@ -409,6 +492,13 @@ impl SQLiteBTreeIndexStore {
     }
 
     pub fn drop_index(&self, table: &str, field: &uqa_storage::ValueIndexKey) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| native::drop_index(snapshot, batch, table, field))?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with_mut(|conn| {
             let tx = conn.savepoint()?;
             tx.execute(
@@ -428,6 +518,13 @@ impl SQLiteBTreeIndexStore {
 
     /// TRUNCATE keeps the index definitions but removes every posting.
     pub fn clear_table(&self, table: &str) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| native::clear_table(snapshot, batch, table))?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|conn| {
             conn.execute(
                 "DELETE FROM _btree_index_entries WHERE table_name = ?1",
@@ -455,6 +552,46 @@ mod tests {
         })
         .unwrap();
         SQLiteBTreeIndexStore::new(conn)
+    }
+
+    #[test]
+    fn stored_point_reads_preserve_null_absence_and_selected_namespace() {
+        use uqa_storage::{ValueIndexEntry, ValueIndexKey};
+        let store = store();
+        let column = ValueIndexKey::Column("price".into());
+        let named = ValueIndexKey::Index("price".into());
+        assert_eq!(
+            store.read_entry("messages", &column, 1).unwrap(),
+            ValueIndexEntry::Unbuilt
+        );
+        store
+            .replace("messages", &column, &[(1, Value::Null)])
+            .unwrap();
+        store
+            .replace("messages", &named, &[(1, Value::Row(vec![Value::Int(5)]))])
+            .unwrap();
+        assert_eq!(
+            store.read_entry("messages", &column, 1).unwrap(),
+            ValueIndexEntry::Present(Value::Null)
+        );
+        assert_eq!(
+            store.read_entry("messages", &column, 2).unwrap(),
+            ValueIndexEntry::Absent
+        );
+        assert_eq!(
+            store.read_entry("messages", &named, 1).unwrap(),
+            ValueIndexEntry::Present(Value::Row(vec![Value::Int(5)]))
+        );
+        store.clear_table("messages").unwrap();
+        assert_eq!(
+            store.read_entry("messages", &column, 1).unwrap(),
+            ValueIndexEntry::Absent
+        );
+        store.drop_index("messages", &column).unwrap();
+        assert_eq!(
+            store.read_entry("messages", &column, 1).unwrap(),
+            ValueIndexEntry::Unbuilt
+        );
     }
 
     #[test]

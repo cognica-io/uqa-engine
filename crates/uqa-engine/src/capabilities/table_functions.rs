@@ -21,7 +21,7 @@ use uqa_storage::FtsIndexStat;
 
 impl GraphNameCatalog for Engine {
     fn list_graphs(&self) -> Result<Vec<String>, SQLError> {
-        self.list_graphs()
+        self.graph_names_in_execution()
             .map_err(|err| SQLError::Internal(format!("read graph catalog: {err}")))
     }
 }
@@ -46,7 +46,7 @@ impl AnalyzerTableFunctions for Engine {
         self.drop_named_analyzer(name)
     }
     fn list_named_analyzers(&self) -> Result<Vec<String>, String> {
-        self.list_named_analyzers()
+        self.named_analyzers_in_execution()
     }
     fn set_table_field_analyzer(
         &self,
@@ -62,7 +62,7 @@ impl AnalyzerTableFunctions for Engine {
             })
     }
     fn fts_index_stats(&self, table: Option<&str>) -> Result<Vec<FtsIndexStat>, SQLError> {
-        self.fts_index_stats(table)
+        self.fts_index_stats_in_execution(table)
     }
 }
 impl OperatorJoinBinding for Engine {

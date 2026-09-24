@@ -244,6 +244,15 @@ impl Preparation<'_> {
             .map(|argument| argument.name.map(str::to_string))
             .collect::<Vec<_>>();
         let variadic = arguments.iter().any(|argument| argument.explicit_variadic);
+        if let Some(crate::ast::FunctionDispatch::NumericOperator(operator)) =
+            binding.and_then(|binding| binding.dispatch)
+        {
+            let selected = crate::type_resolution::numeric_operator_types(operator, &types)?;
+            for (value, target) in observed.iter_mut().zip(&selected.arguments) {
+                self.parameters.coerce_unknown(value, target)?;
+            }
+            return Ok(());
+        }
         if binding.is_some_and(FunctionBinding::is_polymorphic_builtin_syntax) {
             if name == "nullif" {
                 if let [left, right] = observed.as_mut_slice() {

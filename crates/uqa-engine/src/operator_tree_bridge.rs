@@ -74,10 +74,16 @@ pub fn optimised_tree_for(
     where_expr: &ScalarExpr,
     params: &[SQLParam],
 ) -> DriverResult<Option<OperatorTree>> {
-    let Some(tree) = engine.retrieval_binding().lower_where(where_expr, params)? else {
-        return Ok(None);
-    };
-    Ok(Some(query_optimizer(engine, table, &tree)?.optimize(tree)))
+    engine.with_direct_query_snapshot(
+        false,
+        |engine| {
+            let Some(tree) = engine.retrieval_binding().lower_where(where_expr, params)? else {
+                return Ok(None);
+            };
+            Ok(Some(query_optimizer(engine, table, &tree)?.optimize(tree)))
+        },
+        std::convert::identity,
+    )
 }
 
 /// Cost a relation-local SQL predicate through the same lowering and

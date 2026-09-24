@@ -5,7 +5,7 @@
 //
 
 //! Foreign-table declaration validation over fresh schema binding scopes and loaded sequence names.
-use crate::schema::constraint_metadata::ConstraintMetadataResult;
+use crate::schema::constraint_metadata::CatalogIdentityAllocator;
 use crate::schema::dependencies::regclass::SchemaReferenceCatalog;
 use crate::schema::sequences::implicit_ownership::StoredSequenceNames;
 use crate::schema::{SchemaBindingContext, SchemaExpressionCatalog};
@@ -23,7 +23,6 @@ pub struct ForeignSchemaContext<'a> {
     pub bindings: &'a dyn InferenceBindingScope,
     pub references: &'a dyn SchemaReferenceCatalog,
     pub sequences: &'a dyn StoredSequenceNames,
-    pub allocate_identity: fn(&str) -> ConstraintMetadataResult<[u8; 16]>,
 }
 
 pub fn validate_foreign_table_schema_envelope(columns: &[ColumnDef]) -> Result<(), SQLError> {
@@ -61,17 +60,27 @@ impl ForeignSchemaContext<'_> {
         table_name: &str,
         columns: &mut [ColumnDef],
         checks: &mut Vec<TableCheck>,
+        allocate: &mut CatalogIdentityAllocator<'_>,
+        names: &crate::schema::constraint_metadata::ConstraintNameScope,
     ) -> Result<(), SQLError> {
-        self.prepare_foreign_table_schema_inner(table_name, columns, checks, false)
+        self.prepare_foreign_table_schema_inner(table_name, columns, checks, false, allocate, names)
     }
     pub fn prepare_stored_foreign_table_schema(
         &self,
         table_name: &str,
         columns: &mut [ColumnDef],
         checks: &mut Vec<TableCheck>,
+        allocate: &mut CatalogIdentityAllocator<'_>,
     ) -> Result<(), SQLError> {
         validate_foreign_table_schema_envelope(columns)?;
-        self.prepare_foreign_table_schema_inner(table_name, columns, checks, true)
+        self.prepare_foreign_table_schema_inner(
+            table_name,
+            columns,
+            checks,
+            true,
+            allocate,
+            &crate::schema::constraint_metadata::ConstraintNameScope::default(),
+        )
     }
     fn prepare_foreign_table_schema_inner(
         &self,
@@ -79,6 +88,8 @@ impl ForeignSchemaContext<'_> {
         columns: &mut [ColumnDef],
         checks: &mut Vec<TableCheck>,
         stored: bool,
+        allocate: &mut CatalogIdentityAllocator<'_>,
+        names: &crate::schema::constraint_metadata::ConstraintNameScope,
     ) -> Result<(), SQLError> {
         let relation = RelationIdentity::from_legacy_name(table_name).map_err(|error| {
             SQLError::Internal(format!("decode foreign table `{table_name}`: {error}"))
@@ -149,14 +160,16 @@ impl ForeignSchemaContext<'_> {
             checks: std::mem::take(checks),
             ..crate::ast::TableConstraintSet::default()
         };
-        let mut allocate = self.allocate_identity;
-        crate::schema::constraint_metadata::materialize_constraint_metadata(
+        crate::schema::constraint_metadata::materialize_constraint_metadata_with_names(
             &relation,
             columns,
             &mut constraints,
-            &mut allocate,
+            allocate,
+            names,
         )
-        .map_err(|error| SQLError::Internal(error.to_string()))?;
+        .map_err(|error| {
+            crate::catalog::errors::storage_error("foreign table constraint identity", &error)
+        })?;
         *checks = constraints.checks;
         Ok(())
     }

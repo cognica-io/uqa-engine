@@ -29,6 +29,7 @@ mod domains;
 mod drop_alter;
 mod events;
 mod hierarchy;
+mod locking;
 mod merge;
 mod names;
 mod relations;
@@ -62,11 +63,11 @@ pub(crate) fn compile_pg_select(
 }
 
 pub(in crate::compiler) use hierarchy::compile_table_hierarchy;
-pub(crate) use names::render_relation_component;
 pub(super) use names::{
     compile_on_commit, compile_qualified_name, range_var_name, relation_persistence,
     validate_create_table_envelope,
 };
+pub(crate) use names::{render_relation_component, write_relation_component};
 pub(in crate::compiler) use returning::compile_returning_clause;
 
 use tree::{

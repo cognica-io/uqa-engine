@@ -293,7 +293,7 @@ pub fn authorize_foreign_key_parent_namespace(
         })?;
     context.namespace.require_schema_privilege(
         &relation.schema,
-        &context.namespace.current_user_name(),
+        &context.namespace.current_role(),
         crate::catalog::security::schema::SchemaAclPrivilege::Usage,
     )
 }

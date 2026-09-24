@@ -450,7 +450,7 @@ fn legacy_unqualified_default_sequence_targets_are_unique_or_fail_closed() {
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("legacy-default-sequence.db");
     {
-        let eng = Engine::open(&database).unwrap();
+        let eng = crate::native_storage::legacy_engine(&database);
         eng.sql("CREATE SCHEMA app", &[]).unwrap();
         eng.sql("CREATE SEQUENCE app.ids START 10", &[]).unwrap();
         eng.sql(
@@ -508,24 +508,17 @@ fn legacy_unqualified_default_sequence_targets_are_unique_or_fail_closed() {
     );
     drop(reopened);
 
-    connection
-        .with(|connection| {
-            let columns: String = connection.query_row(
-                "SELECT columns FROM _tables \
-                 WHERE schema_name = 'app' AND relation_name = 'items'",
-                [],
-                |row| row.get(0),
-            )?;
-            let dangling = columns.replace("\"ids\"", "\"missing\"");
-            assert_ne!(dangling, columns);
-            connection.execute(
-                "UPDATE _tables SET columns = ?1 \
-                 WHERE schema_name = 'app' AND relation_name = 'items'",
-                [dangling],
-            )?;
-            Ok(())
-        })
+    let catalog = crate::native_storage::catalog(connection).unwrap();
+    let mut schema = catalog
+        .load_tables()
+        .unwrap()
+        .into_iter()
+        .find(|schema| schema.relation.qualified_name() == "app.items")
         .unwrap();
+    let dangling = schema.columns_json.replace("\"ids\"", "\"missing\"");
+    assert_ne!(dangling, schema.columns_json);
+    schema.columns_json = dangling;
+    catalog.save_table(&schema).unwrap();
     let dangling = Engine::open(&database).unwrap();
     let error = dangling
         .column_default_expr("app.items", "generated_id")

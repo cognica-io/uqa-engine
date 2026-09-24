@@ -12,6 +12,135 @@ use uqa_core::{
 
 mod reference;
 
+#[test]
+fn occurrence_validation_borrows_complete_graphs_and_preserves_cancellation() {
+    let entries = graph_fixture(0, 129);
+    let (scores, positions) = encode_occurrence_cluster(&entries).unwrap();
+    let info = allocation_counter::measure(|| {
+        validate_occurrence_cluster(0, &scores, &positions, || Ok(())).unwrap();
+    });
+    assert_eq!(info.count_total, 0);
+    for end in 0..positions.len() {
+        assert!(validate_occurrence_cluster(0, &scores, &positions[..end], || Ok(())).is_err());
+    }
+    let mut polls = 0;
+    let result = validate_occurrence_cluster(0, &scores, &positions, || {
+        polls += 1;
+        if polls == 20 {
+            Err(QueryCancelled.into())
+        } else {
+            Ok(())
+        }
+    });
+    assert!(matches!(result, Err(StorageBackendError::Cancelled(_))));
+    assert_eq!(polls, 20);
+}
+
+#[test]
+fn occurrence_encoding_preserves_wire_bytes_across_varint_widths() {
+    let entries = vec![
+        OccurrencePosting {
+            doc_id: 2,
+            doc_length: 128,
+            occurrences: vec![TokenOccurrence {
+                position: 0,
+                position_length: 1,
+                offsets: None,
+            }],
+        },
+        OccurrencePosting {
+            doc_id: 16_384,
+            doc_length: u64::MAX,
+            occurrences: vec![TokenOccurrence {
+                position: 128,
+                position_length: 2,
+                offsets: None,
+            }],
+        },
+    ];
+    let expected_scores = b"UQCS\x02\0\0\0\x02\0\0\0\x01\0\0\0\x02\0\0\x40\x2c\0\0\0\x2f\0\0\0\x2f\0\0\0\x31\0\0\0\x31\0\0\0\x3d\0\0\0\x02\xfe\x7f\x01\x01\x80\x01\xff\xff\xff\xff\xff\xff\xff\xff\xff\x01";
+    let expected_positions =
+        b"UQCP\x02\0\0\0\x02\0\0\0\x03\0\0\0\0\0\0\0\x03\0\0\0\x07\0\0\0\0\x01\0\x80\x01\x02\0";
+    let control = crate::read_control::StorageReadControl::with_limit(4096);
+    let (scores, positions) =
+        encode_occurrence_cluster_controlled(entries.iter(), &control).unwrap();
+    assert_eq!(&*scores, expected_scores);
+    assert_eq!(&*positions, expected_positions);
+    assert_eq!(
+        reference::decode_occurrence_cluster(0, &scores, &positions).unwrap(),
+        entries
+    );
+    drop((scores, positions));
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn occurrence_encoding_retains_and_releases_its_complete_budget() {
+    let entries = graph_fixture(0, 129);
+    let mut failures = 0;
+    let mut successes = 0;
+    for limit in [0, 32, 128, 512, 4096, 16384, 65536] {
+        let control = crate::read_control::StorageReadControl::with_limit(limit);
+        match encode_occurrence_cluster_controlled(entries.iter(), &control) {
+            Ok((scores, positions)) => {
+                successes += 1;
+                assert_eq!(
+                    decode_occurrence_cluster(0, &scores, &positions).unwrap(),
+                    entries
+                );
+                assert!(control.memory().used() >= scores.capacity() + positions.capacity());
+            }
+            Err(StorageBackendError::Memory(_)) => failures += 1,
+            Err(error) => panic!("unexpected encoding error: {error}"),
+        }
+        assert_eq!(control.memory().used(), 0);
+    }
+    assert!(failures > 0 && successes > 0);
+    let control = crate::read_control::StorageReadControl::with_limit(0);
+    control.cancellation().cancel();
+    assert!(matches!(
+        encode_occurrence_cluster_controlled(entries.iter(), &control),
+        Err(StorageBackendError::Cancelled(_))
+    ));
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn successive_cluster_encodings_share_the_allowance_and_cancellation() {
+    let entries = graph_fixture(0, 129);
+    let probe = crate::read_control::StorageReadControl::with_limit(1 << 24);
+    let (scores, positions) = encode_occurrence_cluster_controlled(entries.iter(), &probe).unwrap();
+    let required_peak = probe.memory().peak();
+    let retained = probe.memory().used();
+    drop((scores, positions));
+    assert_eq!(probe.memory().used(), 0);
+
+    let control = crate::read_control::StorageReadControl::with_limit(required_peak);
+    let first = encode_occurrence_cluster_controlled(entries.iter(), &control).unwrap();
+    assert_eq!(control.memory().used(), retained);
+    assert!(matches!(
+        encode_occurrence_cluster_controlled(entries.iter(), &control),
+        Err(StorageBackendError::Memory(_))
+    ));
+    assert_eq!(control.memory().used(), retained);
+    assert_eq!(
+        decode_occurrence_cluster(0, &first.0, &first.1).unwrap(),
+        entries
+    );
+    drop(first);
+    assert_eq!(control.memory().used(), 0);
+
+    let second = encode_occurrence_cluster_controlled(entries.iter(), &control).unwrap();
+    control.cancellation().cancel();
+    assert!(matches!(
+        encode_occurrence_cluster_controlled(entries.iter(), &control),
+        Err(StorageBackendError::Cancelled(_))
+    ));
+    assert_eq!(control.memory().used(), retained);
+    drop(second);
+    assert_eq!(control.memory().used(), 0);
+}
+
 fn graph_fixture(cluster: u64, count: usize) -> Vec<OccurrencePosting> {
     let base = cluster_base(cluster).unwrap();
     (0..count)

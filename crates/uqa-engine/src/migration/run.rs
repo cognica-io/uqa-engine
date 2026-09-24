@@ -32,7 +32,7 @@ pub fn migrate_python_database(
     let specs = load_table_specs(&source_conn, &index_rows)?;
     let engine = Engine::open(destination)?;
 
-    if !engine.table_names()?.is_empty() || !engine.list_graphs()?.is_empty() {
+    if !engine.table_names_in_execution()?.is_empty() || !engine.list_graphs()?.is_empty() {
         return Err(PythonMigrationError::DestinationNotEmpty(
             destination.display().to_string(),
         ));
@@ -80,6 +80,6 @@ pub fn migrate_python_database(
             report.path_indexes = migrate_path_indexes(&source_conn, engine)?;
             Ok(report)
         },
-        PythonMigrationError::Invalid,
+        |error| PythonMigrationError::Invalid(error.to_string()),
     )
 }

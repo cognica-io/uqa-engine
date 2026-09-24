@@ -18,6 +18,27 @@ use super::{KeyValueStore, StorageBackendResult};
 
 const BTREE_FORMAT_V1: &[u8] = b"uqa-btree-v1";
 
+pub(super) fn read_entry(
+    store: &dyn KeyValueStore,
+    table: &str,
+    field: &crate::ValueIndexKey,
+    doc_id: DocId,
+) -> StorageBackendResult<crate::ValueIndexEntry> {
+    let Some(format) = store.get(&btree_index_key(table, field)?)? else {
+        return Ok(crate::ValueIndexEntry::Unbuilt);
+    };
+    if format != BTREE_FORMAT_V1 {
+        return Err(other_error(format!(
+            "unsupported persisted B-tree format for `{table}.{field}`"
+        )));
+    }
+    store
+        .get(&btree_entry_key(table, field, doc_id)?)?
+        .map_or(Ok(crate::ValueIndexEntry::Absent), |value| {
+            decode_value(&value).map(crate::ValueIndexEntry::Present)
+        })
+}
+
 pub(super) fn load(
     store: &dyn KeyValueStore,
     table: &str,

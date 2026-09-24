@@ -102,7 +102,7 @@ impl Engine {
             storage_generation: RwLock::new(source.storage_generation()),
             document_store: RwLock::new(storage.backend.document_store(name)),
             inverted_index: RwLock::new(storage.backend.inverted_index(name, analyzer)),
-            vector_indexes: RwLock::new(vectors),
+            vector_indexes: RwLock::new(vectors.into()),
             fts_fields: CatalogCell::from_snapshot(source.fts_fields.snapshot()),
             columns: CatalogCell::from_snapshot(source.columns.snapshot()),
             columns_declared: CatalogCell::from_snapshot(source.columns_declared.snapshot()),

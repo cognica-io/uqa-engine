@@ -45,6 +45,7 @@ impl LocalTableRowSource {
         if self.recheck_pins.is_some() {
             return self.next_pinned_physical_rows_batch(max_rows);
         }
+        self.serializable.observe_relation()?;
         if self.command_changes.is_some() {
             return self.next_command_physical_rows_batch(max_rows);
         }
@@ -221,6 +222,7 @@ impl LocalTableRowSource {
         while rows.len() < max_rows && self.recheck_cursor < pins.len() {
             self.cancellation.check().map_err(SQLError::from)?;
             let pin = &pins[self.recheck_cursor];
+            self.serializable.observe_row(pin.doc_id)?;
             self.recheck_cursor += 1;
             let mut document = if let Some(document) = pin.document.as_ref() {
                 (**document).clone()

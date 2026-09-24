@@ -8,6 +8,7 @@
 
 use crate::Engine;
 use std::{collections::BTreeSet, sync::Arc};
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::{ColumnDef, RuleEvent, TriggerEvent, TriggerTiming},
     binding::snapshot::BindingSnapshot,
@@ -29,10 +30,10 @@ impl ViewRewriteCatalog for Engine {
         Engine::try_resolve_view_name(self, name).map_err(|error| error.to_string())
     }
     fn try_describe_table(&self, name: &str) -> Result<Option<Vec<ColumnDef>>, String> {
-        Engine::try_describe_table(self, name).map_err(|error| error.to_string())
+        Engine::describe_table_in_execution(self, name).map_err(|error| error.to_string())
     }
     fn try_table_columns(&self, name: &str) -> Result<Vec<String>, String> {
-        Engine::try_table_columns(self, name).map_err(|error| error.to_string())
+        Engine::table_columns_in_execution(self, name).map_err(|error| error.to_string())
     }
     fn rules_for(&self, name: &str, event: RuleEvent) -> Result<Vec<StoredRule>, SQLError> {
         self.event_lookup_context().rules_for(name, event)
@@ -95,14 +96,20 @@ impl ViewPrivilegeCatalog for Engine {
     fn view_definition(&self, name: &str) -> Result<Option<StoredView>, SQLError> {
         self.view_definition(name)
     }
-    fn current_user_name(&self) -> String {
-        self.current_user_name()
+    fn current_role(&self) -> RoleReference {
+        self.current_role()
+    }
+    fn bound_role(
+        &self,
+        identity: uqa_sql::catalog::roles::RoleIdentity,
+    ) -> Result<RoleReference, SQLError> {
+        RoleReference::from_identity(identity, &self.durable.roles.read())
     }
     fn ensure_view_privilege_for(
         &self,
         name: &str,
         view: &StoredView,
-        subject: &str,
+        subject: &RoleReference,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         self.ensure_view_privilege_for(name, view, subject, privilege)
@@ -112,7 +119,7 @@ impl ViewPrivilegeCatalog for Engine {
         name: &str,
         view: &StoredView,
         column: &str,
-        subject: &str,
+        subject: &RoleReference,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         self.ensure_view_column_privilege_for(name, view, column, subject, privilege)
@@ -121,7 +128,7 @@ impl ViewPrivilegeCatalog for Engine {
         &self,
         name: &str,
         view: &StoredView,
-        subject: &str,
+        subject: &RoleReference,
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         self.ensure_any_view_column_privilege_for(name, view, subject, privilege)

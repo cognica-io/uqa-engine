@@ -8,7 +8,7 @@
 use super::{
     publication::dependencies::CatalogPublicationChanges,
     relation_alteration::{
-        rewrite_relation_rename_dependents, role_transfer_target, RelationAlterLocks,
+        rewrite_relation_rename_dependents, validate_relation_alter_authority,
         RelationRenameDependencies, RoleTransferContext,
     },
     sequences::role_ownership::{
@@ -16,11 +16,17 @@ use super::{
         OwnedSequenceSecurityWrite, SequenceSecurityPublication,
     },
 };
-use crate::catalog::{foreign::StoredForeignTable, security::TableSecurity};
+use crate::catalog::security::roles::dependencies::{prepare_role_owner, RoleDependencyCandidate};
+use crate::catalog::{foreign::StoredForeignTable, security::BoundTableSecurity};
+use crate::row_locks::{
+    binding::{bind_relation, RelationBinding, RelationDefinitionSession},
+    RelationLockMode,
+};
 use std::{collections::BTreeMap, ops::DerefMut};
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::{AlterForeignTableAction, AlterForeignTableStmt},
+    catalog::security::ownership::OwnerChangeAuthority,
     catalog::security::table::{rewrite_acl_owner, validate_table_security_invariants},
     schema::relation_alteration::{self, RelationAlterNames},
     SQLError,
@@ -30,13 +36,13 @@ use uqa_storage::StorageBackendResult;
 pub type ForeignTableRegistryWrite<'a> =
     Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, StoredForeignTable>> + 'a>;
 pub type ForeignSecurityRegistryWrite<'a> =
-    Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, TableSecurity>> + 'a>;
+    Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, BoundTableSecurity>> + 'a>;
 pub type ForeignMemoryRegistryWrite<'a> =
     Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, Vec<uqa_fdw::Row>>> + 'a>;
 
 pub trait ForeignTableAlterCatalog {
     fn contains_table(&self, relation: &RelationIdentity) -> bool;
-    fn security(&self, relation: &RelationIdentity) -> Option<TableSecurity>;
+    fn security(&self, relation: &RelationIdentity) -> Option<BoundTableSecurity>;
     fn table(&self, relation: &RelationIdentity) -> Option<StoredForeignTable>;
 }
 pub trait ForeignTableAlterAccess {
@@ -58,14 +64,15 @@ pub trait ForeignTableAlterPublication {
     fn persist_security(
         &self,
         relation: &RelationIdentity,
-        security: &TableSecurity,
+        security: &BoundTableSecurity,
     ) -> Result<(), SQLError>;
 }
 pub struct ForeignTableAlterContext<'a> {
     pub names: &'a dyn RelationAlterNames,
     pub catalog: &'a dyn ForeignTableAlterCatalog,
-    pub access: &'a dyn ForeignTableAlterAccess,
-    pub locks: &'a dyn RelationAlterLocks,
+    pub authority: crate::catalog::security::table_inquiry::TablePrivilegeContext<'a>,
+    pub creation: super::namespaces::relations::RelationCreationContext<'a>,
+    pub locks: &'a dyn RelationDefinitionSession,
     pub writer: &'a dyn ForeignTableOwnerWriter,
     pub roles: RoleTransferContext<'a>,
     pub dependencies: &'a dyn RelationRenameDependencies,
@@ -84,7 +91,7 @@ pub trait ForeignTableAlterTransactions {
 pub fn bound_foreign_table_security(
     catalog: &dyn ForeignTableAlterCatalog,
     name: &str,
-) -> Result<(RelationIdentity, TableSecurity), SQLError> {
+) -> Result<(RelationIdentity, BoundTableSecurity), SQLError> {
     let relation = RelationIdentity::from_legacy_name(name)
         .map_err(|error| SQLError::Internal(format!("resolve foreign table `{name}`: {error}")))?;
     if !catalog.contains_table(&relation) {
@@ -105,32 +112,56 @@ pub fn alter_foreign_table(
     statement: &AlterForeignTableStmt,
 ) -> Result<(), SQLError> {
     transactions.with_foreign_table_write(Box::new(|context| {
-        let Some(canonical) = relation_alteration::foreign_table_alter_target(
-            context.names.resolve_relation_kind(&statement.name)?,
-            statement,
-            &mut |message| {
-                context
-                    .notices
-                    .lock()
-                    .push(("NOTICE".into(), message.into()));
+        let Some(binding) = bind_relation(
+            context.locks,
+            RelationLockMode::AccessExclusive,
+            false,
+            || {
+                let Some(target) = relation_alteration::foreign_table_alter_target(
+                    context.names.resolve_relation_kind(&statement.name)?,
+                    statement,
+                    &mut |message| {
+                        context
+                            .notices
+                            .lock()
+                            .push(("NOTICE".into(), message.into()));
+                    },
+                )?
+                else {
+                    return Ok(None);
+                };
+                Ok(Some(RelationBinding {
+                    name: target.canonical.clone(),
+                    object_id: context
+                        .catalog
+                        .table(&target.relation)
+                        .map(|table| table.object_id),
+                    value: target,
+                }))
+            },
+            |binding| {
+                let target = &binding.value;
+                validate_relation_alter_authority(
+                    &context.authority,
+                    &context.creation,
+                    &target.relation,
+                    target.kind,
+                    matches!(statement.action, AlterForeignTableAction::RenameTo(_)),
+                )?;
+                target.require_kind("foreign table")
             },
         )?
         else {
             return Ok(());
         };
-        context.locks.lock_exclusive(&canonical)?;
+        let canonical = binding.name;
         match &statement.action {
             AlterForeignTableAction::OwnerTo(owner) => {
                 alter_foreign_table_role_owner(context, &canonical, owner)
             }
             AlterForeignTableAction::RenameTo(new_name) => {
-                context.access.ensure_owner(&canonical)?;
-                let relation = RelationIdentity::from_legacy_name(&canonical).map_err(|error| {
-                    SQLError::Internal(format!(
-                        "resolve foreign table rename target `{canonical}`: {error}"
-                    ))
-                })?;
-                rename_foreign_table(context, &relation, new_name)
+                context.locks.prepare_definition_write()?;
+                rename_foreign_table(context, &binding.value.relation, new_name)
             }
         }
     }))
@@ -139,27 +170,64 @@ pub fn alter_foreign_table(
 fn alter_foreign_table_role_owner(
     context: &ForeignTableAlterContext<'_>,
     name: &str,
-    requested_owner: &str,
+    requested_owner: &uqa_sql::ast::RoleSpecification,
 ) -> Result<(), SQLError> {
-    context.writer.prepare_writer()?;
-    let (relation, mut security) = bound_foreign_table_security(context.catalog, name)?;
-    let current_owner = context.access.ensure_owner(name)?;
-    let (new_owner, current_user_is_superuser) =
-        role_transfer_target(&context.roles, requested_owner)?;
-    if current_owner == new_owner {
+    let owner = context.roles.bind(requested_owner)?;
+    let current_user = context.roles.session.current_role();
+    let RoleDependencyCandidate {
+        roles,
+        memberships,
+        value,
+        ..
+    } = prepare_role_owner(
+        context.roles.lock_context(),
+        &owner,
+        || context.writer.prepare_writer(),
+        |roles, memberships, new_owner| {
+            let (relation, bound) = bound_foreign_table_security(context.catalog, name)?;
+            let mut security = bound.resolve(roles).map_err(SQLError::Internal)?;
+            if security.role_owner == new_owner {
+                return Ok(None);
+            }
+            let authority = OwnerChangeAuthority {
+                roles,
+                memberships,
+                current_user: &current_user,
+                new_owner,
+            };
+            authority.require_owner_change(
+                &security.role_owner,
+                "foreign table",
+                &relation.name,
+            )?;
+            authority.require_schema_create(context.roles.schemas, &relation.schema)?;
+            let table = context.catalog.table(&relation).ok_or_else(|| {
+                SQLError::Internal(format!("foreign table `{name}` disappeared before update"))
+            })?;
+            rewrite_acl_owner(&mut security, new_owner);
+            let columns = table
+                .columns
+                .iter()
+                .map(|column| column.name.clone())
+                .collect::<Vec<_>>();
+            validate_table_security_invariants(&security, Some(&columns), roles)
+                .map_err(|error| SQLError::Internal(format!("foreign table `{name}` produced invalid ownership metadata after owner transfer: {error}")))?;
+            Ok(Some((
+                relation,
+                table.object_id,
+                BoundTableSecurity::bind(&security, roles).map_err(SQLError::Internal)?,
+            )))
+        },
+    )?;
+    let Some((relation, object_id, security)) = value else {
         return Ok(());
-    }
-    if !current_user_is_superuser {
-        context
-            .roles
-            .schemas
-            .require_schema_create(&relation.schema, &new_owner)?;
-    }
-    let table = context.catalog.table(&relation).ok_or_else(|| {
-        SQLError::Internal(format!("foreign table `{name}` disappeared before update"))
-    })?;
-    let sequence_updates =
-        table_owned_sequence_owner_updates(context.owned_sequences, table.object_id, &new_owner)?;
+    };
+    let sequence_updates = table_owned_sequence_owner_updates(
+        context.owned_sequences,
+        object_id,
+        owner.require_name(&roles)?,
+        &roles,
+    )?;
     for (sequence, sequence_security) in &sequence_updates {
         context.sequence_publication.persist_security(
             &sequence.qualified_name(),
@@ -167,19 +235,6 @@ fn alter_foreign_table_role_owner(
             sequence_security,
         )?;
     }
-    rewrite_acl_owner(&mut security, &new_owner);
-    let columns = table
-        .columns
-        .iter()
-        .map(|column| column.name.clone())
-        .collect::<Vec<_>>();
-    validate_table_security_invariants(
-        &security, Some(&columns), &context.roles.roles.role_definitions(),
-    ).map_err(|error| {
-        SQLError::Internal(format!(
-            "foreign table `{name}` produced invalid ownership metadata after owner transfer: {error}"
-        ))
-    })?;
     context.publication.persist_security(&relation, &security)?;
     context
         .publication
@@ -191,6 +246,8 @@ fn alter_foreign_table_role_owner(
             registry.insert(sequence, sequence_security);
         }
     }
+    drop(memberships);
+    drop(roles);
     context.changes.catalog_registry_changed();
     Ok(())
 }
@@ -206,6 +263,9 @@ fn rename_foreign_table(
         new_name,
         "ALTER FOREIGN TABLE RENAME TO",
     )?;
+    context
+        .creation
+        .reserve_row_type_name(&target.qualified_name())?;
     rewrite_relation_rename_dependents(context.dependencies, relation, &target).map_err(
         |error| {
             SQLError::Internal(format!(

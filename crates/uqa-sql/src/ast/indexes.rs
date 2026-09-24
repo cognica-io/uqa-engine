@@ -12,6 +12,13 @@ use serde::{Deserialize, Serialize};
 
 use super::Expr;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RenameIndexStmt {
+    pub name: String,
+    pub new_name: String,
+    pub if_exists: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum IndexKey {

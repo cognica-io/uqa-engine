@@ -18,7 +18,7 @@ impl ReturningCatalog for Engine {
         Engine::try_describe_table_row_type(self, table).map_err(|error| error.to_string())
     }
     fn try_table_columns(&self, table: &str) -> Result<Vec<String>, String> {
-        Engine::try_table_columns(self, table).map_err(|error| error.to_string())
+        Engine::table_columns_in_execution(self, table).map_err(|error| error.to_string())
     }
     fn view_schema(&self, table: &str) -> Result<Option<RowSchema>, SQLError> {
         Engine::view_schema(self, table)

@@ -12,6 +12,7 @@ pub mod declaration;
 pub mod dependencies;
 pub mod lifecycle;
 pub mod merge_columns;
+pub mod privilege_inquiry;
 pub mod regclass;
 pub mod registration;
 pub mod resolution;

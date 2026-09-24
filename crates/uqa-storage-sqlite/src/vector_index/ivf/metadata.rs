@@ -6,7 +6,7 @@
 
 //! Checked IVF metadata representation, encoding, and scalar conversion.
 
-use crate::vector_index::codec::{encode_doc_id, vector_to_blob};
+use crate::vector_index::codec::{encode_doc_id, i64_to_usize, vector_to_blob};
 use crate::{Result as SQLiteResult, SQLiteError};
 use uqa_storage::ivf_index::{IVFMetadataSnapshot, IVFState};
 use uqa_storage::vector_index::IVFIndexParams;
@@ -16,6 +16,8 @@ pub(super) struct SQLiteIVFMeta {
     pub(super) dimensions: u32,
     pub(super) params: IVFIndexParams,
     pub(super) state: IVFState,
+    pub(super) trained_size: usize,
+    pub(super) deletes_since_train: usize,
     pub(super) vector_count: usize,
 }
 
@@ -110,4 +112,23 @@ pub(super) fn parse_state(value: &str) -> SQLiteResult<IVFState> {
             "invalid IVF metadata state: {other}"
         ))),
     }
+}
+
+pub(super) type RawMetadata = (i64, i64, i64, i64, String, i64, i64, i64);
+
+pub(super) fn decode_metadata(row: RawMetadata) -> SQLiteResult<SQLiteIVFMeta> {
+    let (dimensions, nlist, nprobe, threshold, state, trained, deleted, count) = row;
+    Ok(SQLiteIVFMeta {
+        dimensions: u32::try_from(dimensions)
+            .map_err(|_| invalid_metadata("dimensions", dimensions))?,
+        params: IVFIndexParams {
+            nlist: positive_i64_to_usize("nlist", nlist)?,
+            nprobe: positive_i64_to_usize("nprobe", nprobe)?,
+            train_threshold: positive_i64_to_usize("train_threshold", threshold)?,
+        },
+        state: parse_state(&state)?,
+        trained_size: i64_to_usize("IVF trained_size", trained)?,
+        deletes_since_train: i64_to_usize("IVF deletes_since_train", deleted)?,
+        vector_count: i64_to_usize("IVF vector_count", count)?,
+    })
 }

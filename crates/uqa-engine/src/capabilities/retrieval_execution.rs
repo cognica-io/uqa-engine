@@ -33,7 +33,7 @@ impl TextRetrieval for Engine {
 
 impl RetrievalDocuments for Engine {
     fn get_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError> {
-        self.get_document(table, doc_id)
+        self.get_query_document(table, doc_id)
     }
 }
 
@@ -74,15 +74,16 @@ impl Engine {
 }
 
 impl uqa_execution::query::block::context::RelationRetrieval for Engine {
-    fn accelerated(
-        &self,
-        table: &str,
-        signal_table: &str,
+    fn prepare_accelerated<'a>(
+        &'a self,
+        table: &'a str,
+        signal_table: &'a str,
         predicate: Option<&ScalarExpr>,
-        params: &[SQLParam],
-    ) -> Result<Option<Vec<ScoredEntry>>, SQLError> {
+        params: &'a [SQLParam],
+    ) -> Result<Option<uqa_execution::query::scored_input::ScoredEntriesProducer<'a>>, SQLError>
+    {
         self.retrieval_query_context()
-            .accelerated(table, signal_table, predicate, params)
+            .prepare_accelerated(table, signal_table, predicate, params)
     }
     fn optimized(
         &self,

@@ -121,7 +121,7 @@ fn plpgsql_block_may_mutate_engine(
     visiting_routines: &mut BTreeSet<String>,
     classification: MutabilityClassification,
 ) -> Result<bool, SQLError> {
-    if classification.procedural_state_requires_transaction && !block.exceptions.is_empty() {
+    if classification.include_transaction_scopes && !block.exceptions.is_empty() {
         return Ok(true);
     }
     if plpgsql_statement_list_may_mutate_engine(
@@ -320,13 +320,14 @@ fn plpgsql_statement_may_mutate_engine(
             visiting_routines,
             classification,
         )?),
-        PLpgSQLStmt::ForQuery { query, body, .. } => Ok(lowered_statement_may_mutate_engine(
-            context,
-            query.clone(),
-            visiting_views,
-            visiting_routines,
-            classification,
-        )?
+        PLpgSQLStmt::ForQuery { query, body, .. } => Ok(classification.include_transaction_scopes
+            || lowered_statement_may_mutate_engine(
+                context,
+                query.clone(),
+                visiting_views,
+                visiting_routines,
+                classification,
+            )?
             || plpgsql_statement_list_may_mutate_engine(
                 context,
                 datums,
@@ -342,7 +343,7 @@ fn plpgsql_statement_may_mutate_engine(
             body,
             ..
         } => {
-            if classification.procedural_state_requires_transaction
+            if classification.include_transaction_scopes
                 || plpgsql_expressions_may_mutate_engine(
                     context,
                     arguments.iter().map(|argument| &argument.expr),
@@ -434,7 +435,7 @@ fn plpgsql_statement_may_mutate_engine(
             classification,
         ),
         PLpgSQLStmt::OpenCursor { cursor, open } => {
-            if classification.procedural_state_requires_transaction {
+            if classification.include_transaction_scopes {
                 return Ok(true);
             }
             match open {
@@ -477,7 +478,7 @@ fn plpgsql_statement_may_mutate_engine(
             }
         }
         PLpgSQLStmt::FetchCursor { count, .. } | PLpgSQLStmt::MoveCursor { count, .. } => {
-            if classification.procedural_state_requires_transaction {
+            if classification.include_transaction_scopes {
                 return Ok(true);
             }
             match count {
@@ -493,10 +494,10 @@ fn plpgsql_statement_may_mutate_engine(
                 }
             }
         }
-        PLpgSQLStmt::CloseCursor { .. } => Ok(classification.procedural_state_requires_transaction),
+        PLpgSQLStmt::CloseCursor { .. } => Ok(classification.include_transaction_scopes),
         PLpgSQLStmt::Commit { .. } | PLpgSQLStmt::Rollback { .. } => Ok(classification
             .include_session_mutations
-            || classification.procedural_state_requires_transaction),
+            || classification.include_transaction_scopes),
         PLpgSQLStmt::GetDiagnostics { .. } => Ok(false),
     }
 }
@@ -542,3 +543,6 @@ pub(super) fn plpgsql_function_may_mutate_engine(
         classification,
     )
 }
+
+#[cfg(test)]
+mod tests;

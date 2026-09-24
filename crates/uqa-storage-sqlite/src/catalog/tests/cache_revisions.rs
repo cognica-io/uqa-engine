@@ -7,6 +7,181 @@
 use super::*;
 
 #[test]
+fn native_cache_views_retain_private_and_committed_boundaries_after_undo_and_another_commit() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let catalog = Catalog::open(connection.clone()).unwrap();
+    connection
+        .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
+        .unwrap();
+    let other = Catalog::open(connection.new_session()).unwrap();
+    let initial = connection.native_snapshot().unwrap().unwrap();
+    let baseline = initial.cache_revisions().unwrap();
+    connection.begin_transaction().unwrap();
+    catalog.save_scoring_params("private", "{}").unwrap();
+    let retained = connection.native_snapshot().unwrap().unwrap();
+    let private = retained.cache_revisions().unwrap();
+    other.save_scoring_params("outside", "{}").unwrap();
+    assert_eq!(catalog.cache_revisions().unwrap(), private);
+    connection.rollback_transaction().unwrap();
+    assert_ne!(catalog.cache_revisions().unwrap(), baseline);
+    assert_ne!(catalog.cache_revisions().unwrap(), private);
+    assert_eq!(retained.cache_revisions().unwrap(), private);
+    assert_eq!(initial.cache_revisions().unwrap(), baseline);
+}
+
+#[test]
+fn metadata_cache_names_preserve_embedded_zero_and_unicode() {
+    for native in [false, true] {
+        let connection = ManagedConnection::open_in_memory().unwrap();
+        let catalog = Catalog::open(connection.clone()).unwrap();
+        if native {
+            connection
+                .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
+                .unwrap();
+        }
+        let graph = "g\0日本語";
+        catalog.save_named_graph(graph).unwrap();
+        let baseline = catalog.cache_revisions().unwrap();
+        catalog
+            .set_metadata(&format!("graph_label_registry::{graph}"), "{}")
+            .unwrap();
+        let updated = catalog.cache_revisions().unwrap();
+        assert_ne!(
+            updated.graphs.as_ref().unwrap()[graph],
+            baseline.graphs.as_ref().unwrap()[graph]
+        );
+        assert!(!updated.graphs.as_ref().unwrap().contains_key("g"));
+        assert_eq!(updated.registries, baseline.registries);
+        for prefix in ["uqa.table_next_id.v1:", "uqa.statistics.maintenance.v1:"] {
+            catalog
+                .set_metadata(&format!("{prefix}{graph}"), "1")
+                .unwrap();
+        }
+        let revisions = catalog.cache_revisions().unwrap();
+        assert!(revisions.table_data.contains_key(graph));
+        assert!(revisions.statistics_maintenance.contains_key(graph));
+        let guard = uqa_storage::catalog::graph_guards::GraphRecordGuard::new(
+            uqa_storage::GraphEntityKind::Vertex,
+            1,
+        );
+        for name in [
+            guard.lifetime(),
+            guard.references(),
+            guard.membership_references(graph),
+        ] {
+            catalog.set_metadata(&name, "1").unwrap();
+        }
+        assert_eq!(catalog.cache_revisions().unwrap(), revisions);
+    }
+}
+
+// Exact released metadata INSERT trigger, independent of the current formatter.
+const LEGACY_METADATA_INSERT: &str = "CREATE TRIGGER \"uqa_cache__metadata_INSERT\" AFTER INSERT ON \"_metadata\" BEGIN INSERT INTO _cache_revisions(kind, name, generation) VALUES (CASE WHEN substr(NEW.key, 1, 30) = 'uqa.statistics.maintenance.v1:' THEN 'maintenance' WHEN substr(NEW.key, 1, 21) = 'uqa.table_next_id.v1:' THEN 'data' WHEN substr(NEW.key, 1, 22) = 'graph_label_registry::' THEN 'graph' ELSE 'registry' END, CASE WHEN substr(NEW.key, 1, 30) = 'uqa.statistics.maintenance.v1:' THEN substr(NEW.key, 31) WHEN substr(NEW.key, 1, 21) = 'uqa.table_next_id.v1:' THEN substr(NEW.key, 22) WHEN substr(NEW.key, 1, 22) = 'graph_label_registry::' THEN substr(NEW.key, 23) ELSE '' END, 1) ON CONFLICT(kind, name) DO UPDATE SET generation = generation + 1; END";
+
+#[test]
+fn cache_trigger_upgrade_preserves_counters_and_native_history_and_is_idempotent() {
+    use uqa_storage::{mvcc::VersionedPersistence, read_control::StorageReadControl};
+    for encoding in [0, 1, 2] {
+        for native in [false, true] {
+            let connection = ManagedConnection::open_in_memory().unwrap();
+            let catalog = Catalog::open(connection.clone()).unwrap();
+            catalog.save_named_graph("g\0日本語").unwrap();
+            let baseline = catalog.cache_revisions().unwrap().graphs;
+            let control = StorageReadControl::with_limit(1 << 20);
+            let records = native
+                .then(|| crate::SQLiteRecordStore::for_native(&connection, &control).unwrap());
+            let history = || {
+                connection.record_connection().with(|conn| {
+            Ok(conn.prepare("SELECT key, sequence, value FROM _uqa_mvcc_versions ORDER BY key, sequence")?
+                .query_map([], |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?, row.get::<_, Option<Vec<u8>>>(2)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?)
+        }).unwrap()
+            };
+            let before_history = native.then(history);
+            connection
+                .record_connection()
+                .with(|conn| {
+                    conn.execute_batch("DROP TRIGGER uqa_cache__metadata_INSERT")?;
+                    let mut previous = LEGACY_METADATA_INSERT.to_owned();
+                    if encoding != 0 {
+                        for offset in [31, 22, 23] {
+                            previous = previous.replace(
+                                &format!("substr(NEW.key, {offset})"),
+                                &format!("CAST(substr(CAST(NEW.key AS BLOB), {offset}) AS TEXT)"),
+                            );
+                        }
+                    }
+                    if encoding == 2 {
+                        previous = previous.replacen("VALUES (", "SELECT ", 1).replace(
+                            ", 1) ON CONFLICT", ", 1 WHERE NEW.key NOT IN ('graph_identifier_generation', 'graph_identifier_data_revision') AND substr(CAST(NEW.key AS BLOB), 1, 32) != CAST('graph_definition_data_revision::' AS BLOB) ON CONFLICT"
+                        );
+                    }
+                    conn.execute_batch(&previous)?;
+                    Ok(())
+                })
+                .unwrap();
+            if let Some(records) = records {
+                let before = records.snapshot(&control).unwrap().sequence();
+                let reopened = crate::SQLiteRecordStore::for_native(&connection, &control).unwrap();
+                assert_eq!(reopened.database_id(), records.database_id());
+                assert_eq!(reopened.snapshot(&control).unwrap().sequence(), before);
+                assert_eq!(Some(history()), before_history);
+                connection
+                    .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
+                    .unwrap();
+            } else {
+                Catalog::open(connection.clone()).unwrap();
+            }
+            assert_eq!(catalog.cache_revisions().unwrap().graphs, baseline);
+            let stable = catalog.cache_revisions().unwrap();
+            Catalog::open(connection.clone()).unwrap();
+            assert_eq!(catalog.cache_revisions().unwrap(), stable);
+            catalog
+                .set_metadata("graph_label_registry::g\0日本語", "{}")
+                .unwrap();
+            assert_ne!(catalog.cache_revisions().unwrap().graphs, baseline);
+        }
+    }
+}
+
+#[test]
+fn native_conversion_and_reopen_reject_missing_or_changed_cache_tracking() {
+    for mapped in [false, true] {
+        for changed in [false, true] {
+            let connection = ManagedConnection::open_in_memory().unwrap();
+            Catalog::open(connection.clone()).unwrap();
+            let control = uqa_storage::read_control::StorageReadControl::with_limit(1 << 20);
+            if mapped {
+                crate::SQLiteRecordStore::for_native(&connection, &control).unwrap();
+            }
+            connection.record_connection().with(|conn| {
+                conn.execute_batch("DROP TRIGGER uqa_cache__metadata_INSERT")?;
+                conn.execute_batch(LEGACY_METADATA_INSERT)?;
+                conn.execute_batch("DROP TRIGGER uqa_cache__documents_INSERT")?;
+                if changed { conn.execute_batch("CREATE TRIGGER uqa_cache__documents_INSERT AFTER INSERT ON _documents BEGIN SELECT 1; END")?; }
+                Ok(())
+            }).unwrap();
+            assert!(crate::SQLiteRecordStore::for_native(&connection, &control).is_err());
+            connection
+                .record_connection()
+                .with(|conn| {
+                    let definition: String = conn.query_row(
+                        "SELECT sql FROM sqlite_schema WHERE name = 'uqa_cache__metadata_INSERT'",
+                        [],
+                        |row| row.get(0),
+                    )?;
+                    assert_eq!(
+                        definition, LEGACY_METADATA_INSERT,
+                        "failed validation published part of the trigger upgrade"
+                    );
+                    Ok(())
+                })
+                .unwrap();
+        }
+    }
+}
+
+#[test]
 fn physical_path_pages_and_validity_do_not_invalidate_catalog_definitions() {
     let catalog = fresh();
     catalog.save_named_graph("items").unwrap();

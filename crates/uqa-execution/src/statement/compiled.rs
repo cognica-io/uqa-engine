@@ -7,6 +7,7 @@
 //! Execute compiled statements with planning and statement scopes captured at their point of use.
 
 use super::{context::StatementExecutionInputs, plan_executor::UnifiedPlanExecutor};
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     binding::stored_routines::mark_catalog_statement_relations_bound,
     plan::{AggregateClassifier, CommandPlan, ExecutablePlanOptimizer, UnifiedPlan},
@@ -42,7 +43,7 @@ pub fn execute_with_privilege_subject<S: Clone + Send + Sync + 'static>(
     context: &CompiledStatementContext<'_, S>,
     statement: Statement,
     params: &[SQLParam],
-    privilege_subject: &str,
+    privilege_subject: &RoleReference,
 ) -> Result<SQLResult, SQLError> {
     let mut plan = UnifiedPlan::lower_with(statement, context.aggregates);
     mark_catalog_statement_relations_bound(&mut plan)?;

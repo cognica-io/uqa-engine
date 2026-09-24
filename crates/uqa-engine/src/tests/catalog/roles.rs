@@ -6,6 +6,30 @@
 
 use crate::Engine;
 
+mod coordination;
+mod creation;
+mod database_security;
+mod deletion;
+mod dependencies;
+mod domain_security;
+mod identity;
+mod memberships;
+mod migration;
+mod ownership;
+mod publication;
+mod quoted_acl_roles;
+mod relation_security;
+mod rename;
+mod routine_security;
+mod routine_settings;
+mod schema_security;
+mod sequence_security;
+mod session_identity;
+mod settings;
+mod snapshots;
+mod system_security;
+mod tuple_changes;
+
 #[test]
 fn role_registry_and_memberships_restore_together_after_reopen() {
     let directory = tempfile::tempdir().unwrap();
@@ -29,8 +53,8 @@ fn role_registry_and_memberships_restore_together_after_reopen() {
         assert!(roles["managed"].has(uqa_sql::ast::RoleAttribute::Login));
         assert!(memberships
             .values()
-            .any(|membership| membership.role == "managed"
-                && membership.member == "creator"
+            .any(|membership| membership.role.name == "managed"
+                && membership.member.name == "creator"
                 && membership.admin_option
                 && !membership.inherit_option
                 && !membership.set_option));
@@ -68,5 +92,11 @@ fn failed_role_declaration_preserves_live_registry_identity_and_prepared_cache()
         &prepared,
         &engine.session.prepared.read()["saved"].logical_plan
     ));
-    assert_eq!(engine.current_user_name(), "limited");
+    assert_eq!(
+        engine
+            .current_role()
+            .require_name(&engine.durable.roles.read())
+            .unwrap(),
+        "limited"
+    );
 }

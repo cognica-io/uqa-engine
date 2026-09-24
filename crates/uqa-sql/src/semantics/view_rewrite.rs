@@ -165,6 +165,13 @@ pub fn relation_columns(
     services: ViewRewriteContext<'_>,
     relation: &str,
 ) -> Result<Vec<String>, SQLError> {
+    if let Some(relation) = crate::catalog::VirtualRelation::from_qualified_name(relation) {
+        return Ok(relation
+            .schema()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect());
+    }
     if let Some(view) = services.catalog.view_definition(relation)? {
         let schema = stored_view_schema(services, &view)?;
         return Ok(schema

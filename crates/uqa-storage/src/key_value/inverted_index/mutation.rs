@@ -8,10 +8,46 @@
 
 use super::super::codec::u64_value;
 use super::{
-    cluster_id, encode_occurrence_cluster, encode_term_keys, keys, other_error, BTreeMap,
-    ClusterChanges, DocId, DocumentFields, FieldName, FieldStats, KeyValueBatch,
-    KeyValueInvertedIndex, OccurrencePosting, StorageBackendResult, TokenTermKey,
+    cluster_id, encode_occurrence_cluster_controlled, encode_term_keys, keys, other_error,
+    BTreeMap, ClusterChanges, DocId, DocumentFields, FieldName, FieldStats, KeyValueBatch,
+    OccurrencePosting, OccurrenceRead, StorageBackendResult, TokenTermKey,
 };
+use crate::inverted_index::{
+    visit_field_replacement, InvertedIndexChange, InvertedIndexChangeVisitor,
+};
+
+fn visit_replacement(
+    visit: &mut InvertedIndexChangeVisitor<'_>,
+    doc_id: DocId,
+    previous: &DocumentFields,
+    replacement: &DocumentFields,
+) -> StorageBackendResult<()> {
+    for field in previous.keys().chain(
+        replacement
+            .keys()
+            .filter(|field| !previous.contains_key(*field)),
+    ) {
+        let old = previous.get(field);
+        let new = replacement.get(field);
+        visit_field_replacement(
+            visit,
+            doc_id,
+            field,
+            old.map(|snapshot| snapshot.metadata.length),
+            new.map(|snapshot| snapshot.metadata.length),
+        )?;
+        for snapshot in old.into_iter().chain(new) {
+            for term in snapshot.terms.keys() {
+                visit(InvertedIndexChange::Posting {
+                    doc_id,
+                    field,
+                    term,
+                })?;
+            }
+        }
+    }
+    Ok(())
+}
 
 fn merge_cluster_changes(
     entries: Vec<OccurrencePosting>,
@@ -33,7 +69,7 @@ fn merge_cluster_changes(
     merged
 }
 
-impl KeyValueInvertedIndex {
+impl OccurrenceRead<'_> {
     pub(super) fn put_cluster(
         &self,
         batch: &mut dyn KeyValueBatch,
@@ -42,15 +78,16 @@ impl KeyValueInvertedIndex {
         cluster: u64,
         entries: &[OccurrencePosting],
     ) -> StorageBackendResult<()> {
-        let score_key = keys::cluster_key(&self.table, keys::SCORE, field, term, cluster)?;
-        let graph_key = keys::cluster_key(&self.table, keys::POSITIONS, field, term, cluster)?;
+        let score_key = keys::cluster_key(self.table, keys::SCORE, field, term, cluster)?;
+        let graph_key = keys::cluster_key(self.table, keys::POSITIONS, field, term, cluster)?;
         if entries.is_empty() {
-            batch.delete(&score_key)?;
-            batch.delete(&graph_key)?;
+            batch.replace_occurrence_record(&score_key, None)?;
+            batch.replace_occurrence_record(&graph_key, None)?;
         } else {
-            let (score, graph) = encode_occurrence_cluster(entries)?;
-            batch.put(&score_key, &score)?;
-            batch.put(&graph_key, &graph)?;
+            let (score, graph) =
+                encode_occurrence_cluster_controlled(entries.iter(), self.store.control())?;
+            batch.replace_occurrence_record(&score_key, Some(&score))?;
+            batch.replace_occurrence_record(&graph_key, Some(&graph))?;
         }
         Ok(())
     }
@@ -63,16 +100,16 @@ impl KeyValueInvertedIndex {
     ) -> StorageBackendResult<()> {
         for (field, snapshot) in fields {
             batch.put(
-                &keys::metadata_key(&self.table, field, doc_id)?,
+                &keys::metadata_key(self.table, field, doc_id)?,
                 &snapshot.metadata.to_bytes()?,
             )?;
             batch.put(
-                &keys::document_key(&self.table, keys::LENGTH, doc_id, field)?,
+                &keys::document_key(self.table, keys::LENGTH, doc_id, field)?,
                 &u64_value(snapshot.metadata.length),
             )?;
             let terms = snapshot.terms.keys().cloned().collect::<Vec<_>>();
             batch.put(
-                &keys::document_key(&self.table, keys::DOCUMENT, doc_id, field)?,
+                &keys::document_key(self.table, keys::DOCUMENT, doc_id, field)?,
                 &encode_term_keys(&terms)?,
             )?;
         }
@@ -113,30 +150,36 @@ impl KeyValueInvertedIndex {
         totals: BTreeMap<FieldName, FieldStats>,
     ) -> StorageBackendResult<()> {
         for (field, stats) in totals {
-            let key = keys::field_prefix(&self.table, keys::FIELD, &field)?;
+            let key = keys::field_prefix(self.table, keys::FIELD, &field)?;
             if stats.doc_count == 0 {
                 if stats.total_length != 0 {
                     return Err(other_error("empty indexed field retains document length"));
                 }
-                batch.delete(&key)?;
+                batch.replace_occurrence_record(&key, None)?;
             } else {
-                batch.put(&key, &stats.to_bytes()?)?;
+                batch.replace_occurrence_record(&key, Some(&stats.to_bytes()?))?;
             }
         }
         Ok(())
     }
 
     pub(super) fn add_documents(
-        &mut self,
+        &self,
+        batch: &mut dyn KeyValueBatch,
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        mut visit: Option<&mut InvertedIndexChangeVisitor<'_>>,
     ) -> StorageBackendResult<()> {
         self.require_graph_format()?;
-        let staged = self.stage_documents(documents, false)?;
+        let mut staged = self.stage_documents(documents, false)?;
         let mut previous = BTreeMap::new();
         let mut totals = BTreeMap::<FieldName, FieldStats>::new();
         let mut changes = ClusterChanges::new();
         for (doc_id, fields) in &staged {
+            batch.occurrence_document(self.table, *doc_id)?;
             let old = self.old_document(*doc_id)?;
+            if let Some(visit) = visit.as_mut() {
+                visit_replacement(*visit, *doc_id, &old, fields)?;
+            }
             for field in old.keys().chain(fields.keys()) {
                 if !totals.contains_key(field) {
                     if let Some(stats) = self.stored_field_stats(field)? {
@@ -165,10 +208,10 @@ impl KeyValueInvertedIndex {
             }
             previous.insert(*doc_id, old);
         }
-        for (doc_id, fields) in &staged {
+        for (doc_id, fields) in &mut staged {
             Self::add_field_statistics(&mut totals, fields)?;
             for (field, snapshot) in fields {
-                for (term, occurrences) in &snapshot.terms {
+                for (term, occurrences) in &mut snapshot.terms {
                     changes
                         .entry((field.clone(), term.clone(), cluster_id(*doc_id)))
                         .or_default()
@@ -177,7 +220,7 @@ impl KeyValueInvertedIndex {
                             Some(OccurrencePosting {
                                 doc_id: *doc_id,
                                 doc_length: snapshot.metadata.length,
-                                occurrences: occurrences.clone(),
+                                occurrences: std::mem::take(occurrences),
                             }),
                         );
                 }
@@ -186,26 +229,26 @@ impl KeyValueInvertedIndex {
         if totals.is_empty() {
             return Ok(());
         }
-        let mut batch = self.store.batch();
+        self.invalidate_accelerators(batch)?;
         for ((field, term, cluster), updates) in changes {
             let merged = merge_cluster_changes(self.load_cluster(&field, &term, cluster)?, updates);
-            self.put_cluster(batch.as_mut(), &field, &term, cluster, &merged)?;
+            self.put_cluster(batch, &field, &term, cluster, &merged)?;
         }
         for (doc_id, fields) in previous {
-            batch.delete_prefix(&keys::document_prefix(&self.table, keys::DOCUMENT, doc_id)?)?;
-            batch.delete_prefix(&keys::document_prefix(&self.table, keys::LENGTH, doc_id)?)?;
+            batch.delete_prefix(&keys::document_prefix(self.table, keys::DOCUMENT, doc_id)?)?;
+            batch.delete_prefix(&keys::document_prefix(self.table, keys::LENGTH, doc_id)?)?;
             for field in fields.keys() {
-                batch.delete(&keys::metadata_key(&self.table, field, doc_id)?)?;
+                batch.delete(&keys::metadata_key(self.table, field, doc_id)?)?;
             }
         }
         for (doc_id, fields) in &staged {
-            self.put_document(batch.as_mut(), *doc_id, fields)?;
+            self.put_document(batch, *doc_id, fields)?;
         }
-        self.put_field_statistics(batch.as_mut(), totals)?;
-        batch.put(
-            &keys::kind_prefix(&self.table, keys::FORMAT)?,
-            keys::FORMAT_NAME,
+        self.put_field_statistics(batch, totals)?;
+        batch.replace_occurrence_record(
+            &keys::kind_prefix(self.table, keys::FORMAT)?,
+            Some(keys::FORMAT_NAME),
         )?;
-        batch.commit()
+        Ok(())
     }
 }

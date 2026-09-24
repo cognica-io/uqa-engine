@@ -38,6 +38,9 @@ impl StatementTransactions for Engine {
     fn transaction_depth(&self) -> usize {
         Engine::transaction_depth(self)
     }
+    fn commit_resolution_pending(&self) -> bool {
+        self.pending_transaction_completion().is_some()
+    }
     fn current_transaction_is_read_only(&self) -> bool {
         Engine::current_transaction_is_read_only(self)
     }

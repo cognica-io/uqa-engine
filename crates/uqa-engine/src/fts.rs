@@ -8,6 +8,7 @@ use super::{
     analyzer_registry, Arc, BTreeMap, DocId, Document, Engine, FieldName, FtsIndexStat, SQLError,
     TableState, Value,
 };
+use uqa_storage::InvertedIndex;
 
 type TextIndexDocuments = Vec<(DocId, BTreeMap<FieldName, String>)>;
 
@@ -47,65 +48,102 @@ impl Engine {
         &self,
         table_filter: Option<&str>,
     ) -> Result<Vec<FtsIndexStat>, SQLError> {
-        self.synchronize_table_catalog()
-            .map_err(|err| SQLError::Internal(format!("refresh table catalog: {err}")))?;
-        let resolved_filter = match table_filter {
-            Some(name) => Some(
-                self.try_resolve_table_name(name)
-                    .map_err(|err| SQLError::Internal(format!("resolve table filter: {err}")))?
-                    .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?,
-            ),
-            None => None,
-        };
-        let mut tables: Vec<(String, Arc<TableState>)> = self
-            .storage
-            .tables
-            .read()
-            .iter()
-            .filter(|(name, _)| {
-                resolved_filter
-                    .as_ref()
-                    .is_none_or(|target| name.qualified_name() == *target)
+        self.with_direct_read_snapshot(|engine| {
+            engine.fts_index_stats_with_tables(table_filter, |name| {
+                engine
+                    .bind_query_table_read(name)
+                    .map(|binding| binding.value)
             })
-            .map(|(name, table)| (name.qualified_name(), table.clone()))
-            .collect();
-        tables.sort_by(|a, b| a.0.cmp(&b.0));
+        })
+    }
 
+    pub(crate) fn fts_index_stats_in_execution(
+        &self,
+        table_filter: Option<&str>,
+    ) -> Result<Vec<FtsIndexStat>, SQLError> {
+        self.fts_index_stats_with_tables(table_filter, |name| self.require_query_table(name))
+    }
+
+    fn fts_index_stats_with_tables(
+        &self,
+        table_filter: Option<&str>,
+        bind: impl Fn(&str) -> Result<Arc<TableState>, SQLError>,
+    ) -> Result<Vec<FtsIndexStat>, SQLError> {
         let mut out = Vec::new();
-        for (table_name, table) in tables {
+        for table_name in self.fts_stats_table_names(table_filter)? {
+            let table = bind(&table_name)?;
             let mut fields = table.fts_fields();
             fields.sort();
             let index = table.inverted_index.read();
+            let index = uqa_execution::serializable::text::ObservedTextIndex::new(
+                index.as_ref(),
+                self.serializable_table_state_read(&table)?,
+                table.columns.snapshot(),
+            );
             for field in fields {
                 let analyzer = self
-                    .table_field_analyzer(&table_name, &field)
+                    .table_field_analyzer_in_execution(&table_name, &field)
                     .map_err(SQLError::Internal)?
                     .map_or_else(
                         || analyzer_registry::DEFAULT_ANALYZER_NAME.to_string(),
                         |(name, _)| name,
                     );
                 let doc_length_count = index.doc_length_count(Some(&field)).map_err(|error| {
-                    SQLError::Internal(format!("read FTS document-length count: {error}"))
+                    uqa_execution::storage_errors::storage_error(
+                        "read FTS document-length count",
+                        &error,
+                    )
                 })?;
                 out.push(FtsIndexStat {
                     table_name: table_name.clone(),
                     field: field.clone(),
                     analyzer,
                     posting_count: index.posting_count(Some(&field)).map_err(|error| {
-                        SQLError::Internal(format!("read FTS posting count: {error}"))
+                        uqa_execution::storage_errors::storage_error(
+                            "read FTS posting count",
+                            &error,
+                        )
                     })?,
                     doc_length_count,
                     indexed_doc_count: doc_length_count,
                     term_count: index.term_count(Some(&field)).map_err(|error| {
-                        SQLError::Internal(format!("read FTS term count: {error}"))
+                        uqa_execution::storage_errors::storage_error("read FTS term count", &error)
                     })?,
                     total_field_length: index.total_field_length(&field).map_err(|error| {
-                        SQLError::Internal(format!("read FTS field length: {error}"))
+                        uqa_execution::storage_errors::storage_error(
+                            "read FTS field length",
+                            &error,
+                        )
                     })?,
                 });
             }
         }
         Ok(out)
+    }
+
+    fn fts_stats_table_names(&self, table_filter: Option<&str>) -> Result<Vec<String>, SQLError> {
+        self.synchronize_table_catalog()
+            .map_err(|err| SQLError::Internal(format!("refresh table catalog: {err}")))?;
+        let mut names = if let Some(name) = table_filter {
+            vec![self
+                .try_resolve_query_table_name(name)
+                .map_err(|err| SQLError::Internal(format!("resolve table filter: {err}")))?
+                .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?]
+        } else if let Some(tables) = self.query_table_snapshots.as_ref() {
+            tables
+                .keys()
+                .map(uqa_core::RelationIdentity::qualified_name)
+                .collect()
+        } else {
+            self.storage
+                .tables
+                .read()
+                .keys()
+                .map(uqa_core::RelationIdentity::qualified_name)
+                .collect()
+        };
+        names.sort_unstable();
+        Ok(names)
     }
 
     pub(crate) fn project_fts_sources(t: &Arc<TableState>) -> Result<TextIndexDocuments, String> {
@@ -202,6 +240,7 @@ impl Engine {
             table,
             &mut document,
         )?;
+        uqa_execution::serializable::observe_row_write(self, table, doc_id)?;
         self.add_prepared_document_impl(table, doc_id, document, known_new)
     }
 
@@ -274,11 +313,13 @@ impl Engine {
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
-        let result = t
-            .inverted_index
-            .write()
-            .try_add_documents(documents)
-            .map_err(|error| SQLError::Internal(format!("index documents: {error}")));
+        let result = uqa_execution::serializable::text::add_documents(
+            self,
+            table,
+            t.columns.snapshot(),
+            t.inverted_index.write().as_mut(),
+            documents,
+        );
         result
     }
 
@@ -312,14 +353,6 @@ impl Engine {
                 .map_err(|error| SQLError::Internal(format!("read existing document: {error}")))?
                 .is_some()
         };
-        if index_fts {
-            let text_fields = self.prepared_document_text_fields(table, &document)?;
-            // Replacement is one atomic inverted-index operation even when the new document has no indexed text. Skipping an empty field map would leave stale postings from the previous version; remove-then-add would expose a destructive failure window when analysis fails.
-            t.inverted_index
-                .write()
-                .add_document(doc_id, text_fields)
-                .map_err(|error| SQLError::Internal(format!("index document: {error}")))?;
-        }
         // Value-index maintenance: unindex the previous field values
         // (put may replace an existing document), index the new ones.
         // `old_indexed` is `None` exactly when no index is built, so
@@ -348,12 +381,38 @@ impl Engine {
                 self.value_index_document_values(&table_name, &fields, &document)
             })
             .transpose()?;
+        self.observe_value_index_write(
+            &table_name,
+            &t,
+            doc_id,
+            existed,
+            old_indexed.as_ref(),
+            persistent_indexed.as_ref().or(new_indexed.as_ref()),
+        )?;
+        if index_fts {
+            let text_fields = self.prepared_document_text_fields(table, &document)?;
+            // Replacement is one atomic inverted-index operation even when the new document has no indexed text. Skipping an empty field map would leave stale postings from the previous version; remove-then-add would expose a destructive failure window when analysis fails.
+            uqa_execution::serializable::text::add_document(
+                self,
+                &table_name,
+                t.columns.snapshot(),
+                t.inverted_index.write().as_mut(),
+                doc_id,
+                text_fields,
+            )?;
+        }
         let columns = t.columns.read().clone();
         crate::generated::strip_virtual_generated_columns(&columns, &mut document);
         let metadata = match metadata {
             Some(metadata) => metadata,
             None => uqa_storage::DocumentMetadata::with_tuple_xmin(self.tuple_version_xid()?),
         };
+        self.advance_next_id(&table_name, doc_id).map_err(|error| {
+            uqa_execution::mutation::errors::identifier_storage_error(
+                "observe inserted document identity",
+                &error,
+            )
+        })?;
         let mut store = t.document_store.write();
         store
             .put_stored(
@@ -370,13 +429,6 @@ impl Engine {
         drop(store);
         self.mark_column_stats_dirty(&table_name, &t)
             .map_err(|err| SQLError::Internal(format!("invalidate column stats: {err}")))?;
-        // Keep the auto-id watermark monotonic over manual inserts as well.
-        let mut nx = t.next_id.lock();
-        let next = u128::from(doc_id) + 1;
-        if next > *nx {
-            *nx = next;
-        }
-        drop(nx);
         if existed {
             self.note_row_changed(&table_name, doc_id)?;
         } else {

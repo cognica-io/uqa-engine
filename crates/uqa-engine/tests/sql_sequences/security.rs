@@ -8,6 +8,8 @@ use super::*;
 
 #[path = "security/information_schema.rs"]
 mod information_schema;
+#[path = "security/inquiry.rs"]
+mod inquiry;
 #[path = "security/schema.rs"]
 mod schema;
 #[path = "security/schema_inquiry.rs"]
@@ -633,7 +635,7 @@ fn sequence_acl_controls_value_functions_catalog_and_inquiry() {
 }
 
 #[test]
-fn sequence_owner_keeps_implicit_privileges_after_self_revoke_and_transfers_acl_ownership() {
+fn sequence_owner_keeps_grant_options_after_self_revoke_and_transfers_acl_ownership() {
     let engine = Engine::new();
     for sql in [
         "CREATE ROLE acl_self_owner",
@@ -661,7 +663,7 @@ fn sequence_owner_keeps_implicit_privileges_after_self_revoke_and_transfers_acl_
             &engine,
             "SELECT has_sequence_privilege('acl_self_owner', 'acl_owner_ids', 'USAGE') AS v",
         ),
-        Value::Bool(true)
+        Value::Bool(false)
     );
     assert_eq!(
         scalar(
@@ -671,8 +673,8 @@ fn sequence_owner_keeps_implicit_privileges_after_self_revoke_and_transfers_acl_
         Value::Bool(true)
     );
     assert_eq!(
-        scalar(&engine, "SELECT nextval('acl_owner_ids') AS v"),
-        Value::Int(1)
+        sqlstate(&engine, "SELECT nextval('acl_owner_ids') AS v"),
+        "42501"
     );
     engine
         .sql("ALTER SEQUENCE acl_owner_ids CACHE 2", &[])

@@ -22,6 +22,19 @@ static CATALOG_NAMED_TYPES: LazyLock<Vec<ColumnType>> = LazyLock::new(|| {
     domains
 });
 
+/// Creation reads current domain declarations, independently of a query's retained snapshot.
+pub fn named_type_exists<'a>(
+    mut domains: impl Iterator<Item = &'a uqa_sql::catalog::domain::StoredDomain>,
+    identity: &uqa_core::RelationIdentity,
+) -> bool {
+    domains.any(|domain| domain.identity == *identity)
+        || ColumnType::from_sql_name(&identity.qualified_name()).is_ok()
+        || CATALOG_NAMED_TYPES.iter().any(|ty| {
+            matches!(ty, ColumnType::Domain { schema, name, .. }
+                if schema == &identity.schema && name == &identity.name)
+        })
+}
+
 pub fn resolve_catalog_domain_type_by_oid(
     context: &CatalogContext<'_>,
     oid: u32,

@@ -100,9 +100,18 @@ pub fn set_column_not_null(
         .map_err(StorageBackendError::Other)?;
     let mut constraints = state.constraints();
     materialize_metadata(context, &table_name, &mut next, &mut constraints)?;
+    let indexes = crate::schema::indexes::registry::prepare_constraint_indexes(
+        &context.indexes,
+        &table_name,
+        state.object_id(),
+        &mut next,
+        &mut constraints,
+    )?;
+    let state = super::current_table_state(context.catalog, &table_name, state.as_ref())?;
     state.mark_statistics_dirty()?;
     state.persist_candidate(&next, &constraints)?;
     state.publish_constraints(next, constraints);
+    indexes.publish(&context.indexes)?;
     Ok(true)
 }
 pub fn register_table_constraints(
@@ -140,15 +149,25 @@ pub fn register_table_constraints(
         &mut constraints.checks,
     )
     .map_err(StorageBackendError::Other)?;
-    let mut allocate = context.allocate_identity;
-    uqa_sql::schema::constraint_metadata::materialize_constraint_metadata(
+    let mut allocate = context.identity_allocator();
+    uqa_sql::schema::constraint_metadata::materialize_constraint_metadata_with_names(
         &relation,
         &mut columns,
         &mut constraints,
         &mut allocate,
+        &context.constraint_names().name_scope(&relation),
     )
-    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+    .map_err(|error| StorageBackendError::backend("constraint identity", error))?;
+    let indexes = crate::schema::indexes::registry::prepare_constraint_indexes(
+        &context.indexes,
+        &table_name,
+        state.object_id(),
+        &mut columns,
+        &mut constraints,
+    )?;
+    let state = super::current_table_state(context.catalog, &table_name, state.as_ref())?;
     state.persist_candidate(&columns, &constraints)?;
     state.publish_constraints(columns, constraints);
+    indexes.publish(&context.indexes)?;
     Ok(())
 }

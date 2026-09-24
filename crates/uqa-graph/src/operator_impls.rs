@@ -125,7 +125,7 @@ impl Operator for WeightedPathQueryOperator {
         }
         Ok(query
             .execute(self.graph_store.as_ref())
-            .map_err(|error| StorageBackendError::Other(error.to_string()))?
+            .map_err(|error| StorageBackendError::backend("graph operator", error))?
             .to_posting_list())
     }
 
@@ -189,7 +189,7 @@ impl Operator for CypherQueryOperator {
             .with_params(self.params.clone());
         let (_cols, rows) = writer
             .execute(&self.query)
-            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            .map_err(|error| StorageBackendError::backend("cypher operator", error))?;
         // Project bound vertex/edge ids out of the result rows. The
         // posting list carries one entry per distinct vertex id seen,
         // so downstream operators can intersect / union the result

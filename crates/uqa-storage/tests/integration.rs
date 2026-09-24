@@ -25,3 +25,18 @@ mod field_metadata;
 
 #[path = "cases/japanese.rs"]
 mod japanese;
+
+#[path = "cases/mvcc.rs"]
+mod mvcc;
+
+#[path = "cases/mvcc_private.rs"]
+mod mvcc_private;
+
+#[path = "cases/mvcc_reads.rs"]
+mod mvcc_reads;
+
+#[path = "cases/mvcc_persistence.rs"]
+mod mvcc_persistence;
+
+#[path = "cases/mvcc_sessions.rs"]
+mod mvcc_sessions;

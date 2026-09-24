@@ -43,7 +43,7 @@ pub struct RetrievalQueryContext<'a> {
     pub planner: &'a dyn RelationRetrievalPlanner,
     pub graphs: &'a dyn GraphLifecycle,
 }
-impl RetrievalQueryContext<'_> {
+impl<'a> RetrievalQueryContext<'a> {
     pub fn optimized(
         &self,
         table: &str,
@@ -63,13 +63,16 @@ impl RetrievalQueryContext<'_> {
         Ok(Some(posting_list_to_scored(&pl)))
     }
 
-    pub fn accelerated(
+    pub fn prepare_accelerated<'b>(
         &self,
-        table: &str,
-        signal_table: &str,
+        table: &'b str,
+        signal_table: &'b str,
         where_expr: Option<&ScalarExpr>,
-        params: &[SQLParam],
-    ) -> Result<Option<Vec<ScoredEntry>>, SQLError> {
+        params: &'b [SQLParam],
+    ) -> Result<Option<crate::query::scored_input::ScoredEntriesProducer<'b>>, SQLError>
+    where
+        'a: 'b,
+    {
         let Some(expression) = where_expr else {
             return Ok(None);
         };
@@ -79,9 +82,12 @@ impl RetrievalQueryContext<'_> {
         let Some(optimized) = self.planner.accelerated_tree(table, expression, tree)? else {
             return Ok(None);
         };
-        let output =
-            execute_preoptimized_tree(&self.trees, table, signal_table, params, &optimized)?;
-        let posting = expect_posting_output(output, "SQL WHERE")?;
-        Ok(Some(posting_list_to_scored(&posting)))
+        let trees = self.trees;
+        Ok(Some(Box::new(move || {
+            let output =
+                execute_preoptimized_tree(&trees, table, signal_table, params, &optimized)?;
+            let posting = expect_posting_output(output, "SQL WHERE")?;
+            Ok(posting_list_to_scored(&posting))
+        })))
     }
 }

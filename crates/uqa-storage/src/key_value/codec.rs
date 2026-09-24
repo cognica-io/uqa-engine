@@ -14,6 +14,9 @@ use super::{
 };
 use crate::document_store::{DocumentMetadata, StoredDocument};
 
+mod retained;
+pub(super) use retained::decode_retained_stored_document_value;
+
 const LEGACY_SYSTEM_XMIN: &str = "\0uqa.system.xmin";
 const LEGACY_USER_XMIN_MARKER: &str = "\0uqa.user.xmin";
 
@@ -65,10 +68,6 @@ pub(super) fn encode_stored_document_value(
     encoded.extend_from_slice(DOCUMENT_VALUE_V2_PREFIX);
     encoded.extend_from_slice(&body);
     Ok(encoded)
-}
-
-pub(super) fn decode_document_value(bytes: &[u8]) -> StorageBackendResult<Document> {
-    decode_stored_document_value(bytes).map(StoredDocument::into_fields)
 }
 
 pub(super) fn decode_stored_document_value(bytes: &[u8]) -> StorageBackendResult<StoredDocument> {
@@ -368,6 +367,29 @@ pub(super) fn blob_to_vector(blob: &[u8]) -> StorageBackendResult<Vec<f32>> {
 
 pub(super) fn document_key_prefix(table: &str) -> StorageBackendResult<Vec<u8>> {
     table_prefixed_key(TAG_DOCUMENT, table)
+}
+
+pub(super) fn document_key_prefix_controlled(
+    table: &str,
+    control: &crate::read_control::StorageReadControl,
+) -> StorageBackendResult<uqa_core::memory::BudgetedVec<u8>> {
+    control.check()?;
+    let length = key_segment_length(table.len())?;
+    let mut key = uqa_core::memory::BudgetedVec::new(control.memory());
+    key.reserve(
+        table
+            .len()
+            .checked_add(5)
+            .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?,
+    )?;
+    key.push(TAG_DOCUMENT)?;
+    key.extend_from_slice(&length.to_be_bytes())?;
+    for chunk in table.as_bytes().chunks(8192) {
+        control.check()?;
+        key.extend_from_slice(chunk)?;
+    }
+    control.check()?;
+    Ok(key)
 }
 
 pub(super) fn document_key(table: &str, doc_id: DocId) -> StorageBackendResult<Vec<u8>> {

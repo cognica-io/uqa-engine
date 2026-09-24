@@ -6,10 +6,12 @@
 
 //! Foreign servers, foreign tables, catalog indexes, and path indexes.
 
+use super::native::{text, RelationRecord};
 use super::{
     params, Catalog, CatalogIndexRow, ForeignTableRow, RelationIdentity, RelationKind, Result,
-    SQLiteError, TableAclEntry,
+    SQLiteError,
 };
+use crate::mvcc::native::NativeRecordFamily as Family;
 
 impl Catalog {
     // -- Foreign servers ---------------------------------------------------
@@ -20,6 +22,15 @@ impl Catalog {
         fdw_type: &str,
         options_json: &str,
     ) -> Result<()> {
+        if self
+            .put_native_named(
+                Family::ForeignServers,
+                &[text(name), text(fdw_type), text(options_json)],
+            )?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "INSERT OR REPLACE INTO _foreign_servers (name, fdw_type, options) \
@@ -31,6 +42,12 @@ impl Catalog {
     }
 
     pub fn drop_foreign_server(&self, name: &str) -> Result<()> {
+        if self
+            .drop_native_named(Family::ForeignServers, name)?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "DELETE FROM _foreign_servers WHERE name = ?1",
@@ -41,6 +58,9 @@ impl Catalog {
     }
 
     pub fn load_foreign_servers(&self) -> Result<Vec<(String, String, String)>> {
+        if let Some(servers) = self.load_native_foreign_servers()? {
+            return Ok(servers);
+        }
         self.conn.with(|c| {
             let mut stmt =
                 c.prepare("SELECT name, fdw_type, options FROM _foreign_servers ORDER BY name")?;
@@ -62,11 +82,13 @@ impl Catalog {
     // -- Foreign tables ----------------------------------------------------
 
     pub fn save_foreign_table(&self, row: &ForeignTableRow) -> Result<()> {
+        if self.save_native_foreign_table(row)?.is_some() {
+            return Ok(());
+        }
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
             Self::claim_relation(&tx, &row.relation, RelationKind::ForeignTable)?;
-            let acl_json = row.acl.as_deref().map(serde_json::to_string).transpose()?;
-            let column_acls_json = serde_json::to_string(&row.column_acls)?;
+            let (role_owner, acl_json, column_acls_json) = super::role_security::encode_relation(&row.security)?;
             tx.execute(
                 "INSERT OR REPLACE INTO _foreign_tables \
                     (schema_name, relation_name, kind, role_owner, acl_json, column_acls_json, server_name, columns_json, options) \
@@ -74,7 +96,7 @@ impl Catalog {
                 params![
                     row.relation.schema,
                     row.relation.name,
-                    row.role_owner,
+                    role_owner,
                     acl_json,
                     column_acls_json,
                     row.server_name,
@@ -90,13 +112,14 @@ impl Catalog {
     pub fn update_foreign_table_security(
         &self,
         relation: &RelationIdentity,
-        role_owner: &str,
-        acl: Option<&[TableAclEntry]>,
-        column_acls: &std::collections::BTreeMap<String, Vec<TableAclEntry>>,
+        security: &uqa_storage::RelationSecurityRow,
     ) -> Result<bool> {
+        if let Some(updated) = self.update_native_foreign_security(relation, security)? {
+            return Ok(updated);
+        }
         self.conn.with_mut(|connection| {
-            let acl_json = acl.map(serde_json::to_string).transpose()?;
-            let column_acls_json = serde_json::to_string(column_acls)?;
+            let (role_owner, acl_json, column_acls_json) =
+                super::role_security::encode_relation(security)?;
             Ok(connection.execute(
                 "UPDATE _foreign_tables
                     SET role_owner = ?3, acl_json = ?4, column_acls_json = ?5
@@ -121,6 +144,11 @@ impl Catalog {
             return Err(SQLiteError::StorageBackend(
                 "moving a foreign table between schemas is not supported by the catalog".into(),
             ));
+        }
+        if let Some(renamed) =
+            self.rename_native_relation(RelationRecord::ForeignTable, from, to)?
+        {
+            return Ok(renamed);
         }
         self.conn.with_mut(|connection| {
             let source_exists = connection.query_row(
@@ -161,6 +189,12 @@ impl Catalog {
     }
 
     pub fn drop_foreign_table(&self, relation: &RelationIdentity) -> Result<()> {
+        if self
+            .drop_native_relation(RelationRecord::ForeignTable, relation)?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
             let removed = tx.execute(
@@ -177,6 +211,9 @@ impl Catalog {
     }
 
     pub fn load_foreign_tables(&self) -> Result<Vec<ForeignTableRow>> {
+        if let Some(tables) = self.load_native_foreign_tables()? {
+            return Ok(tables);
+        }
         self.conn.with(|c| {
             let mut stmt = c.prepare(
                 "SELECT schema_name, relation_name, role_owner, acl_json, column_acls_json, server_name, columns_json, options
@@ -186,7 +223,7 @@ impl Catalog {
                 Ok((
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
+                    r.get::<_, rusqlite::types::Value>(2)?,
                     r.get::<_, Option<String>>(3)?,
                     r.get::<_, String>(4)?,
                     r.get::<_, String>(5)?,
@@ -199,12 +236,7 @@ impl Catalog {
                 let (schema, name, owner, acl_json, column_acls_json, server, cols, opts) = row?;
                 out.push(ForeignTableRow {
                     relation: RelationIdentity::new(schema, name),
-                    role_owner: owner,
-                    acl: acl_json
-                        .as_deref()
-                        .map(serde_json::from_str)
-                        .transpose()?,
-                    column_acls: serde_json::from_str(&column_acls_json)?,
+                    security: super::role_security::decode_relation((&owner).into(), acl_json.as_deref(), Some(&column_acls_json))?,
                     server_name: server,
                     columns_json: cols,
                     options_json: opts,
@@ -252,6 +284,9 @@ impl Catalog {
                 table.qualified_name()
             )));
         }
+        if self.save_native_catalog_index(index, &table)?.is_some() {
+            return Ok(());
+        }
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
             Self::claim_relation(&tx, relation, RelationKind::Index)?;
@@ -284,6 +319,9 @@ impl Catalog {
     }
 
     pub fn drop_catalog_index(&self, relation: &RelationIdentity) -> Result<()> {
+        if self.drop_native_catalog_index(relation)?.is_some() {
+            return Ok(());
+        }
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
             tx.execute(
@@ -300,6 +338,9 @@ impl Catalog {
     pub fn drop_catalog_indexes_for_table(&self, table_name: &str) -> Result<()> {
         let table =
             RelationIdentity::from_legacy_name(table_name).map_err(SQLiteError::StorageBackend)?;
+        if self.drop_native_table_indexes(&table)?.is_some() {
+            return Ok(());
+        }
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
             Self::drop_catalog_index_rows_for_table(&tx, &table)?;
@@ -340,6 +381,9 @@ impl Catalog {
     }
 
     pub fn load_catalog_indexes(&self) -> Result<Vec<CatalogIndexRow>> {
+        if let Some(indexes) = self.load_native_catalog_indexes()? {
+            return Ok(indexes);
+        }
         self.conn.with(|c| {
             let mut stmt = c.prepare(
                 "SELECT schema_name, relation_name, index_type,
@@ -378,6 +422,20 @@ impl Catalog {
     // -- Path indexes ------------------------------------------------------
 
     pub fn save_path_index(&self, graph_name: &str, label_sequences_json: &str) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                super::native::graph::paths::definition(
+                    snapshot,
+                    batch,
+                    graph_name,
+                    Some(label_sequences_json),
+                )
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "INSERT OR REPLACE INTO _path_indexes (graph_name, label_sequences) \
@@ -389,6 +447,15 @@ impl Catalog {
     }
 
     pub fn drop_path_index(&self, graph_name: &str) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                super::native::graph::paths::definition(snapshot, batch, graph_name, None)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "DELETE FROM _path_indexes WHERE graph_name = ?1",
@@ -400,6 +467,13 @@ impl Catalog {
 
     /// `(graph_name, label_sequences_json)` for every persisted path index.
     pub fn load_path_indexes(&self) -> Result<Vec<(String, String)>> {
+        if let Some(rows) = self.load_native_named(
+            crate::mvcc::native::NativeRecordFamily::PathIndexes,
+            1,
+            false,
+        )? {
+            return Ok(rows);
+        }
         self.conn.with(|c| {
             let mut stmt = c.prepare(
                 "SELECT graph_name, label_sequences FROM _path_indexes ORDER BY graph_name",

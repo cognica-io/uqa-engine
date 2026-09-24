@@ -18,6 +18,13 @@ struct BackendSessionProvider {
 }
 
 impl PersistentStorageProvider for BackendSessionProvider {
+    fn open_session_with_cancellation(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        self.backend.open_session_with_cancellation(cancellation)
+    }
+
     fn auxiliary_encryption_key(&self) -> Option<uqa_storage::StorageEncryptionKey> {
         self.backend.auxiliary_encryption_key()
     }
@@ -212,19 +219,42 @@ impl Engine {
     /// so every durable mutation commits atomically.
     pub fn new_session(&self) -> StorageBackendResult<Self> {
         let _statement = self.runtime.statement_gate.lock();
+        self.new_sibling_session(false, None)
+    }
+
+    /// Restore an independent internal read view without entering the source statement or acquiring another automatic-maintenance client lease.
+    pub(crate) fn new_internal_read_session(&self) -> StorageBackendResult<Self> {
+        self.new_sibling_session(true, None)
+    }
+
+    pub(crate) fn new_internal_retained_read_session(&self) -> StorageBackendResult<Self> {
+        let backend = self.storage.backend.as_ref().ok_or_else(|| {
+            StorageBackendError::Other("retained reads require persistent storage".into())
+        })?;
+        let storage_session =
+            backend.open_retained_read_session(&uqa_core::CancellationToken::new())?;
+        self.new_sibling_session(true, Some(storage_session))
+    }
+
+    fn new_sibling_session(
+        &self,
+        internal_read: bool,
+        retained_session: Option<PersistentStorageSession>,
+    ) -> StorageBackendResult<Self> {
         let provider = self.storage.provider.as_ref().ok_or_else(|| {
             StorageBackendError::Other(
                 "independent sessions require a PersistentStorageProvider".into(),
             )
         })?;
-        // Fixed-snapshot construction can call this while holding the
-        // transaction stack. In that case restore committed storage instead
-        // of recursively locking the stack or sharing private definitions.
-        let share_catalog = self
-            .session
-            .transactions
-            .try_lock()
-            .is_some_and(|stack| stack.is_empty())
+        // Only the public factory owns the source statement gate. Internal readers can run on a worker of that statement and must restore their own catalog without borrowing the source transaction or temporary namespace. A retained pair supplies its own fixed catalog view.
+        let retained = retained_session.is_some();
+        let share_catalog = !internal_read
+            && !retained
+            && self
+                .session
+                .transactions
+                .try_lock()
+                .is_some_and(|stack| stack.is_empty())
             && !self.session.state.read().temporary_namespace_allocated;
         if share_catalog {
             self.synchronize_table_catalog()?;
@@ -232,7 +262,11 @@ impl Engine {
             self.synchronize_catalog_registries()?;
         }
         let observed_epochs = self.epochs.published_epochs();
-        let storage_session = provider.open_session()?;
+        let storage_session = match retained_session {
+            Some(session) => session,
+            None => provider.open_session()?,
+        };
+        storage_session.validate_transaction_affinity()?;
         let storage_version_before_restore = storage_session.backend.change_version()?;
         let shared = if share_catalog {
             self.session_from_shared_catalog(&storage_session, provider)?
@@ -246,6 +280,10 @@ impl Engine {
                 Some(Arc::clone(provider)),
             )?,
         };
+        session
+            .session
+            .statistics_worker
+            .store(internal_read, std::sync::atomic::Ordering::Release);
         session.row_locks = Arc::clone(&self.row_locks);
         session.statistics = Arc::clone(&self.statistics);
         session.install_notification_hub(Arc::clone(&self.notification_hub))?;
@@ -273,9 +311,11 @@ impl Engine {
         // Catalog cells keep independent mutable owners over shared immutable
         // values, so a writer cannot expose uncommitted definitions to siblings.
         session.extensions = super::RuntimeExtensions::shared_from(&self.extensions);
-        session.synchronize_table_catalog()?;
-        session.synchronize_table_data()?;
-        session.synchronize_catalog_registries()?;
+        if !retained {
+            session.synchronize_table_catalog()?;
+            session.synchronize_table_data()?;
+            session.synchronize_catalog_registries()?;
+        }
         session.start_automatic_statistics();
         Ok(session)
     }
@@ -361,6 +401,7 @@ impl Engine {
         provider: Option<Arc<dyn PersistentStorageProvider>>,
     ) -> Self {
         let PersistentStorageSession { catalog, backend } = storage_session;
+        let cancellation = backend.write_cancellation().unwrap_or_default();
         let row_locks = Arc::new(crate::row_locks::RowLockManager::new());
         let notification_hub = Arc::new(crate::NotificationHub::default());
         let session_id = row_locks.allocate_session();
@@ -370,7 +411,10 @@ impl Engine {
             session: Arc::new(super::SessionContext::new(super::initial_random_state())),
             extensions: super::RuntimeExtensions::new(),
             epochs: super::EpochCoordinator::new(),
-            runtime: super::QueryRuntime::new(super::SQL_FUNCTION_DEPTH_LIMIT),
+            runtime: super::QueryRuntime::with_cancellation(
+                super::SQL_FUNCTION_DEPTH_LIMIT,
+                cancellation,
+            ),
             statistics: crate::statistics::shared_statistics(&row_locks),
             row_locks,
             notification_hub,
@@ -390,6 +434,7 @@ impl Engine {
         provider: Option<Arc<dyn PersistentStorageProvider>>,
         initialize_catalog: bool,
     ) -> StorageBackendResult<Self> {
+        storage_session.validate_transaction_affinity()?;
         let restore_catalog = Arc::clone(&storage_session.catalog);
         let restore_backend = Arc::clone(&storage_session.backend);
         let cache_revisions_before;

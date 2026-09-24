@@ -5,44 +5,46 @@
 //
 
 use super::*;
+mod deletion;
 mod fixtures;
+mod identity;
+mod memberships;
+mod rename;
+mod tuples;
 use fixtures::{create, Catalog};
-use std::collections::BTreeMap;
-use uqa_sql::ast::RoleAttribute;
+use std::collections::{BTreeMap, BTreeSet};
+use uqa_sql::ast::{DropRoleStmt, RoleAttribute, RoleMembershipOptions};
 
 #[test]
 fn create_keeps_both_write_guards_and_publishes_only_after_both_persistence_calls() {
     let catalog = Catalog::new();
     let roles = catalog.roles.borrow().clone();
+    let mut statement = create("created");
+    statement.role_members.push("uqa".into());
     catalog.fail_membership_persistence.set(true);
     assert!(
-        matches!(create_role(&catalog.context(), &create("created")), Err(SQLError::Internal(message)) if message == "membership write failed")
+        matches!(create_role(&catalog.context(), &statement), Err(SQLError::Internal(message)) if message == "membership write failed")
     );
     assert_eq!(*catalog.roles.borrow(), roles);
     assert!(catalog.memberships.borrow().is_empty());
     assert_eq!(catalog.epoch.get(), 0);
-    assert_eq!(
-        *catalog.events.borrow(),
-        [
-            "current",
-            "read roles",
-            "release roles",
-            "current",
-            "read roles",
-            "release roles",
-            "writer",
-            "write roles",
-            "write memberships",
-            "persist roles",
-            "persist memberships",
-            "release memberships",
-            "release roles"
-        ]
-    );
+    let events = catalog.events.borrow();
+    let writer = events.iter().position(|event| event == "writer").unwrap();
+    let refreshed = events.iter().rposition(|event| event == "refresh").unwrap();
+    assert!(refreshed < writer);
+    assert!(events.ends_with(&[
+        "write roles".into(),
+        "write memberships".into(),
+        "persist roles".into(),
+        "persist memberships".into(),
+        "release memberships".into(),
+        "release roles".into(),
+    ]));
+    drop(events);
     catalog.released();
     catalog.events.borrow_mut().clear();
     catalog.fail_membership_persistence.set(false);
-    create_role(&catalog.context(), &create("created")).unwrap();
+    create_role(&catalog.context(), &statement).unwrap();
     assert!(catalog.roles.borrow().contains_key("created"));
     assert_eq!(catalog.epoch.get(), 1);
     assert!(catalog.events.borrow().ends_with(&[
@@ -54,6 +56,36 @@ fn create_keeps_both_write_guards_and_publishes_only_after_both_persistence_call
         "release roles".into(),
         "epoch".into()
     ]));
+}
+
+#[test]
+fn creation_without_memberships_does_not_publish_the_membership_registry() {
+    let catalog = Catalog::new();
+    catalog.fail_membership_persistence.set(true);
+    create_role(&catalog.context(), &create("created")).unwrap();
+    assert!(catalog.roles.borrow().contains_key("created"));
+    assert!(catalog.memberships.borrow().is_empty());
+    assert!(!catalog
+        .events
+        .borrow()
+        .iter()
+        .any(|event| event == "persist memberships"));
+}
+
+#[test]
+fn deletion_publishes_membership_dependencies_even_when_no_visible_edges_are_removed() {
+    let catalog = Catalog::new();
+    catalog.role("removed", &[]);
+    catalog.fail_membership_persistence.set(true);
+    let statement = DropRoleStmt {
+        names: vec!["removed".into()],
+        if_exists: false,
+    };
+    assert!(
+        matches!(drop_roles(&catalog.context(), &statement), Err(SQLError::Internal(message)) if message == "membership write failed")
+    );
+    assert!(catalog.roles.borrow().contains_key("removed"));
+    assert_eq!(catalog.epoch.get(), 0);
 }
 
 #[test]
@@ -70,8 +102,7 @@ fn duplicate_creation_stops_before_membership_write_or_persistence() {
             "current",
             "read roles",
             "release roles",
-            "writer",
-            "write roles",
+            "read roles",
             "release roles"
         ]
     );
@@ -79,7 +110,7 @@ fn duplicate_creation_stops_before_membership_write_or_persistence() {
 }
 
 #[test]
-fn alter_holds_role_write_while_checking_membership_administration() {
+fn alter_authorizes_before_tuple_wait_and_holds_the_write_guard_for_publication() {
     let catalog = Catalog::new();
     catalog.role("creator", &[RoleAttribute::CreateRole]);
     catalog.role("managed", &[]);
@@ -93,53 +124,58 @@ fn alter_holds_role_write_while_checking_membership_administration() {
         members: Vec::new(),
     };
     alter_role(&catalog.context(), &statement).unwrap();
-    assert_eq!(
-        *catalog.events.borrow(),
-        [
-            "current",
-            "writer",
-            "write roles",
-            "read memberships",
-            "release memberships",
-            "persist roles",
-            "publish roles",
-            "release roles",
-            "epoch"
-        ]
-    );
+    let events = catalog.events.borrow();
+    let authority = events
+        .iter()
+        .position(|event| event == "read memberships")
+        .unwrap();
+    let locked = events
+        .iter()
+        .position(|event| event == "lock role tuple")
+        .unwrap();
+    let writer = events.iter().position(|event| event == "writer").unwrap();
+    assert!(authority < locked && locked < writer);
+    assert!(events.ends_with(&[
+        "persist roles".into(),
+        "publish roles".into(),
+        "release roles".into(),
+        "epoch".into()
+    ]));
+    assert!(catalog.catalog_locks.borrow().is_empty());
+    assert_eq!(catalog.tuple_locks.borrow().len(), 1);
     let roles = catalog.roles.borrow();
     assert!(roles["managed"].has(RoleAttribute::Login));
     assert_eq!(roles["managed"].connection_limit, 3);
+    assert_eq!(roles["managed"].revision, 2);
 }
 
 #[test]
-fn grant_prepares_writer_before_binding_names_and_retains_authorization_through_publication() {
+fn grant_releases_catalog_guards_for_locks_then_persists_before_publication() {
     let catalog = Catalog::new();
     catalog.role("team", &[]);
     let statement = GrantRoleStmt {
         granted_roles: vec!["team".into()],
-        grantee_roles: vec!["CURRENT_USER".into()],
+        grantee_roles: vec![uqa_sql::ast::RoleSpecification::CurrentUser],
         is_grant: true,
         options: RoleMembershipOptions::default(),
         grantor: None,
         cascade: false,
     };
     grant_roles(&catalog.context(), &statement).unwrap();
-    assert_eq!(
-        *catalog.events.borrow(),
-        [
-            "writer",
-            "current",
-            "read roles",
-            "current",
-            "write memberships",
-            "persist memberships",
-            "publish memberships",
-            "release memberships",
-            "release roles",
-            "epoch"
-        ]
-    );
+    let events = catalog.events.borrow();
+    let writer = events.iter().position(|event| event == "writer").unwrap();
+    let refreshed = events.iter().rposition(|event| event == "refresh").unwrap();
+    assert!(refreshed < writer);
+    assert!(events.ends_with(&[
+        "writer".into(),
+        "write roles".into(),
+        "write memberships".into(),
+        "persist memberships".into(),
+        "publish memberships".into(),
+        "release memberships".into(),
+        "release roles".into(),
+        "epoch".into(),
+    ]));
     assert_eq!(catalog.memberships.borrow().len(), 1);
 }
 
@@ -159,19 +195,20 @@ fn drop_reports_grantor_dependency_before_object_catalog_reads() {
     assert!(
         matches!(error, SQLError::Routine { sqlstate, message } if sqlstate == "2BP01" && message == "role \"grantor\" cannot be dropped because some objects depend on it: privileges for membership of role member in role team")
     );
-    assert_eq!(
-        *catalog.events.borrow(),
-        [
-            "current",
-            "session",
-            "writer",
-            "write roles",
-            "NOTICE: role \"missing\" does not exist, skipping",
-            "write memberships",
-            "release memberships",
-            "release roles"
-        ]
-    );
+    let events = catalog.events.borrow();
+    let lock = events
+        .iter()
+        .position(|event| event == "lock role")
+        .unwrap();
+    let writer = events.iter().position(|event| event == "writer").unwrap();
+    assert!(lock < writer);
+    assert!(events
+        .iter()
+        .any(|event| event == "NOTICE: role \"missing\" does not exist, skipping"));
+    assert!(!events
+        .iter()
+        .any(|event| ["database", "schemas", "tables"].contains(&event.as_str())));
+    drop(events);
     assert_eq!(*catalog.roles.borrow(), roles);
     assert_eq!(catalog.epoch.get(), 0);
 }
@@ -182,7 +219,7 @@ fn set_role_releases_authorization_guards_before_changing_current_identity() {
     catalog.role("reduced", &[]);
     catalog.role("target", &[]);
     *catalog.current.borrow_mut() = "reduced".into();
-    set_role(&catalog.context(), "target").unwrap();
+    set_role(&catalog.context(), Some("target")).unwrap();
     assert_eq!(*catalog.current.borrow(), "target");
     assert_eq!(
         *catalog.events.borrow(),
@@ -196,7 +233,78 @@ fn set_role_releases_authorization_guards_before_changing_current_identity() {
         ]
     );
     catalog.events.borrow_mut().clear();
-    assert!(set_role(&catalog.context(), "missing").is_err());
+    assert_eq!(
+        set_role(&catalog.context(), Some("missing"))
+            .unwrap_err()
+            .sqlstate(),
+        Some("22023")
+    );
     assert_eq!(*catalog.current.borrow(), "target");
     assert_eq!(*catalog.events.borrow(), ["read roles", "release roles"]);
+}
+
+#[test]
+fn a_non_superuser_admin_cannot_drop_a_superuser_role() {
+    let catalog = Catalog::new();
+    catalog.role("creator", &[RoleAttribute::CreateRole]);
+    catalog.role("privileged", &[RoleAttribute::Superuser]);
+    catalog.membership("privileged", "creator", "uqa");
+    *catalog.current.borrow_mut() = "creator".into();
+    let error = drop_roles(
+        &catalog.context(),
+        &DropRoleStmt {
+            names: vec!["privileged".into()],
+            if_exists: false,
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42501"));
+    assert!(!catalog
+        .events
+        .borrow()
+        .iter()
+        .any(|event| event == "writer" || event == "lock role"));
+    assert!(catalog.roles.borrow().contains_key("privileged"));
+}
+
+#[test]
+fn drop_requires_createrole_before_missing_role_notices_or_current_user_checks() {
+    let catalog = Catalog::new();
+    catalog.role("limited", &[]);
+    *catalog.current.borrow_mut() = "limited".into();
+    for name in ["missing", "limited"] {
+        catalog.events.borrow_mut().clear();
+        let error = drop_roles(
+            &catalog.context(),
+            &DropRoleStmt {
+                names: vec![name.into()],
+                if_exists: true,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42501"));
+        assert!(!catalog
+            .events
+            .borrow()
+            .iter()
+            .any(|event| event.starts_with("NOTICE") || event == "writer" || event == "lock role"));
+    }
+}
+
+#[test]
+fn role_reset_is_distinct_from_explicit_role_names() {
+    let catalog = Catalog::new();
+    for name in ["NONE", "DEFAULT", "default"] {
+        catalog.role(name, &[]);
+        set_role(&catalog.context(), Some(name)).unwrap();
+        assert_eq!(*catalog.current.borrow(), name);
+        set_role(&catalog.context(), None).unwrap();
+        assert_eq!(*catalog.current.borrow(), "uqa");
+        set_role(&catalog.context(), Some(name)).unwrap();
+        set_role(&catalog.context(), Some("none")).unwrap();
+        assert_eq!(*catalog.current.borrow(), "uqa");
+    }
+    let error = set_role(&catalog.context(), Some("")).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("22023"));
+    assert_eq!(*catalog.current.borrow(), "uqa");
 }

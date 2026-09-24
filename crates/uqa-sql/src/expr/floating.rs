@@ -6,6 +6,8 @@
 
 //! Floating-point input, arithmetic, and output at the declared SQL width.
 
+use uqa_core::memory::{Produced, ProductionControl};
+
 use super::{division_by_zero, BinaryOp, Result, SQLError, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,7 +16,12 @@ pub enum FloatWidth {
     DoublePrecision,
 }
 
-pub(super) fn to_float(value: &Value, width: FloatWidth) -> Result<f64> {
+pub(super) fn to_float_with_control(
+    value: &Value,
+    width: FloatWidth,
+    control: &ProductionControl<'_>,
+) -> Result<f64> {
+    control.check()?;
     match value {
         Value::Float(value) => match width {
             FloatWidth::Real => narrow_real(*value).map(f64::from),
@@ -25,8 +32,10 @@ pub(super) fn to_float(value: &Value, width: FloatWidth) -> Result<f64> {
             FloatWidth::DoublePrecision => *value as f64,
         }),
         Value::Bool(value) => Ok(f64::from(u8::from(*value))),
-        Value::Str(value) | Value::FixedChar(value) => parse_float(value, width),
-        Value::Decimal(value) => parse_float(&value.to_sql_string(), width),
+        Value::Str(value) | Value::FixedChar(value) => parse_float(value, width, control),
+        Value::Decimal(value) => {
+            parse_float(&value.to_sql_string_with_control(control)?, width, control)
+        }
         other => Err(SQLError::TypeMismatch(format!(
             "expected number, got {other:?}"
         ))),
@@ -44,7 +53,10 @@ fn narrow_real(value: f64) -> Result<f32> {
     Ok(narrowed)
 }
 
-fn parse_float(input: &str, width: FloatWidth) -> Result<f64> {
+fn parse_float(input: &str, width: FloatWidth, control: &ProductionControl<'_>) -> Result<f64> {
+    for _ in input.as_bytes().chunks(4096) {
+        control.check()?;
+    }
     let text = input.trim_matches(|c: char| c.is_ascii_whitespace());
     let value = match width {
         FloatWidth::Real => text.parse::<f32>().map(f64::from),
@@ -88,6 +100,42 @@ fn range_error(kind: &str) -> SQLError {
     }
 }
 
+pub(super) fn square_root(value: f64) -> Result<f64> {
+    if value < 0.0 {
+        return Err(SQLError::Routine {
+            sqlstate: "2201F".into(),
+            message: "cannot take square root of a negative number".into(),
+        });
+    }
+    Ok(value.sqrt())
+}
+
+pub(super) fn power(base: f64, exponent: f64) -> Result<f64> {
+    let invalid = if base == 0.0 && exponent < 0.0 {
+        Some("zero raised to a negative power is undefined")
+    } else if base < 0.0 && !exponent.is_nan() && exponent.floor() != exponent {
+        Some("a negative number raised to a non-integer power yields a complex result")
+    } else {
+        None
+    };
+    if let Some(message) = invalid {
+        return Err(SQLError::Routine {
+            sqlstate: "2201F".into(),
+            message: message.into(),
+        });
+    }
+    let value = libm::pow(base, exponent);
+    if base.is_finite() && exponent.is_finite() {
+        if value.is_infinite() {
+            return Err(range_error("overflow"));
+        }
+        if value == 0.0 && base != 0.0 {
+            return Err(range_error("underflow"));
+        }
+    }
+    Ok(value)
+}
+
 /// Apply arithmetic at its resolved float width before widening the storage carrier.
 pub fn eval_float_arithmetic(
     op: BinaryOp,
@@ -95,11 +143,23 @@ pub fn eval_float_arithmetic(
     right: &Value,
     width: FloatWidth,
 ) -> Result<Value> {
+    eval_float_arithmetic_with_control(op, left, right, width, &ProductionControl::uncontrolled())
+}
+
+/// Evaluate the same width-specific arithmetic with controlled numeric coercion workspace. The resulting float carrier is inline.
+pub fn eval_float_arithmetic_with_control(
+    op: BinaryOp,
+    left: &Value,
+    right: &Value,
+    width: FloatWidth,
+    control: &ProductionControl<'_>,
+) -> Result<Value> {
+    control.check()?;
     if matches!(left, Value::Null) || matches!(right, Value::Null) {
         return Ok(Value::Null);
     }
-    let left = to_float(left, width)?;
-    let right = to_float(right, width)?;
+    let left = to_float_with_control(left, width, control)?;
+    let right = to_float_with_control(right, width, control)?;
     if matches!(op, BinaryOp::Divide) && right == 0.0 && !left.is_nan() {
         return Err(division_by_zero());
     }
@@ -148,23 +208,32 @@ fn non_arithmetic(op: BinaryOp) -> SQLError {
 /// Format a real value using `PostgreSQL`'s shortest decimal and exponent thresholds.
 #[must_use]
 pub fn format_real(value: f32) -> String {
+    format_real_with_control(value, &ProductionControl::uncontrolled())
+        .expect("ordinary real formatting")
+        .into_uncontrolled()
+        .expect("ordinary real text")
+}
+
+pub(super) fn format_real_with_control(
+    value: f32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>> {
     if value.is_nan() {
-        return "NaN".into();
+        return Ok(control.copy_text("NaN")?);
     }
     if value.is_infinite() {
-        return if value.is_sign_negative() {
+        return Ok(control.copy_text(if value.is_sign_negative() {
             "-Infinity"
         } else {
             "Infinity"
-        }
-        .into();
+        })?);
     }
-    let scientific = format!("{value:e}");
+    let scientific = control.format(format_args!("{value:e}"))?;
     let (mantissa, exponent) = scientific.split_once('e').expect("scientific float output");
     let exponent: i32 = exponent.parse().expect("scientific exponent");
     if (-4..6).contains(&exponent) {
-        return value.to_string();
+        return Ok(control.format(format_args!("{value}"))?);
     }
     let sign = if exponent >= 0 { '+' } else { '-' };
-    format!("{mantissa}e{sign}{:02}", exponent.abs())
+    Ok(control.format(format_args!("{mantissa}e{sign}{:02}", exponent.abs()))?)
 }

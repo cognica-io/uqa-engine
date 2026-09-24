@@ -5,9 +5,7 @@
 //
 
 //! Foreign server and table creation inside the caller's existing catalog transaction.
-use crate::catalog::{
-    foreign::StoredForeignTable, security::TableSecurity, services::CatalogSession,
-};
+use crate::catalog::{foreign::StoredForeignTable, security::BoundTableSecurity};
 use crate::schema::{
     foreign_table_alteration::ForeignTableAlterPublication,
     publication::dependencies::CatalogPublicationChanges,
@@ -39,6 +37,7 @@ pub trait ForeignCreationNamespace {
     fn relation_kind_at(&self, name: &str) -> StorageBackendResult<Option<&'static str>>;
 }
 pub struct ForeignCreationContext<'a> {
+    pub identities: crate::catalog::identity::CatalogIdentityReservationContext<'a>,
     pub creation: crate::schema::namespaces::relations::RelationCreationContext<'a>,
     pub schema: ForeignSchemaContext<'a>,
     pub namespace: &'a dyn ForeignCreationNamespace,
@@ -46,11 +45,15 @@ pub struct ForeignCreationContext<'a> {
     pub publication: &'a dyn ForeignTableAlterPublication,
     pub catalog: Option<&'a dyn CatalogFacade>,
     pub changes: &'a dyn CatalogPublicationChanges,
-    pub session: &'a dyn CatalogSession,
     pub sequences: ImplicitSequenceContext<'a>,
     pub ownership: ImplicitOwnershipContext<'a>,
     pub notices: &'a parking_lot::Mutex<Vec<(String, String)>>,
     pub allocate_identity: fn() -> StorageBackendResult<[u8; 16]>,
+}
+struct ForeignTableCreationTarget {
+    relation: RelationIdentity,
+    owner: crate::catalog::security::roles::locking::RoleBinding,
+    if_not_exists: bool,
 }
 impl ForeignCreationContext<'_> {
     pub fn register_foreign_server_inner(
@@ -105,7 +108,7 @@ impl ForeignCreationContext<'_> {
             .map_err(|error| {
                 uqa_sql::SQLError::Internal(format!("refresh FDW catalog: {error}"))
             })?;
-        let name = self.creation.persistent_name(name)?;
+        let name = self.creation.persistent_relation_name(name)?;
         let relation = RelationIdentity::from_legacy_name(&name).map_err(|error| {
             uqa_sql::SQLError::Internal(format!("decode foreign table `{name}`: {error}"))
         })?;
@@ -171,7 +174,8 @@ impl ForeignCreationContext<'_> {
         if !if_not_exists {
             validate_foreign_table_schema_envelope(&columns)?;
         }
-        let Some((name, relation)) = self.preflight_foreign_table_creation(name, if_not_exists)?
+        let owner = self.creation.bind_owner()?;
+        let Some((_, relation)) = self.preflight_foreign_table_creation(name, if_not_exists)?
         else {
             return Ok(());
         };
@@ -179,8 +183,11 @@ impl ForeignCreationContext<'_> {
             validate_foreign_table_schema_envelope(&columns)?;
         }
         self.register_foreign_table_after_preflight(
-            &name,
-            relation,
+            ForeignTableCreationTarget {
+                relation,
+                owner,
+                if_not_exists,
+            },
             server_name,
             columns,
             checks,
@@ -189,19 +196,26 @@ impl ForeignCreationContext<'_> {
     }
     fn register_foreign_table_after_preflight(
         &self,
-        name: &str,
-        relation: RelationIdentity,
+        target: ForeignTableCreationTarget,
         server_name: String,
         mut columns: Vec<uqa_sql::ast::ColumnDef>,
         mut checks: Vec<uqa_sql::ast::TableCheck>,
         options: Vec<(String, String)>,
     ) -> Result<(), uqa_sql::SQLError> {
+        let name = target.relation.qualified_name();
+        let name = name.as_str();
         for column in &mut columns {
             column.ty = uqa_sql::type_resolution::resolve_declared_column_type(
                 self.schema.types,
                 &column.ty,
             )?;
         }
+        self.creation.retain_owner(&target.owner)?;
+        let Some((_, relation)) =
+            self.preflight_foreign_table_creation(name, target.if_not_exists)?
+        else {
+            return Ok(());
+        };
         implicit::materialize_implicit_sequences(
             &self.sequences,
             "CREATE FOREIGN TABLE",
@@ -209,9 +223,20 @@ impl ForeignCreationContext<'_> {
             &mut columns,
             uqa_sql::ast::RelationPersistence::Permanent,
         )?;
-        self.schema
-            .prepare_foreign_table_schema(name, &mut columns, &mut checks)?;
+        self.schema.prepare_foreign_table_schema(
+            name,
+            &mut columns,
+            &mut checks,
+            &mut self
+                .identities
+                .allocator(crate::catalog::identity::allocate_catalog_object_id),
+            &crate::schema::constraints::names::name_scope(
+                &self.identities.catalog.current_catalog_snapshot(),
+                &RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?,
+            ),
+        )?;
         self.ensure_foreign_server_exists(&server_name)?;
+        self.creation.reserve_row_type_name(name)?;
         let mut opt_map: std::collections::BTreeMap<String, String> =
             std::collections::BTreeMap::new();
         for (k, v) in options {
@@ -231,8 +256,7 @@ impl ForeignCreationContext<'_> {
             checks,
             options: opt_map,
         };
-        let role_owner = self.session.current_user();
-        let security = TableSecurity::owner(role_owner);
+        let security = BoundTableSecurity::owner(target.owner.identity());
         let mut tables = self.publication.tables_write();
         let mut table_security = self.publication.security_write();
         if tables.contains_key(&relation) || table_security.contains_key(&relation) {
@@ -298,15 +322,19 @@ impl ForeignCreationContext<'_> {
         &self,
         deferred: DeferredCreateForeignTable,
     ) -> Result<(), SQLError> {
-        let Some((name, relation)) = self.preflight_foreign_table_creation(&deferred.name, true)?
+        let owner = self.creation.bind_owner()?;
+        let Some((_, relation)) = self.preflight_foreign_table_creation(&deferred.name, true)?
         else {
             return Ok(());
         };
         let statement = uqa_sql::resolve_deferred_create_foreign_table(&deferred)?;
         validate_foreign_table_schema_envelope(&statement.columns)?;
         self.register_foreign_table_after_preflight(
-            &name,
-            relation,
+            ForeignTableCreationTarget {
+                relation,
+                owner,
+                if_not_exists: true,
+            },
             statement.server_name,
             statement.columns,
             statement.checks,

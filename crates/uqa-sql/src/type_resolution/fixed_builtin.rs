@@ -6,26 +6,31 @@
 
 //! One registry and binding path for implemented fixed-signature `PostgreSQL` built-ins.
 
+mod binding;
+pub(super) use binding::bind_call_in_place_with_control;
+mod registry;
+mod selected;
+mod selection;
 mod standard;
 
 use crate::ast::{ColumnType, FunctionBinding, FunctionDispatch};
 use crate::{SQLError, SQLParam};
 use uqa_core::Value;
 
-use crate::{scalar_call_arguments, RowSchema, ScalarExpr};
+use crate::{scalar_call_arguments, schema::ScalarTypeSchema, ScalarExpr};
 
 use super::common::base_type;
 use super::functions::{named_argument, named_argument_value};
 use super::{
     builtin_binding_matches, canonical_column_type_name, canonical_routine_type_name,
-    match_builtin_function_overload, resolve_local_builtin_overload, scalar_type_inner,
-    BuiltinFunctionOverload, FunctionTypeResolver, ResolvedFunctionOverload,
+    match_builtin_function_overload, scalar_type_inner, BuiltinFunctionOverload,
+    FunctionTypeResolver, ResolvedFunctionOverload,
 };
 
 #[doc(hidden)]
 #[must_use]
 pub fn is_function(name: &str) -> bool {
-    overloads(name).is_some()
+    registry::lookup(name).is_some()
 }
 
 /// Fixed-signature call metadata needed by generated-column binding without exposing the built-in registry itself.
@@ -90,11 +95,27 @@ pub fn resolve_fixed_builtin_call(
 #[doc(hidden)]
 #[must_use]
 pub fn fixed_builtin_return_type(binding: &FunctionBinding) -> Option<ColumnType> {
-    binding.builtin.then_some(())?;
-    overloads(&binding.name)?
-        .into_iter()
-        .find(|overload| builtin_binding_matches(overload, binding))
-        .map(|overload| overload.return_type)
+    fixed_builtin_return_type_with_control(
+        binding,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary fixed binding lookup cannot be cancelled or limited")
+    .map(|ty| ty.into_uncontrolled().expect("ordinary fixed result type"))
+}
+
+/// Resolve the same fixed result descriptor while temporary signature names and copied type payloads retain the caller's allowance.
+pub fn fixed_builtin_return_type_with_control(
+    binding: &FunctionBinding,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+    registry::bound_signature(binding, control)?
+        .map(|signature| {
+            signature
+                .return_type
+                .clone_with_control(control)
+                .map_err(Into::into)
+        })
+        .transpose()
 }
 
 pub(super) fn resolve_type(
@@ -108,6 +129,22 @@ pub(super) fn resolve_type(
 ) -> Result<Option<ColumnType>, SQLError> {
     let argument_names = argument_names(args);
     let argument_types = effective_argument_types(args, argument_types, params);
+    if resolver.is_none() {
+        return resolve_return_type_with_control(
+            name,
+            binding,
+            &argument_names,
+            &argument_types,
+            explicit_variadic,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+        .map(|ty| {
+            Some(
+                ty.into_uncontrolled()
+                    .expect("ordinary fixed result type has no reservation"),
+            )
+        });
+    }
     resolve_overload(
         name,
         binding,
@@ -119,6 +156,30 @@ pub(super) fn resolve_type(
     .map(|overload| Some(overload.return_type))
 }
 
+/// Infer the selected result directly from the borrowed descriptor without constructing an unused execution binding.
+pub(super) fn resolve_return_type_with_control(
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    argument_names: &[Option<String>],
+    argument_types: &[Option<ColumnType>],
+    explicit_variadic: bool,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<ColumnType>, SQLError> {
+    let selected = selection::select_with_control(
+        name,
+        binding,
+        argument_names,
+        argument_types,
+        explicit_variadic,
+        control,
+    )?;
+    selected
+        .declaration
+        .return_type
+        .clone_with_control(control)
+        .map_err(Into::into)
+}
+
 pub(super) fn resolve_overload(
     name: &str,
     binding: Option<&FunctionBinding>,
@@ -128,16 +189,16 @@ pub(super) fn resolve_overload(
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<ResolvedFunctionOverload, SQLError> {
     crate::expr::validate_named_argument_order(argument_names.iter().map(Option::as_deref))?;
-    let builtins = overloads(name).ok_or_else(|| {
-        super::function_resolution_error(
-            "42883",
-            name,
-            argument_names,
-            argument_types,
-            "does not exist",
-        )
-    })?;
     if let Some(resolver) = resolver {
+        let builtins = overloads(name).ok_or_else(|| {
+            super::function_resolution_error(
+                "42883",
+                name,
+                argument_names,
+                argument_types,
+                "does not exist",
+            )
+        })?;
         if let Some(selected) = resolver.resolve_function_overload_with_builtins(
             name,
             binding,
@@ -149,16 +210,19 @@ pub(super) fn resolve_overload(
             return Ok(selected);
         }
     }
-    if explicit_variadic && argument_names.iter().any(Option::is_some) {
-        return Err(super::function_resolution_error(
-            "42883",
-            name,
-            argument_names,
-            argument_types,
-            "does not exist",
-        ));
-    }
-    resolve_local_builtin_overload(name, binding, argument_names, argument_types, &builtins)
+    selection::resolve_overload_with_control(
+        name,
+        binding,
+        argument_names,
+        argument_types,
+        explicit_variadic,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .map(|selected| {
+        selected
+            .into_uncontrolled()
+            .expect("ordinary fixed selection has no reservation")
+    })
 }
 
 pub(super) fn selected_argument_targets(
@@ -182,14 +246,17 @@ pub(super) fn bind_call(
     name: String,
     binding: &mut Option<FunctionBinding>,
     args: &mut Vec<ScalarExpr>,
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> String {
+    if resolver.is_none() {
+        return binding::bind_local_call(name, binding, args, schema, params);
+    }
     if binding.is_none() && resolver.is_some_and(|resolver| resolver.has_untyped_function(&name)) {
         return name;
     }
-    let Some(builtins) = overloads(&name) else {
+    let Some(_) = registry::lookup(&name) else {
         return name;
     };
     let Ok(call_arguments) = scalar_call_arguments(args) else {
@@ -206,19 +273,20 @@ pub(super) fn bind_call(
         return name;
     };
     let names = argument_names(args);
-    let argument_types = effective_argument_types(args, &argument_types, params);
+    let effective_types = effective_argument_types(args, &argument_types, params);
+    let builtins = overloads(&name).expect("fixed registry membership was checked");
     let selected = resolve_overload(
         &name,
         binding.as_ref(),
         &names,
-        &argument_types,
+        &effective_types,
         explicit_variadic,
         resolver,
     );
     let mut selected = match selected {
         Ok(selected) => selected,
         Err(error) if error.sqlstate() == Some("42883") => {
-            let signature = unresolved_call_signature(&name, &names, &argument_types);
+            let signature = unresolved_call_signature(&name, &names, &effective_types);
             *binding = Some(FunctionBinding::undefined_function(name.clone(), signature));
             return name;
         }
@@ -232,7 +300,7 @@ pub(super) fn bind_call(
         .iter()
         .find(|overload| builtin_binding_matches(overload, &selected.binding))
         .cloned()
-        .and_then(|overload| match_builtin_function_overload(overload, &names, &argument_types))
+        .and_then(|overload| match_builtin_function_overload(overload, &names, &effective_types))
     else {
         return name;
     };
@@ -245,7 +313,20 @@ pub(super) fn bind_call(
     ) {
         return name;
     }
-    for (argument, declared) in args.iter_mut().zip(&overload.argument_types) {
+    coerce_arguments(args, &overload.argument_types, schema, params, resolver);
+    selected.binding.dispatch = runtime_dispatch(&selected.binding);
+    *binding = Some(selected.binding);
+    name
+}
+
+fn coerce_arguments(
+    args: &mut [ScalarExpr],
+    declared: &[ColumnType],
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    resolver: Option<&dyn FunctionTypeResolver>,
+) {
+    for (argument, declared) in args.iter_mut().zip(declared) {
         let actual = scalar_type_inner(argument, schema, params, resolver)
             .ok()
             .flatten();
@@ -259,9 +340,6 @@ pub(super) fn bind_call(
             };
         }
     }
-    selected.binding.dispatch = runtime_dispatch(&selected.binding);
-    *binding = Some(selected.binding);
-    name
 }
 
 fn requires_cast(
@@ -305,42 +383,8 @@ pub(crate) fn runtime_dispatch(binding: &FunctionBinding) -> Option<FunctionDisp
 }
 
 fn builtin_binding_is_non_immutable(binding: &FunctionBinding) -> bool {
-    matches!(
-        binding.name.rsplit('.').next(),
-        Some(
-            "random"
-                | "gen_random_uuid"
-                | "uuidv4"
-                | "uuidv7"
-                | "pg_get_expr"
-                | "pg_get_partkeydef"
-                | "pg_backend_pid"
-                | "version"
-                | "pg_listening_channels"
-                | "pg_notify"
-                | "pg_notification_queue_usage"
-                | "pg_get_serial_sequence"
-                | "pg_get_sequence_data"
-                | "pg_sequence_last_value"
-                | "pg_sequence_parameters"
-                | "pg_get_triggerdef"
-                | "pg_get_ruledef"
-                | "pg_get_viewdef"
-                | "pg_get_indexdef"
-                | "format_type"
-                | "pg_has_role"
-                | "has_table_privilege"
-                | "has_column_privilege"
-                | "has_database_privilege"
-                | "has_schema_privilege"
-                | "has_sequence_privilege"
-                | "to_regproc"
-                | "to_regprocedure"
-                | "to_regclass"
-                | "to_regnamespace"
-                | "to_regrole"
-                | "to_regtype"
-        )
+    crate::schema::generated::eligibility::fixed_builtin_is_non_immutable(
+        binding.name.rsplit('.').next().unwrap_or_default(),
     )
 }
 
@@ -419,22 +463,15 @@ fn unresolved_call_signature(
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
 ) -> String {
-    let arguments = argument_names
-        .iter()
-        .zip(argument_types)
-        .map(|(argument_name, argument_type)| {
-            let argument_type = argument_type
-                .as_ref()
-                .map_or_else(|| "unknown".into(), ColumnType::regtype_name);
-            argument_name
-                .as_ref()
-                .map_or(argument_type.clone(), |name| {
-                    format!("{name} => {argument_type}")
-                })
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("{name}({arguments})")
+    binding::unresolved_call_signature_with_control(
+        name,
+        argument_names,
+        argument_types,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary unresolved signature formatter")
+    .into_uncontrolled()
+    .expect("ordinary signature has no reservation")
 }
 
 fn named_argument_value_owned(expression: ScalarExpr) -> ScalarExpr {
@@ -453,504 +490,28 @@ fn named_argument_value_owned(expression: ScalarExpr) -> ScalarExpr {
     expression
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "type resolution preserves candidate order and ambiguity diagnostics atomically"
-)]
 fn overloads(name: &str) -> Option<Vec<BuiltinFunctionOverload>> {
-    let local = local_name(name)?;
-    if let Some(overloads) = standard::overloads(&local) {
-        return Some(overloads);
-    }
-    let overloads = match local.as_str() {
-        "abs" => [
-            ColumnType::SmallInteger,
-            ColumnType::Integer,
-            ColumnType::BigInteger,
-            ColumnType::Real,
-            ColumnType::DoublePrecision,
-            numeric_type(),
-        ]
-        .into_iter()
-        .map(|ty| overload(&local, std::slice::from_ref(&ty), ty.clone()))
-        .collect(),
-        "reverse" => vec![
-            overload(&local, &[ColumnType::Text], ColumnType::Text),
-            overload(&local, &[ColumnType::Bytea], ColumnType::Bytea),
-        ],
-        "md5" => vec![
-            overload(&local, &[ColumnType::Text], ColumnType::Text),
-            overload(&local, &[ColumnType::Bytea], ColumnType::Text),
-        ],
-        "crc32" | "crc32c" => {
-            vec![overload(
-                &local,
-                &[ColumnType::Bytea],
-                ColumnType::BigInteger,
-            )]
-        }
-        "length" | "octet_length" => vec![
-            overload(&local, &[ColumnType::Text], ColumnType::Integer),
-            overload(&local, &[ColumnType::Bpchar], ColumnType::Integer),
-            overload(&local, &[ColumnType::Bytea], ColumnType::Integer),
-        ],
-        "char_length" | "character_length" => vec![
-            overload(&local, &[ColumnType::Text], ColumnType::Integer),
-            overload(&local, &[ColumnType::Bpchar], ColumnType::Integer),
-        ],
-        "bit_length" => vec![
-            overload(&local, &[ColumnType::Text], ColumnType::Integer),
-            overload(&local, &[ColumnType::Bytea], ColumnType::Integer),
-        ],
-        "gamma" | "lgamma" => vec![overload(
-            &local,
-            &[ColumnType::DoublePrecision],
-            ColumnType::DoublePrecision,
-        )],
-        "json_strip_nulls" => vec![overload_with_names_and_defaults(
-            &local,
-            &[ColumnType::Json, ColumnType::Boolean],
-            &["target", "strip_in_arrays"],
-            1,
-            ColumnType::Json,
-        )],
-        "jsonb_strip_nulls" => vec![overload_with_names_and_defaults(
-            &local,
-            &[ColumnType::JsonB, ColumnType::Boolean],
-            &["target", "strip_in_arrays"],
-            1,
-            ColumnType::JsonB,
-        )],
-        "to_bin" | "to_hex" | "to_oct" => vec![
-            overload(&local, &[ColumnType::Integer], ColumnType::Text),
-            overload(&local, &[ColumnType::BigInteger], ColumnType::Text),
-        ],
-        "random" => vec![
-            overload(&local, &[], ColumnType::DoublePrecision),
-            overload_with_names(
-                &local,
-                &[ColumnType::Integer, ColumnType::Integer],
-                &["min", "max"],
-                ColumnType::Integer,
-            ),
-            overload_with_names(
-                &local,
-                &[ColumnType::BigInteger, ColumnType::BigInteger],
-                &["min", "max"],
-                ColumnType::BigInteger,
-            ),
-            overload_with_names(
-                &local,
-                &[numeric_type(), numeric_type()],
-                &["min", "max"],
-                numeric_type(),
-            ),
-        ],
-        "uuid_extract_timestamp" => vec![overload(
-            &local,
-            &[ColumnType::Uuid],
-            ColumnType::TimestampTz,
-        )],
-        "uuid_extract_version" => vec![overload(
-            &local,
-            &[ColumnType::Uuid],
-            ColumnType::SmallInteger,
-        )],
-        "gen_random_uuid" | "uuidv4" => vec![overload(&local, &[], ColumnType::Uuid)],
-        "uuidv7" => vec![
-            overload(&local, &[], ColumnType::Uuid),
-            overload_with_names(
-                &local,
-                &[ColumnType::Interval],
-                &["shift"],
-                ColumnType::Uuid,
-            ),
-        ],
-        "casefold" => vec![overload(&local, &[ColumnType::Text], ColumnType::Text)],
-        "to_regproc" => vec![overload(&local, &[ColumnType::Text], ColumnType::Regproc)],
-        "to_regprocedure" => vec![overload(
-            &local,
-            &[ColumnType::Text],
-            ColumnType::Regprocedure,
-        )],
-        "to_regclass" => vec![overload(&local, &[ColumnType::Text], ColumnType::Regclass)],
-        "to_regnamespace" => vec![overload(
-            &local,
-            &[ColumnType::Text],
-            ColumnType::Regnamespace,
-        )],
-        "to_regrole" => vec![overload(&local, &[ColumnType::Text], ColumnType::Regrole)],
-        "to_regtype" => vec![overload(&local, &[ColumnType::Text], ColumnType::Regtype)],
-        "pg_get_expr" => vec![
-            overload(
-                &local,
-                &[ColumnType::PgNodeTree, ColumnType::Oid],
-                ColumnType::Text,
-            ),
-            overload(
-                &local,
-                &[ColumnType::PgNodeTree, ColumnType::Oid, ColumnType::Boolean],
-                ColumnType::Text,
-            ),
-        ],
-        "pg_get_partkeydef" => vec![overload(&local, &[ColumnType::Oid], ColumnType::Text)],
-        "pg_backend_pid" => vec![overload(&local, &[], ColumnType::Integer)],
-        "version" | "pg_listening_channels" => vec![overload(&local, &[], ColumnType::Text)],
-        "pg_notify" => vec![overload(
-            &local,
-            &[ColumnType::Text, ColumnType::Text],
-            ColumnType::Void,
-        )],
-        "pg_notification_queue_usage" => {
-            vec![overload(&local, &[], ColumnType::DoublePrecision)]
-        }
-        "pg_get_serial_sequence" => vec![overload(
-            &local,
-            &[ColumnType::Text, ColumnType::Text],
-            ColumnType::Text,
-        )],
-        "pg_get_sequence_data" => vec![overload(
-            &local,
-            &[ColumnType::Regclass],
-            ColumnType::Record,
-        )],
-        "pg_sequence_last_value" => vec![overload(
-            &local,
-            &[ColumnType::Regclass],
-            ColumnType::BigInteger,
-        )],
-        "pg_sequence_parameters" => vec![overload(&local, &[ColumnType::Oid], ColumnType::Record)],
-        "pg_get_triggerdef" | "pg_get_ruledef" => vec![
-            overload(&local, &[ColumnType::Oid], ColumnType::Text),
-            overload(
-                &local,
-                &[ColumnType::Oid, ColumnType::Boolean],
-                ColumnType::Text,
-            ),
-        ],
-        "format_type" => vec![overload(
-            &local,
-            &[ColumnType::Oid, ColumnType::Integer],
-            ColumnType::Text,
-        )],
-        "pg_get_indexdef" => vec![
-            overload(&local, &[ColumnType::Oid], ColumnType::Text),
-            overload(
-                &local,
-                &[ColumnType::Oid, ColumnType::Integer, ColumnType::Boolean],
-                ColumnType::Text,
-            ),
-        ],
-        "pg_get_viewdef" => vec![
-            overload(&local, &[ColumnType::Text], ColumnType::Text),
-            overload(&local, &[ColumnType::Oid], ColumnType::Text),
-            overload(
-                &local,
-                &[ColumnType::Text, ColumnType::Boolean],
-                ColumnType::Text,
-            ),
-            overload(
-                &local,
-                &[ColumnType::Oid, ColumnType::Boolean],
-                ColumnType::Text,
-            ),
-            overload(
-                &local,
-                &[ColumnType::Oid, ColumnType::Integer],
-                ColumnType::Text,
-            ),
-        ],
-        "pg_has_role" => vec![
-            overload(
-                &local,
-                &[ColumnType::Name, ColumnType::Name, ColumnType::Text],
-                ColumnType::Boolean,
-            ),
-            overload(
-                &local,
-                &[ColumnType::Name, ColumnType::Oid, ColumnType::Text],
-                ColumnType::Boolean,
-            ),
-            overload(
-                &local,
-                &[ColumnType::Oid, ColumnType::Name, ColumnType::Text],
-                ColumnType::Boolean,
-            ),
-            overload(
-                &local,
-                &[ColumnType::Oid, ColumnType::Oid, ColumnType::Text],
-                ColumnType::Boolean,
-            ),
-            overload(
-                &local,
-                &[ColumnType::Name, ColumnType::Text],
-                ColumnType::Boolean,
-            ),
-            overload(
-                &local,
-                &[ColumnType::Oid, ColumnType::Text],
-                ColumnType::Boolean,
-            ),
-        ],
-        "has_column_privilege" => vec![
-            overload(
-                &local,
-                &[
-                    ColumnType::Name,
-                    ColumnType::Text,
-                    ColumnType::Text,
-                    ColumnType::Text,
-                ],
-                ColumnType::Boolean,
-            ),
-            overload(
-                &local,
-                &[
-                    ColumnType::Name,
-                    ColumnType::Text,
-                    ColumnType::SmallInteger,
-                    ColumnType::Text,
-                ],
-                ColumnType::Boolean,
-            ),
-            overload(
-                &local,
-                &[
-                    ColumnType::Name,
-                    ColumnType::Oid,
-                    ColumnType::Text,
-                    ColumnType::Text,
-                ],
-                ColumnType::Boolean,
-            ),
-            overload(
-                &local,
-                &[
-                    ColumnType::Name,
-                    ColumnType::Oid,
-                    ColumnType::SmallInteger,
-                    ColumnType::Text,
-                ],
-                ColumnType::Boolean,
-            ),
-            overload(
-                &local,
-                &[
-                    ColumnType::Oid,
-                    ColumnType::Text,
-                    ColumnType::Text,
-                    ColumnType::Text,
-                ],
-                ColumnType::Boolean,
-            ),
-            overload(
-                &local,
-                &[
-                    ColumnType::Oid,
-                    ColumnType::Text,
-                    ColumnType::SmallInteger,
-                    ColumnType::Text,
-                ],
-                ColumnType::Boolean,
-            ),
-            overload(
-                &local,
-                &[
-                    ColumnType::Oid,
-                    ColumnType::Oid,
-                    ColumnType::Text,
-                    ColumnType::Text,
-                ],
-                ColumnType::Boolean,
-            ),
-            overload(
-                &local,
-                &[
-                    ColumnType::Oid,
-                    ColumnType::Oid,
-                    ColumnType::SmallInteger,
-                    ColumnType::Text,
-                ],
-                ColumnType::Boolean,
-            ),
-            overload(
-                &local,
-                &[ColumnType::Text, ColumnType::Text, ColumnType::Text],
-                ColumnType::Boolean,
-            ),
-            overload(
-                &local,
-                &[ColumnType::Text, ColumnType::SmallInteger, ColumnType::Text],
-                ColumnType::Boolean,
-            ),
-            overload(
-                &local,
-                &[ColumnType::Oid, ColumnType::Text, ColumnType::Text],
-                ColumnType::Boolean,
-            ),
-            overload(
-                &local,
-                &[ColumnType::Oid, ColumnType::SmallInteger, ColumnType::Text],
-                ColumnType::Boolean,
-            ),
-        ],
-        "has_table_privilege"
-        | "has_database_privilege"
-        | "has_schema_privilege"
-        | "has_sequence_privilege" => vec![
-            overload(
-                &local,
-                &[ColumnType::Name, ColumnType::Text, ColumnType::Text],
-                ColumnType::Boolean,
-            ),
-            overload(
-                &local,
-                &[ColumnType::Name, ColumnType::Oid, ColumnType::Text],
-                ColumnType::Boolean,
-            ),
-            overload(
-                &local,
-                &[ColumnType::Oid, ColumnType::Text, ColumnType::Text],
-                ColumnType::Boolean,
-            ),
-            overload(
-                &local,
-                &[ColumnType::Oid, ColumnType::Oid, ColumnType::Text],
-                ColumnType::Boolean,
-            ),
-            overload(
-                &local,
-                &[ColumnType::Text, ColumnType::Text],
-                ColumnType::Boolean,
-            ),
-            overload(
-                &local,
-                &[ColumnType::Oid, ColumnType::Text],
-                ColumnType::Boolean,
-            ),
-        ],
-        _ => return None,
-    };
-    Some(overloads)
-}
-
-fn local_name(name: &str) -> Option<String> {
-    let lower = name.to_ascii_lowercase();
-    if lower.contains('.') && !lower.starts_with("pg_catalog.") {
-        return None;
-    }
-    let local = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
-    matches!(
-        local,
-        "abs"
-            | "round"
-            | "trunc"
-            | "substring"
-            | "substr"
-            | "date_trunc"
-            | "generate_series"
-            | "reverse"
-            | "md5"
-            | "crc32"
-            | "crc32c"
-            | "length"
-            | "char_length"
-            | "character_length"
-            | "octet_length"
-            | "bit_length"
-            | "gamma"
-            | "lgamma"
-            | "json_strip_nulls"
-            | "jsonb_strip_nulls"
-            | "to_bin"
-            | "to_hex"
-            | "to_oct"
-            | "random"
-            | "uuid_extract_timestamp"
-            | "uuid_extract_version"
-            | "gen_random_uuid"
-            | "uuidv4"
-            | "uuidv7"
-            | "casefold"
-            | "to_regproc"
-            | "to_regprocedure"
-            | "to_regclass"
-            | "to_regnamespace"
-            | "to_regrole"
-            | "to_regtype"
-            | "pg_get_expr"
-            | "pg_get_partkeydef"
-            | "pg_backend_pid"
-            | "version"
-            | "pg_listening_channels"
-            | "pg_notify"
-            | "pg_notification_queue_usage"
-            | "pg_get_serial_sequence"
-            | "pg_get_sequence_data"
-            | "pg_sequence_last_value"
-            | "pg_sequence_parameters"
-            | "pg_get_triggerdef"
-            | "pg_get_ruledef"
-            | "pg_get_viewdef"
-            | "pg_get_indexdef"
-            | "format_type"
-            | "pg_has_role"
-            | "has_table_privilege"
-            | "has_column_privilege"
-            | "has_database_privilege"
-            | "has_schema_privilege"
-            | "has_sequence_privilege"
-    )
-    .then(|| local.to_string())
-}
-
-fn overload(
-    name: &str,
-    argument_types: &[ColumnType],
-    return_type: ColumnType,
-) -> BuiltinFunctionOverload {
-    BuiltinFunctionOverload {
-        name: format!("pg_catalog.{name}"),
-        argument_names: vec![None; argument_types.len()],
-        argument_types: argument_types.to_vec(),
-        default_arguments: 0,
-        return_type,
-    }
-}
-
-fn overload_with_names(
-    name: &str,
-    argument_types: &[ColumnType],
-    argument_names: &[&str],
-    return_type: ColumnType,
-) -> BuiltinFunctionOverload {
-    overload_with_names_and_defaults(name, argument_types, argument_names, 0, return_type)
-}
-
-fn overload_with_names_and_defaults(
-    name: &str,
-    argument_types: &[ColumnType],
-    argument_names: &[&str],
-    default_arguments: usize,
-    return_type: ColumnType,
-) -> BuiltinFunctionOverload {
-    BuiltinFunctionOverload {
-        name: format!("pg_catalog.{name}"),
-        argument_names: argument_names
+    let (name, signatures) = registry::lookup(name)?;
+    Some(
+        signatures
             .iter()
-            .map(|name| Some((*name).into()))
+            .map(|signature| BuiltinFunctionOverload {
+                name: format!("pg_catalog.{name}"),
+                argument_names: if signature.argument_names.is_empty() {
+                    vec![None; signature.argument_types.len()]
+                } else {
+                    signature
+                        .argument_names
+                        .iter()
+                        .map(|name| Some((*name).into()))
+                        .collect()
+                },
+                argument_types: signature.argument_types.to_vec(),
+                default_arguments: signature.default_arguments,
+                return_type: signature.return_type.clone(),
+            })
             .collect(),
-        argument_types: argument_types.to_vec(),
-        default_arguments,
-        return_type,
-    }
-}
-
-fn numeric_type() -> ColumnType {
-    ColumnType::Numeric {
-        precision: None,
-        scale: None,
-    }
+    )
 }
 
 #[cfg(test)]
@@ -976,3 +537,6 @@ mod tests {
         assert_eq!(args, original);
     }
 }
+
+#[cfg(test)]
+mod selected_tests;

@@ -24,7 +24,7 @@ use uqa_sql::catalog::events::{StoredRule, StoredTrigger};
 use uqa_sql::routines::{routine_signature_types, CompiledFunctionBody, SQLUserFunction};
 
 use super::expression_text::schema_expr_text;
-use super::helpers::oids::{schema_oid, split_schema_name, stable_oid};
+use super::helpers::oids::{namespace_oid, split_schema_name, stable_oid};
 use super::helpers::rows::{bool_value, catalog_usize, int_value, row, str_value};
 use super::helpers::views::view_columns_for;
 use super::pg_catalog::table_relation_oid_from;
@@ -205,7 +205,10 @@ pub fn build_trigger_constraints(
                 )?),
             ),
             ("conname", str_value(constraint_name)),
-            ("connamespace", int_value(schema_oid(&relation.schema))),
+            (
+                "connamespace",
+                int_value(namespace_oid(catalog, &relation.schema)),
+            ),
             ("contype", str_value("t")),
             (
                 "condeferrable",

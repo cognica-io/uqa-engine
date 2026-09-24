@@ -35,6 +35,9 @@ pub struct ColumnDef {
     /// `PostgreSQL`'s generated name before the constraint becomes visible.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub not_null_name: Option<String>,
+    /// Independent NOT NULL lifetime and public catalog OID, retained through column, relation, and constraint renames.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub not_null_identity: Option<ConstraintCatalogIdentity>,
     /// Whether the named `NOT NULL` constraint has been validated against
     /// every pre-existing row. `NOT VALID` still enforces future writes.
     #[serde(default = "default_true")]
@@ -85,23 +88,33 @@ pub struct ColumnDef {
     /// Durable identity of the column CHECK, preserved across constraint and relation renames.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check_object_id: Option<[u8; 16]>,
+    /// Public CHECK address allocated separately from its durable incarnation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_catalog_oid: Option<i64>,
     /// Column-level `REFERENCES parent[(col)]` foreign key. An omitted column is resolved to the referenced primary key before publication.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub references: Option<ForeignKeyRef>,
 }
 
+pub use uqa_core::catalog_identity::CatalogObjectIdentity as ConstraintCatalogIdentity;
+
 /// `REFERENCES table[(column)]` reference target.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct ForeignKeyRef {
+    /// Incarnation of the selected unique index; names are retained only for diagnostics and legacy conversion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub referenced_index: Option<[u8; 16]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub referenced_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// Durable identity of the catalog constraint object. The engine assigns
-    /// this when the constraint is published; parsed SQL leaves it unset.
+    /// Logical foreign-key identity shared by a partition family for enforcement and deferred events.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub object_id: Option<[u8; 16]>,
+    /// Independent catalog row lifetime and OID, preserved through renames and distinct in each partition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_identity: Option<ConstraintCatalogIdentity>,
     pub table: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub column: Option<String>,
@@ -175,6 +188,9 @@ pub enum TableKeyConstraintKind {
 /// A table key whose columns are compared as one tuple.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableKeyConstraint {
+    /// Independent catalog row lifetime, retained while the owning index changes its name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_identity: Option<ConstraintCatalogIdentity>,
     pub name: Option<String>,
     pub kind: TableKeyConstraintKind,
     pub columns: Vec<String>,
@@ -225,6 +241,8 @@ pub struct TableCheck {
     /// Durable identity of this CHECK, assigned when its definition is published.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub object_id: Option<[u8; 16]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_oid: Option<i64>,
     /// Whether this relation declares this CHECK locally, independently from inherited copies. Missing legacy origin retains the historical local projection.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub is_local: bool,
@@ -250,14 +268,19 @@ pub struct DetachedPartitionConstraint {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct ForeignKey {
+    /// Incarnation of the selected unique index, retained across index and constraint renames.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub referenced_index: Option<[u8; 16]>,
     /// Name of the selected unique index in the referenced relation namespace.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub referenced_key: Option<String>,
     pub name: Option<String>,
-    /// Durable identity of the catalog constraint object. The engine assigns
-    /// this when the constraint is published; parsed SQL leaves it unset.
+    /// Logical foreign-key identity shared by a partition family for enforcement and deferred events.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub object_id: Option<[u8; 16]>,
+    /// Independent catalog row lifetime and OID, preserved through renames and distinct in each partition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_identity: Option<ConstraintCatalogIdentity>,
     pub local_columns: Vec<String>,
     pub ref_table: String,
     pub ref_columns: Vec<String>,

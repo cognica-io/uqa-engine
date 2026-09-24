@@ -109,60 +109,91 @@ impl ScalarExpr {
 
     /// Collect every column needed to evaluate this expression. Returns `false` when evaluation needs row shape or a relational child that a projected field scan cannot provide.
     pub fn collect_columns(&self, output: &mut std::collections::BTreeSet<String>) -> bool {
+        match self.try_visit_columns(&mut |name| {
+            output.insert(name.to_owned());
+            Ok::<_, std::convert::Infallible>(())
+        }) {
+            Ok(projectable) => projectable,
+            Err(never) => match never {},
+        }
+    }
+
+    /// Borrow referenced column names in evaluation-tree order, stopping at the first visitor failure or unprojectable expression. Qualified references yield their column component, matching `collect_columns`; repeated references remain visible to the visitor. No name or result container is allocated by this traversal.
+    pub fn try_visit_columns<'a, E>(
+        &'a self,
+        visitor: &mut impl FnMut(&'a str) -> Result<(), E>,
+    ) -> Result<bool, E> {
         match self {
             Self::Column(name) | Self::QualifiedColumn { column: name, .. } => {
-                output.insert(name.clone());
-                true
+                visitor(name)?;
+                Ok(true)
             }
             Self::Literal(_)
             | Self::TypedLiteral { .. }
             | Self::Param(_)
-            | Self::InternalColumn(_) => true,
+            | Self::InternalColumn(_) => Ok(true),
             Self::Func {
                 args,
                 order_by,
                 filter,
                 ..
             } => {
-                args.iter().all(|arg| arg.collect_columns(output))
-                    && order_by
-                        .iter()
-                        .all(|order| order.expr.collect_columns(output))
-                    && filter
-                        .as_deref()
-                        .is_none_or(|filter| filter.collect_columns(output))
+                for expression in args
+                    .iter()
+                    .chain(order_by.iter().map(|order| &order.expr))
+                    .chain(filter.as_deref())
+                {
+                    if !expression.try_visit_columns(visitor)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
             }
             Self::Array(items) | Self::Row(items) | Self::And(items) | Self::Or(items) => {
-                items.iter().all(|item| item.collect_columns(output))
+                for item in items {
+                    if !item.try_visit_columns(visitor)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
             }
             Self::Binary { lhs, rhs, .. } => {
-                lhs.collect_columns(output) && rhs.collect_columns(output)
+                Ok(lhs.try_visit_columns(visitor)? && rhs.try_visit_columns(visitor)?)
             }
             Self::UnaryMinus(expr)
             | Self::Not(expr)
             | Self::IsNull { expr, .. }
-            | Self::Cast { expr, .. } => expr.collect_columns(output),
-            Self::Between { expr, low, high } => {
-                expr.collect_columns(output)
-                    && low.collect_columns(output)
-                    && high.collect_columns(output)
-            }
+            | Self::Cast { expr, .. } => expr.try_visit_columns(visitor),
+            Self::Between { expr, low, high } => Ok(expr.try_visit_columns(visitor)?
+                && low.try_visit_columns(visitor)?
+                && high.try_visit_columns(visitor)?),
             Self::InList { expr, list, .. } => {
-                expr.collect_columns(output) && list.iter().all(|item| item.collect_columns(output))
+                for item in std::iter::once(expr.as_ref()).chain(list) {
+                    if !item.try_visit_columns(visitor)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
             }
             Self::Case {
                 base,
                 when,
                 else_branch,
             } => {
-                base.as_deref()
-                    .is_none_or(|base| base.collect_columns(output))
-                    && when.iter().all(|(condition, result)| {
-                        condition.collect_columns(output) && result.collect_columns(output)
-                    })
-                    && else_branch
-                        .as_deref()
-                        .is_none_or(|branch| branch.collect_columns(output))
+                for expression in base
+                    .as_deref()
+                    .into_iter()
+                    .chain(
+                        when.iter()
+                            .flat_map(|(condition, result)| [condition, result]),
+                    )
+                    .chain(else_branch.as_deref())
+                {
+                    if !expression.try_visit_columns(visitor)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
             }
             Self::Default
             | Self::Star
@@ -171,7 +202,7 @@ impl ScalarExpr {
             | Self::WindowCall { .. }
             | Self::ScalarSubquery(_)
             | Self::Exists { .. }
-            | Self::InSubquery { .. } => false,
+            | Self::InSubquery { .. } => Ok(false),
         }
     }
 
@@ -510,5 +541,63 @@ mod tests {
         assert_eq!(columns, std::collections::BTreeSet::from(["amount".into()]));
         assert!(expression.contains_aggregate(&|name| name == "sum"));
         assert!(!expression.contains_subquery());
+    }
+
+    #[test]
+    fn borrowed_column_visits_keep_names_and_stop_at_the_first_failure() {
+        let expression = ScalarExpr::Row(vec![
+            ScalarExpr::Column("first".into()),
+            ScalarExpr::QualifiedColumn {
+                qualifier: "table".into(),
+                column: "second".into(),
+            },
+            ScalarExpr::Column("first".into()),
+        ]);
+        let mut borrowed = Vec::new();
+        assert!(expression
+            .try_visit_columns(&mut |name| {
+                borrowed.push(name);
+                Ok::<_, &str>(())
+            })
+            .unwrap());
+        assert_eq!(borrowed, ["first", "second", "first"]);
+        let ScalarExpr::Row(items) = &expression else {
+            unreachable!()
+        };
+        let ScalarExpr::Column(first) = &items[0] else {
+            unreachable!()
+        };
+        assert_eq!(borrowed[0].as_ptr(), first.as_ptr());
+        let mut visits = 0;
+        let result = expression.try_visit_columns(&mut |_| {
+            visits += 1;
+            if visits == 2 {
+                Err("quota")
+            } else {
+                Ok(())
+            }
+        });
+        assert_eq!(result, Err("quota"));
+        assert_eq!(visits, 2);
+    }
+
+    #[test]
+    fn borrowed_column_visits_preserve_unprojectable_prefix_semantics() {
+        let expression = ScalarExpr::Array(vec![
+            ScalarExpr::Column("before".into()),
+            ScalarExpr::Position(0),
+            ScalarExpr::Column("after".into()),
+        ]);
+        let mut borrowed = Vec::new();
+        assert!(!expression
+            .try_visit_columns(&mut |name| {
+                borrowed.push(name);
+                Ok::<_, &str>(())
+            })
+            .unwrap());
+        let mut owned = std::collections::BTreeSet::new();
+        assert!(!expression.collect_columns(&mut owned));
+        assert_eq!(borrowed, ["before"]);
+        assert_eq!(owned, std::collections::BTreeSet::from(["before".into()]));
     }
 }

@@ -4,15 +4,23 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! COMMIT, ROLLBACK, and nontransactional statistics restoration.
+//! COMMIT, ROLLBACK, and retained nontransactional sequence effects.
 
 use super::{
-    Engine, NontransactionalColumnStats, NontransactionalSequenceValues, SQLError,
-    SessionLastSequenceReference, SessionStateSnapshot, StorageBackendError, StorageBackendResult,
-    StorageSavepointId, TransactionDirtyState, TransactionFrame, TransactionIntent,
-    TransactionRelationStates, TransactionStatus,
+    Engine, NontransactionalSequenceValues, SQLError, SessionLastSequenceReference,
+    SessionStateSnapshot, StorageBackendError, StorageBackendResult, StorageSavepointId,
+    TransactionDirtyState, TransactionFrame, TransactionIntent, TransactionStatus,
 };
 use crate::notifications::NotificationCommitGuard;
+use uqa_execution::row_locks::{temporary_roles::TemporaryRolePublication, RowChangePublication};
+use uqa_storage::mvcc::TransactionOutcome;
+
+// Drop temporary additions before the notification and row-publication guards are released.
+struct TransactionPublication<'a> {
+    temporary_roles: Option<TemporaryRolePublication<'a>>,
+    notifications: Option<NotificationCommitGuard<'a>>,
+    changes: Option<RowChangePublication<'a>>,
+}
 
 impl Engine {
     pub(super) fn commit_transaction_frame(
@@ -24,7 +32,11 @@ impl Engine {
             .last()
             .ok_or_else(|| SQLError::Internal("COMMIT without an open transaction".into()))?
             .storage_savepoint;
-        if !deferred_constraints_validated && storage_savepoint.is_none() {
+        let resolving = matches!(
+            stack.last().map(|frame| frame.status),
+            Some(TransactionStatus::CommitPending(_))
+        );
+        if !deferred_constraints_validated && storage_savepoint.is_none() && !resolving {
             return Err(SQLError::Internal(
                 "outer COMMIT skipped deferred-constraint preparation".into(),
             ));
@@ -33,24 +45,31 @@ impl Engine {
             .last()
             .ok_or_else(|| SQLError::Internal("COMMIT without an open transaction".into()))?;
         let read_only = frame.intent == TransactionIntent::ReadOnly;
-        let has_row_changes = !frame.row_changes.is_empty();
-        let statistics_changes = frame.statistics_changes.clone();
-        self.validate_read_only_commit(stack, read_only, storage_savepoint.is_none())?;
-        let change_publication = if storage_savepoint.is_none() && has_row_changes {
-            Some(
-                self.row_locks
-                    .begin_change_publication(&self.runtime.cancellation)?,
-            )
-        } else {
-            None
-        };
-        let notification_commit =
-            self.prepare_notification_commit(stack, storage_savepoint.is_none())?;
+        let statistics_changes =
+            (storage_savepoint.is_none() && !resolving).then(|| frame.statistics_changes.clone());
+        if !resolving {
+            self.validate_read_only_commit(stack, read_only, storage_savepoint.is_none())?;
+        }
+        let mut publication =
+            self.prepare_transaction_publication(stack, storage_savepoint.is_none())?;
         let savepoints_deferred = Self::backend_savepoints_deferred(stack);
-        if storage_savepoint.is_none() {
-            if let Err(error) = self.persist_statistics_changes(&statistics_changes) {
-                drop(notification_commit);
-                drop(change_publication);
+        if let Some(statistics_changes) = statistics_changes {
+            // Maintenance counters are derived at publication, after any earlier publisher. A savepoint can restore an older command base, and concurrent commands must not overwrite each other's accumulated maintenance state.
+            let refresh = if statistics_changes.is_empty() {
+                Ok(())
+            } else {
+                self.storage
+                    .backend
+                    .as_ref()
+                    .filter(|backend| backend.transaction_model().is_versioned())
+                    .map_or(Ok(()), |backend| {
+                        backend.refresh_transaction_snapshot(&self.runtime.cancellation)
+                    })
+            };
+            if let Err(error) =
+                refresh.and_then(|()| self.persist_statistics_changes(&statistics_changes))
+            {
+                drop(publication);
                 return Err(self.rollback_failed_statistics_preparation(stack, &error));
             }
         }
@@ -59,66 +78,93 @@ impl Engine {
                 if savepoints_deferred {
                     Ok(())
                 } else {
-                    backend
-                        .release_savepoint(savepoint)
-                        .map_err(|err| Self::storage_tx_error("nested COMMIT savepoint", &err))
+                    backend.release_savepoint(savepoint)
                 }
             } else {
-                backend
-                    .commit_transaction()
-                    .map_err(|err| Self::storage_tx_error("COMMIT", &err))
+                backend.commit_transaction()
             };
-            if let Err(commit_error) = commit_result {
-                drop(notification_commit);
+            if let Err(error) = commit_result {
+                drop(publication);
+                if let Some(error) = Self::retain_pending_completion(stack, &error, false) {
+                    return Err(error);
+                }
+                let action = if storage_savepoint.is_some() {
+                    "nested COMMIT savepoint"
+                } else {
+                    "COMMIT"
+                };
                 return Err(self.recover_failed_transaction_finish(
                     stack,
                     storage_savepoint.is_some(),
-                    commit_error,
+                    Self::storage_tx_error(action, &error),
                 ));
             }
+        }
+        if let Some(temporary_roles) = publication.temporary_roles.take() {
+            temporary_roles.commit();
         }
         let committed = stack
             .pop()
             .ok_or_else(|| SQLError::Internal("COMMIT lost its transaction frame".into()))?;
-        if storage_savepoint.is_none() {
-            self.session.state.write().graph_overlay = None;
-            self.restore_local_runtime_parameters();
-            let publication_result = self.row_locks.publish_row_changes(
-                self.session_id,
-                committed.row_changes.iter().map(|change| change.pending),
-            );
-            drop(change_publication);
-            self.row_locks.release_session(self.session_id);
-            self.publish_committed_transaction_epochs();
-            if !committed.statistics_changes.is_empty() {
-                self.wake_automatic_statistics();
+        self.publish_committed_transaction_frame(
+            stack,
+            committed,
+            publication.changes,
+            publication.notifications,
+        )
+    }
+
+    fn prepare_transaction_publication<'a>(
+        &'a self,
+        stack: &mut Vec<TransactionFrame>,
+        outer: bool,
+    ) -> Result<TransactionPublication<'a>, SQLError> {
+        let frame = stack
+            .last()
+            .ok_or_else(|| SQLError::Internal("COMMIT without an open transaction".into()))?;
+        let read_only = frame.intent == TransactionIntent::ReadOnly;
+        let status = frame.status;
+        let has_row_changes = !frame.row_changes.is_empty();
+        let change_publication = if outer
+            && (has_row_changes || (self.versioned_backend_transactions() && !read_only))
+        {
+            Some(
+                self.row_locks
+                    .begin_change_publication(&self.runtime.cancellation)
+                    .map_err(|error| match status {
+                        TransactionStatus::CommitPending(transaction) => {
+                            Self::pending_completion_error(transaction, error)
+                        }
+                        _ => error,
+                    })?,
+            )
+        } else {
+            None
+        };
+        let notification_commit = self.prepare_notification_commit(stack, outer)?;
+        let temporary_roles = if outer {
+            match self.prepare_temporary_role_publication() {
+                Ok(publication) => publication,
+                Err(error) => {
+                    drop(notification_commit);
+                    drop(change_publication);
+                    if let TransactionStatus::CommitPending(transaction) = status {
+                        return Err(Self::pending_completion_error(transaction, error));
+                    }
+                    return Err(match self.rollback_transaction_frame(stack) {
+                        Ok(()) => error,
+                        Err(rollback) => Self::rollback_cleanup_error(&rollback, format!("{error}; temporary catalog preparation rollback also failed: {rollback}")),
+                    });
+                }
             }
-            let notification_result = notification_commit.map_or(Ok(()), |notification_commit| {
-                self.commit_notification_state(notification_commit, &committed)
-            });
-            self.session
-                .portals
-                .lock()
-                .retain(|_, portal| portal.holdable);
-            publication_result?;
-            notification_result?;
-        }
-        if let Some(parent) = stack.last_mut() {
-            parent.next_lock_mark = parent.next_lock_mark.max(committed.next_lock_mark);
-            parent.constraint_modes = committed.constraint_modes;
-            parent.row_changes.extend(committed.row_changes);
-            Self::merge_statistics_changes(
-                &mut parent.statistics_changes,
-                committed.statistics_changes,
-            );
-            parent.deferred_foreign_key_checks = committed.deferred_foreign_key_checks;
-            parent.deferred_constraint_trigger_events =
-                committed.deferred_constraint_trigger_events;
-            parent.merge_pending_listen_actions(committed.pending_listen_actions);
-            parent.merge_pending_notifications(committed.pending_notifications);
-            parent.first_snapshot_set |= committed.first_snapshot_set;
-        }
-        Ok(())
+        } else {
+            None
+        };
+        Ok(TransactionPublication {
+            temporary_roles,
+            notifications: notification_commit,
+            changes: change_publication,
+        })
     }
 
     fn rollback_failed_statistics_preparation(
@@ -131,9 +177,10 @@ impl Engine {
         // rollback before its transaction frame and caches can be restored.
         match self.rollback_transaction_frame(stack) {
             Ok(()) => failure,
-            Err(rollback) => SQLError::Internal(format!(
-                "{failure}; statistics preparation rollback also failed: {rollback}"
-            )),
+            Err(rollback) => Self::rollback_cleanup_error(
+                &rollback,
+                format!("{failure}; statistics preparation rollback also failed: {rollback}"),
+            ),
         }
     }
 
@@ -160,9 +207,10 @@ impl Engine {
         };
         Err(match self.rollback_transaction_frame(stack) {
             Ok(()) => violation,
-            Err(rollback_error) => SQLError::Internal(format!(
-                "{violation}; read-only violation rollback also failed: {rollback_error}"
-            )),
+            Err(rollback_error) => Self::rollback_cleanup_error(
+                &rollback_error,
+                format!("{violation}; read-only violation rollback also failed: {rollback_error}"),
+            ),
         })
     }
 
@@ -179,58 +227,52 @@ impl Engine {
         };
         match notification_commit {
             Ok(commit) => Ok(commit),
-            Err(error) => Err(match self.rollback_transaction_frame(stack) {
-                Ok(()) => error,
-                Err(rollback_error) => SQLError::Internal(format!(
-                    "{error}; notification commit preparation rollback also failed: {rollback_error}"
-                )),
-            }),
+            Err(error) => {
+                if let Some(TransactionStatus::CommitPending(transaction)) =
+                    stack.last().map(|frame| frame.status)
+                {
+                    return Err(Self::pending_completion_error(transaction, error));
+                }
+                Err(match self.rollback_transaction_frame(stack) {
+                    Ok(()) => error,
+                    Err(rollback_error) => Self::rollback_cleanup_error(&rollback_error, format!(
+                        "{error}; notification commit preparation rollback also failed: {rollback_error}"
+                    )),
+                })
+            }
         }
     }
 
-    /// A failed outer backend COMMIT/ROLLBACK has already ended the managed
-    /// storage transaction; a failed nested savepoint finish aborts the
-    /// enclosing transaction explicitly. In every case the engine stack and
-    /// session-local caches are restored before the error escapes, so callers
-    /// never inherit a ghost transaction or uncommitted catalog state.
+    /// End any retained backend transaction before restoring caches. If cleanup fails while storage still retains its transaction, keep the engine frames and locks for a later explicit resolution instead of reading private state as committed state.
     pub(super) fn recover_failed_transaction_finish(
         &self,
         stack: &mut Vec<TransactionFrame>,
         nested: bool,
         finish_error: SQLError,
     ) -> SQLError {
-        let raw_nontransactional_column_stats = stack
-            .first()
-            .map(|frame| frame.nontransactional_column_stats.clone())
-            .unwrap_or_default();
         let nontransactional_sequence_values = stack
             .first()
             .map(|frame| frame.nontransactional_sequence_values.clone())
             .unwrap_or_default();
-        let rollback_relation_states = stack
-            .first()
-            .map(|frame| frame.relation_states_at_begin.clone())
-            .unwrap_or_default();
-        let nontransactional_column_stats = self.nontransactional_column_stats_after_rollback(
-            &raw_nontransactional_column_stats,
-            &rollback_relation_states,
-        );
         let session_snapshot = stack.first().map(|frame| frame.session_snapshot.clone());
         let snapshot = stack.first().and_then(|frame| frame.data_snapshot.clone());
         let dirty_at_begin = stack
             .first()
             .map_or_else(TransactionDirtyState::default, |frame| frame.dirty_at_begin);
-        let mut cleanup_errors = Vec::new();
-        if nested {
-            if let Some(backend) = self.storage.backend.as_ref() {
-                if let Err(error) = backend.rollback_transaction() {
-                    cleanup_errors.push(format!("storage rollback: {error}"));
-                }
-            }
-        }
+        let mut cleanup_errors =
+            match self.abort_retained_backend_before_restore(stack, nested, &finish_error) {
+                Ok(error) => error
+                    .into_iter()
+                    .map(|error| format!("storage rollback: {error}"))
+                    .collect::<Vec<_>>(),
+                Err(error) => return error,
+            };
         let outer_notification_transaction = !stack.is_empty();
         stack.clear();
         self.row_locks.release_session(self.session_id);
+        if let Some(snapshot) = session_snapshot.as_ref() {
+            self.restore_graph_transaction_overlay(snapshot);
+        }
         self.restore_transaction_dirty_state(dirty_at_begin);
         if let Some(snapshot) = snapshot.as_ref() {
             if let Err(error) = self.restore_transaction_data(snapshot) {
@@ -247,16 +289,6 @@ impl Engine {
             if let Err(error) = self.reload_catalog_registries_after_rollback() {
                 cleanup_errors.push(format!("registry restore: {error}"));
             }
-        }
-        if let Err(error) = self.persist_nontransactional_column_stats_after_rollback(
-            &nontransactional_column_stats,
-            true,
-        ) {
-            cleanup_errors.push(format!("ANALYZE statistics restore: {error}"));
-        }
-        if let Err(error) = self.apply_nontransactional_column_stats(&nontransactional_column_stats)
-        {
-            cleanup_errors.push(format!("ANALYZE statistics cache restore: {error}"));
         }
         if session_snapshot.is_some() {
             if let Err(error) = self.persist_nontransactional_sequence_values_after_rollback(
@@ -285,25 +317,40 @@ impl Engine {
         }
     }
 
-    pub(super) fn retain_nontransactional_stats_for_rollback(
+    fn abort_retained_backend_before_restore(
         &self,
         stack: &mut [TransactionFrame],
-        relation_states: &TransactionRelationStates,
-    ) -> NontransactionalColumnStats {
-        let raw_nontransactional_column_stats = stack
-            .first()
-            .map(|frame| frame.nontransactional_column_stats.clone())
-            .unwrap_or_default();
-        let nontransactional_column_stats = self.nontransactional_column_stats_after_rollback(
-            &raw_nontransactional_column_stats,
-            relation_states,
-        );
-        if let Some(frame) = stack.first_mut() {
-            frame
-                .nontransactional_column_stats
-                .clone_from(&nontransactional_column_stats);
+        nested: bool,
+        finish_error: &SQLError,
+    ) -> Result<Option<StorageBackendError>, SQLError> {
+        let mut cleanup_error = None;
+        if let Some(backend) = self.storage.backend.as_ref() {
+            if nested || backend.in_transaction() {
+                if let Err(error) = backend.rollback_transaction() {
+                    if let Some(error) = Self::retain_pending_completion(stack, &error, true) {
+                        return Err(error);
+                    }
+                    if backend.in_transaction() {
+                        for frame in stack.iter_mut() {
+                            frame.status = TransactionStatus::Failed;
+                        }
+                        return Err(SQLError::Internal(format!(
+                            "{finish_error}; storage rollback failed; transaction state is retained: {error}"
+                        )));
+                    }
+                    cleanup_error = Some(error);
+                }
+                if backend.in_transaction() {
+                    for frame in stack.iter_mut() {
+                        frame.status = TransactionStatus::Failed;
+                    }
+                    return Err(SQLError::Internal(format!(
+                        "{finish_error}; storage rollback did not end the transaction; transaction state is retained"
+                    )));
+                }
+            }
         }
-        nontransactional_column_stats
+        Ok(cleanup_error)
     }
 
     pub(super) fn rollback_backend_transaction_frame(
@@ -316,31 +363,87 @@ impl Engine {
         let Some(backend) = self.storage.backend.as_ref().filter(|_| !backend_aborted) else {
             return Ok(());
         };
-        let rollback_result = if let Some(savepoint) = storage_savepoint {
+        let (action, rollback_result) = if let Some(savepoint) = storage_savepoint {
             if savepoints_deferred {
-                Ok(())
+                ("nested ROLLBACK savepoint", Ok(()))
             } else {
-                backend
-                    .rollback_to_savepoint(savepoint)
-                    .map_err(|error| Self::storage_tx_error("nested ROLLBACK savepoint", &error))
-                    .and_then(|()| {
-                        backend.release_savepoint(savepoint).map_err(|error| {
-                            Self::storage_tx_error("nested ROLLBACK release", &error)
-                        })
-                    })
+                match backend.rollback_to_savepoint(savepoint) {
+                    Ok(()) => (
+                        "nested ROLLBACK release",
+                        backend.release_savepoint(savepoint),
+                    ),
+                    Err(error) => ("nested ROLLBACK savepoint", Err(error)),
+                }
             }
         } else {
-            backend
-                .rollback_transaction()
-                .map_err(|error| Self::storage_tx_error("ROLLBACK", &error))
+            ("ROLLBACK", backend.rollback_transaction())
         };
-        rollback_result.map_err(|rollback_error| {
-            self.recover_failed_transaction_finish(
+        if let Err(error) = rollback_result {
+            if storage_savepoint.is_none() {
+                if let Some(TransactionOutcome::Committed(transaction)) =
+                    error.transaction_outcome()
+                {
+                    stack
+                        .last_mut()
+                        .ok_or_else(|| {
+                            SQLError::Internal("commit receipt without a transaction frame".into())
+                        })?
+                        .status = TransactionStatus::CommitPending(transaction);
+                    self.commit_transaction_frame(stack, false)?;
+                    return Err(SQLError::Routine {
+                        sqlstate: "25000".into(),
+                        message: format!(
+                            "transaction {transaction:?} already committed; ROLLBACK cannot undo it"
+                        ),
+                    });
+                }
+            }
+            if let Some(error) = Self::retain_pending_completion(stack, &error, true) {
+                return Err(error);
+            }
+            return Err(self.recover_failed_transaction_finish(
                 stack,
                 storage_savepoint.is_some(),
-                rollback_error,
-            )
-        })
+                Self::storage_tx_error(action, &error),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn retain_pending_completion(
+        stack: &mut [TransactionFrame],
+        error: &StorageBackendError,
+        rollback: bool,
+    ) -> Option<SQLError> {
+        let frame = stack.last_mut()?;
+        if frame.storage_savepoint.is_some() {
+            return None;
+        }
+        // Keep the original unresolved operation: a prior COMMIT must still report a confirmed abort, while failed-statement cleanup can only finish rollback.
+        let rollback = match frame.status {
+            TransactionStatus::CommitPending(_) => false,
+            TransactionStatus::RollbackPending(_) => true,
+            _ => rollback,
+        };
+        let (transaction, rollback) = match error.transaction_outcome() {
+            Some(TransactionOutcome::Indeterminate(transaction)) => (transaction, rollback),
+            Some(TransactionOutcome::Committed(transaction)) => (transaction, false),
+            Some(TransactionOutcome::Aborted(_)) => {
+                frame.status = TransactionStatus::Failed;
+                return None;
+            }
+            None => match frame.status {
+                TransactionStatus::CommitPending(transaction) => (transaction, rollback),
+                TransactionStatus::RollbackPending(transaction) => (transaction, true),
+                _ => return None,
+            },
+        };
+        frame.status = if rollback {
+            TransactionStatus::RollbackPending(transaction)
+        } else {
+            TransactionStatus::CommitPending(transaction)
+        };
+        Some(Self::pending_completion_error(transaction, error))
     }
 
     pub(super) fn rollback_transaction_frame(
@@ -351,12 +454,6 @@ impl Engine {
             .last()
             .map(|frame| frame.nontransactional_sequence_values.clone())
             .unwrap_or_default();
-        let rollback_relation_states = stack
-            .last()
-            .map(|frame| frame.relation_states_at_begin.clone())
-            .unwrap_or_default();
-        let nontransactional_column_stats =
-            self.retain_nontransactional_stats_for_rollback(stack, &rollback_relation_states);
         let storage_savepoint = stack
             .last()
             .ok_or_else(|| SQLError::Internal("ROLLBACK without an open transaction".into()))?
@@ -369,6 +466,7 @@ impl Engine {
             SQLError::Internal("ROLLBACK lost its checked transaction frame".into())
         })?;
         let session_snapshot = frame.session_snapshot.clone();
+        self.restore_graph_transaction_overlay(&session_snapshot);
         let mut cleanup_errors = Vec::new();
         if let Some(snapshot) = frame.data_snapshot.as_ref() {
             if let Err(error) = self.restore_transaction_data(snapshot) {
@@ -379,12 +477,6 @@ impl Engine {
             .last()
             .map_or_else(TransactionDirtyState::default, |frame| frame.dirty_at_begin);
         self.restore_transaction_dirty_state(dirty_at_begin);
-        if let Err(error) = self.persist_nontransactional_column_stats_after_rollback(
-            &nontransactional_column_stats,
-            storage_savepoint.is_none(),
-        ) {
-            cleanup_errors.push(format!("ANALYZE statistics restore: {error}"));
-        }
         if let Err(error) = self.reload_persistent_value_indexes() {
             cleanup_errors.push(format!("btree restore: {error}"));
         }
@@ -395,10 +487,6 @@ impl Engine {
             if let Err(error) = self.reload_catalog_registries_after_rollback() {
                 cleanup_errors.push(format!("registry restore: {error}"));
             }
-        }
-        if let Err(error) = self.apply_nontransactional_column_stats(&nontransactional_column_stats)
-        {
-            cleanup_errors.push(format!("ANALYZE statistics cache restore: {error}"));
         }
         if let Err(error) = self.persist_nontransactional_sequence_values_after_rollback(
             &nontransactional_sequence_values,
@@ -433,83 +521,6 @@ impl Engine {
         }
     }
 
-    pub(super) fn persist_nontransactional_column_stats_after_rollback(
-        &self,
-        stats: &NontransactionalColumnStats,
-        outer: bool,
-    ) -> StorageBackendResult<()> {
-        if !stats
-            .iter()
-            .any(|entry| entry.persistent && !entry.autonomous)
-        {
-            return Ok(());
-        }
-        if !outer {
-            let catalog = self.storage.catalog.as_ref().ok_or_else(|| {
-                StorageBackendError::Other("persistent ANALYZE statistics require a catalog".into())
-            })?;
-            for entry in stats
-                .iter()
-                .filter(|entry| entry.persistent && !entry.autonomous)
-            {
-                Self::persist_column_stats(catalog.as_ref(), &entry.table_name, &entry.stats)?;
-            }
-            return Ok(());
-        }
-        let provider = self.storage.provider.as_ref().ok_or_else(|| {
-            StorageBackendError::Other(
-                "nontransactional ANALYZE statistics require an independent session".into(),
-            )
-        })?;
-        let session = provider.open_session()?;
-        session.backend.begin_transaction()?;
-        let result = (|| {
-            for entry in stats
-                .iter()
-                .filter(|entry| entry.persistent && !entry.autonomous)
-            {
-                Self::persist_column_stats(
-                    session.catalog.as_ref(),
-                    &entry.table_name,
-                    &entry.stats,
-                )?;
-            }
-            Ok(())
-        })();
-        match result {
-            Ok(()) => session.backend.commit_transaction(),
-            Err(error) => match session.backend.rollback_transaction() {
-                Ok(()) => Err(error),
-                Err(rollback_error) => Err(StorageBackendError::Other(format!(
-                    "restore nontransactional ANALYZE statistics failed: {error}; rollback also failed: {rollback_error}"
-                ))),
-            },
-        }
-    }
-
-    pub(super) fn apply_nontransactional_column_stats(
-        &self,
-        stats: &NontransactionalColumnStats,
-    ) -> StorageBackendResult<()> {
-        for entry in stats {
-            let Some(table) = self.try_table(&entry.table_name)? else {
-                continue;
-            };
-            *table.column_stats.write() = entry.stats.clone();
-            table
-                .column_stats_loaded
-                .store(true, std::sync::atomic::Ordering::Release);
-            table
-                .column_stats_dirty
-                .store(false, std::sync::atomic::Ordering::Release);
-            if entry.persistent {
-                self.statistics
-                    .publish_column_stats(entry.table_name.clone(), entry.stats.clone());
-            }
-        }
-        Ok(())
-    }
-
     pub(super) fn persist_nontransactional_sequence_values_after_rollback(
         &self,
         values: &NontransactionalSequenceValues,
@@ -535,8 +546,14 @@ impl Engine {
                     }
                     let generation = sequences.get(relation)?.definition_generation;
                     let value = history.values_by_definition.get(&generation).copied()?;
-                    (value.object_id == *object_id && !value.autonomous)
-                        .then(|| (relation.qualified_name(), value.object_id, value))
+                    (value.object_id == *object_id && !value.autonomous).then(|| {
+                        (
+                            relation.qualified_name(),
+                            value.object_id,
+                            generation,
+                            value,
+                        )
+                    })
                 })
                 .collect::<Vec<_>>()
         };
@@ -544,20 +561,23 @@ impl Engine {
             return Ok(());
         }
         let persist = |catalog: &dyn uqa_storage::CatalogFacade| -> StorageBackendResult<()> {
-            for (name, object_id, value) in &persistent {
-                if catalog
+            for (name, object_id, generation, value) in &persistent {
+                match catalog
                     .set_sequence_value(
                         name,
                         *object_id,
+                        *generation,
                         value.current,
                         value.called,
                         value.log_count,
-                    )?
-                    .is_none()
-                {
-                    return Err(StorageBackendError::Other(format!(
+                    )? {
+                    uqa_storage::SequenceSetValueResult::Set(_) => {}
+                    uqa_storage::SequenceSetValueResult::Missing => return Err(StorageBackendError::Other(format!(
                         "sequence `{name}` disappeared while restoring its nontransactional value"
-                    )));
+                    ))),
+                    uqa_storage::SequenceSetValueResult::DefinitionChanged => return Err(StorageBackendError::Other(format!(
+                        "sequence `{name}` definition changed while restoring its nontransactional value"
+                    ))),
                 }
             }
             Ok(())
@@ -654,25 +674,5 @@ impl Engine {
         }
         self.restore_session_state(snapshot);
         self.apply_nontransactional_sequence_values(values);
-    }
-
-    pub(super) fn nontransactional_column_stats_after_rollback(
-        &self,
-        stats: &NontransactionalColumnStats,
-        relation_states: &TransactionRelationStates,
-    ) -> NontransactionalColumnStats {
-        for entry in stats {
-            self.statistics.invalidate_column_stats(&entry.table_name);
-        }
-        stats
-            .iter()
-            .filter(|entry| {
-                relation_states.iter().any(|(relation, lifecycle_id)| {
-                    relation.qualified_name() == entry.table_name
-                        && *lifecycle_id == entry.table_lifecycle_id
-                })
-            })
-            .cloned()
-            .collect()
     }
 }

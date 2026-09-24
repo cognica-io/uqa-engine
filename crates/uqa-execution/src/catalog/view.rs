@@ -15,9 +15,7 @@ pub fn catalog_view_row(
 ) -> Result<ViewRow, serde_json::Error> {
     Ok(ViewRow {
         relation: relation.clone(),
-        role_owner: view.role_owner.clone(),
-        acl: view.acl.clone(),
-        column_acls: view.column_acls.clone(),
+        security: view.security.row().into(),
         definition_json: serde_json::to_string(view)?,
     })
 }

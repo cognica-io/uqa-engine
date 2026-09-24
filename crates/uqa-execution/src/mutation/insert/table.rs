@@ -247,7 +247,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
         |read_context: &MutationStatementContext<'_, S>| -> Result<SQLResult, SQLError> {
             let read_assignment = read_context.mutation.preparation.referential.assignment;
             let mut scope = read_context.mutation.scopes.command_scope(
-                stmt.statement_privilege_subject.as_deref(),
+                stmt.statement_privilege_subject.as_ref(),
                 stmt.relations_bound,
             )?;
             if let Some(parent) = inherited_ctes {

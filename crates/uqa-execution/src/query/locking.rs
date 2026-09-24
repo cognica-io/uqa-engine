@@ -11,7 +11,10 @@ use crate::catalog::schema::virtual_relation_accepts_row_lock as virtual_row_loc
 use crate::catalog::{CatalogReadView, RelationNameResolution};
 use crate::query::{binding::bind_source_plan_schema, CteScope};
 use crate::row_locks::{
-    recheck::recheck_storage_names_match, retry_cache::RowLockRetryCache, LockAcquire,
+    binding::{bind_relation, lock_descendants, RelationBinding},
+    recheck::recheck_storage_names_match,
+    retry_cache::RowLockRetryCache,
+    LockAcquire,
 };
 use crate::{Batch, ExecResult, PhysicalOperator, PhysicalRow, RowProjectionValue, RowSchema};
 use uqa_sql::ast::{LockStrength, LockWait, LockingClause, RelationPersistence};
@@ -212,53 +215,14 @@ fn lock_source_plan_relations<S: Clone + Send + Sync + 'static>(
             {
                 return Ok(());
             }
-            match context.catalog.resolve_relation(name, relations_bound)? {
-                Some((table, "table")) => {
-                    for member in context
-                        .catalog
-                        .hierarchy_scan_tables(&table, *include_descendants)?
-                    {
-                        if locked.insert(member.clone()) {
-                            context.session.lock_relation(
-                                &member,
-                                crate::row_locks::RelationLockMode::AccessShare,
-                            )?;
-                        }
-                    }
-                    Ok(())
-                }
-                Some((view_name, "view")) => {
-                    let view = context.catalog.view_plan(&view_name)?.ok_or_else(|| {
-                        SQLError::Internal(format!(
-                            "resolved query view `{view_name}` disappeared before locking"
-                        ))
-                    })?;
-                    if !visiting_views.insert(view_name.clone()) {
-                        return Err(SQLError::Internal(format!(
-                            "view `{view_name}` has a recursive relation dependency"
-                        )));
-                    }
-                    let result = lock_query_plan_relations(
-                        context,
-                        &view,
-                        &std::collections::BTreeSet::new(),
-                        locked,
-                        visiting_views,
-                    );
-                    visiting_views.remove(&view_name);
-                    result
-                }
-                Some((foreign, "foreign table")) => {
-                    if locked.insert(foreign.clone()) {
-                        context.session.lock_relation(
-                            &foreign,
-                            crate::row_locks::RelationLockMode::AccessShare,
-                        )?;
-                    }
-                    Ok(())
-                }
-                Some(_) | None => Ok(()),
-            }
+            lock_named_query_relation(
+                context,
+                name,
+                relations_bound,
+                *include_descendants,
+                locked,
+                visiting_views,
+            )
         }
         SourcePlan::Join { left, right, .. } => {
             lock_source_plan_relations(
@@ -296,6 +260,90 @@ fn lock_source_plan_relations<S: Clone + Send + Sync + 'static>(
             Ok(())
         }
         SourcePlan::Values { .. } => Ok(()),
+    }
+}
+
+fn lock_named_query_relation<S: Clone + Send + Sync + 'static>(
+    context: RowLockContext<'_, S>,
+    name: &str,
+    relations_bound: bool,
+    include_descendants: bool,
+    locked: &mut std::collections::BTreeSet<String>,
+    visiting_views: &mut std::collections::BTreeSet<String>,
+) -> Result<(), SQLError> {
+    let Some(binding) = bind_relation(
+        context.session,
+        crate::row_locks::RelationLockMode::AccessShare,
+        false,
+        || {
+            context
+                .catalog
+                .resolve_relation(name, relations_bound)?
+                .map(|(canonical, kind)| {
+                    let object_id = context.catalog.relation_object_id(&canonical)?;
+                    Ok(RelationBinding {
+                        name: canonical,
+                        object_id,
+                        value: kind,
+                    })
+                })
+                .transpose()
+        },
+        |_| Ok(()),
+    )?
+    else {
+        return Ok(());
+    };
+    let canonical = binding.name;
+    locked.insert(canonical.clone());
+    if let Some(relation) = uqa_sql::catalog::SystemRelation::from_qualified_name(&canonical) {
+        for source in relation.view_sources() {
+            lock_named_query_relation(
+                context,
+                &source.qualified_name(),
+                true,
+                false,
+                locked,
+                visiting_views,
+            )?;
+        }
+        return Ok(());
+    }
+    match binding.value {
+        "table" => lock_descendants(
+            context.catalog,
+            context.session,
+            context
+                .catalog
+                .hierarchy_scan_tables(&canonical, include_descendants)?
+                .into_iter()
+                .filter(|child| child != &canonical),
+            crate::row_locks::RelationLockMode::AccessShare,
+            false,
+        ),
+        "view" => {
+            let view_name = canonical;
+            let view = context.catalog.view_plan(&view_name)?.ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "resolved query view `{view_name}` disappeared before locking"
+                ))
+            })?;
+            if !visiting_views.insert(view_name.clone()) {
+                return Err(SQLError::Internal(format!(
+                    "view `{view_name}` has a recursive relation dependency"
+                )));
+            }
+            let result = lock_query_plan_relations(
+                context,
+                &view,
+                &std::collections::BTreeSet::new(),
+                locked,
+                visiting_views,
+            );
+            visiting_views.remove(&view_name);
+            result
+        }
+        _ => Ok(()),
     }
 }
 

@@ -17,12 +17,42 @@ on:
         description: Run the Rust validation jobs for a Rust-affecting change
         required: true
         type: boolean
+      run_transactions:
+        description: Run concurrent transaction owner and public API acceptance without measurements
+        required: false
+        default: false
+        type: boolean
+      transaction_platform:
+        description: Select the transaction runner to verify an affected platform independently
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - ubuntu-24.04
+          - macos-14
+          - windows-latest
+      transaction_suite:
+        description: Select transaction histories, retained resources, or a production owner
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - retained-resources
+          - sql-production
+          - execution-production
+      run_nori_allocations:
+        description: Run only persistent Nori allocation and output checks when run_rust is false
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.run_transactions && inputs.transaction_platform || 'default' }}-${{ inputs.run_transactions && inputs.transaction_suite || 'default' }}
   cancel-in-progress: true
 
 env:
@@ -270,7 +300,7 @@ jobs:
 
   nori-benchmark:
     name: Nori native analysis and indexing gate
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.run_rust || inputs.run_nori_allocations)) }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -283,20 +313,23 @@ jobs:
           cache-targets: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Measure native analysis and indexing with reviewed allocation ceilings
+        if: ${{ github.event_name == 'push' || inputs.run_rust }}
         run: |
           mkdir -p target/benchmark-runs
-          cargo bench --locked -p uqa-storage-redb --bench commit_allocation_order > target/benchmark-runs/redb-commit-allocation-order.json
           python3 scripts/run-nori-benchmark.py --output target/benchmark-runs/nori-native.json
           python3 scripts/run-nori-index-benchmark.py --output target/benchmark-runs/nori-index-native.json
-          python3 scripts/run-nori-persistent-benchmark.py --provider sqlite --output target/benchmark-runs/nori-sqlite-native.json
-          python3 scripts/run-nori-persistent-benchmark.py --provider redb --output target/benchmark-runs/nori-redb-native.json
           python3 scripts/run-nori-phrase-benchmark.py --output target/benchmark-runs/nori-phrase-native.json
+      - name: Verify SQLite allocation and reopened outputs
+        if: ${{ !cancelled() }}
+        run: python3 scripts/run-nori-persistent-benchmark.py --provider sqlite --output target/benchmark-runs/nori-sqlite-native.json --allocation-only
+      - name: Verify redb allocation and reopened outputs
+        if: ${{ !cancelled() }}
+        run: python3 scripts/run-nori-persistent-benchmark.py --provider redb --output target/benchmark-runs/nori-redb-native.json --allocation-only
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: nori-native-${{ github.sha }}
           path: |
-            target/benchmark-runs/redb-commit-allocation-order.json
             target/benchmark-runs/nori-native.json
             target/benchmark-runs/nori-index-native.json
             target/benchmark-runs/nori-sqlite-native.json
@@ -306,7 +339,7 @@ jobs:
   gate:
     name: pre-merge CI
     if: ${{ always() }}
-    needs: [test-linux, test-fdw-linux, test-macos, clippy, msrv, doc, deny, upstream-regression-oracle, nori-reference, nori-benchmark]
+    needs: [test-linux, test-fdw-linux, test-macos, clippy, msrv, doc, deny, upstream-regression-oracle, nori-reference, nori-benchmark, concurrent-transactions]
     runs-on: ubuntu-24.04
     env:
       RESULTS: ${{ join(needs.*.result, ' ') }}
@@ -316,3 +349,71 @@ jobs:
           case " $RESULTS " in
             *" failure "*|*" cancelled "*) exit 1 ;;
           esac
+
+  concurrent-transactions:
+    name: concurrent transactions ${{ matrix.os }} (${{ inputs.transaction_suite }})
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_transactions }}
+    runs-on: ${{ matrix.os }}
+    env:
+      RUSTFLAGS: ${{ matrix.os == 'ubuntu-24.04' && '-D warnings -C linker-features=-lld' || '-D warnings' }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.transaction_platform == 'all' && '["ubuntu-24.04","macos-14","windows-latest"]' || format('["{0}"]', inputs.transaction_platform)) }}
+    defaults:
+      run:
+        shell: ${{ matrix.os == 'windows-latest' && 'pwsh' || 'bash' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Free Linux runner disk
+        if: runner.os == 'Linux'
+        run: bash .github/scripts/free-linux-runner-disk.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Lint transaction owners and consumers
+        run: >-
+          cargo clippy --locked
+          ${{ inputs.transaction_suite == 'sql-production' && '-p uqa-sql' || inputs.transaction_suite == 'execution-production' && '-p uqa-execution' || '-p uqa-core -p uqa-sql -p uqa-storage -p uqa-storage-sqlite -p uqa-storage-redb -p uqa-execution -p uqa-engine -p uqa-pg-server' }}
+          --lib --tests
+          ${{ inputs.transaction_suite != 'sql-production' && (inputs.transaction_suite == 'execution-production' && '--features uqa-analysis/nori,uqa-analysis/kuromoji' || '--features uqa-engine/nori,uqa-engine/kuromoji') || '' }}
+          -- -D warnings
+      - name: Verify retained owners and actual provider histories
+        run: >-
+          cargo test --locked --no-fail-fast
+          ${{ inputs.transaction_suite == 'sql-production' && '-p uqa-sql' || inputs.transaction_suite == 'execution-production' && '-p uqa-execution' || '-p uqa-core -p uqa-sql -p uqa-storage -p uqa-storage-sqlite -p uqa-storage-redb -p uqa-execution -p uqa-engine -p uqa-pg-server' }}
+          --lib --tests
+          ${{ inputs.transaction_suite != 'sql-production' && (inputs.transaction_suite == 'execution-production' && '--features uqa-analysis/nori,uqa-analysis/kuromoji' || '--features uqa-engine/nori,uqa-engine/kuromoji') || '' }} --
+          memory:: types::value:: types::array:: types::decimal:: types::jsonb:: types::temporal:: types::tests:: json::tests float_text::
+          expr:: type_resolution:: schema::retention:: schema::generated:: assignment:: scalar::
+          ast::types::production:: ir::call_arguments::
+          document_store:: inverted_index:: key_value::tests::index_retention::
+          mvcc:: mvcc_sessions:: analyzer_bindings:: analyzer_revisions:: occurrences:: field_metadata:: japanese::
+          temporary_file:: vector_index::collection:: compound:: logical_sessions:: restore::
+          query::generated:: query::table_snapshot:: query::document_changes:: serializable::
+          spill:: spill_scan:: external_sort:: distinct:: join:: aggregation:: temporary_database::
+          mutation::conflict:: row_locks::retry_cache:: storage_errors::tests::
+          tests::storage_consistency:: table_storage::documents::tests::
+          transactions::tests::mutation_failures:: state::catalog_cell::tests::
+          storage::sessions::commit_resolution::
+          session::analyze::
+          sql_generated_columns:: queries::sql_cursor::secure_temporary:: concurrent_transactions::
+          ${{ inputs.transaction_suite == 'all' && 'transaction_lifecycle::pg18_cursors:: sessions::concurrent_writes:: sessions::native_publication:: redb_backend:: sqlite_key_value_backend:: storage::transaction_lifecycle::pg18_isolation:: storage::sessions::serializable_observations:: storage::sessions::concurrent_inserts::' || '' }}
+          --skip snapshot_creation_does_not_scale_with_document_count
+          --skip mvcc::process_writer_helper
+          --skip storage::sessions::concurrent_inserts::processes::insert_worker
+          2>&1 | tee target/concurrent-transactions.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: concurrent-transactions-${{ matrix.os }}-${{ inputs.transaction_suite }}-${{ github.sha }}
+          path: target/concurrent-transactions.log
+          if-no-files-found: ignore

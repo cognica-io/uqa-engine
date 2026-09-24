@@ -14,6 +14,79 @@ use uqa_sql::ast::{BinaryOp, ColumnType, FunctionBinding, FunctionDispatch};
 use uqa_sql::{SQLError, SQLParam};
 
 #[test]
+fn numeric_operator_ir_retains_declared_column_width_and_numeric_result() {
+    for (source, ty, input, expected) in [
+        (
+            "v % 2::smallint",
+            ColumnType::SmallInteger,
+            Value::Int(7),
+            Value::Int(1),
+        ),
+        (
+            "v ^ 3",
+            ColumnType::Numeric {
+                precision: None,
+                scale: None,
+            },
+            Value::Decimal(uqa_core::DecimalValue::parse("2").unwrap()),
+            Value::Decimal(uqa_core::DecimalValue::parse("8.0000000000000000").unwrap()),
+        ),
+        (
+            "|/ v",
+            ColumnType::Numeric {
+                precision: None,
+                scale: None,
+            },
+            Value::Decimal(uqa_core::DecimalValue::parse("9").unwrap()),
+            Value::Float(3.0),
+        ),
+    ] {
+        let uqa_sql::Statement::Select(query) = uqa_sql::compile(&format!("SELECT {source}"))
+            .unwrap()
+            .remove(0)
+        else {
+            panic!("SELECT")
+        };
+        let expression =
+            uqa_sql::plan::ExpressionPlan::lower(query.projections[0].expr.clone()).scalar;
+        let schema = RowSchema::with_types(vec!["v".into()], vec![Some(ty)]);
+        let row = PhysicalRow::from_values(vec![input]);
+        let view = schema.view(&row);
+        let context = ScalarEvalContext::from_row_lookup(&view, &[]).with_row_schema(&schema);
+        assert_eq!(
+            eval_scalar(&expression, &context).unwrap(),
+            expected,
+            "{source}"
+        );
+        let bound = uqa_sql::bind_type_introspection(expression, &schema, &[]);
+        assert_eq!(
+            eval_scalar(&bound, &ScalarEvalContext::from_row_lookup(&view, &[])).unwrap(),
+            expected,
+            "bound {source}"
+        );
+    }
+    let expression = marker(
+        FunctionDispatch::NumericOperator(uqa_sql::ast::NumericOperator::Absolute),
+        vec![ScalarExpr::Column("v".into())],
+    );
+    let schema = RowSchema::with_types(vec!["v".into()], vec![Some(ColumnType::SmallInteger)]);
+    let row = PhysicalRow::from_values(vec![Value::Int(-32768)]);
+    let view = schema.view(&row);
+    let context = ScalarEvalContext::from_row_lookup(&view, &[]).with_row_schema(&schema);
+    assert_eq!(
+        eval_scalar(&expression, &context).unwrap_err().sqlstate(),
+        Some("22003")
+    );
+    let bound = uqa_sql::bind_type_introspection(expression, &schema, &[]);
+    assert_eq!(
+        eval_scalar(&bound, &ScalarEvalContext::from_row_lookup(&view, &[]))
+            .unwrap_err()
+            .sqlstate(),
+        Some("22003")
+    );
+}
+
+#[test]
 fn arithmetic_does_not_require_parser_ast() {
     let expression = ScalarExpr::Binary {
         op: BinaryOp::Multiply,

@@ -14,14 +14,14 @@
 //! preserving input order. The temporary file is removed when the buffer (or
 //! its active drain iterator) is dropped.
 
-use std::fs::File;
 use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use uqa_storage::temporary_file::TemporaryFile as File;
 
 use crate::batch::{Batch, OwnedPhysicalRow, PhysicalRow, RowSchema};
 use crate::physical::ExecResult;
-use tempfile::NamedTempFile;
+use uqa_storage::temporary_file::TemporaryFile as NamedTempFile;
 
 mod format;
 mod indexed;

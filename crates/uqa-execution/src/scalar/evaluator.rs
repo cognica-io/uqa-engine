@@ -7,193 +7,192 @@
 //! Direct evaluation operations for the physical scalar IR.
 
 use crate::RowSchemaExecution;
-use uqa_core::{ArrayValue, Value};
+use uqa_core::{
+    memory::{Produced, ProductionControl, ProductionVec},
+    ArrayValue, Value,
+};
 use uqa_sql::ast::BinaryOp;
 use uqa_sql::expr::{
-    cast_value_with_type_resolution, eval_binary_values, eval_binary_values_with_integer_width,
-    eval_bound_builtin_function_call, eval_function_call, integer_width_for_literal,
-    integer_width_for_type, negate_value, truthy, IntegerWidth,
+    cast_value_with_type_resolution_with_control, eval_binary_values_with_control,
+    eval_binary_values_with_integer_width_with_control, negate_value_with_control, truthy,
+    IntegerWidth,
 };
 use uqa_sql::{SQLError, SQLParam};
 
-use super::call_arguments::eval_call_arguments;
+use super::call_arguments::eval_call_arguments_with_control;
 use super::context::ScalarEvalContext;
 use super::{ScalarExpr, SubqueryId};
 
 /// Evaluate the physical scalar tree directly. No parser expression is reconstructed at this boundary.
-#[expect(
-    clippy::too_many_lines,
-    reason = "scalar evaluation keeps IR variants and callback errors exhaustive"
-)]
 pub fn eval_scalar(
     expression: &ScalarExpr,
     context: &ScalarEvalContext<'_>,
 ) -> Result<Value, SQLError> {
+    eval_scalar_inner(expression, context, &ProductionControl::uncontrolled())
+        .map(|value| value.into_uncontrolled().expect("ordinary scalar result"))
+}
+
+/// Evaluate a validated generated-column expression against borrowed row fields. The context has no query runner, session callbacks or physical whole-row schema; their general execution contracts remain with `eval_scalar`.
+pub fn eval_generated_scalar_with_control(
+    expression: &ScalarExpr,
+    row: &dyn uqa_sql::expr::RowLookup,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    eval_scalar_inner(
+        expression,
+        &ScalarEvalContext::from_row_lookup(row, &[]),
+        control,
+    )
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "scalar evaluation keeps IR variants and callback errors exhaustive"
+)]
+pub(super) fn eval_scalar_inner(
+    expression: &ScalarExpr,
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    control.check()?;
     match expression {
         ScalarExpr::Default => Err(SQLError::Internal(
             "DEFAULT reached scalar expression evaluation without a mutation target".into(),
         )),
         ScalarExpr::Star => Err(SQLError::Internal("`*` cannot be evaluated".into())),
-        ScalarExpr::QualifiedStar(qualifier) => evaluate_qualified_whole_row(qualifier, context),
+        ScalarExpr::QualifiedStar(qualifier) => {
+            ordinary_output(evaluate_qualified_whole_row(qualifier, context), control)
+        }
         ScalarExpr::Column(name) => {
             if context.row_schema().is_some_and(|schema| {
                 !schema.has_unqualified_column(name)
                     && !schema.column_is_ambiguous(name)
                     && schema.has_qualifier(name)
             }) {
-                evaluate_qualified_whole_row(name, context)
+                ordinary_output(evaluate_qualified_whole_row(name, context), control)
             } else {
-                context.sql_context().column_value(name)
+                context
+                    .sql_context()
+                    .column_value_with_control(name, control)
             }
         }
         ScalarExpr::Position(position) => context
             .row_lookup()
             .and_then(|row| row.positional_column(*position))
-            .cloned()
             .ok_or_else(|| {
                 SQLError::Internal(format!(
                     "bound physical column position {position} is unavailable"
                 ))
-            }),
+            })
+            .and_then(|value| control.copy_value(value).map_err(Into::into)),
         ScalarExpr::InternalColumn(column) => context
             .row_lookup()
             .and_then(|row| row.internal_column(*column))
-            .cloned()
             .ok_or_else(|| {
                 SQLError::Internal(format!(
                     "internal relation attribute {column:?} is unavailable"
                 ))
-            }),
+            })
+            .and_then(|value| control.copy_value(value).map_err(Into::into)),
         ScalarExpr::QualifiedColumn { qualifier, column } => context
             .sql_context()
-            .qualified_column_value(qualifier, column),
-        ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => Ok(value.clone()),
-        ScalarExpr::Param(index) => eval_parameter(*index, context.params()),
+            .qualified_column_value_with_control(qualifier, column, control),
+        ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. } => {
+            control.copy_value(value).map_err(Into::into)
+        }
+        ScalarExpr::Param(index) => eval_parameter(*index, context.params(), control),
         ScalarExpr::Func {
             name,
             binding,
             args,
             ..
-        } => {
-            if name.eq_ignore_ascii_case("coalesce")
-                && binding.as_ref().is_none_or(|binding| binding.builtin)
-            {
-                for argument in args {
-                    let value = eval_scalar(argument, context)?;
-                    if !matches!(value, Value::Null) {
-                        return Ok(value);
-                    }
-                }
-                return Ok(Value::Null);
-            }
-            let arguments = eval_call_arguments(args, context)?;
-            if let Some(binding) = binding {
-                if let Some(uqa_sql::ast::FunctionResolutionError::UndefinedFunction {
-                    signature,
-                }) = binding.resolution_error.as_ref()
-                {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42883".into(),
-                        message: format!("function {signature} does not exist"),
-                    });
-                }
-                if binding.builtin {
-                    if let Some(result) = context
-                        .function_hook()
-                        .and_then(|hook| hook.call_bound_builtin_function(binding, &arguments))
-                    {
-                        return result;
-                    }
-                    return eval_bound_builtin_function_call(
-                        binding,
-                        arguments,
-                        &context.sql_context(),
-                    );
-                }
-                let sql_context = context.sql_context();
-                let engine = sql_context.engine.ok_or_else(|| {
-                    SQLError::Unsupported(
-                        "bound user function requires a logical engine session".into(),
-                    )
-                })?;
-                engine
-                    .call_bound_user_function(binding, &arguments)
-                    .unwrap_or_else(|| Err(SQLError::UnknownFunction(binding.name.clone())))
-            } else {
-                eval_function_call(name, arguments, &context.sql_context())
-            }
+        } => evaluate_function(name, binding.as_ref(), args, context, control),
+        ScalarExpr::Array(items) => {
+            let items = evaluate_items(items, context, control)?;
+            let array = ArrayValue::try_new_with_control(items, control)?.ok_or_else(|| {
+                SQLError::TypeMismatch(
+                    "multidimensional arrays must have matching dimensions".into(),
+                )
+            })?;
+            let (array, memory) = array.into_parts();
+            control
+                .finish(Value::Array(array), memory)
+                .map_err(Into::into)
         }
-        ScalarExpr::Array(items) => items
-            .iter()
-            .map(|item| eval_scalar(item, context))
-            .collect::<Result<Vec<_>, _>>()
-            .and_then(|items| {
-                ArrayValue::try_new(items).map(Value::Array).ok_or_else(|| {
-                    SQLError::TypeMismatch(
-                        "multidimensional arrays must have matching dimensions".into(),
-                    )
-                })
-            }),
-        ScalarExpr::Row(items) => items
-            .iter()
-            .map(|item| eval_scalar(item, context))
-            .collect::<Result<Vec<_>, _>>()
-            .map(Value::Row),
+        ScalarExpr::Row(items) => {
+            let (items, memory) = evaluate_items(items, context, control)?.into_parts();
+            control
+                .finish(Value::Row(items), memory)
+                .map_err(Into::into)
+        }
         ScalarExpr::Binary { op, lhs, rhs } => {
-            let left = eval_scalar(lhs, context)?;
-            let right = eval_scalar(rhs, context)?;
-            if (matches!(left, Value::Float(_)) || matches!(right, Value::Float(_)))
+            let left = eval_scalar_inner(lhs, context, control)?;
+            let right = eval_scalar_inner(rhs, context, control)?;
+            if (matches!(*left, Value::Float(_)) || matches!(*right, Value::Float(_)))
                 && matches!(
                     op,
                     BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
                 )
-                && scalar_source_type(lhs, context).is_some_and(|ty| real_type_name(&ty))
-                && scalar_source_type(rhs, context).is_some_and(|ty| real_type_name(&ty))
+                && scalar_source_type(lhs, context, control)?
+                    .map(|ty| real_type_name(&ty, control))
+                    .transpose()?
+                    .unwrap_or(false)
+                && scalar_source_type(rhs, context, control)?
+                    .map(|ty| real_type_name(&ty, control))
+                    .transpose()?
+                    .unwrap_or(false)
             {
-                return uqa_sql::expr::eval_float_arithmetic(
+                let value = uqa_sql::expr::eval_float_arithmetic_with_control(
                     *op,
                     &left,
                     &right,
                     uqa_sql::expr::FloatWidth::Real,
-                );
+                    control,
+                )?;
+                return plain(value, control);
             }
-            eval_binary_values_with_integer_width(
+            eval_binary_values_with_integer_width_with_control(
                 *op,
                 &left,
                 &right,
-                scalar_integer_binary_width(
+                uqa_sql::scalar_integer_operation_width_with_control(
                     lhs,
                     rhs,
                     context.row_schema().unwrap_or(&crate::RowSchema::default()),
                     context.params(),
-                ),
+                    control,
+                )?,
+                control,
             )
         }
         ScalarExpr::UnaryMinus(inner) => {
-            let source_ty = scalar_source_type(inner, context);
-            let value = eval_scalar(inner, context)?;
-            negate_value(&value, source_ty.as_deref())
+            let source_ty = scalar_source_type(inner, context, control)?;
+            let value = eval_scalar_inner(inner, context, control)?;
+            negate_value_with_control(&value, source_ty.as_deref().map(String::as_str), control)
         }
         ScalarExpr::Not(inner) => {
-            let value = eval_scalar(inner, context)?;
-            if matches!(value, Value::Null) {
-                Ok(Value::Null)
+            let value = eval_scalar_inner(inner, context, control)?;
+            if matches!(*value, Value::Null) {
+                plain(Value::Null, control)
             } else {
-                Ok(Value::Bool(!truthy(&value)))
+                plain(Value::Bool(!truthy(&value)), control)
             }
         }
-        ScalarExpr::And(items) => eval_and(items, context),
-        ScalarExpr::Or(items) => eval_or(items, context),
+        ScalarExpr::And(items) => eval_and(items, context, control),
+        ScalarExpr::Or(items) => eval_or(items, context, control),
         ScalarExpr::IsNull { expr, negated } => {
-            let is_null = matches!(eval_scalar(expr, context)?, Value::Null);
-            Ok(Value::Bool(if *negated { !is_null } else { is_null }))
+            let is_null = matches!(*eval_scalar_inner(expr, context, control)?, Value::Null);
+            plain(
+                Value::Bool(if *negated { !is_null } else { is_null }),
+                control,
+            )
         }
-        ScalarExpr::Between { expr, low, high } => eval_between(expr, low, high, context),
+        ScalarExpr::Between { expr, low, high } => eval_between(expr, low, high, context, control),
         ScalarExpr::InList {
             expr,
             list,
             negated,
-        } => eval_in_list(expr, list, *negated, context),
+        } => eval_in_list(expr, list, *negated, context, control),
         ScalarExpr::WindowCall { name, .. } => Err(SQLError::Unsupported(format!(
             "window function `{name}` must be evaluated by the window-aware executor"
         ))),
@@ -201,32 +200,47 @@ pub fn eval_scalar(
             base,
             when,
             else_branch,
-        } => eval_case(base.as_deref(), when, else_branch.as_deref(), context),
+        } => eval_case(
+            base.as_deref(),
+            when,
+            else_branch.as_deref(),
+            context,
+            control,
+        ),
         ScalarExpr::Cast { expr, ty } => {
-            let source_ty = scalar_source_type(expr, context);
-            let value = eval_scalar(expr, context)?;
-            cast_value_with_type_resolution(
+            let source_ty = scalar_source_type(expr, context, control)?;
+            let value = eval_scalar_inner(expr, context, control)?;
+            cast_value_with_type_resolution_with_control(
                 &value,
-                source_ty.as_deref(),
+                source_ty.as_deref().map(String::as_str),
                 ty,
                 context.function_hook(),
+                control,
             )
         }
-        ScalarExpr::ScalarSubquery(subquery) => execute_scalar_subquery(*subquery, context),
+        ScalarExpr::ScalarSubquery(subquery) => {
+            ordinary_output(execute_scalar_subquery(*subquery, context), control)
+        }
         ScalarExpr::Exists { subquery, negated } => {
             let exists = execute_exists_subquery(*subquery, context)?;
-            Ok(Value::Bool(if *negated { !exists } else { exists }))
+            plain(
+                Value::Bool(if *negated { !exists } else { exists }),
+                control,
+            )
         }
         ScalarExpr::InSubquery {
             expr,
             subquery,
             negated,
         } => {
-            let needle = eval_scalar(expr, context)?;
+            let needle = eval_scalar_inner(expr, context, control)?;
             let found = execute_in_subquery(*subquery, &needle, context)?;
-            Ok(found.map_or(Value::Null, |found| {
-                Value::Bool(if *negated { !found } else { found })
-            }))
+            plain(
+                found.map_or(Value::Null, |found| {
+                    Value::Bool(if *negated { !found } else { found })
+                }),
+                control,
+            )
         }
     }
 }
@@ -294,67 +308,63 @@ fn materialize_qualified_whole_row(
         .map(Value::Record)
 }
 
-fn eval_parameter(index: usize, params: &[SQLParam]) -> Result<Value, SQLError> {
-    match index
-        .checked_sub(1)
-        .and_then(|parameter_index| params.get(parameter_index))
-    {
-        Some(SQLParam::Scalar(value) | SQLParam::TypedScalar { value, .. }) => Ok(value.clone()),
-        Some(SQLParam::Vector(vector)) => Ok(Value::List(
-            vector
-                .iter()
-                .map(|value| Value::Float(f64::from(*value)))
-                .collect(),
-        )),
-        Some(SQLParam::Tensor(vectors)) => Ok(Value::List(
-            vectors
-                .iter()
-                .map(|vector| {
-                    Value::List(
-                        vector
-                            .iter()
-                            .map(|value| Value::Float(f64::from(*value)))
-                            .collect(),
-                    )
-                })
-                .collect(),
-        )),
-        None => Err(SQLError::MissingParam(index)),
-    }
+fn eval_parameter(
+    index: usize,
+    params: &[SQLParam],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    params
+        .get(index.checked_sub(1).ok_or(SQLError::MissingParam(index))?)
+        .ok_or(SQLError::MissingParam(index))?
+        .to_value_with_control(control)
 }
 
-fn eval_and(items: &[ScalarExpr], context: &ScalarEvalContext<'_>) -> Result<Value, SQLError> {
+fn eval_and(
+    items: &[ScalarExpr],
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
     let mut saw_null = false;
     for item in items {
-        let value = eval_scalar(item, context)?;
-        if matches!(value, Value::Null) {
+        let value = eval_scalar_inner(item, context, control)?;
+        if matches!(*value, Value::Null) {
             saw_null = true;
         } else if !truthy(&value) {
-            return Ok(Value::Bool(false));
+            return plain(Value::Bool(false), control);
         }
     }
-    Ok(if saw_null {
-        Value::Null
-    } else {
-        Value::Bool(true)
-    })
+    plain(
+        if saw_null {
+            Value::Null
+        } else {
+            Value::Bool(true)
+        },
+        control,
+    )
 }
 
-fn eval_or(items: &[ScalarExpr], context: &ScalarEvalContext<'_>) -> Result<Value, SQLError> {
+fn eval_or(
+    items: &[ScalarExpr],
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
     let mut saw_null = false;
     for item in items {
-        let value = eval_scalar(item, context)?;
-        if matches!(value, Value::Null) {
+        let value = eval_scalar_inner(item, context, control)?;
+        if matches!(*value, Value::Null) {
             saw_null = true;
         } else if truthy(&value) {
-            return Ok(Value::Bool(true));
+            return plain(Value::Bool(true), control);
         }
     }
-    Ok(if saw_null {
-        Value::Null
-    } else {
-        Value::Bool(false)
-    })
+    plain(
+        if saw_null {
+            Value::Null
+        } else {
+            Value::Bool(false)
+        },
+        control,
+    )
 }
 
 fn eval_between(
@@ -362,16 +372,18 @@ fn eval_between(
     low: &ScalarExpr,
     high: &ScalarExpr,
     context: &ScalarEvalContext<'_>,
-) -> Result<Value, SQLError> {
-    let value = eval_scalar(expression, context)?;
-    let low = eval_scalar(low, context)?;
-    let high = eval_scalar(high, context)?;
-    let greater_equal = eval_binary_values(BinaryOp::GreaterEqual, &value, &low)?;
-    let less_equal = eval_binary_values(BinaryOp::LessEqual, &value, &high)?;
-    match (greater_equal, less_equal) {
-        (Value::Bool(false), _) | (_, Value::Bool(false)) => Ok(Value::Bool(false)),
-        (Value::Bool(true), Value::Bool(true)) => Ok(Value::Bool(true)),
-        _ => Ok(Value::Null),
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    let value = eval_scalar_inner(expression, context, control)?;
+    let low = eval_scalar_inner(low, context, control)?;
+    let high = eval_scalar_inner(high, context, control)?;
+    let greater_equal =
+        eval_binary_values_with_control(BinaryOp::GreaterEqual, &value, &low, control)?;
+    let less_equal = eval_binary_values_with_control(BinaryOp::LessEqual, &value, &high, control)?;
+    match (&*greater_equal, &*less_equal) {
+        (Value::Bool(false), _) | (_, Value::Bool(false)) => plain(Value::Bool(false), control),
+        (Value::Bool(true), Value::Bool(true)) => plain(Value::Bool(true), control),
+        _ => plain(Value::Null, control),
     }
 }
 
@@ -380,22 +392,26 @@ fn eval_in_list(
     list: &[ScalarExpr],
     negated: bool,
     context: &ScalarEvalContext<'_>,
-) -> Result<Value, SQLError> {
-    let needle = eval_scalar(expression, context)?;
-    let mut saw_null = matches!(needle, Value::Null);
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    let needle = eval_scalar_inner(expression, context, control)?;
+    let mut saw_null = matches!(*needle, Value::Null);
     for item in list {
-        let candidate = eval_scalar(item, context)?;
-        match eval_binary_values(BinaryOp::Equal, &needle, &candidate)? {
-            Value::Bool(true) => return Ok(Value::Bool(!negated)),
+        let candidate = eval_scalar_inner(item, context, control)?;
+        match *eval_binary_values_with_control(BinaryOp::Equal, &needle, &candidate, control)? {
+            Value::Bool(true) => return plain(Value::Bool(!negated), control),
             Value::Null => saw_null = true,
             _ => {}
         }
     }
-    Ok(if saw_null {
-        Value::Null
-    } else {
-        Value::Bool(negated)
-    })
+    plain(
+        if saw_null {
+            Value::Null
+        } else {
+            Value::Bool(negated)
+        },
+        control,
+    )
 }
 
 fn eval_case(
@@ -403,25 +419,26 @@ fn eval_case(
     branches: &[(ScalarExpr, ScalarExpr)],
     else_branch: Option<&ScalarExpr>,
     context: &ScalarEvalContext<'_>,
-) -> Result<Value, SQLError> {
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
     let base = base
-        .map(|expression| eval_scalar(expression, context))
+        .map(|expression| eval_scalar_inner(expression, context, control))
         .transpose()?;
     for (condition, result) in branches {
-        let condition = eval_scalar(condition, context)?;
+        let condition = eval_scalar_inner(condition, context, control)?;
         let matched = match &base {
             Some(base) => matches!(
-                eval_binary_values(BinaryOp::Equal, base, &condition)?,
+                *eval_binary_values_with_control(BinaryOp::Equal, base, &condition, control)?,
                 Value::Bool(true)
             ),
             None => truthy(&condition),
         };
         if matched {
-            return eval_scalar(result, context);
+            return eval_scalar_inner(result, context, control);
         }
     }
-    else_branch.map_or(Ok(Value::Null), |expression| {
-        eval_scalar(expression, context)
+    else_branch.map_or(plain(Value::Null, control), |expression| {
+        eval_scalar_inner(expression, context, control)
     })
 }
 
@@ -471,82 +488,25 @@ fn execute_in_subquery(
     }
 }
 
-fn scalar_source_type(expression: &ScalarExpr, context: &ScalarEvalContext<'_>) -> Option<String> {
-    match expression {
-        ScalarExpr::TypedLiteral {
-            bound_type: Some(ty),
-            ..
-        } => {
-            return Some(literal_operator_type(ty).sql_name());
-        }
-        ScalarExpr::Func {
-            binding: Some(binding),
-            ..
-        } if binding
-            .invocation
-            .as_ref()
-            .is_some_and(|invocation| invocation.return_type.is_some()) =>
-        {
-            return binding
-                .invocation
-                .as_ref()
-                .and_then(|invocation| invocation.return_type.clone());
-        }
-        ScalarExpr::Cast { ty, .. } | ScalarExpr::TypedLiteral { ty, .. } => {
-            return Some(ty.clone())
-        }
-        ScalarExpr::UnaryMinus(inner) => return scalar_source_type(inner, context),
-        ScalarExpr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => {
-            return Some("integer".into());
-        }
-        ScalarExpr::Literal(Value::Int(_)) => return Some("bigint".into()),
-        ScalarExpr::Literal(Value::Bytes(_)) => return Some("bytea".into()),
-        ScalarExpr::Literal(Value::Str(_) | Value::FixedChar(_)) => return None,
-        _ => {}
-    }
-    let empty = crate::RowSchema::default();
-    crate::scalar_type(
+fn scalar_source_type(
+    expression: &ScalarExpr,
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<String>>, SQLError> {
+    uqa_sql::scalar_operand_type_name_with_control(
         expression,
-        context.row_schema().unwrap_or(&empty),
+        context.row_schema().unwrap_or(&crate::RowSchema::default()),
         context.params(),
-    )
-    .ok()
-    .flatten()
-    .map(|ty| literal_operator_type(&ty).sql_name())
-}
-
-fn real_type_name(name: &str) -> bool {
-    matches!(
-        uqa_sql::ast::ColumnType::from_sql_name(name),
-        Ok(uqa_sql::ast::ColumnType::Real)
+        control,
     )
 }
 
-fn scalar_integer_width(expression: &ScalarExpr) -> Option<IntegerWidth> {
-    match expression {
-        ScalarExpr::Literal(Value::Int(value)) => Some(integer_width_for_literal(*value)),
-        ScalarExpr::TypedLiteral {
-            bound_type: Some(ty),
-            ..
-        } => integer_width_for_type(&literal_operator_type(ty).sql_name()),
-        ScalarExpr::Cast { ty, .. } | ScalarExpr::TypedLiteral { ty, .. } => {
-            integer_width_for_type(ty)
-        }
-        ScalarExpr::UnaryMinus(inner) => scalar_integer_width(inner),
-        ScalarExpr::Binary {
-            op: BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide,
-            lhs,
-            rhs,
-        } => Some(scalar_integer_width(lhs)?.max(scalar_integer_width(rhs)?)),
-        _ => None,
+fn real_type_name(name: &str, control: &ProductionControl<'_>) -> Result<bool, SQLError> {
+    match uqa_sql::ColumnType::from_sql_name_with_control(name, control) {
+        Ok(ty) => Ok(matches!(*ty, uqa_sql::ColumnType::Real)),
+        Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => Err(error),
+        Err(_) => Ok(false),
     }
-}
-
-fn literal_operator_type(mut ty: &uqa_sql::ast::ColumnType) -> &uqa_sql::ast::ColumnType {
-    while let uqa_sql::ast::ColumnType::Domain { base, .. } = ty {
-        ty = base;
-    }
-    ty
 }
 
 pub(crate) fn scalar_integer_binary_width(
@@ -555,13 +515,38 @@ pub(crate) fn scalar_integer_binary_width(
     schema: &crate::RowSchema,
     parameters: &[SQLParam],
 ) -> Option<IntegerWidth> {
-    let width = |expression| {
-        scalar_integer_width(expression).or_else(|| {
-            let ty = crate::scalar_type(expression, schema, parameters)
-                .ok()
-                .flatten()?;
-            integer_width_for_type(&literal_operator_type(&ty).sql_name())
-        })
-    };
-    Some(width(lhs)?.max(width(rhs)?))
+    uqa_sql::scalar_integer_operation_width(lhs, rhs, schema, parameters)
 }
+
+fn plain(value: Value, control: &ProductionControl<'_>) -> Result<Produced<Value>, SQLError> {
+    control
+        .finish(value, control.empty_reservation())
+        .map_err(Into::into)
+}
+
+// Whole physical rows, session functions and query runners exist only in the ordinary context. The generated entry constructs a field-only context, so these legacy capability calls fail before returning a value there.
+fn ordinary_output(
+    value: Result<Value, SQLError>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    control.finish(value?, None).map_err(Into::into)
+}
+
+fn evaluate_items(
+    items: &[ScalarExpr],
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<Value>>, SQLError> {
+    let mut output = ProductionVec::new(*control);
+    output.reserve(items.len())?;
+    for item in items {
+        output.push_produced(eval_scalar_inner(item, context, control)?)?;
+    }
+    output.finish().map_err(Into::into)
+}
+
+mod function;
+use function::evaluate_function;
+
+#[cfg(test)]
+mod production_tests;

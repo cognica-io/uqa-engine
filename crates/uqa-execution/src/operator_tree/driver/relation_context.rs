@@ -10,6 +10,7 @@ use super::{
     first_text_signal, operator_execution_error, BTreeMap, ColumnType, DocId, DriverResult,
     OperatorTree, Payload, PhysicalRetrievalDriver, PostingEntry, PostingList, SQLError, Value,
 };
+use uqa_storage::InvertedIndex;
 
 impl PhysicalRetrievalDriver<'_> {
     pub(super) fn execute_opaque(
@@ -38,11 +39,16 @@ impl PhysicalRetrievalDriver<'_> {
             return Err(SQLError::UnknownTable(self.table.to_string()));
         };
         let idx_guard = table_state.inverted_index();
-        let index_stats = idx_guard
+        let index = crate::serializable::text::ObservedTextIndex::new(
+            idx_guard.as_ref().as_ref(),
+            self.context.relations.serializable_read(self.table)?,
+            table_state.columns(),
+        );
+        let index_stats = index
             .stats()
-            .map_err(|error| operator_execution_error("index statistics", error))?;
+            .map_err(|error| crate::storage_errors::storage_error("index statistics", &error))?;
         if let Some((field, query)) = first_text_signal(signals) {
-            let analyzer = idx_guard
+            let analyzer = index
                 .search_analyzer_revision(&field)
                 .map_err(|error| operator_execution_error("attention analyzer revision", error))?;
             let terms = analyzer

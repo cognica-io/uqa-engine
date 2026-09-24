@@ -21,6 +21,55 @@ use uqa_sql::{plan::QueryBlockPlan, SQLError, SQLParam};
     reason = "keeps SELECT scope inputs aligned"
 )]
 pub fn attach_order_limit<'a, S: Clone + 'static>(
+    operator: Box<dyn crate::PhysicalOperator + 'a>,
+    statement: &QueryBlockPlan,
+    output_columns: &[OutputColumnMapping],
+    context: RelationalContext<'a, S>,
+    params: &'a [SQLParam],
+    ctes: &CteScope<S>,
+    runtime: QueryRuntimeView<'a>,
+    evaluator: SharedExpressionEvaluator<'a>,
+    recheck_source: Option<crate::query::recheck_source::LockRowsRecheckSource<S>>,
+) -> Result<Box<dyn crate::PhysicalOperator + 'a>, SQLError> {
+    attach_ordered_slice(
+        operator,
+        statement,
+        output_columns,
+        context,
+        params,
+        ctes,
+        runtime,
+        evaluator,
+        recheck_source,
+        false,
+    )
+}
+
+pub(super) fn attach_presorted_limit<'a, S: Clone + 'static>(
+    operator: Box<dyn crate::PhysicalOperator + 'a>,
+    statement: &QueryBlockPlan,
+    output_columns: &[OutputColumnMapping],
+    execution: super::ordering::FinalProjectionExecution<'a, '_, S>,
+) -> Result<Box<dyn crate::PhysicalOperator + 'a>, SQLError> {
+    attach_ordered_slice(
+        operator,
+        statement,
+        output_columns,
+        execution.context,
+        execution.params,
+        execution.ctes,
+        execution.runtime,
+        execution.evaluator,
+        None,
+        true,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps SELECT scope and established ordering explicit"
+)]
+fn attach_ordered_slice<'a, S: Clone + 'static>(
     mut operator: Box<dyn crate::PhysicalOperator + 'a>,
     statement: &QueryBlockPlan,
     output_columns: &[OutputColumnMapping],
@@ -30,6 +79,7 @@ pub fn attach_order_limit<'a, S: Clone + 'static>(
     runtime: QueryRuntimeView<'a>,
     evaluator: SharedExpressionEvaluator<'a>,
     recheck_source: Option<crate::query::recheck_source::LockRowsRecheckSource<S>>,
+    presorted: bool,
 ) -> Result<Box<dyn crate::PhysicalOperator + 'a>, SQLError> {
     use crate::{ExternalSort, Limit};
 
@@ -49,7 +99,6 @@ pub fn attach_order_limit<'a, S: Clone + 'static>(
     };
     let mut tie_keys = None;
     if !statement.order_by.is_empty() {
-        let work_mem_bytes = physical_work_mem_bytes(runtime)?;
         let keys = resolved_sort_keys(statement, output_columns, Some(operator.row_schema()))?;
         if with_ties {
             tie_keys = Some(keys.clone());
@@ -80,9 +129,10 @@ pub fn attach_order_limit<'a, S: Clone + 'static>(
                 })
             })
             .collect::<Option<Vec<_>>>();
-        let already_ordered = required_ordering.as_ref().is_some_and(|required| {
-            crate::ordering_satisfies(operator.output_ordering(), required)
-        });
+        let already_ordered = presorted
+            || required_ordering.as_ref().is_some_and(|required| {
+                crate::ordering_satisfies(operator.output_ordering(), required)
+            });
         if !already_ordered {
             // A locking query must keep the complete sorted candidate stream: SKIP LOCKED skips rows, and a tuple-local recheck can drop a changed candidate, in which case PostgreSQL 18 surfaces the next candidate in sort order instead of returning fewer rows.
             operator = Box::new(ExternalSort::new(
@@ -90,7 +140,7 @@ pub fn attach_order_limit<'a, S: Clone + 'static>(
                 keys,
                 Arc::clone(&evaluator),
                 keep.filter(|_| statement.locking.is_empty() && !with_ties),
-                work_mem_bytes,
+                physical_work_mem_bytes(runtime)?,
             ));
             if ctes.scans_backwards() {
                 operator = crate::prepare_backward_scan(operator);

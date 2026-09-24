@@ -12,7 +12,7 @@ use super::{
     CreateIndex, CreateTable, Expr, NodeEnum, Result, SQLError, TableKeyConstraint,
     TableKeyConstraintKind,
 };
-use crate::ast::{AutoIncrement, ColumnType, GeneratedColumn, GeneratedColumnKind};
+use crate::ast::{AutoIncrement, ColumnType, GeneratedColumn, GeneratedColumnKind, TableCheck};
 
 struct TableNotNullConstraint {
     name: Option<String>,
@@ -28,7 +28,7 @@ struct TableNotNullConstraint {
 pub(in crate::compiler) fn compile_create_table(
     stmt: &pg_query::protobuf::CreateStmt,
 ) -> Result<CreateTable> {
-    use crate::ast::{ForeignKey, TableCheck};
+    use crate::ast::ForeignKey;
     use std::collections::BTreeSet;
     crate::compiler::validate_create_table_envelope(stmt, "CREATE TABLE")?;
     let relation = stmt
@@ -70,32 +70,19 @@ pub(in crate::compiler) fn compile_create_table(
                         &cstr.conname,
                         &relation.relname,
                     )?;
-                    let kind = match cstr.contype() {
-                        pg_query::protobuf::ConstrType::ConstrPrimary => {
-                            if primary_key_seen {
-                                return Err(SQLError::TypeMismatch(
-                                    "multiple PRIMARY KEY constraints are not allowed".into(),
-                                ));
-                            }
-                            primary_key_seen = true;
-                            Some(TableKeyConstraintKind::PrimaryKey)
+                    if cstr.contype() == pg_query::protobuf::ConstrType::ConstrPrimary {
+                        if primary_key_seen {
+                            return Err(SQLError::TypeMismatch(
+                                "multiple PRIMARY KEY constraints are not allowed".into(),
+                            ));
                         }
-                        pg_query::protobuf::ConstrType::ConstrUnique => {
-                            Some(TableKeyConstraintKind::Unique)
-                        }
-                        _ => None,
-                    };
-                    if let Some(kind) = kind {
-                        key_constraints.push(TableKeyConstraint {
-                            name: constraint_name(&cstr.conname),
-                            kind,
-                            columns: vec![col.colname.clone()],
-                            nulls_not_distinct: cstr.nulls_not_distinct,
-                            without_overlaps: cstr.without_overlaps,
-                        });
+                        primary_key_seen = true;
                     }
                 }
-                columns.push(compile_column_def(col)?);
+                key_constraints.extend(compile_column_key_constraints(col)?);
+                let (column, column_checks) = compile_column_def(col)?;
+                columns.push(column);
+                checks.extend(column_checks);
             }
             NodeEnum::Constraint(cstr) => {
                 register_constraint_name(&mut named_constraints, &cstr.conname, &relation.relname)?;
@@ -112,6 +99,7 @@ pub(in crate::compiler) fn compile_create_table(
                             Some(cstr.conname.clone())
                         };
                         checks.push(TableCheck {
+                            catalog_oid: None,
                             name: cname,
                             expr,
                             enforced: cstr.is_enforced,
@@ -160,8 +148,10 @@ pub(in crate::compiler) fn compile_create_table(
                         )?;
                         foreign_keys.push(ForeignKey {
                             referenced_key: None,
+                            referenced_index: None,
                             name: cname,
                             object_id: None,
+                            catalog_identity: None,
                             local_columns,
                             ref_table,
                             ref_columns,
@@ -192,6 +182,7 @@ pub(in crate::compiler) fn compile_create_table(
                             };
                         let key_columns = extract_strings(&cstr.keys)?;
                         key_constraints.push(TableKeyConstraint {
+                            catalog_identity: None,
                             name: constraint_name(&cstr.conname),
                             kind,
                             columns: key_columns,
@@ -397,13 +388,40 @@ pub(in crate::compiler) fn key_constraint_label(kind: TableKeyConstraintKind) ->
     }
 }
 
+pub(in crate::compiler) fn compile_column_key_constraints(
+    column: &pg_query::protobuf::ColumnDef,
+) -> Result<Vec<TableKeyConstraint>> {
+    let mut keys = Vec::new();
+    for node in &column.constraints {
+        let Some(NodeEnum::Constraint(constraint)) = node.node.as_ref() else {
+            return Err(SQLError::Internal(
+                "column contains an invalid constraint".into(),
+            ));
+        };
+        let kind = match constraint.contype() {
+            pg_query::protobuf::ConstrType::ConstrPrimary => TableKeyConstraintKind::PrimaryKey,
+            pg_query::protobuf::ConstrType::ConstrUnique => TableKeyConstraintKind::Unique,
+            _ => continue,
+        };
+        keys.push(TableKeyConstraint {
+            catalog_identity: None,
+            name: constraint_name(&constraint.conname),
+            kind,
+            columns: vec![column.colname.clone()],
+            nulls_not_distinct: constraint.nulls_not_distinct,
+            without_overlaps: constraint.without_overlaps,
+        });
+    }
+    Ok(keys)
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "ordered PostgreSQL lowering preserves syntax and error precedence"
 )]
 pub(in crate::compiler) fn compile_column_def(
     col: &pg_query::protobuf::ColumnDef,
-) -> Result<ColumnDef> {
+) -> Result<(ColumnDef, Vec<TableCheck>)> {
     let name = col.colname.clone();
     let raw_type = raw_type_name(col)?;
     let ty = compile_type_name(col)?;
@@ -426,6 +444,7 @@ pub(in crate::compiler) fn compile_column_def(
     let mut check_enforced = true;
     let mut check_validated = true;
     let mut check_no_inherit = false;
+    let mut checks = Vec::new();
     let mut references: Option<crate::ast::ForeignKeyRef> = None;
     #[derive(Clone, Copy)]
     enum EnforceableConstraint {
@@ -499,6 +518,19 @@ pub(in crate::compiler) fn compile_column_def(
                     last_enforceable = None;
                 }
                 pg_query::protobuf::ConstrType::ConstrCheck => {
+                    if let Some(expr) = check.take() {
+                        checks.push(TableCheck {
+                            name: check_name.take(),
+                            expr,
+                            enforced: check_enforced,
+                            validated: check_validated,
+                            no_inherit: check_no_inherit,
+                            object_id: None,
+                            catalog_oid: None,
+                            is_local: true,
+                            partition_constraint: None,
+                        });
+                    }
                     let raw = cstr
                         .raw_expr
                         .as_deref()
@@ -529,8 +561,10 @@ pub(in crate::compiler) fn compile_column_def(
                     }
                     references = Some(crate::ast::ForeignKeyRef {
                         referenced_key: None,
+                        referenced_index: None,
                         name: constraint_name(&cstr.conname),
                         object_id: None,
+                        catalog_identity: None,
                         table,
                         column: columns.into_iter().next(),
                         on_update: compile_foreign_key_action(&cstr.fk_upd_action)?,
@@ -651,7 +685,7 @@ pub(in crate::compiler) fn compile_column_def(
     if auto_increment.is_some() {
         not_null = true;
     }
-    Ok(ColumnDef {
+    let mut column = ColumnDef {
         name,
         ty,
         object_id: None,
@@ -660,6 +694,7 @@ pub(in crate::compiler) fn compile_column_def(
         not_null,
         not_null_explicit,
         not_null_name,
+        not_null_identity: None,
         not_null_validated,
         not_null_no_inherit,
         not_null_is_local: true,
@@ -674,8 +709,16 @@ pub(in crate::compiler) fn compile_column_def(
         check_no_inherit,
         check_is_local: true,
         check_object_id: None,
+        check_catalog_oid: None,
         references,
-    })
+    };
+    if !checks.is_empty() {
+        checks.push(
+            crate::schema::constraint_changes::take_column_check(&mut column)
+                .ok_or_else(|| SQLError::Internal("final column CHECK disappeared".into()))?,
+        );
+    }
+    Ok((column, checks))
 }
 
 // -------------------------------------------------------------------------

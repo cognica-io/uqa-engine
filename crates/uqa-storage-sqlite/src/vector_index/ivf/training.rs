@@ -35,6 +35,26 @@ impl SQLiteIVFIndex {
     }
 
     pub(super) fn initialize_metadata(&self) -> StorageBackendResult<()> {
+        if self
+            .persistent
+            .write_native(|read, batch| {
+                let read = read.owned(batch)?;
+                let index = super::native::load_state(&read, self.params, true)?;
+                let snapshot = index.prepare_metadata(
+                    uqa_storage::ivf_index::IVFMutation::Train,
+                    &read.snapshot.control,
+                )?;
+                let encoded = super::native::encode_controlled(
+                    self.params,
+                    &snapshot,
+                    &read.snapshot.control,
+                )?;
+                super::native::write_metadata(&read, batch, &encoded, false)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         if self.persistent.count()? >= self.params.train_threshold {
             self.train_metadata()
         } else {

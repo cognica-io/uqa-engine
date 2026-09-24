@@ -38,6 +38,13 @@ impl Engine {
     }
 
     pub fn load_model(&self, name: &str) -> Result<Option<DeepModel>, SQLError> {
+        self.with_direct_read_snapshot(|engine| engine.load_model_in_execution(name))
+    }
+
+    pub(crate) fn load_model_in_execution(
+        &self,
+        name: &str,
+    ) -> Result<Option<DeepModel>, SQLError> {
         let Some(catalog) = self.storage.catalog.as_ref() else {
             return Ok(self.durable.models.read().get(name).cloned());
         };
@@ -66,7 +73,7 @@ impl Engine {
     }
 
     fn drop_model_inner(&self, name: &str) -> Result<bool, SQLError> {
-        if self.load_model(name)?.is_none() {
+        if self.load_model_in_execution(name)?.is_none() {
             return Ok(false);
         }
         let mut models = self.durable.models.write();
@@ -131,6 +138,14 @@ impl Engine {
         name: &str,
         params_json: &str,
     ) -> Result<(), SQLError> {
+        // Physical retrieval workers publish through this adapter without reentering the public mutation scope.
+        if self.current_transaction_is_read_only() {
+            return Err(SQLError::Routine {
+                sqlstate: "25006".into(),
+                message: "cannot save scoring parameters in a read-only transaction".into(),
+            });
+        }
+        self.lock_scoring_parameter_write(name)?;
         let mut scoring_params = self.durable.scoring_params.write();
         if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
@@ -236,6 +251,7 @@ impl Engine {
     }
 
     fn drop_scoring_params_inner(&self, name: &str) -> Result<bool, SQLError> {
+        self.lock_scoring_parameter_write(name)?;
         if self.load_scoring_params(name)?.is_none() {
             return Ok(false);
         }
@@ -255,19 +271,22 @@ impl Engine {
     /// plan executor. A missing model retains the public API's `None`
     /// contract; the physical driver only receives known models.
     pub fn deep_predict(&self, name: &str) -> Result<Option<Vec<(DocId, f64)>>, SQLError> {
-        if self.load_model(name)?.is_none() {
-            return Ok(None);
-        }
-        let tree = uqa_operators::OperatorTree::DeepPredict {
-            model: name.to_string(),
-        };
-        let entries = crate::operator_tree_bridge::execute_scored_tree(self, "", &[], &tree)?;
-        Ok(Some(
-            entries
-                .into_iter()
-                .map(|entry| (entry.doc_id, entry.score))
-                .collect(),
-        ))
+        self.with_direct_read_snapshot(|engine| {
+            if engine.load_model_in_execution(name)?.is_none() {
+                return Ok(None);
+            }
+            let tree = uqa_operators::OperatorTree::DeepPredict {
+                model: name.to_string(),
+            };
+            let entries =
+                crate::operator_tree_bridge::execute_scored_tree(engine, "", "", &[], &tree)?;
+            Ok(Some(
+                entries
+                    .into_iter()
+                    .map(|entry| (entry.doc_id, entry.score))
+                    .collect(),
+            ))
+        })
     }
 
     pub fn deep_predict_features(
@@ -275,12 +294,14 @@ impl Engine {
         name: &str,
         examples: &[(DocId, Vec<f64>)],
     ) -> Result<Vec<(DocId, f64)>, SQLError> {
-        let model = self
-            .load_model(name)?
-            .ok_or_else(|| SQLError::Unsupported(format!("unknown model {name:?}")))?;
-        let (scores, _) = model
-            .predict_features(examples)
-            .map_err(|e| SQLError::Unsupported(format!("deep_predict: {e}")))?;
-        Ok(scores)
+        self.with_direct_read_snapshot(|engine| {
+            let model = engine
+                .load_model_in_execution(name)?
+                .ok_or_else(|| SQLError::Unsupported(format!("unknown model {name:?}")))?;
+            let (scores, _) = model
+                .predict_features(examples)
+                .map_err(|e| SQLError::Unsupported(format!("deep_predict: {e}")))?;
+            Ok(scores)
+        })
     }
 }

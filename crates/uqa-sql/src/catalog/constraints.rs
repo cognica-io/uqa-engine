@@ -20,6 +20,29 @@ pub fn constraint_identities_match(left: &ConstraintIdentity, right: &Constraint
     }
 }
 
+/// Reconcile a retained constraint with a renamed row before considering a renamed relation. A removed row on a surviving relation must not bind to another partition copy.
+pub fn find_live_constraint_identity<'a>(
+    live: &'a [ConstraintIdentity],
+    live_relations: &std::collections::BTreeSet<RelationIdentity>,
+    identity: &ConstraintIdentity,
+) -> Option<&'a ConstraintIdentity> {
+    live.iter()
+        .find(|current| *current == identity)
+        .or_else(|| {
+            live.iter().find(|current| {
+                current.relation == identity.relation
+                    && constraint_identities_match(identity, current)
+            })
+        })
+        .or_else(|| {
+            if live_relations.contains(&identity.relation) {
+                return None;
+            }
+            live.iter()
+                .find(|current| constraint_identities_match(identity, current))
+        })
+}
+
 pub fn foreign_key_identity(
     table: &str,
     foreign_key: &crate::ast::ForeignKey,
@@ -45,3 +68,6 @@ pub fn foreign_key_identity(
         object_id: Some(object_id),
     })
 }
+
+#[cfg(test)]
+mod tests;

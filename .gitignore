@@ -63,3 +63,9 @@ crates/uqa-node/node_modules/
 /benchmarks/nori/evidence/
 /benchmarks/nori/*-evidence/
 /benchmarks/nori/*followup-evidence.json
+
+# Native transaction and snapshot coordination
+*.uqa-snapshots
+*.uqa-serializable
+*.uqa-serializable-journal
+*.uqa-serializable-leases

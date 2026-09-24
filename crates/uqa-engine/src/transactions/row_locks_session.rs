@@ -12,15 +12,7 @@ use super::{
 };
 
 impl Engine {
-    /// Run one typed row mutation with the same relation/tuple locking order as SQL DML: logical locks first, backend-writer promotion second. This prevents typed APIs from bypassing `SELECT ... FOR UPDATE` and avoids a writer/row-lock inversion while waiting for another transaction.
-    pub(crate) fn with_implicit_row_write_transaction<R>(
-        &self,
-        table: &str,
-        doc_id: uqa_core::DocId,
-        strength: uqa_sql::ast::LockStrength,
-        f: impl FnOnce(&Self) -> Result<R, SQLError>,
-    ) -> Result<R, SQLError> {
-        let _statement = self.runtime.statement_gate.lock();
+    fn ensure_row_mutation_allowed(&self, table: &str) -> Result<(), SQLError> {
         if self.current_transaction_is_read_only()
             && self
                 .table_persistence(table)
@@ -38,6 +30,30 @@ impl Engine {
                 message: "cannot execute row mutation in a read-only transaction".into(),
             });
         }
+        Ok(())
+    }
+
+    /// Keep the row mutation transaction boundary after SQL has acquired its chosen tuple-lock strength. Existing temporary rows retain their read-only transaction permission without taking a stronger lock.
+    pub(crate) fn with_prepared_row_write_transaction<R>(
+        &self,
+        table: &str,
+        f: impl FnOnce(&Self) -> Result<R, SQLError>,
+    ) -> Result<R, SQLError> {
+        let _statement = self.runtime.statement_gate.lock();
+        self.ensure_row_mutation_allowed(table)?;
+        self.with_implicit_transaction_mutation(f)
+    }
+
+    /// Run one typed row mutation with the same relation/tuple locking order as SQL DML: logical locks first, backend-writer promotion second. This prevents typed APIs from bypassing `SELECT ... FOR UPDATE` and avoids a writer/row-lock inversion while waiting for another transaction.
+    pub(crate) fn with_implicit_row_write_transaction<R>(
+        &self,
+        table: &str,
+        doc_id: uqa_core::DocId,
+        strength: uqa_sql::ast::LockStrength,
+        f: impl FnOnce(&Self) -> Result<R, SQLError>,
+    ) -> Result<R, SQLError> {
+        let _statement = self.runtime.statement_gate.lock();
+        self.ensure_row_mutation_allowed(table)?;
         if self.storage.backend.is_none() && self.transaction_depth() == 0 {
             return f(self);
         }
@@ -50,6 +66,7 @@ impl Engine {
             self.begin_implicit_statement_transaction(false)?;
         }
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.prepare_serializable_transaction_snapshot()?;
             self.lock_relation(table, crate::row_locks::RelationLockMode::RowExclusive)?;
             match self.lock_row(
                 table,
@@ -70,10 +87,7 @@ impl Engine {
         }));
 
         if !started {
-            return match result {
-                Ok(result) => result,
-                Err(payload) => std::panic::resume_unwind(payload),
-            };
+            return self.finish_existing_transaction_operation(result, std::convert::identity);
         }
         match result {
             Ok(Ok(value)) => {
@@ -82,13 +96,13 @@ impl Engine {
             }
             Ok(Err(error)) => match self.rollback() {
                 Ok(()) => Err(error),
-                Err(rollback_error) => Err(SQLError::Internal(format!(
+                Err(rollback_error) => Err(Self::rollback_cleanup_error(&rollback_error, format!(
                     "typed row mutation failed: {error}; rollback also failed: {rollback_error}"
                 ))),
             },
             Err(payload) => match self.rollback() {
                 Ok(()) => std::panic::resume_unwind(payload),
-                Err(rollback_error) => Err(SQLError::Internal(format!(
+                Err(rollback_error) => Err(Self::rollback_cleanup_error(&rollback_error, format!(
                     "typed row mutation rollback after panic failed: {rollback_error}; original panic: {}",
                     panic_description(payload.as_ref())
                 ))),
@@ -110,6 +124,9 @@ impl Engine {
         };
         if self.storage.provider.is_none() {
             return Ok(false);
+        }
+        if backend.transaction_model().is_versioned() {
+            return Ok(true);
         }
         let stack = self.session.transactions.lock();
         let deferred_reader = stack.first().is_some_and(|frame| {
@@ -148,6 +165,38 @@ impl Engine {
             cancel: &self.runtime.cancellation,
             relation: display_name,
         })
+    }
+
+    /// Refresh a named parameter after obtaining its transaction-retained logical lock. Execution workers already belong to the parent command, so this adapter must not reenter its thread-owned statement gate.
+    pub(crate) fn lock_scoring_parameter_write(&self, name: &str) -> Result<(), SQLError> {
+        let Some(backend) = self
+            .storage
+            .backend
+            .as_ref()
+            .filter(|backend| backend.transaction_model().is_versioned())
+        else {
+            return Ok(());
+        };
+        if self.transaction_depth() == 0 {
+            return Err(SQLError::Internal(
+                "scoring parameter writes require an active transaction".into(),
+            ));
+        }
+        self.row_locks.acquire(&crate::row_locks::LockRequest {
+            session_id: self.session_id,
+            key: crate::row_locks::RowLockKey {
+                table: self.row_locks.scoring_parameters_key(name),
+                doc_id: 0,
+            },
+            strength: uqa_sql::ast::LockStrength::ForUpdate,
+            mark: self.current_lock_mark(),
+            wait: uqa_sql::ast::LockWait::Block,
+            cancel: &self.runtime.cancellation,
+            relation: name,
+        })?;
+        backend
+            .refresh_transaction_snapshot(&self.runtime.cancellation)
+            .map_err(|error| Self::storage_tx_error("refresh scoring parameters", &error))
     }
 
     pub(crate) fn reserve_document_id_candidate(
@@ -201,6 +250,22 @@ impl Engine {
             self.row_locks.table_key(&canonical),
             mode,
             self.current_lock_mark(),
+            &self.runtime.cancellation,
+        )
+    }
+
+    pub(crate) fn temporary_relation_lock(
+        &self,
+        table: &str,
+        mode: crate::row_locks::RelationLockMode,
+    ) -> Result<crate::row_locks::ScopedRelationLock<'_>, SQLError> {
+        let canonical = self.row_lock_table_name(table)?;
+        self.prepare_transaction_lock_wait()?;
+        self.row_locks.acquire_scoped_relation(
+            self.session_id,
+            self.row_locks.table_key(&canonical),
+            mode,
+            self.temporary_relation_lock_marks()?,
             &self.runtime.cancellation,
         )
     }
@@ -288,7 +353,7 @@ impl Engine {
                     "decode deferred foreign-key firing relation '{table}': {error}"
                 ))
             })?;
-        let foreign_keys = self.try_foreign_keys(table).map_err(|error| {
+        let foreign_keys = self.foreign_keys_in_execution(table).map_err(|error| {
             SQLError::Internal(format!(
                 "read deferred foreign keys for table `{table}`: {error}"
             ))

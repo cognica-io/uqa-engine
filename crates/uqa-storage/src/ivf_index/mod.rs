@@ -16,13 +16,19 @@
 mod index;
 mod math;
 mod mutation;
+mod prepare;
 mod restore;
 mod search;
+mod snapshot;
 mod state;
 mod training;
 
+pub use prepare::IVFMutation;
 pub use state::IVFMetadataSnapshot;
 pub use state::{IVFIndex, IVFState};
 
+#[cfg(test)]
+#[path = "tests/preparation.rs"]
+mod preparation_tests;
 #[cfg(test)]
 mod tests;

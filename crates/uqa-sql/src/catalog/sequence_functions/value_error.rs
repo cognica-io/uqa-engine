@@ -10,6 +10,8 @@ use crate::SQLError;
 pub enum SequenceValueError {
     #[error("relation \"{0}\" does not exist")]
     Undefined(String),
+    #[error("could not open relation with OID {0}")]
+    MissingOid(i64),
     #[error("cannot open relation \"{name}\": this operation is not supported for {kind}s")]
     WrongKind { name: String, kind: &'static str },
     #[error("currval of sequence \"{0}\" is not yet defined in this session")]
@@ -33,6 +35,8 @@ pub enum SequenceValueError {
     ReadOnly(&'static str),
     #[error(transparent)]
     Security(#[from] SQLError),
+    #[error(transparent)]
+    Cancelled(#[from] uqa_core::QueryCancelled),
     #[error("{0}")]
     Internal(String),
 }
@@ -41,12 +45,14 @@ impl SequenceValueError {
     pub fn into_sql_error(self) -> SQLError {
         let sqlstate = match self {
             Self::Undefined(_) => "42P01",
+            Self::MissingOid(_) => "XX000",
             Self::WrongKind { .. } => "42809",
             Self::CurrvalUndefined(_) | Self::LastvalUndefined => "55000",
             Self::SetvalOutOfBounds { .. } => "22003",
             Self::Exhausted { .. } => "2200H",
             Self::ReadOnly(_) => "25006",
             Self::Security(error) => return error,
+            Self::Cancelled(error) => return SQLError::Cancelled(error),
             Self::Internal(message) => return SQLError::Internal(message),
         };
         SQLError::Routine {

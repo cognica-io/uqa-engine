@@ -9,24 +9,11 @@
 use super::{BTreeSet, ConstraintModeState, Engine, SQLError};
 use crate::{ConstraintIdentity, RelationIdentity};
 use uqa_sql::ast::{ForeignKey, SetConstraintName};
+use uqa_sql::catalog::roles::identity::RoleSubject;
 
 pub(crate) use uqa_sql::catalog::constraints::constraint_identities_match;
 
-fn find_live_constraint_identity<'a>(
-    live: &'a [ConstraintIdentity],
-    live_relations: &BTreeSet<RelationIdentity>,
-    identity: &ConstraintIdentity,
-) -> Option<&'a ConstraintIdentity> {
-    live.iter()
-        .find(|current| *current == identity)
-        .or_else(|| {
-            if live_relations.contains(&identity.relation) {
-                return None;
-            }
-            live.iter()
-                .find(|current| constraint_identities_match(identity, current))
-        })
-}
+use uqa_sql::catalog::constraints::find_live_constraint_identity;
 
 fn constraint_is_deferred(
     modes: &ConstraintModeState,
@@ -65,7 +52,7 @@ impl Engine {
         if schema == self.temporary_schema_name() {
             return Ok(self.temporary_namespace_allocated());
         }
-        self.has_namespace(schema)
+        self.has_namespace_in_execution(schema)
             .map_err(|error| SQLError::Internal(format!("resolve constraint schema: {error}")))
     }
 
@@ -87,7 +74,10 @@ impl Engine {
             let schema = match configured_schema.as_str() {
                 "pg_temp" if has_temporary => temporary.clone(),
                 "pg_temp" => continue,
-                "$user" => self.current_user_name(),
+                "$user" => match self.current_role().role_name(&self.durable.roles.read()) {
+                    Some(name) => name.to_owned(),
+                    None => continue,
+                },
                 _ => configured_schema,
             };
             if self.constraint_namespace_exists(&schema)? && !effective.contains(&schema) {
@@ -453,7 +443,7 @@ impl Engine {
                 .map(|constraint| constraint.identity)
                 .collect::<Vec<_>>();
         let live_relations = self
-            .table_names()
+            .table_names_in_execution()
             .map_err(|error| SQLError::Internal(format!("read live constraint tables: {error}")))?
             .into_iter()
             .map(|table| {
@@ -679,9 +669,12 @@ impl Engine {
             let mut stack = self.session.transactions.lock();
             return Err(match self.rollback_transaction_frame(&mut stack) {
                 Ok(()) => validation_error,
-                Err(rollback_error) => SQLError::Internal(format!(
+                Err(rollback_error) => Self::rollback_cleanup_error(
+                    &rollback_error,
+                    format!(
                     "{validation_error}; deferred constraint rollback also failed: {rollback_error}"
-                )),
+                ),
+                ),
             });
         }
         Ok(())

@@ -7,12 +7,14 @@
 //! Execute SQL sequence value functions against retained runtime and provider inputs.
 mod allocation;
 pub mod context;
+mod persistence;
 mod resolution;
 use super::{
     session::{NontransactionalSequenceValue, SessionSequenceValue},
     SequenceState,
 };
 use context::SequenceValueContext;
+use resolution::{BoundSequenceValue, ValueAccess};
 use uqa_core::RelationIdentity;
 use uqa_sql::catalog::sequence_functions::value_error::SequenceValueError;
 struct NextvalTarget {
@@ -25,8 +27,18 @@ struct NextvalTarget {
 
 impl SequenceValueContext<'_> {
     pub fn nextval(&self, name: &str) -> Result<i64, SequenceValueError> {
+        self.transactions
+            .with_value_transaction(Box::new(|| self.nextval_locked(name)))
+    }
+
+    fn nextval_locked(&self, name: &str) -> Result<i64, SequenceValueError> {
+        let bound = self.bind_sequence_value_reference(name)?;
         loop {
-            let target = self.resolve_nextval_target(name)?;
+            self.runtime.cancellation().check()?;
+            let target = self.lock_sequence_value_target(&bound, ValueAccess::Next)?;
+            if self.runtime.current_transaction_is_read_only() && !target.temporary {
+                return Err(SequenceValueError::ReadOnly("nextval"));
+            }
             let mut caches = self.runtime.caches();
             if let Some((current, autonomous)) = Self::take_cached_nextval(&target, &mut caches)? {
                 drop(caches);
@@ -57,21 +69,28 @@ impl SequenceValueContext<'_> {
         }
     }
     pub fn currval(&self, name: &str) -> Result<i64, SequenceValueError> {
-        let (name, relation, object_id) = self.resolve_sequence_value_target(name)?;
-        self.privileges
-            .ensure_sequence_currval_privilege(&name, &relation)?;
+        self.transactions
+            .with_value_transaction(Box::new(|| self.currval_locked(name)))
+    }
+
+    fn currval_locked(&self, name: &str) -> Result<i64, SequenceValueError> {
+        let bound = self.bind_sequence_value_reference(name)?;
+        let target = self.lock_sequence_value_target(&bound, ValueAccess::Current)?;
         self.runtime
             .session_read()
             .currvals()
             .values()
-            .find(|current| current.object_id == object_id)
+            .find(|current| current.object_id == target.object_id)
             .map(|current| current.value)
-            .ok_or(SequenceValueError::CurrvalUndefined(relation.name))
+            .ok_or(SequenceValueError::CurrvalUndefined(target.relation.name))
     }
     pub fn lastval(&self) -> Result<i64, SequenceValueError> {
-        self.sequences.refresh_sequences().map_err(|error| {
-            SequenceValueError::Internal(format!("load sequence catalog: {error}"))
-        })?;
+        self.transactions
+            .with_value_transaction(Box::new(|| self.lastval_locked()))
+    }
+
+    fn lastval_locked(&self) -> Result<i64, SequenceValueError> {
+        let snapshot = self.read_snapshot()?;
         let session = self.runtime.session_read();
         let last = session.last().ok_or(SequenceValueError::LastvalUndefined)?;
         let object_id = last.object_id;
@@ -82,15 +101,18 @@ impl SequenceValueContext<'_> {
             .map(|current| current.value)
             .ok_or(SequenceValueError::LastvalUndefined)?;
         drop(session);
-        let relation = self
-            .sequences
-            .object_ids()
+        let relation = snapshot
+            .object_ids
             .iter()
             .find_map(|(relation, candidate)| (*candidate == object_id).then(|| relation.clone()))
             .ok_or(SequenceValueError::LastvalUndefined)?;
-        let name = relation.qualified_name();
-        self.privileges
-            .ensure_sequence_currval_privilege(&name, &relation)?;
+        self.lock_sequence_value_target(
+            &BoundSequenceValue {
+                name: relation.qualified_name(),
+                object_id,
+            },
+            ValueAccess::Current,
+        )?;
         Ok(value)
     }
     pub fn setval(
@@ -99,52 +121,43 @@ impl SequenceValueContext<'_> {
         value: i64,
         is_called: bool,
     ) -> Result<i64, SequenceValueError> {
-        let (name, relation, object_id) = self.resolve_sequence_value_target(name)?;
-        let previous = self
-            .sequences
-            .states()
-            .get(&relation)
-            .copied()
-            .ok_or_else(|| SequenceValueError::Undefined(name.clone()))?;
-        let temporary = self
-            .runtime
-            .persistence()
-            .get(&relation)
-            .is_some_and(|persistence| {
-                *persistence == uqa_sql::ast::RelationPersistence::Temporary
-            });
-        self.privileges
-            .ensure_sequence_setval_privilege(&name, &relation)?;
-        if self.runtime.current_transaction_is_read_only() && !temporary {
-            return Err(SequenceValueError::ReadOnly("setval"));
+        self.transactions
+            .with_value_transaction(Box::new(|| self.setval_locked(name, value, is_called)))
+    }
+
+    fn setval_locked(
+        &self,
+        name: &str,
+        value: i64,
+        is_called: bool,
+    ) -> Result<i64, SequenceValueError> {
+        let bound = self.bind_sequence_value_reference(name)?;
+        loop {
+            self.runtime.cancellation().check()?;
+            let target = self.lock_sequence_value_target(&bound, ValueAccess::Set)?;
+            if self.runtime.current_transaction_is_read_only() && !target.temporary {
+                return Err(SequenceValueError::ReadOnly("setval"));
+            }
+            let (min, max) = (target.state.min_value, target.state.max_value);
+            if !(min..=max).contains(&value) {
+                return Err(SequenceValueError::SetvalOutOfBounds {
+                    name: target.name,
+                    value,
+                    min,
+                    max,
+                });
+            }
+            if let Some(value) = self.setval_target(target, value, is_called)? {
+                return Ok(value);
+            }
         }
-        let (min, max) = (previous.min_value, previous.max_value);
-        if !(min..=max).contains(&value) {
-            return Err(SequenceValueError::SetvalOutOfBounds {
-                name,
-                value,
-                min,
-                max,
-            });
-        }
-        self.setval_target(
-            NextvalTarget {
-                name,
-                relation,
-                object_id,
-                state: previous,
-                temporary,
-            },
-            value,
-            is_called,
-        )
     }
     fn setval_target(
         &self,
         target: NextvalTarget,
         value: i64,
         is_called: bool,
-    ) -> Result<i64, SequenceValueError> {
+    ) -> Result<Option<i64>, SequenceValueError> {
         let NextvalTarget {
             name,
             relation,
@@ -152,46 +165,41 @@ impl SequenceValueContext<'_> {
             state: previous,
             temporary,
         } = target;
-        let sequence_session = if temporary {
-            None
-        } else {
-            self.runtime
-                .open_nontransactional_sequence_session()
-                .map_err(|error| {
-                    SequenceValueError::Internal(format!("open sequence session: {error}"))
-                })?
+        let persisted = self.mutate_persistent_value(
+            temporary,
+            &relation,
+            object_id,
+            "persist sequence value",
+            |catalog| {
+                catalog.set_sequence_value(
+                    &name,
+                    object_id,
+                    previous.definition_generation,
+                    value,
+                    is_called,
+                    0,
+                )
+            },
+        )?;
+        let autonomous = match persisted {
+            Some((uqa_storage::SequenceSetValueResult::Set(_), autonomous)) => Some(autonomous),
+            Some((uqa_storage::SequenceSetValueResult::DefinitionChanged, _)) => return Ok(None),
+            Some((uqa_storage::SequenceSetValueResult::Missing, _)) => {
+                return Err(SequenceValueError::Undefined(name))
+            }
+            None => None,
         };
-        let autonomous = sequence_session.is_some();
-        if !temporary && sequence_session.is_none() {
-            self.runtime
-                .prepare_explicit_transaction_writer()
-                .map_err(|error| {
-                    SequenceValueError::Internal(format!("prepare sequence writer: {error}"))
-                })?;
-        }
-        let catalog = if temporary {
-            None
-        } else {
-            sequence_session
-                .as_ref()
-                .map(|session| session.catalog.as_ref())
-                .or(self.storage)
-        };
-        if let Some(catalog) = catalog {
-            catalog
-                .set_sequence_value(&name, object_id, value, is_called, 0)
-                .map_err(|error| {
-                    SequenceValueError::Internal(format!("persist sequence value: {error}"))
-                })?
-                .ok_or_else(|| SequenceValueError::Undefined(name.clone()))?;
-        }
         let mut seqs = self.runtime.states_write();
-        let seq = seqs
-            .get_mut(&relation)
-            .ok_or(SequenceValueError::Undefined(name))?;
-        seq.current = value;
-        seq.called = is_called;
-        seq.log_count = 0;
+        match seqs.get_mut(&relation) {
+            Some(seq) if seq.definition_generation == previous.definition_generation => {
+                seq.current = value;
+                seq.called = is_called;
+                seq.log_count = 0;
+            }
+            _ if autonomous.is_some() => {}
+            Some(_) => return Ok(None),
+            None => return Err(SequenceValueError::Undefined(name)),
+        }
         drop(seqs);
         self.runtime
             .caches()
@@ -212,10 +220,10 @@ impl SequenceValueContext<'_> {
                 current: value,
                 called: is_called,
                 log_count: 0,
-                autonomous,
+                autonomous: autonomous.unwrap_or(false),
             },
             false,
         );
-        Ok(value)
+        Ok(Some(value))
     }
 }

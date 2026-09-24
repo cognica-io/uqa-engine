@@ -8,7 +8,10 @@
 
 use std::borrow::Cow;
 
-use uqa_core::Value;
+use uqa_core::{
+    memory::{Produced, ProductionControl, ProductionString, ProductionVec},
+    Value,
+};
 
 use crate::ast::{Expr, FunctionBinding, FunctionDispatch};
 use crate::error::{Result, SQLError};
@@ -17,12 +20,32 @@ use super::context::EvalContext;
 use super::evaluator::eval;
 
 pub(super) fn normalized_function_name(name: &str) -> Cow<'_, str> {
+    normalized_function_name_with_control(name, &ProductionControl::uncontrolled())
+        .expect("ordinary function name normalization")
+        .into_uncontrolled()
+        .expect("ordinary function name has no retained owner")
+}
+
+pub(super) fn normalized_function_name_with_control<'a>(
+    name: &'a str,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Cow<'a, str>>> {
+    control.check()?;
     let stripped = name.strip_prefix("pg_catalog.").unwrap_or(name);
-    if stripped.bytes().any(|byte| byte.is_ascii_uppercase()) {
-        Cow::Owned(stripped.to_ascii_lowercase())
-    } else {
-        Cow::Borrowed(stripped)
+    if !stripped.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        return control
+            .finish(Cow::Borrowed(stripped), control.empty_reservation())
+            .map_err(Into::into);
     }
+    let mut output = ProductionString::new(*control);
+    output.reserve(stripped.len())?;
+    for character in stripped.chars() {
+        output.push(character.to_ascii_lowercase())?;
+    }
+    let (output, memory) = output.finish()?.into_parts();
+    control
+        .finish(Cow::Owned(output), memory)
+        .map_err(Into::into)
 }
 
 fn binding_dispatch(binding: Option<&FunctionBinding>) -> Option<FunctionDispatch> {
@@ -103,9 +126,18 @@ pub fn call_argument_value(argument: &Expr) -> &Expr {
 pub fn validate_named_argument_order<'a>(
     argument_names: impl IntoIterator<Item = Option<&'a str>>,
 ) -> Result<()> {
+    validate_named_argument_order_with_control(argument_names, &ProductionControl::uncontrolled())
+}
+
+pub fn validate_named_argument_order_with_control<'a>(
+    argument_names: impl IntoIterator<Item = Option<&'a str>>,
+    control: &ProductionControl<'_>,
+) -> Result<()> {
+    control.check()?;
     let mut saw_named = false;
-    let mut named = Vec::new();
+    let mut named = ProductionVec::new(*control);
     for argument_name in argument_names {
+        control.check()?;
         let Some(argument_name) = argument_name else {
             if saw_named {
                 return Err(SQLError::Routine {
@@ -122,7 +154,7 @@ pub fn validate_named_argument_order<'a>(
                 message: format!("argument name \"{argument_name}\" used more than once"),
             });
         }
-        named.push(argument_name);
+        named.push_copy(argument_name)?;
     }
     Ok(())
 }
@@ -167,4 +199,17 @@ fn evaluate_call_argument_value(argument: &Expr, ctx: &EvalContext<'_>) -> Resul
         }
     }
     eval(argument, ctx)
+}
+
+/// Borrow argument labels while owning only the traversal buffer; the evaluated call retains the names and values.
+pub(super) fn evaluated_argument_names_with_control<'a>(
+    args: &'a [(Option<String>, Value)],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<Option<&'a str>>>> {
+    let mut names = ProductionVec::new(*control);
+    names.reserve(args.len())?;
+    for (name, _) in args {
+        names.push_copy(name.as_deref())?;
+    }
+    Ok(names.finish()?)
 }

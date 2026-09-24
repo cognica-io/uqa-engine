@@ -10,11 +10,12 @@ use crate::{
     query::{locking::RowLockContext, statement::context::QueryContext, CteScope},
     scalar::plan::PhysicalEvalContext,
 };
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{SQLError, SQLParam, SQLResult};
 pub type StatementExpressionOperation<'a> =
     dyn FnMut(&PhysicalEvalContext<'_>) -> Result<SQLResult, SQLError> + 'a;
 pub trait StatementQueryContexts<S: Clone + 'static> {
-    fn statement_scope(&self, privilege_subject: Option<&str>) -> CteScope<S>;
+    fn statement_scope(&self, privilege_subject: Option<&RoleReference>) -> CteScope<S>;
     fn query_context(&self) -> QueryContext<'_, S>;
     fn row_lock_context(&self) -> RowLockContext<'_, S>;
     fn with_expression_context(

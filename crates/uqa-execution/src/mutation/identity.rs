@@ -5,7 +5,10 @@
 //
 
 //! Physical document identity selection and sequence allocation services.
-use super::{constraints::context::ConstraintCatalog, errors::dml_storage_error};
+use super::{
+    constraints::context::ConstraintCatalog,
+    errors::{dml_storage_error, identifier_storage_error},
+};
 use uqa_core::{DocId, Value};
 use uqa_sql::SQLError;
 use uqa_storage::document_store::Document;
@@ -14,8 +17,8 @@ pub use reservation::reserve_document_id;
 
 pub trait MutationIdentifiers {
     fn allocate_next_id(&self, table: &str) -> Result<DocId, SQLError>;
-    fn advance_next_id(&self, table: &str, doc_id: DocId) -> Result<(), String>;
-    fn persist_next_id(&self, table: &str) -> Result<(), String>;
+    fn advance_next_id(&self, table: &str, doc_id: DocId) -> uqa_storage::StorageBackendResult<()>;
+    fn persist_next_id(&self, table: &str) -> uqa_storage::StorageBackendResult<()>;
 }
 pub fn integer_primary_key_doc_id(
     catalog: &dyn ConstraintCatalog,
@@ -215,7 +218,7 @@ pub fn persist_auto_increment_identity(
     context
         .identifiers
         .persist_next_id(&owner)
-        .map_err(|error| dml_storage_error(action, error))
+        .map_err(|error| identifier_storage_error(action, &error))
 }
 
 pub fn prepare_insert_identity(
@@ -243,7 +246,7 @@ pub fn prepare_insert_identity(
     context
         .identifiers
         .advance_next_id(allocation_table, doc_id)
-        .map_err(|error| dml_storage_error(action, error))?;
+        .map_err(|error| identifier_storage_error(action, &error))?;
     Ok((doc_id, supplied))
 }
 
@@ -278,7 +281,9 @@ pub fn refresh_insert_identity_after_trigger(
     allocation
         .identifiers
         .advance_next_id(&owner, doc_id)
-        .map_err(|error| dml_storage_error("apply BEFORE INSERT trigger identity", error))?;
+        .map_err(|error| {
+            identifier_storage_error("apply BEFORE INSERT trigger identity", &error)
+        })?;
     *identity = (doc_id, true);
     Ok(())
 }

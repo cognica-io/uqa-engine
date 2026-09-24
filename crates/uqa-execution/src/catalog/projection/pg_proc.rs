@@ -10,7 +10,7 @@ use super::builtin_routines::PG18_BUILTIN_ROUTINE_GROUPS;
 use super::expression_text::schema_expr_text;
 use super::helpers::acl::acl_identifier;
 use super::helpers::oids::{
-    current_user_oid, schema_oid, split_schema_name, stable_object_oid, stable_oid,
+    current_user_oid, namespace_oid, schema_oid, split_schema_name, stable_object_oid, stable_oid,
 };
 use super::helpers::rows::{
     bool_value, catalog_array, catalog_usize, int_value, list_int, row, str_value,
@@ -18,7 +18,6 @@ use super::helpers::rows::{
 use super::helpers::type_metadata::{routine_type_oid, routine_variadic_element_oid};
 use crate::catalog::CatalogReadView;
 use uqa_core::Value;
-use uqa_sql::catalog::roles::role_oid;
 use uqa_sql::registry::registered_names;
 use uqa_sql::routines::{builtin_routine_support_oid, SQLUserFunction};
 use uqa_sql::{ResultRow, SQLError};
@@ -269,8 +268,14 @@ pub fn build_pg_proc(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLErr
         rows.push(row([
             ("oid", int_value(user_routine_catalog_oid(&function)?)),
             ("proname", str_value(routine_name)),
-            ("pronamespace", int_value(schema_oid(&routine_schema))),
-            ("proowner", int_value(role_oid(&def.owner))),
+            (
+                "pronamespace",
+                int_value(namespace_oid(catalog, &routine_schema)),
+            ),
+            (
+                "proowner",
+                int_value(uqa_sql::routines::security::bound_routine_owner(def)?.oid),
+            ),
             ("prolang", int_value(0)),
             ("procost", Value::Float(100.0)),
             (
@@ -321,7 +326,7 @@ pub fn build_pg_proc(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLErr
             ("probin", Value::Null),
             ("prosqlbody", Value::Null),
             ("proconfig", routine_config_catalog_value(def)?),
-            ("proacl", routine_acl_catalog_value(def)?),
+            ("proacl", routine_acl_catalog_value(catalog, def)?),
         ]));
     }
     Ok(rows)
@@ -340,27 +345,33 @@ fn routine_config_catalog_value(def: &uqa_sql::ast::CreateFunction) -> Result<Va
     )
 }
 
-fn routine_acl_catalog_value(def: &uqa_sql::ast::CreateFunction) -> Result<Value, SQLError> {
+fn routine_acl_catalog_value(
+    catalog: &CatalogReadView,
+    def: &uqa_sql::ast::CreateFunction,
+) -> Result<Value, SQLError> {
+    use uqa_sql::catalog::roles::identity::RoleSubject;
+    let roles = &catalog.snapshot().definitions.roles;
+    let name = |identity: uqa_core::catalog_role::RoleIdentity| {
+        identity
+            .role_name(roles)
+            .map(acl_identifier)
+            .ok_or_else(|| {
+                SQLError::Internal("routine ACL references a missing role incarnation".into())
+            })
+    };
     let Some(acl) = def.execute_acl.as_ref() else {
         return Ok(Value::Null);
     };
-    let owner = acl_identifier(&def.owner);
-    let mut entries = vec![str_value(format!("{owner}=X/{owner}"))];
-    entries.extend(
-        acl.iter()
-            .filter(|entry| entry.role != def.owner)
-            .map(|entry| {
-                let grantee = if entry.role == "PUBLIC" {
-                    String::new()
-                } else {
-                    acl_identifier(&entry.role)
-                };
-                let grantor = acl_identifier(entry.grantor.as_deref().unwrap_or(&def.owner));
-                str_value(format!(
-                    "{grantee}=X{}/{grantor}",
-                    if entry.grant_option { "*" } else { "" }
-                ))
-            }),
-    );
+    let entries = acl
+        .iter()
+        .map(|entry| {
+            let grantee = entry.role.map(&name).transpose()?.unwrap_or_default();
+            let grantor = name(entry.grantor)?;
+            Ok(str_value(format!(
+                "{grantee}=X{}/{grantor}",
+                if entry.grant_option { "*" } else { "" }
+            )))
+        })
+        .collect::<Result<Vec<_>, SQLError>>()?;
     catalog_array(entries, "pg_proc.proacl")
 }

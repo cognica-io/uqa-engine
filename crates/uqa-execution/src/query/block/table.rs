@@ -72,52 +72,48 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
     // returns `None` for shapes that are not posting-list access paths
     // (arithmetic across columns, subqueries, window calls, ...); those
     // remain scalar predicates in this relational filter node.
-    let optimised = if has_jsonpath_fts_filter
-        || !matches!(block.access, AccessPathPlan::OperatorTree { .. })
-    {
-        None
-    } else if let (Some(top_k), Some(ScalarExpr::Func { name, args, .. })) =
-        (score_top_k, stmt.r#where.as_ref())
-    {
-        Some(context.relation_retrieval.function(
-            table,
-            reference_name,
-            name,
-            args,
-            params,
-            Some(top_k),
-        )?)
-    } else {
-        context.relation_retrieval.accelerated(
-            table,
-            reference_name,
-            stmt.r#where.as_ref(),
-            params,
-        )?
-    };
+    let retrieval = context.relation_retrieval;
+    let optimised: Option<crate::query::scored_input::ScoredEntriesProducer<'_>> =
+        if has_jsonpath_fts_filter || !matches!(block.access, AccessPathPlan::OperatorTree { .. }) {
+            None
+        } else if let (Some(top_k), Some(ScalarExpr::Func { name, args, .. })) =
+            (score_top_k, stmt.r#where.as_ref())
+        {
+            Some(Box::new(move || {
+                retrieval.function(table, reference_name, name, args, params, Some(top_k))
+            }))
+        } else {
+            retrieval.prepare_accelerated(table, reference_name, stmt.r#where.as_ref(), params)?
+        };
     let score_bearing_filter = stmt
         .r#where
         .as_ref()
         .is_some_and(uqa_sql::semantics::contains_retrieval);
-    let (mut scored, mut physical_filter) = if let Some(rows) = optimised {
-        (ScoredInput::entries(rows, score_bearing_filter), None)
+    let mut pending = optimised;
+    let (mut scored, mut physical_filter) = if pending.is_some() {
+        (ScoredInput::entries(Vec::new(), score_bearing_filter), None)
     } else {
         match &block.access {
             AccessPathPlan::Row => (ScoredInput::All, stmt.r#where.clone()),
             AccessPathPlan::Hybrid => {
                 let rows = match stmt.r#where.as_ref() {
-                    Some(filter) => ScoredInput::entries(
-                        execute_mixed_where(
-                            context,
-                            table,
-                            reference_name,
-                            qualifier,
-                            filter,
-                            params,
-                            ctes,
-                        )?,
-                        uqa_sql::semantics::contains_retrieval(filter),
-                    ),
+                    Some(filter) => {
+                        pending = Some(Box::new(move || {
+                            execute_mixed_where(
+                                context,
+                                table,
+                                reference_name,
+                                qualifier,
+                                filter,
+                                params,
+                                ctes,
+                            )
+                        }));
+                        ScoredInput::entries(
+                            Vec::new(),
+                            uqa_sql::semantics::contains_retrieval(filter),
+                        )
+                    }
                     None => ScoredInput::All,
                 };
                 (rows, None)
@@ -128,15 +124,11 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
                         if uqa_sql::registry::is_registered(name)
                             && !expr_is_jsonpath_fts_match(filter_expr) =>
                     {
+                        pending = Some(Box::new(move || {
+                            retrieval.function(table, reference_name, name, args, params, None)
+                        }));
                         ScoredInput::entries(
-                            context.relation_retrieval.function(
-                                table,
-                                reference_name,
-                                name,
-                                args,
-                                params,
-                                None,
-                            )?,
+                            Vec::new(),
                             uqa_sql::semantics::contains_retrieval(filter_expr),
                         )
                     }
@@ -191,7 +183,14 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
             ctes,
             output_mode,
         };
-        return build_facet_output(context, table, scored, physical_filter.take(), execution);
+        return build_facet_output(
+            context,
+            table,
+            scored,
+            pending,
+            physical_filter.take(),
+            execution,
+        );
     }
 
     let table_state = context.scans.tables.table(table)?;
@@ -217,10 +216,10 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
     let (pushed_predicate, residual_filter) =
         split_projected_filter(physical_filter.take(), &predicate_schema, params)?;
     physical_filter = residual_filter;
-    if pushed_predicate.is_none() && physical_filter.is_none() {
-        if let Some(top_k) = post_retrieval_top_k {
-            scored.retain_top_scores_with_ties(top_k);
-        }
+    let cutoff =
+        post_retrieval_top_k.filter(|_| pushed_predicate.is_none() && physical_filter.is_none());
+    if let Some(top_k) = cutoff {
+        scored.retain_top_scores_with_ties(top_k);
     }
     let lock_origin = if ctes.lock_identities.emit {
         let storage_name = catalog
@@ -247,16 +246,20 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
         pushed_predicate,
         metadata_projection,
     )
+    .with_serializable_read(context.scans.tables.serializable_read(table)?)
     .with_table_oid(crate::catalog::projection::snapshot_table_relation_oid(
         &catalog,
         &resolution,
         table,
     )?)
     .with_qualifier(qualifier)
-    .with_lock_origin(lock_origin)
-    .with_recheck_pins(recheck_pins);
-    let source: Box<dyn crate::PhysicalOperator + '_> =
-        Box::new(crate::TableScan::new(Box::new(source)));
+    .with_lock_origin(lock_origin);
+    let source = crate::query::scored_input::defer_entries(
+        source,
+        pending,
+        cutoff.filter(|_| score_bearing_filter),
+        recheck_pins,
+    )?;
     let columns = expand_from_star_columns(
         projection_columns(&stmt.projections),
         &stmt.projections,

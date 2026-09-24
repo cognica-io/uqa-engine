@@ -8,6 +8,8 @@
 //! vertex, edge, membership, or adjacency replicas.
 
 mod catalog;
+mod identifiers;
+mod observations;
 mod overlay;
 pub mod storage;
 mod trait_impl;
@@ -31,6 +33,7 @@ const ID_PAGE_SIZE: usize = 256;
 pub struct PersistentGraphStore {
     storage: Arc<dyn GraphStorage>,
     resource: Option<Arc<dyn Send + Sync>>,
+    read: Option<observations::GraphRead>,
 }
 
 impl Clone for PersistentGraphStore {
@@ -38,6 +41,7 @@ impl Clone for PersistentGraphStore {
         Self {
             storage: Arc::clone(&self.storage),
             resource: self.resource.clone(),
+            read: self.read.clone(),
         }
     }
 }
@@ -63,6 +67,7 @@ impl PersistentGraphStore {
         Self {
             storage,
             resource: None,
+            read: None,
         }
     }
 
@@ -76,10 +81,12 @@ impl PersistentGraphStore {
     /// Read from a pinned durable snapshot, with this transaction's writes
     /// overlaid by identity. No snapshot entities are copied into memory.
     pub fn with_read_snapshot(&self, snapshot: &Self) -> Self {
-        Self::from_storage(Arc::new(overlay::OverlayGraphStorage::new(
+        let mut store = Self::from_storage(Arc::new(overlay::OverlayGraphStorage::new(
             self.clone(),
             snapshot.clone(),
-        )))
+        )));
+        store.read.clone_from(&snapshot.read);
+        store
     }
 
     /// A mutation candidate copies only its changed-id sets. Previously
@@ -91,13 +98,19 @@ impl PersistentGraphStore {
                 .fork_overlay()
                 .unwrap_or_else(|| Arc::clone(&self.storage)),
             resource: self.resource.clone(),
+            read: self.read.clone(),
         }
     }
 
     /// Reuse a transaction's original pinned reader when it has no graph
     /// changes. A cursor can retain this owner independently of COMMIT.
     pub fn unmodified_read_snapshot(&self) -> Option<Self> {
-        self.storage.unmodified_read_snapshot()
+        self.storage.unmodified_read_snapshot().map(|mut snapshot| {
+            if self.read.is_some() {
+                snapshot.read.clone_from(&self.read);
+            }
+            snapshot
+        })
     }
 
     pub(crate) fn transaction_mapped<T, E>(
@@ -164,6 +177,7 @@ impl PersistentGraphStore {
     }
 
     fn collect_ids(&self, filter: GraphEntityFilter<'_>) -> GraphStoreResult<BTreeSet<u64>> {
+        self.observe_selection(filter, None)?;
         let mut ids = BTreeSet::new();
         self.for_each_id(filter, |id| {
             ids.insert(id);
@@ -222,8 +236,13 @@ impl PersistentGraphStore {
         let next = id.checked_add(1).ok_or_else(|| {
             GraphStoreError::IdExhausted(format!("{} id counter overflow", kind.as_str()))
         })?;
+        if let Some(identifiers) = self.storage.identifiers()? {
+            return self.observe_durable_id(&identifiers, kind, id);
+        }
         let previous = self.next_counter(kind)?;
-        self.storage.save_counter(kind, next.max(previous))?;
+        if next > previous || self.storage.counter(kind)?.is_none() {
+            self.storage.save_counter(kind, next.max(previous))?;
+        }
         Ok(())
     }
 
@@ -242,6 +261,10 @@ impl PersistentGraphStore {
 
     fn allocate_counter(&mut self, kind: GraphEntityKind) -> GraphStoreResult<u64> {
         self.transaction(|store| {
+            store.storage.guard_definition(None)?;
+            if let Some(identifiers) = store.storage.identifiers()? {
+                return store.allocate_durable_counter(&identifiers, kind);
+            }
             let id = store.next_counter(kind)?;
             let next = id.checked_add(1).ok_or_else(|| {
                 GraphStoreError::IdExhausted(format!("{} id counter overflow", kind.as_str()))
@@ -259,21 +282,53 @@ impl PersistentGraphStore {
     ) -> GraphStoreResult<u64> {
         self.transaction(|store| {
             store.require_graph(graph)?;
-            let mut registry = store.storage.registry(graph)?;
-            let label_id = registry.label_id(label, kind)?;
+            store.storage.guard_definition(Some(graph))?;
+            let mut registry = store.restored_registry(graph)?;
+            let selected = if label.is_empty() {
+                kind.default_label_name()
+            } else {
+                label
+            };
+            store.observe_labels(graph, Some(selected))?;
+            if registry.label_kind(selected).is_none() {
+                store.observe_labels(graph, Some(kind.default_label_name()))?;
+            }
+            let label_id = store.resolve_label(&mut registry, label, kind)?;
+            if let Some(identifiers) = store.storage.identifiers()? {
+                let id = store.allocate_durable_label(&identifiers, &registry, label_id, kind)?;
+                store.save_registry(graph, &registry)?;
+                return Ok(id);
+            }
             let id = make_graphid(label_id, registry.next_sequence(label_id)?)?;
-            store.storage.save_registry(graph, &registry)?;
+            store.save_registry(graph, &registry)?;
             Ok(id)
         })
     }
 
     pub fn label_registry(&self, graph: &str) -> GraphStoreResult<GraphLabelRegistry> {
+        self.observe_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::NamedGraph,
+            Some(graph),
+        )?;
+        self.observe_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::LabelRegistry,
+            Some(graph),
+        )?;
+        self.restored_registry(graph)
+    }
+
+    pub(crate) fn restored_registry(&self, graph: &str) -> GraphStoreResult<GraphLabelRegistry> {
         self.require_graph(graph)?;
-        self.storage.registry(graph)
+        let mut registry = self.storage.registry(graph)?;
+        if let Some(identifiers) = self.storage.identifiers()? {
+            identifiers.restore_registry(graph, &mut registry)?;
+        }
+        Ok(registry)
     }
 
     pub fn graph_labels(&self, graph: &str) -> GraphStoreResult<Vec<GraphLabelInfo>> {
-        Ok(self.label_registry(graph)?.labels())
+        self.observe_labels(graph, None)?;
+        Ok(self.restored_registry(graph)?.labels())
     }
 
     pub fn graph_label_kind(
@@ -281,7 +336,8 @@ impl PersistentGraphStore {
         graph: &str,
         label: &str,
     ) -> GraphStoreResult<Option<LabelKind>> {
-        Ok(self.label_registry(graph)?.label_kind(label))
+        self.observe_labels(graph, Some(label))?;
+        Ok(self.restored_registry(graph)?.label_kind(label))
     }
 
     pub fn import_label_registry(
@@ -292,7 +348,7 @@ impl PersistentGraphStore {
         self.transaction(|store| {
             let mut combined = store.label_registry(graph)?;
             combined.merge(registry);
-            store.storage.save_registry(graph, &combined)
+            store.save_registry(graph, &combined)
         })
     }
 
@@ -300,7 +356,7 @@ impl PersistentGraphStore {
     /// retaining their properties or an entity map in the engine.
     pub fn rebuild_label_registry_from_ids(&mut self, graph: &str) -> GraphStoreResult<()> {
         self.transaction(|store| {
-            let mut registry = store.label_registry(graph)?;
+            let mut registry = store.restored_registry(graph)?;
             for kind in [GraphEntityKind::Vertex, GraphEntityKind::Edge] {
                 store.for_each_id(GraphEntityFilter::new(kind, Some(graph)), |id| {
                     match kind {
@@ -314,11 +370,11 @@ impl PersistentGraphStore {
                             id,
                             LabelKind::Edge,
                         ),
-                    }
+                    };
                     Ok(())
                 })?;
             }
-            store.storage.save_registry(graph, &registry)
+            store.save_registry(graph, &registry)
         })
     }
 
@@ -329,10 +385,17 @@ impl PersistentGraphStore {
         kind: LabelKind,
     ) -> GraphStoreResult<Option<u32>> {
         self.transaction(|store| {
-            let mut registry = store.label_registry(graph)?;
-            let result = registry.register_label(label, kind)?;
+            store.observe_labels(graph, Some(label))?;
+            let mut registry = store.restored_registry(graph)?;
+            if registry.label_kind(label).is_none() {
+                store.observe_labels(graph, Some(kind.default_label_name()))?;
+            }
+            let result = registry
+                .register_label(label, kind)?
+                .map(|proposed| store.reserve_label_definition(&mut registry, label, proposed))
+                .transpose()?;
             if result.is_some() {
-                store.storage.save_registry(graph, &registry)?;
+                store.save_registry(graph, &registry)?;
             }
             Ok(result)
         })
@@ -344,12 +407,14 @@ impl PersistentGraphStore {
         label: &str,
     ) -> GraphStoreResult<Option<(u32, LabelKind)>> {
         self.transaction(|store| {
-            let mut registry = store.label_registry(graph)?;
+            store.observe_labels(graph, Some(label))?;
+            let mut registry = store.restored_registry(graph)?;
             let Some(kind) = registry.label_kind(label) else {
                 return Ok(None);
             };
             let default = label == kind.default_label_name();
             let id = if default {
+                store.observe_labels(graph, None)?;
                 if let Some(dependent) = registry
                     .labels
                     .keys()
@@ -377,14 +442,14 @@ impl PersistentGraphStore {
             }
             // AGE label removal intentionally preserves incident edge rows;
             // the tombstone distinguishes these from corrupt endpoints.
-            store.for_each_id(filter, |entity_id| {
+            store.for_each_selected_id(filter, |entity_id| {
                 if !default || graphid_label_id(entity_id) == id {
                     store.detach_entity(entity_kind, entity_id, graph)?;
                 }
                 Ok(())
             })?;
             registry.remove_label(label);
-            store.storage.save_registry(graph, &registry)?;
+            store.save_registry(graph, &registry)?;
             Ok(Some((id, kind)))
         })
     }
@@ -401,11 +466,9 @@ impl PersistentGraphStore {
                 )));
             }
             store.storage.create_graph(to)?;
-            store
-                .storage
-                .save_registry(to, &store.label_registry(from)?)?;
+            store.save_registry(to, &store.label_registry(from)?)?;
             for kind in [GraphEntityKind::Vertex, GraphEntityKind::Edge] {
-                store.for_each_id(GraphEntityFilter::new(kind, Some(from)), |id| {
+                store.for_each_selected_id(GraphEntityFilter::new(kind, Some(from)), |id| {
                     store.storage.attach(kind, id, to)?;
                     store.storage.detach(kind, id, from)
                 })?;
@@ -429,9 +492,12 @@ impl PersistentGraphStore {
             }
             store.create_graph(target)?;
             for kind in [GraphEntityKind::Vertex, GraphEntityKind::Edge] {
-                store.for_each_id(GraphEntityFilter::new(kind, Some(first)), |id| {
+                store.for_each_selected_id(GraphEntityFilter::new(kind, Some(first)), |id| {
                     let common = match second {
-                        Some(second) => store.storage.has_membership(kind, id, second)?,
+                        Some(second) => {
+                            store.observe_membership(kind, id, Some(second))?;
+                            store.storage.has_membership(kind, id, second)?
+                        }
                         None => false,
                     };
                     if keep(common) {
@@ -440,9 +506,10 @@ impl PersistentGraphStore {
                     Ok(())
                 })?;
                 if let Some(second) = second.filter(|_| include_second) {
-                    store.for_each_id(GraphEntityFilter::new(kind, Some(second)), |id| {
-                        store.storage.attach(kind, id, target)
-                    })?;
+                    store
+                        .for_each_selected_id(GraphEntityFilter::new(kind, Some(second)), |id| {
+                            store.storage.attach(kind, id, target)
+                        })?;
                 }
             }
             let mut registry = store.label_registry(target)?;
@@ -450,7 +517,7 @@ impl PersistentGraphStore {
             if let Some(second) = second {
                 registry.merge(&store.label_registry(second)?);
             }
-            store.storage.save_registry(target, &registry)
+            store.save_registry(target, &registry)
         })
     }
 }

@@ -93,27 +93,30 @@ impl Engine {
     }
 
     pub fn view(&self, name: &str) -> Result<Option<uqa_planner::QueryPlan>, SQLError> {
-        Ok(self.view_definition(name)?.and_then(|definition| {
-            (definition.kind == StoredViewKind::View).then_some(definition.query)
-        }))
+        self.with_direct_read_snapshot(|engine| engine.view_plan(name))
     }
 
     pub(crate) fn view_plan(&self, name: &str) -> Result<Option<uqa_planner::QueryPlan>, SQLError> {
-        self.view(name)
+        Ok(self.view_definition(name)?.and_then(|definition| {
+            (definition.kind == StoredViewKind::View).then_some(definition.definition.query)
+        }))
     }
 
     pub fn list_views(&self) -> Result<Vec<String>, SQLError> {
-        self.synchronize_catalog_registries()
-            .map_err(|err| SQLError::Internal(format!("refresh view catalog: {err}")))?;
-        let mut out: Vec<String> = self
-            .durable
-            .views
-            .read()
-            .iter()
-            .filter(|(_, view)| view.kind == StoredViewKind::View)
-            .map(|(relation, _)| relation.qualified_name())
-            .collect();
-        out.sort_unstable();
-        Ok(out)
+        self.with_direct_read_snapshot(|engine| {
+            engine
+                .synchronize_catalog_registries()
+                .map_err(|err| SQLError::Internal(format!("refresh view catalog: {err}")))?;
+            let mut out: Vec<String> = engine
+                .durable
+                .views
+                .read()
+                .iter()
+                .filter(|(_, view)| view.kind == StoredViewKind::View)
+                .map(|(relation, _)| relation.qualified_name())
+                .collect();
+            out.sort_unstable();
+            Ok(out)
+        })
     }
 }

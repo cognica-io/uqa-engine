@@ -13,7 +13,7 @@ use super::{
 use crate::query::{
     binding::{analyze_query_plan_schema, bind_query_plan_schema},
     block::execute_query_block_output,
-    cte::materialize_plan_ctes_with_filters,
+    cte::{materialize_plan_ctes_with_filters, strategy::schedule_plan_ctes},
     ordering::identity_order_columns,
     output::{QueryOutput, QueryRows},
     projection::{physical_exec_error, physical_work_mem_bytes},
@@ -23,15 +23,11 @@ use crate::query::{
     },
     CteScope,
 };
-use std::{collections::BTreeSet, rc::Rc};
+use std::rc::Rc;
 use uqa_sql::{
     ast::SetOpKind,
     plan::{AccessPathPlan, ComputePlan, QueryBlockPlan, QueryPlan, RelationalPlan},
-    semantics::{
-        cte_references_own_name, ordered_plan_ctes, reachable_plan_cte_names,
-        sets::validation::validate_values_set_contexts, single_reference_plan_cte_names,
-        volatility::query_contains_volatile_function,
-    },
+    semantics::sets::validation::validate_values_set_contexts,
     SQLError, SQLParam, SQLResult,
 };
 
@@ -62,60 +58,17 @@ pub fn execute_query_plan_output<S: Clone + Send + Sync + 'static>(
         relation_lookup.enter_visible_ctes(plan.ctes.iter().map(|cte| cte.name.as_str()));
     let ctes = &mut *visible_ctes;
     if !plan.ctes.is_empty() {
-        let ordered_ctes = ordered_plan_ctes(plan)?;
-        let reachable = reachable_plan_cte_names(plan);
-        let single_reference = single_reference_plan_cte_names(plan);
-        let recursive = ordered_ctes
-            .iter()
-            .copied()
-            .filter(|cte| cte_references_own_name(cte))
-            .map(|cte| cte.name.as_str())
-            .collect::<BTreeSet<_>>();
-        for cte in ordered_ctes.iter().copied().filter(|cte| {
-            !cte.body.modifies_data()
-                && !recursive.contains(cte.name.as_str())
-                && reachable.contains(&cte.name)
-                && match cte.materialization {
-                    uqa_sql::ast::CteMaterialization::Default => {
-                        single_reference.contains(&cte.name)
-                    }
-                    uqa_sql::ast::CteMaterialization::Materialized => false,
-                    uqa_sql::ast::CteMaterialization::NotMaterialized => true,
-                }
-                && matches!(
-                    cte.body
-                        .query()
-                        .map_or(Ok(true), |query| query_contains_volatile_function(
-                            context.source.volatility,
-                            query
-                        )),
-                    Ok(false)
-                )
-        }) {
-            ctes.insert_deferred(cte.clone());
+        let scheduled = schedule_plan_ctes(context.source.volatility, plan)?;
+        for cte in scheduled.iter().filter(|cte| cte.deferred) {
+            ctes.insert_deferred(cte.plan.clone());
         }
         let filters = context.cte_filters.output_filters(plan, ctes)?;
         materialize_plan_ctes_with_filters(
             context.source.ctes,
-            ordered_ctes.into_iter().filter(|cte| {
-                reachable.contains(&cte.name)
-                    && (cte.body.modifies_data()
-                        || recursive.contains(cte.name.as_str())
-                        || matches!(
-                            cte.materialization,
-                            uqa_sql::ast::CteMaterialization::Materialized
-                        )
-                        || (matches!(
-                            cte.materialization,
-                            uqa_sql::ast::CteMaterialization::Default
-                        ) && !single_reference.contains(&cte.name))
-                        || !matches!(
-                            cte.body.query().map_or(Ok(true), |query| {
-                                query_contains_volatile_function(context.source.volatility, query)
-                            }),
-                            Ok(false)
-                        ))
-            }),
+            scheduled
+                .into_iter()
+                .filter(|cte| !cte.deferred)
+                .map(|cte| cte.plan),
             params,
             ctes,
             &filters,

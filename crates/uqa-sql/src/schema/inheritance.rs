@@ -98,6 +98,10 @@ pub fn prepare_create_table_hierarchy(
             .map_err(|error| SQLError::Internal(format!("read inherited row type: {error}")))?
             .ok_or_else(|| SQLError::UnknownTable(parent.clone()))?;
         for column in &mut columns {
+            column.not_null_identity = None;
+            if let Some(reference) = &mut column.references {
+                reference.catalog_identity = None;
+            }
             if column.not_null_no_inherit {
                 column.not_null = false;
                 column.not_null_explicit = false;
@@ -110,6 +114,7 @@ pub fn prepare_create_table_hierarchy(
             column.check = None;
             column.check_name = None;
             column.check_object_id = None;
+            column.check_catalog_oid = None;
             column.check_is_local = true;
             column.check_enforced = true;
             column.check_validated = true;
@@ -118,6 +123,7 @@ pub fn prepare_create_table_hierarchy(
         if !is_partition {
             // PostgreSQL inherits the NOT NULL property of an identity column, but not its identity generation attribute or owned sequence. SERIAL is different: its nextval default is ordinary inherited metadata and therefore keeps pointing at the parent's sequence.
             for column in &mut columns {
+                column.references = None;
                 if column
                     .auto_increment
                     .as_ref()
@@ -142,13 +148,18 @@ pub fn prepare_create_table_hierarchy(
             super::check_inheritance::bind_parent_check_columns(&parent, &mut check.expr)?;
             check.is_local = false;
             check.object_id = None;
+            check.catalog_oid = None;
             check.validated = check.enforced;
             inherited_checks.push(check);
         }
         if is_partition {
-            inherited_foreign_keys.extend(constraints.foreign_keys);
+            inherited_foreign_keys.extend(constraints.foreign_keys.into_iter().map(|mut key| {
+                key.catalog_identity = None;
+                key
+            }));
             inherited_keys.extend(constraints.key_constraints.into_iter().map(|mut key| {
                 key.name = None;
+                key.catalog_identity = None;
                 key
             }));
         }
@@ -245,6 +256,7 @@ pub fn merge_same_column(
         || (declared.not_null && declared.not_null_is_local);
     if declared.not_null && (!inherited.not_null || declared.not_null_is_local) {
         inherited.not_null_name.clone_from(&declared.not_null_name);
+        inherited.not_null_identity = declared.not_null_identity;
         inherited.not_null_validated = declared.not_null_validated;
         inherited.not_null_no_inherit = declared.not_null_no_inherit;
     }
@@ -315,4 +327,6 @@ fn validate_partition_keys(
 
 pub mod alter;
 
+pub mod detachment;
 pub mod origins;
+pub mod restoration;

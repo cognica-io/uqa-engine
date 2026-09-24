@@ -6,13 +6,18 @@
 
 //! Database ACL values, grant paths, privilege checks and dependency-aware revocation.
 
+use crate::catalog::roles::identity::RoleSubject;
 use std::collections::{BTreeMap, BTreeSet};
+use uqa_core::catalog_acl::AclGrantee;
 
 use crate::ast::{DatabasePrivilege, DatabaseRevokeBehavior, GrantDatabaseStmt, RoleAttribute};
 use crate::catalog::DATABASE_NAME;
 use crate::SQLError;
 
 use crate::catalog::roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey};
+
+pub mod binding;
+pub use binding::BoundDatabaseSecurity;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DatabaseAclPrivilege {
@@ -105,13 +110,13 @@ fn materialize_acl(security: &mut DatabaseSecurity) {
     let owner = security.role_owner.clone();
     security.acl = Some(vec![
         DatabaseAclEntry {
-            role: owner.clone(),
+            role: owner.clone().into(),
             grantor: Some(owner.clone()),
             privileges: DatabasePrivileges::ALL,
             grant_options: DatabasePrivileges::default(),
         },
         DatabaseAclEntry {
-            role: "PUBLIC".into(),
+            role: AclGrantee::Public,
             grantor: Some(owner),
             privileges: DatabasePrivileges {
                 connect: true,
@@ -134,11 +139,13 @@ fn grant_option_roles(
     loop {
         let mut changed = false;
         for entry in acl {
-            if entry.role != "PUBLIC"
-                && entry.grant_options.intersects(privilege.mask())
+            let Some(role) = entry.role.role_name() else {
+                continue;
+            };
+            if entry.grant_options.intersects(privilege.mask())
                 && reachable.contains(acl_grantor(entry, &security.role_owner))
             {
-                changed |= reachable.insert(entry.role.clone());
+                changed |= reachable.insert(role.to_owned());
             }
         }
         if !changed {
@@ -150,10 +157,11 @@ fn grant_option_roles(
 pub fn select_acl_grantor(
     security: &DatabaseSecurity,
     privilege: DatabaseAclPrivilege,
-    current_user: &str,
+    current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> Option<String> {
+    let current_user = current_user.role_name(roles)?;
     if role_inherits(roles, memberships, current_user, &security.role_owner) {
         return Some(security.role_owner.clone());
     }
@@ -163,21 +171,22 @@ pub fn select_acl_grantor(
     }
     security.acl.as_ref().and_then(|acl| {
         acl.iter()
-            .filter(|entry| entry.role != "PUBLIC" && grant_options.contains(&entry.role))
-            .find(|entry| role_inherits(roles, memberships, current_user, &entry.role))
-            .map(|entry| entry.role.clone())
+            .filter_map(|entry| entry.role.role_name())
+            .filter(|role| grant_options.contains(*role))
+            .find(|role| role_inherits(roles, memberships, current_user, *role))
+            .map(str::to_owned)
     })
 }
 
 pub fn role_has_database_privilege_check(
     security: &DatabaseSecurity,
-    subject: &str,
+    subject: &(impl RoleSubject + ?Sized),
     check: DatabasePrivilegeCheck,
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
 ) -> bool {
-    if roles
-        .get(subject)
+    if subject
+        .role_definition(roles)
         .is_some_and(|role| role.has(RoleAttribute::Superuser))
     {
         return true;
@@ -197,7 +206,7 @@ pub fn role_has_database_privilege_check(
         }
         Some(acl) => acl.iter().any(|entry| {
             entry.privileges.intersects(check.privilege.mask())
-                && (entry.role == "PUBLIC"
+                && (entry.role.is_public()
                     || role_inherits(roles, memberships, subject, &entry.role))
         }),
     }
@@ -205,7 +214,7 @@ pub fn role_has_database_privilege_check(
 
 pub fn role_has_database_privilege(
     security: &DatabaseSecurity,
-    subject: &str,
+    subject: &(impl RoleSubject + ?Sized),
     privilege: DatabaseAclPrivilege,
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
@@ -225,7 +234,7 @@ pub fn role_has_database_privilege(
 pub fn grant_acl(
     security: &mut DatabaseSecurity,
     privilege: DatabaseAclPrivilege,
-    grantees: &[String],
+    grantees: &[AclGrantee],
     grantor: &str,
     grant_option: bool,
 ) {
@@ -250,7 +259,7 @@ pub fn grant_acl(
             });
         let entry = &mut acl[position];
         entry.privileges.insert(privilege.mask());
-        if grant_option && grantee != "PUBLIC" && grantee != &owner {
+        if grant_option && grantee.role_name().is_some_and(|name| name != owner) {
             entry.grant_options.insert(privilege.mask());
         }
     }
@@ -259,7 +268,7 @@ pub fn grant_acl(
 pub fn revoke_acl(
     security: &mut DatabaseSecurity,
     privilege: DatabaseAclPrivilege,
-    grantees: &[String],
+    grantees: &[AclGrantee],
     grantor: &str,
     grant_option_only: bool,
     cascade: bool,
@@ -374,7 +383,7 @@ impl DatabasePrivileges {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DatabaseAclEntry {
-    pub role: String,
+    pub role: uqa_core::catalog_acl::AclGrantee,
     pub grantor: Option<String>,
     pub privileges: DatabasePrivileges,
     pub grant_options: DatabasePrivileges,
@@ -409,9 +418,9 @@ pub fn resolve_database_grant_targets(databases: &[String]) -> Result<(), SQLErr
 
 pub fn apply_database_acl(
     statement: &GrantDatabaseStmt,
-    grantees: &[String],
+    grantees: &[AclGrantee],
     privileges: &[DatabaseAclPrivilege],
-    current_user: &str,
+    current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
     current: &DatabaseSecurity,
@@ -458,21 +467,23 @@ pub fn apply_database_acl(
 
 pub fn validate_database_acl_roles(
     statement: &GrantDatabaseStmt,
-    grantees: &[String],
+    grantees: &[AclGrantee],
     requested_grantor: Option<&str>,
-    current_user: &str,
+    current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
 ) -> Result<(), SQLError> {
     for role in grantees {
-        if role != "PUBLIC" && !roles.contains_key(role) {
+        if role
+            .role_name()
+            .is_some_and(|name| !roles.contains_key(name))
+        {
             return Err(SQLError::Routine {
                 sqlstate: "42704".into(),
                 message: format!("role \"{role}\" does not exist"),
             });
         }
     }
-    if statement.is_grant && statement.grant_option && grantees.iter().any(|role| role == "PUBLIC")
-    {
+    if statement.is_grant && statement.grant_option && grantees.iter().any(AclGrantee::is_public) {
         return Err(SQLError::Routine {
             sqlstate: "0LP01".into(),
             message: "grant options can only be granted to roles".into(),
@@ -485,7 +496,7 @@ pub fn validate_database_acl_roles(
                 message: format!("role \"{requested_grantor}\" does not exist"),
             });
         }
-        if requested_grantor != current_user {
+        if current_user.role_name(roles) != Some(requested_grantor) {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),
                 message: "grantor must be current user".into(),
@@ -518,7 +529,10 @@ pub fn validate_stored_database_security(
     if let Some(acl) = security.acl.as_ref() {
         for entry in acl {
             let grantor = entry.grantor.as_deref().unwrap_or(&security.role_owner);
-            if (entry.role != "PUBLIC" && !roles.contains_key(&entry.role))
+            if (entry
+                .role
+                .role_name()
+                .is_some_and(|name| !roles.contains_key(name)))
                 || !roles.contains_key(grantor)
             {
                 return Err(format!(

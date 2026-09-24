@@ -82,15 +82,22 @@ impl Engine {
 
     /// Analyze one input with a resolved revision and return the SQL diagnostic object.
     pub fn analyze_text(&self, name: &str, input: &str) -> Result<uqa_core::Value, String> {
-        self.synchronize_catalog_registries()
-            .map_err(|err| format!("refresh analyzer catalog: {err}"))?;
-        uqa_execution::query::table_functions::analyze_text(
-            self.query_runtime_view(),
-            self,
-            name,
-            input,
+        self.with_direct_query_snapshot(
+            true,
+            |engine| {
+                engine
+                    .synchronize_catalog_registries()
+                    .map_err(|err| format!("refresh analyzer catalog: {err}"))?;
+                uqa_execution::query::table_functions::analyze_text(
+                    engine.query_runtime_view(),
+                    engine,
+                    name,
+                    input,
+                )
+                .map_err(|error| error.to_string())
+            },
+            |error| error.to_string(),
         )
-        .map_err(|error| error.to_string())
     }
 
     pub fn drop_named_analyzer(&self, name: &str) -> Result<bool, String> {
@@ -130,6 +137,12 @@ impl Engine {
     }
 
     pub fn list_named_analyzers(&self) -> Result<Vec<String>, String> {
+        self.with_direct_query_snapshot(true, Self::named_analyzers_in_execution, |error| {
+            error.to_string()
+        })
+    }
+
+    pub(crate) fn named_analyzers_in_execution(&self) -> Result<Vec<String>, String> {
         self.synchronize_catalog_registries()
             .map_err(|err| format!("refresh analyzer catalog: {err}"))?;
         let mut names: Vec<String> = self
@@ -331,6 +344,18 @@ impl Engine {
         table: &str,
         field: &str,
     ) -> Result<Option<(String, String)>, String> {
+        self.with_direct_query_snapshot(
+            true,
+            |engine| engine.table_field_analyzer_in_execution(table, field),
+            |error| error.to_string(),
+        )
+    }
+
+    pub(crate) fn table_field_analyzer_in_execution(
+        &self,
+        table: &str,
+        field: &str,
+    ) -> Result<Option<(String, String)>, String> {
         self.synchronize_catalog_registries()
             .map_err(|err| format!("refresh analyzer catalog: {err}"))?;
         let Some(table) = self
@@ -381,46 +406,53 @@ impl Engine {
         field: &str,
         phase: &str,
     ) -> Result<Option<String>, String> {
-        self.synchronize_catalog_registries()
-            .map_err(|error| error.to_string())?;
-        let (_, phase) = normalize_analyzer_phase(phase)?;
-        let Some(table) = self
-            .try_resolve_table_name(table)
-            .map_err(|error| error.to_string())?
-        else {
-            return Ok(None);
-        };
-        let Some(binding) = self
-            .durable
-            .table_field_analyzers
-            .read()
-            .get(&(table, field.to_owned()))
-            .cloned()
-        else {
-            return Ok(None);
-        };
-        let side = match phase {
-            AnalyzerPhase::Index => &binding.index,
-            AnalyzerPhase::Search => &binding.search,
-            AnalyzerPhase::Both
-                if binding.index.name == binding.search.name
-                    && binding.index.compiled.descriptor().fingerprint()
-                        == binding.search.compiled.descriptor().fingerprint() =>
-            {
-                &binding.index
-            }
-            AnalyzerPhase::Both => return Ok(None),
-        };
-        if side.name.is_none() {
-            return Ok(None);
-        }
-        let configuration = side
-            .compiled
-            .descriptor()
-            .configuration()
-            .map_err(|error| error.to_string())?;
-        serde_json::to_string(&configuration)
-            .map(Some)
-            .map_err(|error| error.to_string())
+        self.with_direct_query_snapshot(
+            true,
+            |engine| {
+                engine
+                    .synchronize_catalog_registries()
+                    .map_err(|error| error.to_string())?;
+                let (_, phase) = normalize_analyzer_phase(phase)?;
+                let Some(table) = engine
+                    .try_resolve_table_name(table)
+                    .map_err(|error| error.to_string())?
+                else {
+                    return Ok(None);
+                };
+                let Some(binding) = engine
+                    .durable
+                    .table_field_analyzers
+                    .read()
+                    .get(&(table, field.to_owned()))
+                    .cloned()
+                else {
+                    return Ok(None);
+                };
+                let side = match phase {
+                    AnalyzerPhase::Index => &binding.index,
+                    AnalyzerPhase::Search => &binding.search,
+                    AnalyzerPhase::Both
+                        if binding.index.name == binding.search.name
+                            && binding.index.compiled.descriptor().fingerprint()
+                                == binding.search.compiled.descriptor().fingerprint() =>
+                    {
+                        &binding.index
+                    }
+                    AnalyzerPhase::Both => return Ok(None),
+                };
+                if side.name.is_none() {
+                    return Ok(None);
+                }
+                let configuration = side
+                    .compiled
+                    .descriptor()
+                    .configuration()
+                    .map_err(|error| error.to_string())?;
+                serde_json::to_string(&configuration)
+                    .map(Some)
+                    .map_err(|error| error.to_string())
+            },
+            |error| error.to_string(),
+        )
     }
 }

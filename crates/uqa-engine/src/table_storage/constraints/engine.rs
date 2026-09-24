@@ -5,8 +5,11 @@
 //
 
 use super::{
-    table_next_id_metadata_key, table_not_found, DocId, Engine, RelationIdentity, SQLError,
-    StorageBackendError, StorageBackendResult, TableState,
+    table_not_found, DocId, Engine, RelationIdentity, SQLError, StorageBackendError,
+    StorageBackendResult, TableState,
+};
+use uqa_storage::document_store::identifiers::{
+    load_legacy_document_id_watermark, restored_document_id_watermark, DocumentIdAllocator,
 };
 
 impl Engine {
@@ -131,16 +134,27 @@ impl Engine {
         &self,
         table: &str,
     ) -> StorageBackendResult<Vec<(Option<String>, uqa_sql::ast::Expr)>> {
-        Ok(self
-            .try_check_constraint_definitions(table)?
-            .into_iter()
-            .map(|constraint| (constraint.name, constraint.expr))
-            .collect())
+        self.with_catalog_read_snapshot(|engine| {
+            Ok(engine
+                .check_constraint_definitions_in_execution(table)?
+                .into_iter()
+                .map(|constraint| (constraint.name, constraint.expr))
+                .collect())
+        })
     }
 
     /// Snapshot of every CHECK constraint, including `PostgreSQL` 18 enforcement
     /// metadata.
     pub fn try_check_constraint_definitions(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Vec<uqa_sql::ast::TableCheck>> {
+        self.with_catalog_read_snapshot(|engine| {
+            engine.check_constraint_definitions_in_execution(table)
+        })
+    }
+
+    pub(crate) fn check_constraint_definitions_in_execution(
         &self,
         table: &str,
     ) -> StorageBackendResult<Vec<uqa_sql::ast::TableCheck>> {
@@ -190,6 +204,13 @@ impl Engine {
         &self,
         table: &str,
     ) -> StorageBackendResult<Vec<uqa_sql::ast::ForeignKey>> {
+        self.with_catalog_read_snapshot(|engine| engine.foreign_keys_in_execution(table))
+    }
+
+    pub(crate) fn foreign_keys_in_execution(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Vec<uqa_sql::ast::ForeignKey>> {
         let t = self
             .try_table(table)?
             .ok_or_else(|| table_not_found(table))?;
@@ -214,6 +235,13 @@ impl Engine {
         &self,
         table: &str,
     ) -> StorageBackendResult<Vec<(String, uqa_sql::ast::ForeignKey)>> {
+        self.with_catalog_read_snapshot(|engine| engine.referrers_in_execution(table))
+    }
+
+    pub(crate) fn referrers_in_execution(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Vec<(String, uqa_sql::ast::ForeignKey)>> {
         let table = self
             .try_resolve_table_name(table)?
             .ok_or_else(|| table_not_found(table))?;
@@ -229,7 +257,7 @@ impl Engine {
             .map(RelationIdentity::qualified_name)
             .collect();
         for other in names {
-            for fk in self.try_foreign_keys(&other)? {
+            for fk in self.foreign_keys_in_execution(&other)? {
                 if fk.enforced && Self::foreign_key_targets(&fk, &target) {
                     out.push((other.clone(), fk));
                 }
@@ -247,13 +275,20 @@ impl Engine {
     }
 
     pub fn try_unique_columns(&self, table: &str) -> StorageBackendResult<Vec<String>> {
+        self.with_catalog_read_snapshot(|engine| engine.unique_columns_in_execution(table))
+    }
+
+    pub(crate) fn unique_columns_in_execution(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Vec<String>> {
         let t = self
             .try_table(table)?
             .ok_or_else(|| table_not_found(table))?;
         let auto_increment =
             uqa_sql::schema::constraint_views::auto_increment_columns(&t.columns.read());
         Ok(uqa_sql::schema::constraint_views::unique_scalar_columns(
-            self.try_key_constraints(table)?,
+            self.key_constraints_in_execution(table)?,
             &auto_increment,
         ))
     }
@@ -272,6 +307,13 @@ impl Engine {
         &self,
         table: &str,
     ) -> StorageBackendResult<Vec<uqa_sql::ast::TableKeyConstraint>> {
+        self.with_catalog_read_snapshot(|engine| engine.key_constraints_in_execution(table))
+    }
+
+    pub(crate) fn key_constraints_in_execution(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<Vec<uqa_sql::ast::TableKeyConstraint>> {
         let t = self
             .try_table(table)?
             .ok_or_else(|| table_not_found(table))?;
@@ -280,23 +322,38 @@ impl Engine {
         Ok(constraints)
     }
 
-    /// Reserve a physical identity before it is exposed to staged rows, triggers, or RETURNING. Session-local watermarks only select candidates.
+    pub(crate) fn table_identifier_allocator(
+        &self,
+        state: &TableState,
+    ) -> StorageBackendResult<DocumentIdAllocator<'_>> {
+        let durable = (state.persistence != uqa_sql::ast::RelationPersistence::Temporary)
+            .then(|| self.storage.backend.as_ref()?.identifier_allocator())
+            .flatten();
+        DocumentIdAllocator::new(durable, state.object_id(), state.storage_generation())
+    }
+
+    /// Durable providers reserve identities in their storage namespace; serialized providers retain candidate locks through publication.
     pub(crate) fn allocate_next_id(&self, table: &str) -> Result<u64, SQLError> {
         let t = self
             .try_table(table)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
             .ok_or_else(|| SQLError::Internal(format!("unknown table `{table}`")))?;
+        let allocator = self.table_identifier_allocator(&t).map_err(|error| {
+            uqa_execution::mutation::errors::identifier_storage_error(
+                &format!("allocate document id for `{table}`"),
+                &error,
+            )
+        })?;
         let next_candidate = || {
-            let mut next = t.next_id.lock();
-            let id = u64::try_from(*next).map_err(|_| {
-                SQLError::Internal(format!(
-                    "document id space for table `{table}` is exhausted"
-                ))
-            })?;
-            *next += 1;
-            Ok(id)
+            allocator.allocate(&mut t.next_id.lock()).map_err(|error| {
+                uqa_execution::mutation::errors::identifier_storage_error(
+                    &format!("allocate document id for `{table}`"),
+                    &error,
+                )
+            })
         };
-        if self.storage.backend.is_none()
+        if allocator.is_durable()
+            || self.storage.backend.is_none()
             || t.persistence == uqa_sql::ast::RelationPersistence::Temporary
         {
             return next_candidate();
@@ -368,12 +425,9 @@ impl Engine {
         let t = self
             .try_table(table)?
             .ok_or_else(|| table_not_found(table))?;
-        let mut g = t.next_id.lock();
-        let next = u128::from(doc_id) + 1;
-        if next > *g {
-            *g = next;
-        }
-        Ok(())
+        let mut next = t.next_id.lock();
+        self.table_identifier_allocator(&t)?
+            .observe(&mut next, doc_id)
     }
 
     pub(crate) fn persist_next_id(&self, table: &str) -> StorageBackendResult<()> {
@@ -386,25 +440,16 @@ impl Engine {
         let Some(catalog) = self.storage.catalog.as_ref() else {
             return Ok(());
         };
-        let next_id = t.next_id.lock().to_string();
-        catalog.set_metadata(&table_next_id_metadata_key(table), &next_id)
+        let mut next = t.next_id.lock();
+        self.table_identifier_allocator(&t)?
+            .persist(catalog.as_ref(), table, &mut next)
     }
 
     pub(crate) fn load_persisted_next_id(
         catalog: &dyn uqa_storage::CatalogFacade,
         table: &str,
     ) -> StorageBackendResult<Option<u128>> {
-        let Some(value) = catalog.get_metadata(&table_next_id_metadata_key(table))? else {
-            return Ok(None);
-        };
-        if value.is_empty() {
-            return Ok(None);
-        }
-        value.parse::<u128>().map(Some).map_err(|error| {
-            StorageBackendError::Other(format!(
-                "invalid persisted next id for table `{table}`: {error}"
-            ))
-        })
+        load_legacy_document_id_watermark(catalog, table)
     }
 
     pub(crate) fn refresh_table_next_id(
@@ -427,12 +472,9 @@ impl Engine {
         } else {
             None
         };
-        let physical = u128::from(state.document_store.read().max_doc_id()?) + 1;
+        let maximum = state.document_store.read().max_doc_id()?;
         let mut current = state.next_id.lock();
-        *current = persisted.map_or_else(
-            || (*current).max(physical),
-            |persisted| persisted.max(physical),
-        );
+        *current = restored_document_id_watermark(maximum, persisted.or(Some(*current)));
         Ok(())
     }
 }

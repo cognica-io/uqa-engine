@@ -7,6 +7,8 @@
 use super::*;
 use uqa_storage_sqlite::{Catalog, SQLiteStorageBackend};
 
+mod retained;
+
 #[derive(Clone)]
 struct StoreWithMissingDocId {
     docs: BTreeMap<DocId, StoredDocument>,
@@ -93,9 +95,14 @@ fn transaction_snapshot_captures_one_writable_copy_without_probe_clone() {
     assert_eq!(writable_calls.load(std::sync::atomic::Ordering::Relaxed), 1);
 }
 
+type SnapshotErrorFactory = fn() -> StorageBackendError;
+
 #[derive(Clone)]
 struct PortalSnapshotProbeStore {
-    docs: BTreeMap<DocId, StoredDocument>,
+    docs: Arc<BTreeMap<DocId, StoredDocument>>,
+    snapshot_error: Option<SnapshotErrorFactory>,
+    snapshot_calls: Arc<std::sync::atomic::AtomicUsize>,
+    row_reads: Arc<std::sync::atomic::AtomicUsize>,
     doc_id_calls: Arc<std::sync::atomic::AtomicUsize>,
     catalog_was_unlocked: Arc<std::sync::atomic::AtomicBool>,
     tables: Arc<parking_lot::RwLock<BTreeMap<RelationIdentity, Arc<TableState>>>>,
@@ -108,7 +115,10 @@ impl PortalSnapshotProbeStore {
         let doc_ids = store.doc_ids().unwrap();
         let docs = store.get_stored_many(&doc_ids).unwrap();
         Self {
-            docs,
+            docs: Arc::new(docs),
+            snapshot_error: None,
+            snapshot_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            row_reads: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             doc_id_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             catalog_was_unlocked: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             tables: Arc::clone(&engine.storage.tables),
@@ -117,32 +127,86 @@ impl PortalSnapshotProbeStore {
 }
 
 impl DocumentStore for PortalSnapshotProbeStore {
+    fn field_presence_controlled(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<bool>> {
+        control.check()?;
+        let mut present = uqa_core::memory::BudgetedVec::new(control.memory());
+        for id in ids {
+            for field in fields {
+                control.check()?;
+                present.push(
+                    self.docs
+                        .get(id)
+                        .is_some_and(|row| row.fields().contains_key(*field)),
+                )?;
+            }
+        }
+        Ok(present)
+    }
+
     fn put_stored(&mut self, doc_id: DocId, document: StoredDocument) -> StorageBackendResult<()> {
-        self.docs.insert(doc_id, document);
+        Arc::make_mut(&mut self.docs).insert(doc_id, document);
         Ok(())
     }
 
     fn get_stored(&self, doc_id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
+        self.row_reads
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Ok(self.docs.get(&doc_id).cloned())
     }
 
+    fn contains_doc_id(&self, doc_id: DocId) -> StorageBackendResult<bool> {
+        Ok(self.docs.contains_key(&doc_id))
+    }
+
+    fn get_metadata(&self, doc_id: DocId) -> StorageBackendResult<Option<DocumentMetadata>> {
+        Ok(self.docs.get(&doc_id).map(StoredDocument::metadata))
+    }
+
+    fn get_field(&self, doc_id: DocId, field: &str) -> StorageBackendResult<Option<Value>> {
+        Ok(self
+            .docs
+            .get(&doc_id)
+            .and_then(|row| row.fields().get(field))
+            .cloned())
+    }
+
+    fn get_fields_multi(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+    ) -> StorageBackendResult<BTreeMap<DocId, Vec<Value>>> {
+        Ok(ids
+            .iter()
+            .filter_map(|id| {
+                self.docs.get(id).map(|row| {
+                    let values = fields
+                        .iter()
+                        .map(|field| row.fields().get(*field).cloned().unwrap_or(Value::Null))
+                        .collect();
+                    (*id, values)
+                })
+            })
+            .collect())
+    }
+
     fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
-        self.docs.remove(&doc_id);
+        Arc::make_mut(&mut self.docs).remove(&doc_id);
         Ok(())
     }
 
     fn clear(&mut self) -> StorageBackendResult<()> {
-        self.docs.clear();
+        self.docs = Arc::default();
         Ok(())
     }
 
     fn doc_ids(&self) -> StorageBackendResult<Vec<DocId>> {
         self.doc_id_calls
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.catalog_was_unlocked.store(
-            self.tables.try_write().is_some(),
-            std::sync::atomic::Ordering::Relaxed,
-        );
         Ok(self.docs.keys().copied().collect())
     }
 
@@ -151,6 +215,16 @@ impl DocumentStore for PortalSnapshotProbeStore {
     }
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>> {
+        self.snapshot_calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.catalog_was_unlocked.store(
+            self.tables.try_write().is_some(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+
+        if let Some(error) = self.snapshot_error {
+            return Err(error());
+        }
         Ok(Arc::new(self.clone()))
     }
 
@@ -170,10 +244,23 @@ fn cursor_snapshots_only_referenced_tables_without_holding_the_catalog_lock() {
     let used = PortalSnapshotProbeStore::from_table(&eng, "portal_used");
     let right = PortalSnapshotProbeStore::from_table(&eng, "portal_right");
     let unrelated = PortalSnapshotProbeStore::from_table(&eng, "portal_unrelated");
-    let used_calls = Arc::clone(&used.doc_id_calls);
-    let right_calls = Arc::clone(&right.doc_id_calls);
-    let unrelated_calls = Arc::clone(&unrelated.doc_id_calls);
+    let used_calls = Arc::clone(&used.snapshot_calls);
+    let right_calls = Arc::clone(&right.snapshot_calls);
+    let unrelated_calls = Arc::clone(&unrelated.snapshot_calls);
     let used_catalog_was_unlocked = Arc::clone(&used.catalog_was_unlocked);
+    let document_reads = [
+        Arc::clone(&used.doc_id_calls),
+        Arc::clone(&used.row_reads),
+        Arc::clone(&right.doc_id_calls),
+        Arc::clone(&right.row_reads),
+        Arc::clone(&unrelated.doc_id_calls),
+        Arc::clone(&unrelated.row_reads),
+    ];
+    let read_counts = || {
+        document_reads
+            .each_ref()
+            .map(|calls| calls.load(std::sync::atomic::Ordering::Relaxed))
+    };
     *eng.table("portal_used")
         .unwrap()
         .expect("portal_used")
@@ -200,6 +287,7 @@ fn cursor_snapshots_only_referenced_tables_without_holding_the_catalog_lock() {
         0
     );
 
+    let before = read_counts();
     eng.sql(
         "DECLARE table_cursor CURSOR FOR SELECT id FROM portal_used",
         &[],
@@ -212,6 +300,7 @@ fn cursor_snapshots_only_referenced_tables_without_holding_the_catalog_lock() {
         0
     );
     assert!(used_catalog_was_unlocked.load(std::sync::atomic::Ordering::Relaxed));
+    assert_eq!(read_counts(), before);
     assert_eq!(
         eng.sql("FETCH ALL FROM table_cursor", &[])
             .unwrap()
@@ -220,6 +309,7 @@ fn cursor_snapshots_only_referenced_tables_without_holding_the_catalog_lock() {
         1
     );
 
+    let before = read_counts();
     eng.sql(
         "DECLARE operator_cursor CURSOR FOR SELECT left_doc_id FROM vector_similarity_join(portal_used, knn_match(embedding, ARRAY[1.0, 0.0], 1), portal_right, knn_match(archived_embedding, ARRAY[1.0, 0.0], 1), 0.8)",
         &[],
@@ -231,6 +321,7 @@ fn cursor_snapshots_only_referenced_tables_without_holding_the_catalog_lock() {
         unrelated_calls.load(std::sync::atomic::Ordering::Relaxed),
         0
     );
+    assert_eq!(read_counts(), before);
     eng.sql("SET search_path = portal_shadow, public", &[])
         .unwrap();
     assert_eq!(

@@ -32,39 +32,34 @@ impl Engine {
         })
     }
 
-    /// Whether `schema` is an explicit entry of the current `search_path`.
-    /// First existing namespace on this logical session's explicit search
-    /// path: a durable schema, a virtual system schema such as `ag_catalog`,
-    /// or a graph namespace.
+    /// First usable namespace on this logical session's explicit search path: a durable, virtual system or graph namespace.
     pub fn current_schema_name(&self) -> StorageBackendResult<Option<String>> {
-        Ok(self.current_schema_names(false)?.into_iter().next())
+        self.with_catalog_read_snapshot(Self::current_schema_name_in_execution)
     }
 
-    /// Existing schemas with USAGE privilege in this logical session's search path.
-    /// `PostgreSQL` implicitly searches `pg_catalog` unless it is already named explicitly.
+    pub(crate) fn current_schema_name_in_execution(&self) -> StorageBackendResult<Option<String>> {
+        self.catalog_execution()
+            .current_schema_name()
+            .map_err(|error| uqa_storage::StorageBackendError::backend("schema namespace", error))
+    }
+
+    /// Existing schemas with USAGE privilege in this logical session's search path. `PostgreSQL` implicitly searches `pg_catalog` unless it is already named explicitly.
     pub fn current_schema_names(
         &self,
         include_implicit: bool,
     ) -> StorageBackendResult<Vec<String>> {
-        self.synchronize_catalog_registries()?;
-        let path = self.session.state.read().search_path.clone();
-        let user = self.current_user_name();
-        let mut out = Vec::new();
-        if include_implicit && !path.iter().any(|name| name == "pg_catalog") {
-            out.push("pg_catalog".to_string());
-        }
-        for name in path {
-            if !out.contains(&name)
-                && self.schema_has_privilege_for_role(
-                    &name,
-                    &user,
-                    crate::schema_security::SchemaAclPrivilege::Usage,
-                )
-            {
-                out.push(name);
-            }
-        }
-        Ok(out)
+        self.with_catalog_read_snapshot(|engine| {
+            engine.current_schema_names_in_execution(include_implicit)
+        })
+    }
+
+    pub(crate) fn current_schema_names_in_execution(
+        &self,
+        include_implicit: bool,
+    ) -> StorageBackendResult<Vec<String>> {
+        self.catalog_execution()
+            .current_schema_names(include_implicit)
+            .map_err(|error| uqa_storage::StorageBackendError::backend("schema namespace", error))
     }
 
     /// Draw every bit of one word from this logical session's PRNG.
@@ -105,6 +100,8 @@ impl Engine {
         }
         let mut session = self.session.state.write();
         session.search_path = value;
+        session.session_vars.remove("search_path");
+        session.parameter_scopes.session_assignment("search_path");
         session.sql_statement_cache.clear();
     }
 
@@ -112,6 +109,10 @@ impl Engine {
     /// directly; every other parameter is stored in the session-vars
     /// map so a subsequent `SHOW <name>` can echo it back.
     pub fn set_variable(&self, name: &str, value: &str) -> Result<(), SQLError> {
+        self.set_runtime_parameter(name, Some(value), false)
+    }
+
+    fn assign_variable(&self, name: &str, value: &str) -> Result<(), SQLError> {
         if !crate::capabilities::is_known_runtime_parameter(name) {
             return Err(SQLError::Routine {
                 sqlstate: "42704".into(),
@@ -211,6 +212,10 @@ impl Engine {
     }
 
     pub fn reset_variable(&self, name: &str) -> Result<(), SQLError> {
+        self.set_runtime_parameter(name, None, false)
+    }
+
+    fn assign_reset_variable(&self, name: &str) -> Result<(), SQLError> {
         if !crate::capabilities::is_known_runtime_parameter(name) {
             return Err(SQLError::Routine {
                 sqlstate: "42704".into(),
@@ -254,9 +259,7 @@ impl Engine {
     pub fn reset_all_variables(&self) {
         let mut session = self.session.state.write();
         session.session_vars.clear();
-        session
-            .local_parameter_restore
-            .retain(|name, _| name == "role");
+        session.parameter_scopes.reset_all();
         session.search_path = vec!["public".into()];
         session.sql_statement_cache.clear();
     }
@@ -276,6 +279,32 @@ impl Engine {
         value: Option<&str>,
         local: bool,
     ) -> Result<(), SQLError> {
+        use uqa_sql::semantics::parameters::ParameterAssignment;
+        self.assign_runtime_parameter(
+            name,
+            value,
+            if local {
+                ParameterAssignment::Local
+            } else {
+                ParameterAssignment::Session
+            },
+        )
+    }
+
+    pub(crate) fn set_configured_parameter(&self, name: &str, value: &str) -> Result<(), SQLError> {
+        self.assign_runtime_parameter(
+            name,
+            Some(value),
+            uqa_sql::semantics::parameters::ParameterAssignment::Save,
+        )
+    }
+
+    fn assign_runtime_parameter(
+        &self,
+        name: &str,
+        value: Option<&str>,
+        action: uqa_sql::semantics::parameters::ParameterAssignment,
+    ) -> Result<(), SQLError> {
         use crate::state::RuntimeParameterValue;
         let name = name.to_ascii_lowercase();
         let before = {
@@ -290,41 +319,59 @@ impl Engine {
                     setting,
                     path: state.search_path.clone(),
                 },
-                "role" => RuntimeParameterValue::Role(state.current_user.clone()),
+                "role" => RuntimeParameterValue::Role(state.authorization.selected().cloned()),
+                "session_authorization" => RuntimeParameterValue::SessionAuthorization(
+                    state.authorization.session().clone(),
+                ),
                 _ => RuntimeParameterValue::Setting(setting),
             }
         };
-        if name == "role" {
+        let prior_role = (name == "session_authorization").then(|| {
+            RuntimeParameterValue::Role(self.session.state.read().authorization.selected().cloned())
+        });
+        if name == "session_authorization" {
+            uqa_execution::catalog::security::role_lifecycle::set_session_authorization(
+                &self.role_execution_context(),
+                value,
+            )?;
+        } else if name == "role" {
             uqa_execution::catalog::security::role_lifecycle::set_role(
                 &self.role_execution_context(),
-                value.unwrap_or("default"),
+                value,
             )?;
         } else if let Some(value) = value {
-            self.set_variable(&name, value)?;
+            self.assign_variable(&name, value)?;
         } else {
-            self.reset_variable(&name)?;
+            self.assign_reset_variable(&name)?;
         }
         let in_transaction = self.transaction_depth() != 0;
         let mut state = self.session.state.write();
-        if local {
-            if in_transaction {
-                state.local_parameter_restore.entry(name).or_insert(before);
-            } else {
-                restore_runtime_parameter(&mut state, &name, before);
-                self.push_sql_notice(
-                    "WARNING",
-                    "SET LOCAL can only be used in transaction blocks",
-                );
+        if let Some(prior_role) = prior_role {
+            if let Some(previous) =
+                state
+                    .parameter_scopes
+                    .assigned("role".into(), prior_role, action, in_transaction)
+            {
+                restore_runtime_parameter(&mut state, "role", previous);
             }
-        } else {
-            state.local_parameter_restore.remove(&name);
+        }
+        if let Some(previous) =
+            state
+                .parameter_scopes
+                .assigned(name.clone(), before, action, in_transaction)
+        {
+            restore_runtime_parameter(&mut state, &name, previous);
+            self.push_sql_notice(
+                "WARNING",
+                "SET LOCAL can only be used in transaction blocks",
+            );
         }
         Ok(())
     }
 
     pub(crate) fn restore_local_runtime_parameters(&self) {
         let mut state = self.session.state.write();
-        let saved = std::mem::take(&mut state.local_parameter_restore);
+        let saved = state.parameter_scopes.finish_transaction();
         for (name, value) in saved {
             restore_runtime_parameter(&mut state, &name, value);
         }
@@ -368,6 +415,9 @@ impl Engine {
         }
         if matches!(target, DiscardTarget::All | DiscardTarget::Temp) {
             self.discard_temporary_relations();
+            if self.transaction_depth() == 0 {
+                self.row_locks.close_temporary_roles(self.session_id);
+            }
         }
         if matches!(target, DiscardTarget::All | DiscardTarget::Sequences) {
             self.discard_sequence_session_values();
@@ -386,8 +436,7 @@ impl Engine {
                 self.session.prepared.write().clear();
                 session.sql_statement_cache.clear();
                 session.search_path = vec!["public".to_string()];
-                let session_user = session.session_user.clone();
-                session.current_user = session_user;
+                session.authorization.discard();
                 drop(session);
                 self.session.portals.lock().clear();
                 return Ok(());
@@ -481,7 +530,7 @@ impl Engine {
     }
 }
 
-fn restore_runtime_parameter(
+pub(crate) fn restore_runtime_parameter(
     state: &mut crate::SessionStateSnapshot,
     name: &str,
     value: crate::state::RuntimeParameterValue,
@@ -494,8 +543,13 @@ fn restore_runtime_parameter(
             state.sql_statement_cache.clear();
             setting
         }
+        RuntimeParameterValue::SessionAuthorization(role) => {
+            state.authorization.restore_session(role);
+            state.sql_statement_cache.clear();
+            return;
+        }
         RuntimeParameterValue::Role(role) => {
-            state.current_user = role;
+            state.authorization.set_role(role);
             state.sql_statement_cache.clear();
             return;
         }

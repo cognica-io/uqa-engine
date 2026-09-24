@@ -23,6 +23,8 @@ impl Engine {
             relations: self,
             access: self,
             locks: self,
+            lock_catalog: self,
+            lock_session: self,
             modes: self,
             names: self,
             rows: self.constraint_execution_context(),
@@ -46,12 +48,12 @@ impl uqa_sql::schema::constraint_changes::ConstraintTypeReferrers for Engine {
         &self,
         table: &str,
     ) -> Result<Vec<(String, ForeignKey)>, uqa_sql::assignment::columns::ColumnCatalogError> {
-        Engine::try_referrers_to(self, table).map_err(|error| Box::new(error) as _)
+        Engine::referrers_in_execution(self, table).map_err(|error| Box::new(error) as _)
     }
 }
 impl ConstraintRelations for Engine {
     fn table_names(&self) -> StorageBackendResult<Vec<String>> {
-        Engine::table_names(self)
+        Engine::table_names_in_execution(self)
     }
     fn table_hierarchy(&self, table: &str) -> StorageBackendResult<TableHierarchy> {
         self.try_table_hierarchy(table)

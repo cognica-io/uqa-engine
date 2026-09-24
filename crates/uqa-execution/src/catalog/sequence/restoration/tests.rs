@@ -5,6 +5,8 @@
 //
 
 use super::*;
+
+mod authority;
 use uqa_storage::{SequenceOwner, SequenceOwnerDependency};
 
 fn row() -> SequenceRow {
@@ -31,13 +33,65 @@ fn row() -> SequenceRow {
         [2; 16],
         state,
         RelationPersistence::Permanent,
-        &SequenceSecurity {
-            role_owner: "uqa".into(),
-            acl: None,
-        },
+        &BoundSequenceSecurity::owner(uqa_core::catalog_role::RoleIdentity::BOOTSTRAP),
     )
     .unwrap()
 }
+
+#[test]
+fn sequence_values_follow_commits_without_losing_private_name_and_definition_changes() {
+    let named = |name: &str, object: u8, value: i64| {
+        let mut row = row();
+        row.relation.name = name.into();
+        row.object_id = [object; 16];
+        row.current = value;
+        row
+    };
+    let bound = vec![
+        named("values", 1, 20),
+        named("renamed", 2, 40),
+        named("created", 4, 50),
+        named("removed_by_peer", 5, 60),
+    ];
+    let mut committed_value = named("values", 1, 300);
+    committed_value.definition_generation = [8; 16];
+    let selected = select_sequence_value_rows(
+        bound,
+        vec![
+            committed_value,
+            named("old_name", 2, 10),
+            named("privately_dropped", 3, 15),
+            named("created_by_peer", 6, 70),
+        ],
+        |row| Ok(matches!(row.object_id[0], 2..=4)),
+    )
+    .unwrap();
+    assert_eq!(
+        selected
+            .iter()
+            .map(|row| (row.relation.name.as_str(), row.current))
+            .collect::<Vec<_>>(),
+        [
+            ("created", 50),
+            ("created_by_peer", 70),
+            ("renamed", 40),
+            ("values", 300)
+        ]
+    );
+    assert_eq!(selected.last().unwrap().definition_generation, [8; 16]);
+}
+
+#[test]
+fn failed_private_sequence_inspection_does_not_return_a_partial_registry() {
+    let error = select_sequence_value_rows(Vec::new(), vec![row()], |_| {
+        Err(StorageBackendError::Other(
+            "private view unavailable".into(),
+        ))
+    })
+    .unwrap_err();
+    assert_eq!(error.to_string(), "private view unavailable");
+}
+
 #[test]
 fn durable_sequence_row_round_trip_preserves_all_allocation_and_owner_fields() {
     let original = row();
@@ -47,10 +101,15 @@ fn durable_sequence_row_round_trip_preserves_all_allocation_and_owner_fields() {
         original.object_id,
         state,
         RelationPersistence::Permanent,
-        &SequenceSecurity {
-            role_owner: original.role_owner.clone(),
-            acl: original.acl.clone(),
-        },
+        &security::restore_security(
+            &original.security,
+            &BTreeMap::from([(
+                "uqa".into(),
+                uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
+            )]),
+            false,
+        )
+        .unwrap(),
     )
     .unwrap();
     assert_eq!(

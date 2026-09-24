@@ -349,6 +349,18 @@ pub fn split_locking_order_projections(
     ),
     SQLError,
 > {
+    let (sort_statement, required) = order_projection_targets(statement, output, &physical)?;
+    let (before_sort, after_sort) = physical
+        .into_iter()
+        .partition(|(target, _)| required.contains(target));
+    Ok((sort_statement, before_sort, after_sort))
+}
+
+pub fn order_projection_targets(
+    statement: &QueryBlockPlan,
+    output: &[OutputColumnMapping],
+    physical: &[PhysicalProjection],
+) -> Result<(QueryBlockPlan, HashSet<ProjectionTarget>), SQLError> {
     let mut sort_statement = statement.clone();
     let mut required = HashSet::new();
     for (index, order) in statement.order_by.iter().enumerate() {
@@ -377,10 +389,7 @@ pub fn split_locking_order_projections(
             sort_statement.order_by[index].expr = projection_target_expression(target);
         }
     }
-    let (before_sort, after_sort) = physical
-        .into_iter()
-        .partition(|(target, _)| required.contains(target));
-    Ok((sort_statement, before_sort, after_sort))
+    Ok((sort_statement, required))
 }
 
 pub fn append_row_at_time_projection<'a>(

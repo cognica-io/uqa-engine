@@ -4,13 +4,25 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Core `PostgreSQL` array built-ins.
+//! Core `PostgreSQL` array built-ins share admitted result constructors.
 
-use super::{out_of_range, to_i64, ArrayValue, Result, SQLError, Value};
+use super::conversion::to_i64_with_control;
+use super::{out_of_range, ArrayValue, Result, SQLError, Value};
+use uqa_core::memory::{Produced, ProductionControl, ProductionString, ProductionVec};
 
 mod order;
+mod properties;
 
 pub(super) fn eval_array_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
+    eval_array_functions_with_control(name, args, &ProductionControl::uncontrolled())
+        .map(|result| result.map(ordinary))
+}
+
+pub(super) fn eval_array_functions_with_control(
+    name: &str,
+    args: &[Value],
+    control: &ProductionControl<'_>,
+) -> Option<Result<Produced<Value>>> {
     const NAMES: &[&str] = &[
         "array_length",
         "array_upper",
@@ -27,277 +39,227 @@ pub(super) fn eval_array_functions(name: &str, args: &[Value]) -> Option<Result<
         "array_sort",
         "unnest",
     ];
-    if !NAMES.contains(&name) {
-        return None;
-    }
-    Some(eval_array_function(name, args, false))
+    NAMES
+        .contains(&name)
+        .then(|| eval_array_function(name, args, false, control))
 }
 
-pub(super) fn eval_dispatched_json_array_sort(args: &[Value]) -> Result<Value> {
-    eval_array_function("array_sort", args, true)
+pub(super) fn eval_dispatched_json_array_sort_with_control(
+    args: &[Value],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    eval_array_function("array_sort", args, true, control)
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "builtin dispatch preserves arity, NULL, and error precedence"
-)]
-fn eval_array_function(name: &str, args: &[Value], json_sort: bool) -> Result<Value> {
-    (|| -> Result<Value> {
-        match name {
-            "array_length" | "array_upper" | "array_lower" => {
-                if args.len() != 2 {
-                    return Err(SQLError::TypeMismatch(format!("{name} takes 2 args")));
-                }
-                let array = match &args[0] {
-                    Value::Array(array) => array,
-                    Value::Null => return Ok(Value::Null),
-                    other => return Err(not_an_array(name, other)),
-                };
-                if matches!(args[1], Value::Null) {
-                    return Ok(Value::Null);
-                }
-                let Some(dimension) = dimension_index(&args[1])? else {
-                    return Ok(Value::Null);
-                };
-                let Some(length) = array.dimensions().get(dimension) else {
-                    return Ok(Value::Null);
-                };
-                if *length == 0 {
-                    return Ok(Value::Null);
-                }
-                match name {
-                    "array_length" => i64::try_from(*length)
-                        .map(Value::Int)
-                        .map_err(|_| out_of_range("array length")),
-                    "array_lower" => array
-                        .lower_bound(dimension)
-                        .map(|bound| Value::Int(i64::from(bound)))
-                        .ok_or_else(|| SQLError::TypeMismatch("invalid array dimensions".into())),
-                    "array_upper" => Ok(array
-                        .upper_bound(dimension)
-                        .map(Value::Int)
-                        .unwrap_or(Value::Null)),
-                    _ => unreachable!(),
-                }
-            }
-            "array_dims" => {
-                if args.len() != 1 {
-                    return Err(SQLError::TypeMismatch("array_dims takes 1 arg".into()));
-                }
-                match &args[0] {
-                    Value::Array(array) if array.dimensions().is_empty() => Ok(Value::Null),
-                    Value::Array(array) => Ok(Value::Str(
-                        array
-                            .lower_bounds()
-                            .iter()
-                            .zip(array.dimensions())
-                            .map(|(lower, length)| {
-                                let length = i64::try_from(*length)
-                                    .map_err(|_| out_of_range("array dimension"))?;
-                                Ok(format!("[{lower}:{}]", i64::from(*lower) + length - 1))
-                            })
-                            .collect::<Result<String>>()?,
-                    )),
-                    Value::Null => Ok(Value::Null),
-                    other => Err(not_an_array("array_dims", other)),
-                }
-            }
-            "array_ndims" => {
-                if args.len() != 1 {
-                    return Err(SQLError::TypeMismatch("array_ndims takes 1 arg".into()));
-                }
-                match &args[0] {
-                    Value::Array(array) if array.dimensions().is_empty() => Ok(Value::Null),
-                    Value::Array(array) => i64::try_from(array.dimensions().len())
-                        .map(Value::Int)
-                        .map_err(|_| out_of_range("array dimensions")),
-                    Value::Null => Ok(Value::Null),
-                    other => Err(not_an_array("array_ndims", other)),
-                }
-            }
-            "cardinality" => {
-                if args.len() != 1 {
-                    return Err(SQLError::TypeMismatch("cardinality takes 1 arg".into()));
-                }
-                match &args[0] {
-                    Value::Array(array) => {
-                        let cardinality = array.dimensions().iter().try_fold(
-                            i64::from(!array.dimensions().is_empty()),
-                            |total, length| {
-                                let length = i64::try_from(*length)
-                                    .map_err(|_| out_of_range("array cardinality"))?;
-                                total
-                                    .checked_mul(length)
-                                    .ok_or_else(|| out_of_range("array cardinality"))
-                            },
-                        )?;
-                        Ok(Value::Int(cardinality))
-                    }
-                    Value::Null => Ok(Value::Null),
-                    other => Err(not_an_array("cardinality", other)),
-                }
-            }
-            "array_cat" => {
-                if args.len() != 2 {
-                    return Err(SQLError::TypeMismatch("array_cat takes 2 args".into()));
-                }
-                match (&args[0], &args[1]) {
-                    (Value::Null, Value::Null) => Ok(Value::Null),
-                    (Value::Null, Value::Array(array)) | (Value::Array(array), Value::Null) => {
-                        Ok(Value::Array(array.clone()))
-                    }
-                    (Value::Array(left), Value::Array(right)) => concatenate(left, right),
-                    _ => Err(SQLError::TypeMismatch(
-                        "array_cat: both args must be arrays".into(),
-                    )),
-                }
-            }
-            "array_append" => {
-                if args.len() != 2 {
-                    return Err(SQLError::TypeMismatch("array_append takes 2 args".into()));
-                }
-                match &args[0] {
-                    Value::Array(array) if array.dimensions().len() <= 1 => {
-                        let mut elements = array.elements().to_vec();
-                        elements.push(args[1].clone());
-                        rebuild_array(array, elements)
-                    }
-                    Value::Array(_) => Err(SQLError::TypeMismatch(
-                        "argument must be an empty or one-dimensional array".into(),
-                    )),
-                    Value::Null => ArrayValue::try_new(vec![args[1].clone()])
-                        .map(Value::Array)
-                        .ok_or_else(|| SQLError::TypeMismatch("invalid array element".into())),
-                    other => Err(not_an_array("array_append", other)),
-                }
-            }
-            "array_prepend" => {
-                if args.len() != 2 {
-                    return Err(SQLError::TypeMismatch("array_prepend takes 2 args".into()));
-                }
-                match &args[1] {
-                    Value::Array(array) if array.dimensions().len() <= 1 => {
-                        let mut elements = Vec::with_capacity(array.elements().len() + 1);
-                        elements.push(args[0].clone());
-                        elements.extend(array.elements().iter().cloned());
-                        rebuild_array(array, elements)
-                    }
-                    Value::Array(_) => Err(SQLError::TypeMismatch(
-                        "argument must be an empty or one-dimensional array".into(),
-                    )),
-                    Value::Null => ArrayValue::try_new(vec![args[0].clone()])
-                        .map(Value::Array)
-                        .ok_or_else(|| SQLError::TypeMismatch("invalid array element".into())),
-                    other => Err(not_an_array("array_prepend", other)),
-                }
-            }
-            "array_remove" => {
-                if args.len() != 2 {
-                    return Err(SQLError::TypeMismatch("array_remove takes 2 args".into()));
-                }
-                match &args[0] {
-                    Value::Array(array) if array.dimensions().len() <= 1 => rebuild_array(
-                        array,
-                        array
-                            .elements()
-                            .iter()
-                            .filter(|value| **value != args[1])
-                            .cloned()
-                            .collect(),
-                    ),
-                    Value::Array(_) => Err(SQLError::TypeMismatch(
-                        "removing elements from multidimensional arrays is not supported".into(),
-                    )),
-                    Value::Null => Ok(Value::Null),
-                    other => Err(not_an_array("array_remove", other)),
-                }
-            }
-            "array_position" => {
-                if !(2..=3).contains(&args.len()) {
-                    return Err(SQLError::TypeMismatch(
-                        "array_position takes 2 or 3 args".into(),
-                    ));
-                }
-                match &args[0] {
-                    Value::Array(array) if array.dimensions().len() <= 1 => {
-                        let lower = i64::from(array.lower_bound(0).unwrap_or(1));
-                        let start = match args.get(2) {
-                            Some(Value::Null) => return Ok(Value::Null),
-                            Some(value) => to_i64(value)?,
-                            None => lower,
-                        };
-                        let offset = usize::try_from(start.saturating_sub(lower).max(0))
-                            .map_err(|_| out_of_range("array position"))?;
-                        Ok(array
-                            .elements()
-                            .iter()
-                            .enumerate()
-                            .skip(offset)
-                            .find(|(_, value)| **value == args[1])
-                            .and_then(|(index, _)| i64::try_from(index).ok())
-                            .and_then(|index| lower.checked_add(index))
-                            .map(Value::Int)
-                            .unwrap_or(Value::Null))
-                    }
-                    Value::Array(_) => Err(SQLError::TypeMismatch(
-                        "searching for elements in multidimensional arrays is not supported".into(),
-                    )),
-                    Value::Null => Ok(Value::Null),
-                    other => Err(not_an_array("array_position", other)),
-                }
-            }
-            "array_reverse" | "array_sort" => {
-                if name == "array_reverse" && args.len() != 1 {
-                    return Err(SQLError::TypeMismatch("array_reverse takes 1 arg".into()));
-                }
-                if name != "array_reverse" && !(1..=3).contains(&args.len()) {
-                    return Err(SQLError::TypeMismatch(
-                        "array_sort takes 1 to 3 args".into(),
-                    ));
-                }
-                if args.iter().any(|arg| matches!(arg, Value::Null)) {
-                    return Ok(Value::Null);
-                }
-                let Value::Array(array) = &args[0] else {
-                    return Err(not_an_array(name, &args[0]));
-                };
-                if name == "array_reverse" {
-                    let mut elements = array.elements().to_vec();
-                    elements.reverse();
-                    return rebuild_array(array, elements);
-                }
-                let descending =
-                    boolean_option(args.get(1), "array_sort: descending")?.unwrap_or(false);
-                let nulls_first =
-                    boolean_option(args.get(2), "array_sort: nulls_first")?.unwrap_or(descending);
-                let elements = order::sorted_elements(array, descending, nulls_first, json_sort)?;
-                rebuild_array(array, elements)
-            }
-            "unnest" => {
-                if args.len() != 1 {
-                    return Err(SQLError::TypeMismatch("unnest takes 1 arg".into()));
-                }
-                match &args[0] {
-                    Value::Array(array) => {
-                        let mut values = Vec::new();
-                        flatten_elements(array.elements(), &mut values);
-                        Ok(Value::List(values))
-                    }
-                    Value::Null => Ok(Value::List(Vec::new())),
-                    other => Err(not_an_array("unnest", other)),
-                }
-            }
-            _ => unreachable!("function family membership was checked before dispatch"),
+fn ordinary(value: Produced<Value>) -> Value {
+    value.into_uncontrolled().expect("ordinary array result")
+}
+
+fn inline(value: Value, control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+    Ok(control.finish(value, control.empty_reservation())?)
+}
+
+fn eval_array_function(
+    name: &str,
+    args: &[Value],
+    json_sort: bool,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    control.check()?;
+    match name {
+        "array_length" | "array_upper" | "array_lower" | "array_ndims" | "cardinality" => {
+            inline(properties::evaluate(name, args, control)?, control)
         }
-    })()
+        "array_dims" => dimensions(args, control),
+        "array_cat" => {
+            require_arity(name, args, 2)?;
+            match (&args[0], &args[1]) {
+                (Value::Null, Value::Null) => inline(Value::Null, control),
+                (Value::Null, Value::Array(_)) => Ok(control.copy_value(&args[1])?),
+                (Value::Array(_), Value::Null) => Ok(control.copy_value(&args[0])?),
+                (Value::Array(left), Value::Array(right)) => concatenate(left, right, control),
+                _ => Err(SQLError::TypeMismatch(
+                    "array_cat: both args must be arrays".into(),
+                )),
+            }
+        }
+        "array_append" | "array_prepend" => append(name, args, control),
+        "array_remove" => remove(args, control),
+        "array_position" => position(args, control),
+        "array_reverse" | "array_sort" => reordered(name, args, json_sort, control),
+        "unnest" => {
+            require_arity(name, args, 1)?;
+            let mut values = ProductionVec::new(*control);
+            match &args[0] {
+                Value::Array(array) => flatten_elements(array.elements(), &mut values, control)?,
+                Value::Null => {}
+                other => return Err(not_an_array(name, other)),
+            }
+            list(values.finish()?, control)
+        }
+        _ => unreachable!("function family membership was checked before dispatch"),
+    }
 }
 
-fn dimension_index(value: &Value) -> Result<Option<usize>> {
-    let dimension = to_i64(value)?;
-    if dimension <= 0 {
-        return Ok(None);
+fn require_arity(name: &str, args: &[Value], count: usize) -> Result<()> {
+    if args.len() == count {
+        Ok(())
+    } else {
+        Err(SQLError::TypeMismatch(format!(
+            "{name} takes {count} {}",
+            if count == 1 { "arg" } else { "args" }
+        )))
     }
-    Ok(usize::try_from(dimension - 1).ok())
+}
+
+fn dimensions(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+    require_arity("array_dims", args, 1)?;
+    let array = match &args[0] {
+        Value::Null => return inline(Value::Null, control),
+        Value::Array(array) if array.dimensions().is_empty() => {
+            return inline(Value::Null, control)
+        }
+        Value::Array(array) => array,
+        other => return Err(not_an_array("array_dims", other)),
+    };
+    let mut output = ProductionString::new(*control);
+    for (lower, length) in array.lower_bounds().iter().zip(array.dimensions()) {
+        let length = i64::try_from(*length).map_err(|_| out_of_range("array dimension"))?;
+        output.push_str(
+            &control.format(format_args!("[{lower}:{}]", i64::from(*lower) + length - 1))?,
+        )?;
+    }
+    let (text, memory) = output.finish()?.into_parts();
+    Ok(control.finish(Value::Str(text), memory)?)
+}
+
+fn append(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+    require_arity(name, args, 2)?;
+    let prepend = name == "array_prepend";
+    let (source, item) = if prepend {
+        (&args[1], &args[0])
+    } else {
+        (&args[0], &args[1])
+    };
+    let array = match source {
+        Value::Array(array) if array.dimensions().len() <= 1 => Some(array),
+        Value::Array(_) => {
+            return Err(SQLError::TypeMismatch(
+                "argument must be an empty or one-dimensional array".into(),
+            ))
+        }
+        Value::Null => None,
+        other => return Err(not_an_array(name, other)),
+    };
+    let mut elements = ProductionVec::new(*control);
+    if prepend {
+        elements.push_produced(control.copy_value(item)?)?;
+    }
+    if let Some(array) = array {
+        copy_into(array.elements().iter(), &mut elements, control)?;
+    }
+    if !prepend {
+        elements.push_produced(control.copy_value(item)?)?;
+    }
+    let elements = elements.finish()?;
+    match array {
+        Some(array) => rebuild_array(array, elements, control),
+        None => finish_array(
+            ArrayValue::try_new_with_control(elements, control)?,
+            control,
+            || SQLError::TypeMismatch("invalid array element".into()),
+        ),
+    }
+}
+
+fn remove(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+    require_arity("array_remove", args, 2)?;
+    let array = match &args[0] {
+        Value::Null => return inline(Value::Null, control),
+        Value::Array(array) if array.dimensions().len() <= 1 => array,
+        Value::Array(_) => {
+            return Err(SQLError::TypeMismatch(
+                "removing elements from multidimensional arrays is not supported".into(),
+            ))
+        }
+        other => return Err(not_an_array("array_remove", other)),
+    };
+    let mut elements = ProductionVec::new(*control);
+    for value in array.elements() {
+        if !value.cmp_with_control(&args[1], control)?.is_eq() {
+            elements.push_produced(control.copy_value(value)?)?;
+        }
+    }
+    rebuild_array(array, elements.finish()?, control)
+}
+
+fn position(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+    if !(2..=3).contains(&args.len()) {
+        return Err(SQLError::TypeMismatch(
+            "array_position takes 2 or 3 args".into(),
+        ));
+    }
+    let array = match &args[0] {
+        Value::Null => return inline(Value::Null, control),
+        Value::Array(array) if array.dimensions().len() <= 1 => array,
+        Value::Array(_) => {
+            return Err(SQLError::TypeMismatch(
+                "searching for elements in multidimensional arrays is not supported".into(),
+            ))
+        }
+        other => return Err(not_an_array("array_position", other)),
+    };
+    let lower = i64::from(array.lower_bound(0).unwrap_or(1));
+    let start = match args.get(2) {
+        Some(Value::Null) => return inline(Value::Null, control),
+        Some(value) => to_i64_with_control(value, control)?,
+        None => lower,
+    };
+    let offset = usize::try_from(start.saturating_sub(lower).max(0))
+        .map_err(|_| out_of_range("array position"))?;
+    for (index, value) in array.elements().iter().enumerate().skip(offset) {
+        if value.cmp_with_control(&args[1], control)?.is_eq() {
+            return inline(
+                i64::try_from(index)
+                    .ok()
+                    .and_then(|index| lower.checked_add(index))
+                    .map(Value::Int)
+                    .unwrap_or(Value::Null),
+                control,
+            );
+        }
+    }
+    inline(Value::Null, control)
+}
+
+fn reordered(
+    name: &str,
+    args: &[Value],
+    json_sort: bool,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    if name == "array_reverse" {
+        require_arity(name, args, 1)?;
+    } else if !(1..=3).contains(&args.len()) {
+        return Err(SQLError::TypeMismatch(
+            "array_sort takes 1 to 3 args".into(),
+        ));
+    }
+    if args.iter().any(|arg| matches!(arg, Value::Null)) {
+        return inline(Value::Null, control);
+    }
+    let Value::Array(array) = &args[0] else {
+        return Err(not_an_array(name, &args[0]));
+    };
+    let elements = if name == "array_reverse" {
+        copy_elements(array.elements().iter().rev(), control)?
+    } else {
+        let descending = boolean_option(args.get(1), "array_sort: descending")?.unwrap_or(false);
+        let nulls_first =
+            boolean_option(args.get(2), "array_sort: nulls_first")?.unwrap_or(descending);
+        order::sorted_elements(array, descending, nulls_first, json_sort, control)?
+    };
+    rebuild_array(array, elements, control)
 }
 
 fn boolean_option(value: Option<&Value>, label: &str) -> Result<Option<bool>> {
@@ -310,57 +272,121 @@ fn boolean_option(value: Option<&Value>, label: &str) -> Result<Option<bool>> {
     }
 }
 
-fn rebuild_array(original: &ArrayValue, elements: Vec<Value>) -> Result<Value> {
-    let rebuilt = if elements.is_empty() || original.dimensions().is_empty() {
-        ArrayValue::try_new(elements)
-    } else {
-        ArrayValue::with_lower_bounds(elements, original.lower_bounds().to_vec())
-    };
-    rebuilt
-        .map(Value::Array)
-        .ok_or_else(|| SQLError::TypeMismatch("array dimensions do not match".into()))
+fn copy_into<'a>(
+    values: impl IntoIterator<Item = &'a Value>,
+    output: &mut ProductionVec<'_, Value>,
+    control: &ProductionControl<'_>,
+) -> Result<()> {
+    for value in values {
+        output.push_produced(control.copy_value(value)?)?;
+    }
+    Ok(())
 }
 
-fn concatenate(left: &ArrayValue, right: &ArrayValue) -> Result<Value> {
+fn copy_elements<'a>(
+    values: impl IntoIterator<Item = &'a Value>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<Value>>> {
+    let mut output = ProductionVec::new(*control);
+    copy_into(values, &mut output, control)?;
+    Ok(output.finish()?)
+}
+
+fn bounds(values: &[i32], control: &ProductionControl<'_>) -> Result<Produced<Vec<i32>>> {
+    let mut output = ProductionVec::new(*control);
+    for value in values {
+        output.push_copy(*value)?;
+    }
+    Ok(output.finish()?)
+}
+
+fn list(
+    elements: Produced<Vec<Value>>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let (elements, memory) = elements.into_parts();
+    Ok(control.finish(Value::List(elements), memory)?)
+}
+
+fn finish_array(
+    array: Option<Produced<ArrayValue>>,
+    control: &ProductionControl<'_>,
+    invalid: impl FnOnce() -> SQLError,
+) -> Result<Produced<Value>> {
+    let (array, memory) = array.ok_or_else(invalid)?.into_parts();
+    Ok(control.finish(Value::Array(array), memory)?)
+}
+
+fn rebuild_array(
+    original: &ArrayValue,
+    elements: Produced<Vec<Value>>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let rebuilt = if elements.is_empty() || original.dimensions().is_empty() {
+        ArrayValue::try_new_with_control(elements, control)?
+    } else {
+        ArrayValue::with_lower_bounds_with_control(
+            elements,
+            bounds(original.lower_bounds(), control)?,
+            control,
+        )?
+    };
+    finish_array(rebuilt, control, || {
+        SQLError::TypeMismatch("array dimensions do not match".into())
+    })
+}
+
+fn concatenate(
+    left: &ArrayValue,
+    right: &ArrayValue,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
     if left.dimensions().is_empty() {
-        return Ok(Value::Array(right.clone()));
+        return rebuild_array(right, copy_elements(right.elements(), control)?, control);
     }
     if right.dimensions().is_empty() {
-        return Ok(Value::Array(left.clone()));
+        return rebuild_array(left, copy_elements(left.elements(), control)?, control);
     }
-    let (elements, lower_bounds) = if left.dimensions().len() == right.dimensions().len() {
+    let mut elements = ProductionVec::new(*control);
+    let lower_bounds = if left.dimensions().len() == right.dimensions().len() {
         if left.dimensions().get(1..) != right.dimensions().get(1..)
             || left.lower_bounds().get(1..) != right.lower_bounds().get(1..)
         {
             return Err(incompatible_array_concat());
         }
-        let mut elements = left.elements().to_vec();
-        elements.extend(right.elements().iter().cloned());
-        (elements, left.lower_bounds().to_vec())
+        copy_into(left.elements(), &mut elements, control)?;
+        copy_into(right.elements(), &mut elements, control)?;
+        left.lower_bounds()
     } else if left.dimensions().len() + 1 == right.dimensions().len() {
         if left.dimensions() != &right.dimensions()[1..]
             || left.lower_bounds() != &right.lower_bounds()[1..]
         {
             return Err(incompatible_array_concat());
         }
-        let mut elements = vec![Value::List(left.elements().to_vec())];
-        elements.extend(right.elements().iter().cloned());
-        (elements, right.lower_bounds().to_vec())
+        elements.push_produced(list(copy_elements(left.elements(), control)?, control)?)?;
+        copy_into(right.elements(), &mut elements, control)?;
+        right.lower_bounds()
     } else if left.dimensions().len() == right.dimensions().len() + 1 {
         if &left.dimensions()[1..] != right.dimensions()
             || &left.lower_bounds()[1..] != right.lower_bounds()
         {
             return Err(incompatible_array_concat());
         }
-        let mut elements = left.elements().to_vec();
-        elements.push(Value::List(right.elements().to_vec()));
-        (elements, left.lower_bounds().to_vec())
+        copy_into(left.elements(), &mut elements, control)?;
+        elements.push_produced(list(copy_elements(right.elements(), control)?, control)?)?;
+        left.lower_bounds()
     } else {
         return Err(incompatible_array_concat());
     };
-    ArrayValue::with_lower_bounds(elements, lower_bounds)
-        .map(Value::Array)
-        .ok_or_else(incompatible_array_concat)
+    finish_array(
+        ArrayValue::with_lower_bounds_with_control(
+            elements.finish()?,
+            bounds(lower_bounds, control)?,
+            control,
+        )?,
+        control,
+        incompatible_array_concat,
+    )
 }
 
 fn incompatible_array_concat() -> SQLError {
@@ -370,16 +396,25 @@ fn incompatible_array_concat() -> SQLError {
     }
 }
 
-fn flatten_elements(elements: &[Value], output: &mut Vec<Value>) {
+fn flatten_elements(
+    elements: &[Value],
+    output: &mut ProductionVec<'_, Value>,
+    control: &ProductionControl<'_>,
+) -> Result<()> {
     for element in elements {
+        control.check()?;
         if let Value::List(nested) = element {
-            flatten_elements(nested, output);
+            flatten_elements(nested, output, control)?;
         } else {
-            output.push(element.clone());
+            output.push_produced(control.copy_value(element)?)?;
         }
     }
+    Ok(())
 }
 
 fn not_an_array(function: &str, value: &Value) -> SQLError {
     SQLError::TypeMismatch(format!("{function}: not an array {value:?}"))
 }
+
+#[cfg(test)]
+mod tests;

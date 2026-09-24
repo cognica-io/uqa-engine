@@ -155,7 +155,7 @@ fn paged_size_probes_and_payloads_share_a_snapshot_during_concurrent_growth() {
     let store = SQLiteKeyValueStore::open(&directory.path().join("snapshot.sqlite3")).unwrap();
     store
         .connection()
-        .with(|connection| {
+        .with_physical(|connection| {
             connection.pragma_update(None, "journal_mode", "WAL")?;
             Ok(())
         })

@@ -197,6 +197,7 @@ pub struct PLpgSQLVar {
 #[derive(Debug, Clone)]
 pub struct PLpgSQLCursor {
     pub query: Statement,
+    pub source_sql: std::sync::Arc<str>,
     pub argument_row: Option<usize>,
     /// Explicit declaration scroll mode. `None` leaves scrollability query-dependent.
     pub scroll: Option<bool>,
@@ -216,6 +217,7 @@ pub enum PLpgSQLCursorOpen {
     },
     Static {
         query: Box<Statement>,
+        source_sql: std::sync::Arc<str>,
         scroll: Option<bool>,
     },
     Dynamic {
@@ -338,6 +340,7 @@ pub enum PLpgSQLStmt {
         label: Option<String>,
         target: IntoTarget,
         query: Statement,
+        source_sql: std::sync::Arc<str>,
         body: Vec<PLpgSQLStmt>,
     },
     /// `FOR target IN EXECUTE query [USING params] LOOP`.

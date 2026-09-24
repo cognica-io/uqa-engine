@@ -6,36 +6,43 @@
 
 //! Sequence ACL publication with retained authorization and registry guards.
 
+use super::roles::{
+    dependencies::{prepare_role_dependencies, RoleDependencyCandidate},
+    locking::RoleLockContext,
+};
 use crate::catalog::{
     context::CatalogContext,
     projection::{resolve_regclass_kind_by_oid, sequence_relation_oid},
     sequence::sequence_row,
     sequence_introspection::SequenceIntrospectionCatalog,
 };
-use std::{collections::BTreeMap, ops::DerefMut};
+use crate::row_locks::shared_objects::SharedObjectLockSession;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ops::DerefMut,
+};
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::security::acl_command::{AclCommandRoles, ResolvedAclRoles};
 use uqa_sql::{
     ast::{GrantSequenceStmt, GrantSequenceTarget},
-    catalog::{
-        roles::resolve_role_reference,
-        security::{
-            sequence::requested_acl_privileges,
-            sequence_grants::{
-                apply_sequence_acl, bind_named_sequence_grants, bind_sequence_grant_schemas,
-                sequence_acl_warning, sequence_grants_in_schemas, validate_sequence_acl_roles,
-                validate_sequence_grant_target_kinds, ResolvedSequenceGrantTarget,
-                SequenceGrantNamespace,
-            },
-            sequence_inquiry::SequencePrivilegeInquiry,
-            SequenceSecurity,
+    catalog::security::{
+        dependencies::added_acl_roles,
+        sequence::requested_acl_privileges,
+        sequence_grants::{
+            apply_sequence_acl, bind_named_sequence_grants, bind_sequence_grant_schemas,
+            sequence_acl_warning, sequence_grants_in_schemas, validate_sequence_acl_roles,
+            validate_sequence_grant_target_kinds, ResolvedSequenceGrantTarget,
+            SequenceGrantNamespace,
         },
+        sequence_inquiry::SequencePrivilegeInquiry,
+        BoundSequenceSecurity,
     },
     SQLError,
 };
 use uqa_storage::{CatalogFacade, StorageBackendResult};
 
 pub type SequenceSecurityWrite<'a> =
-    Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, SequenceSecurity>> + 'a>;
+    Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, BoundSequenceSecurity>> + 'a>;
 pub trait SequencePrivilegePublication {
     fn prepare_writer(&self) -> Result<(), SQLError>;
     fn refresh_catalog(&self) -> StorageBackendResult<()>;
@@ -45,6 +52,7 @@ pub trait SequencePrivilegePublication {
 }
 pub struct SequencePrivilegeContext<'a> {
     pub inquiry: SequencePrivilegeInquiry<'a>,
+    pub locks: &'a dyn SharedObjectLockSession,
     pub sequences: &'a dyn SequenceIntrospectionCatalog,
     pub namespaces: &'a dyn SequenceGrantNamespace,
     pub publication: &'a dyn SequencePrivilegePublication,
@@ -52,61 +60,41 @@ pub struct SequencePrivilegeContext<'a> {
     pub storage: Option<&'a dyn CatalogFacade>,
 }
 
+struct SequencePrivilegeCandidate<'a> {
+    registry: SequenceSecurityWrite<'a>,
+    updates: Vec<(String, RelationIdentity, BoundSequenceSecurity)>,
+    notices: Vec<(&'static str, String)>,
+}
+
 impl SequencePrivilegeContext<'_> {
     pub fn grant_sequence_privileges(&self, statement: &GrantSequenceStmt) -> Result<(), SQLError> {
-        self.publication.prepare_writer()?;
+        self.grant_sequence_privileges_with_roles(statement, &mut AclCommandRoles::default())
+    }
+
+    pub(crate) fn grant_sequence_privileges_with_roles(
+        &self,
+        statement: &GrantSequenceStmt,
+        command_roles: &mut AclCommandRoles,
+    ) -> Result<(), SQLError> {
         let targets = self.resolve_sequence_grant_targets(&statement.target)?;
-        let grantees = statement
-            .grantees
-            .iter()
-            .map(|role| resolve_role_reference(self.inquiry.names, role))
-            .collect::<Vec<_>>();
-        let requested_grantor = statement
-            .grantor
-            .as_ref()
-            .map(|role| resolve_role_reference(self.inquiry.names, role));
-        let current_user = self.inquiry.names.current_user_name();
-        let roles = self.inquiry.roles.role_definitions();
-        validate_sequence_acl_roles(
-            statement,
-            &grantees,
-            requested_grantor.as_deref(),
-            &current_user,
-            &roles,
+        let RoleDependencyCandidate {
+            roles,
+            memberships,
+            value:
+                SequencePrivilegeCandidate {
+                    mut registry,
+                    updates,
+                    notices,
+                },
+            ..
+        } = prepare_role_dependencies(
+            &RoleLockContext {
+                roles: self.inquiry.roles,
+                session: self.locks,
+            },
+            || self.publication.prepare_writer(),
+            || self.prepare_privileges(statement, &targets, command_roles),
         )?;
-        validate_sequence_grant_target_kinds(&targets)?;
-        let privileges = requested_acl_privileges(&statement.privileges)?;
-        let memberships = self.inquiry.roles.role_memberships();
-        let mut registry = self.publication.security_write();
-        let mut updates = Vec::new();
-        let mut notices = Vec::new();
-        for target in &targets {
-            let current = registry.get(&target.relation).cloned().ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "sequence `{}` has no security metadata",
-                    target.name
-                ))
-            })?;
-            let (next, grantable) = apply_sequence_acl(
-                statement,
-                &grantees,
-                &privileges,
-                &current_user,
-                &roles,
-                &memberships,
-                &current,
-            )?;
-            if grantable != privileges.len() {
-                notices.push(sequence_acl_warning(
-                    statement.is_grant,
-                    grantable != 0,
-                    &target.relation.name,
-                ));
-            }
-            if next != current {
-                updates.push((target.name.clone(), target.relation.clone(), next));
-            }
-        }
         for (name, relation, security) in &updates {
             self.persist_sequence_security(name, relation, security)?;
         }
@@ -124,6 +112,89 @@ impl SequencePrivilegeContext<'_> {
             self.publication.catalog_changed();
         }
         Ok(())
+    }
+
+    fn prepare_privileges<'a>(
+        &'a self,
+        statement: &GrantSequenceStmt,
+        targets: &[ResolvedSequenceGrantTarget],
+        command_roles: &mut AclCommandRoles,
+    ) -> Result<RoleDependencyCandidate<'a, SequencePrivilegeCandidate<'a>>, SQLError> {
+        let roles = self.inquiry.roles.role_definitions();
+        let ResolvedAclRoles {
+            grantees,
+            current_user,
+            ..
+        } = command_roles.resolve_validated(
+            self.inquiry.names,
+            &roles,
+            &statement.grantees,
+            statement.grantor.as_ref(),
+            |resolved| {
+                validate_sequence_acl_roles(
+                    statement,
+                    &resolved.grantees,
+                    resolved.requested_grantor.as_deref(),
+                    &resolved.current_user,
+                    &roles,
+                )
+            },
+        )?;
+        validate_sequence_grant_target_kinds(targets)?;
+        let privileges = requested_acl_privileges(&statement.privileges)?;
+        let memberships = self.inquiry.roles.role_memberships();
+        let registry = self.publication.security_write();
+        let mut updates = Vec::new();
+        let mut notices = Vec::new();
+        let mut dependencies = BTreeSet::new();
+        for target in targets {
+            let current = registry.get(&target.relation).cloned().ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "sequence `{}` has no security metadata",
+                    target.name
+                ))
+            })?;
+            let current = current.resolve(&roles).map_err(SQLError::Internal)?;
+            let (next, grantable) = apply_sequence_acl(
+                statement,
+                &grantees,
+                &privileges,
+                &current_user,
+                &roles,
+                &memberships,
+                &current,
+            )?;
+            if grantable != privileges.len() {
+                notices.push(sequence_acl_warning(
+                    statement.is_grant,
+                    grantable != 0,
+                    &target.relation.name,
+                ));
+            }
+            added_acl_roles(
+                current.acl.as_deref().unwrap_or_default(),
+                &current.role_owner,
+                next.acl.as_deref().unwrap_or_default(),
+                &next.role_owner,
+                &mut dependencies,
+            );
+            if next != current {
+                let next =
+                    BoundSequenceSecurity::bind(&next, &roles).map_err(SQLError::Internal)?;
+                next.validate(&roles).map_err(SQLError::Internal)?;
+                updates.push((target.name.clone(), target.relation.clone(), next));
+            }
+        }
+        Ok(RoleDependencyCandidate {
+            value: SequencePrivilegeCandidate {
+                registry,
+                updates,
+                notices,
+            },
+            memberships,
+            roles,
+            dependencies,
+        })
     }
 
     fn resolve_sequence_grant_targets(
@@ -160,7 +231,7 @@ impl SequencePrivilegeContext<'_> {
         &self,
         name: &str,
         relation: &RelationIdentity,
-        security: &SequenceSecurity,
+        security: &BoundSequenceSecurity,
     ) -> Result<(), SQLError> {
         let state = self
             .sequences

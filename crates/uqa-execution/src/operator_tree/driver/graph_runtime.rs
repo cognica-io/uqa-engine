@@ -46,11 +46,7 @@ impl uqa_operators::GraphNeighborLookup for GraphNeighborAccess {
                 direction,
                 &self.graph,
             )
-            .map_err(|error| {
-                StorageBackendError::Other(format!(
-                    "graph-aware DeepFusion input vertex {vertex}: {error}"
-                ))
-            })?;
+            .map_err(|error| StorageBackendError::backend("graph-aware DeepFusion", error))?;
         neighbors.sort_unstable();
         neighbors.dedup();
         Ok(neighbors)

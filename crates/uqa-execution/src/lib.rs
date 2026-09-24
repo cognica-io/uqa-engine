@@ -80,9 +80,12 @@ pub mod scalar;
 pub mod scan;
 pub mod scope_overlay;
 pub mod scroll_materialize;
+pub mod serializable;
 pub mod set_operation;
 pub mod spill;
 pub mod spill_scan;
+pub mod storage_errors;
+mod temporary_database;
 pub mod type_resolution;
 pub mod window;
 
@@ -117,10 +120,10 @@ pub use relational::{
     SharedRowPredicate, Sort, SortKey, Window, WindowExecutor, WindowKind,
 };
 pub use scalar::{
-    eval_call_arguments, eval_scalar, scalar_call_argument, scalar_call_arguments,
-    validate_scalar_call_arguments, ScalarCallArgument, ScalarEvalContext, ScalarExpr,
-    ScalarFrameBound, ScalarOrder, ScalarSubqueryRunner, ScalarWindowFrame, ScalarWindowSpec,
-    SubqueryId, SubqueryResult,
+    eval_call_arguments, eval_generated_scalar_with_control, eval_scalar, scalar_call_argument,
+    scalar_call_arguments, validate_scalar_call_arguments, ScalarCallArgument, ScalarEvalContext,
+    ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarSubqueryRunner, ScalarWindowFrame,
+    ScalarWindowSpec, SubqueryId, SubqueryResult,
 };
 pub use scan::{PhysicalRowIteratorScan, RowIteratorScan, RowSource, TableScan};
 pub use scope_overlay::ScopeOverlay;

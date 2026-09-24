@@ -33,10 +33,10 @@ pub struct TableHierarchy {
     /// Original local sequence metadata hidden while an attached partition uses a parent's identity generator. `PostgreSQL` keeps a pre-existing SERIAL default and restores its behavior after DETACH.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub partition_identity_overrides: Vec<PartitionIdentityOverride>,
-    /// Key constraints copied from a partitioned parent while this relation is attached. The exact copies are retained so DETACH removes only inherited entries and preserves equivalent constraints declared locally before ATTACH.
+    /// Key constraints materialized during partition attachment. Local catalog identities bind provenance to the retained rows through schema changes; detachment clears external provenance while preserving the constraints.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub partition_inherited_key_constraints: Vec<TableKeyConstraint>,
-    /// Foreign keys copied from a partitioned parent while this relation is attached. The exact copies are retained so DETACH removes only inherited entries and preserves equivalent constraints declared locally before ATTACH.
+    /// Foreign keys materialized during partition attachment. Local catalog identities bind provenance to each row; detachment retains the rows and separates their enforcement family from the former parent.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub partition_inherited_foreign_keys: Vec<ForeignKey>,
 }

@@ -70,10 +70,13 @@ pub use rpq::{
     NfaTransition, RPQBuildError, RPQParseError, RegularPathExpr, StateId, MAX_DFA_STATES,
     MAX_NFA_STATES, MAX_RPQ_AST_DEPTH,
 };
-pub use store::{GraphStore, GraphStoreError, GraphStoreResult};
+pub use store::{GraphStorageError, GraphStore, GraphStoreError, GraphStoreResult};
 pub use subgraph_index::SubgraphIndex;
 pub use temporal::{TemporalFilter, TemporalPatternMatch, TemporalTraverse};
 pub use types::Direction;
 pub use versioned_store::VersionedGraphStore;
 
-pub use persistent_store::storage::{begin_graph_write, GraphStorage, GraphWriteTransaction};
+pub use persistent_store::storage::{
+    begin_graph_write, decode_identifier_generation, GraphIdentifierScope, GraphStorage,
+    GraphWriteTransaction,
+};

@@ -25,13 +25,23 @@ impl MemoryDocumentStore {
         if limit == 0 {
             return 0;
         }
+        let lower = after.map_or(Unbounded, Excluded);
+        if fields.is_empty() {
+            let mut visited = 0;
+            for (doc_id, _) in self.state.documents.range((lower, Unbounded)).take(limit) {
+                visited += 1;
+                if !visitor(*doc_id, &[]) {
+                    break;
+                }
+            }
+            return visited;
+        }
         let layout_projections = self
             .state
             .layouts
             .iter()
             .map(|layout| ProjectedLayout::compile(layout, fields))
             .collect::<Vec<_>>();
-        let lower = after.map_or(Unbounded, Excluded);
         let null = Value::Null;
         let mut values = Vec::with_capacity(fields.len());
         let mut visited = 0usize;

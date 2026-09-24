@@ -8,66 +8,20 @@
 
 use super::{
     document_store_read_error, document_store_write_error, Arc, BTreeMap, DocId, Document, Engine,
-    FieldName, IndexConflictProbe, SQLError, TableState, Value,
+    FieldName, SQLError, TableState, Value,
 };
-use uqa_storage::{DocumentMetadata, StoredDocument};
+use uqa_storage::{DocumentMetadata, DocumentStore, StoredDocument};
 
 enum CommandOverlayDocument {
     Present(uqa_storage::StoredDocument),
     Deleted,
 }
 
-fn project_stored_values(
-    document: &StoredDocument,
-    fields: &[&str],
-    columns: &[uqa_sql::ast::ColumnDef],
-) -> Vec<Value> {
-    fields
-        .iter()
-        .map(|field| {
-            uqa_execution::query::document_projection::project_stored_document_column(
-                document, field, columns,
-            )
-        })
-        .collect()
-}
-
-fn command_exact_lookup_parts(
-    fields: &[String],
-    values: &[Value],
-) -> Result<(Vec<String>, Vec<u8>), SQLError> {
-    if fields.len() != values.len() {
-        return Err(SQLError::Internal(
-            "command-overlay exact lookup has mismatched fields and values".into(),
-        ));
-    }
-    let mut pairs = fields
-        .iter()
-        .cloned()
-        .zip(values.iter().cloned())
-        .collect::<Vec<_>>();
-    pairs.sort_by(|left, right| left.0.cmp(&right.0));
-    let (fields, values): (Vec<_>, Vec<_>) = pairs.into_iter().unzip();
-    let key = uqa_execution::canonical_row_key(&values).map_err(|error| {
-        SQLError::Internal(format!("encode command-overlay exact lookup key: {error}"))
-    })?;
-    Ok((fields, key))
-}
-
-fn command_exact_document_key(document: &Document, fields: &[String]) -> Result<Vec<u8>, SQLError> {
-    let values = fields
-        .iter()
-        .map(|field| document.get(field).cloned().unwrap_or(Value::Null))
-        .collect::<Vec<_>>();
-    uqa_execution::canonical_row_key(&values).map_err(|error| {
-        SQLError::Internal(format!("encode command-overlay document key: {error}"))
-    })
-}
-
+mod exact_lookup;
 mod overlay;
 
 impl Engine {
-    fn raw_command_visible_document(
+    pub(super) fn raw_command_visible_document(
         &self,
         table: &str,
         state: &TableState,
@@ -84,7 +38,7 @@ impl Engine {
         }
     }
 
-    fn materialize_query_document(
+    pub(super) fn materialize_query_document(
         columns: &[uqa_sql::ast::ColumnDef],
         document: &mut StoredDocument,
     ) -> Result<(), SQLError> {
@@ -107,15 +61,6 @@ impl Engine {
         Ok(())
     }
 
-    pub fn get_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError> {
-        let t = self.require_table(table)?;
-        let mut document = self.raw_command_visible_document(table, &t, doc_id)?;
-        if let Some(document) = document.as_mut() {
-            Self::materialize_query_document(&t.columns.read(), document)?;
-        }
-        Ok(document.map(StoredDocument::into_fields))
-    }
-
     /// Read only user fields for a tuple rewrite. A successful rewrite receives fresh tuple metadata at the storage publication boundary.
     pub(crate) fn get_document_for_mutation(
         &self,
@@ -129,19 +74,6 @@ impl Engine {
                 &state.columns.read(),
                 document.fields_mut(),
             )?;
-        }
-        Ok(document.map(StoredDocument::into_fields))
-    }
-
-    pub(crate) fn get_query_document(
-        &self,
-        table: &str,
-        doc_id: DocId,
-    ) -> Result<Option<Document>, SQLError> {
-        let table_state = self.require_query_table(table)?;
-        let mut document = self.raw_command_visible_document(table, &table_state, doc_id)?;
-        if let Some(document) = document.as_mut() {
-            Self::materialize_query_document(&table_state.columns.read(), document)?;
         }
         Ok(document.map(StoredDocument::into_fields))
     }
@@ -212,7 +144,7 @@ impl Engine {
                 params,
             );
         }
-        let session = self.new_session().map_err(|error| {
+        let session = self.new_internal_read_session().map_err(|error| {
             SQLError::Internal(format!(
                 "open independent session to recheck retrieval on `{table}`: {error}"
             ))
@@ -231,7 +163,7 @@ impl Engine {
         if self.storage.provider.is_none() {
             return self.knn_search_leaf(table, field, query_vector, top_k);
         }
-        let session = self.new_session().map_err(|error| {
+        let session = self.new_internal_read_session().map_err(|error| {
             SQLError::Internal(format!(
                 "open independent session to recheck vector retrieval on `{table}`: {error}"
             ))
@@ -257,11 +189,13 @@ impl Engine {
             })?;
         if let Some(changes) = self.command_overlay_changes(table)? {
             for doc_id in doc_ids {
-                let Some(document) = changes.get(doc_id) else {
+                if !changes.contains_change(*doc_id) {
                     continue;
-                };
-                if let Some(document) = document {
-                    documents.insert(*doc_id, document.clone());
+                }
+                if let Some(document) = changes.get_stored(*doc_id).map_err(|error| {
+                    document_store_read_error("read private generated document projection", &error)
+                })? {
+                    documents.insert(*doc_id, document);
                 } else {
                     documents.remove(doc_id);
                 }
@@ -302,87 +236,38 @@ impl Engine {
     ) -> Result<BTreeMap<DocId, Vec<Value>>, SQLError> {
         let table_state = self.require_query_table(table)?;
         let columns = table_state.columns.read().clone();
-        let requested = fields
+        let changes = self.command_overlay_changes(table)?;
+        let persisted_ids = doc_ids
             .iter()
-            .map(|field| (*field).to_string())
+            .copied()
+            .filter(|id| {
+                changes
+                    .as_ref()
+                    .is_none_or(|changes| !changes.contains_change(*id))
+            })
             .collect::<Vec<_>>();
-        let uses_tuple_xmin = uqa_execution::query::document_projection::projections_use_tuple_xmin(
-            &requested, &columns,
-        );
-        if crate::generated::projection_contains_virtual_generated_column(&columns, &requested) {
-            let mut projected = BTreeMap::new();
-            for doc_id in doc_ids {
-                let Some(document) = self.get_query_document(table, *doc_id)? else {
-                    continue;
-                };
-                projected.insert(
-                    *doc_id,
-                    fields
-                        .iter()
-                        .map(|field| document.get(*field).cloned().unwrap_or(Value::Null))
-                        .collect(),
-                );
-            }
-            return Ok(projected);
-        }
-        if let Some(changes) = self.command_overlay_changes(table)? {
-            let persisted_ids = doc_ids
+        let mut projected = uqa_execution::query::document_projection::read_document_projection(
+            &**table_state.document_store.read(),
+            &persisted_ids,
+            fields,
+            &columns,
+        )?;
+        if let Some(changes) = changes {
+            let private_ids = doc_ids
                 .iter()
-                .filter(|doc_id| !changes.contains_key(doc_id))
                 .copied()
+                .filter(|id| changes.change_presence(*id) == Some(true))
                 .collect::<Vec<_>>();
-            let mut projected = if uses_tuple_xmin {
-                table_state
-                    .document_store
-                    .read()
-                    .get_stored_many(&persisted_ids)
-                    .map_err(|error| {
-                        document_store_read_error("read query documents with metadata", &error)
-                    })?
-                    .into_iter()
-                    .map(|(doc_id, document)| {
-                        (doc_id, project_stored_values(&document, fields, &columns))
-                    })
-                    .collect()
-            } else {
-                table_state
-                    .document_store
-                    .read()
-                    .get_fields_multi(&persisted_ids, fields)
-                    .map_err(|error| {
-                        document_store_read_error("read query document fields", &error)
-                    })?
-            };
-            for doc_id in doc_ids {
-                if let Some(Some(document)) = changes.get(doc_id) {
-                    projected.insert(*doc_id, project_stored_values(document, fields, &columns));
-                }
-            }
-            return Ok(projected);
+            projected.extend(
+                uqa_execution::query::document_projection::read_document_projection(
+                    &changes,
+                    &private_ids,
+                    fields,
+                    &columns,
+                )?,
+            );
         }
-        if uses_tuple_xmin {
-            return table_state
-                .document_store
-                .read()
-                .get_stored_many(doc_ids)
-                .map_err(|error| {
-                    document_store_read_error("read query documents with metadata", &error)
-                })
-                .map(|documents| {
-                    documents
-                        .into_iter()
-                        .map(|(doc_id, document)| {
-                            (doc_id, project_stored_values(&document, fields, &columns))
-                        })
-                        .collect()
-                });
-        }
-        let result = table_state
-            .document_store
-            .read()
-            .get_fields_multi(doc_ids, fields)
-            .map_err(|error| document_store_read_error("read query document fields", &error));
-        result
+        Ok(projected)
     }
 
     pub(crate) fn get_document_fields(
@@ -403,217 +288,6 @@ impl Engine {
             out.insert(doc_id, values.remove(0));
         }
         Ok(out)
-    }
-
-    pub fn find_doc_id_by_field(
-        &self,
-        table: &str,
-        field: &str,
-        value: &Value,
-    ) -> Result<Option<DocId>, SQLError> {
-        if let Some(doc_id) = self.command_overlay_exact_match(
-            table,
-            &[field.to_string()],
-            std::slice::from_ref(value),
-        )? {
-            return Ok(Some(doc_id));
-        }
-        let t = self.require_table(table)?;
-        let Some(changes) = self.command_overlay_changes(table)? else {
-            return t
-                .document_store
-                .read()
-                .find_doc_id_by_field(field, value)
-                .map_err(|error| document_store_read_error("find document by field", &error));
-        };
-        if changes.is_empty() {
-            return t
-                .document_store
-                .read()
-                .find_doc_id_by_field(field, value)
-                .map_err(|error| document_store_read_error("find document by field", &error));
-        }
-        let store = t.document_store.read();
-        let mut after = None;
-        loop {
-            let doc_ids = store
-                .next_doc_ids(after, uqa_execution::DEFAULT_BATCH_SIZE)
-                .map_err(|error| {
-                    document_store_read_error("scan command-visible document fields", &error)
-                })?;
-            let Some(last) = doc_ids.last().copied() else {
-                return Ok(None);
-            };
-            after = Some(last);
-            let projected = store
-                .get_fields_multi(&doc_ids, &[field])
-                .map_err(|error| {
-                    document_store_read_error("read command-visible document field", &error)
-                })?;
-            for doc_id in doc_ids {
-                if changes.contains_key(&doc_id) {
-                    continue;
-                }
-                if projected
-                    .get(&doc_id)
-                    .and_then(|values| values.first())
-                    .unwrap_or(&Value::Null)
-                    == value
-                {
-                    return Ok(Some(doc_id));
-                }
-            }
-        }
-    }
-
-    /// Find the first document whose conflict columns all match the
-    /// given values. Returns the existing doc id when a conflict
-    /// exists, `None` when the row would be a fresh insert. Mirrors
-    /// `PostgreSQL`'s `ON CONFLICT (col, ...)` lookup; the conflict
-    /// columns map to the unique-constraint target.
-    ///
-    /// Lookup order: the integer-primary-key slot mapping, then a
-    /// value-index equality probe on the first index-answerable
-    /// conflict column (conflict targets are PRIMARY KEY / UNIQUE
-    /// columns admitted by `value_indexable_fields`), and only then the
-    /// evaluated document scan. The index
-    /// probe is what keeps per-row UNIQUE and FOREIGN KEY validation
-    /// `O(log n)` during bulk inserts -- previously every insert into a
-    /// table with a non-integer unique column re-scanned all documents,
-    /// making an n-row load `O(n^2)`.
-    pub fn find_conflict(
-        &self,
-        table: &str,
-        conflict_columns: &[String],
-        values: &[Value],
-    ) -> Result<Option<DocId>, SQLError> {
-        if conflict_columns.is_empty() || conflict_columns.len() != values.len() {
-            return Ok(None);
-        }
-        if let Some(doc_id) = self.command_overlay_exact_match(table, conflict_columns, values)? {
-            return Ok(Some(doc_id));
-        }
-        let persisted = self.find_persisted_conflict(table, conflict_columns, values)?;
-        let Some(doc_id) = persisted else {
-            return Ok(None);
-        };
-        Ok(self
-            .command_overlay_document(table, doc_id)?
-            .is_none()
-            .then_some(doc_id))
-    }
-
-    fn find_persisted_conflict(
-        &self,
-        table: &str,
-        conflict_columns: &[String],
-        values: &[Value],
-    ) -> Result<Option<DocId>, SQLError> {
-        let t = self.require_table(table)?;
-        if conflict_columns.len() == 1 {
-            if let Some(doc_id) =
-                Self::doc_id_for_primary_key_conflict(&t, &conflict_columns[0], &values[0])
-            {
-                if u128::from(doc_id) >= *t.next_id.lock() {
-                    return Ok(None);
-                }
-                let exists = t
-                    .document_store
-                    .read()
-                    .contains_doc_id(doc_id)
-                    .map_err(|error| {
-                        document_store_read_error("check conflicting document", &error)
-                    })?;
-                return Ok(exists.then_some(doc_id));
-            }
-        }
-        match self.find_conflict_via_value_index(&t, table, conflict_columns, values)? {
-            IndexConflictProbe::Conflict(doc_id) => return Ok(Some(doc_id)),
-            IndexConflictProbe::NoConflict => return Ok(None),
-            IndexConflictProbe::Unanswerable => {}
-        }
-        let result = t
-            .document_store
-            .read()
-            .find_doc_id_by_fields(conflict_columns, values);
-        result.map_err(|error| document_store_read_error("find conflicting document", &error))
-    }
-
-    /// Index-backed conflict lookup. `Unanswerable` means no conflict
-    /// column could be answered by a value index (unindexed columns, or
-    /// the temporal/NaN semantics guard refused) and the caller must
-    /// fall back to the evaluated scan. Otherwise the answer is
-    /// authoritative: candidates narrow through the pivot column's
-    /// posting list in `O(log n + k)` and the remaining columns verify
-    /// against stored fields on those candidates only, with the same
-    /// `Value` equality the evaluated scan uses. An empty posting list
-    /// is an authoritative `NoConflict`, which is the common case on
-    /// insert and must not degrade into a scan.
-    pub(super) fn find_conflict_via_value_index(
-        &self,
-        t: &TableState,
-        table: &str,
-        conflict_columns: &[String],
-        values: &[Value],
-    ) -> Result<IndexConflictProbe, SQLError> {
-        for (pivot, (column, value)) in conflict_columns.iter().zip(values.iter()).enumerate() {
-            let Some(candidates) = self.value_index_scan(
-                table,
-                column,
-                &if matches!(value, Value::Null) {
-                    uqa_core::Predicate::IsNull
-                } else {
-                    uqa_core::Predicate::Equals(value.clone())
-                },
-            )?
-            else {
-                continue;
-            };
-            let store = t.document_store.read();
-            for entry in candidates.entries() {
-                let mut matches = true;
-                for (index, (column, expected)) in
-                    conflict_columns.iter().zip(values.iter()).enumerate()
-                {
-                    if index == pivot {
-                        continue;
-                    }
-                    let actual = store.get_field(entry.doc_id, column).map_err(|error| {
-                        document_store_read_error("verify conflicting document", &error)
-                    })?;
-                    if actual.unwrap_or(Value::Null) != *expected {
-                        matches = false;
-                        break;
-                    }
-                }
-                if matches {
-                    return Ok(IndexConflictProbe::Conflict(entry.doc_id));
-                }
-            }
-            return Ok(IndexConflictProbe::NoConflict);
-        }
-        Ok(IndexConflictProbe::Unanswerable)
-    }
-
-    pub(super) fn doc_id_for_primary_key_conflict(
-        table: &TableState,
-        column: &str,
-        value: &Value,
-    ) -> Option<DocId> {
-        let Value::Int(id) = value else {
-            return None;
-        };
-        if *id < 0 {
-            return None;
-        }
-        let columns = table.columns.read();
-        let maps_to_doc_id = columns
-            .iter()
-            .any(|col| col.name == column && col.primary_key && col.ty.is_integer());
-        if !maps_to_doc_id {
-            return None;
-        }
-        Some(*id as DocId)
     }
 
     /// Apply per-column updates to an existing document. Mirrors the
@@ -664,6 +338,9 @@ impl Engine {
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
+        if let Some(read) = self.serializable_table_state_read(&t)? {
+            read.observe_row(doc_id)?;
+        }
         let Some(mut doc) = t
             .document_store
             .read()
@@ -732,6 +409,9 @@ impl Engine {
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
+        if let Some(read) = self.serializable_table_state_read(&t)? {
+            read.observe_row(doc_id)?;
+        }
         let Some(mut document) = t
             .document_store
             .read()
@@ -793,7 +473,7 @@ impl Engine {
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?;
         let vectors = Self::document_vector_values(&table_state, &document)?;
-        self.with_implicit_transaction(|engine| {
+        self.with_prepared_row_write_transaction(&table_name, |engine| {
             engine.add_prepared_document_with_vector_values_inner(
                 &table_name,
                 doc_id,
@@ -853,13 +533,23 @@ impl Engine {
                 .put_stored(doc_id, StoredDocument::with_metadata(document, metadata))
                 .map_err(|err| document_store_write_error(&err))?;
         }
+        uqa_execution::serializable::text::add_document(
+            self,
+            &table_name,
+            t.columns.snapshot(),
+            t.inverted_index.write().as_mut(),
+            doc_id,
+            text_fields,
+        )?;
+        for (field, index) in t
+            .vector_indexes
+            .write()
+            .live_mut()
+            .map_err(|error| {
+                uqa_execution::storage_errors::storage_error("write vector registrations", &error)
+            })?
+            .iter_mut()
         {
-            let mut index = t.inverted_index.write();
-            index
-                .add_document(doc_id, text_fields)
-                .map_err(|error| SQLError::Internal(format!("index document: {error}")))?;
-        }
-        for (field, index) in t.vector_indexes.write().iter_mut() {
             index
                 .add_many(doc_id, vectors.remove(field).unwrap_or_default())
                 .map_err(|error| SQLError::Internal(format!("index document vector: {error}")))?;
@@ -888,13 +578,38 @@ impl Engine {
             .try_table(&table_name)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?;
+        if let Some(read) = self.serializable_table_state_read(&t)? {
+            read.observe_row(doc_id)?;
+        }
         let existed = t
             .document_store
             .read()
             .get(doc_id)
             .map_err(|err| document_store_write_error(&err))?
             .is_some();
+        if existed {
+            uqa_execution::serializable::observe_row_write(self, &table_name, doc_id)?;
+        }
         let old_indexed = Self::value_indexes_old_values(&t, doc_id);
+        self.observe_value_index_write(
+            &table_name,
+            &t,
+            doc_id,
+            existed,
+            old_indexed.as_ref(),
+            None,
+        )?;
+        for (field, index) in t.vector_indexes.read().iter() {
+            uqa_execution::serializable::vector::observe_write(
+                self,
+                &table_name,
+                &t.columns.snapshot(),
+                field,
+                index,
+                doc_id,
+                uqa_execution::serializable::vector::VectorChange::Delete,
+            )?;
+        }
         let mut store = t.document_store.write();
         store
             .delete(doc_id)
@@ -904,11 +619,22 @@ impl Engine {
             Self::value_indexes_apply_write(&t, doc_id, Some(old), None);
         }
         drop(store);
-        t.inverted_index
+        uqa_execution::serializable::text::remove_document(
+            self,
+            &table_name,
+            t.columns.snapshot(),
+            t.inverted_index.write().as_mut(),
+            doc_id,
+        )?;
+        for idx in t
+            .vector_indexes
             .write()
-            .remove_document(doc_id)
-            .map_err(|error| SQLError::Internal(format!("remove indexed document: {error}")))?;
-        for idx in t.vector_indexes.write().values_mut() {
+            .live_mut()
+            .map_err(|error| {
+                uqa_execution::storage_errors::storage_error("write vector registrations", &error)
+            })?
+            .values_mut()
+        {
             idx.as_mut()
                 .delete(doc_id)
                 .map_err(|error| SQLError::Internal(format!("delete indexed vector: {error}")))?;
@@ -919,12 +645,6 @@ impl Engine {
             self.note_row_deleted(&table_name, doc_id)?;
         }
         Ok(())
-    }
-
-    pub fn document_count(&self, table: &str) -> Result<u64, SQLError> {
-        let t = self.require_table(table)?;
-        let result = t.inverted_index.read().doc_count();
-        result.map_err(|error| SQLError::Internal(format!("read indexed document count: {error}")))
     }
 }
 

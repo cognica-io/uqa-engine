@@ -123,7 +123,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
     let statement_events = super::statement_events::MergeStatementEvents::from_plan(stmt);
     let mut ctes = mutation
         .scopes
-        .command_scope(stmt.statement_privilege_subject.as_deref(), false)?;
+        .command_scope(stmt.statement_privilege_subject.as_ref(), false)?;
     if let Some(parent) = inherited_ctes {
         ctes.inherit_cte_bindings(parent);
     }

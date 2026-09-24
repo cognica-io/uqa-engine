@@ -97,11 +97,13 @@ fn persistent_batches_preserve_complete_graphs_across_clusters_and_both_length_p
         TokenLengthPolicy::EmittedTokens,
         TokenLengthPolicy::DiscountOverlaps,
     ] {
-        check_persistent_batches(policy);
+        for native in [false, true] {
+            check_persistent_batches(policy, native);
+        }
     }
 }
 
-fn check_persistent_batches(policy: TokenLengthPolicy) {
+fn check_persistent_batches(policy: TokenLengthPolicy, native: bool) {
     let revision = AnalyzerResources::default()
         .compile_with_length_policy(&config(), policy)
         .unwrap();
@@ -109,6 +111,7 @@ fn check_persistent_batches(policy: TokenLengthPolicy) {
     let path = directory.path().join("graphs.db");
     let conn = ManagedConnection::open(&path).unwrap();
     Catalog::open(conn.clone()).unwrap();
+    bind_native(&conn, native);
     let mut actual = SQLiteInvertedIndex::new(conn.clone(), "docs", whitespace_analyzer());
     let mut expected = MemoryInvertedIndex::new(whitespace_analyzer());
     let ids = [0, 1, 2, 65_535, 65_536, i64::MAX as u64];
@@ -163,11 +166,9 @@ fn check_persistent_batches(policy: TokenLengthPolicy) {
     }
     assert_same(&expected, &actual, &ids);
     drop(actual);
-    let mut reopened = SQLiteInvertedIndex::new(
-        ManagedConnection::open(&path).unwrap(),
-        "docs",
-        whitespace_analyzer(),
-    );
+    let reopened_connection = ManagedConnection::open(&path).unwrap();
+    bind_native(&reopened_connection, native);
+    let mut reopened = SQLiteInvertedIndex::new(reopened_connection, "docs", whitespace_analyzer());
     reopened
         .set_field_analyzer_revisions("body", revision.clone(), revision)
         .unwrap();
@@ -206,6 +207,20 @@ fn check_persistent_batches(policy: TokenLengthPolicy) {
 
 #[test]
 fn binary_nori_terms_and_source_metadata_follow_column_and_table_lifecycles() {
+    for native in [false, true] {
+        verify_binary_terms(native);
+    }
+}
+
+fn bind_native(connection: &ManagedConnection, native: bool) {
+    if native {
+        connection
+            .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
+            .unwrap();
+    }
+}
+
+fn verify_binary_terms(native: bool) {
     let config = match serde_json::from_str::<Analyzer>(
         r#"{"char_filters":[{"type":"html_strip"}],"tokenizer":{"type":"nori_tokenizer","decompound_mode":"mixed","user_dictionary":"🙂a 가 나"},"token_filters":[]}"#,
     ) {
@@ -220,13 +235,12 @@ fn binary_nori_terms_and_source_metadata_follow_column_and_table_lifecycles() {
     let conn = ManagedConnection::open_in_memory().unwrap();
     let revision = config.compile().unwrap();
     let catalog = Catalog::open(conn.clone()).unwrap();
+    bind_native(&conn, native);
     catalog.save_schema("public").unwrap();
     catalog
         .save_table(&TableSchema {
             relation: RelationIdentity::from_legacy_name("public.docs").unwrap(),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: BTreeMap::new(),
+            security: uqa_storage::RelationSecurityRow::legacy("uqa"),
             object_id: [1; 16],
             storage_generation: [1; 16],
             analyzer_json: serde_json::to_string(&config).unwrap(),
@@ -295,23 +309,29 @@ fn binary_nori_terms_and_source_metadata_follow_column_and_table_lifecycles() {
         .unwrap();
     catalog.purge_table_data("public.renamed").unwrap();
     assert_eq!(renamed.doc_count().unwrap(), 0);
-    assert_empty_graph_tables(&conn);
+    assert_empty_graph_tables(&conn, native);
     renamed
         .add_document(4, BTreeMap::from([("caption".into(), "🙂a".into())]))
         .unwrap();
     catalog.drop_table_and_data("public.renamed").unwrap();
-    assert_empty_graph_tables(&conn);
+    assert_empty_graph_tables(&conn, native);
 }
 
-fn assert_empty_graph_tables(conn: &ManagedConnection) {
-    conn.with(|db| {
-        for table in [
+fn assert_empty_graph_tables(conn: &ManagedConnection, native: bool) {
+    conn.with_physical(|db| {
+        let canonical = [
             "_occurrence_clusters",
             "_occurrence_documents",
             "_occurrence_lengths",
             "_occurrence_fields",
             "_occurrence_formats",
-        ] {
+        ];
+        let accelerators: &[&str] = if native {
+            &["_occurrence_skips", "_occurrence_block_max"]
+        } else {
+            &[]
+        };
+        for table in canonical.iter().chain(accelerators) {
             let count: i64 = db.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
                 row.get(0)
             })?;
@@ -345,6 +365,25 @@ fn stored_graph(conn: &ManagedConnection) -> Vec<Vec<rusqlite::types::Value>> {
         Ok(rows)
     })
     .unwrap()
+}
+
+#[test]
+fn cluster_publication_failure_restores_already_staged_document_metadata() {
+    let conn = ManagedConnection::open_in_memory().unwrap();
+    Catalog::open(conn.clone()).unwrap();
+    let mut index = SQLiteInvertedIndex::new(conn.clone(), "docs", config());
+    index.add_document(1, fields("a a")).unwrap();
+    let before = stored_graph(&conn);
+    conn.with(|db| {
+        db.execute_batch("CREATE TRIGGER reject_cluster_publication BEFORE INSERT ON _occurrence_clusters BEGIN SELECT RAISE(ABORT, 'forced cluster publication failure'); END;")?;
+        Ok(())
+    }).unwrap();
+    assert!(index
+        .try_add_documents(vec![(1, fields("changed")), (2, fields("new"))])
+        .unwrap_err()
+        .to_string()
+        .contains("forced cluster publication failure"));
+    assert_eq!(stored_graph(&conn), before);
 }
 
 #[test]

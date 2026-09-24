@@ -8,11 +8,12 @@
 
 use uqa_core::{ArrayValue, Value};
 
-use crate::ast::{Expr, FunctionResolutionError};
+use crate::ast::Expr;
 use crate::error::{Result, SQLError};
-use crate::params::SQLParam;
 
-use super::binary::{compare_nullable, eval_binary, truthy, values_equal, values_equal_nullable};
+use super::binary::{
+    compare_nullable_with_control, eval_binary, truthy, values_equal, values_equal_nullable,
+};
 use super::builtin::eval_bound_builtin_function_call;
 use super::call_arguments::evaluate_call_args;
 use super::call_dispatch::eval_function_call;
@@ -31,18 +32,7 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
         )),
         Expr::Literal(v) | Expr::TypedLiteral { value: v, .. } => Ok(v.clone()),
         Expr::Param(i) => match i.checked_sub(1).and_then(|index| ctx.params.get(index)) {
-            Some(SQLParam::Scalar(v) | SQLParam::TypedScalar { value: v, .. }) => Ok(v.clone()),
-            Some(SQLParam::Vector(v)) => Ok(Value::List(
-                v.iter().map(|x| Value::Float(f64::from(*x))).collect(),
-            )),
-            Some(SQLParam::Tensor(vectors)) => Ok(Value::List(
-                vectors
-                    .iter()
-                    .map(|vector| {
-                        Value::List(vector.iter().map(|x| Value::Float(f64::from(*x))).collect())
-                    })
-                    .collect(),
-            )),
+            Some(parameter) => parameter.to_value(),
             None => Err(SQLError::MissingParam(*i)),
         },
         Expr::Column(name) => {
@@ -107,6 +97,18 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             args,
             ..
         } => {
+            if let Some(binding) = binding {
+                if let Some(error) = &binding.resolution_error {
+                    return Err(error.sql_error());
+                }
+                if let Some(crate::ast::FunctionDispatch::NumericOperator(operator)) =
+                    binding.dispatch
+                {
+                    return super::numeric_operator::eval_ast_operator(
+                        operator, binding, args, ctx,
+                    );
+                }
+            }
             if name.eq_ignore_ascii_case("coalesce")
                 && binding.as_ref().is_none_or(|binding| binding.builtin)
             {
@@ -120,14 +122,6 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             }
             let call_args = evaluate_call_args(args, ctx)?;
             if let Some(binding) = binding {
-                if let Some(FunctionResolutionError::UndefinedFunction { signature }) =
-                    binding.resolution_error.as_ref()
-                {
-                    return Err(SQLError::Routine {
-                        sqlstate: "42883".into(),
-                        message: format!("function {signature} does not exist"),
-                    });
-                }
                 if binding.builtin {
                     return eval_bound_builtin_function_call(binding, call_args, ctx);
                 }
@@ -275,8 +269,22 @@ fn explicit_expr_type(expr: &Expr) -> Option<&str> {
 /// `expr BETWEEN low AND high` under three-valued logic: a definite
 /// FALSE on either bound wins over a NULL on the other.
 pub(super) fn eval_between(v: &Value, lo: &Value, hi: &Value) -> Result<Value> {
-    let ge = compare_nullable(v, lo)?.map(|ord| ord.is_ge());
-    let le = compare_nullable(v, hi)?.map(|ord| ord.is_le());
+    eval_between_with_control(
+        v,
+        lo,
+        hi,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+pub(super) fn eval_between_with_control(
+    v: &Value,
+    lo: &Value,
+    hi: &Value,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Value> {
+    let ge = compare_nullable_with_control(v, lo, control)?.map(|ord| ord.is_ge());
+    let le = compare_nullable_with_control(v, hi, control)?.map(|ord| ord.is_le());
     Ok(match (ge, le) {
         (Some(false), _) | (_, Some(false)) => Value::Bool(false),
         (Some(true), Some(true)) => Value::Bool(true),

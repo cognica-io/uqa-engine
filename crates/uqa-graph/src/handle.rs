@@ -29,6 +29,47 @@ impl Default for GraphStoreHandle {
 }
 
 impl GraphStoreHandle {
+    /// Record a semantic definition read from a retained catalog cache without loading graph data.
+    pub fn observe_definition(
+        &self,
+        kind: uqa_storage::catalog::graph_observations::GraphDefinitionKind,
+        name: Option<&str>,
+    ) -> GraphStoreResult<()> {
+        match self {
+            Self::Memory(_) => Ok(()),
+            Self::Persistent(store) => store.observe_definition(kind, name),
+        }
+    }
+
+    pub fn with_serializable_read(
+        self,
+        context: uqa_storage::mvcc::SerializableReadContext,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> Self {
+        match self {
+            Self::Memory(_) => self,
+            Self::Persistent(store) => {
+                Self::Persistent(store.with_serializable_read(context, cancellation))
+            }
+        }
+    }
+
+    pub fn without_serializable_read(self) -> Self {
+        match self {
+            Self::Memory(_) => self,
+            Self::Persistent(store) => Self::Persistent(store.without_serializable_read()),
+        }
+    }
+
+    /// Cost estimation retains the same data without creating semantic query reads. The primary in-memory graph remains borrowed; persistent handles share their original storage and retained resources.
+    pub fn for_statistics(&self) -> std::borrow::Cow<'_, Self> {
+        match self {
+            Self::Memory(_) => std::borrow::Cow::Borrowed(self),
+            Self::Persistent(store) => {
+                std::borrow::Cow::Owned(Self::Persistent(store.clone().without_serializable_read()))
+            }
+        }
+    }
     pub fn from_catalog(
         catalog: Arc<dyn CatalogFacade>,
         backend: Arc<dyn PersistentStorageBackend>,
@@ -79,6 +120,35 @@ impl GraphStoreHandle {
             Self::Memory(store) => store.graph_labels(graph),
             Self::Persistent(store) => store.graph_labels(graph),
         }
+    }
+
+    /// Cypher validates the registry even for constant expressions, but only required default relations contribute semantic label dependencies.
+    pub(crate) fn default_label_relations(
+        &self,
+        graph: &str,
+        required: [bool; 2],
+    ) -> GraphStoreResult<[bool; 2]> {
+        let kinds = [crate::LabelKind::Vertex, crate::LabelKind::Edge];
+        let labels = match self {
+            Self::Memory(store) => store.graph_labels(graph)?,
+            Self::Persistent(store) => {
+                store.observe_definition(
+                    uqa_storage::catalog::graph_observations::GraphDefinitionKind::NamedGraph,
+                    Some(graph),
+                )?;
+                for (required, kind) in required.into_iter().zip(kinds) {
+                    if required {
+                        store.observe_labels(graph, Some(kind.default_label_name()))?;
+                    }
+                }
+                store.restored_registry(graph)?.labels()
+            }
+        };
+        Ok(kinds.map(|kind| {
+            labels
+                .iter()
+                .any(|label| label.id == kind.default_label_id())
+        }))
     }
     pub fn graph_label_kind(
         &self,

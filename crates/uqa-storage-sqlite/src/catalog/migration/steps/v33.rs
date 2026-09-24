@@ -27,7 +27,7 @@ pub(super) fn migrate(tx: &rusqlite::Connection) -> Result<()> {
 }
 
 fn public_schema_acl() -> Vec<uqa_storage::catalog::SchemaAclEntry> {
-    uqa_storage::catalog::SchemaRow::legacy("public")
+    uqa_core::catalog_schema::SchemaRow::legacy("public")
         .acl
         .expect("public schema has an explicit default ACL")
 }

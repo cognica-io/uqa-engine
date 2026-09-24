@@ -9,10 +9,10 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use super::{exec, tempdir, Catalog, Engine, ManagedConnection, Value};
+use super::{exec, tempdir, Engine, ManagedConnection, Value};
 
 fn stored_rows(path: &Path, table: &str) -> Option<i64> {
-    let catalog = Catalog::open(ManagedConnection::open(path).unwrap()).unwrap();
+    let catalog = crate::native_storage::catalog(ManagedConnection::open(path).unwrap()).unwrap();
     catalog
         .load_column_stats(table)
         .unwrap()
@@ -89,12 +89,10 @@ fn automatic_statistics_never_hydrate_opaque_payloads() {
             ]))],
         )
         .unwrap();
-    rusqlite::Connection::open(&path).unwrap().execute(
-        "DELETE FROM _document_blobs WHERE table_name = 'public.assets' AND field_name = 'bytes'", []
-    ).unwrap();
+    crate::native_storage::remove_blob(&path, "public.assets", 1, "bytes");
     wait_for_rows(&engine, &path, "public.assets", 1);
     assert!(engine.automatic_statistics_status().last_error.is_none());
-    let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
+    let catalog = crate::native_storage::catalog(ManagedConnection::open(&path).unwrap()).unwrap();
     let stats = catalog.load_column_stats("public.assets").unwrap();
     assert!(stats.iter().any(|stats| stats.column_name == "kind"));
     assert!(!stats.iter().any(|stats| stats.column_name == "bytes"));
@@ -110,7 +108,7 @@ fn automatic_maintenance_counts_follow_commit_savepoint_and_rollback() {
     exec(&engine, "INSERT INTO t VALUES (1)");
     wait_for_rows(&engine, &path, "public.t", 1);
     exec(&engine, "BEGIN; INSERT INTO t VALUES (2); SAVEPOINT keep_one; INSERT INTO t VALUES (3); ROLLBACK TO keep_one; COMMIT");
-    let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
+    let catalog = crate::native_storage::catalog(ManagedConnection::open(&path).unwrap()).unwrap();
     let json = catalog
         .get_metadata("uqa.statistics.maintenance.v1:public.t")
         .unwrap()
@@ -179,7 +177,7 @@ fn sampled_automatic_statistics_keep_the_full_table_row_count() {
         "INSERT INTO t SELECT n, 'same' FROM generate_series(1, 5000) AS g(n)",
     );
     wait_for_rows(&engine, &path, "public.t", 5000);
-    let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
+    let catalog = crate::native_storage::catalog(ManagedConnection::open(&path).unwrap()).unwrap();
     let stats = catalog.load_column_stats("public.t").unwrap();
     assert_eq!(
         stats
@@ -215,7 +213,7 @@ fn old_small_pending_changes_refresh_automatically_after_reopen() {
     }
     // Model a restart more than 60 seconds after the committed small write.
     // This exercises durable timer recovery without a minute-long test sleep.
-    let catalog = Catalog::open(ManagedConnection::open(&path).unwrap()).unwrap();
+    let catalog = crate::native_storage::catalog(ManagedConnection::open(&path).unwrap()).unwrap();
     let key = "uqa.statistics.maintenance.v1:public.t";
     let mut pending: serde_json::Value =
         serde_json::from_str(&catalog.get_metadata(key).unwrap().unwrap()).unwrap();

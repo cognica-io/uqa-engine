@@ -91,6 +91,21 @@ fn compiled_synonyms_remain_fixed_after_edits_deletion_and_replacement() {
     let second = analyzer.compile().unwrap();
     assert_eq!(analyzer.analyze("cat").unwrap(), ["cat", "animal"]);
     std::fs::remove_file(&path).unwrap();
+    for compiled in [&first, &second] {
+        let alias = Arc::clone(compiled);
+        assert!(std::ptr::eq(
+            compiled.configuration(),
+            alias.configuration()
+        ));
+        assert_eq!(
+            serde_json::to_value(compiled.configuration()).unwrap(),
+            serde_json::to_value(compiled.descriptor().configuration().unwrap()).unwrap(),
+        );
+        assert_eq!(
+            compiled.configuration().analyze("cat").unwrap(),
+            compiled.analyze("cat").unwrap(),
+        );
+    }
     assert_eq!(first.analyze("cat").unwrap(), ["cat", "feline"]);
     assert_eq!(second.analyze("cat").unwrap(), ["cat", "animal"]);
     assert!(matches!(

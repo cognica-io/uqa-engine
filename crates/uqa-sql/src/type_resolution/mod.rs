@@ -9,19 +9,25 @@
 use crate::ast::{ColumnType, FunctionBinding};
 use crate::{SQLError, SQLParam};
 
+use crate::schema::ScalarTypeSchema;
 use crate::{RowSchema, ScalarExpr};
 #[cfg(test)]
 use uqa_core::Value;
 
 mod array_transform;
+mod call;
 mod cast_compatibility;
 mod checksum;
 mod common;
+pub(crate) use common::value_type;
+pub(crate) use common::value_type_with_control;
 mod containment;
 mod equality;
 mod fixed_builtin;
 mod functions;
 mod gamma;
+mod inference;
+use inference::scalar_type_inner_with_control;
 mod introspection;
 mod json_strip;
 mod length;
@@ -32,9 +38,17 @@ mod qualified_column;
 mod range;
 mod reverse;
 mod routine_signature;
+mod scalar_input;
+pub use scalar_input::{
+    scalar_integer_operation_width, scalar_integer_operation_width_with_control,
+    scalar_operand_type_name, scalar_operand_type_name_with_control,
+};
 mod string_binary;
 
-pub use cast_compatibility::{assignment_type_compatible, explicit_type_compatible};
+pub use cast_compatibility::{
+    assignment_type_compatible, cast_catalog_entry, explicit_type_compatible, CastCatalogEntry,
+    CastMethod,
+};
 #[doc(hidden)]
 pub use checksum::{resolve_checksum_overload, ResolvedChecksumOverload};
 pub use common::{
@@ -42,16 +56,21 @@ pub use common::{
     effective_overload_argument_type_with_params, function_call_argument_signature,
     values_column_types, FunctionCallArgumentSignature,
 };
-pub use equality::{equality_operand_type, foreign_key_operand_type};
+pub use equality::{
+    equality_operand_type, equality_operand_type_with_control, foreign_key_operand_type,
+};
 #[doc(hidden)]
 pub use fixed_builtin::{
-    fixed_builtin_return_type, is_function as is_fixed_builtin, resolve_fixed_builtin_call,
-    ResolvedFixedBuiltinCall,
+    fixed_builtin_return_type, fixed_builtin_return_type_with_control,
+    is_function as is_fixed_builtin, resolve_fixed_builtin_call, ResolvedFixedBuiltinCall,
 };
 pub use functions::{builtin_function_argument_targets, builtin_function_type};
 #[doc(hidden)]
 pub use gamma::{resolve_gamma_overload, ResolvedGammaOverload};
-pub use introspection::{bind_type_introspection, bind_type_introspection_with_resolver};
+pub use introspection::{
+    bind_type_introspection, bind_type_introspection_with_control,
+    bind_type_introspection_with_resolver,
+};
 #[doc(hidden)]
 pub use json_strip::{resolve_json_strip_overload, ResolvedJsonStripOverload};
 #[doc(hidden)]
@@ -60,7 +79,11 @@ pub use length::{resolve_length_overload, ResolvedLengthOverload};
 pub use md5::{resolve_md5_overload, ResolvedMd5Overload};
 #[doc(hidden)]
 pub use operators::{
-    binary_operator_types, binary_result_type, require_equality_operator, require_ordering_operator,
+    binary_operator_by_oid, binary_operator_catalog_entry, binary_operator_types,
+    binary_operator_types_with_control, binary_result_type, binary_result_type_with_control,
+    numeric_operator_types, numeric_operator_types_with_control, require_equality_operator,
+    require_ordering_operator, unary_minus_catalog_entry, unary_operator_by_oid,
+    BinaryOperatorCatalogEntry, NumericOperatorTypes, UnaryOperatorCatalogEntry,
 };
 #[doc(hidden)]
 pub use overload_resolution::{
@@ -185,298 +208,60 @@ impl ResolvedFunctionOverload {
 
 pub fn scalar_type(
     expression: &ScalarExpr,
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
 ) -> Result<Option<ColumnType>, SQLError> {
     scalar_type_inner(expression, schema, params, None)
 }
 
+/// Infer a scalar type from borrowed schema and parameter metadata while retaining every constructed type and temporary buffer under the supplied allowance.
+pub fn scalar_type_with_control(
+    expression: &ScalarExpr,
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+    scalar_type_inner_with_control(expression, schema, params, None, control)
+}
+
+/// Preserve unknown-literal and domain rules when selecting an operator's common type without a catalog callback.
+pub fn common_context_type_with_control(
+    expression: &ScalarExpr,
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+    common::common_context_expression_type_with_control(expression, schema, params, None, control)
+}
+
 pub fn scalar_type_with_resolver(
     expression: &ScalarExpr,
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<ColumnType>, SQLError> {
     scalar_type_inner(expression, schema, params, Some(resolver))
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "type resolution preserves candidate order and ambiguity diagnostics atomically"
-)]
 pub(super) fn scalar_type_inner(
     expression: &ScalarExpr,
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ColumnType>, SQLError> {
-    if matches!(
+    scalar_type_inner_with_control(
         expression,
-        ScalarExpr::Func { binding, .. }
-            if binding.as_ref().and_then(|binding| binding.dispatch).is_some_and(
-                crate::ast::FunctionDispatch::is_call_argument_marker
-            )
-    ) {
-        let argument = crate::scalar_call_argument(expression)?;
-        return scalar_type_inner(argument.value, schema, params, resolver);
-    }
-    match expression {
-        ScalarExpr::Column(column) => {
-            if schema.has_unqualified_column(column) || schema.column_is_ambiguous(column) {
-                Ok(schema.type_of(column).cloned())
-            } else if schema.has_qualifier(column) {
-                Ok(Some(ColumnType::Record))
-            } else {
-                Ok(None)
-            }
-        }
-        ScalarExpr::Position(position) => Ok(schema.column_type(*position).cloned()),
-        ScalarExpr::InternalColumn(column) => Ok(schema.internal_type(*column).cloned()),
-        ScalarExpr::QualifiedColumn { qualifier, column } => {
-            qualified_column::resolve(schema, qualifier, column)
-        }
-        ScalarExpr::Literal(value) => Ok(common::value_type(value)),
-        ScalarExpr::TypedLiteral {
-            bound_type: Some(ty),
-            ..
-        } => Ok(Some(ty.clone())),
-        ScalarExpr::TypedLiteral { ty, .. } => {
-            let target = match ColumnType::from_sql_name(ty) {
-                Ok(ty) => Ok(Some(ty)),
-                Err(error @ SQLError::Unsupported(_)) => match resolver {
-                    Some(resolver) => resolver
-                        .resolve_type_name(ty)?
-                        .map_or(Err(error), |ty| Ok(Some(ty))),
-                    None => Err(error),
-                },
-                Err(error) => Err(error),
-            }?;
-            Ok(target)
-        }
-        ScalarExpr::Param(index) => Ok(index
-            .checked_sub(1)
-            .and_then(|index| params.get(index))
-            .and_then(common::parameter_type)),
-        ScalarExpr::Cast { expr, ty } => {
-            let source = scalar_type_inner(expr, schema, params, resolver)?;
-            let target = match ColumnType::from_sql_name(ty) {
-                Ok(ty) => Ok(Some(ty)),
-                Err(error @ SQLError::Unsupported(_)) => match resolver {
-                    Some(resolver) => resolver
-                        .resolve_type_name(ty)?
-                        .map_or(Err(error), |ty| Ok(Some(ty))),
-                    None => Err(error),
-                },
-                Err(error) => Err(error),
-            }?;
-            if let Some(target) = target.as_ref() {
-                cast_compatibility::validate_explicit_cast(source.as_ref(), target)?;
-            }
-            Ok(target)
-        }
-        ScalarExpr::Array(items) => {
-            if items.is_empty() {
-                return Ok(None);
-            }
-            let mut element = None;
-            for item in items {
-                element = common::merge_optional_types(
-                    element,
-                    common::common_context_expression_type(item, schema, params, resolver)?,
-                )?;
-            }
-            Ok(Some(ColumnType::Array(Box::new(
-                element.unwrap_or(ColumnType::Text),
-            ))))
-        }
-        ScalarExpr::Row(items) => {
-            for item in items {
-                scalar_type_inner(item, schema, params, resolver)?;
-            }
-            Ok(Some(ColumnType::Record))
-        }
-        ScalarExpr::Binary { op, lhs, rhs } => {
-            let left = common_context_expression_type(lhs, schema, params, resolver)?;
-            let right = common_context_expression_type(rhs, schema, params, resolver)?;
-            operators::binary_result_type(*op, left.as_ref(), right.as_ref())
-        }
-        ScalarExpr::UnaryMinus(inner) => scalar_type_inner(inner, schema, params, resolver)?
-            .map_or(Ok(None), |ty| {
-                operators::unary_minus_result_type(&ty).map(Some)
-            }),
-        ScalarExpr::Not(inner) | ScalarExpr::IsNull { expr: inner, .. } => {
-            scalar_type_inner(inner, schema, params, resolver)?;
-            Ok(Some(ColumnType::Boolean))
-        }
-        ScalarExpr::And(items) | ScalarExpr::Or(items) => {
-            for item in items {
-                scalar_type_inner(item, schema, params, resolver)?;
-            }
-            Ok(Some(ColumnType::Boolean))
-        }
-        ScalarExpr::Between { expr, low, high } => {
-            let value = scalar_type_inner(expr, schema, params, resolver)?;
-            let low = scalar_type_inner(low, schema, params, resolver)?;
-            let high = scalar_type_inner(high, schema, params, resolver)?;
-            operators::binary_result_type(
-                crate::ast::BinaryOp::GreaterEqual,
-                value.as_ref(),
-                low.as_ref(),
-            )?;
-            operators::binary_result_type(
-                crate::ast::BinaryOp::LessEqual,
-                value.as_ref(),
-                high.as_ref(),
-            )?;
-            Ok(Some(ColumnType::Boolean))
-        }
-        ScalarExpr::InList { expr, list, .. } => {
-            let needle = scalar_type_inner(expr, schema, params, resolver)?;
-            for item in list {
-                let candidate = scalar_type_inner(item, schema, params, resolver)?;
-                operators::binary_result_type(
-                    crate::ast::BinaryOp::Equal,
-                    needle.as_ref(),
-                    candidate.as_ref(),
-                )?;
-            }
-            Ok(Some(ColumnType::Boolean))
-        }
-        ScalarExpr::InSubquery { expr, subquery, .. } => {
-            let needle = scalar_type_inner(expr, schema, params, resolver)?;
-            let candidate = resolver
-                .map(|resolver| resolver.resolve_scalar_subquery_type(*subquery, schema, params))
-                .transpose()?
-                .flatten();
-            operators::binary_result_type(
-                crate::ast::BinaryOp::Equal,
-                needle.as_ref(),
-                candidate.as_ref(),
-            )?;
-            Ok(Some(ColumnType::Boolean))
-        }
-        ScalarExpr::Exists { .. } => Ok(Some(ColumnType::Boolean)),
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            let simple = base.is_some();
-            let base_type = base
-                .as_deref()
-                .map(|base| common::common_context_expression_type(base, schema, params, resolver))
-                .transpose()?
-                .flatten();
-            let mut result = None;
-            for (condition, value) in when {
-                let condition_type = if simple {
-                    common::common_context_expression_type(condition, schema, params, resolver)?
-                } else {
-                    scalar_type_inner(condition, schema, params, resolver)?
-                };
-                if simple {
-                    operators::binary_result_type(
-                        crate::ast::BinaryOp::Equal,
-                        base_type.as_ref(),
-                        condition_type.as_ref(),
-                    )?;
-                }
-                result = common::merge_optional_types(
-                    result,
-                    common::common_context_expression_type(value, schema, params, resolver)?,
-                )?;
-            }
-            if let Some(value) = else_branch {
-                result = common::merge_optional_types(
-                    result,
-                    common::common_context_expression_type(value, schema, params, resolver)?,
-                )?;
-            }
-            match result {
-                Some(result) => {
-                    common::case_output_type(expression, &result, schema, params, resolver)
-                        .map(Some)
-                }
-                result => Ok(result),
-            }
-        }
-        ScalarExpr::Func {
-            name,
-            binding,
-            args,
-            distinct,
-            order_by,
-            filter,
-        } => {
-            if let Some(crate::ast::FunctionResolutionError::UndefinedFunction { signature }) =
-                binding
-                    .as_ref()
-                    .and_then(|binding| binding.resolution_error.as_ref())
-            {
-                return Err(SQLError::Routine {
-                    sqlstate: "42883".into(),
-                    message: format!("function {signature} does not exist"),
-                });
-            }
-            if let Some(filter) = filter {
-                scalar_type_inner(filter, schema, params, resolver)?;
-            }
-            if *distinct {
-                for argument in args {
-                    if let Some(ty) = scalar_type_inner(argument, schema, params, resolver)? {
-                        require_equality_operator(&ty)?;
-                    }
-                }
-            }
-            for order in order_by {
-                if let Some(ty) = scalar_type_inner(&order.expr, schema, params, resolver)? {
-                    require_ordering_operator(&ty)?;
-                }
-            }
-            functions::builtin_function_type_inner(
-                name,
-                binding.as_ref(),
-                args,
-                order_by,
-                schema,
-                params,
-                resolver,
-            )
-        }
-        ScalarExpr::WindowCall { name, args, spec } => {
-            for expression in &spec.partition_by {
-                if let Some(ty) = scalar_type_inner(expression, schema, params, resolver)? {
-                    require_equality_operator(&ty)?;
-                }
-            }
-            for order in &spec.order_by {
-                if let Some(ty) = scalar_type_inner(&order.expr, schema, params, resolver)? {
-                    require_ordering_operator(&ty)?;
-                }
-            }
-            if let Some(frame) = &spec.frame {
-                for bound in [&frame.start, &frame.end] {
-                    match bound {
-                        crate::ScalarFrameBound::Preceding(expression)
-                        | crate::ScalarFrameBound::Following(expression) => {
-                            scalar_type_inner(expression, schema, params, resolver)?;
-                        }
-                        crate::ScalarFrameBound::UnboundedPreceding
-                        | crate::ScalarFrameBound::UnboundedFollowing
-                        | crate::ScalarFrameBound::CurrentRow => {}
-                    }
-                }
-            }
-            functions::builtin_function_type_inner(name, None, args, &[], schema, params, resolver)
-        }
-        ScalarExpr::ScalarSubquery(subquery) => resolver.map_or(Ok(None), |resolver| {
-            resolver.resolve_scalar_subquery_type(*subquery, schema, params)
-        }),
-        ScalarExpr::QualifiedStar(qualifier) if schema.has_qualifier(qualifier) => {
-            Ok(Some(ColumnType::Record))
-        }
-        ScalarExpr::Star | ScalarExpr::QualifiedStar(_) | ScalarExpr::Default => Ok(None),
-    }
+        schema,
+        params,
+        resolver,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .map(|ty| {
+        ty.map(|ty| {
+            ty.into_uncontrolled()
+                .expect("ordinary scalar inference has no reservation")
+        })
+    })
 }
 
 #[cfg(test)]

@@ -12,9 +12,10 @@ use uqa_storage::vector_index::IVFIndexParams;
 
 mod lifecycle;
 mod loading;
-mod math;
 mod metadata;
 mod mutation;
+mod native;
+pub(crate) use native::NativeIVFRecords;
 mod search;
 mod training;
 mod writing;

@@ -102,7 +102,7 @@ impl ColumnDropTable for ColumnDropBinding<'_> {
         Box::new(self.state.foreign_keys.write())
     }
     fn remove_column_acl(&self, column: &str) {
-        self.state.security.write().column_acls.remove(column);
+        self.state.security.write().remove_column_acl(column);
     }
     fn remove_text_field(&self, column: &str) {
         self.state
@@ -145,12 +145,9 @@ impl ColumnDropIndexes for Engine {
         }
         Ok(())
     }
-    fn remove_value_index(&self, table: &str, name: &RelationIdentity) -> StorageBackendResult<()> {
+    fn remove_value_index(&self, table: &str, key: &ValueIndexKey) -> StorageBackendResult<()> {
         if let Some(state) = self.try_table(table)? {
-            state
-                .value_indexes
-                .write()
-                .remove(&ValueIndexKey::Index(name.qualified_name()));
+            state.value_indexes.write().remove(key);
         }
         Ok(())
     }

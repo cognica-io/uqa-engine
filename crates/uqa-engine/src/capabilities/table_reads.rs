@@ -43,6 +43,13 @@ impl Engine {
     }
 }
 impl QueryTableAccess for Engine {
+    fn serializable_read(
+        &self,
+        name: &str,
+    ) -> Result<Option<uqa_execution::serializable::SerializableRelationRead>, SQLError> {
+        self.serializable_table_read(name)
+    }
+
     fn table(&self, name: &str) -> Result<std::sync::Arc<dyn TableRead>, SQLError> {
         self.require_query_table(name)
             .map(|table| table as std::sync::Arc<dyn TableRead>)
@@ -50,10 +57,7 @@ impl QueryTableAccess for Engine {
     fn command_overlay_changes(
         &self,
         name: &str,
-    ) -> Result<
-        Option<std::collections::BTreeMap<uqa_core::DocId, Option<uqa_storage::StoredDocument>>>,
-        SQLError,
-    > {
+    ) -> Result<Option<uqa_execution::query::document_changes::DocumentChanges>, SQLError> {
         self.command_overlay_changes(name)
     }
     fn table_doc_count(&self, name: &str) -> Result<u64, SQLError> {
@@ -100,7 +104,7 @@ impl RetrievalAccess for Engine {
 
 impl uqa_execution::query::block::context::QueryDocumentRead for Engine {
     fn document_ids(&self, table: &str) -> Result<Vec<uqa_core::DocId>, SQLError> {
-        self.table_doc_ids(table)
+        self.query_table_doc_ids(table)
     }
     fn document(
         &self,
@@ -126,5 +130,52 @@ impl uqa_execution::query::block::context::QueryDocumentRead for Engine {
     }
     fn command_overlay_active(&self) -> bool {
         self.command_mutation_overlay_active()
+    }
+}
+
+use uqa_execution::{
+    serializable::{SerializableRelationRead, SerializableWrites},
+    storage_errors::storage_error,
+};
+use uqa_sql::ast::RelationPersistence;
+
+impl Engine {
+    pub(crate) fn serializable_table_read(
+        &self,
+        table: &str,
+    ) -> Result<Option<SerializableRelationRead>, SQLError> {
+        self.serializable_table_read_using(|| self.require_query_table(table))
+    }
+
+    pub(crate) fn serializable_table_state_read(
+        &self,
+        table: &std::sync::Arc<TableState>,
+    ) -> Result<Option<SerializableRelationRead>, SQLError> {
+        self.serializable_table_read_using(|| Ok(std::sync::Arc::clone(table)))
+    }
+
+    fn serializable_table_read_using(
+        &self,
+        table: impl FnOnce() -> Result<std::sync::Arc<TableState>, SQLError>,
+    ) -> Result<Option<SerializableRelationRead>, SQLError> {
+        let Some(session) = self.serializable_session() else {
+            return Ok(None);
+        };
+        let Some(context) = session
+            .serializable_read_context()
+            .map_err(|error| storage_error("retain serializable reader", &error))?
+        else {
+            return Ok(None);
+        };
+        let table = table()?;
+        Ok(
+            (table.persistence != RelationPersistence::Temporary).then(|| {
+                SerializableRelationRead::new(
+                    table.object_id(),
+                    context,
+                    &self.runtime.cancellation,
+                )
+            }),
+        )
     }
 }

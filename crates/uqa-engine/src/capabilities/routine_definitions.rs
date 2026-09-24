@@ -37,7 +37,7 @@ impl Engine {
 }
 impl RoutineTypeCatalog for Engine {
     fn try_describe_table(&self, name: &str) -> Result<Option<Vec<ColumnDef>>, String> {
-        Engine::try_describe_table(self, name).map_err(|error| error.to_string())
+        Engine::describe_table_in_execution(self, name).map_err(|error| error.to_string())
     }
     fn resolve_catalog_column_type(&self, name: &str) -> Option<ColumnType> {
         uqa_execution::catalog::projection::resolve_catalog_column_type(

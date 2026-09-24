@@ -80,7 +80,13 @@ pub fn validate_unique_index(
     Ok(())
 }
 
+mod binding;
+pub mod constraint_names;
 pub mod creation;
+pub mod renaming;
 
+pub mod registration;
+pub mod registry;
 pub mod removal;
+pub mod restoration;
 pub mod routines;

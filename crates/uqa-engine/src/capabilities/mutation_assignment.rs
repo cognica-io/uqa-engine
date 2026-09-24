@@ -20,7 +20,7 @@ impl AssignmentColumnCatalog for Engine {
         &self,
         table: &str,
     ) -> Result<Option<Vec<ColumnDef>>, uqa_sql::assignment::columns::ColumnCatalogError> {
-        Engine::try_describe_table(self, table)
+        Engine::describe_table_in_execution(self, table)
             .map_err(|error| Box::new(error) as uqa_sql::assignment::columns::ColumnCatalogError)
     }
     fn columns_declared(

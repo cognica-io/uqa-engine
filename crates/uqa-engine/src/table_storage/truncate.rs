@@ -48,6 +48,7 @@ impl Engine {
         names: &[String],
         restart_identity: bool,
     ) -> Result<(), SQLError> {
+        self.prepare_serializable_transaction_snapshot()?;
         let mut ordered = Vec::new();
         let mut lock_order = std::collections::BTreeSet::new();
         for name in names {
@@ -79,13 +80,22 @@ impl Engine {
         restart_identity: bool,
     ) -> Result<(), SQLError> {
         let t = self.require_table(table_name)?;
-        *t.storage_generation.write() = crate::new_table_storage_generation().map_err(|error| {
-            SQLError::Internal(format!("rotate TRUNCATE storage generation: {error}"))
+        let allocator = self.table_identifier_allocator(&t).map_err(|error| {
+            uqa_execution::mutation::errors::identifier_storage_error(
+                "bind TRUNCATE document allocator",
+                &error,
+            )
         })?;
-        self.try_save_table_schema(table_name, &t)
-            .map_err(|error| {
-                SQLError::Internal(format!("persist TRUNCATE storage generation: {error}"))
-            })?;
+        if allocator.is_durable() {
+            allocator
+                .synchronize(&mut t.next_id.lock())
+                .map_err(|error| {
+                    uqa_execution::mutation::errors::identifier_storage_error(
+                        "retain TRUNCATE document watermark",
+                        &error,
+                    )
+                })?;
+        }
         // Snapshot the doc id set before grabbing any write locks so
         // we do not deadlock against the read guard inside the loop.
         let ids: Vec<DocId> = t
@@ -99,21 +109,46 @@ impl Engine {
                 .write()
                 .delete(doc_id)
                 .map_err(|err| document_store_write_error(&err))?;
-            t.inverted_index
+            uqa_execution::serializable::text::remove_document(
+                self,
+                table_name,
+                t.columns.snapshot(),
+                t.inverted_index.write().as_mut(),
+                doc_id,
+            )?;
+            for idx in t
+                .vector_indexes
                 .write()
-                .remove_document(doc_id)
-                .map_err(|error| SQLError::Internal(format!("remove indexed document: {error}")))?;
-            for idx in t.vector_indexes.write().values_mut() {
+                .live_mut()
+                .map_err(|error| {
+                    uqa_execution::storage_errors::storage_error(
+                        "write vector registrations",
+                        &error,
+                    )
+                })?
+                .values_mut()
+            {
                 idx.as_mut().delete(doc_id).map_err(|error| {
                     SQLError::Internal(format!("delete indexed vector: {error}"))
                 })?;
             }
             self.note_row_deleted(table_name, doc_id)?;
         }
+        // Retire old rows under their original generation before selecting the new allocator namespace.
+        *t.storage_generation.write() = crate::new_table_storage_generation().map_err(|error| {
+            SQLError::Internal(format!("rotate TRUNCATE storage generation: {error}"))
+        })?;
+        self.try_save_table_schema(table_name, &t)
+            .map_err(|error| {
+                SQLError::Internal(format!("persist TRUNCATE storage generation: {error}"))
+            })?;
         if restart_identity {
             *t.next_id.lock() = 1;
             self.persist_next_id(table_name).map_err(|error| {
-                SQLError::Internal(format!("persist TRUNCATE identity: {error}"))
+                uqa_execution::mutation::errors::identifier_storage_error(
+                    "persist TRUNCATE identity",
+                    &error,
+                )
             })?;
             let owned_sequences = self
                 .sequence_names_owned_by_tables(&std::collections::BTreeSet::from([t.object_id()]))
@@ -123,6 +158,13 @@ impl Engine {
                     SQLError::Internal(format!("restart owned sequence `{sequence}`: {error}"))
                 })?;
             }
+        } else if allocator.is_durable() {
+            self.persist_next_id(table_name).map_err(|error| {
+                uqa_execution::mutation::errors::identifier_storage_error(
+                    "persist TRUNCATE document watermark",
+                    &error,
+                )
+            })?;
         }
         self.value_indexes_truncate(table_name, &t)?;
         self.mark_column_stats_dirty_by_count(table_name, &t, removed_count)

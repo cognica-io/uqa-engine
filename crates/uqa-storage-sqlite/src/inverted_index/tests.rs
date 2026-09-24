@@ -8,6 +8,16 @@ use super::*;
 use crate::catalog::Catalog;
 use uqa_analysis::{standard_analyzer, Analyzer, Tokenizer};
 
+mod retention;
+
+#[test]
+fn evaluated_text_changes_preserve_logical_terms_and_atomicity() {
+    uqa_storage::key_value::conformance::verify_inverted_index_changes(&mut idx_with_analyzer(
+        uqa_analysis::whitespace_analyzer(),
+    ))
+    .unwrap();
+}
+
 fn fields<const N: usize>(pairs: [(&str, &str); N]) -> BTreeMap<FieldName, String> {
     pairs
         .into_iter()
@@ -35,6 +45,63 @@ fn add_get_round_trip() {
     let pl = idx.get_posting_list("title", "languag").unwrap();
     let docs: Vec<_> = pl.doc_ids().collect();
     assert_eq!(docs, vec![1, 2]);
+}
+
+#[test]
+fn cluster_encoding_preserves_typed_resource_errors_and_existing_postings() {
+    let mut index = idx();
+    index.add_document(1, fields([("body", "term")])).unwrap();
+    let entries = [OccurrencePosting {
+        doc_id: 2,
+        doc_length: 1,
+        occurrences: vec![uqa_core::TokenOccurrence {
+            position: 0,
+            position_length: 1,
+            offsets: None,
+        }],
+    }];
+    let control = uqa_storage::read_control::StorageReadControl::with_limit(0);
+    index
+        .conn
+        .with(|connection| {
+            let write = || {
+                write_cluster(
+                    connection,
+                    "articles",
+                    "body",
+                    &TokenTermKey::from_text("term"),
+                    0,
+                    &entries,
+                    &control,
+                )
+            };
+            assert!(matches!(write(), Err(SQLiteError::Memory(_))));
+            control.cancellation().cancel();
+            assert!(matches!(write(), Err(SQLiteError::Cancelled(_))));
+            assert!(matches!(
+                write_cluster(
+                    connection,
+                    "articles",
+                    "body",
+                    &TokenTermKey::from_text("term"),
+                    0,
+                    &[],
+                    &control,
+                ),
+                Err(SQLiteError::Cancelled(_))
+            ));
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(control.memory().used(), 0);
+    assert_eq!(
+        index
+            .get_posting_list("body", "term")
+            .unwrap()
+            .doc_ids()
+            .collect::<Vec<_>>(),
+        [1]
+    );
 }
 
 #[test]

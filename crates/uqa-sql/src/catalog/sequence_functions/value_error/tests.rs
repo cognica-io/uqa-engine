@@ -10,6 +10,11 @@ use super::*;
 fn sequence_value_errors_keep_sqlstate_and_direct_api_diagnostics() {
     let cases = [
         (
+            SequenceValueError::MissingOid(12345),
+            "XX000",
+            "could not open relation with OID 12345",
+        ),
+        (
             SequenceValueError::Undefined("missing".into()),
             "42P01",
             "relation \"missing\" does not exist",
@@ -77,4 +82,7 @@ fn sequence_security_and_internal_errors_keep_their_original_variants() {
     assert!(
         matches!(internal.into_sql_error(), SQLError::Internal(message) if message == "storage detail")
     );
+    let cancelled = SequenceValueError::from(uqa_core::QueryCancelled).into_sql_error();
+    assert_eq!(cancelled.sqlstate(), Some("57014"));
+    assert!(matches!(cancelled, SQLError::Cancelled(_)));
 }

@@ -610,11 +610,34 @@ impl SchemaScope {
             else {
                 return;
             };
-            if binding
-                .as_ref()
-                .and_then(|binding| binding.dispatch)
-                .is_some()
-            {
+            if let Some(dispatch) = binding.as_ref().and_then(|binding| binding.dispatch) {
+                if let crate::ast::FunctionDispatch::NumericOperator(operator) = dispatch {
+                    let selected = (|| {
+                        let resolver = self.query_function_type_resolver_for_subqueries(
+                            engine, args, schema, subqueries, params, outer,
+                        )?;
+                        let (_, types, _) = crate::function_call_argument_signature(
+                            args,
+                            schema,
+                            params,
+                            Some(&resolver),
+                        )?;
+                        crate::type_resolution::numeric_operator_types(operator, &types)
+                    })();
+                    match selected {
+                        Ok(selected) => {
+                            binding
+                                .as_mut()
+                                .expect("structural operator binding")
+                                .argument_types = selected
+                                .arguments
+                                .iter()
+                                .map(crate::ColumnType::sql_name)
+                                .collect();
+                        }
+                        Err(error) => failure = Some(error),
+                    }
+                }
                 return;
             }
             if let Err(error) = self.bind_scalar_function_for_storage(

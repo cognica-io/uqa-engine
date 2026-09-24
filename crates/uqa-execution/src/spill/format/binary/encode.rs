@@ -6,8 +6,8 @@
 
 //! Binary spill sizing and encoding.
 
-use std::fs::File;
 use std::io::{BufWriter, Seek, SeekFrom, Write};
+use uqa_storage::temporary_file::TemporaryFile as File;
 
 use crate::batch::{Batch, ColumnIdentity, PhysicalRow, RowSchema};
 use crate::physical::ExecResult;

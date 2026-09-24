@@ -5,6 +5,10 @@
 //
 
 use super::*;
+use uqa_storage::{DocumentMetadata, StoredDocument};
+
+#[path = "../tests/support/native_catalog.rs"]
+pub(crate) mod native_storage;
 
 fn doc<const N: usize>(pairs: [(&str, Value); N]) -> Document {
     pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
@@ -30,6 +34,7 @@ fn vector_index_kind(engine: &Engine, table: &str, field: &str) -> String {
 
 mod api_validation;
 
+mod storage_cancellation;
 mod storage_consistency;
 
 mod search_and_vectors;
@@ -37,3 +42,12 @@ mod search_and_vectors;
 mod catalog;
 mod prepared;
 mod queries;
+mod system_catalog_locks;
+mod system_catalog_security;
+mod table_locks;
+mod virtual_catalog_names;
+
+mod direct_drop_locks;
+mod drop_locks;
+mod relation_lock_support;
+mod view_locks;

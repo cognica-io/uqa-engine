@@ -7,10 +7,10 @@
 //! Row-lock waits, cross-process claims, and deadlock detection.
 
 use super::{
-    lock_strengths_conflict, relation_modes_conflict, remove_inactive_versions, rollback_grant,
-    row_byte_claims, try_grant, ByteClaim, CrossAttachment, FileLockCoordinator, GrantAttempt,
-    HashSet, LockAcquire, LockRequest, LockStrength, LockTable, MutexGuard, RelationLockMode,
-    RowLockAcquisition, RowLockKey, RowLockManager, SQLError, WAIT_SLICE,
+    lock_strengths_conflict, remove_inactive_versions, rollback_grant, row_byte_claims, try_grant,
+    ByteClaim, CrossAttachment, FileLockCoordinator, GrantAttempt, HashSet, LockAcquire,
+    LockRequest, LockStrength, LockTable, MutexGuard, RelationLockMode, RowLockAcquisition,
+    RowLockKey, RowLockManager, SQLError, WAIT_SLICE,
 };
 
 impl RowLockManager {
@@ -178,6 +178,15 @@ impl<'a> CrossWaitGuard<'a> {
             self.registered.set(true);
         }
     }
+
+    pub(super) fn clear(&self, state: &mut LockTable) {
+        if self.registered.replace(false) {
+            if let Some(coordinator) = self.coordinator {
+                coordinator.clear_wait(self.session_id);
+            }
+            state.advertised_waits.remove(&self.session_id);
+        }
+    }
 }
 
 impl Drop for CrossWaitGuard<'_> {
@@ -311,10 +320,7 @@ fn relation_holders_of(
         .get(&table)
         .into_iter()
         .flatten()
-        .filter(|grant| {
-            grant.session_id != except
-                && relation_modes_conflict(grant.effective_mode(), wanted_mode)
-        })
+        .filter(|grant| grant.session_id != except && grant.conflicting_mode(wanted_mode).is_some())
         .map(|grant| grant.session_id)
         .collect()
 }

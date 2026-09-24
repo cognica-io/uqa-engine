@@ -6,6 +6,7 @@
 
 //! Persistent brute-force vector index and exact search contract.
 
+use super::native::NativeVectorRead;
 use super::{
     blob_to_vector, cosine_similarity, decode_doc_id, encode_doc_id, i64_to_usize, params,
     select_top_k_scored, usize_to_u64, validate_persisted_ordinal_sequence,
@@ -20,6 +21,7 @@ pub struct SQLiteVectorIndex {
     pub(super) table: String,
     pub(super) field: String,
     pub(super) dimensions: u32,
+    pub(super) retained: Option<Arc<crate::mvcc::native::NativeSnapshot>>,
 }
 
 impl SQLiteVectorIndex {
@@ -34,15 +36,20 @@ impl SQLiteVectorIndex {
             table: table.into(),
             field: field.into(),
             dimensions,
+            retained: None,
         }
     }
 
-    pub(super) fn load_all(&self) -> SQLiteResult<Vec<(DocId, Vec<f32>)>> {
-        self.load_all_with_ordinals().map(|rows| {
-            rows.into_iter()
-                .map(|(doc_id, _, vector)| (doc_id, vector))
-                .collect()
-        })
+    fn with_vectors<R>(
+        &self,
+        read: impl FnOnce(&[(DocId, u32, Vec<f32>)]) -> SQLiteResult<R>,
+    ) -> SQLiteResult<R> {
+        if let Some(snapshot) = self.native_snapshot()? {
+            let native = NativeVectorRead::new(&snapshot, self)?;
+            read(&native.vectors()?)
+        } else {
+            read(&self.load_all_with_ordinals()?)
+        }
     }
 
     pub(super) fn load_all_with_ordinals(&self) -> SQLiteResult<Vec<(DocId, u32, Vec<f32>)>> {
@@ -123,6 +130,20 @@ impl SQLiteVectorIndex {
 }
 
 impl VectorIndex for SQLiteVectorIndex {
+    fn contains_document(&self, doc_id: DocId) -> StorageBackendResult<bool> {
+        let doc_id = encode_doc_id(doc_id)?;
+        if let Some(found) = self.read_native(|read| read.contains_document(doc_id))? {
+            return Ok(found);
+        }
+        Ok(self.conn.with(|connection| {
+            Ok(connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM _vectors WHERE table_name = ?1 AND field = ?2 AND doc_id = ?3 AND vector_ordinal = 0)",
+                params![self.table, self.field, doc_id],
+                |row| row.get(0),
+            )?)
+        })?)
+    }
+
     fn dimensions(&self) -> u32 {
         self.dimensions
     }
@@ -137,6 +158,12 @@ impl VectorIndex for SQLiteVectorIndex {
 
     fn add_many(&mut self, doc_id: DocId, vectors: Vec<Vec<f32>>) -> StorageBackendResult<()> {
         let (doc_id, encoded_vectors) = self.stage_doc_vectors(doc_id, &vectors)?;
+        if self
+            .write_native(|read, batch| read.replace(batch, doc_id, &encoded_vectors))?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with_mut(|conn| {
             let tx = conn.savepoint()?;
             tx.execute(
@@ -160,6 +187,12 @@ impl VectorIndex for SQLiteVectorIndex {
 
     fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
         let doc_id = encode_doc_id(doc_id)?;
+        if self
+            .write_native(|read, batch| read.delete(batch, doc_id))?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "DELETE FROM _vectors
@@ -172,6 +205,14 @@ impl VectorIndex for SQLiteVectorIndex {
     }
 
     fn clear(&mut self) -> StorageBackendResult<()> {
+        if self
+            .write_native(|read, batch| {
+                read.clear_family(batch, crate::mvcc::native::NativeRecordFamily::Vectors)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "DELETE FROM _vectors WHERE table_name = ?1 AND field = ?2",
@@ -187,46 +228,14 @@ impl VectorIndex for SQLiteVectorIndex {
         if k == 0 {
             return Ok(PostingList::new());
         }
-        let entries = self.load_all()?;
-        if entries.is_empty() {
-            return Ok(PostingList::new());
-        }
-        let mut best_by_doc: std::collections::BTreeMap<DocId, f32> =
-            std::collections::BTreeMap::new();
-        for (doc_id, vector) in &entries {
-            let sim = cosine_similarity(query, vector);
-            best_by_doc
-                .entry(*doc_id)
-                .and_modify(|best| {
-                    if sim > *best {
-                        *best = sim;
-                    }
-                })
-                .or_insert(sim);
-        }
-        let mut scored: Vec<(DocId, f32)> = best_by_doc.into_iter().collect();
-        select_top_k_scored(&mut scored, k);
-        scored.sort_by_key(|(id, _)| *id);
-        let entries: Vec<PostingEntry> = scored
-            .into_iter()
-            .map(|(doc_id, sim)| PostingEntry::new(doc_id, Payload::with_score(f64::from(sim))))
-            .collect();
-        Ok(PostingList::from_sorted_unchecked(entries))
-    }
-
-    fn search_threshold(&self, query: &[f32], threshold: f32) -> StorageBackendResult<PostingList> {
-        self.validate_dimensions(query)?;
-        if !threshold.is_finite() {
-            return Err(uqa_storage::StorageBackendError::Other(format!(
-                "vector similarity threshold must be finite, got {threshold}"
-            )));
-        }
-        let entries = self.load_all()?;
-        let mut best_by_doc: std::collections::BTreeMap<DocId, f32> =
-            std::collections::BTreeMap::new();
-        for (doc_id, vector) in &entries {
-            let sim = cosine_similarity(query, vector);
-            if sim >= threshold {
+        Ok(self.with_vectors(|entries| {
+            if entries.is_empty() {
+                return Ok(PostingList::new());
+            }
+            let mut best_by_doc: std::collections::BTreeMap<DocId, f32> =
+                std::collections::BTreeMap::new();
+            for (doc_id, _, vector) in entries {
+                let sim = cosine_similarity(query, vector);
                 best_by_doc
                     .entry(*doc_id)
                     .and_modify(|best| {
@@ -236,16 +245,53 @@ impl VectorIndex for SQLiteVectorIndex {
                     })
                     .or_insert(sim);
             }
+            let mut scored: Vec<(DocId, f32)> = best_by_doc.into_iter().collect();
+            select_top_k_scored(&mut scored, k);
+            scored.sort_by_key(|(id, _)| *id);
+            let entries: Vec<PostingEntry> = scored
+                .into_iter()
+                .map(|(doc_id, sim)| PostingEntry::new(doc_id, Payload::with_score(f64::from(sim))))
+                .collect();
+            Ok(PostingList::from_sorted_unchecked(entries))
+        })?)
+    }
+
+    fn search_threshold(&self, query: &[f32], threshold: f32) -> StorageBackendResult<PostingList> {
+        self.validate_dimensions(query)?;
+        if !threshold.is_finite() {
+            return Err(uqa_storage::StorageBackendError::Other(format!(
+                "vector similarity threshold must be finite, got {threshold}"
+            )));
         }
-        let mut out: Vec<PostingEntry> = best_by_doc
-            .into_iter()
-            .map(|(doc_id, sim)| PostingEntry::new(doc_id, Payload::with_score(f64::from(sim))))
-            .collect();
-        out.sort_by_key(|e| e.doc_id);
-        Ok(PostingList::from_sorted_unchecked(out))
+        Ok(self.with_vectors(|entries| {
+            let mut best_by_doc: std::collections::BTreeMap<DocId, f32> =
+                std::collections::BTreeMap::new();
+            for (doc_id, _, vector) in entries {
+                let sim = cosine_similarity(query, vector);
+                if sim >= threshold {
+                    best_by_doc
+                        .entry(*doc_id)
+                        .and_modify(|best| {
+                            if sim > *best {
+                                *best = sim;
+                            }
+                        })
+                        .or_insert(sim);
+                }
+            }
+            let mut out: Vec<PostingEntry> = best_by_doc
+                .into_iter()
+                .map(|(doc_id, sim)| PostingEntry::new(doc_id, Payload::with_score(f64::from(sim))))
+                .collect();
+            out.sort_by_key(|e| e.doc_id);
+            Ok(PostingList::from_sorted_unchecked(out))
+        })?)
     }
 
     fn count(&self) -> StorageBackendResult<usize> {
+        if let Some(snapshot) = self.native_snapshot()? {
+            return Ok(NativeVectorRead::new(&snapshot, self)?.count()?);
+        }
         Ok(self.conn.with(|c| {
             let n: i64 = c.query_row(
                 "SELECT COUNT(*) FROM _vectors WHERE table_name = ?1 AND field = ?2",
@@ -257,6 +303,6 @@ impl VectorIndex for SQLiteVectorIndex {
     }
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
-        Ok(Arc::new(self.clone()))
+        Ok(Arc::new(self.retained_snapshot()?))
     }
 }

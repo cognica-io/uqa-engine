@@ -20,7 +20,7 @@ use uqa_sql::{
                 SequencePrivilegeInquiry, SequencePrivilegeResolution, SequenceSecurityCatalog,
                 SequenceSecurityRead,
             },
-            SequenceSecurity,
+            BoundSequenceSecurity,
         },
     },
     SQLError,
@@ -52,7 +52,8 @@ impl SequenceGrantNamespace for Engine {
         self.temporary_namespace_allocated()
     }
     fn has_namespace(&self, name: &str) -> Result<bool, String> {
-        self.has_namespace(name).map_err(|error| error.to_string())
+        self.has_namespace_in_execution(name)
+            .map_err(|error| error.to_string())
     }
 }
 impl SequencePrivilegePublication for Engine {
@@ -73,6 +74,16 @@ impl SequencePrivilegePublication for Engine {
     }
 }
 impl Engine {
+    pub(crate) fn sequence_privilege_read_context(
+        &self,
+    ) -> uqa_execution::catalog::security::sequence_inquiry::SequencePrivilegeReadContext<'_> {
+        uqa_execution::catalog::security::sequence_inquiry::SequencePrivilegeReadContext {
+            inquiry: self.sequence_privilege_inquiry(),
+            snapshots: self,
+            catalog: self.catalog_execution(),
+        }
+    }
+
     pub(crate) fn sequence_privilege_inquiry(&self) -> SequencePrivilegeInquiry<'_> {
         SequencePrivilegeInquiry {
             names: self,
@@ -83,6 +94,7 @@ impl Engine {
     }
     pub(crate) fn sequence_privilege_context(&self) -> SequencePrivilegeContext<'_> {
         SequencePrivilegeContext {
+            locks: self,
             inquiry: self.sequence_privilege_inquiry(),
             sequences: self,
             namespaces: self,
@@ -95,18 +107,9 @@ impl Engine {
         &self,
         name: &str,
         relation: &RelationIdentity,
-        security: &SequenceSecurity,
+        security: &BoundSequenceSecurity,
     ) -> Result<(), SQLError> {
         self.sequence_privilege_context()
             .persist_sequence_security(name, relation, security)
-    }
-
-    pub(crate) fn ensure_sequence_owner(
-        &self,
-        name: &str,
-        relation: &RelationIdentity,
-    ) -> Result<String, SQLError> {
-        self.sequence_privilege_inquiry()
-            .ensure_sequence_owner(name, relation)
     }
 }

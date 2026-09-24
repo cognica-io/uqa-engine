@@ -41,21 +41,21 @@ use routines::plpgsql_function_may_mutate_engine;
 #[derive(Clone, Copy)]
 struct MutabilityClassification {
     include_session_mutations: bool,
-    procedural_state_requires_transaction: bool,
+    include_transaction_scopes: bool,
 }
 
 impl MutabilityClassification {
     const DATABASE_WRITES: Self = Self {
         include_session_mutations: false,
-        procedural_state_requires_transaction: false,
+        include_transaction_scopes: false,
     };
     const ENGINE_MUTATIONS: Self = Self {
         include_session_mutations: true,
-        procedural_state_requires_transaction: false,
+        include_transaction_scopes: false,
     };
     const STATEMENT_TRANSACTION: Self = Self {
         include_session_mutations: true,
-        procedural_state_requires_transaction: true,
+        include_transaction_scopes: true,
     };
 }
 
@@ -73,7 +73,7 @@ pub fn query_may_mutate_engine(
     )
 }
 
-/// Some read-only operations still need a statement transaction. In particular, a PL/pgSQL block with an `EXCEPTION` arm opens a subtransaction even when neither branch writes data.
+/// Some read-only operations still need a statement transaction. PL/pgSQL exception blocks open subtransactions, and query FOR loops retain internal portals and their relation locks even when their queries and bodies do not write data.
 pub fn query_requires_statement_transaction(
     context: &QueryEffectContext<'_>,
     query: &crate::plan::QueryPlan,
@@ -371,7 +371,13 @@ fn function_may_mutate_engine(
             visiting_routines,
             classification,
         )?;
+    let sequence_lock_scope = classification.include_transaction_scopes
+        && matches!(
+            dispatch_name.as_str(),
+            "nextval" | "currval" | "lastval" | "setval"
+        );
     Ok(mutates_database_directly
+        || sequence_lock_scope
         || (classification.include_session_mutations
             && (builtin_requires_mutating_execution || sql_routine_mutates)))
 }
@@ -509,7 +515,7 @@ fn query_source_may_mutate_engine(
             )?,
             crate::plan::CtePlanBody::Command(command) => {
                 classification.include_session_mutations
-                    || classification.procedural_state_requires_transaction
+                    || classification.include_transaction_scopes
                     || command_may_write_database(context, command)?
             }
         };

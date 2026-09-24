@@ -24,6 +24,7 @@ impl Engine {
             publication: self,
             changes: self,
             names: self,
+            locks: self,
             events: self,
             routines: self,
             dependencies: self.view_dependency_context(),
@@ -66,7 +67,9 @@ impl ViewRemovalTransactions for Engine {
         &self,
         operation: impl FnOnce(&Self, &ViewRemovalContext<'_>) -> Result<R, SQLError>,
     ) -> Result<R, SQLError> {
-        self.with_implicit_transaction(|engine| operation(engine, &engine.view_removal_context()))
+        self.with_implicit_definition_transaction(|engine| {
+            operation(engine, &engine.view_removal_context())
+        })
     }
 }
 impl ViewRemovalNames for Engine {

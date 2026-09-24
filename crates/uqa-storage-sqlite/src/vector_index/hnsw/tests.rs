@@ -173,6 +173,171 @@ fn rollback_invalidates_the_published_session_generation() {
 }
 
 #[test]
+fn rollback_branches_cannot_reuse_another_handles_cached_graph_revision() {
+    for savepoint in [false, true] {
+        let (connection, mut first) = initialized_index();
+        let mut second = SQLiteHNSWIndex::open_existing(
+            connection.clone(),
+            "articles",
+            "embedding",
+            2,
+            params(),
+        );
+        connection.begin_transaction().unwrap();
+        if savepoint {
+            connection.savepoint("before").unwrap();
+        }
+        first.add(3, vec![-1.0, 0.0]).unwrap();
+        let discarded_revision = first.persisted_revision().unwrap();
+        if savepoint {
+            connection.rollback_to_savepoint("before").unwrap();
+        } else {
+            connection.rollback_transaction().unwrap();
+        }
+        second.add(4, vec![-1.0, 0.0]).unwrap();
+        assert_eq!(second.persisted_revision().unwrap(), discarded_revision);
+        assert_eq!(
+            first
+                .search_knn(&[-1.0, 0.0], 1)
+                .unwrap()
+                .doc_ids()
+                .collect::<Vec<_>>(),
+            vec![4]
+        );
+        if savepoint {
+            connection.rollback_transaction().unwrap();
+        }
+    }
+}
+
+#[test]
+fn rollback_to_a_recreated_graph_invalidates_cache_without_another_write() {
+    let (connection, index) = initialized_index();
+    let original_revision = index.persisted_revision().unwrap();
+    connection.begin_transaction().unwrap();
+    connection.savepoint("old_graph").unwrap();
+    replace_with_document(&connection, 4);
+    assert_eq!(index.persisted_revision().unwrap(), original_revision);
+    assert_eq!(nearest(&index), vec![4]);
+    let discarded = index.snapshot().unwrap();
+    let changes = connection
+        .with(|sqlite| Ok(sqlite.total_changes()))
+        .unwrap();
+    connection.rollback_to_savepoint("old_graph").unwrap();
+    assert_eq!(
+        connection
+            .with(|sqlite| Ok(sqlite.total_changes()))
+            .unwrap(),
+        changes
+    );
+    assert_eq!(nearest(&index), vec![2]);
+    assert_eq!(nearest(&*discarded), vec![4]);
+    connection.rollback_transaction().unwrap();
+}
+
+#[test]
+fn independently_recreated_graphs_do_not_reuse_a_cached_revision_in_any_file_mode() {
+    for mode in 0..4 {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("hnsw-cache.db");
+        let first = open_mode(mode, &path);
+        Catalog::open(first.clone()).unwrap();
+        let mut index =
+            SQLiteHNSWIndex::with_params(first.clone(), "articles", "embedding", 2, params());
+        index.add(1, vec![1.0, 0.0]).unwrap();
+        index.add(2, vec![0.0, 1.0]).unwrap();
+        index.initialize().unwrap();
+        let revision = index.persisted_revision().unwrap();
+        assert_eq!(nearest(&index), vec![2]);
+        let old = index.snapshot().unwrap();
+        let second = open_mode(mode, &path);
+        second.begin_transaction().unwrap();
+        replace_with_document(&second, 4);
+        second.commit_transaction().unwrap();
+        assert_eq!(index.persisted_revision().unwrap(), revision);
+        assert_eq!(nearest(&index), vec![4]);
+        assert_eq!(nearest(&*old), vec![2]);
+        drop((first, second, index, old));
+        let reopened = open_mode(mode, &path);
+        let index = SQLiteHNSWIndex::open_existing(reopened, "articles", "embedding", 2, params());
+        assert_eq!(nearest(&index), vec![4]);
+    }
+}
+
+#[test]
+fn a_warm_graph_cache_still_rejects_canonical_vector_drift() {
+    let (connection, index) = initialized_index();
+    assert_eq!(nearest(&index), vec![2]);
+    let mut raw = crate::SQLiteVectorIndex::new(connection, "articles", "embedding", 2);
+    raw.add(1, vec![-1.0, 0.0]).unwrap();
+    let error = index.search_knn(&[-1.0, 0.0], 1).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("differs from its live graph node"));
+}
+
+#[test]
+fn stable_views_reuse_graphs_and_retained_readers_survive_external_recreation() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("retained.db");
+    let first = open_mode(0, &path);
+    Catalog::open(first.clone()).unwrap();
+    let mut index =
+        SQLiteHNSWIndex::with_params(first.clone(), "articles", "embedding", 2, params());
+    index.add(1, vec![1.0, 0.0]).unwrap();
+    index.add(2, vec![0.0, 1.0]).unwrap();
+    index.initialize().unwrap();
+    let before = index.graph_snapshot().unwrap().unwrap();
+    let again = index.graph_snapshot().unwrap().unwrap();
+    assert!(std::ptr::eq(
+        &raw const *before.graph,
+        &raw const *again.graph
+    ));
+    first.begin_deferred_transaction().unwrap();
+    assert_eq!(nearest(&index), vec![2]);
+    let second = open_mode(0, &path);
+    second.begin_transaction().unwrap();
+    replace_with_document(&second, 4);
+    second.commit_transaction().unwrap();
+    assert_eq!(nearest(&index), vec![2]);
+    first.rollback_transaction().unwrap();
+    assert_eq!(nearest(&index), vec![4]);
+    assert_eq!(nearest(&*before.graph), vec![2]);
+}
+
+fn replace_with_document(connection: &ManagedConnection, document: u64) {
+    SQLiteHNSWIndex::drop_metadata(connection, "articles", "embedding").unwrap();
+    let mut raw = crate::SQLiteVectorIndex::new(connection.clone(), "articles", "embedding", 2);
+    raw.clear().unwrap();
+    raw.add(document, vec![-1.0, 0.0]).unwrap();
+    SQLiteHNSWIndex::with_params(connection.clone(), "articles", "embedding", 2, params())
+        .initialize()
+        .unwrap();
+}
+
+fn nearest(index: &dyn VectorIndex) -> Vec<u64> {
+    index
+        .search_knn(&[-1.0, 0.0], 1)
+        .unwrap()
+        .doc_ids()
+        .collect()
+}
+
+fn open_mode(mode: usize, path: &std::path::Path) -> ManagedConnection {
+    match mode {
+        0 => ManagedConnection::open(path),
+        1 => ManagedConnection::open_encrypted(path, "HNSW test key"),
+        2 => ManagedConnection::open_compressed(path, crate::SQLiteCompressionOptions::default()),
+        _ => ManagedConnection::open_compressed_encrypted(
+            path,
+            "HNSW test key",
+            crate::SQLiteCompressionOptions::default(),
+        ),
+    }
+    .unwrap()
+}
+
+#[test]
 fn metadata_failure_rolls_back_vector_and_graph_changes() {
     let (connection, mut index) = initialized_index();
     connection

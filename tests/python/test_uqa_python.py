@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 import uqa
+from concurrent_transactions import ISOLATION_LEVELS, ORACLE, run_concurrent_writer_case
 
 BINDING_FEATURES = {
     language: os.environ.get(f"UQA_TEST_{language.upper()}", "enabled")
@@ -314,6 +315,22 @@ def test_persistent_open_and_batch(tmp_path) -> None:
 
     reopened = uqa.open(path)
     assert reopened.sql("SELECT count(*) AS n FROM docs").rows == [{"n": 1}]
+
+
+@pytest.mark.parametrize(
+    "open_engine",
+    (
+        uqa.open,
+        uqa.open_compressed,
+        lambda path: uqa.open_encrypted(path, "binding-concurrent-writer-fixture"),
+        lambda path: uqa.open_compressed_encrypted(path, "binding-concurrent-writer-fixture"),
+    ),
+    ids=("sqlite", "compressed", "encrypted", "compressed-encrypted"),
+)
+@pytest.mark.parametrize("isolation", ISOLATION_LEVELS)
+@pytest.mark.parametrize("schedule", ORACLE["cases"], ids=lambda schedule: schedule["name"])
+def test_concurrent_writer_progress_and_isolation(tmp_path, open_engine, isolation, schedule):
+    run_concurrent_writer_case(open_engine, tmp_path / "concurrent.db", schedule, isolation)
 
 
 def test_close_releases_persistent_file_and_is_idempotent(tmp_path) -> None:

@@ -4,10 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Direct public read/modify/write APIs must reserve the persistent writer
-//! before refreshing their engine-local snapshot. Otherwise independently
-//! opened sessions can both derive from the same old value and the last full
-//! snapshot write silently discards the first mutation.
+//! Direct public read/modify/write APIs coordinate their logical target before selecting the value to update. Independent targets must remain writable while another transaction retains private changes.
 
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -99,6 +96,60 @@ fn concurrent_scoring_updates_from_independent_engines_do_not_lose_training_step
     let expected_value: serde_json::Value = serde_json::from_str(&expected_json).unwrap();
     let actual_value: serde_json::Value = serde_json::from_str(&actual_json).unwrap();
     assert_eq!(actual_value, expected_value);
+}
+
+#[test]
+fn scoring_parameter_locks_follow_signal_and_savepoint_scope() {
+    let directory = tempdir().unwrap();
+    let engines = [
+        Engine::open(&directory.path().join("parameters.sqlite")).unwrap(),
+        Engine::from_persistent_provider(Arc::new(
+            uqa_storage_sqlite::SQLiteKeyValueStorage::open(
+                &directory.path().join("parameters-kv.sqlite"),
+            )
+            .unwrap(),
+        ))
+        .unwrap(),
+        Engine::from_persistent_provider(Arc::new(
+            uqa_storage_redb::RedbStorage::open(directory.path().join("parameters.redb")).unwrap(),
+        ))
+        .unwrap(),
+    ];
+    for first in engines {
+        let second = first.new_session().unwrap();
+        first.begin().unwrap();
+        first.save_scoring_params("left", r#"{"value":1}"#).unwrap();
+        first.sql("SAVEPOINT parameters", &[]).unwrap();
+        first
+            .save_scoring_params("right", r#"{"value":-1}"#)
+            .unwrap();
+        first.sql("ROLLBACK TO parameters", &[]).unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let worker = thread::spawn(move || {
+            sender
+                .send(second.save_scoring_params("right", r#"{"value":2}"#))
+                .unwrap();
+            second
+        });
+        let completed = receiver.recv_timeout(Duration::from_secs(30));
+        if completed.as_ref().is_ok_and(Result::is_ok) {
+            first.commit().unwrap();
+        } else {
+            first.rollback().unwrap();
+        }
+        let second = worker.join().unwrap();
+        completed
+            .expect("an independent parameter write waited for the private transaction")
+            .unwrap();
+        assert_eq!(
+            second.load_scoring_params("left").unwrap().as_deref(),
+            Some(r#"{"value":1}"#)
+        );
+        assert_eq!(
+            second.load_scoring_params("right").unwrap().as_deref(),
+            Some(r#"{"value":2}"#)
+        );
+    }
 }
 
 #[test]

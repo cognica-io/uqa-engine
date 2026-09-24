@@ -11,7 +11,7 @@ use super::{
     StorageBackendResult, TableSchema, TableState, VectorFieldSchema, VectorIndex,
     VectorIndexOpenMode, VectorIndexSpec,
 };
-use crate::state::TableSecurity;
+use crate::state::BoundTableSecurity;
 
 impl Engine {
     pub(crate) fn is_persistent(&self) -> bool {
@@ -68,7 +68,7 @@ impl Engine {
         table: &TableState,
         columns: &[uqa_sql::ast::ColumnDef],
         constraints: &uqa_sql::ast::TableConstraintSet,
-        security: &crate::state::TableSecurity,
+        security: &crate::state::BoundTableSecurity,
     ) -> StorageBackendResult<()> {
         if table.persistence == uqa_sql::ast::RelationPersistence::Temporary {
             return Ok(());
@@ -89,13 +89,11 @@ impl Engine {
             .collect();
         let columns_json = serde_json::to_string(columns).map_err(StorageBackendError::from)?;
         let constraints_json =
-            serde_json::to_string(constraints).map_err(StorageBackendError::from)?;
+            uqa_execution::schema::indexes::constraint_names::encode(constraints)?;
         catalog.save_table(&TableSchema {
             relation: RelationIdentity::from_legacy_name(name)
                 .map_err(StorageBackendError::Other)?,
-            role_owner: security.role_owner.clone(),
-            acl: security.acl.clone(),
-            column_acls: security.column_acls.clone(),
+            security: security.row().into(),
             object_id: table.object_id(),
             storage_generation: table.storage_generation(),
             analyzer_json,
@@ -131,12 +129,17 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         let raw_name = name.into();
         self.with_implicit_storage_transaction(move |engine| {
+            let owner = engine
+                .relation_creation_context()
+                .bind_owner()
+                .map_err(|error| StorageBackendError::backend("CREATE TABLE owner", error))?;
             engine.create_table_inner(
                 &raw_name,
                 analyzer,
                 fts_fields,
                 uqa_sql::ast::RelationPersistence::Permanent,
                 uqa_sql::ast::OnCommitAction::PreserveRows,
+                &owner,
             )
         })
     }
@@ -148,13 +151,21 @@ impl Engine {
         fts_fields: Vec<FieldName>,
         persistence: uqa_sql::ast::RelationPersistence,
         on_commit: uqa_sql::ast::OnCommitAction,
+        owner: &uqa_execution::catalog::security::roles::locking::RoleBinding,
     ) -> StorageBackendResult<()> {
         if persistence == uqa_sql::ast::RelationPersistence::Temporary {
-            return self.create_table_inner(name, analyzer, fts_fields, persistence, on_commit);
+            return self.create_table_inner(
+                name,
+                analyzer,
+                fts_fields,
+                persistence,
+                on_commit,
+                owner,
+            );
         }
         let name = name.to_string();
         self.with_implicit_storage_transaction(move |engine| {
-            engine.create_table_inner(&name, analyzer, fts_fields, persistence, on_commit)
+            engine.create_table_inner(&name, analyzer, fts_fields, persistence, on_commit, owner)
         })
     }
 
@@ -165,15 +176,14 @@ impl Engine {
         fts_fields: Vec<FieldName>,
         persistence: uqa_sql::ast::RelationPersistence,
         on_commit: uqa_sql::ast::OnCommitAction,
+        owner: &uqa_execution::catalog::security::roles::locking::RoleBinding,
     ) -> StorageBackendResult<()> {
         let name = if persistence == uqa_sql::ast::RelationPersistence::Temporary {
             self.relation_creation_context()
                 .temporary_name(raw_name)
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?
         } else {
-            self.relation_creation_context()
-                .api_name(raw_name)
-                .map_err(StorageBackendError::Other)?
+            self.relation_creation_context().api_name(raw_name)?
         };
         let relation = Self::resolved_relation_identity(&name)?;
         if let Some(kind) = self.relation_kind_at(&name)? {
@@ -207,18 +217,20 @@ impl Engine {
                     Box::new(MemoryInvertedIndex::new(analyzer.clone())),
                 )
             };
+        self.relation_creation_context()
+            .retain_owner(owner)
+            .map_err(|error| StorageBackendError::backend("CREATE TABLE owner", error))?;
+        self.relation_creation_context()
+            .reserve_row_type_name(&name)
+            .map_err(|error| StorageBackendError::backend("CREATE TABLE name", error))?;
         let table = TableState {
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: crate::new_table_object_id()?,
-            security: crate::state::CatalogCell::new(TableSecurity {
-                role_owner: self.current_user_name(),
-                acl: None,
-                column_acls: BTreeMap::new(),
-            }),
+            security: crate::state::CatalogCell::new(BoundTableSecurity::owner(owner.identity())),
             storage_generation: RwLock::new(crate::new_table_storage_generation()?),
             document_store: RwLock::new(docs),
             inverted_index: RwLock::new(inv),
-            vector_indexes: RwLock::new(BTreeMap::new()),
+            vector_indexes: RwLock::new(uqa_storage::vector_index::VectorIndexes::default()),
             fts_fields: crate::state::CatalogCell::new(fts_fields),
             columns: crate::state::CatalogCell::new(Vec::new()),
             columns_declared: crate::state::CatalogCell::new(false),
@@ -288,8 +300,18 @@ impl Engine {
     ) -> StorageBackendResult<bool> {
         let field = field.into();
         self.with_implicit_storage_transaction(|engine| {
-            engine.install_vector_field(table, field, dimensions, spec, true, true)
+            engine.rebuild_vector_field_in_transaction(table, field, dimensions, spec)
         })
+    }
+
+    pub(crate) fn rebuild_vector_field_in_transaction(
+        &self,
+        table: &str,
+        field: impl Into<FieldName>,
+        dimensions: u32,
+        spec: VectorIndexSpec,
+    ) -> StorageBackendResult<bool> {
+        self.install_vector_field(table, field.into(), dimensions, spec, true, true)
     }
 
     pub(crate) fn rebuild_vector_field(
@@ -333,7 +355,7 @@ impl Engine {
             .ok_or_else(|| StorageBackendError::Other(format!("table `{table}` does not exist")))?;
         let field = field.into();
         let idx = self.build_vector_index_for_restore(table, &field, dimensions, spec)?;
-        t.vector_indexes.write().insert(field, idx);
+        t.vector_indexes.write().live_mut()?.insert(field, idx);
         Ok(true)
     }
 
@@ -402,10 +424,15 @@ impl Engine {
             Self::backfill_vector_index(&t, &field, idx.as_mut())?;
         }
         idx.initialize()?;
-        let old = t.vector_indexes.write().insert(field.clone(), idx);
+        let old = t
+            .vector_indexes
+            .write()
+            .live_mut()?
+            .insert(field.clone(), idx);
         if persist_schema && self.is_persistent() {
             if let Err(err) = self.try_save_table_schema(&table_name, &t) {
-                let mut indexes = t.vector_indexes.write();
+                let mut vectors = t.vector_indexes.write();
+                let indexes = vectors.live_mut()?;
                 indexes.remove(&field);
                 if let Some(old) = old {
                     indexes.insert(field, old);
@@ -541,16 +568,28 @@ impl Engine {
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
-        let mut idxs = t.vector_indexes.write();
+        let mut registrations = t.vector_indexes.write();
+        let idxs = registrations.live_mut().map_err(|error| {
+            uqa_execution::storage_errors::storage_error("write vector registrations", &error)
+        })?;
         let Some(idx) = idxs.get_mut(field) else {
             return Err(SQLError::TypeMismatch(format!(
                 "vector field `{table}.{field}` is not registered"
             )));
         };
+        uqa_execution::serializable::vector::observe_write(
+            self,
+            table,
+            &t.columns.snapshot(),
+            field,
+            idx.as_ref(),
+            doc_id,
+            uqa_execution::serializable::vector::VectorChange::Single(&vector),
+        )?;
         idx.as_mut()
             .add(doc_id, vector)
             .map_err(|error| SQLError::Internal(format!("index document vector: {error}")))?;
-        drop(idxs);
+        drop(registrations);
         self.note_table_data_changed();
         self.note_row_changed(table, doc_id)?;
         Ok(true)
@@ -584,16 +623,28 @@ impl Engine {
         else {
             return Err(SQLError::UnknownTable(table.to_string()));
         };
-        let mut idxs = t.vector_indexes.write();
+        let mut registrations = t.vector_indexes.write();
+        let idxs = registrations.live_mut().map_err(|error| {
+            uqa_execution::storage_errors::storage_error("write vector registrations", &error)
+        })?;
         let Some(idx) = idxs.get_mut(field) else {
             return Err(SQLError::TypeMismatch(format!(
                 "vector field `{table}.{field}` is not registered"
             )));
         };
+        uqa_execution::serializable::vector::observe_write(
+            self,
+            table,
+            &t.columns.snapshot(),
+            field,
+            idx.as_ref(),
+            doc_id,
+            uqa_execution::serializable::vector::VectorChange::Tensor(&vectors),
+        )?;
         idx.as_mut()
             .add_many(doc_id, vectors)
             .map_err(|error| SQLError::Internal(format!("index document vectors: {error}")))?;
-        drop(idxs);
+        drop(registrations);
         self.note_table_data_changed();
         self.note_row_changed(table, doc_id)?;
         Ok(true)

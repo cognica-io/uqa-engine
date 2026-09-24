@@ -18,13 +18,6 @@ fn table_not_found(table: &str) -> StorageBackendError {
     StorageBackendError::Other(format!("table `{table}` does not exist"))
 }
 impl TableRemovalContext<'_> {
-    pub fn drop_table(&self, name: &str) -> StorageBackendResult<bool> {
-        let Some(name) = self.resolve_table_ddl_target(name, "DROP TABLE")? else {
-            return Ok(false);
-        };
-        self.try_drop_tables_inner(&[name], false)?;
-        Ok(true)
-    }
     pub fn try_drop_tables(&self, names: &[String], cascade: bool) -> StorageBackendResult<()> {
         self.transactions
             .with_table_removal_write(Box::new(move |context| {
@@ -55,6 +48,11 @@ impl TableRemovalContext<'_> {
         cascade: bool,
     ) -> StorageBackendResult<()> {
         let canonical_names = self.canonical_hierarchy_drop_targets(names, cascade)?;
+        crate::schema::indexes::registry::binding::table_indexes(
+            &self.indexes,
+            &canonical_names,
+            crate::row_locks::RelationLockMode::AccessExclusive,
+        )?;
         crate::routines::removal::drop_relation_routine_dependents(
             &self.routines,
             &canonical_names,

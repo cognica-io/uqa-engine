@@ -30,6 +30,14 @@ fn open_backend(path: &Path, backend: &str) -> Engine {
             uqa_storage_redb::RedbStorage::open(path).unwrap(),
         ))
         .unwrap(),
+        "serialized" => {
+            let connection = uqa_storage_sqlite::ManagedConnection::open(path).unwrap();
+            Engine::from_persistent_backends(
+                Arc::new(uqa_storage_sqlite::Catalog::open(connection.clone()).unwrap()),
+                Arc::new(uqa_storage_sqlite::SQLiteStorageBackend::new(connection)),
+            )
+            .unwrap()
+        }
         _ => unreachable!(),
     }
 }
@@ -148,7 +156,7 @@ fn text_primary_key_inserts_survive_concurrent_preparation_and_reopen() {
 
 #[test]
 fn synthetic_identities_are_reserved_across_providers_and_insert_sources() {
-    for backend in ["sqlite", "compressed", "redb"] {
+    for backend in ["sqlite", "compressed", "redb", "serialized"] {
         for definition in [
             "key TEXT",
             "key TEXT PRIMARY KEY",
@@ -210,7 +218,7 @@ fn multi_row_identity_reservations_survive_snapshot_refresh_and_writer_promotion
 
 #[test]
 fn identity_reservation_rechecks_commits_after_the_statement_snapshot() {
-    for backend in ["sqlite", "redb"] {
+    for backend in ["sqlite", "redb", "serialized"] {
         for isolation in [None, Some("REPEATABLE READ"), Some("SERIALIZABLE")] {
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().join("committed-identity.db");
@@ -254,8 +262,8 @@ fn identity_reservation_rechecks_commits_after_the_statement_snapshot() {
 }
 
 #[test]
-fn failed_and_rolled_back_inserts_release_identity_reservations() {
-    for backend in ["sqlite", "compressed", "redb"] {
+fn failed_and_rolled_back_inserts_preserve_rows_and_durable_identity_progress() {
+    for backend in ["sqlite", "compressed", "redb", "serialized"] {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("rolled-back-identities.db");
         let root = open_backend(&path, backend);
@@ -281,7 +289,8 @@ fn failed_and_rolled_back_inserts_release_identity_reservations() {
         assert!(error.to_string().contains("injected RETURNING failure"));
         assert!(read_rows(&root).is_empty());
         let rolled_back = session.sql("BEGIN; SAVEPOINT before_insert; INSERT INTO items VALUES ('rolled_back') RETURNING _doc_id AS doc_id", &[]).unwrap();
-        assert_eq!(rolled_back.rows[0]["doc_id"], Value::Int(1));
+        let retained_id = if backend == "serialized" { 1 } else { 2 };
+        assert_eq!(rolled_back.rows[0]["doc_id"], Value::Int(retained_id));
         session
             .sql("ROLLBACK TO before_insert; COMMIT", &[])
             .unwrap();
@@ -293,7 +302,8 @@ fn failed_and_rolled_back_inserts_release_identity_reservations() {
                 &[],
             )
             .unwrap();
-        assert_eq!(replacement.rows[0]["doc_id"], Value::Int(1));
+        let retained_id = if backend == "serialized" { 1 } else { 3 };
+        assert_eq!(replacement.rows[0]["doc_id"], Value::Int(retained_id));
         assert_eq!(read_rows(&root), replacement.rows);
         drop(session);
         drop(root);

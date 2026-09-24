@@ -6,6 +6,8 @@
 
 //! In-memory implementation of the backend-neutral key/value traits.
 
+mod view;
+
 use super::{
     BTreeMap, KeyValueBatch, KeyValueBatchOperation, KeyValueStore, Mutex, StorageBackendError,
     StorageBackendResult,
@@ -13,9 +15,10 @@ use super::{
 
 /// In-memory Key/Value store used by trait-level tests and future non-SQL
 /// fixtures.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct MemoryKeyValueStore {
     inner: Mutex<MemoryKeyValueState>,
+    control: crate::read_control::StorageReadControl,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -26,6 +29,7 @@ struct MemoryKeyValueState {
     transaction_read_only: bool,
     transaction_written: bool,
     change_version: u64,
+    read_revision: std::sync::Arc<()>,
 }
 
 #[derive(Debug, Clone)]
@@ -40,7 +44,47 @@ impl MemoryKeyValueStore {
     }
 }
 
+impl Default for MemoryKeyValueStore {
+    fn default() -> Self {
+        Self {
+            inner: Mutex::new(MemoryKeyValueState::default()),
+            control: crate::read_control::StorageReadControl::with_limit(64 << 20),
+        }
+    }
+}
+
 impl KeyValueStore for MemoryKeyValueStore {
+    fn with_read_view(&self, read: &mut super::KeyValueReadScope<'_>) -> StorageBackendResult<()> {
+        self.control.check()?;
+        let state = self.inner.lock();
+        self.control.check()?;
+        read(&view::MemoryRead {
+            state: &state,
+            control: &self.control,
+        })?;
+        self.control.check()
+    }
+
+    fn with_mutation(&self, mutate: &mut super::KeyValueMutation<'_>) -> StorageBackendResult<()> {
+        self.control.check()?;
+        let mut state = self.inner.lock();
+        self.control.check()?;
+        check_write(&state)?;
+        let mut batch = MemoryKeyValueBatch {
+            store: self,
+            operations: Vec::new(),
+        };
+        mutate(
+            &view::MemoryRead {
+                state: &state,
+                control: &self.control,
+            },
+            &mut batch,
+        )?;
+        self.control.check()?;
+        apply_operations(&mut state, batch.operations)
+    }
+
     fn visit_value(
         &self,
         key: &[u8],
@@ -270,6 +314,7 @@ impl KeyValueStore for MemoryKeyValueStore {
             StorageBackendError::Other("no open KeyValue transaction to roll back".into())
         })?;
         inner.map = snapshot;
+        inner.read_revision = std::sync::Arc::new(());
         inner.transaction_read_only = false;
         inner.transaction_written = false;
         inner.savepoints.clear();
@@ -310,6 +355,7 @@ impl KeyValueStore for MemoryKeyValueStore {
             .rposition(|savepoint| savepoint.name == name)
             .ok_or_else(|| StorageBackendError::Other(format!("unknown savepoint `{name}`")))?;
         inner.map = inner.savepoints[position].snapshot.clone();
+        inner.read_revision = std::sync::Arc::new(());
         inner.savepoints.truncate(position + 1);
         Ok(())
     }
@@ -341,46 +387,59 @@ impl KeyValueBatch for MemoryKeyValueBatch<'_> {
 
     fn commit(self: Box<Self>) -> StorageBackendResult<()> {
         let mut inner = self.store.inner.lock();
-        prepare_write(&mut inner)?;
-        for operation in self.operations {
-            match operation {
-                KeyValueBatchOperation::Put(key, value) => {
-                    inner.map.insert(key, value);
-                }
-                KeyValueBatchOperation::Delete(key) => {
-                    inner.map.remove(&key);
-                }
-                KeyValueBatchOperation::DeletePrefix(prefix) => {
-                    let keys = inner
-                        .map
-                        .range(prefix.clone()..)
-                        .take_while(|(key, _)| key.starts_with(&prefix))
-                        .map(|(key, _)| key.clone())
-                        .collect::<Vec<_>>();
-                    for key in keys {
-                        inner.map.remove(&key);
-                    }
-                }
-            }
-        }
-        finish_autocommit_write(&mut inner);
-        Ok(())
+        apply_operations(&mut inner, self.operations)
     }
 }
 
-fn prepare_write(inner: &mut MemoryKeyValueState) -> StorageBackendResult<()> {
-    if !inner.transactions.is_empty() && inner.transaction_read_only {
-        return Err(StorageBackendError::Other(
-            "cannot write in a read-only KeyValue transaction".into(),
-        ));
+fn apply_operations(
+    inner: &mut MemoryKeyValueState,
+    operations: Vec<KeyValueBatchOperation>,
+) -> StorageBackendResult<()> {
+    prepare_write(inner)?;
+    for operation in operations {
+        match operation {
+            KeyValueBatchOperation::Put(key, value) => {
+                inner.map.insert(key, value);
+            }
+            KeyValueBatchOperation::Delete(key) => {
+                inner.map.remove(&key);
+            }
+            KeyValueBatchOperation::DeletePrefix(prefix) => {
+                let keys = inner
+                    .map
+                    .range(prefix.clone()..)
+                    .take_while(|(key, _)| key.starts_with(&prefix))
+                    .map(|(key, _)| key.clone())
+                    .collect::<Vec<_>>();
+                for key in keys {
+                    inner.map.remove(&key);
+                }
+            }
+        }
     }
+    finish_autocommit_write(inner);
+    Ok(())
+}
+
+fn prepare_write(inner: &mut MemoryKeyValueState) -> StorageBackendResult<()> {
+    check_write(inner)?;
     if !inner.transactions.is_empty() {
         inner.transaction_written = true;
     }
     Ok(())
 }
 
+fn check_write(inner: &MemoryKeyValueState) -> StorageBackendResult<()> {
+    if !inner.transactions.is_empty() && inner.transaction_read_only {
+        return Err(StorageBackendError::Other(
+            "cannot write in a read-only KeyValue transaction".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn finish_autocommit_write(inner: &mut MemoryKeyValueState) {
+    inner.read_revision = std::sync::Arc::new(());
     if inner.transactions.is_empty() {
         inner.change_version = inner.change_version.wrapping_add(1);
     }

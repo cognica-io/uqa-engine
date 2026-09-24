@@ -181,7 +181,7 @@ fn generated_schema_and_values_survive_reopen() {
 
 #[test]
 fn v016_generated_dispatch_markers_migrate_and_are_rewritten_on_reopen() {
-    use uqa_storage_sqlite::{Catalog, ManagedConnection};
+    use uqa_storage_sqlite::ManagedConnection;
 
     let directory = TempDir::new().unwrap();
     let database = directory.path().join("legacy-generated-dispatch.sqlite");
@@ -200,7 +200,8 @@ fn v016_generated_dispatch_markers_migrate_and_are_rewritten_on_reopen() {
     }
 
     {
-        let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+        let catalog =
+            crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
         let mut tables = catalog.load_tables().unwrap();
         let table = tables
             .iter_mut()
@@ -229,7 +230,8 @@ fn v016_generated_dispatch_markers_migrate_and_are_rewritten_on_reopen() {
     assert_eq!(selected.rows[0]["derived"], Value::Int(42));
     drop(reopened);
 
-    let catalog = Catalog::open(ManagedConnection::open(&database).unwrap()).unwrap();
+    let catalog =
+        crate::native_storage::catalog(ManagedConnection::open(&database).unwrap()).unwrap();
     let migrated = catalog
         .load_tables()
         .unwrap()

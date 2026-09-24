@@ -78,6 +78,7 @@ pub fn builtin_function_dispatch_name(name: &str) -> String {
                         | "setval"
                         | "current_schema"
                         | "current_schemas"
+                        | "current_setting"
                         | "pg_backend_pid"
                         | "pg_listening_channels"
                         | "pg_notify"
@@ -85,6 +86,9 @@ pub fn builtin_function_dispatch_name(name: &str) -> String {
                         | "pg_get_expr"
                         | "pg_get_partkeydef"
                         | "pg_get_serial_sequence"
+                        | "pg_get_sequence_data"
+                        | "pg_sequence_last_value"
+                        | "pg_sequence_parameters"
                         | "pg_get_triggerdef"
                         | "pg_get_ruledef"
                         | "pg_get_viewdef"
@@ -96,6 +100,7 @@ pub fn builtin_function_dispatch_name(name: &str) -> String {
                         | "has_database_privilege"
                         | "has_schema_privilege"
                         | "has_sequence_privilege"
+                        | "has_function_privilege"
                 )
         }
         _ => false,
@@ -367,5 +372,38 @@ pub fn expect_column_name(expr: &ScalarExpr, label: &str) -> Result<String, SQLE
         other => Err(SQLError::TypeMismatch(format!(
             "{label} must be a column reference, got {other:?}"
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::builtin_function_dispatch_name;
+
+    #[test]
+    fn sequence_introspection_dispatch_preserves_schema_identity() {
+        for name in [
+            "pg_get_sequence_data",
+            "pg_sequence_last_value",
+            "pg_sequence_parameters",
+        ] {
+            assert_eq!(builtin_function_dispatch_name(name), name);
+            assert_eq!(
+                builtin_function_dispatch_name(&format!("pg_catalog.{name}")),
+                name
+            );
+            assert_eq!(
+                builtin_function_dispatch_name(&format!("PG_CATALOG.{}", name.to_uppercase())),
+                name
+            );
+            let user_function = format!("public.{name}");
+            assert_eq!(
+                builtin_function_dispatch_name(&user_function),
+                user_function
+            );
+        }
+        assert_eq!(
+            builtin_function_dispatch_name("pg_catalog.custom_function"),
+            "pg_catalog.custom_function"
+        );
     }
 }

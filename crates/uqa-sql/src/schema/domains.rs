@@ -15,38 +15,14 @@ use crate::{
     RowSchema, SQLError,
 };
 use std::collections::BTreeSet;
-use uqa_core::{RelationIdentity, Value};
-
-/// Namespace and collision reads used before binding a domain declaration.
-pub trait DomainCreationCatalog {
-    fn domain_type_exists(&self, name: &str) -> bool;
-    fn domain_table_exists(&self, name: &str) -> Result<bool, SQLError>;
-}
-
-pub fn bind_domain_creation_target(
-    catalog: &dyn DomainCreationCatalog,
-    definition: &mut CreateDomain,
-) -> Result<RelationIdentity, SQLError> {
-    let identity =
-        RelationIdentity::from_legacy_name(&definition.name).map_err(SQLError::Internal)?;
-    if catalog.domain_type_exists(&definition.name)
-        || catalog.domain_table_exists(&definition.name)?
-    {
-        return Err(domain_error(
-            "42710",
-            format!("type \"{}\" already exists", identity.name),
-        ));
-    }
-    Ok(identity)
-}
+use uqa_core::Value;
 
 pub fn prepare_domain_definition(
     context: &SchemaBindingContext<'_, '_>,
     domains: &dyn DomainCatalog,
     definition: &mut CreateDomain,
+    schema_names: &BTreeSet<String>,
 ) -> Result<(), SQLError> {
-    let identity =
-        RelationIdentity::from_legacy_name(&definition.name).map_err(SQLError::Internal)?;
     definition.base =
         crate::type_resolution::resolve_declared_column_type(context.catalog, &definition.base)?;
     if definition.default.is_none() {
@@ -85,34 +61,8 @@ pub fn prepare_domain_definition(
             )?;
         }
     }
-    let mut names = BTreeSet::new();
-    if let Some(not_null) = &mut definition.not_null {
-        let name = not_null
-            .name
-            .get_or_insert_with(|| format!("{}_not_null", identity.name));
-        names.insert(name.clone());
-    }
+    constraints::assign_names(definition, schema_names)?;
     for check in &mut definition.checks {
-        if let Some(name) = &check.name {
-            if !names.insert(name.clone()) {
-                return Err(domain_error(
-                    "42710",
-                    format!(
-                        "constraint \"{name}\" for domain \"{}\" already exists",
-                        identity.name
-                    ),
-                ));
-            }
-        } else {
-            let base = format!("{}_check", identity.name);
-            let mut name = base.clone();
-            let mut suffix = 1;
-            while !names.insert(name.clone()) {
-                name = format!("{base}{suffix}");
-                suffix += 1;
-            }
-            check.name = Some(name);
-        }
         bind_domain_check(context, &definition.base, &mut check.expression)?;
     }
     definition
@@ -201,5 +151,6 @@ fn bind_domain_check(
     Ok(())
 }
 
+pub mod constraints;
 pub mod dependencies;
 pub mod removal;

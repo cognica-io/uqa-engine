@@ -7,6 +7,7 @@
 //! Establish an independently authenticated database session.
 
 use uqa_sql::ast::RoleAttribute;
+use uqa_sql::catalog::roles::{identity::RoleBinding, session::SessionAuthorization};
 use uqa_sql::SQLError;
 
 use crate::Engine;
@@ -18,7 +19,7 @@ impl Engine {
         let session = self
             .new_session()
             .map_err(|error| SQLError::Internal(format!("open authenticated session: {error}")))?;
-        {
+        let identity = {
             let roles = session.durable.roles.read();
             let role = roles.get(user).ok_or_else(|| SQLError::Routine {
                 sqlstate: "28000".into(),
@@ -30,12 +31,12 @@ impl Engine {
                     message: format!("role \"{user}\" is not permitted to log in"),
                 });
             }
-        }
-        session.ensure_database_privilege(user, DatabaseAclPrivilege::Connect)?;
+            RoleBinding::from_definition(role)?
+        };
+        session.ensure_database_privilege(&identity, DatabaseAclPrivilege::Connect)?;
         {
             let mut state = session.session.state.write();
-            state.session_user = user.to_string();
-            state.current_user = user.to_string();
+            state.authorization = SessionAuthorization::new(identity);
             state.sql_statement_cache.clear();
         }
         Ok(session)

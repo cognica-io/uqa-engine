@@ -26,6 +26,9 @@ use uqa_storage::{document_store::Document, CatalogIndexRow, DocumentStore, Stor
 
 struct TableIndexState(Arc<TableState>);
 impl RetrievalIndexState for TableIndexState {
+    fn columns(&self) -> Arc<Vec<ColumnDef>> {
+        self.0.columns.snapshot()
+    }
     fn inverted_index(&self) -> TextIndexRead<'_> {
         Box::new(self.0.inverted_index.read())
     }
@@ -35,6 +38,13 @@ impl RetrievalIndexState for TableIndexState {
 }
 
 impl RetrievalRelations for Engine {
+    fn serializable_read(
+        &self,
+        table: &str,
+    ) -> Result<Option<uqa_execution::serializable::SerializableRelationRead>, SQLError> {
+        self.serializable_table_read(table)
+    }
+
     fn try_describe_query_table(
         &self,
         table: &str,
@@ -42,13 +52,13 @@ impl RetrievalRelations for Engine {
         self.try_describe_query_table(table)
     }
     fn has_table(&self, table: &str) -> StorageBackendResult<bool> {
-        self.has_table(table)
+        self.has_table_in_execution(table)
     }
     fn column_type(&self, table: &str, field: &str) -> StorageBackendResult<Option<ColumnType>> {
         self.column_type(table, field)
     }
     fn table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError> {
-        self.table_doc_ids(table)
+        self.query_table_doc_ids(table)
     }
     fn get_document_fields(
         &self,
@@ -99,7 +109,7 @@ impl RetrievalIndexes for Engine {
             .map(|state| Box::new(TableIndexState(state)) as Box<dyn RetrievalIndexState>))
     }
     fn catalog_index(&self, name: &str) -> StorageBackendResult<Option<CatalogIndexRow>> {
-        self.catalog_index(name)
+        self.catalog_index_in_execution(name)
     }
     fn resolve_table_name(&self, table: &str) -> StorageBackendResult<Option<String>> {
         self.resolve_table_name(table)
@@ -110,7 +120,7 @@ impl RetrievalIndexes for Engine {
         field: &str,
         predicate: &uqa_core::Predicate,
     ) -> Result<Option<uqa_core::PostingList>, SQLError> {
-        self.value_index_scan(table, field, predicate)
+        self.value_index_query_scan(table, field, predicate)
     }
 }
 
@@ -155,14 +165,19 @@ impl PhysicalVectorRetrieval for Engine {
 }
 
 impl RetrievalGraphs for Engine {
-    fn graph_handle(&self, graph: &str) -> Option<Arc<uqa_graph::GraphStoreHandle>> {
-        self.graph_handle_in_execution(graph)
+    fn graph_handle(
+        &self,
+        graph: &str,
+    ) -> Result<Option<Arc<uqa_graph::GraphStoreHandle>>, SQLError> {
+        self.graph_handle_in_execution(graph).map_err(|error| {
+            uqa_execution::storage_errors::storage_error("retain graph reader", &error)
+        })
     }
 }
 
 impl RetrievalModels for Engine {
     fn load_model(&self, name: &str) -> Result<Option<uqa_ml::DeepModel>, SQLError> {
-        self.load_model(name)
+        self.load_model_in_execution(name)
     }
 }
 

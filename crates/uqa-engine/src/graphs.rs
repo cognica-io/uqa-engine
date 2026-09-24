@@ -9,8 +9,10 @@ use uqa_graph::GraphStore as _;
 
 mod snapshots;
 
-fn graph_store_error(error: impl std::fmt::Display) -> super::StorageBackendError {
-    super::StorageBackendError::Other(error.to_string())
+fn graph_store_error(
+    error: impl std::error::Error + Send + Sync + 'static,
+) -> super::StorageBackendError {
+    super::StorageBackendError::backend("graph", error)
 }
 
 impl Engine {
@@ -68,14 +70,30 @@ impl Engine {
 
     /// Return every named graph registered on this engine in sorted order.
     pub fn list_graphs(&self) -> StorageBackendResult<Vec<String>> {
+        self.with_direct_query_snapshot(true, Self::graph_names_in_execution, graph_store_error)
+    }
+
+    pub(crate) fn graph_names_in_execution(&self) -> StorageBackendResult<Vec<String>> {
         self.synchronize_catalog_registries()?;
+        self.observe_graph_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::NamedGraph,
+            None,
+        )?;
         Ok(self.visible_graph_handles().keys().cloned().collect())
     }
 
     /// Return `true` when a graph with `name` is registered.
     pub fn has_graph(&self, name: &str) -> StorageBackendResult<bool> {
+        self.with_direct_query_snapshot(
+            true,
+            |engine| engine.has_graph_in_execution(name),
+            graph_store_error,
+        )
+    }
+
+    pub(crate) fn has_graph_in_execution(&self, name: &str) -> StorageBackendResult<bool> {
         self.synchronize_catalog_registries()?;
-        Ok(self.graph_handle_in_execution(name).is_some())
+        Ok(self.graph_handle_in_execution(name)?.is_some())
     }
 
     /// Every named graph with its `ag_label` entries, read under one catalog
@@ -84,17 +102,28 @@ impl Engine {
     pub fn graph_label_catalog(
         &self,
     ) -> StorageBackendResult<Vec<(String, Vec<uqa_graph::GraphLabelInfo>)>> {
-        self.synchronize_catalog_registries()?;
-        let graphs = self.visible_graph_handles();
-        graphs
-            .iter()
-            .map(|(name, store)| {
-                store
-                    .graph_labels(name)
-                    .map(|labels| (name.clone(), labels))
-                    .map_err(graph_store_error)
-            })
-            .collect()
+        self.with_graph_read_snapshot(|engine| {
+            engine.observe_graph_definition(
+                uqa_storage::catalog::graph_observations::GraphDefinitionKind::NamedGraph,
+                None,
+            )?;
+            let context = engine.graph_read_context()?;
+            engine
+                .visible_graph_handles()
+                .iter()
+                .map(|(name, store)| {
+                    let labels = match (store.as_ref(), context.as_ref()) {
+                        (uqa_graph::GraphStoreHandle::Persistent(store), Some(context)) => store
+                            .with_serializable_read(context.clone(), &engine.runtime.cancellation)
+                            .graph_labels(name),
+                        _ => store.graph_labels(name),
+                    };
+                    labels
+                        .map(|labels| (name.clone(), labels))
+                        .map_err(graph_store_error)
+                })
+                .collect()
+        })
     }
 
     /// The surviving `ag_label` entries of a named graph in label-id order.
@@ -103,8 +132,19 @@ impl Engine {
         &self,
         graph: &str,
     ) -> StorageBackendResult<Option<Vec<uqa_graph::GraphLabelInfo>>> {
+        self.with_direct_query_snapshot(
+            true,
+            |engine| engine.graph_labels_in_execution(graph),
+            graph_store_error,
+        )
+    }
+
+    pub(crate) fn graph_labels_in_execution(
+        &self,
+        graph: &str,
+    ) -> StorageBackendResult<Option<Vec<uqa_graph::GraphLabelInfo>>> {
         self.synchronize_catalog_registries()?;
-        let Some(store) = self.graph_handle_in_execution(graph) else {
+        let Some(store) = self.graph_handle_in_execution(graph)? else {
             return Ok(None);
         };
         store
@@ -228,7 +268,7 @@ impl Engine {
         if from == to {
             return Ok(true);
         }
-        if self.has_graph(to)? {
+        if self.has_graph_in_execution(to)? {
             return Err(super::StorageBackendError::Other(format!(
                 "graph `{to}` already exists"
             )));
@@ -339,6 +379,10 @@ impl Engine {
         label_sequences: &[Vec<String>],
     ) -> StorageBackendResult<bool> {
         self.synchronize_catalog_registries()?;
+        self.observe_graph_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::NamedGraph,
+            Some(graph),
+        )?;
         let key = format!("{graph}::{name}");
         let idx = {
             let graphs = self.durable.graphs.read();
@@ -355,8 +399,8 @@ impl Engine {
                 ),
                 (None, None) => uqa_graph::PathIndex::build(store.as_ref(), graph, label_sequences),
                 _ => {
-                    return Err(graph_store_error(
-                        "path-index catalog and backend must share a storage session",
+                    return Err(super::StorageBackendError::Other(
+                        "path-index catalog and backend must share a storage session".into(),
                     ))
                 }
             }
@@ -375,6 +419,10 @@ impl Engine {
     fn drop_path_index_inner(&self, name: &str, graph: &str) -> StorageBackendResult<bool> {
         self.synchronize_catalog_registries()?;
         let key = format!("{graph}::{name}");
+        self.observe_graph_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::PathIndex,
+            Some(&key),
+        )?;
         if !self.durable.path_indexes.read().contains_key(&key) {
             return Ok(false);
         }
@@ -395,11 +443,19 @@ impl Engine {
         name: &str,
         graph: &str,
     ) -> StorageBackendResult<Option<uqa_graph::PathIndex>> {
-        self.with_graph_read_snapshot(|engine| Ok(engine.path_index_in_execution(name, graph)))
+        self.with_graph_read_snapshot(|engine| engine.path_index_in_execution(name, graph))
     }
 
-    fn path_index_in_execution(&self, name: &str, graph: &str) -> Option<uqa_graph::PathIndex> {
+    fn path_index_in_execution(
+        &self,
+        name: &str,
+        graph: &str,
+    ) -> StorageBackendResult<Option<uqa_graph::PathIndex>> {
         let key = format!("{graph}::{name}");
+        self.observe_graph_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::PathIndex,
+            Some(&key),
+        )?;
         let index = self.query_catalog_snapshot.as_ref().map_or_else(
             || self.durable.path_indexes.read().get(&key).cloned(),
             |snapshot| snapshot.path_indexes.get(&key).cloned(),
@@ -407,22 +463,29 @@ impl Engine {
         if self.query_catalog_snapshot.is_some()
             || self.session.state.read().graph_overlay.is_some()
         {
-            return index.and_then(|index| {
-                self.graph_handle_in_execution(graph)
-                    .map(|store| index.with_graph_read_view(store))
+            return Ok(match index {
+                Some(index) => self
+                    .graph_handle_in_execution(graph)?
+                    .map(|store| index.with_graph_read_view(store)),
+                None => None,
             });
         }
-        index
+        Ok(index)
     }
 
     /// Sorted list of registered path index keys. Each key has the
     /// shape `<graph>::<name>` so the caller can split as needed.
     pub fn list_path_indexes(&self) -> StorageBackendResult<Vec<String>> {
-        self.synchronize_catalog_registries()?;
-        Ok(self.query_catalog_snapshot.as_ref().map_or_else(
-            || self.durable.path_indexes.read().keys().cloned().collect(),
-            |snapshot| snapshot.path_indexes.keys().cloned().collect(),
-        ))
+        self.with_graph_read_snapshot(|engine| {
+            engine.observe_graph_definition(
+                uqa_storage::catalog::graph_observations::GraphDefinitionKind::PathIndex,
+                None,
+            )?;
+            Ok(engine.query_catalog_snapshot.as_ref().map_or_else(
+                || engine.durable.path_indexes.read().keys().cloned().collect(),
+                |snapshot| snapshot.path_indexes.keys().cloned().collect(),
+            ))
+        })
     }
 
     /// Read-only borrow of a named graph for ad-hoc query construction
@@ -442,7 +505,7 @@ impl Engine {
         f: impl FnOnce(&std::sync::Arc<uqa_graph::GraphStoreHandle>) -> R,
     ) -> StorageBackendResult<Option<R>> {
         self.with_graph_read_snapshot(|engine| {
-            Ok(engine.graph_handle_in_execution(name).as_ref().map(f))
+            Ok(engine.graph_handle_in_execution(name)?.as_ref().map(f))
         })
     }
 
@@ -452,8 +515,45 @@ impl Engine {
     pub(crate) fn graph_handle_in_execution(
         &self,
         name: &str,
-    ) -> Option<std::sync::Arc<uqa_graph::GraphStoreHandle>> {
-        if let Some(snapshot) = &self.query_catalog_snapshot {
+    ) -> StorageBackendResult<Option<std::sync::Arc<uqa_graph::GraphStoreHandle>>> {
+        self.observe_graph_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::NamedGraph,
+            Some(name),
+        )?;
+        self.selected_graph_handle(name)
+    }
+
+    pub(crate) fn graph_statistics_with<R>(
+        &self,
+        name: &str,
+        f: impl FnOnce(&uqa_graph::GraphStoreHandle) -> R,
+    ) -> StorageBackendResult<Option<R>> {
+        self.with_graph_read_snapshot(|engine| {
+            Ok(engine
+                .selected_graph_handle(name)?
+                .map(|store| f(&store.for_statistics())))
+        })
+    }
+
+    fn observe_graph_definition(
+        &self,
+        kind: uqa_storage::catalog::graph_observations::GraphDefinitionKind,
+        name: Option<&str>,
+    ) -> StorageBackendResult<()> {
+        if let Some(context) = self.graph_read_context()? {
+            self.new_graph_store()?
+                .with_serializable_read(context, &self.runtime.cancellation)
+                .observe_definition(kind, name)
+                .map_err(graph_store_error)?;
+        }
+        Ok(())
+    }
+
+    fn selected_graph_handle(
+        &self,
+        name: &str,
+    ) -> StorageBackendResult<Option<std::sync::Arc<uqa_graph::GraphStoreHandle>>> {
+        let store = if let Some(snapshot) = &self.query_catalog_snapshot {
             snapshot.graphs.get(name).cloned()
         } else if let Some(overlay) = &self.session.state.read().graph_overlay {
             overlay.names.contains(name).then(|| {
@@ -463,53 +563,55 @@ impl Engine {
             })
         } else {
             self.durable.graphs.read().get(name).cloned()
+        };
+        let Some(context) = self.graph_read_context()? else {
+            return Ok(store);
+        };
+        Ok(store.map(|store| {
+            std::sync::Arc::new(
+                store
+                    .as_ref()
+                    .clone()
+                    .with_serializable_read(context, &self.runtime.cancellation),
+            )
+        }))
+    }
+
+    pub(super) fn bind_graph_reader(
+        &self,
+        store: uqa_graph::GraphStoreHandle,
+    ) -> StorageBackendResult<uqa_graph::GraphStoreHandle> {
+        match self.graph_read_context()? {
+            None => Ok(store),
+            Some(context) => Ok(store.with_serializable_read(context, &self.runtime.cancellation)),
         }
+    }
+
+    pub(crate) fn graph_read_context(
+        &self,
+    ) -> StorageBackendResult<Option<uqa_storage::mvcc::SerializableReadContext>> {
+        Ok(self
+            .storage
+            .backend
+            .as_ref()
+            .and_then(|backend| backend.serializable_session())
+            .map(uqa_storage::mvcc::SerializableSession::serializable_read_context)
+            .transpose()?
+            .flatten())
     }
 
     pub(crate) fn with_graph_read_snapshot<R>(
         &self,
         f: impl FnOnce(&Self) -> StorageBackendResult<R>,
     ) -> StorageBackendResult<R> {
-        let _statement = self.runtime.statement_gate.lock();
-        if self.transaction_depth() != 0 {
-            self.ensure_transaction_usable()
-                .map_err(graph_store_error)?;
-            self.prepare_explicit_statement_snapshot(true)
-                .map_err(graph_store_error)?;
-        }
-        let owned = self
-            .storage
-            .backend
-            .as_ref()
-            .filter(|backend| !backend.in_transaction())
-            .cloned();
-        if let Some(backend) = &owned {
-            backend.begin_read_transaction()?;
-        }
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            if owned.is_some() {
-                self.refresh_pinned_transaction_snapshot()?;
-            } else {
-                self.synchronize_catalog_registries()?;
-            }
-            f(self)
-        }));
-        let cleanup = owned
-            .as_ref()
-            .map_or(Ok(()), |backend| backend.rollback_transaction());
-        match result {
-            Ok(Ok(value)) => {
-                cleanup?;
-                Ok(value)
-            }
-            Ok(Err(error)) => match cleanup {
-                Ok(()) => Err(error),
-                Err(cleanup) => Err(graph_store_error(format!(
-                    "graph read failed: {error}; snapshot cleanup failed: {cleanup}"
-                ))),
+        self.with_direct_query_snapshot(
+            true,
+            |engine| {
+                engine.synchronize_catalog_registries()?;
+                f(engine)
             },
-            Err(panic) => std::panic::resume_unwind(panic),
-        }
+            graph_store_error,
+        )
     }
 
     /// Mutable borrow of a named graph for vertex / edge insertion.
@@ -573,32 +675,33 @@ impl Engine {
     ) -> Result<(Vec<String>, Vec<uqa_graph::cypher::ResultRow>), uqa_graph::cypher::CypherError>
     {
         use uqa_graph::cypher::{CypherError, CypherExecutor};
-        let _statement = self.runtime.statement_gate.lock();
-        let query = uqa_graph::cypher::parse_cypher(query)?;
-        if self.transaction_depth() != 0 {
-            self.ensure_transaction_usable()
-                .map_err(|error| CypherError::Storage(error.to_string()))?;
-            self.prepare_explicit_statement_snapshot(true)
-                .map_err(|error| CypherError::Storage(error.to_string()))?;
-        }
-        let existed = self
-            .has_graph(graph)
-            .map_err(|error| CypherError::Storage(error.to_string()))?;
-        if query.mutates_graph() || !existed {
-            self.with_implicit_mapped_transaction(
-                |engine| engine.run_cypher_inner(graph, &query, params),
-                CypherError::Storage,
-            )
-        } else {
-            self.graph_with(graph, |store| {
-                uqa_graph::cypher::validate_default_label_relations(store, graph, &query)?;
-                CypherExecutor::new(store, graph)
+        // Even a read query can create its named graph on first use.
+        self.with_direct_query_snapshot(
+            false,
+            |engine| {
+                let query = uqa_graph::cypher::parse_cypher(query)?;
+                let existed = engine
+                    .has_graph_in_execution(graph)
+                    .map_err(CypherError::from)?;
+                if query.mutates_graph() || !existed {
+                    return engine.with_implicit_mapped_transaction(
+                        |engine| engine.run_cypher_inner(graph, &query, params),
+                        |error| CypherError::from(graph_store_error(error)),
+                    );
+                }
+                let store = engine
+                    .graph_handle_in_execution(graph)
+                    .map_err(CypherError::from)?
+                    .ok_or_else(|| {
+                        CypherError::Storage(format!("graph {graph:?} does not exist"))
+                    })?;
+                uqa_graph::cypher::validate_default_label_relations(store.as_ref(), graph, &query)?;
+                CypherExecutor::new(store.as_ref(), graph)
                     .with_params(params)
                     .execute(&query)
-            })
-            .map_err(|error| CypherError::Storage(error.to_string()))?
-            .ok_or_else(|| CypherError::Storage(format!("graph {graph:?} does not exist")))?
-        }
+            },
+            |error| CypherError::from(graph_store_error(error)),
+        )
     }
 
     fn run_cypher_inner(
@@ -610,10 +713,10 @@ impl Engine {
     {
         use uqa_graph::cypher::{CypherError, CypherWriter};
         self.synchronize_catalog_registries()
-            .map_err(|error| CypherError::Storage(error.to_string()))?;
+            .map_err(CypherError::from)?;
         let mut candidate = self
             .graph_write_candidate(graph, true)
-            .map_err(|error| CypherError::Storage(error.to_string()))?
+            .map_err(CypherError::from)?
             .expect("create candidate");
         let result = candidate.transaction_mapped(
             |store| {
@@ -625,14 +728,14 @@ impl Engine {
                     .with_params(params)
                     .execute(query)?;
                 self.invalidate_graph_path_indexes(graph)
-                    .map_err(|error| CypherError::Storage(error.to_string()))?;
+                    .map_err(CypherError::from)?;
                 Ok(result)
             },
             CypherError::from,
         )?;
         let published = self
             .publish_graph_candidate(candidate)
-            .map_err(|error| CypherError::Storage(error.to_string()))?;
+            .map_err(CypherError::from)?;
         self.durable
             .graphs
             .write()

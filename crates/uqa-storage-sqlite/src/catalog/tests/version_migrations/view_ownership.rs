@@ -11,9 +11,13 @@ fn save_view(catalog: &Catalog, name: &str, owner: &str) {
     catalog
         .save_view(&ViewRow {
             relation: RelationIdentity::new("public", name),
-            role_owner: owner.into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::new(),
+            security: uqa_storage::RelationSecurityRow::Legacy(
+                uqa_core::catalog_acl::LegacyRelationSecurity {
+                    role_owner: owner.into(),
+                    acl: None,
+                    column_acls: std::collections::BTreeMap::new(),
+                },
+            ),
             definition_json: "{}".into(),
         })
         .unwrap();
@@ -53,7 +57,7 @@ fn migration_38_adds_bootstrap_ownership_to_legacy_views() {
 
     let upgraded = Catalog::open(connection).unwrap();
     let view = upgraded.load_views().unwrap().remove(0);
-    assert_eq!(view.role_owner, "uqa");
+    assert_eq!(legacy_security(&view.security).role_owner, "uqa");
     assert_eq!(view.definition_json, "{}");
 }
 
@@ -74,7 +78,10 @@ fn migration_38_preserves_view_ownership_when_the_column_precedes_its_marker() {
         .unwrap();
 
     let upgraded = Catalog::open(connection).unwrap();
-    assert_eq!(upgraded.load_views().unwrap()[0].role_owner, "early_owner");
+    assert_eq!(
+        legacy_security(&upgraded.load_views().unwrap()[0].security).role_owner,
+        "early_owner"
+    );
 }
 
 #[test]
@@ -97,9 +104,9 @@ fn migration_39_adds_empty_acls_to_legacy_views() {
 
     let upgraded = Catalog::open(connection).unwrap();
     let view = upgraded.load_views().unwrap().remove(0);
-    assert_eq!(view.role_owner, "owner");
-    assert_eq!(view.acl, None);
-    assert!(view.column_acls.is_empty());
+    assert_eq!(legacy_security(&view.security).role_owner, "owner");
+    assert_eq!(legacy_security(&view.security).acl, None);
+    assert!(legacy_security(&view.security).column_acls.is_empty());
 }
 
 #[test]
@@ -111,9 +118,13 @@ fn migration_39_preserves_view_acls_when_columns_precede_their_marker() {
     current
         .save_view(&ViewRow {
             relation: RelationIdentity::new("public", "early_view_acl"),
-            role_owner: "owner".into(),
-            acl: Some(acl.clone()),
-            column_acls: column_acls.clone(),
+            security: uqa_storage::RelationSecurityRow::Legacy(
+                uqa_core::catalog_acl::LegacyRelationSecurity {
+                    role_owner: "owner".into(),
+                    acl: Some(acl.clone()),
+                    column_acls: column_acls.clone(),
+                },
+            ),
             definition_json: "{}".into(),
         })
         .unwrap();
@@ -130,6 +141,6 @@ fn migration_39_preserves_view_acls_when_columns_precede_their_marker() {
 
     let upgraded = Catalog::open(connection).unwrap();
     let view = upgraded.load_views().unwrap().remove(0);
-    assert_eq!(view.acl, Some(acl));
-    assert_eq!(view.column_acls, column_acls);
+    assert_eq!(legacy_security(&view.security).acl, Some(acl));
+    assert_eq!(legacy_security(&view.security).column_acls, column_acls);
 }

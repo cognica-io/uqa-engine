@@ -131,7 +131,9 @@ impl Engine {
             *table.document_store.write() = document_store;
             *table.storage_generation.write() = table_snapshot.storage_generation;
             *table.inverted_index.write() = inverted_index;
-            *table.vector_indexes.write() = vector_indexes;
+            *table.vector_indexes.write().live_mut().map_err(|error| {
+                Self::storage_tx_error("ROLLBACK vector registrations", &error)
+            })? = vector_indexes;
             table
                 .fts_fields
                 .write()
@@ -208,5 +210,14 @@ impl Engine {
             .portals
             .lock()
             .retain(|name, _| snapshot.portal_names.contains(name));
+    }
+
+    /// Registry restoration must resolve graph names against the same boundary as the already rolled-back provider, before the remaining session state is restored.
+    pub(super) fn restore_graph_transaction_overlay(&self, snapshot: &SessionStateSnapshot) {
+        self.session
+            .state
+            .write()
+            .graph_overlay
+            .clone_from(&snapshot.graph_overlay);
     }
 }

@@ -13,19 +13,15 @@ pub fn validate_default_label_relations(
     query: &super::CypherQuery,
 ) -> Result<(), super::CypherError> {
     use super::CypherError;
-    let labels = store
-        .graph_labels(graph)
-        .map_err(|error| CypherError::Storage(error.to_string()))?;
     let (requires_vertex, requires_edge) = label_requirements(query);
-    for (required, kind) in [
-        (requires_vertex, crate::LabelKind::Vertex),
-        (requires_edge, crate::LabelKind::Edge),
+    let present = store
+        .default_label_relations(graph, [requires_vertex, requires_edge])
+        .map_err(CypherError::from)?;
+    for (required, present, kind) in [
+        (requires_vertex, present[0], crate::LabelKind::Vertex),
+        (requires_edge, present[1], crate::LabelKind::Edge),
     ] {
-        if required
-            && !labels
-                .iter()
-                .any(|label| label.id == kind.default_label_id())
-        {
+        if required && !present {
             return Err(CypherError::MissingLabelRelation(format!(
                 "{graph}.{}",
                 kind.default_label_name()

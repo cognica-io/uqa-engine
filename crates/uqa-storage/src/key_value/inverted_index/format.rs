@@ -11,9 +11,40 @@ use super::super::codec::{
     posting_cluster_score_key_prefix, posting_document_key_prefix, posting_key_prefix,
     reverse_posting_key_prefix,
 };
-use super::{keys, other_error, KeyValueBatch, KeyValueInvertedIndex, StorageBackendResult};
+use super::{keys, other_error, KeyValueBatch, OccurrenceRead, StorageBackendResult};
 
-fn legacy_prefixes(table: &str) -> StorageBackendResult<Vec<Vec<u8>>> {
+#[cfg(test)]
+mod tests;
+
+/// The namespace list is fixed; only encoded table bytes allocate, and each prefix uses the reader's canonical controlled encoder.
+pub(super) fn retained_prefixes(
+    table: &str,
+    control: &crate::read_control::StorageReadControl,
+) -> StorageBackendResult<[uqa_core::memory::BudgetedVec<u8>; 8]> {
+    use crate::key_value::{
+        TAG_DOC_LENGTH, TAG_FIELD_STATS, TAG_OCCURRENCE_INDEX, TAG_POSTING,
+        TAG_POSTING_CLUSTER_POSITIONS, TAG_POSTING_CLUSTER_SCORE, TAG_POSTING_DOCUMENT,
+        TAG_REVERSE_POSTING,
+    };
+    let tags = [
+        TAG_POSTING,
+        TAG_POSTING_CLUSTER_SCORE,
+        TAG_POSTING_CLUSTER_POSITIONS,
+        TAG_POSTING_DOCUMENT,
+        TAG_DOC_LENGTH,
+        TAG_FIELD_STATS,
+        TAG_REVERSE_POSTING,
+        TAG_OCCURRENCE_INDEX,
+    ];
+    let mut prefixes =
+        std::array::from_fn(|_| uqa_core::memory::BudgetedVec::new(control.memory()));
+    for (prefix, tag) in prefixes.iter_mut().zip(tags) {
+        *prefix = keys::encoding::controlled(table, tag, None, &[], control)?;
+    }
+    Ok(prefixes)
+}
+
+pub(super) fn legacy_prefixes(table: &str) -> StorageBackendResult<Vec<Vec<u8>>> {
     Ok(vec![
         posting_key_prefix(table)?,
         posting_cluster_score_key_prefix(table)?,
@@ -25,27 +56,32 @@ fn legacy_prefixes(table: &str) -> StorageBackendResult<Vec<Vec<u8>>> {
     ])
 }
 
-impl KeyValueInvertedIndex {
+impl OccurrenceRead<'_> {
     pub(super) fn needs_source_rebuild(&self) -> StorageBackendResult<bool> {
         let format = self
             .store
-            .get(&keys::kind_prefix(&self.table, keys::FORMAT)?)?;
+            .get(&keys::kind_prefix(self.table, keys::FORMAT)?)?;
+        if format.as_deref() == Some(b"source-rebuild") {
+            return Ok(true);
+        }
         if format
             .as_deref()
             .is_some_and(|format| format != keys::FORMAT_NAME)
         {
             return Err(other_error("unsupported occurrence index format"));
         }
-        for prefix in legacy_prefixes(&self.table)? {
-            if !self.store.scan_prefix_after(&prefix, None, 1)?.is_empty() {
+        for prefix in legacy_prefixes(self.table)? {
+            if self
+                .store
+                .contains_prefix_budgeted(&prefix, self.store.control())?
+            {
                 return Ok(true);
             }
         }
         if format.is_none()
-            && !self
+            && self
                 .store
-                .scan_prefix_after(&keys::table_prefix(&self.table)?, None, 1)?
-                .is_empty()
+                .contains_prefix_budgeted(&keys::table_prefix(self.table)?, self.store.control())?
         {
             return Err(other_error("occurrence index format marker is missing"));
         }
@@ -65,12 +101,13 @@ impl KeyValueInvertedIndex {
         &self,
         batch: &mut dyn KeyValueBatch,
     ) -> StorageBackendResult<()> {
-        batch.delete_prefix(&keys::table_prefix(&self.table)?)?;
-        for prefix in legacy_prefixes(&self.table)? {
+        batch.reset_occurrences(self.table)?;
+        batch.delete_prefix(&keys::table_prefix(self.table)?)?;
+        for prefix in legacy_prefixes(self.table)? {
             batch.delete_prefix(&prefix)?;
         }
         batch.put(
-            &keys::kind_prefix(&self.table, keys::FORMAT)?,
+            &keys::kind_prefix(self.table, keys::FORMAT)?,
             keys::FORMAT_NAME,
         )
     }

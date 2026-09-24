@@ -72,7 +72,7 @@ impl PlannerStatisticsCatalog for Engine {
             .map_err(|error| SQLError::Internal(error.to_string()))
     }
     fn catalog_indexes(&self) -> Result<Vec<CatalogIndexRow>, SQLError> {
-        self.list_catalog_indexes()
+        self.catalog_indexes_in_execution()
             .map_err(|error| SQLError::Internal(error.to_string()))
     }
 }

@@ -14,6 +14,7 @@ use super::{
 };
 use crate::schema::{
     events::EventCatalogContext,
+    namespaces::relations::RelationCreationContext,
     publication::dependencies::{CatalogPublicationChanges, SchemaDependencyPublicationContext},
 };
 use uqa_core::RelationIdentity;
@@ -37,6 +38,7 @@ pub trait SequenceRenameCatalog {
 }
 pub struct SequenceLifecycleContext<'a> {
     pub analysis: &'a dyn analysis::SequenceLifecycleCatalog,
+    pub creation: RelationCreationContext<'a>,
     pub schemas: SchemaDependencyPublicationContext<'a>,
     pub views: ViewSequenceRewriteContext<'a>,
     pub state: &'a dyn SequenceStateRename,
@@ -53,16 +55,25 @@ pub fn alter_sequence_lifecycle(
     alter: &AlterSequence,
 ) -> Result<(), SQLError> {
     analysis::validate_sequence_lifecycle_shape(alter)?;
-    let Some(target) = analysis::sequence_lifecycle_target(
+    let mut target =
+        analysis::sequence_lifecycle_target(context.analysis, source, &alter.lifecycle)?;
+    if matches!(
+        alter.lifecycle,
+        uqa_sql::ast::SequenceLifecycle::SetSchema { .. }
+    ) {
+        target = context.creation.relocation_target(&target)?;
+    }
+    if !analysis::validate_sequence_lifecycle_target(
         context.analysis,
         source,
+        &target,
         persistence,
         &alter.lifecycle,
-    )?
-    else {
+    )? {
         return Ok(());
-    };
+    }
     let target_name = target.qualified_name();
+    context.creation.reserve_name(&target_name)?;
     rewrite_sequence_schema_dependencies(&context.schemas, source, &target_name).map_err(
         |error| {
             SQLError::Internal(format!(

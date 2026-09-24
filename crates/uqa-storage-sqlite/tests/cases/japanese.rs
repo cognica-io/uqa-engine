@@ -16,6 +16,32 @@ use uqa_storage_sqlite::{Catalog, ManagedConnection, SQLiteInvertedIndex};
 mod contract;
 
 #[test]
+fn japanese_native_occurrences_keep_graphs_and_scorer_bounds_through_rollback() {
+    for case in contract::cases() {
+        let conn = ManagedConnection::open_in_memory().unwrap();
+        Catalog::open(conn.clone()).unwrap();
+        conn.bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
+            .unwrap();
+        let mut index = SQLiteInvertedIndex::new(conn.clone(), "docs", whitespace_analyzer());
+        contract::populate(&mut index, &case);
+        assert!(rebuild_text_block_max(
+            &mut index,
+            "body",
+            &ScoringMode::BM25(BM25Params::default())
+        )
+        .unwrap());
+        let retained = index.snapshot().unwrap();
+        conn.begin_transaction().unwrap();
+        index.clear().unwrap();
+        conn.rollback_transaction().unwrap();
+        for snapshot in [&index as &dyn InvertedIndex, retained.as_ref()] {
+            contract::verify(snapshot, &case);
+            verify_scores(snapshot, &case);
+        }
+    }
+}
+
+#[test]
 fn japanese_occurrences_restore_from_sqlite_backup_with_original_database_removed() {
     for case in contract::cases() {
         let source = tempfile::tempdir().unwrap();

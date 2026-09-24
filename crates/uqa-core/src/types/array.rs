@@ -8,6 +8,11 @@
 
 use super::Value;
 
+mod elements;
+mod production;
+mod shape;
+pub use elements::{ArrayTraversalError, BudgetedArrayElements, ControlledArrayElements};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArrayValue {
     storage: Box<ArrayStorage>,
@@ -22,35 +27,78 @@ struct ArrayStorage {
 
 impl ArrayValue {
     pub fn try_new(elements: Vec<Value>) -> Option<Self> {
-        let elements = normalize_nested_arrays(elements);
-        let dimensions = normalized_shape(&elements)?;
-        let lower_bounds = vec![1; dimensions.len()];
-        Some(Self {
-            storage: Box::new(ArrayStorage {
-                elements,
-                dimensions,
-                lower_bounds,
-            }),
-        })
+        let control = crate::memory::ProductionControl::uncontrolled();
+        Self::try_new_with_control(control.finish(elements, None).ok()?, &control)
+            .ok()??
+            .into_uncontrolled()
+            .ok()
     }
 
     pub fn with_lower_bounds(elements: Vec<Value>, lower_bounds: Vec<i32>) -> Option<Self> {
-        let elements = normalize_nested_arrays(elements);
-        let dimensions = normalized_shape(&elements)?;
-        if dimensions.len() != lower_bounds.len() {
-            return None;
-        }
-        Some(Self {
+        let control = crate::memory::ProductionControl::uncontrolled();
+        Self::with_lower_bounds_with_control(
+            control.finish(elements, None).ok()?,
+            control.finish(lower_bounds, None).ok()?,
+            &control,
+        )
+        .ok()??
+        .into_uncontrolled()
+        .ok()
+    }
+
+    /// Validate borrowed input before a tagged decoder transfers its values. Rejected tags must preserve the complete original map.
+    pub(super) fn decoded_shape(elements: &[Value]) -> Option<Vec<usize>> {
+        normalized_shape(elements)
+    }
+
+    pub(super) fn decoded_shape_budgeted(
+        elements: &[Value],
+        memory: &crate::memory::MemoryBudget,
+        cancellation: &crate::CancellationToken,
+    ) -> Result<Option<crate::memory::Budgeted<Vec<usize>>>, super::ValueRetentionError> {
+        shape::budgeted(elements, memory, cancellation)
+    }
+
+    /// Reserve this exact boxed layout before consuming validated decoded buffers.
+    pub(super) const fn decoded_header_bytes() -> usize {
+        size_of::<ArrayStorage>()
+    }
+
+    /// Consume the values and dimensions validated by this owner, preserving their existing buffers.
+    pub(super) fn from_decoded_parts(
+        mut elements: Vec<Value>,
+        dimensions: Vec<usize>,
+        lower_bounds: Vec<i32>,
+    ) -> Self {
+        debug_assert_eq!(dimensions.len(), lower_bounds.len());
+        normalize_nested_arrays(&mut elements);
+        Self {
             storage: Box::new(ArrayStorage {
                 elements,
                 dimensions,
                 lower_bounds,
             }),
-        })
+        }
     }
 
     pub fn elements(&self) -> &[Value] {
         &self.storage.elements
+    }
+
+    /// Preserve the validated shape and already normalized elements of an existing array. The copying owner reserves these buffers and the boxed header before transferring them here.
+    pub(super) fn from_copied_parts(
+        elements: Vec<Value>,
+        dimensions: Vec<usize>,
+        lower_bounds: Vec<i32>,
+    ) -> Self {
+        debug_assert_eq!(dimensions.len(), lower_bounds.len());
+        Self {
+            storage: Box::new(ArrayStorage {
+                elements,
+                dimensions,
+                lower_bounds,
+            }),
+        }
     }
 
     pub fn into_elements(self) -> Vec<Value> {
@@ -81,56 +129,37 @@ impl ArrayValue {
 
     /// Heap bytes used by the boxed array headers. Element buffers are accounted for by callers together with their recursively retained values.
     pub fn retained_header_bytes(&self) -> usize {
-        std::mem::size_of::<ArrayStorage>()
+        Self::decoded_header_bytes()
+    }
+
+    pub(super) fn retained_buffer_bytes(&self) -> Result<usize, crate::memory::MemoryError> {
+        let buffers = [
+            (self.storage.elements.capacity(), size_of::<Value>()),
+            (self.storage.dimensions.capacity(), size_of::<usize>()),
+            (self.storage.lower_bounds.capacity(), size_of::<i32>()),
+        ];
+        buffers
+            .into_iter()
+            .try_fold(self.retained_header_bytes(), |bytes, (capacity, width)| {
+                capacity
+                    .checked_mul(width)
+                    .and_then(|buffer| bytes.checked_add(buffer))
+                    .ok_or(crate::memory::MemoryError::SizeOverflow)
+            })
     }
 }
 
-fn normalize_nested_arrays(elements: Vec<Value>) -> Vec<Value> {
-    elements
-        .into_iter()
-        .map(|value| match value {
-            Value::Array(array) => Value::List(normalize_nested_arrays(array.into_elements())),
-            Value::List(values) => Value::List(normalize_nested_arrays(values)),
-            other => other,
-        })
-        .collect()
+fn normalize_nested_arrays(elements: &mut [Value]) {
+    production::normalize(
+        elements,
+        &mut None,
+        &crate::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary array normalization");
 }
 
 fn normalized_shape(elements: &[Value]) -> Option<Vec<usize>> {
-    let shape = array_shape(elements)?;
-    if shape.first() == Some(&0) {
-        Some(Vec::new())
-    } else {
-        Some(shape)
-    }
-}
-
-fn array_shape(elements: &[Value]) -> Option<Vec<usize>> {
-    let mut dimensions = vec![elements.len()];
-    let mut nested_shape: Option<Vec<usize>> = None;
-    let mut has_scalar = false;
-    for element in elements {
-        if let Value::List(nested) = element {
-            let shape = array_shape(nested)?;
-            if has_scalar
-                || nested_shape
-                    .as_ref()
-                    .is_some_and(|expected| *expected != shape)
-            {
-                return None;
-            }
-            nested_shape = Some(shape);
-        } else {
-            if nested_shape.is_some() {
-                return None;
-            }
-            has_scalar = true;
-        }
-    }
-    if let Some(shape) = nested_shape {
-        dimensions.extend(shape);
-    }
-    Some(dimensions)
+    shape::unbounded(elements)
 }
 
 impl serde::Serialize for ArrayValue {

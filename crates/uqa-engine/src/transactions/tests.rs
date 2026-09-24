@@ -9,6 +9,43 @@ use std::time::Duration;
 
 use super::*;
 
+mod graph_diagnostics;
+mod mutation_failures;
+
+#[test]
+fn serializable_dependency_errors_preserve_uncertain_commit_precedence() {
+    use uqa_storage::mvcc::{
+        CommitFailure, DatabaseId, SerializableTransactionId, StorageTransactionId, VersionError,
+    };
+
+    let database = DatabaseId::from_bytes([19; 16]);
+    let participant = SerializableTransactionId::new(database, [20; 16], 1).unwrap();
+    let transaction = StorageTransactionId::new(database, 7).unwrap();
+    for uncertain in [false, true] {
+        let error = VersionError::SerializationConflict {
+            transaction: participant,
+        }
+        .into_storage_error();
+        let error = if uncertain {
+            StorageBackendError::backend(
+                "receipt",
+                CommitFailure::Indeterminate {
+                    transaction,
+                    source: error,
+                },
+            )
+        } else {
+            error
+        };
+        let error = StorageBackendError::backend("provider", error);
+        let actual = Engine::storage_tx_error("commit", &error);
+        assert_eq!(
+            actual.sqlstate(),
+            Some(if uncertain { "08007" } else { "40001" })
+        );
+    }
+}
+
 fn integer_column(result: &SQLResult, name: &str) -> Vec<i64> {
     result
         .rows
@@ -173,7 +210,7 @@ fn rollback_failure_after_callback_panic_is_returned_instead_of_panicking_again(
 }
 
 #[test]
-fn waiting_writer_refreshes_when_sqlite_commit_precedes_epoch_publication() {
+fn catalog_lookup_observes_durable_commits_before_epoch_publication() {
     for create_sql in [
         "CREATE TABLE fresh.items (id INTEGER)",
         "CREATE TABLE fresh.items AS SELECT 1 AS id",
@@ -187,21 +224,11 @@ fn waiting_writer_refreshes_when_sqlite_commit_precedes_epoch_publication() {
         assert!(!waiter.has_schema("fresh").unwrap());
         writer.sql("CREATE SCHEMA fresh", &[]).unwrap();
 
-        let (started_tx, started_rx) = mpsc::channel();
-        let (done_tx, done_rx) = mpsc::channel();
-        let waiting_thread = std::thread::spawn(move || {
-            started_tx.send(()).unwrap();
-            let result = waiter.sql(create_sql, &[]);
-            done_tx.send(result).unwrap();
-        });
-        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        match done_rx.recv_timeout(Duration::from_millis(200)) {
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(error) => panic!("waiting writer result channel failed early: {error}"),
-            Ok(result) => panic!("waiting writer completed before writer release: {result:?}"),
-        }
+        // An uncommitted schema is invisible and does not reserve the entire database for its writer.
+        let error = waiter.sql(create_sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("3F000"));
 
-        // End the physical transaction without publishing the shared epoch. This deterministically models the interval after SQLite COMMIT has released its writer lock but before Engine::commit publishes it. The logical writer registration goes with it, exactly as the real commit path releases the session's locks before publication.
+        // Publish durable records without the Engine epoch to expose the interval between storage commit and in-process cache notification.
         writer
             .storage
             .backend
@@ -211,11 +238,7 @@ fn waiting_writer_refreshes_when_sqlite_commit_precedes_epoch_publication() {
             .unwrap();
         writer.row_locks.release_session(writer.session_id);
 
-        done_rx
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap()
-            .unwrap();
-        waiting_thread.join().unwrap();
+        waiter.sql(create_sql, &[]).unwrap();
         writer.session.transactions.lock().clear();
         assert!(root
             .new_session()
@@ -247,7 +270,7 @@ fn unchanged_persistent_statements_keep_their_loaded_catalog_snapshot() {
 }
 
 #[test]
-fn compressed_catalog_writer_fence_releases_reader_before_waiting() {
+fn compressed_catalog_refresh_does_not_wait_for_a_private_writer() {
     let directory = tempfile::tempdir().unwrap();
     let writer = Engine::open_compressed(
         &directory.path().join("catalog-fence.db"),
@@ -273,23 +296,31 @@ fn compressed_catalog_writer_fence_releases_reader_before_waiting() {
         .unwrap();
     waiter.begin().unwrap();
     waiter.sql("SAVEPOINT before_fence", &[]).unwrap();
-    let waiter_id = waiter.session_id;
+    let cancellation = waiter.cancellation_token();
+    let (done, completed) = mpsc::channel();
     let waiting_thread = std::thread::spawn(move || {
         let result = waiter.fence_catalog_writer_and_refresh_snapshot();
-        (waiter, result)
+        done.send(result).unwrap();
+        waiter
     });
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
-    while !writer.row_locks.waiting_for_backend_writer(waiter_id) {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "catalog fence did not wait"
-        );
-        std::thread::yield_now();
+    let result = completed.recv_timeout(Duration::from_secs(30));
+    if result.is_err() {
+        cancellation.cancel();
+        writer.rollback().unwrap();
     }
-    let committed = writer.sql("COMMIT", &[]);
-    let (waiter, fenced) = waiting_thread.join().unwrap();
-    committed.unwrap();
-    fenced.unwrap();
+    let waiter = waiting_thread.join().unwrap();
+    result
+        .expect("catalog refresh waited for a private writer")
+        .unwrap();
+    assert_eq!(writer.transaction_depth(), 1);
+    assert_eq!(
+        integer_column(
+            &waiter.sql("SELECT id FROM items ORDER BY id", &[]).unwrap(),
+            "id"
+        ),
+        [1]
+    );
+    writer.sql("COMMIT", &[]).unwrap();
     waiter.sql("ROLLBACK TO before_fence", &[]).unwrap();
     assert_eq!(
         integer_column(
@@ -394,27 +425,29 @@ fn pinned_reader_defers_sibling_catalog_epochs_until_transaction_end() {
     let reader = root.new_session().unwrap();
     let writer = root.new_session().unwrap();
 
-    {
-        let characteristics = reader.default_transaction_characteristics();
-        let mut stack = reader.session.transactions.lock();
-        reader
-            .begin_transaction_frame(
-                &mut stack,
-                true,
-                true,
-                TransactionFrameKind::ExplicitBlock,
-                characteristics,
-            )
-            .unwrap();
-    }
+    let backend = reader.storage.backend.as_ref().unwrap();
+    backend.begin_read_transaction().unwrap();
+    assert_eq!(reader.transaction_depth(), 0);
     assert!(!reader.has_schema("later").unwrap());
-    writer.sql("CREATE SCHEMA later", &[]).unwrap();
+    assert!(!reader.has_table("later.items").unwrap());
+    writer
+        .sql(
+            "CREATE SCHEMA later; CREATE TABLE later.items(id INTEGER)",
+            &[],
+        )
+        .unwrap();
     writer.create_graph("later_graph").unwrap();
 
     assert!(!reader.has_schema("later").unwrap());
     assert!(!reader.has_graph("later_graph").unwrap());
-    reader.commit().unwrap();
+    assert!(!reader.has_table("later.items").unwrap());
+    assert!(reader.table_names().unwrap().is_empty());
+    assert!(reader.describe_table("later.items").unwrap().is_none());
+    assert_eq!(reader.transaction_depth(), 0);
+    backend.commit_transaction().unwrap();
 
     assert!(reader.has_schema("later").unwrap());
     assert!(reader.has_graph("later_graph").unwrap());
+    assert!(reader.has_table("later.items").unwrap());
+    assert_eq!(reader.table_columns("later.items").unwrap(), ["id"]);
 }

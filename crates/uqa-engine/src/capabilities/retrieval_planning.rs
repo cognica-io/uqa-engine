@@ -18,11 +18,11 @@ use uqa_planner::{
     ColumnStats,
 };
 use uqa_sql::SQLError;
-use uqa_storage::{InvertedIndex, VectorIndex};
+use uqa_storage::InvertedIndex;
 
 struct TableStatistics(Arc<TableState>);
 struct TextRead<'a>(RwLockReadGuard<'a, Box<dyn InvertedIndex>>);
-struct VectorRead<'a>(RwLockReadGuard<'a, BTreeMap<String, Box<dyn VectorIndex>>>);
+struct VectorRead<'a>(RwLockReadGuard<'a, uqa_storage::vector_index::VectorIndexes>);
 impl TextStatisticsRead for TextRead<'_> {
     fn field_names(&self) -> Result<Option<Vec<String>>, String> {
         self.0
@@ -72,7 +72,7 @@ impl TextStatisticsRead for TextRead<'_> {
 }
 impl VectorStatisticsRead for VectorRead<'_> {
     fn dimensions(&self, field: &str) -> Option<u32> {
-        self.0.get(field).map(|index| index.dimensions())
+        self.0.get(field).map(uqa_storage::VectorIndex::dimensions)
     }
 }
 impl RetrievalStatisticsTable for TableStatistics {
@@ -85,14 +85,15 @@ impl RetrievalStatisticsTable for TableStatistics {
 }
 impl RetrievalPlanningCatalog for Engine {
     fn has_table(&self, table: &str) -> Result<bool, String> {
-        self.has_table(table).map_err(|error| error.to_string())
+        self.has_table_in_execution(table)
+            .map_err(|error| error.to_string())
     }
     fn resolve_table_name(&self, table: &str) -> Result<Option<String>, String> {
         self.resolve_table_name(table)
             .map_err(|error| error.to_string())
     }
     fn list_catalog_indexes(&self) -> Result<Vec<CatalogIndexRow>, String> {
-        self.list_catalog_indexes()
+        self.catalog_indexes_in_execution()
             .map_err(|error| error.to_string())
     }
     fn value_index_cardinality(
@@ -162,7 +163,7 @@ impl RetrievalPlanningCatalog for Engine {
             .map_err(|error| error.to_string())
     }
     fn graph_snapshot(&self, graph: &str) -> Result<Option<GraphStatisticsSnapshot>, String> {
-        self.graph_with(graph, |store| {
+        self.graph_statistics_with(graph, |store| {
             use uqa_graph::GraphStore as _;
             let vertices = store.vertices_in_graph(graph)?;
             let edges = store.edges_in_graph(graph)?;

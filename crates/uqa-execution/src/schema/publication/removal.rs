@@ -19,11 +19,10 @@ use uqa_sql::{
 };
 use uqa_storage::{
     document_store::Document, CatalogIndexRow, StorageBackendError, StorageBackendResult,
-    VectorIndex,
 };
 pub type SchemaWrite<'a, T> = Box<dyn DerefMut<Target = Vec<T>> + 'a>;
 pub type VectorIndexesWrite<'a> =
-    Box<dyn DerefMut<Target = BTreeMap<String, Box<dyn VectorIndex>>> + 'a>;
+    Box<dyn DerefMut<Target = uqa_storage::vector_index::VectorIndexes> + 'a>;
 pub type IndexRowsRead<'a> =
     Box<dyn Deref<Target = BTreeMap<RelationIdentity, CatalogIndexRow>> + 'a>;
 pub type IndexRowsWrite<'a> =
@@ -53,7 +52,11 @@ pub trait ColumnDropIndexes {
     fn read_indexes(&self) -> IndexRowsRead<'_>;
     fn write_indexes(&self) -> IndexRowsWrite<'_>;
     fn drop_catalog_index(&self, name: &RelationIdentity) -> StorageBackendResult<()>;
-    fn remove_value_index(&self, table: &str, name: &RelationIdentity) -> StorageBackendResult<()>;
+    fn remove_value_index(
+        &self,
+        table: &str,
+        key: &uqa_storage::ValueIndexKey,
+    ) -> StorageBackendResult<()>;
     fn remove_field_analyzer(&self, table: &str, column: &str);
     fn refresh_value_indexes(&self, table: &str) -> StorageBackendResult<()>;
 }
@@ -126,7 +129,7 @@ pub fn drop_column(
     state.remove_text_field(column);
     {
         let mut vectors = state.write_vector_indexes();
-        if let Some(mut index) = vectors.remove(column) {
+        if let Some(mut index) = vectors.live_mut()?.remove(column) {
             index.clear()?;
         }
     }
@@ -197,8 +200,18 @@ pub fn remove_catalog_indexes(
         }
     }
     for name in removals {
+        let definition = crate::catalog::index::index_definition(&rows[&name])?;
+        let identity = definition.catalog.ok_or_else(|| {
+            StorageBackendError::Other(format!(
+                "index `{}` has no physical identity",
+                name.qualified_name()
+            ))
+        })?;
         indexes.drop_catalog_index(&name)?;
-        indexes.remove_value_index(table, &name)?;
+        indexes.remove_value_index(
+            table,
+            &uqa_storage::ValueIndexKey::Index(identity.physical_key),
+        )?;
         rows.remove(&name);
     }
     Ok(())

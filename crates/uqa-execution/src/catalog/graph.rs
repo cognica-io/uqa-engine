@@ -36,7 +36,7 @@ pub fn graph_catalog_entries(
     catalog: &CatalogReadView,
 ) -> Result<Vec<GraphCatalogEntry>, SQLError> {
     catalog
-        .graph_names()
+        .read_graph_names()?
         .into_iter()
         .map(|name| {
             let labels = catalog.graph_labels(&name)?.ok_or_else(|| {

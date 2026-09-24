@@ -32,11 +32,33 @@ pub struct FunctionBinding {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FunctionResolutionError {
     UndefinedFunction { signature: String },
+    Operator(Box<OperatorResolutionError>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperatorResolutionError {
+    pub sqlstate: String,
+    pub message: String,
+}
+
+impl FunctionResolutionError {
+    #[must_use]
+    pub fn sql_error(&self) -> crate::SQLError {
+        let (sqlstate, message) = match self {
+            Self::UndefinedFunction { signature } => (
+                "42883".to_string(),
+                format!("function {signature} does not exist"),
+            ),
+            Self::Operator(error) => (error.sqlstate.clone(), error.message.clone()),
+        };
+        crate::SQLError::Routine { sqlstate, message }
+    }
 }
 
 /// Structural identity for parser-owned expressions and overload-specific built-in implementations. These variants occupy no SQL function-name namespace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FunctionDispatch {
+    NumericOperator(NumericOperator),
     NamedArgument,
     VariadicArgument,
     ArraySubscripts,
@@ -91,6 +113,7 @@ impl FunctionDispatch {
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
+            Self::NumericOperator(operator) => operator.symbol(),
             Self::NamedArgument => "named argument",
             Self::VariadicArgument => "VARIADIC argument",
             Self::ArraySubscripts | Self::Subscript => "subscript",
@@ -192,6 +215,39 @@ impl FunctionDispatch {
     }
 }
 
+/// Numeric operator syntax, kept separate from ordinary calls such as `mod` or `abs`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NumericOperator {
+    Modulo,
+    Power,
+    Plus,
+    SquareRoot,
+    CubeRoot,
+    Absolute,
+}
+
+impl NumericOperator {
+    #[must_use]
+    pub const fn symbol(self) -> &'static str {
+        match self {
+            Self::Modulo => "%",
+            Self::Power => "^",
+            Self::Plus => "+",
+            Self::SquareRoot => "|/",
+            Self::CubeRoot => "||/",
+            Self::Absolute => "@",
+        }
+    }
+
+    #[must_use]
+    pub const fn arity(self) -> usize {
+        match self {
+            Self::Modulo | Self::Power => 2,
+            Self::Plus | Self::SquareRoot | Self::CubeRoot | Self::Absolute => 1,
+        }
+    }
+}
+
 impl RangeFunctionOperation {
     #[must_use]
     pub const fn label(self) -> &'static str {
@@ -268,15 +324,32 @@ impl FunctionBinding {
     /// Construct a parser- or binder-owned expression with an identity that cannot collide with a SQL routine name.
     #[must_use]
     pub fn dispatched(dispatch: FunctionDispatch) -> Self {
-        Self {
-            object_id: None,
-            name: dispatch.label().into(),
-            argument_types: Vec::new(),
-            builtin: true,
-            dispatch: Some(dispatch),
-            invocation: None,
-            resolution_error: None,
-        }
+        Self::dispatched_with_control(
+            dispatch,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary dispatch constructor cannot be cancelled or limited")
+        .into_uncontrolled()
+        .expect("ordinary dispatch owner")
+    }
+
+    pub fn dispatched_with_control(
+        dispatch: FunctionDispatch,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Self>, uqa_core::ValueRetentionError> {
+        let (name, memory) = control.copy_text(dispatch.label())?.into_parts();
+        control.finish(
+            Self {
+                object_id: None,
+                name,
+                argument_types: Vec::new(),
+                builtin: true,
+                dispatch: Some(dispatch),
+                invocation: None,
+                resolution_error: None,
+            },
+            memory,
+        )
     }
 
     /// Preserve an undefined-overload error structurally without fabricating a dispatch name.

@@ -6,6 +6,7 @@
 
 //! Command state boundaries independent of the owning session.
 use crate::query::CteScope;
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::SQLError;
 /// Mutation lifecycle operations on the active transaction frame.
 pub trait MutationCommandState {
@@ -17,7 +18,7 @@ pub trait MutationCommandState {
 pub trait CommandScopeSource<S: Clone> {
     fn command_scope(
         &self,
-        privilege_subject: Option<&str>,
+        privilege_subject: Option<&RoleReference>,
         relations_bound: bool,
     ) -> Result<CteScope<S>, SQLError>;
 }

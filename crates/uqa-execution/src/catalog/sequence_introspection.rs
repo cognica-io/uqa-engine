@@ -9,8 +9,8 @@
 use super::{
     context::CatalogContext,
     projection::{resolve_regclass_kind_by_oid, resolve_regclass_oid, sequence_relation_oid},
-    security::{roles::RoleCatalogGuards, SequenceSecurity},
-    sequence::SequenceState,
+    security::{roles::persistence::RoleCatalogSnapshot, SequenceSecurity},
+    sequence::{snapshot::SequenceSnapshotSource, SequenceState},
 };
 use std::collections::BTreeMap;
 use uqa_core::{RelationIdentity, Value};
@@ -29,29 +29,27 @@ pub type SequenceObjectIdsRead<'a> =
 pub type SequenceStatesRead<'a> =
     Box<dyn std::ops::Deref<Target = BTreeMap<RelationIdentity, SequenceState>> + 'a>;
 
-/// Separate reads retain the object-id guard through state, security and persistence lookup.
+/// Live sequence registry inputs for definition publication and ownership checks.
 pub trait SequenceIntrospectionCatalog {
     fn refresh_sequences(&self) -> StorageBackendResult<()>;
     fn object_ids(&self) -> SequenceObjectIdsRead<'_>;
     fn states(&self) -> SequenceStatesRead<'_>;
     fn sequence_state(&self, relation: &RelationIdentity) -> Option<SequenceState>;
-    fn sequence_security(&self, relation: &RelationIdentity) -> Option<SequenceSecurity>;
     fn sequence_persistence(&self, relation: &RelationIdentity) -> Option<RelationPersistence>;
 }
 
 pub struct SequenceIntrospectionContext<'a> {
     pub catalog: CatalogContext<'a>,
-    pub sequences: &'a dyn SequenceIntrospectionCatalog,
+    pub snapshots: &'a dyn SequenceSnapshotSource,
     pub owners: &'a dyn SequenceOwnerCatalog,
-    pub roles: &'a dyn RoleCatalogGuards,
 }
 
-#[derive(Clone)]
 struct IntrospectionSequence {
     relation: RelationIdentity,
     state: SequenceState,
     security: SequenceSecurity,
     persistence: RelationPersistence,
+    authority: RoleCatalogSnapshot,
 }
 
 impl SequenceIntrospectionContext<'_> {
@@ -59,12 +57,11 @@ impl SequenceIntrospectionContext<'_> {
         let Some(owner_column) = serial_sequence_owner(self.owners, arguments)? else {
             return Ok(Value::Null);
         };
-        self.sequences.refresh_sequences().map_err(|error| {
+        let snapshot = self.snapshots.sequence_read_snapshot().map_err(|error| {
             SQLError::Internal(format!("load sequence ownership catalog: {error}"))
         })?;
-        let sequence = self
+        let sequence = snapshot
             .sequences
-            .states()
             .iter()
             .find(|(_, state)| {
                 state.owner.is_some_and(|owner| {
@@ -80,7 +77,7 @@ impl SequenceIntrospectionContext<'_> {
         let Some(oid) = strict_sequence_oid("pg_sequence_parameters", arguments)? else {
             return Ok(Value::Null);
         };
-        let sequence = match read_sequence(self.sequences, oid)? {
+        let sequence = match read_sequence(self.snapshots, oid)? {
             Some(sequence) => sequence,
             None if resolve_regclass_kind_by_oid(&self.catalog, oid)?.is_some() => {
                 return Err(SQLError::Routine {
@@ -120,7 +117,7 @@ impl SequenceIntrospectionContext<'_> {
         else {
             return Ok(Value::Null);
         };
-        let Some(sequence) = read_sequence(self.sequences, oid)? else {
+        let Some(sequence) = read_sequence(self.snapshots, oid)? else {
             return Ok(null_sequence_data());
         };
         if self.sequence_is_from_other_temporary_session(&sequence)
@@ -139,7 +136,7 @@ impl SequenceIntrospectionContext<'_> {
         else {
             return Ok(Value::Null);
         };
-        let Some(sequence) = read_sequence(self.sequences, oid)? else {
+        let Some(sequence) = read_sequence(self.snapshots, oid)? else {
             return if resolve_regclass_kind_by_oid(&self.catalog, oid)?.is_some() {
                 Err(SQLError::Routine {
                     sqlstate: "42809".into(),
@@ -181,27 +178,27 @@ impl SequenceIntrospectionContext<'_> {
         sequence: &IntrospectionSequence,
         access: SequenceAccess,
     ) -> bool {
-        let current_user = self.catalog.current_user_name();
-        let roles = self.roles.role_definitions();
-        let memberships = self.roles.role_memberships();
+        let current_user = self.catalog.current_role();
+        let roles = &sequence.authority.roles;
+        let memberships = &sequence.authority.memberships;
         match access {
-            SequenceAccess::Any => super::security::sequence::role_can_view_sequence(
+            SequenceAccess::Any => super::security::sequence::role_has_any_sequence_privilege(
                 &sequence.security,
                 &current_user,
-                &roles,
-                &memberships,
+                roles,
+                memberships,
             ),
             SequenceAccess::Select => super::security::sequence::role_can_select_sequence(
                 &sequence.security,
                 &current_user,
-                &roles,
-                &memberships,
+                roles,
+                memberships,
             ),
             SequenceAccess::ReadValue => super::security::sequence::role_can_read_sequence_value(
                 &sequence.security,
                 &current_user,
-                &roles,
-                &memberships,
+                roles,
+                memberships,
             ),
         }
     }
@@ -236,36 +233,47 @@ fn null_sequence_data() -> Value {
 }
 
 fn read_sequence(
-    catalog: &dyn SequenceIntrospectionCatalog,
+    catalog: &dyn SequenceSnapshotSource,
     oid: i64,
 ) -> Result<Option<IntrospectionSequence>, SQLError> {
-    catalog.refresh_sequences().map_err(|error| {
+    let snapshot = catalog.sequence_read_snapshot().map_err(|error| {
         SQLError::Internal(format!("load sequences for introspection: {error}"))
     })?;
-    let object_ids = catalog.object_ids();
-    let Some(relation) = object_ids.iter().find_map(|(relation, object_id)| {
-        (sequence_relation_oid(*object_id) == oid).then(|| relation.clone())
-    }) else {
+    let Some(relation) = snapshot
+        .object_ids
+        .iter()
+        .find_map(|(relation, object_id)| {
+            (sequence_relation_oid(*object_id) == oid).then(|| relation.clone())
+        })
+    else {
         return Ok(None);
     };
-    let state = catalog.sequence_state(&relation).ok_or_else(|| {
+    let state = snapshot.sequences.get(&relation).copied().ok_or_else(|| {
         SQLError::Internal(format!(
             "sequence `{}` disappeared",
             relation.qualified_name()
         ))
     })?;
-    let security = catalog.sequence_security(&relation).ok_or_else(|| {
+    let security = snapshot.security.get(&relation).cloned().ok_or_else(|| {
         SQLError::Internal(format!(
             "sequence `{}` has no security metadata",
             relation.qualified_name()
         ))
     })?;
-    let persistence = catalog.sequence_persistence(&relation).unwrap_or_default();
+    let security = security
+        .resolve(&snapshot.roles.roles)
+        .map_err(SQLError::Internal)?;
+    let persistence = snapshot
+        .persistence
+        .get(&relation)
+        .copied()
+        .unwrap_or_default();
     Ok(Some(IntrospectionSequence {
         relation,
         state,
         security,
         persistence,
+        authority: snapshot.roles,
     }))
 }
 

@@ -36,12 +36,31 @@ pub fn schema_expr_text(expr: &Expr) -> String {
         Expr::Param(index) => format!("${index}"),
         Expr::Func {
             name,
+            binding,
             args,
             distinct,
             order_by,
             filter,
             ..
         } => {
+            if let Some(crate::ast::FunctionDispatch::NumericOperator(operator)) =
+                binding.as_ref().and_then(|binding| binding.dispatch)
+            {
+                match args.as_slice() {
+                    [argument] if operator.arity() == 1 => {
+                        return format!("({} {})", operator.symbol(), schema_expr_text(argument))
+                    }
+                    [left, right] if operator.arity() == 2 => {
+                        return format!(
+                            "({} {} {})",
+                            schema_expr_text(left),
+                            operator.symbol(),
+                            schema_expr_text(right)
+                        )
+                    }
+                    _ => {}
+                }
+            }
             let mut rendered_args = args
                 .iter()
                 .map(schema_expr_text)

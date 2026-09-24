@@ -8,7 +8,7 @@
 
 use super::expression_core::{builtin_syntax_call, dispatched_call};
 use super::{compile_expr, extract_strings, BinaryOp, Expr, NodeEnum, Result, SQLError, Value};
-use crate::ast::FunctionDispatch;
+use crate::ast::{FunctionDispatch, NumericOperator};
 
 fn compile_pattern_operands(
     rhs: &pg_query::protobuf::Node,
@@ -54,28 +54,26 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
     let kind = a.kind();
     match kind {
         AExprKind::AexprOp => {
-            let op_name = extract_strings(&a.name)?.join("");
+            let names = extract_strings(&a.name)?;
+            let op_name = match names.as_slice() {
+                [schema, operator] if schema == "pg_catalog" => operator.clone(),
+                _ => names.join("."),
+            };
             if a.lexpr.is_none() {
                 let rhs = a
                     .rexpr
                     .as_ref()
                     .ok_or_else(|| SQLError::Internal("AExpr missing rhs".into()))?;
                 let rhs = compile_expr(rhs)?;
-                let unary_func = |name: &str, arg: Expr| Expr::Func {
-                    binding: None,
-                    name: name.into(),
-                    args: vec![arg],
-                    distinct: false,
-                    order_by: Vec::new(),
-                    filter: None,
+                let numeric_operator = |operator, argument| {
+                    dispatched_call(FunctionDispatch::NumericOperator(operator), vec![argument])
                 };
                 return match op_name.as_str() {
-                    "+" => Ok(rhs),
+                    "+" => Ok(numeric_operator(NumericOperator::Plus, rhs)),
                     "-" => Ok(Expr::UnaryMinus(Box::new(rhs))),
-                    // |/ square root, ||/ cube root, @ absolute value.
-                    "|/" => Ok(unary_func("sqrt", rhs)),
-                    "||/" => Ok(unary_func("cbrt", rhs)),
-                    "@" => Ok(unary_func("abs", rhs)),
+                    "|/" => Ok(numeric_operator(NumericOperator::SquareRoot, rhs)),
+                    "||/" => Ok(numeric_operator(NumericOperator::CubeRoot, rhs)),
+                    "@" => Ok(numeric_operator(NumericOperator::Absolute, rhs)),
                     other => Err(SQLError::Unsupported(format!("unary operator `{other}`"))),
                 };
             }
@@ -133,25 +131,16 @@ pub(in crate::compiler) fn compile_a_expr(a: &pg_query::protobuf::AExpr) -> Resu
                         filter: None,
                     });
                 }
-                "%" => {
-                    return Ok(Expr::Func {
-                        binding: None,
-                        name: "mod".into(),
-                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    });
-                }
-                "^" => {
-                    return Ok(Expr::Func {
-                        binding: None,
-                        name: "power".into(),
-                        args: vec![compile_expr(lhs)?, compile_expr(rhs)?],
-                        distinct: false,
-                        order_by: Vec::new(),
-                        filter: None,
-                    });
+                "%" | "^" => {
+                    let operator = if op_name == "%" {
+                        NumericOperator::Modulo
+                    } else {
+                        NumericOperator::Power
+                    };
+                    return Ok(dispatched_call(
+                        FunctionDispatch::NumericOperator(operator),
+                        vec![compile_expr(lhs)?, compile_expr(rhs)?],
+                    ));
                 }
                 // POSIX regex operators: `~` match, `~*` case-insensitive
                 // match, `!~` / `!~*` their negations.

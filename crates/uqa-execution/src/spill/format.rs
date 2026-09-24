@@ -6,10 +6,10 @@
 
 //! Spill record framing shared by the batch and indexed-row codecs.
 
-use std::fs::File;
 use std::io::{BufReader, Read};
+use uqa_storage::temporary_file::TemporaryFile as File;
 
-use tempfile::NamedTempFile;
+use uqa_storage::temporary_file::TemporaryFile as NamedTempFile;
 
 use crate::physical::{ExecError, ExecResult};
 

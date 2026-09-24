@@ -8,6 +8,7 @@
 
 use super::*;
 
+mod column_checks;
 mod foreign_tables;
 
 #[test]
@@ -286,6 +287,22 @@ fn alter_table_add_key_constraint_preserves_tuple_shape() {
                 && constraint.kind == TableKeyConstraintKind::Unique
                 && constraint.columns == ["tenant", "slug"]
     ));
+}
+
+#[test]
+fn added_column_keeps_its_named_key_and_null_semantics() {
+    let Statement::AlterTable(alter) = first(
+        "ALTER TABLE t ADD COLUMN IF NOT EXISTS v int CONSTRAINT named UNIQUE NULLS NOT DISTINCT",
+    ) else {
+        panic!("expected ALTER TABLE")
+    };
+    assert!(
+        matches!(alter.actions.as_slice(), [AlterTableAction::AddColumn {column, key_constraints, if_not_exists: true, ..}]
+        if column.name == "v" && key_constraints.len() == 1
+            && key_constraints[0].name.as_deref() == Some("named")
+            && key_constraints[0].nulls_not_distinct
+            && key_constraints[0].columns == ["v"])
+    );
 }
 
 #[test]
@@ -809,7 +826,7 @@ fn relation_forms_and_options_preserve_lifecycle_semantics() {
             kind: crate::ast::AlterViewKind::View,
             action: crate::ast::AlterViewAction::OwnerTo(owner),
             ..
-        }) if owner == "next_owner"
+        }) if owner == crate::ast::RoleSpecification::from("next_owner")
     ));
     assert!(matches!(
         first("ALTER MATERIALIZED VIEW reports OWNER TO CURRENT_USER"),
@@ -817,7 +834,7 @@ fn relation_forms_and_options_preserve_lifecycle_semantics() {
             kind: crate::ast::AlterViewKind::MaterializedView,
             action: crate::ast::AlterViewAction::OwnerTo(owner),
             ..
-        }) if owner == "CURRENT_USER"
+        }) if owner == crate::ast::RoleSpecification::CurrentUser
     ));
 }
 

@@ -36,6 +36,8 @@ mod json_strip_nulls;
 mod md5_overloads;
 #[path = "sql_generated_columns/mutations_and_functions.rs"]
 mod mutations_and_functions;
+#[path = "sql_generated_columns/numeric_operators.rs"]
+mod numeric_operators;
 #[path = "sql_generated_columns/operators.rs"]
 mod operators;
 #[path = "sql_generated_columns/reverse_overloads.rs"]

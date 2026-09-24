@@ -10,7 +10,7 @@ use super::{SQLError, StorageBackendError};
 
 pub(crate) fn storage_sql_error(action: &str, error: impl Into<StorageBackendError>) -> SQLError {
     let error = error.into();
-    SQLError::Internal(format!("{action}: {error}"))
+    uqa_execution::storage_errors::storage_error(action, &error)
 }
 
 pub(super) fn scoring_sql_error(error: uqa_scoring::TextSearchError) -> SQLError {
@@ -18,6 +18,13 @@ pub(super) fn scoring_sql_error(error: uqa_scoring::TextSearchError) -> SQLError
         uqa_scoring::TextSearchError::Parameters(error) => {
             SQLError::TypeMismatch(error.to_string())
         }
-        error => SQLError::Internal(error.to_string()),
+        uqa_scoring::TextSearchError::Storage { action, source } => {
+            storage_sql_error(action, source)
+        }
+        uqa_scoring::TextSearchError::Memory(error) => storage_sql_error("text search", error),
+        uqa_scoring::TextSearchError::Cancelled(error) => SQLError::Cancelled(error),
+        error @ uqa_scoring::TextSearchError::InvalidIndex(_) => {
+            SQLError::Internal(error.to_string())
+        }
     }
 }

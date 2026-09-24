@@ -19,22 +19,28 @@ use super::{
 };
 use crate::clustered_postings::{
     cluster_id, decode_all_scores, decode_occurrence_cluster, decode_term_keys, encode_cluster,
-    encode_occurrence_cluster, encode_term_keys, encode_terms, score_count, ClusterPosting,
-    ClusteredPostingCursor, EncodedScoreCluster, OccurrencePosting,
+    encode_occurrence_cluster_controlled, encode_term_keys, encode_terms, score_count,
+    ClusterPosting, ClusteredPostingCursor, EncodedScoreCluster, OccurrencePosting,
 };
 use crate::inverted_index::{
     analyze_index_field, AnalyzerBindings, IndexedFieldMetadata, IndexedFieldRevision,
 };
 use crate::{PostingCursor, TokenTermKey};
 
+mod accelerators;
 mod controlled;
 mod data;
 mod format;
 mod migration;
 mod mutation;
 mod queries;
+mod read_impl;
 mod rebuild;
+mod storage;
 mod trait_impl;
+mod view;
+pub use storage::OccurrenceStorage;
+use view::{OccurrenceRead, OccurrenceSource};
 
 use migration::{migrate_legacy_forward_postings, migrate_legacy_reverse_postings};
 
@@ -54,16 +60,16 @@ struct FieldSnapshot {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct FieldStats {
-    revision: IndexedFieldRevision,
-    doc_count: u64,
-    total_length: u64,
+pub(super) struct FieldStats {
+    pub(super) revision: IndexedFieldRevision,
+    pub(super) doc_count: u64,
+    pub(super) total_length: u64,
 }
 
 /// Inverted index implemented over [`KeyValueStore`].
 #[derive(Clone)]
 pub struct KeyValueInvertedIndex {
-    store: Arc<dyn KeyValueStore>,
+    source: OccurrenceSource,
     table: String,
     bindings: AnalyzerBindings,
 }
@@ -74,11 +80,29 @@ impl KeyValueInvertedIndex {
         table: impl Into<String>,
         analyzer: Analyzer,
     ) -> Self {
+        Self::from_storage(
+            Arc::new(storage::KeyValueOccurrences(store)),
+            table,
+            AnalyzerBindings::new(analyzer),
+        )
+    }
+
+    /// Bind the common occurrence algorithms to a provider's native row projection while preserving the already compiled analyzer revisions.
+    pub fn from_storage(
+        storage: Arc<dyn OccurrenceStorage>,
+        table: impl Into<String>,
+        bindings: AnalyzerBindings,
+    ) -> Self {
         Self {
-            store,
+            source: OccurrenceSource::Live(storage),
             table: table.into(),
-            bindings: AnalyzerBindings::new(analyzer),
+            bindings,
         }
+    }
+
+    /// Compiled bindings used by this index, including successful native-provider binding changes.
+    pub fn analyzer_bindings(&self) -> &AnalyzerBindings {
+        &self.bindings
     }
 
     pub(crate) fn migrate_legacy_storage(store: &dyn KeyValueStore) -> StorageBackendResult<()> {

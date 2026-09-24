@@ -702,7 +702,10 @@ fn assert_graph_aware_fusion_rejects_non_members(driver: &EngineDriver<'_>) {
         })
         .expect_err("graph-aware fusion must reject signal ids outside graph membership");
     assert!(
-        matches!(graph_aware_missing_vertex, uqa_sql::SQLError::Internal(ref message) if message.contains("input vertex 0")),
+        matches!(graph_aware_missing_vertex, uqa_sql::SQLError::Internal(ref message)
+            if message.contains("vertex 0")
+                && message.contains("not a member")
+                && message.contains("social")),
         "unexpected graph-aware fusion error: {graph_aware_missing_vertex}"
     );
 }

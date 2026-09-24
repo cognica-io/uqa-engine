@@ -6,6 +6,7 @@
 
 //! DROP, ALTER TABLE, and RENAME lowering.
 
+mod columns;
 mod domains;
 
 use super::relations::{
@@ -210,9 +211,8 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                 let owner = command.newowner.as_ref().ok_or_else(|| {
                     SQLError::Internal("ALTER SEQUENCE OWNER TO without owner".into())
                 })?;
-                alter.role_owner = Some(super::routines::compile_role_spec(
+                alter.role_owner = Some(super::routines::compile_role_specification(
                     owner,
-                    false,
                     "ALTER SEQUENCE OWNER TO",
                 )?);
             }
@@ -271,9 +271,8 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                 name: table,
                 if_exists,
                 action: crate::ast::AlterForeignTableAction::OwnerTo(
-                    super::routines::compile_role_spec(
+                    super::routines::compile_role_specification(
                         owner,
-                        false,
                         "ALTER FOREIGN TABLE OWNER TO",
                     )?,
                 ),
@@ -324,9 +323,8 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                 let owner = cmd.newowner.as_ref().ok_or_else(|| {
                     SQLError::Internal("ALTER VIEW OWNER TO without owner".into())
                 })?;
-                AlterViewAction::OwnerTo(super::routines::compile_role_spec(
+                AlterViewAction::OwnerTo(super::routines::compile_role_specification(
                     owner,
-                    false,
                     "ALTER VIEW OWNER TO",
                 )?)
             }
@@ -379,9 +377,8 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                     SQLError::Internal("ALTER TABLE OWNER TO without owner".into())
                 })?;
                 AlterTableAction::ChangeOwner {
-                    owner: super::routines::compile_role_spec(
+                    owner: super::routines::compile_role_specification(
                         owner,
-                        false,
                         "ALTER TABLE OWNER TO",
                     )?,
                 }
@@ -496,25 +493,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                     finalize: cmd.subtype() == AlterTableType::AtDetachPartitionFinalize,
                 }
             }
-            AlterTableType::AtAddColumn => {
-                let def_inner = cmd
-                    .def
-                    .as_ref()
-                    .and_then(|d| d.node.as_ref())
-                    .ok_or_else(|| SQLError::Internal("ADD COLUMN without ColumnDef".into()))?;
-                let col_def = match def_inner {
-                    NodeEnum::ColumnDef(c) => compile_column_def(c)?,
-                    other => {
-                        return Err(SQLError::Internal(format!(
-                            "ADD COLUMN expected ColumnDef, got {other:?}"
-                        )));
-                    }
-                };
-                AlterTableAction::AddColumn {
-                    column: col_def,
-                    if_not_exists: cmd.missing_ok,
-                }
-            }
+            AlterTableType::AtAddColumn => columns::add_column(cmd)?,
             AlterTableType::AtAddConstraint => {
                 let def_inner = cmd
                     .def
@@ -559,6 +538,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                         }
                         AlterTableAction::AddKeyConstraint {
                             constraint: TableKeyConstraint {
+                                catalog_identity: None,
                                 name,
                                 kind,
                                 columns,
@@ -573,6 +553,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                         })?;
                         AlterTableAction::AddCheckConstraint {
                             constraint: TableCheck {
+                                catalog_oid: None,
                                 name,
                                 expr: compile_expr(raw)?,
                                 enforced: constraint.is_enforced,
@@ -615,8 +596,10 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                         )?;
                         let foreign_key = ForeignKey {
                             referenced_key: None,
+                            referenced_index: None,
                             name,
                             object_id: None,
+                            catalog_identity: None,
                             local_columns,
                             ref_table,
                             ref_columns,
@@ -746,7 +729,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                     .ok_or_else(|| SQLError::Internal("ALTER COLUMN TYPE without type".into()))?;
                 let (ty, using) = match def_inner {
                     NodeEnum::ColumnDef(column) => (
-                        compile_column_def(column)?.ty,
+                        compile_column_def(column)?.0.ty,
                         column
                             .raw_default
                             .as_deref()
@@ -836,6 +819,12 @@ fn collect_reset_reloption_names(nodes: &[Node], kind: AlterViewKind) -> Result<
 
 pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Statement> {
     use pg_query::protobuf::ObjectType;
+    if stmt.rename_type() == ObjectType::ObjectRole {
+        return Ok(Statement::RenameRole(crate::ast::RenameRoleStmt {
+            name: stmt.subname.clone(),
+            new_name: stmt.newname.clone(),
+        }));
+    }
     let (routine_kind, context) = match stmt.rename_type() {
         ObjectType::ObjectFunction => (Some(AlterRoutineKind::Function), "ALTER FUNCTION"),
         ObjectType::ObjectProcedure => (Some(AlterRoutineKind::Procedure), "ALTER PROCEDURE"),
@@ -884,6 +873,13 @@ fn compile_relation_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Stat
         ObjectType::ObjectTable => AlterTableAction::RenameTable {
             to: render_relation_component(&stmt.newname),
         },
+        ObjectType::ObjectIndex => {
+            return Ok(Statement::RenameIndex(crate::ast::RenameIndexStmt {
+                name: table,
+                new_name: render_relation_component(&stmt.newname),
+                if_exists: stmt.missing_ok,
+            }));
+        }
         ObjectType::ObjectSequence => {
             return Ok(Statement::AlterSequence(AlterSequence {
                 name: table,

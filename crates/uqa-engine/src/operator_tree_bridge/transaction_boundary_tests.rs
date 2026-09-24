@@ -42,14 +42,21 @@ fn calibration_then_failure() -> OperatorTree {
 }
 
 fn assert_failed_tree_rolls_back_calibration(engine: &Engine) {
-    assert!(engine.load_scoring_params("docs.body").unwrap().is_none());
-    execute_operator_tree(engine, "docs", &[], &calibration_then_failure())
-        .expect_err("the malformed downstream vector leaf must fail");
-    assert!(
-        engine.load_scoring_params("docs.body").unwrap().is_none(),
-        "failed operator execution leaked auto-calibration state"
-    );
-    assert_eq!(engine.transaction_depth(), 0);
+    use crate::operator_tree_bridge::OperatorTreeDriver as _;
+    for physical in [false, true] {
+        assert!(engine.load_scoring_params("docs.body").unwrap().is_none());
+        let result = if physical {
+            EngineDriver::new(engine, "docs", &[]).execute_node(&calibration_then_failure())
+        } else {
+            execute_operator_tree(engine, "docs", "docs", &[], &calibration_then_failure())
+        };
+        result.expect_err("the malformed downstream vector leaf must fail");
+        assert!(
+            engine.load_scoring_params("docs.body").unwrap().is_none(),
+            "failed operator execution leaked auto-calibration state"
+        );
+        assert_eq!(engine.transaction_depth(), 0);
+    }
 }
 
 #[test]
@@ -70,4 +77,40 @@ fn failed_calibrating_tree_rolls_back_catalog_and_reopen_state() {
 
     let reopened = Engine::open(&path).unwrap();
     assert!(reopened.load_scoring_params("docs.body").unwrap().is_none());
+}
+
+#[test]
+fn graph_catalog_workers_retain_the_callers_statement_scope() {
+    use uqa_execution::query::graph_lifecycle::GraphLifecycle;
+    use uqa_sql::semantics::graph_functions::GraphNameCatalog;
+
+    let directory = tempfile::tempdir().unwrap();
+    for engine in [
+        Engine::new(),
+        Engine::open(&directory.path().join("graph.sqlite")).unwrap(),
+    ] {
+        engine.create_graph("g").unwrap();
+        engine
+            .sql("BEGIN ISOLATION LEVEL SERIALIZABLE", &[])
+            .unwrap();
+        engine
+            .with_direct_read_snapshot(|engine| {
+                std::thread::scope(|scope| {
+                    scope
+                        .spawn(|| {
+                            assert_eq!(GraphNameCatalog::list_graphs(engine).unwrap(), vec!["g"]);
+                            assert!(GraphLifecycle::has_graph(engine, "g").unwrap());
+                            assert!(GraphLifecycle::list_graph_labels(engine, "g")
+                                .unwrap()
+                                .is_some());
+                        })
+                        .join()
+                        .unwrap();
+                });
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(engine.transaction_depth(), 1);
+        engine.commit().unwrap();
+    }
 }

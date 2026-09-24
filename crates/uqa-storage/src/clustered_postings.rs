@@ -55,8 +55,9 @@ pub trait PostingCursor: Send {
 mod controlled_cursor;
 mod positions;
 mod read_cursor;
-pub(crate) use controlled_cursor::open as open_controlled_cursor;
-pub use controlled_cursor::{EncodedScoreClusterRef, ScoreClusterVisitor};
+pub use controlled_cursor::{
+    open as open_controlled_cursor, EncodedScoreClusterRef, ScoreClusterVisitor,
+};
 pub use read_cursor::{BudgetedPostingReadCursor, OwnedPostingReadCursor, PostingReadCursor};
 
 impl Clone for Box<dyn PostingCursor> {
@@ -483,6 +484,7 @@ fn corrupt(message: impl Into<String>) -> StorageBackendError {
     StorageBackendError::Other(format!("corrupt clustered posting: {}", message.into()))
 }
 
+mod encoding;
 mod legacy;
 mod occurrences;
 mod scores;
@@ -490,9 +492,11 @@ mod term_keys;
 
 use legacy::{decode_positions, encode_positions};
 pub use legacy::{decode_terms, encode_terms};
+pub(crate) use occurrences::validate_occurrence_cluster;
 pub use occurrences::{
     decode_occurrence_cluster, decode_occurrence_cluster_budgeted,
-    decode_occurrence_document_budgeted, encode_occurrence_cluster, OccurrencePosting,
+    decode_occurrence_document_budgeted, encode_occurrence_cluster,
+    encode_occurrence_cluster_controlled, OccurrencePosting,
 };
 use scores::{decode_score_block_into, encode_scores, parse_score_blob};
 pub use term_keys::{decode_term_keys, encode_term_keys};

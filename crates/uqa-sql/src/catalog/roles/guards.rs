@@ -14,4 +14,9 @@ pub type RoleMembershipRead<'a> =
 pub trait RoleCatalogGuards {
     fn role_definitions(&self) -> RoleDefinitionRead<'_>;
     fn role_memberships(&self) -> RoleMembershipRead<'_>;
+
+    /// Capture current definitions for explicit inquiry subjects without requiring publication into a retained catalog.
+    fn inquiry_role_definitions(&self) -> Result<RoleDefinitionRead<'_>, crate::SQLError> {
+        Ok(self.role_definitions())
+    }
 }

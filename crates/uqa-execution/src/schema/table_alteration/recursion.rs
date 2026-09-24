@@ -34,7 +34,15 @@ fn run_alter_action_branch<S: Clone + 'static>(
     }
     context.constraints.access.ensure_table_owner(&table)?;
     if recursing {
-        uqa_sql::schema::table_alteration::normalize_inherited_action(&mut action);
+        let hierarchy = context
+            .constraints
+            .relations
+            .table_hierarchy(&table)
+            .map_err(|error| ddl_storage_error("ALTER TABLE inherited declaration", error))?;
+        uqa_sql::schema::table_alteration::normalize_inherited_action(
+            &mut action,
+            hierarchy.partition_bound.is_some(),
+        );
     }
     if recursing && merge_existing_recursive_action(context, &table, &action)? {
         visiting.remove(&table);
@@ -85,13 +93,25 @@ fn run_alter_action_branch<S: Clone + 'static>(
     Ok(())
 }
 
-fn recursive_alter_children<S: Clone + 'static>(
+pub(super) fn recursive_alter_children<S: Clone + 'static>(
     context: &TableAlterContext<'_, S>,
     table: &str,
     recurse: bool,
     action: &AlterTableAction,
 ) -> Result<Vec<String>, SQLError> {
-    let recursive = matches!(action, AlterTableAction::AddColumn { .. })
+    let partition_column = matches!(
+        action,
+        AlterTableAction::RenameColumn { .. } | AlterTableAction::DropColumn { .. }
+    ) && context
+        .hierarchy
+        .partitions
+        .catalog
+        .try_table_hierarchy(table)
+        .map_err(SQLError::Internal)?
+        .partition_spec
+        .is_some();
+    let recursive = partition_column
+        || matches!(action, AlterTableAction::AddColumn { .. })
         || matches!(action, AlterTableAction::AddCheckConstraint { constraint } if !constraint.no_inherit)
         || matches!(
             action,
@@ -141,12 +161,13 @@ fn recursive_alter_children<S: Clone + 'static>(
             .catalog
             .direct_hierarchy_children(table);
     }
-    let requires_children = matches!(
-        action,
-        AlterTableAction::AddColumn { .. }
-            | AlterTableAction::AddCheckConstraint { .. }
-            | AlterTableAction::AddNotNullConstraint { .. }
-    );
+    let requires_children = partition_column
+        || matches!(
+            action,
+            AlterTableAction::AddColumn { .. }
+                | AlterTableAction::AddCheckConstraint { .. }
+                | AlterTableAction::AddNotNullConstraint { .. }
+        );
     if requires_children
         && !context
             .hierarchy
@@ -197,13 +218,18 @@ pub(super) fn materialize_recursive_action_names<S: Clone + 'static>(
         .map_err(|error| ddl_storage_error("ALTER TABLE recursive name binding", error))?;
     let relation = uqa_core::RelationIdentity::from_legacy_name(table)
         .map_err(|error| SQLError::Internal(format!("resolve ALTER TABLE relation: {error}")))?;
-    let mut allocate = context.hierarchy.publication.allocate_identity;
+    let mut allocate = context.hierarchy.publication.identity_allocator();
     uqa_sql::schema::table_alteration::materialize_recursive_action_names(
         &relation,
         &mut columns,
         &mut constraints,
         action,
         &mut allocate,
+        &context
+            .hierarchy
+            .publication
+            .constraint_names()
+            .name_scope(&relation),
     )
 }
 
@@ -233,14 +259,16 @@ pub(super) fn merge_existing_recursive_action<S: Clone + 'static>(
             let existing_not_null = local.not_null.then(|| {
                 (
                     local.not_null_name.clone(),
+                    local.not_null_identity,
                     local.not_null_validated,
                     local.not_null_no_inherit,
                 )
             });
             let mut merged = column.clone();
             uqa_sql::schema::inheritance::merge_same_column(&mut merged, local)?;
-            if let Some((name, validated, no_inherit)) = existing_not_null {
+            if let Some((name, identity, validated, no_inherit)) = existing_not_null {
                 merged.not_null_name = name;
+                merged.not_null_identity = identity;
                 merged.not_null_validated = validated;
                 merged.not_null_no_inherit = no_inherit;
             }

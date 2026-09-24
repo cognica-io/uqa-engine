@@ -94,6 +94,7 @@ impl TableAsPublication for Engine {
         name: &str,
         persistence: RelationPersistence,
         on_commit: OnCommitAction,
+        owner: &uqa_execution::catalog::security::roles::locking::RoleBinding,
     ) -> Result<(), SQLError> {
         self.create_table_with_lifecycle(
             name,
@@ -101,6 +102,7 @@ impl TableAsPublication for Engine {
             Vec::new(),
             persistence,
             on_commit,
+            owner,
         )
         .map_err(|error| storage_error("CREATE TABLE AS", &error))
     }
@@ -188,6 +190,7 @@ impl uqa_execution::schema::table_creation::TableCreationPublication for Engine 
         name: &str,
         persistence: RelationPersistence,
         on_commit: OnCommitAction,
+        owner: &uqa_execution::catalog::security::roles::locking::RoleBinding,
     ) -> uqa_storage::StorageBackendResult<()> {
         self.create_table_with_lifecycle(
             name,
@@ -195,6 +198,7 @@ impl uqa_execution::schema::table_creation::TableCreationPublication for Engine 
             Vec::new(),
             persistence,
             on_commit,
+            owner,
         )
     }
     fn create_vector_field(

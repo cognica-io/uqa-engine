@@ -11,12 +11,16 @@
 //! year/month decomposition.
 
 use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, Timelike, Utc};
-use uqa_core::{DecimalValue, TemporalValue, Value};
+use uqa_core::{
+    memory::{Produced, ProductionControl},
+    DecimalValue, TemporalValue, Value,
+};
 
 use crate::ast::BinaryOp;
 use crate::error::{Result, SQLError};
 
-use super::{division_by_zero, float_to_i64_rounded, out_of_range, to_f64};
+use super::conversion::to_f64_with_control;
+use super::{division_by_zero, float_to_i64_rounded, out_of_range};
 
 mod number_format;
 
@@ -95,7 +99,14 @@ pub(super) fn timestamp_plus_interval(
     clippy::too_many_lines,
     reason = "temporal dispatch preserves PostgreSQL unit and error precedence"
 )]
-pub(super) fn temporal_arith(a: &Value, b: &Value, op: BinaryOp) -> Result<Value> {
+pub(super) fn temporal_arith_with_control(
+    a: &Value,
+    b: &Value,
+    op: BinaryOp,
+    control: &ProductionControl<'_>,
+) -> Result<Value> {
+    control.check()?;
+    let to_f64 = |value| to_f64_with_control(value, control);
     use TemporalValue as T;
     match (a, b) {
         (Value::Temporal(x), Value::Temporal(y)) => match (x, y, op) {
@@ -331,13 +342,31 @@ fn temporal_timestamp_micros(t: &TemporalValue) -> Result<i64> {
 /// Coerce a scalar into a datetime-like temporal value: temporal
 /// values pass through, strings parse as timestamp / date / time.
 pub(super) fn coerce_temporal(v: &Value) -> Result<TemporalValue> {
+    coerce_temporal_with_control(v, &ProductionControl::uncontrolled())
+}
+
+pub(super) fn coerce_temporal_with_control(
+    v: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<TemporalValue> {
+    control.check()?;
     match v {
         Value::Temporal(t) => Ok(t.clone()),
-        Value::Str(s) => TemporalValue::parse_timestamp(s)
-            .or_else(|| TemporalValue::parse_date(s))
-            .or_else(|| TemporalValue::parse_time(s))
-            .or_else(|| TemporalValue::parse_interval(s))
-            .ok_or_else(|| SQLError::TypeMismatch(format!("cannot parse timestamp {s:?}"))),
+        Value::Str(s) => {
+            for parse in [
+                TemporalValue::parse_timestamp_with_control,
+                TemporalValue::parse_date_with_control,
+                TemporalValue::parse_time_with_control,
+                TemporalValue::parse_interval_with_control,
+            ] {
+                if let Some(value) = parse(s, control)? {
+                    return Ok(value);
+                }
+            }
+            Err(SQLError::TypeMismatch(format!(
+                "cannot parse timestamp {s:?}"
+            )))
+        }
         other => Err(SQLError::TypeMismatch(format!(
             "expected timestamp, got {other:?}"
         ))),
@@ -388,9 +417,19 @@ pub(super) fn age_between(a: &TemporalValue, b: &TemporalValue) -> Result<Value>
 
 /// Numeric result with a fixed decimal scale (`extract(epoch ...)`
 /// renders `60.000000`).
-fn decimal_scaled(value: f64, scale: u32) -> Value {
-    let text = format!("{value:.*}", scale as usize);
-    DecimalValue::parse(&text).map_or(Value::Float(value), Value::Decimal)
+fn decimal_scaled(
+    value: f64,
+    scale: u32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let text = control.format(format_args!("{value:.*}", scale as usize))?;
+    match DecimalValue::parse_with_control(&text, control)? {
+        Some(decimal) => {
+            let (value, memory) = decimal.into_parts();
+            Ok(control.finish(Value::Decimal(value), memory)?)
+        }
+        None => Ok(control.finish(Value::Float(value), control.empty_reservation())?),
+    }
 }
 
 /// `EXTRACT(field FROM x)` / `date_part(field, x)`. `as_numeric`
@@ -400,18 +439,26 @@ fn decimal_scaled(value: f64, scale: u32) -> Value {
     clippy::too_many_lines,
     reason = "temporal dispatch preserves PostgreSQL unit and error precedence"
 )]
-pub(super) fn extract_from_value(field: &str, value: &Value, as_numeric: bool) -> Result<Value> {
+pub(super) fn extract_from_value(
+    field: &str,
+    value: &Value,
+    as_numeric: bool,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let inline = |value| -> Result<Produced<Value>> {
+        Ok(control.finish(value, control.empty_reservation())?)
+    };
     if matches!(value, Value::Null) {
-        return Ok(Value::Null);
+        return inline(Value::Null);
     }
-    let temporal = coerce_temporal(value)?;
-    let int_result = |n: i64| Ok(Value::Int(n));
+    let temporal = coerce_temporal_with_control(value, control)?;
+    let int_result = |n: i64| inline(Value::Int(n));
     let seconds_result = |micros: i64| {
         let secs = micros as f64 / 1e6;
         if as_numeric {
-            Ok(decimal_scaled(secs, 6))
+            decimal_scaled(secs, 6, control)
         } else {
-            Ok(Value::Float(secs))
+            inline(Value::Float(secs))
         }
     };
     if let TemporalValue::Interval {
@@ -429,26 +476,26 @@ pub(super) fn extract_from_value(field: &str, value: &Value, as_numeric: bool) -
             "second" | "seconds" => {
                 let sub = micros % MICROS_PER_MINUTE;
                 if as_numeric {
-                    Ok(decimal_scaled(sub as f64 / 1e6, 6))
+                    decimal_scaled(sub as f64 / 1e6, 6, control)
                 } else {
-                    Ok(Value::Float(sub as f64 / 1e6))
+                    inline(Value::Float(sub as f64 / 1e6))
                 }
             }
             "millisecond" | "milliseconds" => {
                 let sub = micros % MICROS_PER_MINUTE;
                 if as_numeric {
-                    Ok(decimal_scaled(sub as f64 / 1e3, 3))
+                    decimal_scaled(sub as f64 / 1e3, 3, control)
                 } else {
-                    Ok(Value::Float(sub as f64 / 1e3))
+                    inline(Value::Float(sub as f64 / 1e3))
                 }
             }
             "microsecond" | "microseconds" => int_result(micros % MICROS_PER_MINUTE),
             "epoch" => {
                 let total = (i64::from(*months) * 30 + i64::from(*days)) * MICROS_PER_DAY + micros;
                 if as_numeric {
-                    Ok(decimal_scaled(total as f64 / 1e6, 6))
+                    decimal_scaled(total as f64 / 1e6, 6, control)
                 } else {
-                    Ok(Value::Float(total as f64 / 1e6))
+                    inline(Value::Float(total as f64 / 1e6))
                 }
             }
             "quarter" => {
@@ -471,9 +518,9 @@ pub(super) fn extract_from_value(field: &str, value: &Value, as_numeric: bool) -
             "millisecond" | "milliseconds" => {
                 let sub = micros % MICROS_PER_MINUTE;
                 if as_numeric {
-                    Ok(decimal_scaled(sub as f64 / 1e3, 3))
+                    decimal_scaled(sub as f64 / 1e3, 3, control)
                 } else {
-                    Ok(Value::Float(sub as f64 / 1e3))
+                    inline(Value::Float(sub as f64 / 1e3))
                 }
             }
             "microsecond" | "microseconds" => int_result(micros % MICROS_PER_MINUTE),
@@ -492,18 +539,18 @@ pub(super) fn extract_from_value(field: &str, value: &Value, as_numeric: bool) -
             let micros = i64::from(dt.second()) * MICROS_PER_SECOND
                 + i64::from(dt.and_utc().timestamp_subsec_micros());
             if as_numeric {
-                Ok(decimal_scaled(micros as f64 / 1e6, 6))
+                decimal_scaled(micros as f64 / 1e6, 6, control)
             } else {
-                Ok(Value::Float(micros as f64 / 1e6))
+                inline(Value::Float(micros as f64 / 1e6))
             }
         }
         "millisecond" | "milliseconds" => {
             let micros = i64::from(dt.second()) * MICROS_PER_SECOND
                 + i64::from(dt.and_utc().timestamp_subsec_micros());
             if as_numeric {
-                Ok(decimal_scaled(micros as f64 / 1e3, 3))
+                decimal_scaled(micros as f64 / 1e3, 3, control)
             } else {
-                Ok(Value::Float(micros as f64 / 1e3))
+                inline(Value::Float(micros as f64 / 1e3))
             }
         }
         "microsecond" | "microseconds" => int_result(
@@ -516,13 +563,13 @@ pub(super) fn extract_from_value(field: &str, value: &Value, as_numeric: bool) -
         "epoch" => {
             let micros = micros_from_naive(dt);
             if as_numeric {
-                Ok(decimal_scaled(micros as f64 / 1e6, 6))
+                decimal_scaled(micros as f64 / 1e6, 6, control)
             } else {
                 let secs = micros as f64 / 1e6;
                 if secs.fract() == 0.0 {
                     int_result(secs as i64)
                 } else {
-                    Ok(Value::Float(secs))
+                    inline(Value::Float(secs))
                 }
             }
         }
@@ -536,8 +583,12 @@ pub(super) fn extract_from_value(field: &str, value: &Value, as_numeric: bool) -
     }
 }
 
-pub(super) fn date_trunc_value(unit: &str, value: &Value) -> Result<Value> {
-    let temporal = coerce_temporal(value)?;
+pub(super) fn date_trunc_value(
+    unit: &str,
+    value: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<Value> {
+    let temporal = coerce_temporal_with_control(value, control)?;
     let tz = matches!(temporal, TemporalValue::TimestampTz { .. });
     let dt = temporal_naive(&temporal)?;
     let date = dt.date();
@@ -665,12 +716,13 @@ pub(super) fn format_temporal(value: &TemporalValue, fmt: &str) -> Result<String
 }
 
 pub(super) fn hex_encode(bytes: &[u8]) -> String {
-    use std::fmt::Write;
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        let _ = write!(s, "{b:02x}");
-    }
-    s
+    super::encoding::hex_encode_with_control(
+        bytes,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary hex encoding")
+    .into_uncontrolled()
+    .expect("ordinary hex owner")
 }
 
 /// Parse a timestamp string into a UTC `DateTime`. Accepts:

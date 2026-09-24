@@ -10,13 +10,14 @@ use crate::Engine;
 use parking_lot::MappedRwLockReadGuard;
 use std::{collections::BTreeMap, sync::Arc};
 use uqa_graph::GraphStoreHandle;
+use uqa_sql::catalog::roles::identity::RoleSubject;
 use uqa_sql::{
     catalog::security::{
         schema::SchemaAclPrivilege,
         schema_inquiry::{
             GraphNamespaceRead, SchemaPrivilegeCatalog, SchemaPrivilegeInquiry, SchemaRegistryRead,
         },
-        SchemaSecurity,
+        BoundSchemaSecurity,
     },
     SQLError,
 };
@@ -62,20 +63,23 @@ impl Engine {
     pub(crate) fn schema_has_privilege_for_role(
         &self,
         schema: &str,
-        role: &str,
+        role: &(impl RoleSubject + ?Sized),
         privilege: SchemaAclPrivilege,
     ) -> bool {
         self.schema_privilege_inquiry()
             .schema_has_privilege_for_role(schema, role, privilege)
     }
-    pub(crate) fn schema_security_for_privilege(&self, schema: &str) -> Option<SchemaSecurity> {
+    pub(crate) fn schema_security_for_privilege(
+        &self,
+        schema: &str,
+    ) -> Option<BoundSchemaSecurity> {
         self.schema_privilege_inquiry()
             .schema_security_for_privilege(schema)
     }
     pub(crate) fn require_schema_privilege(
         &self,
         schema: &str,
-        role: &str,
+        role: &(impl RoleSubject + ?Sized),
         privilege: SchemaAclPrivilege,
     ) -> Result<(), SQLError> {
         self.schema_privilege_inquiry()
@@ -99,6 +103,12 @@ impl<T, G: std::ops::Deref<Target = BTreeMap<RelationIdentity, T>>> CreationRela
     }
 }
 impl CreationRelationGuards for Engine {
+    fn named_type_exists(&self, identity: &RelationIdentity) -> bool {
+        uqa_execution::catalog::projection::named_type_exists(
+            self.durable.domains.read().values(),
+            identity,
+        )
+    }
     fn tables(&self) -> Box<dyn CreationRelationNames + '_> {
         Box::new(CreationNamesGuard(self.storage.tables.read()))
     }
@@ -140,6 +150,7 @@ impl Engine {
         RelationCreationContext {
             names: self,
             roles: self,
+            locks: self,
             schemas: self,
             database: self,
             state: self,

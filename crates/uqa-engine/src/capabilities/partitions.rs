@@ -35,7 +35,7 @@ impl PartitionCatalog for Engine {
         Engine::try_resolve_table_name(self, name).map_err(|error| error.to_string())
     }
     fn try_describe_table(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String> {
-        Engine::try_describe_table(self, table).map_err(|error| error.to_string())
+        Engine::describe_table_in_execution(self, table).map_err(|error| error.to_string())
     }
 }
 

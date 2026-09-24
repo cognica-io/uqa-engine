@@ -124,13 +124,14 @@ pub fn label_sequence_name(label: &str) -> String {
 }
 
 pub fn build_ag_graph(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
-    Ok(graph_catalog_entries(catalog)?
+    Ok(catalog
+        .read_graph_names()?
         .into_iter()
-        .map(|entry| {
+        .map(|name| {
             row([
-                ("graphid", int_value(graph_oid(&entry.name))),
-                ("name", str_value(entry.name.clone())),
-                ("namespace", str_value(entry.name)),
+                ("graphid", int_value(graph_oid(&name))),
+                ("name", str_value(name.clone())),
+                ("namespace", str_value(name)),
             ])
         })
         .collect())
@@ -197,6 +198,7 @@ pub fn age_pg_class_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQ
     let mut out = Vec::new();
     for entry in graph_catalog_entries(catalog)? {
         out.push(pg_class_row(
+            catalog,
             &entry.name,
             LABEL_ID_SEQUENCE,
             "S",
@@ -208,6 +210,7 @@ pub fn age_pg_class_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQ
             let natts = i64::try_from(label_columns(label.kind).len())
                 .map_err(|_| SQLError::Internal("label column count".into()))?;
             out.push(pg_class_row(
+                catalog,
                 &entry.name,
                 &label.name,
                 "r",
@@ -216,6 +219,7 @@ pub fn age_pg_class_rows(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQ
                 false,
             ));
             out.push(pg_class_row(
+                catalog,
                 &entry.name,
                 &label_sequence_name(&label.name),
                 "S",

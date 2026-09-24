@@ -73,6 +73,10 @@ pub(super) fn lower_expr(raw: &JSONValue) -> Result<Expr> {
 /// Lower a `PLpgSQL_expr` node holding a complete SQL statement
 /// (parse mode 0: queries, PERFORM bodies, CALL statements).
 pub(super) fn lower_full_statement(raw: &JSONValue) -> Result<Statement> {
+    lower_sourced_statement(raw).map(|(statement, _)| statement)
+}
+
+pub(super) fn lower_sourced_statement(raw: &JSONValue) -> Result<(Statement, String)> {
     let (query, mode) = expr_text(raw)?;
     if mode != 0 {
         return Err(SQLError::Internal(format!(
@@ -81,7 +85,7 @@ pub(super) fn lower_full_statement(raw: &JSONValue) -> Result<Statement> {
     }
     let mut stmts = crate::compile(&query)?;
     match stmts.len() {
-        1 => Ok(stmts.remove(0)),
+        1 => Ok((stmts.remove(0), query)),
         n => Err(SQLError::Internal(format!(
             "embedded PL/pgSQL query compiled to {n} statements"
         ))),

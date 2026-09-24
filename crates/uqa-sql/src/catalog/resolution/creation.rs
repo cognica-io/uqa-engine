@@ -21,11 +21,45 @@ pub trait CreationRelationNames {
     fn contains(&self, relation: &RelationIdentity) -> bool;
 }
 pub trait CreationRelationGuards {
+    fn named_type_exists(&self, identity: &RelationIdentity) -> bool;
     fn tables(&self) -> Box<dyn CreationRelationNames + '_>;
     fn views(&self) -> Box<dyn CreationRelationNames + '_>;
     fn sequences(&self) -> Box<dyn CreationRelationNames + '_>;
     fn foreign_tables(&self) -> Box<dyn CreationRelationNames + '_>;
     fn indexes(&self) -> Box<dyn CreationRelationNames + '_>;
+}
+
+/// Domains and row types share the type namespace; sequences and indexes do not define row types.
+pub fn type_name_in_use(catalog: &dyn CreationRelationGuards, identity: &RelationIdentity) -> bool {
+    catalog.named_type_exists(identity)
+        || catalog.tables().contains(identity)
+        || catalog.views().contains(identity)
+        || catalog.foreign_tables().contains(identity)
+}
+
+pub fn ensure_type_name_available(
+    catalog: &dyn CreationRelationGuards,
+    identity: &RelationIdentity,
+) -> Result<(), SQLError> {
+    if type_name_in_use(catalog, identity) {
+        return Err(SQLError::Routine {
+            sqlstate: "42710".into(),
+            message: format!("type \"{}\" already exists", identity.name),
+        });
+    }
+    Ok(())
+}
+
+/// Every relation kind shares the same namespace, independently of query visibility.
+pub fn relation_name_in_use(
+    catalog: &dyn CreationRelationGuards,
+    relation: &RelationIdentity,
+) -> bool {
+    catalog.tables().contains(relation)
+        || catalog.views().contains(relation)
+        || catalog.sequences().contains(relation)
+        || catalog.foreign_tables().contains(relation)
+        || catalog.indexes().contains(relation)
 }
 
 pub fn temporary_creation_parts(
@@ -76,7 +110,7 @@ pub fn sql_creation_schema(
     state: &dyn RelationCandidateState,
     privileges: &SchemaPrivilegeInquiry<'_>,
     schema: Option<&str>,
-    current_user: &str,
+    current_user: &(impl crate::catalog::roles::identity::RoleSubject + ?Sized),
 ) -> Option<String> {
     if let Some(schema) = schema {
         privileges
@@ -113,7 +147,7 @@ pub fn ensure_creation_privilege(
 ) -> Result<(), SQLError> {
     let relation =
         RelationIdentity::from_legacy_name(canonical_name).map_err(SQLError::Unsupported)?;
-    let current_user = names.current_user_name();
+    let current_user = names.current_role();
     privileges.require_schema_privilege(&relation.schema, &current_user, SchemaAclPrivilege::Create)
 }
 
@@ -134,7 +168,7 @@ pub fn resolve_index_table_name(
                     message: format!("schema \"{schema}\" does not exist"),
                 });
             }
-            let current_user = names.current_user_name();
+            let current_user = names.current_role();
             privileges.require_schema_privilege(
                 schema,
                 &current_user,
@@ -142,7 +176,7 @@ pub fn resolve_index_table_name(
             )?;
         }
     }
-    let current_user = names.current_user_name();
+    let current_user = names.current_role();
     for relation in relation_lookup_candidates(state, name)
         .map_err(|error| SQLError::Internal(format!("resolve index table `{name}`: {error}")))?
     {

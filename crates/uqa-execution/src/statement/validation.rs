@@ -16,16 +16,12 @@ pub fn validate_plan(
     plan: &UnifiedPlan,
 ) -> Result<(), SQLError> {
     cancellation.check()?;
-    {
-        let resolution = context.session.relation_name_resolution();
-        uqa_sql::semantics::cte_validation::validate_plan(
-            &uqa_sql::semantics::cte_validation::CteValidationContext {
-                catalog: context.rules,
-                resolution: &resolution,
-            },
-            plan,
-        )?;
-    }
+    uqa_sql::semantics::cte_validation::validate_plan(
+        &uqa_sql::semantics::cte_validation::CteValidationContext {
+            catalog: context.rules,
+        },
+        plan,
+    )?;
     super::transactions::validate_transaction_plan(
         context.transactions,
         &context.effects.query_effect_context(),

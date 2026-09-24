@@ -11,11 +11,13 @@ use crate::schema::foreign_table_alteration::{
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     catalog::{
-        roles::{guards::RoleCatalogGuards, role_inherits, RoleReferenceNames},
+        roles::{
+            guards::RoleCatalogGuards, identity::RoleSubject, role_inherits, RoleReferenceNames,
+        },
         security::{
             ownership::RelationOwnerSchemas,
             table::{role_has_table_privilege, TableAclPrivilege},
-            TableSecurity,
+            BoundTableSecurity,
         },
     },
     SQLError,
@@ -31,7 +33,10 @@ impl ForeignAuthorizationContext<'_> {
     pub fn ensure_foreign_table_owner(&self, name: &str) -> Result<String, SQLError> {
         let (relation, security) = bound_foreign_table_security(self.catalog, name)?;
         if self.current_user_has_role_privileges(&security.role_owner) {
-            return Ok(security.role_owner);
+            return security
+                .resolve(&self.roles.role_definitions())
+                .map(|security| security.role_owner)
+                .map_err(SQLError::Internal);
         }
         Err(SQLError::Routine {
             sqlstate: "42501".into(),
@@ -47,8 +52,8 @@ impl ForeignAuthorizationContext<'_> {
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
         if role_has_table_privilege(
-            &security,
-            &self.names.current_user_name(),
+            &security.resolve(&roles).map_err(SQLError::Internal)?,
+            &self.names.current_role(),
             privilege,
             &roles,
             &memberships,
@@ -75,8 +80,8 @@ impl ForeignAuthorizationContext<'_> {
             message: format!("must be owner of foreign table {}", relation.name),
         })
     }
-    fn current_user_has_role_privileges(&self, target: &str) -> bool {
-        let current = self.names.current_user_name();
+    fn current_user_has_role_privileges(&self, target: &(impl RoleSubject + ?Sized)) -> bool {
+        let current = self.names.current_role();
         let roles = self.roles.role_definitions();
         let memberships = self.roles.role_memberships();
         role_inherits(&roles, &memberships, &current, target)
@@ -85,18 +90,13 @@ impl ForeignAuthorizationContext<'_> {
 pub fn persist_foreign_table_security(
     catalog: Option<&dyn CatalogFacade>,
     relation: &RelationIdentity,
-    security: &TableSecurity,
+    security: &BoundTableSecurity,
 ) -> Result<(), SQLError> {
     let Some(catalog) = catalog else {
         return Ok(());
     };
     let updated = catalog
-        .update_foreign_table_security(
-            relation,
-            &security.role_owner,
-            security.acl.as_deref(),
-            &security.column_acls,
-        )
+        .update_foreign_table_security(relation, &security.row().into())
         .map_err(|error| {
             SQLError::Internal(format!(
                 "persist foreign table security for `{}`: {error}",

@@ -6,12 +6,14 @@
 
 //! Secondary indexes, path indexes, and column statistics.
 
+use crate::catalog::graph_observations::GraphDefinitionKind;
+
 use super::{
     column_stats_key, column_stats_prefix, decode_catalog_relation_key, decode_value, encode_value,
     key_with_tag, load_single_string_rows, read_str, relation_key, single_str_key, string_value,
-    CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, KeyValueBatch,
-    KeyValueCatalog, RelationIdentity, RelationKind, StorageBackendError, StorageBackendResult,
-    StoredCatalogIndex, StoredColumnStats, TAG_CATALOG_INDEX, TAG_PATH_INDEX,
+    CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, KeyValueBatch, KeyValueCatalog,
+    RelationIdentity, RelationKind, StorageBackendError, StorageBackendResult, StoredCatalogIndex,
+    StoredColumnStats, TAG_CATALOG_INDEX, TAG_PATH_INDEX,
 };
 
 impl KeyValueCatalog {
@@ -87,30 +89,16 @@ impl KeyValueCatalog {
         batch: &mut dyn KeyValueBatch,
         table_name: &str,
     ) -> StorageBackendResult<()> {
-        for row in self.load_catalog_indexes()? {
-            if row.table_name == table_name {
-                batch.delete(&relation_key(TAG_CATALOG_INDEX, &row.relation)?)?;
-                self.release_relation(batch, &row.relation, RelationKind::Index)?;
-            }
-        }
-        Ok(())
+        self.store
+            .with_read_view(&mut |read| drop_table_indexes(read, batch, table_name))
     }
 
     pub(super) fn load_catalog_indexes_impl(&self) -> StorageBackendResult<Vec<CatalogIndexRow>> {
         let mut rows = Vec::new();
-        for (key, value) in self.store.scan_prefix(&key_with_tag(TAG_CATALOG_INDEX))? {
-            let (relation, _, _) = decode_catalog_relation_key(&key)?;
-            let stored: StoredCatalogIndex = decode_value(&value)?;
-            rows.push(CatalogIndexRow {
-                relation,
-                index_type: stored.index_type,
-                table_name: stored.table_name,
-                columns_json: stored.columns_json,
-                parameters_json: stored.parameters_json,
-                definition_json: stored.definition_json,
-            });
-        }
-        rows.sort_by(|a, b| a.relation.cmp(&b.relation));
+        self.store.with_read_view(&mut |read| {
+            rows = load_indexes(read)?;
+            Ok(())
+        })?;
         Ok(rows)
     }
 
@@ -119,20 +107,36 @@ impl KeyValueCatalog {
         graph_name: &str,
         label_sequences_json: &str,
     ) -> StorageBackendResult<()> {
-        let mut batch = self.store.batch();
-        Self::invalidate_path_index_data_into(batch.as_mut(), graph_name)?;
-        batch.put(
-            &single_str_key(TAG_PATH_INDEX, graph_name)?,
-            &string_value(label_sequences_json),
-        )?;
-        batch.commit()
+        let identifiers = self.store.identifier_allocator().is_some();
+        self.store.with_mutation(&mut |read, batch| {
+            let read = super::graph_view::GraphRead { read, identifiers };
+            read.observe_definition_change(
+                batch,
+                GraphDefinitionKind::PathIndex,
+                graph_name,
+                Some(label_sequences_json.as_bytes()),
+            )?;
+            Self::invalidate_path_index_data_into(batch, graph_name)?;
+            batch.put(
+                &single_str_key(TAG_PATH_INDEX, graph_name)?,
+                &string_value(label_sequences_json),
+            )
+        })
     }
 
     pub(super) fn drop_path_index_impl(&self, graph_name: &str) -> StorageBackendResult<()> {
-        let mut batch = self.store.batch();
-        self.clear_path_index_data_into(batch.as_mut(), graph_name)?;
-        batch.delete(&single_str_key(TAG_PATH_INDEX, graph_name)?)?;
-        batch.commit()
+        let identifiers = self.store.identifier_allocator().is_some();
+        self.store.with_mutation(&mut |read, batch| {
+            let read = super::graph_view::GraphRead { read, identifiers };
+            read.observe_definition_change(
+                batch,
+                GraphDefinitionKind::PathIndex,
+                graph_name,
+                None,
+            )?;
+            Self::clear_path_index_data_into(read.read, batch, graph_name)?;
+            batch.delete(&single_str_key(TAG_PATH_INDEX, graph_name)?)
+        })
     }
 
     pub(super) fn load_path_indexes_impl(&self) -> StorageBackendResult<Vec<(String, String)>> {
@@ -224,4 +228,39 @@ impl KeyValueCatalog {
             .delete_prefix(&column_stats_prefix(table_name)?)?;
         Ok(())
     }
+}
+
+pub(super) fn load_indexes(
+    read: &dyn crate::key_value::KeyValueRead,
+) -> StorageBackendResult<Vec<CatalogIndexRow>> {
+    let mut rows = Vec::new();
+    read.visit_prefix(&key_with_tag(TAG_CATALOG_INDEX), &mut |key, value| {
+        let (relation, _, _) = decode_catalog_relation_key(key)?;
+        let stored: StoredCatalogIndex = decode_value(value)?;
+        rows.push(CatalogIndexRow {
+            relation,
+            index_type: stored.index_type,
+            table_name: stored.table_name,
+            columns_json: stored.columns_json,
+            parameters_json: stored.parameters_json,
+            definition_json: stored.definition_json,
+        });
+        Ok(())
+    })?;
+    rows.sort_by(|a, b| a.relation.cmp(&b.relation));
+    Ok(rows)
+}
+
+pub(super) fn drop_table_indexes(
+    read: &dyn crate::key_value::KeyValueRead,
+    batch: &mut dyn KeyValueBatch,
+    name: &str,
+) -> StorageBackendResult<()> {
+    for row in load_indexes(read)? {
+        if row.table_name == name {
+            batch.delete(&relation_key(TAG_CATALOG_INDEX, &row.relation)?)?;
+            super::relations::release_relation(read, batch, &row.relation, RelationKind::Index)?;
+        }
+    }
+    Ok(())
 }

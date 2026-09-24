@@ -188,6 +188,36 @@ impl Drop for OverlayCheckpoint {
 }
 
 impl GraphStorage for OverlayGraphStorage {
+    fn visit_selection_namespaces(
+        &self,
+        visit: &mut dyn FnMut(
+            uqa_storage::catalog::graph_identifiers::GraphIdentifierNamespace,
+        ) -> GraphStoreResult<()>,
+    ) -> GraphStoreResult<()> {
+        self.read.storage.visit_selection_namespaces(visit)?;
+        self.write.storage.visit_selection_namespaces(visit)
+    }
+    fn entity_observation_namespace(
+        &self,
+        kind: GraphEntityKind,
+        id: u64,
+    ) -> GraphStoreResult<Option<uqa_storage::catalog::graph_identifiers::GraphIdentifierNamespace>>
+    {
+        if self.changed(kind, id) {
+            self.write.storage.entity_observation_namespace(kind, id)
+        } else {
+            self.read.storage.entity_observation_namespace(kind, id)
+        }
+    }
+    fn guard_definition(&self, graph: Option<&str>) -> GraphStoreResult<()> {
+        self.write.storage.guard_definition(graph)
+    }
+    fn identifiers(&self) -> GraphStoreResult<Option<super::storage::GraphIdentifierScope<'_>>> {
+        self.write.storage.identifiers()
+    }
+    fn reset_identifiers(&self) -> GraphStoreResult<()> {
+        self.write.storage.reset_identifiers()
+    }
     fn unmodified_read_snapshot(&self) -> Option<PersistentGraphStore> {
         let state = self.state.lock();
         (state.changes.vertices.is_empty()

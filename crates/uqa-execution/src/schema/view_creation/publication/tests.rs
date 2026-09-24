@@ -91,18 +91,23 @@ fn definition(kind: StoredViewKind, persistence: RelationPersistence) -> StoredV
         panic!("query fixture");
     };
     StoredView {
-        object_id: [7; 16],
-        role_owner: "view_owner".into(),
-        acl: None,
-        column_acls: BTreeMap::new(),
-        query: *query,
-        output_columns: Some(vec!["value".into()]),
-        persistence,
-        options: Vec::new(),
-        kind,
-        materialized_rows: Vec::new(),
-        materialized_column_types: Vec::new(),
-        populated: true,
+        security: uqa_sql::catalog::security::BoundTableSecurity::owner(
+            uqa_sql::catalog::roles::RoleIdentity {
+                oid: 42,
+                object_id: [42; 16],
+            },
+        ),
+        definition: uqa_sql::catalog::stored_view::StoredViewDefinition {
+            object_id: [7; 16],
+            query: *query,
+            output_columns: Some(vec!["value".into()]),
+            persistence,
+            options: Vec::new(),
+            kind,
+            materialized_rows: Vec::new(),
+            materialized_column_types: Vec::new(),
+            populated: true,
+        },
     }
 }
 
@@ -123,7 +128,17 @@ fn view_publication_preserves_distinct_regular_and_materialized_guard_boundaries
         ["lock", "catalog", "save_locked", "unlock", "publish"]
     );
     assert_eq!(regular.views.borrow()[&relation].object_id, [7; 16]);
-    assert_eq!(regular.saved.borrow()[0].role_owner, "view_owner");
+    assert_eq!(
+        regular.saved.borrow()[0].security,
+        uqa_sql::catalog::security::BoundTableSecurity::owner(
+            uqa_sql::catalog::roles::RoleIdentity {
+                oid: 42,
+                object_id: [42; 16]
+            }
+        )
+        .row()
+        .into()
+    );
     let materialized = Publication::new(true, false);
     publish_materialized_view(
         &materialized,

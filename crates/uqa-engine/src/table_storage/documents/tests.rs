@@ -14,6 +14,65 @@ fn document(id: i64, value: i64) -> Document {
 }
 
 #[test]
+fn command_payload_rejection_preserves_the_previous_row_and_cached_exact_key() {
+    use uqa_execution::query::exact_lookup::FieldPresence;
+    let engine = Engine::new();
+    engine
+        .sql(
+            "CREATE TABLE charged_command (id INTEGER PRIMARY KEY, value INTEGER, body TEXT)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .mutation_coordinator()
+        .begin_command_mutation_overlay();
+    engine
+        .stage_command_document("charged_command", 1, Some(document(1, 10)))
+        .unwrap();
+    let lookup = |value| {
+        engine
+            .command_overlay_exact_match(
+                "charged_command",
+                &["value".into()],
+                &[Value::Int(value)],
+                FieldPresence::MissingIsNull,
+            )
+            .unwrap()
+    };
+    assert_eq!(lookup(10), Some(1));
+    let control = engine.query_retention_control().unwrap();
+    let before = control.memory().used();
+    let full = control
+        .memory()
+        .reserve(control.memory().limit() - before - 4096)
+        .unwrap();
+    let mut larger = document(1, 20);
+    larger.insert("body".into(), Value::Str("x".repeat(8192)));
+    let error = engine
+        .stage_command_document("charged_command", 1, Some(larger))
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("53200"));
+    drop(full);
+    assert_eq!(control.memory().used(), before);
+    assert_eq!(lookup(10), Some(1));
+    assert_eq!(lookup(20), None);
+    let retained = engine
+        .command_overlay_changes("charged_command")
+        .unwrap()
+        .unwrap();
+    let with_cache = control.memory().used();
+    engine.mutation_coordinator().end_command_mutation_overlay();
+    assert_eq!(
+        retained.get_field(1, "value").unwrap(),
+        Some(Value::Int(10))
+    );
+    assert!(control.memory().used() > 0);
+    assert!(control.memory().used() < with_cache);
+    drop(retained);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn command_overlay_scan_merges_persisted_and_staged_rows_in_document_order() {
     let engine = Engine::new();
     engine

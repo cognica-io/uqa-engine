@@ -161,10 +161,9 @@ pub(super) fn projection_output_names(projections: &[crate::ast::Projection]) ->
                 .clone()
                 .unwrap_or_else(|| match &projection.expr {
                     Expr::Column(name) | Expr::QualifiedColumn { column: name, .. } => name.clone(),
-                    Expr::Func { name, .. } => name
-                        .rsplit_once('.')
-                        .map_or(name.as_str(), |(_, local)| local)
-                        .to_string(),
+                    Expr::Func { name, binding, .. } => {
+                        crate::semantics::function_projection_label(name, binding.as_ref())
+                    }
                     _ => "?column?".into(),
                 })
         })

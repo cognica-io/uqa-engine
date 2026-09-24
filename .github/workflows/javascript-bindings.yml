@@ -3,6 +3,11 @@ name: JavaScript Bindings
 on:
   workflow_dispatch:
     inputs:
+      run_nori_measurements:
+        description: Run the existing Nori measurements only when separately authorized for the host
+        required: false
+        type: boolean
+        default: false
       full_matrix:
         description: Also build and verify every release package without publishing
         required: false
@@ -108,6 +113,13 @@ jobs:
         run: bash scripts/build-wasm.sh
       - name: Test browser WASM bundle
         run: node --test tests/wasm/test_uqa_wasm.mjs
+      - name: Verify concurrent transactions and IndexedDB restore in real Chrome
+        run: python3 scripts/verify-concurrent-transactions-browser.py --output output/playwright/concurrent-transactions/report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: concurrent-transactions-browser-${{ github.sha }}
+          path: output/playwright/concurrent-transactions/
       - name: Verify both analyzers in real Chrome and IndexedDB
         run: |
           set -euo pipefail
@@ -115,16 +127,17 @@ jobs:
             python3 scripts/verify-morphology-browser.py --language "$language" --output "output/playwright/${language}-enabled/report.json"
           done
       - name: Measure WASM analysis and indexing with reviewed allocation ceilings
+        if: ${{ inputs.run_nori_measurements }}
         env:
           RUSTFLAGS: ""
           CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS: "-D warnings"
         run: |
           python3 scripts/run-nori-benchmark.py --target wasm --output target/benchmark-runs/nori-wasm.json
           python3 scripts/run-nori-index-benchmark.py --target wasm --output target/benchmark-runs/nori-index-wasm.json
-          python3 scripts/run-nori-persistent-benchmark.py --provider sqlite --target wasm --output target/benchmark-runs/nori-sqlite-wasm.json
+          python3 scripts/run-nori-persistent-benchmark.py --provider sqlite --target wasm --output target/benchmark-runs/nori-sqlite-wasm.json --allocation-only
           python3 scripts/run-nori-phrase-benchmark.py --target wasm --output target/benchmark-runs/nori-phrase-wasm.json
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: ${{ always() && inputs.run_nori_measurements }}
         with:
           name: nori-wasm-${{ github.sha }}
           path: |

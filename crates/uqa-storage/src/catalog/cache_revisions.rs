@@ -12,6 +12,9 @@ use std::collections::BTreeMap;
 /// row data. Providers must advance them atomically with the corresponding
 /// mutation, including direct storage writes, and restore them on rollback.
 /// Missing support is distinct from an empty, unchanged database.
+/// Generations are opaque equality tokens, not clocks or counts. A logical
+/// provider may use a separate domain for transaction-private changes; rollback
+/// restores the prior tokens and commit replaces them with durable generations.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CatalogCacheRevisions {
     pub table_catalog: u64,

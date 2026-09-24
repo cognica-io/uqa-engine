@@ -6,6 +6,9 @@
 
 //! Relation, view, database, and stable OID catalog projection.
 
+#[cfg(test)]
+mod tests;
+
 use uqa_core::Value;
 use uqa_sql::{ResultRow, SQLError};
 
@@ -13,7 +16,7 @@ use crate::catalog::{CatalogReadView, RelationNameResolution};
 
 use super::super::helpers::acl::acl_identifier;
 use super::super::helpers::oids::{
-    current_user_oid, relation_oid, schema_oid, split_schema_name, stable_object_oid, stable_oid,
+    current_user_oid, namespace_oid, relation_oid, split_schema_name, stable_object_oid, stable_oid,
 };
 use super::super::helpers::rows::{
     bool_value, catalog_array, catalog_name, int_value, row, str_value,
@@ -34,7 +37,11 @@ pub fn build_pg_tables(
             ("tablename", str_value(table)),
             (
                 "tableowner",
-                str_value(table_snapshot.security.role_owner.clone()),
+                str_value(
+                    catalog
+                        .relation_security_names(&table_snapshot.security)?
+                        .role_owner,
+                ),
             ),
             ("tablespace", Value::Null),
             (
@@ -91,6 +98,7 @@ pub fn table_rowtype_oid_from(
 }
 
 pub fn pg_class_row(
+    catalog: &CatalogReadView,
     schema: &str,
     name: &str,
     relkind: &str,
@@ -99,6 +107,7 @@ pub fn pg_class_row(
     has_index: bool,
 ) -> ResultRow {
     pg_class_row_with_lifecycle(
+        catalog,
         schema,
         name,
         relkind,
@@ -113,6 +122,7 @@ pub fn pg_class_row(
 
 #[expect(clippy::too_many_arguments, reason = "keeps catalog metadata aligned")]
 pub fn pg_class_row_with_lifecycle(
+    catalog: &CatalogReadView,
     schema: &str,
     name: &str,
     relkind: &str,
@@ -130,7 +140,7 @@ pub fn pg_class_row_with_lifecycle(
         0
     };
     let mut row = pg_class_catalog_row(
-        oid, reltype, schema, name, relkind, natts, tuples, has_index,
+        catalog, oid, reltype, schema, name, relkind, natts, tuples, has_index,
     );
     row.insert(
         "relpersistence".into(),
@@ -152,6 +162,7 @@ pub fn pg_class_row_with_lifecycle(
 
 #[expect(clippy::too_many_arguments, reason = "keeps catalog metadata aligned")]
 pub fn pg_class_catalog_row(
+    catalog: &CatalogReadView,
     oid: i64,
     reltype: i64,
     schema: &str,
@@ -164,7 +175,7 @@ pub fn pg_class_catalog_row(
     row([
         ("oid", int_value(oid)),
         ("relname", str_value(name)),
-        ("relnamespace", int_value(schema_oid(schema))),
+        ("relnamespace", int_value(namespace_oid(catalog, schema))),
         ("reltype", int_value(reltype)),
         ("reloftype", int_value(0)),
         ("relowner", int_value(current_user_oid())),
@@ -219,7 +230,14 @@ pub fn build_pg_views(
         rows.push(row([
             ("schemaname", str_value(schema)),
             ("viewname", str_value(view)),
-            ("viewowner", str_value(stored.role_owner)),
+            (
+                "viewowner",
+                str_value(
+                    catalog
+                        .relation_security_names(&stored.security)?
+                        .role_owner,
+                ),
+            ),
             ("definition", str_value(definition)),
         ]));
     }
@@ -237,7 +255,14 @@ pub fn build_pg_matviews(
         rows.push(row([
             ("schemaname", str_value(schema)),
             ("matviewname", str_value(matview)),
-            ("matviewowner", str_value(&stored.role_owner)),
+            (
+                "matviewowner",
+                str_value(
+                    catalog
+                        .relation_security_names(&stored.security)?
+                        .role_owner,
+                ),
+            ),
             ("tablespace", Value::Null),
             ("hasindexes", bool_value(false)),
             ("ispopulated", bool_value(stored.populated)),
@@ -255,14 +280,12 @@ pub fn build_pg_matviews(
 }
 
 pub fn build_pg_database(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
-    let security = catalog.database_security();
+    let bound = catalog.database_security();
+    let security = catalog.database_security_names()?;
     Ok(vec![row([
         ("oid", int_value(uqa_sql::catalog::DATABASE_OID)),
         ("datname", str_value(uqa_sql::catalog::DATABASE_NAME)),
-        (
-            "datdba",
-            int_value(uqa_sql::catalog::roles::role_oid(&security.role_owner)),
-        ),
+        ("datdba", int_value(bound.role_owner.oid)),
         ("encoding", int_value(6)),
         ("datlocprovider", str_value("b")),
         ("datistemplate", bool_value(false)),
@@ -277,7 +300,7 @@ pub fn build_pg_database(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQ
         ("datlocale", str_value("PG_UNICODE_FAST")),
         ("daticurules", Value::Null),
         ("datcollversion", str_value("1")),
-        ("datacl", database_acl_catalog_value(security)?),
+        ("datacl", database_acl_catalog_value(&security)?),
     ])])
 }
 
@@ -290,11 +313,10 @@ fn database_acl_catalog_value(
     catalog_array(
         acl.iter()
             .map(|entry| {
-                let grantee = if entry.role == "PUBLIC" {
-                    String::new()
-                } else {
-                    acl_identifier(&entry.role)
-                };
+                let grantee = entry
+                    .role
+                    .role_name()
+                    .map_or_else(String::new, acl_identifier);
                 let grantor =
                     acl_identifier(entry.grantor.as_deref().unwrap_or(&security.role_owner));
                 let mut privileges = String::new();

@@ -64,7 +64,7 @@ impl LockingCatalog for Engine {
         Engine::referenceable_keys(self, table).map_err(|error| error.to_string())
     }
     fn table_columns(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String> {
-        self.try_describe_table(table)
+        self.describe_table_in_execution(table)
             .map_err(|error| error.to_string())
     }
 }
@@ -94,7 +94,7 @@ impl QueryRowLockSession for Engine {
 }
 impl RowLockReadSource for Engine {
     fn get_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError> {
-        Engine::get_document(self, table, doc_id)
+        Engine::get_live_document(self, table, doc_id)
     }
     fn get_document_for_mutation(
         &self,

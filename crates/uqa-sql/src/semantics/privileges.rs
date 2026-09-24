@@ -8,6 +8,7 @@
 
 mod enforcement;
 
+use crate::catalog::roles::RoleReference;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::plan::{QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan};
@@ -855,7 +856,7 @@ pub fn ensure_select_privileges_for_table_expressions(
 
 pub struct TargetSelectPrivilegeRequest<'a, 'expr> {
     pub table: &'a str,
-    pub privilege_subject: Option<&'a str>,
+    pub privilege_subject: Option<&'a RoleReference>,
     pub target_qualifier: &'a str,
     pub returning_aliases: &'a crate::ast::ReturningAliases,
     pub expressions: &'a [&'expr ScalarExpr],

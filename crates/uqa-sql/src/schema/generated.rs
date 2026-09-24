@@ -14,6 +14,7 @@ use crate::{
     SQLError,
 };
 
+pub(crate) mod eligibility;
 pub(super) mod typing;
 
 pub fn prepare_generated_columns(
@@ -167,6 +168,7 @@ fn validate_generation_expression(
         }
         Expr::Func {
             name,
+            binding,
             args,
             distinct,
             order_by,
@@ -179,6 +181,10 @@ fn validate_generation_expression(
                 ));
             }
             if kind == GeneratedColumnKind::Virtual
+                && binding
+                    .as_ref()
+                    .and_then(|binding| binding.dispatch)
+                    .is_none()
                 && (engine
                     .registered_runtime_function_volatility(name)
                     .is_some()

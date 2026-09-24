@@ -5,18 +5,35 @@
 //
 
 //! Shared relation rename publication and role-transfer authorization boundaries.
-use crate::catalog::security::roles::RoleCatalogGuards;
+use crate::catalog::security::roles::{
+    locking::{RoleBinding, RoleLockContext},
+    RoleCatalogGuards,
+};
+use crate::catalog::security::table_inquiry::TablePrivilegeContext;
+use crate::row_locks::shared_objects::SharedObjectLockSession;
 use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
-    ast::RoleAttribute,
     catalog::roles::{self, RoleReferenceNames},
+    catalog::security::ownership::RelationOwnerSchemas,
     SQLError,
 };
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
-pub trait RelationAlterLocks {
-    fn lock_exclusive(&self, name: &str) -> Result<(), SQLError>;
+pub fn validate_relation_alter_authority(
+    owners: &TablePrivilegeContext<'_>,
+    namespaces: &super::namespaces::relations::RelationCreationContext<'_>,
+    relation: &RelationIdentity,
+    kind: &str,
+    rename: bool,
+) -> Result<(), SQLError> {
+    owners.ensure_relation_owner(relation, kind)?;
+    uqa_sql::catalog::security::ownership::reject_system_relation_alter(relation)?;
+    if rename {
+        namespaces.ensure_namespace_create(&relation.schema)?;
+    }
+    Ok(())
 }
 
 pub trait RelationRenameDependencies {
@@ -49,31 +66,29 @@ pub fn rewrite_relation_rename_dependents(
 }
 
 pub trait RoleTargetSchemaAccess {
-    fn require_schema_create(&self, schema: &str, role: &str) -> Result<(), SQLError>;
+    fn require_schema_create(&self, schema: &str, role: &RoleReference) -> Result<(), SQLError>;
 }
 
 pub struct RoleTransferContext<'a> {
     pub roles: &'a dyn RoleCatalogGuards,
     pub session: &'a dyn RoleReferenceNames,
-    pub schemas: &'a dyn RoleTargetSchemaAccess,
+    pub schemas: &'a dyn RelationOwnerSchemas,
+    pub locks: &'a dyn SharedObjectLockSession,
 }
 
-/// Validate the target while retaining the original roles-then-memberships guard order.
-pub fn role_transfer_target(
-    context: &RoleTransferContext<'_>,
-    requested_owner: &str,
-) -> Result<(String, bool), SQLError> {
-    let new_owner = roles::resolve_role_reference(context.session, requested_owner);
-    let current_user_is_superuser;
-    {
-        let roles = context.roles.role_definitions();
-        roles::require_role_exists(&roles, &new_owner)?;
-        let memberships = context.roles.role_memberships();
-        let current_user = context.session.current_user_name();
-        current_user_is_superuser = roles
-            .get(&current_user)
-            .is_some_and(|role| role.has(RoleAttribute::Superuser));
-        roles::require_set_role(&roles, &memberships, &current_user, &new_owner)?;
+impl<'a> RoleTransferContext<'a> {
+    pub fn lock_context(&self) -> RoleLockContext<'a> {
+        RoleLockContext {
+            roles: self.roles,
+            session: self.locks,
+        }
     }
-    Ok((new_owner, current_user_is_superuser))
+
+    pub fn bind(
+        &self,
+        requested: &uqa_sql::ast::RoleSpecification,
+    ) -> Result<RoleBinding, SQLError> {
+        self.lock_context()
+            .bind(&roles::resolve_role_specification(self.session, requested))
+    }
 }

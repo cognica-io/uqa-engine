@@ -13,9 +13,7 @@ fn migration_35_adds_bootstrap_ownership_to_legacy_tables() {
     current
         .save_table(&TableSchema {
             relation: RelationIdentity::new("public", "legacy_owner"),
-            role_owner: "former_owner".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::default(),
+            security: uqa_storage::RelationSecurityRow::legacy("former_owner"),
             object_id: [12; 16],
             storage_generation: [13; 16],
             analyzer_json: "{}".into(),
@@ -39,7 +37,7 @@ fn migration_35_adds_bootstrap_ownership_to_legacy_tables() {
 
     let upgraded = Catalog::open(connection).unwrap();
     let schema = upgraded.load_tables().unwrap().remove(0);
-    assert_eq!(schema.role_owner, "uqa");
+    assert_eq!(legacy_security(&schema.security).role_owner, "uqa");
     assert_eq!(schema.object_id, [12; 16]);
     assert_eq!(schema.storage_generation, [13; 16]);
 }
@@ -51,9 +49,7 @@ fn migration_35_preserves_table_ownership_when_the_column_precedes_its_marker() 
     current
         .save_table(&TableSchema {
             relation: RelationIdentity::new("public", "early_owner"),
-            role_owner: "early_table_owner".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::default(),
+            security: uqa_storage::RelationSecurityRow::legacy("early_table_owner"),
             object_id: [14; 16],
             storage_generation: [15; 16],
             analyzer_json: "{}".into(),
@@ -76,7 +72,10 @@ fn migration_35_preserves_table_ownership_when_the_column_precedes_its_marker() 
 
     let upgraded = Catalog::open(connection).unwrap();
     let schema = upgraded.load_tables().unwrap().remove(0);
-    assert_eq!(schema.role_owner, "early_table_owner");
+    assert_eq!(
+        legacy_security(&schema.security).role_owner,
+        "early_table_owner"
+    );
 }
 
 #[test]
@@ -86,9 +85,7 @@ fn migration_36_adds_a_null_table_acl_without_reconstructing_security_state() {
     current
         .save_table(&TableSchema {
             relation: RelationIdentity::new("public", "legacy_acl"),
-            role_owner: "legacy_owner".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::default(),
+            security: uqa_storage::RelationSecurityRow::legacy("legacy_owner"),
             object_id: [16; 16],
             storage_generation: [17; 16],
             analyzer_json: "{}".into(),
@@ -112,8 +109,8 @@ fn migration_36_adds_a_null_table_acl_without_reconstructing_security_state() {
 
     let upgraded = Catalog::open(connection).unwrap();
     let schema = upgraded.load_tables().unwrap().remove(0);
-    assert_eq!(schema.role_owner, "legacy_owner");
-    assert_eq!(schema.acl, None);
+    assert_eq!(legacy_security(&schema.security).role_owner, "legacy_owner");
+    assert_eq!(legacy_security(&schema.security).acl, None);
     assert_eq!(schema.object_id, [16; 16]);
     assert_eq!(schema.storage_generation, [17; 16]);
 }
@@ -134,9 +131,13 @@ fn migration_36_preserves_an_acl_column_installed_before_its_version_marker() {
     current
         .save_table(&TableSchema {
             relation: RelationIdentity::new("public", "early_acl"),
-            role_owner: "early_owner".into(),
-            acl: Some(acl.clone()),
-            column_acls: std::collections::BTreeMap::default(),
+            security: uqa_storage::RelationSecurityRow::Legacy(
+                uqa_core::catalog_acl::LegacyRelationSecurity {
+                    role_owner: "early_owner".into(),
+                    acl: Some(acl.clone()),
+                    column_acls: std::collections::BTreeMap::default(),
+                },
+            ),
             object_id: [18; 16],
             storage_generation: [19; 16],
             analyzer_json: "{}".into(),
@@ -159,6 +160,6 @@ fn migration_36_preserves_an_acl_column_installed_before_its_version_marker() {
 
     let upgraded = Catalog::open(connection).unwrap();
     let schema = upgraded.load_tables().unwrap().remove(0);
-    assert_eq!(schema.role_owner, "early_owner");
-    assert_eq!(schema.acl, Some(acl));
+    assert_eq!(legacy_security(&schema.security).role_owner, "early_owner");
+    assert_eq!(legacy_security(&schema.security).acl, Some(acl));
 }

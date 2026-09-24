@@ -20,18 +20,24 @@ use uqa_sql::{
 };
 use uqa_storage::{
     document_store::Document, CatalogIndexRow, DocumentStore, InvertedIndex, StorageBackendResult,
-    VectorIndex,
 };
 
 pub type TextIndexRead<'a> = Box<dyn Deref<Target = Box<dyn InvertedIndex>> + 'a>;
-pub type VectorIndexRead<'a> = Box<dyn Deref<Target = BTreeMap<String, Box<dyn VectorIndex>>> + 'a>;
+pub type VectorIndexRead<'a> =
+    Box<dyn Deref<Target = uqa_storage::vector_index::VectorIndexes> + 'a>;
 
 pub trait RetrievalIndexState: Send + Sync {
+    fn columns(&self) -> Arc<Vec<ColumnDef>>;
     fn inverted_index(&self) -> TextIndexRead<'_>;
     fn vector_indexes(&self) -> VectorIndexRead<'_>;
 }
 
 pub trait RetrievalRelations: Sync {
+    fn serializable_read(
+        &self,
+        table: &str,
+    ) -> Result<Option<crate::serializable::SerializableRelationRead>, SQLError>;
+
     fn try_describe_query_table(&self, table: &str)
         -> StorageBackendResult<Option<Vec<ColumnDef>>>;
     fn has_table(&self, table: &str) -> StorageBackendResult<bool>;
@@ -110,7 +116,7 @@ pub trait PhysicalVectorRetrieval: Sync {
 }
 
 pub trait RetrievalGraphs: Sync {
-    fn graph_handle(&self, graph: &str) -> Option<Arc<GraphStoreHandle>>;
+    fn graph_handle(&self, graph: &str) -> Result<Option<Arc<GraphStoreHandle>>, SQLError>;
 }
 
 pub trait RetrievalModels: Sync {

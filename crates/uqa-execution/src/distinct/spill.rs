@@ -7,9 +7,9 @@
 //! Memory-to-disk transition and exact bucketed spill storage.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use uqa_storage::temporary_file::TemporaryFile as File;
 
 use tempfile::{Builder as TempBuilder, TempDir};
 
@@ -122,18 +122,12 @@ impl DiskKeySet {
         let bucket = u8::try_from(stable_hash(key) % DISK_BUCKETS)
             .map_err(|_| distinct_error("DISTINCT spill bucket exceeds u8"))?;
         if !self.buckets.contains_key(&bucket) {
-            let path = self.directory.path().join(format!("bucket-{bucket:02x}"));
-            let file = OpenOptions::new()
-                .create_new(true)
-                .read(true)
-                .write(true)
-                .open(&path)
-                .map_err(|error| {
-                    distinct_error(format!(
-                        "failed to create DISTINCT spill bucket {}: {error}",
-                        path.display()
-                    ))
-                })?;
+            let file = File::new_in(self.directory.path()).map_err(|error| {
+                distinct_error(format!(
+                    "failed to create DISTINCT spill bucket {}: {error}",
+                    self.directory.path().display()
+                ))
+            })?;
             self.buckets.insert(bucket, file);
         }
         let file = self

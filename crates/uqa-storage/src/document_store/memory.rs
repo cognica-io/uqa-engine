@@ -9,9 +9,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use uqa_core::{DocId, Value};
+use uqa_core::{memory::BudgetedVec, DocId, Value};
 
 use crate::backend::StorageBackendResult;
+use crate::read_control::StorageReadControl;
 
 use super::{Document, DocumentMetadata, DocumentStore, SharedDocumentRow, StoredDocument};
 
@@ -147,6 +148,40 @@ impl DocumentStore for MemoryDocumentStore {
             .map(|stored| self.materialize_stored_document(stored)))
     }
 
+    fn get_stored_many_controlled(
+        &self,
+        ids: &[DocId],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<super::RetainedDocumentPage> {
+        control.check()?;
+        let mut page = BudgetedVec::new(control.memory());
+        page.reserve(ids.len())?;
+        for id in ids {
+            control.check()?;
+            let row = self
+                .state
+                .documents
+                .get(id)
+                .map(|row| -> StorageBackendResult<_> {
+                    let fields = super::controlled_rows::copy_fields(
+                        self.state.layouts[row.layout_id]
+                            .iter()
+                            .map(String::as_str)
+                            .zip(row.values.iter()),
+                        control,
+                    )?;
+                    Ok(super::RetainedStoredDocument::with_metadata(
+                        fields,
+                        row.metadata,
+                    ))
+                })
+                .transpose()?;
+            page.push(row)?;
+        }
+        control.check()?;
+        Ok(page)
+    }
+
     fn get_stored_many(
         &self,
         doc_ids: &[DocId],
@@ -243,6 +278,42 @@ impl DocumentStore for MemoryDocumentStore {
     ) -> StorageBackendResult<()> {
         self.visit_fields_multi_ref_with_presence(doc_ids, fields, visitor);
         Ok(())
+    }
+
+    fn with_field_ref_controlled(
+        &self,
+        id: DocId,
+        field: &str,
+        control: &StorageReadControl,
+        visitor: &mut dyn FnMut(Option<&Value>) -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        let value = self
+            .state
+            .documents
+            .get(&id)
+            .and_then(|row| self.field(row, field));
+        visitor(value)?;
+        control.check()
+    }
+
+    fn field_presence_controlled(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<BudgetedVec<bool>> {
+        control.check()?;
+        let mut present = BudgetedVec::new(control.memory());
+        for id in ids {
+            let row = self.state.documents.get(id);
+            for field in fields {
+                control.check()?;
+                present.push(row.is_some_and(|row| self.field(row, field).is_some()))?;
+            }
+        }
+        control.check()?;
+        Ok(present)
     }
 
     fn get_shared_fields(
@@ -354,6 +425,25 @@ impl DocumentStore for MemoryDocumentStore {
                 .collect(),
             None => self.state.documents.keys().take(limit).copied().collect(),
         })
+    }
+
+    fn next_doc_ids_controlled(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<BudgetedVec<DocId>> {
+        use std::ops::Bound::{Excluded, Unbounded};
+
+        control.check()?;
+        let mut ids = BudgetedVec::new(control.memory());
+        let after = after.map_or(Unbounded, Excluded);
+        for (&id, _) in self.state.documents.range((after, Unbounded)).take(limit) {
+            control.check()?;
+            ids.push(id)?;
+        }
+        control.check()?;
+        Ok(ids)
     }
 
     fn next_shared_fields(

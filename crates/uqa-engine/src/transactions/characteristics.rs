@@ -178,18 +178,27 @@ impl Engine {
                 "default_transaction_isolation".into(),
                 isolation.as_str().into(),
             );
+            session
+                .parameter_scopes
+                .session_assignment("default_transaction_isolation");
         }
         if let Some(read_only) = options.read_only {
             session.session_vars.insert(
                 "default_transaction_read_only".into(),
                 if read_only { "on" } else { "off" }.into(),
             );
+            session
+                .parameter_scopes
+                .session_assignment("default_transaction_read_only");
         }
         if let Some(deferrable) = options.deferrable {
             session.session_vars.insert(
                 "default_transaction_deferrable".into(),
                 if deferrable { "on" } else { "off" }.into(),
             );
+            session
+                .parameter_scopes
+                .session_assignment("default_transaction_deferrable");
         }
     }
 

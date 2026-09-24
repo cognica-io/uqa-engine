@@ -237,9 +237,11 @@ impl SchemaScope {
                     )?);
                 }
             }
-            if let Some(error) =
-                crate::semantics::virtual_relation_mutation_error(&self.resolution, command)
-            {
+            if let Some(error) = crate::semantics::virtual_relation_mutation_error(
+                self.catalog.as_ref(),
+                &self.resolution,
+                command,
+            )? {
                 return Err(error);
             }
             Ok(RowSchema::with_types(columns, types))

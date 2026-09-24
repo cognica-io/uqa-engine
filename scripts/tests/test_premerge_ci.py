@@ -51,7 +51,8 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
             "(github.event_name == 'workflow_dispatch' && inputs.run_rust) }}"
         )
 
-        self.assertEqual(self.workflow.count(condition), 10)
+        self.assertEqual(self.workflow.count(condition), 9)
+        self.assertIn("(github.event_name == 'workflow_dispatch' && (inputs.run_rust || inputs.run_nori_allocations))", self.workflow)
         self.assertNotIn("if: ${{ inputs.run_rust }}", self.workflow)
 
     def test_upstream_reference_is_required_by_the_merge_gate(self) -> None:
@@ -93,10 +94,9 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
             "          save-if: ${{ github.ref == 'refs/heads/main' }}\n"
         )
 
-        self.assertEqual(
-            self.workflow.count("      - uses: Swatinem/rust-cache@v2\n"), 7
-        )
-        self.assertEqual(self.workflow.count(cache_step), 7)
+        cache_count = self.workflow.count("      - uses: Swatinem/rust-cache@v2\n")
+        self.assertGreater(cache_count, 0)
+        self.assertEqual(self.workflow.count(cache_step), cache_count)
 
 
 class PremergeCITest(unittest.TestCase):

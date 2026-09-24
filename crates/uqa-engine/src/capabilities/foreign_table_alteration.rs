@@ -8,7 +8,7 @@
 use crate::Engine;
 use uqa_core::RelationIdentity;
 use uqa_execution::{
-    catalog::{foreign::StoredForeignTable, security::TableSecurity},
+    catalog::{foreign::StoredForeignTable, security::BoundTableSecurity},
     schema::{
         foreign_table_alteration::{
             ForeignMemoryRegistryWrite, ForeignSecurityRegistryWrite, ForeignTableAlterAccess,
@@ -27,7 +27,8 @@ impl Engine {
         ForeignTableAlterContext {
             names: self,
             catalog: self,
-            access: self,
+            authority: self.table_privilege_context(),
+            creation: self.relation_creation_context(),
             locks: self,
             writer: self,
             roles: self.role_transfer_context(),
@@ -42,14 +43,16 @@ impl Engine {
 }
 impl ForeignTableAlterTransactions for Engine {
     fn with_foreign_table_write(&self, write: ForeignTableAlterWrite<'_>) -> Result<(), SQLError> {
-        self.with_implicit_transaction(|engine| write(&engine.foreign_table_alter_context()))
+        self.with_implicit_definition_transaction(|engine| {
+            write(&engine.foreign_table_alter_context())
+        })
     }
 }
 impl ForeignTableAlterCatalog for Engine {
     fn contains_table(&self, relation: &RelationIdentity) -> bool {
         self.durable.foreign_tables.read().contains_key(relation)
     }
-    fn security(&self, relation: &RelationIdentity) -> Option<TableSecurity> {
+    fn security(&self, relation: &RelationIdentity) -> Option<BoundTableSecurity> {
         self.durable
             .foreign_table_security
             .read()
@@ -97,7 +100,7 @@ impl ForeignTableAlterPublication for Engine {
     fn persist_security(
         &self,
         relation: &RelationIdentity,
-        security: &TableSecurity,
+        security: &BoundTableSecurity,
     ) -> Result<(), SQLError> {
         self.persist_foreign_table_security(relation, security)
     }

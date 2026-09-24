@@ -8,15 +8,16 @@
 use crate::schema::columns::removal::drop_column;
 use crate::schema::constraints::{
     add_check_constraint, add_foreign_key_constraint, add_not_null_constraint, alter_constraint,
-    checks, drop::drop_constraint, set_not_null_constraint, table_constraint_state,
-    validate_and_mark_constraint,
+    drop::drop_constraint, set_not_null_constraint, table_constraint_state, validate_constraint,
 };
 use uqa_sql::{
     ast::{AlterTableAction, AlterTableStmt},
     SQLError, SQLResult,
 };
+pub mod binding;
 mod context;
 pub mod entry;
+mod locking;
 mod recursion;
 pub use context::*;
 use recursion::{materialize_recursive_action_names, run_recursive_alter_action};
@@ -27,6 +28,7 @@ pub fn run_alter_table<S: Clone + 'static>(
     context: &TableAlterContext<'_, S>,
     stmt: AlterTableStmt,
 ) -> Result<SQLResult, SQLError> {
+    let mode = uqa_sql::schema::table_alteration::syntax::table_alter_lock_mode(&stmt).into();
     let AlterTableStmt {
         table,
         qualifier,
@@ -39,6 +41,7 @@ pub fn run_alter_table<S: Clone + 'static>(
         if let AlterTableAction::AddColumn {
             column,
             if_not_exists: true,
+            ..
         } = &action
         {
             if context
@@ -57,28 +60,7 @@ pub fn run_alter_table<S: Clone + 'static>(
                 continue;
             }
         }
-        match &mut action {
-            AlterTableAction::AddColumn { column, .. } => {
-                column.ty = uqa_sql::type_resolution::resolve_declared_column_type(
-                    context.hierarchy.publication.types,
-                    &column.ty,
-                )?;
-            }
-            AlterTableAction::AlterColumnType { ty, .. } => {
-                *ty = uqa_sql::type_resolution::resolve_declared_column_type(
-                    context.hierarchy.publication.types,
-                    ty,
-                )?;
-            }
-            _ => {}
-        }
-        materialize_recursive_action_names(context, &table, recurse, &mut action)?;
-        // Column merging can stop at an existing child column. Its CHECK still has an independent inheritance lifecycle and must reach every supplying edge.
-        let column_check = if let AlterTableAction::AddColumn { column, .. } = &mut action {
-            uqa_sql::schema::constraint_changes::take_column_check(column)
-        } else {
-            None
-        };
+        let column_checks = prepare_alter_action(context, &table, recurse, &mut action, mode)?;
         run_recursive_alter_action(
             context,
             AlterTableStmt {
@@ -90,8 +72,7 @@ pub fn run_alter_table<S: Clone + 'static>(
             },
             action,
         )?;
-        if let Some(constraint) = column_check {
-            let mut action = AlterTableAction::AddCheckConstraint { constraint };
+        for mut action in column_checks {
             materialize_recursive_action_names(context, &table, recurse, &mut action)?;
             run_recursive_alter_action(
                 context,
@@ -107,6 +88,54 @@ pub fn run_alter_table<S: Clone + 'static>(
         }
     }
     Ok(SQLResult::empty())
+}
+
+fn prepare_alter_action<S: Clone + 'static>(
+    context: &TableAlterContext<'_, S>,
+    table: &str,
+    recurse: bool,
+    action: &mut AlterTableAction,
+    mode: crate::row_locks::RelationLockMode,
+) -> Result<Vec<AlterTableAction>, SQLError> {
+    match action {
+        AlterTableAction::AddColumn { column, .. } => {
+            column.ty = uqa_sql::type_resolution::resolve_declared_column_type(
+                context.hierarchy.publication.types,
+                &column.ty,
+            )?;
+        }
+        AlterTableAction::AlterColumnType { ty, .. } => {
+            *ty = uqa_sql::type_resolution::resolve_declared_column_type(
+                context.hierarchy.publication.types,
+                ty,
+            )?;
+        }
+        _ => {}
+    }
+    materialize_recursive_action_names(context, table, recurse, action)?;
+    // Column merging can stop at an existing child column. Its CHECK still has an independent inheritance lifecycle and must reach every supplying edge.
+    let mut column_checks = if let AlterTableAction::AddColumn { column, checks, .. } = action {
+        uqa_sql::schema::constraint_changes::take_column_check(column)
+            .into_iter()
+            .chain(std::mem::take(checks))
+            .map(|constraint| AlterTableAction::AddCheckConstraint { constraint })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    locking::prepare_table_alter_action(&context.binding, context, table, recurse, action, mode)?;
+    for check in &mut column_checks {
+        locking::prepare_table_alter_action(
+            &context.binding,
+            context,
+            table,
+            recurse,
+            check,
+            mode,
+        )?;
+    }
+    context.binding.locks.prepare_definition_write()?;
+    Ok(column_checks)
 }
 
 #[expect(
@@ -166,13 +195,16 @@ fn run_alter_table_action<S: Clone + 'static>(
         }
         AlterTableAction::AddColumn {
             column,
+            key_constraints,
             if_not_exists,
+            ..
         } => {
             crate::schema::columns::addition::add_column(
                 &context.addition,
                 &stmt.table,
                 &stmt.qualifier,
                 column,
+                &key_constraints,
                 if_not_exists,
             )?;
         }
@@ -217,9 +249,7 @@ fn run_alter_table_action<S: Clone + 'static>(
             )?;
         }
         AlterTableAction::ValidateConstraint { name } => {
-            if !checks::validate_check(&context.constraints, &stmt.table, &name, stmt.recurse)? {
-                validate_and_mark_constraint(&context.constraints, &stmt.table, &name)?;
-            }
+            validate_constraint(&context.constraints, &stmt.table, &name, stmt.recurse)?;
         }
         AlterTableAction::AlterConstraint {
             name,
@@ -292,18 +322,17 @@ fn run_alter_table_action<S: Clone + 'static>(
                 .map_err(|e| ddl_storage_error("ALTER TABLE RENAME COLUMN", e))?;
         }
         AlterTableAction::RenameTable { to } => {
-            if context
-                .lifecycle
-                .has_table(&to)
-                .map_err(|err| ddl_storage_error("ALTER TABLE RENAME", err))?
-            {
-                return Err(SQLError::Unsupported(format!(
-                    "ALTER TABLE RENAME: relation `{to}` already exists"
-                )));
-            }
+            let source = uqa_core::RelationIdentity::from_legacy_name(&stmt.table)
+                .map_err(SQLError::Internal)?;
+            let target = uqa_sql::schema::relation_alteration::relation_rename_target(
+                context.binding.names,
+                &source,
+                &to,
+                "ALTER TABLE RENAME",
+            )?;
             if !context
                 .lifecycle
-                .rename_table(&stmt.table, &to)
+                .rename_table(&stmt.table, &target.qualified_name())
                 .map_err(|e| ddl_storage_error("ALTER TABLE RENAME", e))?
             {
                 return Err(SQLError::Unsupported(format!(
@@ -316,7 +345,13 @@ fn run_alter_table_action<S: Clone + 'static>(
             context.events.rename_trigger(&stmt.table, &from, &to)?;
         }
         AlterTableAction::RenameConstraint { from, to } => {
-            if !checks::rename_check(&context.constraints, &stmt.table, &from, &to, stmt.recurse)? {
+            if !crate::schema::constraints::renaming::rename_constraint(
+                &context.constraints,
+                &stmt.table,
+                &from,
+                &to,
+                stmt.recurse,
+            )? {
                 context
                     .events
                     .rename_trigger_constraint(&stmt.table, &from, &to)?;
@@ -397,6 +432,10 @@ fn run_alter_table_action<S: Clone + 'static>(
                 .iter()
                 .find(|column| column.name == name)
                 .ok_or_else(|| SQLError::UnknownColumn(format!("{}.{name}", stmt.table)))?;
+            uqa_sql::schema::constraint_changes::not_null_removal::validate_column_removal(
+                &stmt.table,
+                column,
+            )?;
             if let Some(constraint_name) = column.not_null_name.as_deref() {
                 drop_constraint(
                     &context.constraints,

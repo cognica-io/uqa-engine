@@ -13,14 +13,14 @@ use uqa_execution::schema::publication::{
 use uqa_sql::ast::{ColumnDef, TableConstraintSet};
 use uqa_storage::StorageBackendResult;
 
-pub(crate) use uqa_execution::catalog::identity::allocate_catalog_object_id;
 impl Engine {
     pub(crate) fn schema_publication_context(&self) -> SchemaPublicationContext<'_> {
         SchemaPublicationContext {
             catalog: self,
             types: self,
             bindings: self.schema_dependency_binding_context(),
-            allocate_identity: allocate_catalog_object_id,
+            identities: self.catalog_identity_reservation_context(),
+            indexes: self.index_registry_context(),
         }
     }
 }
@@ -49,6 +49,9 @@ impl TableSchemaCatalog for Engine {
     }
 }
 impl TableSchemaState for SchemaTableBinding<'_> {
+    fn object_id(&self) -> [u8; 16] {
+        self.state.object_id()
+    }
     fn dependency_constraints(&self) -> TableConstraintSet {
         TableConstraintSet {
             checks: self.state.table_checks.read().clone(),
@@ -93,6 +96,7 @@ impl TableSchemaState for SchemaTableBinding<'_> {
         *self.state.table_checks.write() = constraints.checks;
         *self.state.foreign_keys.write() = constraints.foreign_keys;
         *self.state.key_constraints.write() = constraints.key_constraints;
+        *self.state.hierarchy.write() = constraints.hierarchy;
     }
 
     fn key_constraints(&self) -> Vec<uqa_sql::ast::TableKeyConstraint> {

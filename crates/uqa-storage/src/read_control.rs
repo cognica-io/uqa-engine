@@ -7,10 +7,12 @@
 //! Query-owned provider reads share allocation limits and cancellation with their consumers.
 
 use crate::StorageBackendResult;
-use uqa_core::{memory::MemoryBudget, CancellationToken};
+use uqa_core::memory::MemoryBudget;
+pub use uqa_core::CancellationToken;
 
 pub type ValueReadVisitor<'a> = dyn FnMut(Option<&[u8]>) -> StorageBackendResult<()> + 'a;
 pub type KeyValueReadVisitor<'a> = dyn FnMut(&[u8], &[u8]) -> StorageBackendResult<()> + 'a;
+pub type KeyReadVisitor<'a> = dyn FnMut(&[u8]) -> StorageBackendResult<()> + 'a;
 
 #[derive(Clone, Debug)]
 pub struct StorageReadControl {
@@ -35,6 +37,10 @@ impl StorageReadControl {
     }
     pub fn cancellation(&self) -> &CancellationToken {
         &self.cancellation
+    }
+    pub(crate) fn shares_context(&self, other: &Self) -> bool {
+        self.memory.shares_allowance(&other.memory)
+            && self.cancellation.shares_signal(&other.cancellation)
     }
     pub fn check(&self) -> StorageBackendResult<()> {
         self.cancellation.check()?;

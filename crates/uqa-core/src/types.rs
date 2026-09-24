@@ -44,7 +44,7 @@ mod posting;
 mod temporal;
 mod value;
 
-pub use array::ArrayValue;
+pub use array::{ArrayTraversalError, ArrayValue, BudgetedArrayElements, ControlledArrayElements};
 pub use decimal::DecimalValue;
 pub use graph::{Edge, EdgeId, Vertex, VertexId};
 pub use graph_phi::{
@@ -52,11 +52,14 @@ pub use graph_phi::{
     GRAPH_PHI_VERTICES_FIELD,
 };
 pub use index_stats::IndexStats;
-pub use jsonb::jsonb_equality_key;
+pub use jsonb::{
+    jsonb_equality_key, jsonb_equality_key_with_control, write_jsonb_comparison_key,
+    write_jsonb_equality_key, JsonbKeyError,
+};
 pub use occurrence::{TokenOccurrence, TokenOccurrenceError, TokenOffsets};
 pub use posting::{GeneralizedPayload, GeneralizedPostingEntry, Payload, PostingEntry};
 pub use temporal::TemporalValue;
-pub use value::Value;
+pub use value::{JsonValueDecoder, Value, ValueRetentionError};
 
 #[cfg(test)]
 mod tests;

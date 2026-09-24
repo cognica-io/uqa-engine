@@ -6,6 +6,11 @@
 
 //! Schedule creation namespace resolution and writer retries without owning session state.
 
+use crate::catalog::security::roles::{
+    dependencies::retain_created_owner,
+    locking::{RoleBinding, RoleLockContext},
+};
+use crate::row_locks::{shared_objects::SharedObjectLockSession, RelationLockMode};
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     catalog::{
@@ -23,7 +28,7 @@ use uqa_sql::{
     },
     SQLError,
 };
-use uqa_storage::StorageBackendResult;
+use uqa_storage::{StorageBackendError, StorageBackendResult};
 
 pub trait RelationCreationRuntime {
     fn synchronize_catalog_registries(&self) -> StorageBackendResult<()>;
@@ -38,6 +43,7 @@ pub trait RelationCreationRuntime {
 pub struct RelationCreationContext<'a> {
     pub names: &'a dyn RoleReferenceNames,
     pub roles: &'a dyn RoleCatalogGuards,
+    pub locks: &'a dyn SharedObjectLockSession,
     pub schemas: &'a dyn SchemaPrivilegeCatalog,
     pub database: &'a dyn DatabasePrivilegeCatalog,
     pub state: &'a dyn RelationCandidateState,
@@ -46,6 +52,18 @@ pub struct RelationCreationContext<'a> {
 }
 
 impl RelationCreationContext<'_> {
+    fn role_locks(&self) -> RoleLockContext<'_> {
+        RoleLockContext {
+            roles: self.roles,
+            session: self.locks,
+        }
+    }
+    pub fn bind_owner(&self) -> Result<RoleBinding, SQLError> {
+        self.role_locks().bind(&self.names.current_role())
+    }
+    pub fn retain_owner(&self, owner: &RoleBinding) -> Result<(), SQLError> {
+        retain_created_owner(self.role_locks(), owner)
+    }
     fn schema_privileges(&self) -> SchemaPrivilegeInquiry<'_> {
         SchemaPrivilegeInquiry {
             catalog: self.schemas,
@@ -54,7 +72,7 @@ impl RelationCreationContext<'_> {
         }
     }
     pub fn ensure_temporary_privilege(&self) -> Result<(), SQLError> {
-        let current_user = self.names.current_user_name();
+        let current_user = self.names.current_role();
         DatabasePrivilegeInquiry {
             catalog: self.database,
             names: self.names,
@@ -68,12 +86,89 @@ impl RelationCreationContext<'_> {
         self.runtime.allocate_temporary_namespace();
         Ok(RelationIdentity::new(temporary_schema, relation).qualified_name())
     }
-    pub fn api_name(&self, name: &str) -> Result<String, String> {
-        self.runtime
-            .synchronize_catalog_registries()
-            .map_err(|err| format!("refresh schema catalog: {err}"))?;
-        creation::api_relation_name(self.state, self.schemas, name)
+    pub fn api_name(&self, name: &str) -> StorageBackendResult<String> {
+        self.lock_relation_namespace(|| {
+            self.runtime
+                .synchronize_catalog_registries()
+                .map_err(|error| SQLError::Internal(format!("refresh schema catalog: {error}")))?;
+            creation::api_relation_name(self.state, self.schemas, name).map_err(SQLError::Internal)
+        })
+        .map_err(|error| match error {
+            SQLError::Internal(message) => StorageBackendError::Other(message),
+            error => StorageBackendError::backend("CREATE TABLE namespace", error),
+        })
     }
+    pub fn persistent_relation_name(&self, name: &str) -> Result<String, SQLError> {
+        self.lock_relation_namespace(|| self.persistent_name(name))
+    }
+    pub fn reserve_name(&self, name: &str) -> Result<(), SQLError> {
+        let relation = RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?;
+        super::relation_names::reserve_relation_name(self.locks, &relation, || {
+            Ok(creation::relation_name_in_use(self.relations, &relation))
+        })
+    }
+    /// Resolve an explicit SET SCHEMA destination, including temporary namespace allocation and authority, before the caller checks whether that namespace permits relocation.
+    pub fn relocation_target(
+        &self,
+        target: &RelationIdentity,
+    ) -> Result<RelationIdentity, SQLError> {
+        let temporary = self.state.temporary_schema_name();
+        let mut target = target.clone();
+        if target.schema == "pg_temp" {
+            if !self.schemas.temporary_namespace_allocated() {
+                self.ensure_temporary_privilege()?;
+                self.runtime.allocate_temporary_namespace();
+            }
+            target.schema.clone_from(&temporary);
+        } else if target.schema == temporary && !self.schemas.temporary_namespace_allocated() {
+            return Err(super::locking::missing(&temporary));
+        }
+        let name = target.qualified_name();
+        self.lock_relation_namespace(|| {
+            let name = self.resolve_persistent_name(&name)?;
+            self.ensure_namespace_create(&target.schema)?;
+            Ok(name)
+        })?;
+        Ok(target)
+    }
+    /// Check an existing namespace without acquiring a creation dependency. Temporary namespace CREATE follows the current role's database TEMP privilege.
+    pub fn ensure_namespace_create(&self, schema: &str) -> Result<(), SQLError> {
+        if schema == self.state.temporary_schema_name() {
+            return self
+                .ensure_temporary_privilege()
+                .map_err(|error| match error {
+                    SQLError::Routine { sqlstate, .. } if sqlstate == "42501" => {
+                        SQLError::Routine {
+                            sqlstate,
+                            message: format!("permission denied for schema {schema}"),
+                        }
+                    }
+                    error => error,
+                });
+        }
+        self.schema_privileges().require_schema_privilege(
+            schema,
+            &self.names.current_role(),
+            SchemaAclPrivilege::Create,
+        )
+    }
+    fn lock_relation_namespace(
+        &self,
+        mut resolve: impl FnMut() -> Result<String, SQLError>,
+    ) -> Result<String, SQLError> {
+        super::locking::bind_namespace_lifetime(self.locks, RelationLockMode::AccessShare, || {
+            let name = resolve()?;
+            let relation =
+                RelationIdentity::from_legacy_name(&name).map_err(SQLError::Unsupported)?;
+            let security = self
+                .schema_privileges()
+                .schema_security_for_privilege(&relation.schema)
+                .ok_or_else(|| super::locking::missing(&relation.schema))?;
+            Ok(Some((super::locking::tuple(&security)?, name)))
+        })?
+        .ok_or_else(|| SQLError::Internal("creation namespace lookup returned no target".into()))
+    }
+    /// Functions and types resolve authority without retaining relation-creation namespace locks.
     pub fn persistent_name(&self, name: &str) -> Result<String, SQLError> {
         let name = self.resolve_persistent_name(name)?;
         self.ensure_create(&name)?;
@@ -82,7 +177,7 @@ impl RelationCreationContext<'_> {
     pub fn resolve_persistent_name(&self, name: &str) -> Result<String, SQLError> {
         let (schema, relation) =
             RelationIdentity::parse_reference(name).map_err(SQLError::Unsupported)?;
-        let current_user = self.names.current_user_name();
+        let current_user = self.names.current_role();
         for attempt in 0..2 {
             self.runtime
                 .synchronize_catalog_registries()
@@ -113,7 +208,7 @@ impl RelationCreationContext<'_> {
         if relation.schema == self.state.temporary_schema_name() {
             return self.ensure_temporary_privilege();
         }
-        let current_user = self.names.current_user_name();
+        let current_user = self.names.current_role();
         self.schema_privileges().require_schema_privilege(
             &relation.schema,
             &current_user,
@@ -153,7 +248,7 @@ impl uqa_sql::schema::view_creation::ViewCreationNamespace for RelationCreationC
         self.temporary_name(name)
     }
     fn persistent_target(&self, name: &str) -> Result<String, SQLError> {
-        self.persistent_name(name)
+        self.persistent_relation_name(name)
     }
 }
 

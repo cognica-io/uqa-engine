@@ -18,7 +18,10 @@ impl SQLiteInvertedIndex {
         Self {
             conn,
             table: table.into(),
-            bindings: uqa_storage::inverted_index::AnalyzerBindings::new(analyzer),
+            bindings: uqa_storage::inverted_index::AnalyzerBindings::new(analyzer).into(),
+            retention_control: uqa_storage::read_control::StorageReadControl::with_limit(
+                uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
+            ),
         }
     }
 
@@ -36,6 +39,9 @@ impl SQLiteInvertedIndex {
     }
 
     pub fn flush_skip_pointers(&self) -> StorageBackendResult<()> {
+        if let Some(index) = self.native_index() {
+            return index.flush_skip_pointers();
+        }
         let fields = self.field_names()?;
         for field in fields {
             self.rebuild_skip_pointers_for_field(&field)?;

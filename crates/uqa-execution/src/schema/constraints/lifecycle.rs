@@ -6,10 +6,10 @@
 
 //! Schedule constraint creation, validation, and enforcement changes.
 use super::{
-    checks, constraint_error, ddl_storage_error, ensure_constraint_name_available,
-    ensure_not_null_inheritable, find_constraint, foreign_key_constraint_identity,
-    materialize_constraint_candidate, publish_constraint_state, table_constraint_state,
-    validate_check_expression, ConstraintAlterContext, ConstraintLocation, SQLError,
+    checks, constraint_error, ddl_storage_error, ensure_not_null_inheritable, find_constraint,
+    foreign_key_constraint_identity, materialize_constraint_candidate, publish_constraint_state,
+    table_constraint_state, validate_check_expression, ConstraintAlterContext, ConstraintLocation,
+    SQLError,
 };
 use uqa_sql::schema::foreign_keys::column_foreign_key;
 
@@ -31,7 +31,10 @@ pub fn add_check_constraint(
         &constraint.expr,
         None,
     )?;
-    ensure_constraint_name_available(&columns, &constraints, constraint.name.as_deref(), table)?;
+    context
+        .publication
+        .constraint_names()
+        .ensure_available(table, constraint.name.as_deref())?;
     constraints.checks.push(constraint);
     materialize_constraint_candidate(context, table, &mut columns, &mut constraints)?;
     let name = constraints
@@ -60,7 +63,10 @@ pub fn add_foreign_key_constraint(
     let should_validate = constraint.validated;
     constraint.validated = false;
     let (mut columns, mut constraints) = table_constraint_state(context, table)?;
-    ensure_constraint_name_available(&columns, &constraints, constraint.name.as_deref(), table)?;
+    context
+        .publication
+        .constraint_names()
+        .ensure_available(table, constraint.name.as_deref())?;
     constraints.foreign_keys.push(constraint);
     uqa_sql::schema::generated::prepare_generated_columns(
         context.publication.bindings.schema,
@@ -164,7 +170,10 @@ pub fn add_not_null_constraint(
     is_local: bool,
 ) -> Result<(), SQLError> {
     let (mut columns, mut constraints) = table_constraint_state(context, table)?;
-    ensure_constraint_name_available(&columns, &constraints, name.as_deref(), table)?;
+    context
+        .publication
+        .constraint_names()
+        .ensure_available(table, name.as_deref())?;
     let definition = columns
         .iter_mut()
         .find(|definition| definition.name == column)
@@ -181,6 +190,7 @@ pub fn add_not_null_constraint(
     definition.not_null = true;
     definition.not_null_explicit = true;
     definition.not_null_name = name;
+    definition.not_null_identity = None;
     definition.not_null_validated = false;
     definition.not_null_no_inherit = no_inherit;
     definition.not_null_is_local = is_local;
@@ -376,16 +386,10 @@ pub fn add_key_constraint(
         .try_describe_table(table)
         .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    let declared_constraints = context
-        .catalog
-        .try_declared_table_constraints(table)
-        .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
-    ensure_constraint_name_available(
-        &columns,
-        &declared_constraints,
-        constraint.name.as_deref(),
-        table,
-    )?;
+    context
+        .publication
+        .constraint_names()
+        .ensure_available(table, constraint.name.as_deref())?;
     uqa_sql::schema::indexes::names::name_constraint_indexes(
         context.names,
         table,

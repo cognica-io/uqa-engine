@@ -24,9 +24,13 @@ use super::{
 };
 use crate::{PersistentStorageBackend, StorageBackendError};
 
+mod btree_entries;
 mod catalog;
+mod compound;
 mod controlled;
 mod controlled_index;
+mod hnsw_records;
+mod index_retention;
 mod indexes;
 mod occurrences;
 mod tuple_metadata;
@@ -730,9 +734,7 @@ fn clustered_postings_follow_key_value_table_rename_and_drop() {
     catalog
         .save_table(&TableSchema {
             relation: crate::catalog::RelationIdentity::new("public", "articles"),
-            role_owner: "uqa".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::default(),
+            security: crate::RelationSecurityRow::legacy("uqa"),
             object_id: [1; 16],
             storage_generation: [1; 16],
             analyzer_json: "{}".into(),

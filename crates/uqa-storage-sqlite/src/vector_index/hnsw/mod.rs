@@ -13,15 +13,19 @@ use parking_lot::RwLock;
 use super::{ManagedConnection, SQLiteResult, SQLiteVectorIndex};
 use uqa_storage::hnsw_index::HNSWIndex;
 use uqa_storage::vector_index::HNSWIndexParams;
+use uqa_storage::ReadOnlySnapshot;
 
 mod consistency;
 mod encoding;
 mod lifecycle;
 mod loading;
 mod mutation;
+mod native;
 mod persistence;
 mod search;
 mod writing;
+
+pub(crate) use native::NativeHNSWRecords;
 
 #[cfg(test)]
 mod tests;
@@ -37,7 +41,14 @@ pub struct SQLiteHNSWIndex {
 #[derive(Clone)]
 pub(super) struct CachedGraph {
     pub(super) revision: u64,
-    pub(super) graph: Arc<HNSWIndex>,
+    pub(super) identity: GraphIdentity,
+    pub(super) graph: ReadOnlySnapshot<HNSWIndex>,
+}
+
+#[derive(Clone)]
+pub(super) enum GraphIdentity {
+    Physical(crate::connection::SnapshotIdentity),
+    Native(native::GraphIdentity),
 }
 
 impl SQLiteHNSWIndex {

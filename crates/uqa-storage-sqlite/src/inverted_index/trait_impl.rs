@@ -17,6 +17,24 @@ use super::{IndexedFieldMetadata, TokenTermKey};
 use uqa_storage::clustered_postings::{cluster_id, decode_all_scores, OccurrencePosting};
 
 impl InvertedIndex for SQLiteInvertedIndex {
+    fn posting_read_cursor_key_budgeted<'a>(
+        &'a self,
+        field: &'a str,
+        term: &'a TokenTermKey,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::clustered_postings::BudgetedPostingReadCursor<'a>> {
+        control.check()?;
+        if let Some(index) = self.native_index() {
+            return uqa_storage::clustered_postings::open_controlled_cursor(
+                index.snapshot()?,
+                field,
+                term,
+                control,
+            );
+        }
+        uqa_storage::clustered_postings::open_controlled_cursor(self, field, term, control)
+    }
+
     fn visit_score_clusters(
         &self,
         field: &str,
@@ -26,6 +44,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
         control: &uqa_storage::read_control::StorageReadControl,
         visit: &mut uqa_storage::clustered_postings::ScoreClusterVisitor<'_>,
     ) -> StorageBackendResult<()> {
+        if let Some(index) = self.native_index() {
+            return index.visit_score_clusters(field, term, after, limit, control, visit);
+        }
         Ok(self.visit_clusters_budgeted(field, term, after, limit, control, visit)?)
     }
 
@@ -36,6 +57,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
         term: &TokenTermKey,
         control: &uqa_storage::read_control::StorageReadControl,
     ) -> StorageBackendResult<uqa_core::memory::Budgeted<Vec<uqa_core::TokenOccurrence>>> {
+        if let Some(index) = self.native_index() {
+            return index.get_occurrences_budgeted(doc_id, field, term, control);
+        }
         Ok(self.occurrences_budgeted(doc_id, field, term, control)?)
     }
 
@@ -44,6 +68,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
         field: &str,
         control: &uqa_storage::read_control::StorageReadControl,
     ) -> StorageBackendResult<IndexStats> {
+        if let Some(index) = self.native_index() {
+            return index.field_stats_scalar_budgeted(field, control);
+        }
         Ok(self.scalar_stats_budgeted(field, control)?)
     }
 
@@ -51,11 +78,20 @@ impl InvertedIndex for SQLiteInvertedIndex {
         self.bindings.default_configuration()
     }
 
+    fn default_analyzer_binding(
+        &self,
+    ) -> StorageBackendResult<uqa_storage::inverted_index::AnalyzerDefault> {
+        Ok(self.bindings.default_binding())
+    }
+
     fn add_document(
         &mut self,
         doc_id: DocId,
         fields: BTreeMap<FieldName, String>,
     ) -> StorageBackendResult<()> {
+        if let Some(mut index) = self.native_index() {
+            return index.add_document(doc_id, fields);
+        }
         Ok(self.add_document_inner(doc_id, fields)?)
     }
 
@@ -63,14 +99,34 @@ impl InvertedIndex for SQLiteInvertedIndex {
         &mut self,
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
     ) -> StorageBackendResult<()> {
+        if let Some(mut index) = self.native_index() {
+            return index.try_add_documents(documents);
+        }
         Ok(self.add_documents_inner(documents)?)
     }
 
+    fn try_add_documents_observed(
+        &mut self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        visit: &mut uqa_storage::inverted_index::InvertedIndexChangeVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        if let Some(mut index) = self.native_index() {
+            return index.try_add_documents_observed(documents, visit);
+        }
+        Ok(self.add_documents_observed(documents, Some(visit))?)
+    }
+
     fn remove_document(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
+        if let Some(mut index) = self.native_index() {
+            return index.remove_document(doc_id);
+        }
         Ok(self.remove_document_inner(doc_id)?)
     }
 
     fn clear(&mut self) -> StorageBackendResult<()> {
+        if let Some(mut index) = self.native_index() {
+            return index.clear();
+        }
         self.conn.with_mut(|conn| {
             let tx = conn.savepoint()?;
             invalidate_posting_accelerators(&tx, &self.table)?;
@@ -82,6 +138,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
     }
 
     fn source_rebuild_required(&self) -> StorageBackendResult<bool> {
+        if let Some(index) = self.native_index() {
+            return index.source_rebuild_required();
+        }
         Ok(self.conn.with(|conn| self.needs_source_rebuild_on(conn))?)
     }
 
@@ -89,6 +148,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
         &mut self,
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
     ) -> StorageBackendResult<()> {
+        if let Some(mut index) = self.native_index() {
+            return index.try_rebuild_documents(documents);
+        }
         Ok(self.rebuild_documents_inner(documents)?)
     }
 
@@ -97,10 +159,16 @@ impl InvertedIndex for SQLiteInvertedIndex {
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
         cancellation: &uqa_core::CancellationToken,
     ) -> StorageBackendResult<()> {
+        if let Some(mut index) = self.native_index() {
+            return index.try_rebuild_documents_cancellable(documents, cancellation);
+        }
         Ok(self.rebuild_documents_with_cancellation(documents, Some(cancellation))?)
     }
 
     fn get_posting_list(&self, field: &str, term: &str) -> StorageBackendResult<PostingList> {
+        if let Some(index) = self.native_index() {
+            return index.get_posting_list(field, term);
+        }
         self.get_posting_list_key(field, &TokenTermKey::from_text(term))
     }
 
@@ -109,6 +177,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<PostingList> {
+        if let Some(index) = self.native_index() {
+            return index.get_posting_list_key(field, term);
+        }
         Ok(project_postings(self.get_occurrence_postings(field, term)?))
     }
 
@@ -117,6 +188,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<Vec<OccurrencePosting>> {
+        if let Some(index) = self.native_index() {
+            return index.get_occurrence_postings(field, term);
+        }
         Ok(self
             .occurrence_postings_bulk(field, std::slice::from_ref(term))?
             .pop()
@@ -129,6 +203,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<Vec<uqa_core::TokenOccurrence>> {
+        if let Some(index) = self.native_index() {
+            return index.get_occurrences(doc_id, field, term);
+        }
         Ok(self.conn.with(|conn| {
             self.require_graph_format_on(conn)?;
             let entries = super::load_cluster(conn, &self.table, field, term, cluster_id(doc_id))?;
@@ -145,6 +222,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
         doc_id: DocId,
         field: &str,
     ) -> StorageBackendResult<Option<IndexedFieldMetadata>> {
+        if let Some(index) = self.native_index() {
+            return index.indexed_field_metadata(doc_id, field);
+        }
         let doc_id = encode_index_u64("document", doc_id)?;
         Ok(self.conn.with(|conn| {
             self.require_graph_format_on(conn)?;
@@ -157,6 +237,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
         field: &str,
         terms: &[String],
     ) -> StorageBackendResult<Vec<PostingList>> {
+        if let Some(index) = self.native_index() {
+            return index.get_posting_lists_bulk(field, terms);
+        }
         let keys = terms
             .iter()
             .map(|term| TokenTermKey::from_text(term))
@@ -173,6 +256,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
         field: &str,
         term: &str,
     ) -> StorageBackendResult<Box<dyn PostingCursor>> {
+        if let Some(index) = self.native_index() {
+            return index.posting_cursor(field, term);
+        }
         self.posting_cursor_key(field, &TokenTermKey::from_text(term))
     }
 
@@ -181,6 +267,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<Box<dyn PostingCursor>> {
+        if let Some(index) = self.native_index() {
+            return index.posting_cursor_key(field, term);
+        }
         self.cursor_for_term(field, term)
     }
 
@@ -189,6 +278,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
         field: &str,
         terms: &[String],
     ) -> StorageBackendResult<Vec<Box<dyn PostingCursor>>> {
+        if let Some(index) = self.native_index() {
+            return index.posting_cursors_bulk(field, terms);
+        }
         let keys = terms
             .iter()
             .map(|term| TokenTermKey::from_text(term))
@@ -201,6 +293,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
         field: &str,
         terms: &[TokenTermKey],
     ) -> StorageBackendResult<Vec<Box<dyn PostingCursor>>> {
+        if let Some(index) = self.native_index() {
+            return index.posting_cursors_keys_bulk(field, terms);
+        }
         self.cursors_for_terms(field, terms)
     }
 
@@ -209,6 +304,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
         field: &str,
         terms: &[TokenTermKey],
     ) -> StorageBackendResult<Vec<PostingList>> {
+        if let Some(index) = self.native_index() {
+            return index.get_posting_lists_keys_bulk(field, terms);
+        }
         Ok(self
             .occurrence_postings_bulk(field, terms)?
             .into_iter()
@@ -234,6 +332,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
         scorer: &dyn BlockMaxScorer,
         scorer_fingerprint: &str,
     ) -> StorageBackendResult<bool> {
+        if let Some(mut index) = self.native_index() {
+            return index.rebuild_persisted_block_max(field, scorer, scorer_fingerprint);
+        }
         if scorer_fingerprint.is_empty() {
             return Err(SQLiteError::StorageBackend(
                 "persisted block-max scorer fingerprint must not be empty".into(),
@@ -283,6 +384,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
         term: &str,
         visit: &mut dyn FnMut(DocId, u64),
     ) -> StorageBackendResult<()> {
+        if let Some(index) = self.native_index() {
+            return index.for_each_term_freq(field, term, visit);
+        }
         let mut cursor = self.posting_cursor(field, term)?;
         while let Some(entry) = cursor.current() {
             visit(entry.doc_id, entry.term_freq);
@@ -292,14 +396,23 @@ impl InvertedIndex for SQLiteInvertedIndex {
     }
 
     fn doc_freq(&self, field: &str, term: &str) -> StorageBackendResult<u64> {
+        if let Some(index) = self.native_index() {
+            return index.doc_freq(field, term);
+        }
         self.doc_freq_key(field, &TokenTermKey::from_text(term))
     }
 
     fn doc_freq_key(&self, field: &str, term: &TokenTermKey) -> StorageBackendResult<u64> {
+        if let Some(index) = self.native_index() {
+            return index.doc_freq_key(field, term);
+        }
         Ok(self.posting_cursor_key(field, term)?.doc_freq())
     }
 
     fn get_doc_length(&self, doc_id: DocId, field: &str) -> StorageBackendResult<u64> {
+        if let Some(index) = self.native_index() {
+            return index.get_doc_length(doc_id, field);
+        }
         Ok(self
             .get_doc_lengths_bulk(&[doc_id], field)?
             .get(&doc_id)
@@ -312,6 +425,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
         doc_ids: &[DocId],
         field: &str,
     ) -> StorageBackendResult<BTreeMap<DocId, u64>> {
+        if let Some(index) = self.native_index() {
+            return index.get_doc_lengths_bulk(doc_ids, field);
+        }
         Ok(self.conn.with(|conn| {
             self.require_graph_format_on(conn)?;
             let mut out = BTreeMap::new();
@@ -349,6 +465,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
         field: &str,
         terms: &[String],
     ) -> StorageBackendResult<Vec<(u64, Vec<u64>)>> {
+        if let Some(index) = self.native_index() {
+            return index.get_scoring_inputs_bulk(doc_ids, field, terms);
+        }
         let keys = terms
             .iter()
             .map(|term| TokenTermKey::from_text(term))
@@ -362,6 +481,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
         field: &str,
         terms: &[TokenTermKey],
     ) -> StorageBackendResult<Vec<(u64, Vec<u64>)>> {
+        if let Some(index) = self.native_index() {
+            return index.get_scoring_inputs_keys_bulk(doc_ids, field, terms);
+        }
         if doc_ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -403,6 +525,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
     }
 
     fn get_term_freq(&self, doc_id: DocId, field: &str, term: &str) -> StorageBackendResult<u64> {
+        if let Some(index) = self.native_index() {
+            return index.get_term_freq(doc_id, field, term);
+        }
         self.get_term_freq_key(doc_id, field, &TokenTermKey::from_text(term))
     }
 
@@ -412,6 +537,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<u64> {
+        if let Some(index) = self.native_index() {
+            return index.get_term_freq_key(doc_id, field, term);
+        }
         let cluster = encode_index_u64("posting cluster", cluster_id(doc_id))?;
         Ok(self.conn.with(|conn| {
             self.require_graph_format_on(conn)?;
@@ -429,6 +557,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
     }
 
     fn doc_count(&self) -> StorageBackendResult<u64> {
+        if let Some(index) = self.native_index() {
+            return index.doc_count();
+        }
         Ok(self.conn.with(|c| {
             self.require_graph_format_on(c)?;
             let n: i64 = c.query_row(
@@ -442,6 +573,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
     }
 
     fn total_field_length(&self, field: &str) -> StorageBackendResult<u64> {
+        if let Some(index) = self.native_index() {
+            return index.total_field_length(field);
+        }
         Ok(self.conn.with(|conn| {
             self.require_graph_format_on(conn)?;
             Ok(self
@@ -451,10 +585,16 @@ impl InvertedIndex for SQLiteInvertedIndex {
     }
 
     fn vocabulary_terms(&self, field: &str) -> StorageBackendResult<Vec<String>> {
+        if let Some(index) = self.native_index() {
+            return index.vocabulary_terms(field);
+        }
         self.terms_for_field(field)
     }
 
     fn vocabulary_keys(&self, field: &str) -> StorageBackendResult<Vec<TokenTermKey>> {
+        if let Some(index) = self.native_index() {
+            return index.vocabulary_keys(field);
+        }
         Ok(self.conn.with(|conn| {
             self.require_graph_format_on(conn)?;
             let mut statement = conn.prepare("SELECT DISTINCT term FROM _occurrence_clusters WHERE table_name = ?1 AND field = ?2 ORDER BY term")?;
@@ -464,6 +604,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
     }
 
     fn field_doc_count(&self, field: &str) -> StorageBackendResult<u64> {
+        if let Some(index) = self.native_index() {
+            return index.field_doc_count(field);
+        }
         Ok(self.conn.with(|conn| {
             self.require_graph_format_on(conn)?;
             Ok(self
@@ -473,6 +616,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
     }
 
     fn stats(&self) -> StorageBackendResult<IndexStats> {
+        if let Some(index) = self.native_index() {
+            return index.stats();
+        }
         let doc_count = self.doc_count()?;
         let mut s = IndexStats::default();
         s.total_docs = doc_count;
@@ -504,6 +650,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
     }
 
     fn posting_count(&self, field: Option<&str>) -> StorageBackendResult<u64> {
+        if let Some(index) = self.native_index() {
+            return index.posting_count(field);
+        }
         Ok(self.conn.with(|conn| {
             self.term_frequencies_on(conn, field)?
                 .into_values()
@@ -516,6 +665,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
     }
 
     fn doc_length_count(&self, field: Option<&str>) -> StorageBackendResult<u64> {
+        if let Some(index) = self.native_index() {
+            return index.doc_length_count(field);
+        }
         Ok(self.conn.with(|c| {
             self.require_graph_format_on(c)?;
             let n: i64 = if let Some(field) = field {
@@ -537,6 +689,9 @@ impl InvertedIndex for SQLiteInvertedIndex {
     }
 
     fn term_count(&self, field: Option<&str>) -> StorageBackendResult<u64> {
+        if let Some(index) = self.native_index() {
+            return index.term_count(field);
+        }
         Ok(self.conn.with(|conn| {
             let terms = self
                 .term_frequencies_on(conn, field)?
@@ -548,10 +703,28 @@ impl InvertedIndex for SQLiteInvertedIndex {
     }
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn InvertedIndex>> {
-        Ok(Arc::new(self.clone()))
+        if let Some(index) = self.native_retained_index()? {
+            return Ok(index);
+        }
+        self.physical_snapshot(&self.retention_control)
+    }
+
+    fn snapshot_with_control(
+        &self,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Arc<dyn InvertedIndex>> {
+        control.check()?;
+        if let Some(index) = self.native_retained_index()? {
+            control.check()?;
+            return Ok(index);
+        }
+        self.physical_snapshot(control)
     }
 
     fn field_names(&self) -> StorageBackendResult<Vec<FieldName>> {
+        if let Some(index) = self.native_index() {
+            return index.field_names();
+        }
         Ok(self.conn.with(|c| {
             self.require_graph_format_on(c)?;
             let mut stmt =
@@ -571,22 +744,32 @@ impl InvertedIndex for SQLiteInvertedIndex {
         analyzer: Analyzer,
         phase: AnalyzerPhase,
     ) -> Result<(), String> {
-        let mut candidate = self.bindings.clone();
+        if let Some(mut index) = self.native_index() {
+            index.set_field_analyzer(field, analyzer, phase)?;
+            self.bindings = index.analyzer_bindings().clone().into();
+            return Ok(());
+        }
+        let mut candidate = (*self.bindings).clone();
         candidate
             .bind(field, &analyzer, phase)
             .map_err(|error| error.to_string())?;
         self.validate_index_revision_change(field, &candidate)
             .map_err(|error| error.to_string())?;
-        self.bindings = candidate;
+        self.bindings = candidate.into();
         Ok(())
     }
 
     fn remove_field_analyzers(&mut self, field: &str) -> Result<(), String> {
-        let mut candidate = self.bindings.clone();
+        if let Some(mut index) = self.native_index() {
+            index.remove_field_analyzers(field)?;
+            self.bindings = index.analyzer_bindings().clone().into();
+            return Ok(());
+        }
+        let mut candidate = (*self.bindings).clone();
         candidate.remove(field);
         self.validate_index_revision_change(field, &candidate)
             .map_err(|error| error.to_string())?;
-        self.bindings = candidate;
+        self.bindings = candidate.into();
         Ok(())
     }
 
@@ -615,13 +798,18 @@ impl InvertedIndex for SQLiteInvertedIndex {
         revision: Arc<uqa_analysis::CompiledAnalyzer>,
         phase: AnalyzerPhase,
     ) -> Result<(), String> {
-        let mut candidate = self.bindings.clone();
+        if let Some(mut index) = self.native_index() {
+            index.set_field_analyzer_revision(field, revision, phase)?;
+            self.bindings = index.analyzer_bindings().clone().into();
+            return Ok(());
+        }
+        let mut candidate = (*self.bindings).clone();
         candidate
             .bind_revision(field, revision, phase)
             .map_err(|error| error.to_string())?;
         self.validate_index_revision_change(field, &candidate)
             .map_err(|error| error.to_string())?;
-        self.bindings = candidate;
+        self.bindings = candidate.into();
         Ok(())
     }
 
@@ -631,13 +819,18 @@ impl InvertedIndex for SQLiteInvertedIndex {
         index: Arc<uqa_analysis::CompiledAnalyzer>,
         search: Arc<uqa_analysis::CompiledAnalyzer>,
     ) -> Result<(), String> {
-        let mut candidate = self.bindings.clone();
+        if let Some(mut native) = self.native_index() {
+            native.set_field_analyzer_revisions(field, index, search)?;
+            self.bindings = native.analyzer_bindings().clone().into();
+            return Ok(());
+        }
+        let mut candidate = (*self.bindings).clone();
         candidate
             .bind_revisions(field, index, search)
             .map_err(|error| error.to_string())?;
         self.validate_index_revision_change(field, &candidate)
             .map_err(|error| error.to_string())?;
-        self.bindings = candidate;
+        self.bindings = candidate.into();
         Ok(())
     }
 
@@ -648,8 +841,16 @@ impl InvertedIndex for SQLiteInvertedIndex {
         phase: AnalyzerPhase,
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
     ) -> StorageBackendResult<()> {
+        if let Some(mut index) = self.native_index() {
+            index.rebuild_with_analyzer_revision(field, revision, phase, documents)?;
+            self.bindings = index.analyzer_bindings().clone().into();
+            return Ok(());
+        }
         let mut replacement = self.clone();
-        replacement.bindings.bind_revision(field, revision, phase)?;
+        replacement
+            .bindings
+            .live_mut()
+            .bind_revision(field, revision, phase)?;
         replacement.rebuild_documents_inner(documents)?;
         *self = replacement;
         Ok(())
@@ -663,11 +864,72 @@ impl InvertedIndex for SQLiteInvertedIndex {
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
         cancellation: &uqa_core::CancellationToken,
     ) -> StorageBackendResult<()> {
+        if let Some(mut index) = self.native_index() {
+            index.rebuild_with_analyzer_revision_cancellable(
+                field,
+                revision,
+                phase,
+                documents,
+                cancellation,
+            )?;
+            self.bindings = index.analyzer_bindings().clone().into();
+            return Ok(());
+        }
         cancellation.check()?;
         let mut replacement = self.clone();
-        replacement.bindings.bind_revision(field, revision, phase)?;
+        replacement
+            .bindings
+            .live_mut()
+            .bind_revision(field, revision, phase)?;
         replacement.rebuild_documents_with_cancellation(documents, Some(cancellation))?;
         *self = replacement;
         Ok(())
+    }
+    fn doc_freq_any_field(&self, term: &str) -> StorageBackendResult<u64> {
+        if let Some(index) = self.native_index() {
+            return index.doc_freq_any_field(term);
+        }
+        uqa_storage::inverted_index::defaults::doc_freq_any_field(self, term)
+    }
+    fn field_stats(&self, field: &str) -> StorageBackendResult<IndexStats> {
+        if let Some(index) = self.native_index() {
+            return index.field_stats(field);
+        }
+        uqa_storage::inverted_index::defaults::field_stats(self, field)
+    }
+    fn field_stats_scalar(&self, field: &str) -> StorageBackendResult<IndexStats> {
+        if let Some(index) = self.native_index() {
+            return index.field_stats_scalar(field);
+        }
+        uqa_storage::inverted_index::defaults::field_stats_scalar(self, field)
+    }
+    fn get_posting_list_any_field(&self, term: &str) -> StorageBackendResult<PostingList> {
+        if let Some(index) = self.native_index() {
+            return index.get_posting_list_any_field(term);
+        }
+        uqa_storage::inverted_index::defaults::get_posting_list_any_field(self, term)
+    }
+    fn get_term_freqs_bulk(
+        &self,
+        doc_ids: &[DocId],
+        field: &str,
+        term: &str,
+    ) -> StorageBackendResult<BTreeMap<DocId, u64>> {
+        if let Some(index) = self.native_index() {
+            return index.get_term_freqs_bulk(doc_ids, field, term);
+        }
+        uqa_storage::inverted_index::defaults::get_term_freqs_bulk(self, doc_ids, field, term)
+    }
+    fn get_total_doc_length(&self, doc_id: DocId) -> StorageBackendResult<u64> {
+        if let Some(index) = self.native_index() {
+            return index.get_total_doc_length(doc_id);
+        }
+        uqa_storage::inverted_index::defaults::get_total_doc_length(self, doc_id)
+    }
+    fn get_total_term_freq(&self, doc_id: DocId, term: &str) -> StorageBackendResult<u64> {
+        if let Some(index) = self.native_index() {
+            return index.get_total_term_freq(doc_id, term);
+        }
+        uqa_storage::inverted_index::defaults::get_total_term_freq(self, doc_id, term)
     }
 }

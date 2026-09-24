@@ -64,7 +64,7 @@ impl ColumnBackfillState for Engine {
 }
 impl GeneratedRewriteState for Engine {
     fn table_names(&self) -> StorageBackendResult<Vec<String>> {
-        Engine::table_names(self)
+        Engine::table_names_in_execution(self)
     }
     fn advance_next_id(&self, table: &str, id: DocId) -> StorageBackendResult<()> {
         Engine::advance_next_id(self, table, id)
@@ -99,20 +99,20 @@ impl uqa_sql::schema::columns::addition::AddedColumnKeys for Engine {
         Vec<uqa_sql::ast::TableKeyConstraint>,
         uqa_sql::assignment::columns::ColumnCatalogError,
     > {
-        Engine::try_key_constraints(self, table).map_err(|error| Box::new(error) as _)
+        Engine::key_constraints_in_execution(self, table).map_err(|error| Box::new(error) as _)
     }
     fn try_foreign_keys(
         &self,
         table: &str,
     ) -> Result<Vec<uqa_sql::ast::ForeignKey>, uqa_sql::assignment::columns::ColumnCatalogError>
     {
-        Engine::try_foreign_keys(self, table).map_err(|error| Box::new(error) as _)
+        Engine::foreign_keys_in_execution(self, table).map_err(|error| Box::new(error) as _)
     }
 }
 
 impl uqa_execution::schema::columns::addition::ColumnAdditionState for Engine {
     fn has_column(&self, table: &str, column: &str) -> StorageBackendResult<bool> {
-        self.try_table_has_column(table, column)
+        self.table_has_column_in_execution(table, column)
     }
     fn create_vector_field(
         &self,
@@ -180,7 +180,7 @@ impl uqa_sql::schema::columns::alteration::ColumnChangeCatalog for Engine {
         table: &str,
         column: &str,
     ) -> Result<bool, uqa_sql::assignment::columns::ColumnCatalogError> {
-        self.try_table_has_column(table, column)
+        self.table_has_column_in_execution(table, column)
             .map_err(|error| Box::new(error) as _)
     }
     fn column_type(

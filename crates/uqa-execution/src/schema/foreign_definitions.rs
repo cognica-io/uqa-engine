@@ -139,7 +139,7 @@ impl ForeignDefinitionContext<'_> {
                     "foreign table `{table_name}` has no security metadata"
                 ))
             })?;
-        security.column_acls.remove(column_name);
+        security.remove_column_acl(column_name);
         if let Some(catalog) = self.catalog {
             catalog.save_foreign_table(&table.catalog_row(&relation, &security)?)?;
         }

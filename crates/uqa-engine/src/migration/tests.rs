@@ -130,6 +130,7 @@ fn python_array_types_preserve_elements_and_dimensions() {
         not_null: false,
         not_null_explicit: false,
         not_null_name: None,
+        not_null_identity: None,
         not_null_validated: true,
         not_null_no_inherit: false,
         not_null_is_local: true,
@@ -144,6 +145,7 @@ fn python_array_types_preserve_elements_and_dimensions() {
         check_no_inherit: false,
         check_is_local: true,
         check_object_id: None,
+        check_catalog_oid: None,
         references: None,
     };
     let columns = vec![

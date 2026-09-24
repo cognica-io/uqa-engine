@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{ColumnType, Expr};
+use super::{ColumnType, ConstraintCatalogIdentity, Expr};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateDomain {
@@ -23,10 +23,14 @@ pub struct CreateDomain {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DomainNotNull {
     pub name: Option<String>,
+    #[serde(default)]
+    pub catalog_identity: Option<ConstraintCatalogIdentity>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DomainCheck {
     pub name: Option<String>,
+    #[serde(default)]
+    pub catalog_identity: Option<ConstraintCatalogIdentity>,
     pub expression: Expr,
 }

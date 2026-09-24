@@ -9,6 +9,9 @@
 
 //! Single integration-test executable for every engine test domain.
 
+#[path = "support/native_storage.rs"]
+mod native_storage;
+
 #[path = "catalog.rs"]
 mod catalog;
 #[path = "functions.rs"]

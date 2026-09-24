@@ -4,35 +4,15 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Lazily built, incrementally maintained per-column value indexes.
+//! Retain value-index caches and provider handles for execution-owned index selection and lookup.
 //!
-//! Scalar WHERE predicates historically evaluated by scanning every
-//! document. A [`ColumnValueIndex`] wraps the storage-layer
-//! [`BTreeIndex`] so equality / range / IN / IS NULL predicates on
-//! indexed columns resolve to a [`PostingList`] in `O(log n + k)` and
-//! then compose through their document-id support like any other signal.
-//! Indexes are built on first use from one bulk field scan and
-//! maintained incrementally by the insert / update / delete paths.
-//!
-//! Only columns the catalog marks as indexable get an index: PRIMARY
-//! KEY and UNIQUE columns, and columns covered by a `CREATE INDEX ...
-//! USING btree` entry (first column of a composite index). This keeps
-//! write amplification bounded and mirrors `PostgreSQL`, where those
-//! are exactly the columns with implicit or explicit b-tree indexes.
-//!
-//! ## Semantics guard
-//!
-//! [`Predicate::evaluate`] compares temporal values against strings by
-//! parsing, and `f64` NaN never equals itself; a raw `BTreeMap` lookup
-//! cannot reproduce either. `scan` therefore refuses (returns `None`)
-//! whenever the index contains temporal keys or the predicate target
-//! is temporal or NaN, and callers fall back to the evaluated scan, so
-//! an index lookup can never change query results.
+//! Catalog policy selects column accelerators and named expression indexes. Query hydration is memory-only; DDL and repair may publish durable postings. Execution owns predicate eligibility, NULL handling, stored-key maintenance and result construction through [`ColumnValueIndex`].
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use uqa_core::{DocId, Payload, PostingEntry, PostingList, Predicate, Value};
-use uqa_storage::{BTreeIndex, ValueIndexKey};
+use uqa_core::{DocId, PostingList, Predicate, Value};
+pub(crate) use uqa_execution::catalog::index::value::ColumnValueIndex;
+use uqa_storage::ValueIndexKey;
 
 mod keys;
 
@@ -86,145 +66,6 @@ fn unqualified_relation_key(qualified: &str) -> Option<&str> {
     None
 }
 
-/// Per-column index: non-null scalar keys in a B-tree plus the doc ids
-/// whose field is missing or SQL NULL.
-#[derive(Clone)]
-pub(crate) struct ColumnValueIndex {
-    index: BTreeIndex,
-    values: BTreeMap<DocId, Value>,
-    /// Sorted doc ids with a missing or `Value::Null` field.
-    nulls: Vec<DocId>,
-    /// Set when any indexed key is temporal; disables acceleration
-    /// because string-vs-temporal comparisons need parsing.
-    has_temporal: bool,
-}
-
-fn value_is_temporal(value: &Value) -> bool {
-    matches!(value, Value::Temporal(_))
-}
-
-fn value_is_nan(value: &Value) -> bool {
-    matches!(value, Value::Float(f) if f.is_nan())
-}
-
-fn predicate_targets_are_index_safe(predicate: &Predicate) -> bool {
-    let safe = |v: &Value| !value_is_temporal(v) && !value_is_nan(v);
-    match predicate {
-        Predicate::Equals(v)
-        | Predicate::NotEquals(v)
-        | Predicate::GreaterThan(v)
-        | Predicate::GreaterThanOrEqual(v)
-        | Predicate::LessThan(v)
-        | Predicate::LessThanOrEqual(v) => safe(v),
-        Predicate::InSet(values) => values.iter().all(safe),
-        Predicate::Between { low, high } => safe(low) && safe(high),
-        Predicate::IsNull | Predicate::IsNotNull => true,
-    }
-}
-
-impl ColumnValueIndex {
-    pub(crate) fn build(field: &str, values: impl Iterator<Item = (DocId, Value)>) -> Self {
-        let mut index = BTreeIndex::new(field);
-        let mut stored = BTreeMap::new();
-        let mut nulls = Vec::new();
-        let mut has_temporal = false;
-        for (doc_id, value) in values {
-            stored.insert(doc_id, value.clone());
-            match value {
-                Value::Null => nulls.push(doc_id),
-                value => {
-                    has_temporal |= value_is_temporal(&value);
-                    index.insert(doc_id, value);
-                }
-            }
-        }
-        nulls.sort_unstable();
-        nulls.dedup();
-        Self {
-            index,
-            values: stored,
-            nulls,
-            has_temporal,
-        }
-    }
-
-    pub(crate) fn insert(&mut self, doc_id: DocId, value: &Value) {
-        self.values.insert(doc_id, value.clone());
-        match value {
-            Value::Null => {
-                if let Err(pos) = self.nulls.binary_search(&doc_id) {
-                    self.nulls.insert(pos, doc_id);
-                }
-            }
-            value => {
-                self.has_temporal |= value_is_temporal(value);
-                self.index.insert(doc_id, value.clone());
-            }
-        }
-    }
-
-    pub(crate) fn remove(&mut self, doc_id: DocId, value: &Value) {
-        let stored = self.values.remove(&doc_id);
-        let value = stored.as_ref().unwrap_or(value);
-        match value {
-            Value::Null => {
-                if let Ok(pos) = self.nulls.binary_search(&doc_id) {
-                    self.nulls.remove(pos);
-                }
-            }
-            value => self.index.remove(doc_id, value),
-        }
-    }
-
-    pub(crate) fn clear(&mut self) {
-        self.index.clear();
-        self.values.clear();
-        self.nulls.clear();
-        self.has_temporal = false;
-    }
-
-    /// Resolve `predicate` to a posting list, or `None` when this
-    /// index cannot reproduce evaluated-scan semantics for it.
-    pub(crate) fn scan(&self, predicate: &Predicate) -> Option<PostingList> {
-        if !self.supports(predicate) {
-            return None;
-        }
-        match predicate {
-            Predicate::IsNull => Some(posting_list_from_sorted_ids(self.nulls.iter().copied())),
-            Predicate::IsNotNull => Some(self.index.scan(&Predicate::IsNotNull)),
-            // `NotEquals` needs "all non-null minus matches"; the
-            // complement is rarely selective, so leave it to the scan.
-            Predicate::NotEquals(_) => unreachable!("unsupported predicates return above"),
-            predicate => Some(self.index.scan(predicate)),
-        }
-    }
-
-    pub(crate) fn estimate_cardinality(&self, predicate: &Predicate) -> Option<usize> {
-        if !self.supports(predicate) {
-            return None;
-        }
-        Some(match predicate {
-            Predicate::IsNull => self.nulls.len(),
-            Predicate::IsNotNull => self.index.estimate_cardinality(predicate),
-            Predicate::NotEquals(_) => unreachable!("unsupported predicates return above"),
-            predicate => self.index.estimate_cardinality(predicate),
-        })
-    }
-
-    fn supports(&self, predicate: &Predicate) -> bool {
-        predicate_targets_are_index_safe(predicate)
-            && !matches!(predicate, Predicate::NotEquals(_))
-            && (matches!(predicate, Predicate::IsNull | Predicate::IsNotNull) || !self.has_temporal)
-    }
-}
-
-fn posting_list_from_sorted_ids(ids: impl Iterator<Item = DocId>) -> PostingList {
-    let entries: Vec<PostingEntry> = ids
-        .map(|doc_id| PostingEntry::new(doc_id, Payload::default()))
-        .collect();
-    PostingList::from_sorted_unchecked(entries)
-}
-
 impl crate::Engine {
     fn persistent_value_index_backend(
         &self,
@@ -246,43 +87,69 @@ impl crate::Engine {
             .ok_or_else(|| SQLError::UnknownTable(table.to_string()))
     }
 
-    /// Resolve a scalar predicate on `field` through a value index.
-    /// Returns `None` when the column has no index policy, the index
-    /// cannot reproduce scan semantics, or the table is unknown.
-    pub(crate) fn value_index_scan(
-        &self,
-        table: &str,
-        field: &str,
-        predicate: &Predicate,
-    ) -> Result<Option<PostingList>, SQLError> {
-        self.value_index_scan_key(table, &ValueIndexKey::Column(field.into()), predicate)
-    }
-
     pub(crate) fn value_index_scan_key(
         &self,
         table: &str,
         field: &ValueIndexKey,
         predicate: &Predicate,
     ) -> Result<Option<PostingList>, SQLError> {
-        let t = self.require_query_table(table)?;
+        let state = self.require_table(table)?;
+        self.value_index_scan_state(table, &state, field, predicate, None)
+    }
+
+    pub(crate) fn value_index_query_scan(
+        &self,
+        table: &str,
+        field: &str,
+        predicate: &Predicate,
+    ) -> Result<Option<PostingList>, SQLError> {
+        let read = self.serializable_table_read(table)?;
+        let state = self.require_query_table(table)?;
+        self.value_index_scan_state(
+            table,
+            &state,
+            &ValueIndexKey::Column(field.into()),
+            predicate,
+            read.as_ref(),
+        )
+    }
+
+    pub(crate) fn value_index_scan_state(
+        &self,
+        table: &str,
+        t: &std::sync::Arc<TableState>,
+        field: &ValueIndexKey,
+        predicate: &Predicate,
+        read: Option<&uqa_execution::serializable::SerializableRelationRead>,
+    ) -> Result<Option<PostingList>, SQLError> {
+        let observed = read.map(|read| (read, t.columns.snapshot()));
+        let scan = |index: &ColumnValueIndex| {
+            index.scan_observing(predicate, || {
+                if let Some((read, columns)) = &observed {
+                    read.observe_column_index(columns, field, predicate)?;
+                }
+                Ok(())
+            })
+        };
         {
             let indexes = t.value_indexes.read();
             if let Some(index) = indexes.get(field) {
-                return Ok(index.scan(predicate));
+                return scan(index);
             }
         }
         if !self
-            .ensure_query_value_index(table, &t, field)
-            .map_err(|error| SQLError::Internal(format!("build value index: {error}")))?
+            .ensure_query_value_index(table, t, field)
+            .map_err(|error| {
+                uqa_execution::storage_errors::storage_error("build value index", &error)
+            })?
         {
             return Ok(None);
         }
-        let result = t
-            .value_indexes
-            .read()
-            .get(field)
-            .and_then(|index| index.scan(predicate));
-        Ok(result)
+        let indexes = t.value_indexes.read();
+        match indexes.get(field) {
+            Some(index) => scan(index),
+            None => Ok(None),
+        }
     }
 
     /// Estimate one exact value-index predicate without materializing or
@@ -327,7 +194,7 @@ impl crate::Engine {
         predicate: &Predicate,
     ) -> StorageBackendResult<bool> {
         let field = &ValueIndexKey::Column(field.into());
-        let Some(table_name) = self.try_resolve_table_name(table)? else {
+        let Some(table_name) = self.try_resolve_query_table_name(table)? else {
             return Ok(false);
         };
         let Some(table) = self.try_query_table(&table_name)? else {
@@ -358,15 +225,18 @@ impl crate::Engine {
                 return self.ensure_value_index(table_name, field);
             }
         }
+        let Some(table_name) = self.try_resolve_query_table_name(table_name)? else {
+            return Ok(false);
+        };
         if !self
-            .value_indexable_fields(table_name)?
+            .value_indexable_fields_in_state(&table_name, table)?
             .iter()
             .any(|name| name == field)
         {
             return Ok(false);
         }
         let ids = table.document_store.read().doc_ids()?;
-        let values = self.project_value_index_rows(table, table_name, field, &ids)?;
+        let values = self.project_value_index_rows(table, &table_name, field, &ids)?;
         table.value_indexes.write().insert(
             field.clone(),
             ColumnValueIndex::build(field.name(), values.into_iter()),
@@ -609,7 +479,7 @@ impl crate::Engine {
             pending: backend.btree_index_repairs()?.into_iter().collect(),
             ..PersistentValueIndexRepairPlan::default()
         };
-        for table in self.table_names()? {
+        for table in self.table_names_in_execution()? {
             let desired: BTreeSet<ValueIndexKey> =
                 self.value_indexable_fields(&table)?.into_iter().collect();
             let actual: BTreeSet<ValueIndexKey> =
@@ -759,7 +629,7 @@ impl crate::Engine {
                 .map(|(field, index)| {
                     (
                         field.clone(),
-                        index.values.get(&doc_id).cloned().unwrap_or(Value::Null),
+                        index.stored_value(doc_id).cloned().unwrap_or(Value::Null),
                     )
                 })
                 .collect()

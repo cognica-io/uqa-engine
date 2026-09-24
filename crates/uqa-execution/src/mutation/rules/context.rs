@@ -7,6 +7,7 @@
 //! Capabilities required to execute stored rewrite rules.
 use crate::{PhysicalRow, RowSchema};
 use uqa_core::Value;
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     assignment::AssignmentContext,
     ast::{Expr, Statement},
@@ -15,11 +16,14 @@ use uqa_sql::{
     SQLError, SQLResult,
 };
 pub trait RuleSecurity {
-    fn privilege_subject(&self, table: &str) -> Result<String, SQLError>;
+    fn privilege_subject(&self, table: &str) -> Result<RoleReference, SQLError>;
 }
 pub trait RuleStatements {
-    fn execute(&self, statement: Statement, privilege_subject: &str)
-        -> Result<SQLResult, SQLError>;
+    fn execute(
+        &self,
+        statement: Statement,
+        privilege_subject: &RoleReference,
+    ) -> Result<SQLResult, SQLError>;
 }
 pub trait RuleExpressions {
     fn evaluate(&self, expression: &Expr) -> Result<Value, SQLError>;
@@ -28,7 +32,7 @@ pub trait RuleExpressions {
         expression: &ExpressionPlan,
         schema: &RowSchema,
         row: &PhysicalRow,
-        privilege_subject: &str,
+        privilege_subject: &RoleReference,
     ) -> Result<Value, SQLError>;
 }
 #[derive(Clone, Copy)]

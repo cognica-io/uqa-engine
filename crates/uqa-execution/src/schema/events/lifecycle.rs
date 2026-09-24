@@ -82,12 +82,12 @@ impl EventLifecycleContext<'_> {
                     "ON SELECT rule action lowered to a command".into(),
                 ));
             };
-            let output_columns = existing.output_columns.unwrap_or_default();
+            let output_columns = existing.output_columns.as_deref().unwrap_or_default();
             crate::schema::view_creation::register_view_plan(
                 self.views,
                 crate::schema::view_creation::ViewRegistration {
                     name: &definition.table,
-                    column_names: &output_columns,
+                    column_names: output_columns,
                     plan: *plan,
                     or_replace: true,
                     persistence: existing.persistence,
@@ -286,6 +286,12 @@ impl EventLifecycleContext<'_> {
             &definition.name,
             definition.or_replace,
         )?;
+        if definition.constraint {
+            self.constraint_names.reserve(
+                self.constraint_names.bind(&relation.qualified_name())?,
+                &definition.name,
+            )?;
+        }
         self.writer.prepare_writer()?;
         let mut triggers = self.catalog.registry.triggers();
         let mut next = triggers.clone();
@@ -429,20 +435,21 @@ impl EventLifecycleContext<'_> {
         to: &str,
     ) -> Result<(), SQLError> {
         let relation = self.lookup.analysis.resolve_trigger_table(table)?;
-        if crate::catalog::projection::runtime_constraints(&self.projection)?
-            .iter()
-            .any(|constraint| {
-                constraint.identity.relation == relation && constraint.identity.name == to
-            })
-        {
-            return Err(SQLError::Routine {
-                sqlstate: "42710".into(),
-                message: format!(
-                    "constraint \"{to}\" for relation \"{}\" already exists",
-                    relation.name
-                ),
-            });
-        }
+        let missing = || SQLError::Routine {
+            sqlstate: "42704".into(),
+            message: format!(
+                "constraint \"{from}\" of relation \"{}\" does not exist",
+                relation.name
+            ),
+        };
+        let selected = self
+            .lookup
+            .constraint_trigger_by_constraint_name(table, from)?
+            .ok_or_else(missing)?;
+        self.constraint_names
+            .ensure_available(&relation.qualified_name(), Some(to))?;
+        self.constraint_names
+            .reserve(self.constraint_names.bind(&relation.qualified_name())?, to)?;
         self.writer.prepare_writer()?;
         let mut triggers = self.catalog.registry.triggers();
         let mut next = triggers.clone();
@@ -451,19 +458,10 @@ impl EventLifecycleContext<'_> {
             .values_mut()
             .find(|trigger| {
                 trigger.definition.constraint
-                    && trigger
-                        .constraint_name
-                        .as_deref()
-                        .unwrap_or(&trigger.definition.name)
-                        == from
+                    && trigger.object_id == selected.object_id
+                    && trigger.definition.name == selected.definition.name
             })
-            .ok_or_else(|| SQLError::Routine {
-                sqlstate: "42704".into(),
-                message: format!(
-                    "constraint \"{from}\" of relation \"{}\" does not exist",
-                    relation.name
-                ),
-            })?;
+            .ok_or_else(missing)?;
         let old_identity = trigger.constraint_identity()?;
         trigger.constraint_name = Some(to.to_string());
         self.catalog.publication.persist_triggers(&next)?;

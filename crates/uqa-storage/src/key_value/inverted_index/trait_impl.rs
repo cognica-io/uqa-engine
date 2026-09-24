@@ -6,16 +6,73 @@
 
 //! Key/value index provider operations and retained revision installation.
 
-use super::super::codec::usize_to_u64;
-use super::queries::require_score_version;
 use super::{
-    cluster_id, decode_all_scores, keys, other_error, score_count, Analyzer, AnalyzerPhase, Arc,
-    BTreeMap, BTreeSet, DocId, FieldName, IndexStats, IndexedFieldMetadata, InvertedIndex,
-    KeyValueInvertedIndex, OccurrencePosting, Payload, PostingCursor, PostingEntry, PostingList,
+    Analyzer, AnalyzerPhase, Arc, BTreeMap, DocId, FieldName, IndexStats, IndexedFieldMetadata,
+    InvertedIndex, KeyValueInvertedIndex, OccurrencePosting, PostingCursor, PostingList,
     StorageBackendResult, TokenTermKey,
 };
 
 impl InvertedIndex for KeyValueInvertedIndex {
+    fn persisted_block_max_scores_keys_bulk(
+        &self,
+        field: &str,
+        terms: &[TokenTermKey],
+        scorer_fingerprint: &str,
+    ) -> StorageBackendResult<Vec<Option<Vec<f64>>>> {
+        if scorer_fingerprint.is_empty() {
+            return Ok(vec![None; terms.len()]);
+        }
+        self.get_versioned_block_max_scores_keys_bulk(field, terms, scorer_fingerprint)
+    }
+
+    fn persisted_block_max_scores_bulk(
+        &self,
+        field: &str,
+        terms: &[String],
+        scorer_fingerprint: &str,
+    ) -> StorageBackendResult<Vec<Option<Vec<f64>>>> {
+        let terms = terms
+            .iter()
+            .map(|term| TokenTermKey::from_text(term))
+            .collect::<Vec<_>>();
+        self.persisted_block_max_scores_keys_bulk(field, &terms, scorer_fingerprint)
+    }
+
+    fn persisted_block_max_scores(
+        &self,
+        field: &str,
+        term: &str,
+        scorer_fingerprint: &str,
+    ) -> StorageBackendResult<Option<Vec<f64>>> {
+        Ok(self
+            .persisted_block_max_scores_keys_bulk(
+                field,
+                &[TokenTermKey::from_text(term)],
+                scorer_fingerprint,
+            )?
+            .pop()
+            .expect("one term"))
+    }
+
+    fn rebuild_persisted_block_max(
+        &mut self,
+        field: &str,
+        scorer: &dyn crate::block_max_index::BlockMaxScorer,
+        scorer_fingerprint: &str,
+    ) -> StorageBackendResult<bool> {
+        self.rebuild_block_max(field, scorer, scorer_fingerprint)
+    }
+
+    fn posting_read_cursor_key_budgeted<'a>(
+        &'a self,
+        field: &'a str,
+        term: &'a TokenTermKey,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::clustered_postings::BudgetedPostingReadCursor<'a>> {
+        control.check()?;
+        crate::clustered_postings::open_controlled_cursor(self.snapshot()?, field, term, control)
+    }
+
     fn visit_score_clusters(
         &self,
         field: &str,
@@ -25,7 +82,7 @@ impl InvertedIndex for KeyValueInvertedIndex {
         control: &crate::read_control::StorageReadControl,
         visit: &mut crate::clustered_postings::ScoreClusterVisitor<'_>,
     ) -> StorageBackendResult<()> {
-        self.visit_clusters_budgeted(field, term, after, limit, control, visit)
+        self.read(|view| view.visit_score_clusters(field, term, after, limit, control, visit))
     }
 
     fn get_occurrences_budgeted(
@@ -35,7 +92,7 @@ impl InvertedIndex for KeyValueInvertedIndex {
         term: &TokenTermKey,
         control: &crate::read_control::StorageReadControl,
     ) -> StorageBackendResult<uqa_core::memory::Budgeted<Vec<uqa_core::TokenOccurrence>>> {
-        self.occurrences_budgeted(doc_id, field, term, control)
+        self.read(|view| view.get_occurrences_budgeted(doc_id, field, term, control))
     }
 
     fn field_stats_scalar_budgeted(
@@ -43,15 +100,21 @@ impl InvertedIndex for KeyValueInvertedIndex {
         field: &str,
         control: &crate::read_control::StorageReadControl,
     ) -> StorageBackendResult<IndexStats> {
-        self.scalar_stats_budgeted(field, control)
+        self.read(|view| view.field_stats_scalar_budgeted(field, control))
     }
 
     fn analyzer(&self) -> &Analyzer {
         self.bindings.default_configuration()
     }
 
+    fn default_analyzer_binding(
+        &self,
+    ) -> StorageBackendResult<crate::inverted_index::AnalyzerDefault> {
+        Ok(self.bindings.default_binding())
+    }
+
     fn source_rebuild_required(&self) -> StorageBackendResult<bool> {
-        self.needs_source_rebuild()
+        self.read(|view| view.source_rebuild_required())
     }
 
     fn add_document(
@@ -67,6 +130,14 @@ impl InvertedIndex for KeyValueInvertedIndex {
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
     ) -> StorageBackendResult<()> {
         self.add_documents(documents)
+    }
+
+    fn try_add_documents_observed(
+        &mut self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        visit: &mut crate::inverted_index::InvertedIndexChangeVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.mutate(|view, batch| view.add_documents(batch, documents, Some(visit)))
     }
 
     fn remove_document(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
@@ -89,13 +160,11 @@ impl InvertedIndex for KeyValueInvertedIndex {
     }
 
     fn clear(&mut self) -> StorageBackendResult<()> {
-        let mut batch = self.store.batch();
-        self.clear_index_batch(batch.as_mut())?;
-        batch.commit()
+        self.mutate(|view, batch| view.clear_index_batch(batch))
     }
 
     fn get_posting_list(&self, field: &str, term: &str) -> StorageBackendResult<PostingList> {
-        self.get_posting_list_key(field, &TokenTermKey::from_text(term))
+        self.read(|view| view.get_posting_list(field, term))
     }
 
     fn get_posting_list_key(
@@ -103,21 +172,7 @@ impl InvertedIndex for KeyValueInvertedIndex {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<PostingList> {
-        let entries = self
-            .occurrence_postings(field, term)?
-            .into_iter()
-            .map(|entry| {
-                PostingEntry::new(
-                    entry.doc_id,
-                    Payload {
-                        positions: entry.positions(),
-                        score: 0.0,
-                        fields: BTreeMap::new(),
-                    },
-                )
-            })
-            .collect();
-        Ok(PostingList::from_sorted_unchecked(entries))
+        self.read(|view| view.get_posting_list_key(field, term))
     }
 
     fn posting_cursor(
@@ -125,7 +180,7 @@ impl InvertedIndex for KeyValueInvertedIndex {
         field: &str,
         term: &str,
     ) -> StorageBackendResult<Box<dyn PostingCursor>> {
-        self.cursor_for_term(field, &TokenTermKey::from_text(term))
+        self.read(|view| view.posting_cursor(field, term))
     }
 
     fn posting_cursor_key(
@@ -133,7 +188,7 @@ impl InvertedIndex for KeyValueInvertedIndex {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<Box<dyn PostingCursor>> {
-        self.cursor_for_term(field, term)
+        self.read(|view| view.posting_cursor_key(field, term))
     }
 
     fn get_occurrence_postings(
@@ -141,7 +196,7 @@ impl InvertedIndex for KeyValueInvertedIndex {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<Vec<OccurrencePosting>> {
-        self.occurrence_postings(field, term)
+        self.read(|view| view.get_occurrence_postings(field, term))
     }
 
     fn get_occurrences(
@@ -150,13 +205,7 @@ impl InvertedIndex for KeyValueInvertedIndex {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<Vec<uqa_core::TokenOccurrence>> {
-        self.require_graph_format()?;
-        let entries = self.load_cluster(field, term, cluster_id(doc_id))?;
-        let Some(posting) = entries.into_iter().find(|entry| entry.doc_id == doc_id) else {
-            return Ok(Vec::new());
-        };
-        self.validate_posting_metadata(field, &posting)?;
-        Ok(posting.occurrences)
+        self.read(|view| view.get_occurrences(doc_id, field, term))
     }
 
     fn indexed_field_metadata(
@@ -164,8 +213,7 @@ impl InvertedIndex for KeyValueInvertedIndex {
         doc_id: DocId,
         field: &str,
     ) -> StorageBackendResult<Option<IndexedFieldMetadata>> {
-        self.require_graph_format()?;
-        self.read_field_metadata(doc_id, field)
+        self.read(|view| view.indexed_field_metadata(doc_id, field))
     }
 
     fn for_each_term_freq(
@@ -183,25 +231,15 @@ impl InvertedIndex for KeyValueInvertedIndex {
     }
 
     fn doc_freq(&self, field: &str, term: &str) -> StorageBackendResult<u64> {
-        self.doc_freq_key(field, &TokenTermKey::from_text(term))
+        self.read(|view| view.doc_freq(field, term))
     }
 
     fn doc_freq_key(&self, field: &str, term: &TokenTermKey) -> StorageBackendResult<u64> {
-        self.require_graph_format()?;
-        self.store
-            .scan_prefix(&keys::term_prefix(&self.table, keys::SCORE, field, term)?)?
-            .into_iter()
-            .try_fold(0_u64, |total, (key, score)| {
-                keys::read_cluster(&key, keys::SCORE)?;
-                require_score_version(&score)?;
-                total
-                    .checked_add(score_count(&score)?)
-                    .ok_or_else(|| other_error("document frequency overflow"))
-            })
+        self.read(|view| view.doc_freq_key(field, term))
     }
 
     fn get_doc_length(&self, doc_id: DocId, field: &str) -> StorageBackendResult<u64> {
-        self.document_length(doc_id, field)
+        self.read(|view| view.get_doc_length(doc_id, field))
     }
 
     fn get_scoring_inputs_bulk(
@@ -210,11 +248,7 @@ impl InvertedIndex for KeyValueInvertedIndex {
         field: &str,
         terms: &[String],
     ) -> StorageBackendResult<Vec<(u64, Vec<u64>)>> {
-        let keys = terms
-            .iter()
-            .map(|term| TokenTermKey::from_text(term))
-            .collect::<Vec<_>>();
-        self.get_scoring_inputs_keys_bulk(doc_ids, field, &keys)
+        self.read(|view| view.get_scoring_inputs_bulk(doc_ids, field, terms))
     }
 
     fn get_scoring_inputs_keys_bulk(
@@ -223,31 +257,11 @@ impl InvertedIndex for KeyValueInvertedIndex {
         field: &str,
         terms: &[TokenTermKey],
     ) -> StorageBackendResult<Vec<(u64, Vec<u64>)>> {
-        let mut output = doc_ids
-            .iter()
-            .map(|id| Ok((self.document_length(*id, field)?, vec![0; terms.len()])))
-            .collect::<StorageBackendResult<Vec<_>>>()?;
-        let mut positions = BTreeMap::<DocId, Vec<usize>>::new();
-        for (position, doc_id) in doc_ids.iter().copied().enumerate() {
-            positions.entry(doc_id).or_default().push(position);
-        }
-        for (term_index, term) in terms.iter().enumerate() {
-            let mut cursor = self.posting_cursor_key(field, term)?;
-            while let Some(entry) = cursor.current() {
-                if let Some(output_positions) = positions.get(&entry.doc_id) {
-                    for position in output_positions {
-                        output[*position].0 = entry.doc_length;
-                        output[*position].1[term_index] = entry.term_freq;
-                    }
-                }
-                cursor.advance()?;
-            }
-        }
-        Ok(output)
+        self.read(|view| view.get_scoring_inputs_keys_bulk(doc_ids, field, terms))
     }
 
     fn get_term_freq(&self, doc_id: DocId, field: &str, term: &str) -> StorageBackendResult<u64> {
-        self.get_term_freq_key(doc_id, field, &TokenTermKey::from_text(term))
+        self.read(|view| view.get_term_freq(doc_id, field, term))
     }
 
     fn get_term_freq_key(
@@ -256,118 +270,51 @@ impl InvertedIndex for KeyValueInvertedIndex {
         field: &str,
         term: &TokenTermKey,
     ) -> StorageBackendResult<u64> {
-        self.require_graph_format()?;
-        let cluster = cluster_id(doc_id);
-        self.store
-            .get(&keys::cluster_key(
-                &self.table,
-                keys::SCORE,
-                field,
-                term,
-                cluster,
-            )?)?
-            .map_or(Ok(0), |score| {
-                require_score_version(&score)?;
-                let entries = decode_all_scores(cluster, &score)?;
-                Ok(entries
-                    .binary_search_by_key(&doc_id, |entry| entry.doc_id)
-                    .ok()
-                    .map_or(0, |position| entries[position].term_freq))
-            })
+        self.read(|view| view.get_term_freq_key(doc_id, field, term))
     }
 
     fn doc_count(&self) -> StorageBackendResult<u64> {
-        self.require_graph_format()?;
-        let mut doc_ids = BTreeSet::new();
-        for (key, _) in self
-            .store
-            .scan_prefix(&keys::kind_prefix(&self.table, keys::LENGTH)?)?
-        {
-            doc_ids.insert(keys::read_document(&key, keys::LENGTH)?.0);
-        }
-        usize_to_u64(doc_ids.len(), "document count")
+        self.read(|view| view.doc_count())
     }
 
     fn total_field_length(&self, field: &str) -> StorageBackendResult<u64> {
-        self.require_graph_format()?;
-        Ok(self
-            .stored_field_stats(field)?
-            .map_or(0, |stats| stats.total_length))
+        self.read(|view| view.total_field_length(field))
     }
 
     fn field_doc_count(&self, field: &str) -> StorageBackendResult<u64> {
-        self.require_graph_format()?;
-        Ok(self
-            .stored_field_stats(field)?
-            .map_or(0, |stats| stats.doc_count))
+        self.read(|view| view.field_doc_count(field))
     }
 
     fn vocabulary_terms(&self, field: &str) -> StorageBackendResult<Vec<String>> {
-        self.vocabulary_keys(field)?
-            .into_iter()
-            .map(|key| Ok(key.to_term().into_string()?))
-            .collect()
+        self.read(|view| view.vocabulary_terms(field))
     }
 
     fn vocabulary_keys(&self, field: &str) -> StorageBackendResult<Vec<TokenTermKey>> {
-        self.indexed_terms(Some(field))
+        self.read(|view| view.vocabulary_keys(field))
     }
 
     fn stats(&self) -> StorageBackendResult<IndexStats> {
-        self.index_statistics()
+        self.read(|view| view.stats())
     }
 
     fn posting_count(&self, field: Option<&str>) -> StorageBackendResult<u64> {
-        self.store
-            .scan_prefix(&self.score_prefix(field)?)?
-            .into_iter()
-            .try_fold(0_u64, |total, (key, value)| {
-                keys::read_cluster(&key, keys::SCORE)?;
-                require_score_version(&value)?;
-                total
-                    .checked_add(score_count(&value)?)
-                    .ok_or_else(|| other_error("posting count overflow"))
-            })
+        self.read(|view| view.posting_count(field))
     }
 
     fn doc_length_count(&self, field: Option<&str>) -> StorageBackendResult<u64> {
-        self.require_graph_format()?;
-        if let Some(field) = field {
-            return self.field_doc_count(field);
-        }
-        let mut count = 0_u64;
-        for (key, _) in self
-            .store
-            .scan_prefix(&keys::kind_prefix(&self.table, keys::LENGTH)?)?
-        {
-            keys::read_document(&key, keys::LENGTH)?;
-            count = count
-                .checked_add(1)
-                .ok_or_else(|| other_error("document-length row count overflow"))?;
-        }
-        Ok(count)
+        self.read(|view| view.doc_length_count(field))
     }
 
     fn term_count(&self, field: Option<&str>) -> StorageBackendResult<u64> {
-        usize_to_u64(self.indexed_terms(field)?.len(), "term count")
+        self.read(|view| view.term_count(field))
     }
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn InvertedIndex>> {
-        Ok(Arc::new(self.clone()))
+        self.retained_snapshot()
     }
 
     fn field_names(&self) -> StorageBackendResult<Vec<FieldName>> {
-        self.require_graph_format()?;
-        let mut fields = Vec::new();
-        for (key, value) in self
-            .store
-            .scan_prefix(&keys::kind_prefix(&self.table, keys::FIELD)?)?
-        {
-            super::FieldStats::from_bytes(&value)?;
-            fields.push(keys::read_field(&key)?);
-        }
-        fields.sort();
-        Ok(fields)
+        self.read(|view| view.field_names())
     }
 
     fn set_field_analyzer(
@@ -376,20 +323,22 @@ impl InvertedIndex for KeyValueInvertedIndex {
         analyzer: Analyzer,
         phase: AnalyzerPhase,
     ) -> Result<(), String> {
+        self.ensure_writable().map_err(|error| error.to_string())?;
         let mut candidate = self.bindings.clone();
         candidate
             .bind(field, &analyzer, phase)
             .map_err(|error| error.to_string())?;
-        self.validate_index_revision_change(field, &candidate)
+        self.read(|view| view.validate_index_revision_change(field, &candidate))
             .map_err(|error| error.to_string())?;
         self.bindings = candidate;
         Ok(())
     }
 
     fn remove_field_analyzers(&mut self, field: &str) -> Result<(), String> {
+        self.ensure_writable().map_err(|error| error.to_string())?;
         let mut candidate = self.bindings.clone();
         candidate.remove(field);
-        self.validate_index_revision_change(field, &candidate)
+        self.read(|view| view.validate_index_revision_change(field, &candidate))
             .map_err(|error| error.to_string())?;
         self.bindings = candidate;
         Ok(())
@@ -420,11 +369,12 @@ impl InvertedIndex for KeyValueInvertedIndex {
         revision: Arc<uqa_analysis::CompiledAnalyzer>,
         phase: AnalyzerPhase,
     ) -> Result<(), String> {
+        self.ensure_writable().map_err(|error| error.to_string())?;
         let mut candidate = self.bindings.clone();
         candidate
             .bind_revision(field, revision, phase)
             .map_err(|error| error.to_string())?;
-        self.validate_index_revision_change(field, &candidate)
+        self.read(|view| view.validate_index_revision_change(field, &candidate))
             .map_err(|error| error.to_string())?;
         self.bindings = candidate;
         Ok(())
@@ -436,11 +386,12 @@ impl InvertedIndex for KeyValueInvertedIndex {
         index: Arc<uqa_analysis::CompiledAnalyzer>,
         search: Arc<uqa_analysis::CompiledAnalyzer>,
     ) -> Result<(), String> {
+        self.ensure_writable().map_err(|error| error.to_string())?;
         let mut candidate = self.bindings.clone();
         candidate
             .bind_revisions(field, index, search)
             .map_err(|error| error.to_string())?;
-        self.validate_index_revision_change(field, &candidate)
+        self.read(|view| view.validate_index_revision_change(field, &candidate))
             .map_err(|error| error.to_string())?;
         self.bindings = candidate;
         Ok(())
@@ -453,6 +404,7 @@ impl InvertedIndex for KeyValueInvertedIndex {
         phase: AnalyzerPhase,
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
     ) -> StorageBackendResult<()> {
+        self.ensure_writable()?;
         let mut replacement = self.clone();
         replacement.bindings.bind_revision(field, revision, phase)?;
         replacement.rebuild_documents(documents)?;
@@ -469,10 +421,167 @@ impl InvertedIndex for KeyValueInvertedIndex {
         cancellation: &uqa_core::CancellationToken,
     ) -> StorageBackendResult<()> {
         cancellation.check()?;
+        self.ensure_writable()?;
         let mut replacement = self.clone();
         replacement.bindings.bind_revision(field, revision, phase)?;
         replacement.rebuild_documents_inner(documents, Some(cancellation))?;
         *self = replacement;
         Ok(())
+    }
+
+    fn get_posting_lists_bulk(
+        &self,
+        field: &str,
+        terms: &[String],
+    ) -> StorageBackendResult<Vec<PostingList>> {
+        self.read(|view| {
+            terms
+                .iter()
+                .map(|term| view.get_posting_list(field, term))
+                .collect()
+        })
+    }
+
+    fn posting_cursors_bulk(
+        &self,
+        field: &str,
+        terms: &[String],
+    ) -> StorageBackendResult<Vec<Box<dyn PostingCursor>>> {
+        self.read(|view| {
+            terms
+                .iter()
+                .map(|term| view.posting_cursor(field, term))
+                .collect()
+        })
+    }
+
+    fn posting_cursors_keys_bulk(
+        &self,
+        field: &str,
+        terms: &[TokenTermKey],
+    ) -> StorageBackendResult<Vec<Box<dyn PostingCursor>>> {
+        self.read(|view| {
+            terms
+                .iter()
+                .map(|term| view.posting_cursor_key(field, term))
+                .collect()
+        })
+    }
+
+    fn get_posting_lists_keys_bulk(
+        &self,
+        field: &str,
+        terms: &[TokenTermKey],
+    ) -> StorageBackendResult<Vec<PostingList>> {
+        self.read(|view| {
+            terms
+                .iter()
+                .map(|term| view.get_posting_list_key(field, term))
+                .collect()
+        })
+    }
+
+    fn field_stats(&self, field: &str) -> StorageBackendResult<IndexStats> {
+        self.read(|view| {
+            let mut stats = view.stats()?;
+            let field_docs = view.field_doc_count(field)?;
+            stats.total_docs = field_docs;
+            stats.avg_doc_length = if field_docs > 0 {
+                view.total_field_length(field)? as f64 / field_docs as f64
+            } else {
+                0.0
+            };
+            Ok(stats)
+        })
+    }
+
+    fn field_stats_scalar(&self, field: &str) -> StorageBackendResult<IndexStats> {
+        self.read(|view| {
+            let mut stats = IndexStats::default();
+            let field_docs = view.field_doc_count(field)?;
+            stats.total_docs = field_docs;
+            stats.avg_doc_length = if field_docs > 0 {
+                view.total_field_length(field)? as f64 / field_docs as f64
+            } else {
+                0.0
+            };
+            Ok(stats)
+        })
+    }
+
+    fn get_posting_list_any_field(&self, term: &str) -> StorageBackendResult<PostingList> {
+        self.read(|view| {
+            let mut result = PostingList::new();
+            for field in view.field_names()? {
+                let pl = view.get_posting_list(&field, term)?;
+                result = result.merge_union(&pl);
+            }
+            Ok(result)
+        })
+    }
+
+    fn doc_freq_any_field(&self, term: &str) -> StorageBackendResult<u64> {
+        self.read(|view| {
+            let mut total = 0_u64;
+            for field in view.field_names()? {
+                total = total
+                    .checked_add(view.doc_freq(&field, term)?)
+                    .ok_or_else(|| super::other_error("document frequency overflow"))?;
+            }
+            Ok(total)
+        })
+    }
+
+    fn get_total_doc_length(&self, doc_id: DocId) -> StorageBackendResult<u64> {
+        self.read(|view| {
+            let mut total = 0_u64;
+            for field in view.field_names()? {
+                total = total
+                    .checked_add(view.get_doc_length(doc_id, &field)?)
+                    .ok_or_else(|| super::other_error("document length overflow"))?;
+            }
+            Ok(total)
+        })
+    }
+
+    fn get_total_term_freq(&self, doc_id: DocId, term: &str) -> StorageBackendResult<u64> {
+        self.read(|view| {
+            let mut total = 0_u64;
+            for field in view.field_names()? {
+                total = total
+                    .checked_add(view.get_term_freq(doc_id, &field, term)?)
+                    .ok_or_else(|| super::other_error("term frequency overflow"))?;
+            }
+            Ok(total)
+        })
+    }
+
+    fn get_doc_lengths_bulk(
+        &self,
+        doc_ids: &[DocId],
+        field: &str,
+    ) -> StorageBackendResult<BTreeMap<DocId, u64>> {
+        self.read(|view| {
+            let mut out = BTreeMap::new();
+            for doc_id in doc_ids {
+                out.insert(*doc_id, view.get_doc_length(*doc_id, field)?);
+            }
+            Ok(out)
+        })
+    }
+
+    fn get_term_freqs_bulk(
+        &self,
+        doc_ids: &[DocId],
+        field: &str,
+        term: &str,
+    ) -> StorageBackendResult<BTreeMap<DocId, u64>> {
+        self.read(|view| {
+            let mut out = BTreeMap::new();
+            for doc_id in doc_ids {
+                out.insert(*doc_id, view.get_term_freq(*doc_id, field, term)?);
+            }
+            Ok(out)
+        })
     }
 }

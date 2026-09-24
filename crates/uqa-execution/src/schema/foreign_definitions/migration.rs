@@ -9,7 +9,10 @@ use crate::catalog::foreign::StoredForeignTable;
 use uqa_core::RelationIdentity;
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
-pub fn migrate_foreign_table_identities(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
+pub fn migrate_foreign_table_identities(
+    catalog: &dyn CatalogFacade,
+    roles: &std::collections::BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+) -> StorageBackendResult<()> {
     for mut row in catalog.load_foreign_tables()? {
         let relation_name = row.relation.qualified_name();
         let options = serde_json::from_str(&row.options_json)?;
@@ -32,11 +35,22 @@ pub fn migrate_foreign_table_identities(catalog: &dyn CatalogFacade) -> StorageB
         changed |=
             materialize_constraint_metadata(&row.relation, &mut table.columns, &mut constraints)?;
         table.checks = constraints.checks;
+        let column_names = table
+            .columns
+            .iter()
+            .map(|column| column.name.clone())
+            .collect::<Vec<_>>();
+        let security = crate::catalog::security::relation_restoration::restore_security(
+            &row.security,
+            Some(&column_names),
+            roles,
+            true,
+        )?;
         changed |=
             crate::schema::sequences::migration::materialize_persisted_foreign_implicit_sequences(
                 catalog,
                 &row.relation,
-                &row.role_owner,
+                security.role_owner,
                 table.object_id,
                 &mut table.columns,
             )?;

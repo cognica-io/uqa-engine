@@ -18,6 +18,7 @@ use crate::scalar::plan::{PhysicalOuterRow, PhysicalSubqueryRunner};
 use crate::{Batch, PhysicalRow, RowSchema, SpillBuffer, SubqueryResult};
 use parking_lot::Mutex;
 use uqa_core::Value;
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::{FunctionBinding, FunctionVolatility},
     catalog::session::PreparedStatementMetadata,
@@ -68,6 +69,10 @@ impl QueryMemorySettings for Services {
 }
 
 impl CatalogSnapshotSource for Services {
+    fn current_catalog_snapshot(&self) -> CatalogReadView {
+        panic!("subquery correlation does not read the current definition catalog")
+    }
+
     fn catalog_snapshot(&self) -> CatalogReadView {
         assert!(
             self.allow_metadata,
@@ -97,7 +102,7 @@ impl CatalogSession for Services {
             lookup_mode: RelationLookupMode::Dynamic,
         }
     }
-    fn current_user(&self) -> String {
+    fn current_role(&self) -> RoleReference {
         panic!("unexpected session read")
     }
     fn temporary_schema_name(&self) -> String {
@@ -108,6 +113,9 @@ impl CatalogSession for Services {
     }
     fn runtime_parameter_source(&self, _: &str) -> &'static str {
         panic!("unexpected session read")
+    }
+    fn cursors(&self) -> Vec<uqa_sql::catalog::session::CursorMetadata> {
+        panic!("unexpected cursor catalog read")
     }
     fn prepared_statements(&self) -> Vec<PreparedStatementMetadata> {
         panic!("unexpected session read")

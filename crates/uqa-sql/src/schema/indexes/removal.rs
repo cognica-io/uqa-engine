@@ -82,12 +82,13 @@ pub fn catalog_index_columns(
 
 pub fn collect_index_dependents(
     index_name: &str,
+    index_id: [u8; 16],
     referrers: Vec<(String, ForeignKey)>,
     cascade: bool,
     dependents: &mut BTreeSet<(String, String)>,
 ) -> Result<(), SQLError> {
     for (table, foreign_key) in referrers {
-        if foreign_key.referenced_key.as_deref() != Some(index_name) {
+        if foreign_key.referenced_index != Some(index_id) {
             continue;
         }
         let name = foreign_key

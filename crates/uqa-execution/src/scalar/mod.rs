@@ -21,8 +21,8 @@ pub use call_arguments::{
     validate_scalar_call_arguments, ScalarCallArgument,
 };
 pub use context::ScalarEvalContext;
-pub use evaluator::eval_scalar;
 pub(crate) use evaluator::scalar_integer_binary_width;
+pub use evaluator::{eval_generated_scalar_with_control, eval_scalar};
 pub use subquery::{ScalarSubqueryRunner, SubqueryResult};
 
 #[cfg(test)]

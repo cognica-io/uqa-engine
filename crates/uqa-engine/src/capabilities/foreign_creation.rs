@@ -21,19 +21,18 @@ impl Engine {
             bindings: self,
             references: self,
             sequences: self,
-            allocate_identity: super::allocate_catalog_object_id,
         }
     }
     pub(crate) fn foreign_creation_context(&self) -> ForeignCreationContext<'_> {
         ForeignCreationContext {
             creation: self.relation_creation_context(),
+            identities: self.catalog_identity_reservation_context(),
             schema: self.foreign_schema_context(),
             namespace: self,
             registry: self,
             publication: self,
             catalog: self.storage.catalog.as_deref(),
             changes: self,
-            session: self,
             sequences: self.implicit_sequence_context(),
             ownership: self.implicit_ownership_context(),
             notices: self.query_runtime_view().notices,

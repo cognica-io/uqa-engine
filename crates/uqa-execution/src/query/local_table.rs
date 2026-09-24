@@ -18,6 +18,7 @@ pub type SharedLockOrigin = (Arc<str>, Arc<str>);
 
 pub struct LocalTableRowSource {
     cancellation: uqa_core::CancellationToken,
+    serializable: crate::serializable::SerializableScan,
     table_name: String,
     table: Arc<dyn super::table_read::TableRead>,
     column_definitions: Arc<Vec<uqa_sql::ast::ColumnDef>>,
@@ -32,9 +33,7 @@ pub struct LocalTableRowSource {
     lock_origin: Option<SharedLockOrigin>,
     recheck_pins: Option<Arc<Vec<crate::row_locks::recheck::RecheckDoc>>>,
     recheck_cursor: usize,
-    command_changes: Option<
-        Arc<std::collections::BTreeMap<uqa_core::DocId, Option<uqa_storage::StoredDocument>>>,
-    >,
+    command_changes: Option<super::document_changes::DocumentChanges>,
     command_change_after: Option<uqa_core::DocId>,
     command_base_after: Option<uqa_core::DocId>,
     command_base_ids: std::collections::VecDeque<uqa_core::DocId>,
@@ -118,6 +117,7 @@ impl crate::RowSource for HierarchyRowSource {
 
 pub struct LocalTableScanConfig {
     pub cancellation: uqa_core::CancellationToken,
+    pub serializable: Option<crate::serializable::SerializableRelationRead>,
     pub table_name: String,
     pub table: Arc<dyn super::table_read::TableRead>,
     pub column_definitions: Arc<Vec<uqa_sql::ast::ColumnDef>>,
@@ -130,15 +130,14 @@ pub struct LocalTableScanConfig {
     pub estimated_cardinality: u64,
     pub lock_origin: Option<SharedLockOrigin>,
     pub recheck_pins: Option<Arc<Vec<crate::row_locks::recheck::RecheckDoc>>>,
-    pub command_changes: Option<
-        Arc<std::collections::BTreeMap<uqa_core::DocId, Option<uqa_storage::StoredDocument>>>,
-    >,
+    pub command_changes: Option<super::document_changes::DocumentChanges>,
 }
 
 impl LocalTableRowSource {
     pub fn new(config: LocalTableScanConfig) -> Self {
         Self {
             cancellation: config.cancellation,
+            serializable: crate::serializable::SerializableScan::new(config.serializable),
             table_name: config.table_name,
             table: config.table,
             column_definitions: config.column_definitions,

@@ -14,6 +14,40 @@
 use super::KeyValueStore;
 use crate::{StorageBackendError, StorageBackendResult};
 
+mod documents;
+pub use documents::{verify_document_ownership, verify_document_reopen};
+mod commands;
+pub use commands::{verify_command_refresh, verify_command_refresh_reopen};
+mod sequences;
+pub use sequences::{verify_sequence_concurrency, verify_sequence_reopen};
+mod graph;
+pub use graph::{verify_graph_cache_concurrency, verify_graph_cache_reopen};
+mod graph_retry;
+pub use graph_retry::verify_graph_admission_retry;
+mod compound;
+pub use compound::{verify_compound_concurrency, verify_compound_mutations};
+mod physical_vectors;
+pub use physical_vectors::{
+    verify_hnsw_concurrency, verify_hnsw_reopen, verify_hnsw_undo, verify_ivf_concurrency,
+    verify_ivf_reopen, verify_ivf_undo,
+};
+mod vector_merging;
+pub use vector_merging::{
+    verify_vector_document_merges, verify_vector_merge_conflicts, verify_vector_merge_reopen,
+    VectorMergeKind,
+};
+mod vector_snapshots;
+pub use vector_snapshots::{verify_exact_snapshot_concurrency, verify_vector_snapshots};
+mod occurrence_accelerators;
+mod occurrence_changes;
+mod occurrence_merging;
+mod occurrences;
+pub use occurrence_accelerators::verify_occurrence_accelerators;
+pub use occurrence_changes::verify_inverted_index_changes;
+pub use occurrences::{
+    verify_occurrence_concurrency, verify_occurrence_reopen, verify_occurrence_snapshots,
+};
+
 const PREFIX: &[u8] = b"\0uqa-key-value-conformance/v1/";
 
 /// Verify the single-session ordered Key/Value and transaction contract.

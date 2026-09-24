@@ -65,16 +65,26 @@ fn unqualified_names_preserve_search_order_and_duplicates_after_temporary_schema
     ]);
     assert_eq!(
         relation_lookup_candidates(&session, "items").unwrap(),
-        ["pg_temp_42", "tenant", "public", "tenant"]
-            .into_iter()
-            .map(|schema| RelationIdentity::new(schema, "items"))
-            .collect::<Vec<_>>()
+        [
+            "pg_temp_42",
+            "tenant",
+            "pg_catalog",
+            "public",
+            "information_schema",
+            "tenant"
+        ]
+        .into_iter()
+        .map(|schema| RelationIdentity::new(schema, "items"))
+        .collect::<Vec<_>>()
     );
     assert_eq!(*session.reads.borrow(), vec!["temporary", "search_path"]);
     let empty = Session::new(&[]);
     assert_eq!(
         relation_lookup_candidates(&empty, "items").unwrap(),
-        vec![RelationIdentity::new("pg_temp_42", "items")]
+        vec![
+            RelationIdentity::new("pg_temp_42", "items"),
+            RelationIdentity::new("pg_catalog", "items")
+        ]
     );
 }
 
@@ -86,4 +96,16 @@ fn malformed_references_fail_before_reading_session_state() {
         assert_eq!(error, RelationIdentity::parse_reference(name).unwrap_err());
     }
     assert!(session.reads.borrow().is_empty());
+}
+
+#[test]
+fn explicit_temporary_and_system_schemas_keep_their_search_positions() {
+    for temporary in ["pg_temp", "pg_temp_42"] {
+        let session = Session::new(&["public", "pg_catalog", temporary]);
+        assert_eq!(
+            relation_lookup_candidates(&session, "items").unwrap(),
+            ["public", "pg_catalog", "pg_temp_42"]
+                .map(|schema| RelationIdentity::new(schema, "items"))
+        );
+    }
 }

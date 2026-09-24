@@ -16,7 +16,7 @@ pub struct DistinctTracker {
     pub(super) memory_bytes: usize,
     pub(super) max_memory_record_bytes: usize,
     pub(super) budget_bytes: usize,
-    pub(super) disk: Option<tempfile::NamedTempFile>,
+    pub(super) disk: Option<uqa_storage::temporary_file::TemporaryFile>,
     pub(super) max_disk_record_bytes: usize,
 }
 
@@ -92,11 +92,13 @@ impl DistinctTracker {
             return Ok(());
         }
         if self.disk.is_none() {
-            self.disk = Some(tempfile::NamedTempFile::new().map_err(|error| {
-                SQLError::Internal(format!(
-                    "failed to create aggregate DISTINCT spill: {error}"
-                ))
-            })?);
+            self.disk = Some(uqa_storage::temporary_file::TemporaryFile::new().map_err(
+                |error| {
+                    SQLError::Internal(format!(
+                        "failed to create aggregate DISTINCT spill: {error}"
+                    ))
+                },
+            )?);
         }
         let file = self.disk.as_mut().ok_or_else(|| {
             SQLError::Internal("aggregate DISTINCT spill file was not initialized".into())

@@ -10,22 +10,14 @@ use super::{
 };
 use crate::compiler::{extract_string, range_var_name};
 
-pub(in crate::compiler) fn compile_role_spec(
+fn compile_acl_role_specification(
     role: &pg_query::protobuf::RoleSpec,
-    allow_public: bool,
     context: &str,
-) -> Result<String> {
-    use pg_query::protobuf::RoleSpecType;
-    match role.roletype() {
-        RoleSpecType::RolespecCstring => Ok(role.rolename.clone()),
-        RoleSpecType::RolespecCurrentRole | RoleSpecType::RolespecCurrentUser => {
-            Ok("CURRENT_USER".into())
-        }
-        RoleSpecType::RolespecSessionUser => Ok("SESSION_USER".into()),
-        RoleSpecType::RolespecPublic => Ok(if allow_public { "PUBLIC" } else { "public" }.into()),
-        other => Err(SQLError::Unsupported(format!(
-            "{context}: role specification {other:?} is not supported"
-        ))),
+) -> Result<crate::ast::AclRoleSpecification> {
+    if role.roletype() == pg_query::protobuf::RoleSpecType::RolespecPublic {
+        Ok(crate::ast::AclRoleSpecification::Public)
+    } else {
+        compile_role_specification(role, context).map(crate::ast::AclRoleSpecification::Role)
     }
 }
 
@@ -86,7 +78,7 @@ pub(in crate::compiler) fn compile_alter_routine_owner(
             .ok_or_else(|| SQLError::Internal("ALTER SCHEMA has no owner".into()))?;
         return Ok(Statement::AlterSchemaOwner {
             name: extract_string(target)?,
-            new_owner: compile_role_spec(owner, false, "ALTER SCHEMA OWNER TO")?,
+            new_owner: compile_role_specification(owner, "ALTER SCHEMA OWNER TO")?,
         });
     }
     let (kind, context) = match statement.object_type() {
@@ -122,7 +114,7 @@ pub(in crate::compiler) fn compile_alter_routine_owner(
         name,
         arg_types,
         arg_type_references,
-        new_owner: compile_role_spec(owner, false, context)?,
+        new_owner: compile_role_specification(owner, context)?,
     }))
 }
 
@@ -159,13 +151,13 @@ fn compile_grant_table(statement: &pg_query::protobuf::GrantStmt) -> Result<Stat
                     "GRANT/REVOKE contains a malformed grantee".into(),
                 ));
             };
-            compile_role_spec(role, true, "GRANT/REVOKE")
+            compile_acl_role_specification(role, "GRANT/REVOKE")
         })
         .collect::<Result<Vec<_>>>()?;
     let grantor = statement
         .grantor
         .as_ref()
-        .map(|role| compile_role_spec(role, false, "GRANTED BY"))
+        .map(|role| compile_role_specification(role, "GRANTED BY"))
         .transpose()?;
     Ok(Statement::GrantTable(GrantTableStmt {
         is_grant: statement.is_grant,
@@ -326,13 +318,13 @@ fn compile_grant_database(statement: &pg_query::protobuf::GrantStmt) -> Result<S
                     "GRANT/REVOKE contains a malformed grantee".into(),
                 ));
             };
-            compile_role_spec(role, true, "GRANT/REVOKE")
+            compile_acl_role_specification(role, "GRANT/REVOKE")
         })
         .collect::<Result<Vec<_>>>()?;
     let grantor = statement
         .grantor
         .as_ref()
-        .map(|role| compile_role_spec(role, false, "GRANTED BY"))
+        .map(|role| compile_role_specification(role, "GRANTED BY"))
         .transpose()?;
     Ok(Statement::GrantDatabase(GrantDatabaseStmt {
         is_grant: statement.is_grant,
@@ -401,13 +393,13 @@ fn compile_grant_schema(statement: &pg_query::protobuf::GrantStmt) -> Result<Sta
                     "GRANT/REVOKE contains a malformed grantee".into(),
                 ));
             };
-            compile_role_spec(role, true, "GRANT/REVOKE")
+            compile_acl_role_specification(role, "GRANT/REVOKE")
         })
         .collect::<Result<Vec<_>>>()?;
     let grantor = statement
         .grantor
         .as_ref()
-        .map(|role| compile_role_spec(role, false, "GRANTED BY"))
+        .map(|role| compile_role_specification(role, "GRANTED BY"))
         .transpose()?;
     Ok(Statement::GrantSchema(GrantSchemaStmt {
         is_grant: statement.is_grant,
@@ -485,13 +477,13 @@ fn compile_grant_routine(statement: &pg_query::protobuf::GrantStmt) -> Result<St
                     "GRANT/REVOKE contains a malformed grantee".into(),
                 ));
             };
-            compile_role_spec(role, true, "GRANT/REVOKE")
+            compile_acl_role_specification(role, "GRANT/REVOKE")
         })
         .collect::<Result<Vec<_>>>()?;
     let grantor = statement
         .grantor
         .as_ref()
-        .map(|role| compile_role_spec(role, false, "GRANTED BY"))
+        .map(|role| compile_role_specification(role, "GRANTED BY"))
         .transpose()?;
     Ok(Statement::GrantRoutine(GrantRoutineStmt {
         kind,
@@ -553,13 +545,13 @@ fn compile_grant_sequence(statement: &pg_query::protobuf::GrantStmt) -> Result<S
                     "GRANT/REVOKE contains a malformed grantee".into(),
                 ));
             };
-            compile_role_spec(role, true, "GRANT/REVOKE")
+            compile_acl_role_specification(role, "GRANT/REVOKE")
         })
         .collect::<Result<Vec<_>>>()?;
     let grantor = statement
         .grantor
         .as_ref()
-        .map(|role| compile_role_spec(role, false, "GRANTED BY"))
+        .map(|role| compile_role_specification(role, "GRANTED BY"))
         .transpose()?;
     Ok(Statement::GrantSequence(GrantSequenceStmt {
         is_grant: statement.is_grant,
@@ -618,10 +610,29 @@ fn compile_grant_sequence_target(
     }
 }
 
+pub(in crate::compiler) fn compile_role_specification(
+    role: &pg_query::protobuf::RoleSpec,
+    context: &str,
+) -> Result<crate::ast::RoleSpecification> {
+    use crate::ast::RoleSpecification;
+    use pg_query::protobuf::RoleSpecType;
+    match role.roletype() {
+        RoleSpecType::RolespecCstring => Ok(RoleSpecification::Named(role.rolename.clone())),
+        RoleSpecType::RolespecCurrentRole | RoleSpecType::RolespecCurrentUser => {
+            Ok(RoleSpecification::CurrentUser)
+        }
+        RoleSpecType::RolespecSessionUser => Ok(RoleSpecification::SessionUser),
+        RoleSpecType::RolespecPublic => Ok(RoleSpecification::Named("public".into())),
+        other => Err(SQLError::Unsupported(format!(
+            "{context}: role specification {other:?} is not supported"
+        ))),
+    }
+}
+
 fn compile_membership_role_list(
     nodes: &[pg_query::protobuf::Node],
     context: &str,
-) -> Result<Vec<String>> {
+) -> Result<Vec<crate::ast::RoleSpecification>> {
     nodes
         .iter()
         .map(|node| {
@@ -630,7 +641,7 @@ fn compile_membership_role_list(
                     "{context} contains a malformed role specification"
                 )));
             };
-            compile_role_spec(role, false, context)
+            compile_role_specification(role, context)
         })
         .collect()
 }
@@ -691,7 +702,7 @@ pub(in crate::compiler) fn compile_grant_role(
     let grantor = statement
         .grantor
         .as_ref()
-        .map(|role| compile_role_spec(role, false, "GRANTED BY"))
+        .map(|role| compile_role_specification(role, "GRANTED BY"))
         .transpose()?;
     Ok(Statement::GrantRole(GrantRoleStmt {
         granted_roles,
@@ -797,7 +808,7 @@ pub(in crate::compiler) fn compile_alter_role(
         .as_ref()
         .ok_or_else(|| SQLError::Internal("ALTER ROLE has no target".into()))?;
     let mut alter = AlterRoleStmt {
-        name: compile_role_spec(role, false, "ALTER ROLE")?,
+        name: compile_role_specification(role, "ALTER ROLE")?,
         attributes: std::collections::BTreeMap::new(),
         connection_limit: None,
         membership_action: None,
@@ -869,7 +880,7 @@ pub(in crate::compiler) fn compile_drop_role(
                     "DROP ROLE has a malformed target".into(),
                 ));
             };
-            compile_role_spec(role, false, "DROP ROLE")
+            compile_role_specification(role, "DROP ROLE")
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(Statement::DropRole(DropRoleStmt {

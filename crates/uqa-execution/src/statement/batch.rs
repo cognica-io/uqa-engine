@@ -437,6 +437,13 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                 context
                     .transactions
                     .begin_implicit_statement_transaction(is_read_query)?;
+                if let Err(error) = context.transactions.prepare_explicit_statement_snapshot(
+                    uqa_sql::semantics::effects::read_only::plan_sets_transaction_snapshot(
+                        initial_plan.as_ref(),
+                    ),
+                ) {
+                    return rollback_after_statement_error(context.transactions, error);
+                }
                 // Catalog/table refresh intentionally invalidates cached logical
                 // plans even when the in-process generation did not move: a
                 // sibling SQLite writer can release its lock immediately before
@@ -480,6 +487,13 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                     context
                         .transactions
                         .begin_implicit_statement_transaction(false)?;
+                    if let Err(error) = context.transactions.prepare_explicit_statement_snapshot(
+                        uqa_sql::semantics::effects::read_only::plan_sets_transaction_snapshot(
+                            initial_plan.as_ref(),
+                        ),
+                    ) {
+                        return rollback_after_statement_error(context.transactions, error);
+                    }
                     plan = UnifiedPlan::lower_with(statement.clone(), context.aggregates);
                     if is_single_statement {
                         context.cache.cache_sql_statement(

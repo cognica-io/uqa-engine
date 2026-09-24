@@ -27,3 +27,6 @@ mod sqlite_document_store;
 
 #[path = "cases/japanese.rs"]
 mod japanese;
+
+#[path = "cases/mvcc.rs"]
+mod mvcc;

@@ -6,8 +6,8 @@
 
 use super::IndexedFieldMetadata;
 use super::{
-    counter_error, Analyzer, Arc, BTreeMap, BlockMaxScorer, DocId, FieldName, IndexStats,
-    PostingEntry, PostingList, StorageBackendError, StorageBackendResult,
+    Analyzer, Arc, BTreeMap, BlockMaxScorer, DocId, FieldName, IndexStats, PostingEntry,
+    PostingList, StorageBackendError, StorageBackendResult,
 };
 use crate::clustered_postings::BudgetedPostingReadCursor;
 use crate::clustered_postings::{
@@ -57,6 +57,13 @@ pub trait InvertedIndex: Send + Sync {
 
     fn analyzer(&self) -> &Analyzer;
 
+    /// Retain the exact default configuration, resource provider and already resolved revision without forcing deferred compilation. Controlled reconstruction requires this capability instead of copying and recompiling diagnostic configuration.
+    fn default_analyzer_binding(&self) -> StorageBackendResult<super::AnalyzerDefault> {
+        Err(StorageBackendError::Other(
+            "retained default analyzer bindings are not supported by this backend".into(),
+        ))
+    }
+
     fn add_document(
         &mut self,
         doc_id: DocId,
@@ -80,6 +87,26 @@ pub trait InvertedIndex: Send + Sync {
             self.try_add_document(doc_id, fields)?;
         }
         Ok(())
+    }
+
+    /// Capture logical changes from the same analysis and original reverse entries used by the atomic replacement. The visitor must not reenter this provider. A transaction owner discards captured changes on error and registers successful intents before completing its statement; private writes and intents must share savepoint undo.
+    fn try_add_documents_observed(
+        &mut self,
+        _documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        _visit: &mut super::InvertedIndexChangeVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "evaluated text mutation observations are not supported by this backend".into(),
+        ))
+    }
+
+    /// Deletion captures the original analyzed terms without reconstructing the document or rerunning its analyzer. An absent document produces no logical change.
+    fn try_remove_document_observed(
+        &mut self,
+        doc_id: DocId,
+        visit: &mut super::InvertedIndexChangeVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.try_add_documents_observed(vec![(doc_id, BTreeMap::new())], visit)
     }
 
     fn remove_document(&mut self, doc_id: DocId) -> StorageBackendResult<()>;
@@ -466,15 +493,7 @@ pub trait InvertedIndex: Send + Sync {
     /// one field. Reusing table-wide totals mixes unrelated field lengths
     /// and produces scores that cannot match a field-scoped BM25 scorer.
     fn field_stats(&self, field: &str) -> StorageBackendResult<IndexStats> {
-        let mut stats = self.stats()?;
-        let field_docs = self.field_doc_count(field)?;
-        stats.total_docs = field_docs;
-        stats.avg_doc_length = if field_docs > 0 {
-            self.total_field_length(field)? as f64 / field_docs as f64
-        } else {
-            0.0
-        };
-        Ok(stats)
+        super::defaults::field_stats(self, field)
     }
 
     /// [`InvertedIndex::field_stats`] without the vocabulary-wide
@@ -485,15 +504,7 @@ pub trait InvertedIndex: Send + Sync {
     /// field's document count and average length; copying the whole
     /// term dictionary per query is O(vocabulary) for nothing.
     fn field_stats_scalar(&self, field: &str) -> StorageBackendResult<IndexStats> {
-        let mut stats = IndexStats::default();
-        let field_docs = self.field_doc_count(field)?;
-        stats.total_docs = field_docs;
-        stats.avg_doc_length = if field_docs > 0 {
-            self.total_field_length(field)? as f64 / field_docs as f64
-        } else {
-            0.0
-        };
-        Ok(stats)
+        super::defaults::field_stats_scalar(self, field)
     }
 
     /// Read only field scoring scalars with producer-owned temporary reservations.
@@ -542,6 +553,17 @@ pub trait InvertedIndex: Send + Sync {
     /// Read-only handle suitable for an `ExecutionContext`.
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn InvertedIndex>>;
 
+    /// Capture the selected view with its caller's retention allowance. Providers that already retain their own read boundary preserve it; memory owners override this hook to charge their shared state before publication.
+    fn snapshot_with_control(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Arc<dyn InvertedIndex>> {
+        control.check()?;
+        let snapshot = self.snapshot()?;
+        control.check()?;
+        Ok(snapshot)
+    }
+
     /// Independent writable copy used to restore an in-memory engine
     /// transaction without reconstructing analyzer state from documents.
     fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn InvertedIndex>> {
@@ -563,34 +585,17 @@ pub trait InvertedIndex: Send + Sync {
     /// together. Default implementation sums per-field posting lists
     /// via [`PostingList::merge_union`].
     fn get_posting_list_any_field(&self, term: &str) -> StorageBackendResult<PostingList> {
-        let mut result = PostingList::new();
-        for field in self.field_names()? {
-            let pl = self.get_posting_list(&field, term)?;
-            result = result.merge_union(&pl);
-        }
-        Ok(result)
+        super::defaults::get_posting_list_any_field(self, term)
     }
 
     /// Document frequency of `term` across every indexed field.
     fn doc_freq_any_field(&self, term: &str) -> StorageBackendResult<u64> {
-        let mut total = 0_u64;
-        for field in self.field_names()? {
-            total = total
-                .checked_add(self.doc_freq(&field, term)?)
-                .ok_or_else(|| counter_error("document frequency"))?;
-        }
-        Ok(total)
+        super::defaults::doc_freq_any_field(self, term)
     }
 
     /// Sum of all per-field token lengths for a single doc.
     fn get_total_doc_length(&self, doc_id: DocId) -> StorageBackendResult<u64> {
-        let mut total = 0_u64;
-        for field in self.field_names()? {
-            total = total
-                .checked_add(self.get_doc_length(doc_id, &field)?)
-                .ok_or_else(|| counter_error("document length"))?;
-        }
-        Ok(total)
+        super::defaults::get_total_doc_length(self, doc_id)
     }
 
     /// Bulk doc-length lookup. Default falls back to per-id calls.
@@ -613,11 +618,7 @@ pub trait InvertedIndex: Send + Sync {
         field: &str,
         term: &str,
     ) -> StorageBackendResult<BTreeMap<DocId, u64>> {
-        let mut out = BTreeMap::new();
-        for doc_id in doc_ids {
-            out.insert(*doc_id, self.get_term_freq(*doc_id, field, term)?);
-        }
-        Ok(out)
+        super::defaults::get_term_freqs_bulk(self, doc_ids, field, term)
     }
 
     /// Fetch the document length and one term frequency per query term for
@@ -644,13 +645,7 @@ pub trait InvertedIndex: Send + Sync {
     /// Total term frequency for a doc summed across every indexed
     /// field.
     fn get_total_term_freq(&self, doc_id: DocId, term: &str) -> StorageBackendResult<u64> {
-        let mut total = 0_u64;
-        for field in self.field_names()? {
-            total = total
-                .checked_add(self.get_term_freq(doc_id, &field, term)?)
-                .ok_or_else(|| counter_error("term frequency"))?;
-        }
-        Ok(total)
+        super::defaults::get_total_term_freq(self, doc_id, term)
     }
 
     /// Bind an analyzer to a single field for the given phase.

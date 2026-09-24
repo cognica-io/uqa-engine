@@ -36,7 +36,7 @@ impl Engine {
             writer: self,
             notices: &self.runtime.notices,
             views: self,
-            projection: self.catalog_execution(),
+            constraint_names: self.schema_publication_context().constraint_names(),
             pending: self,
         }
     }
@@ -54,7 +54,7 @@ impl EventPartitionCatalog for Engine {
         self.storage.tables.read().contains_key(relation)
     }
     fn table_names(&self) -> Result<Vec<String>, String> {
-        Engine::table_names(self).map_err(|error| error.to_string())
+        Engine::table_names_in_execution(self).map_err(|error| error.to_string())
     }
     fn try_table_hierarchy(&self, name: &str) -> Result<TableHierarchy, String> {
         Engine::try_table_hierarchy(self, name).map_err(|error| error.to_string())

@@ -7,16 +7,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { bindingFeatures, noriEnabled, runBindings } from "../parity/bindings.mjs";
+import { concurrentIsolationLevels, runConcurrentWriterCase } from "../parity/concurrent_transactions.mjs";
 
 const require = createRequire(import.meta.url);
 const packagePath = require.resolve(process.env.UQA_TEST_PACKAGE ? resolve(process.env.UQA_TEST_PACKAGE) : "../../crates/uqa-node");
 const uqa = require(packagePath);
+const concurrentWriterOracle = JSON.parse(readFileSync(new URL("../parity/pg18/concurrent_writes.expected.json", import.meta.url), "utf8"));
 
 async function readRequestJSON(request) {
   const chunks = [];
@@ -414,6 +416,26 @@ test("persistent open, batch, and format detection", async () => {
   );
   compressedReopened.close();
 });
+
+for (const [mode, open] of [
+  ["sqlite", (path) => uqa.open(path)],
+  ["compressed", (path) => uqa.openCompressed(path)],
+  ["encrypted", (path) => uqa.openEncrypted(path, "binding-concurrent-writer-fixture")],
+  ["compressed-encrypted", (path) => uqa.openCompressedEncrypted(path, "binding-concurrent-writer-fixture")],
+]) {
+  for (const isolation of concurrentIsolationLevels) {
+    for (const schedule of concurrentWriterOracle.cases) {
+      test(`concurrent writer progress and isolation: ${mode}, ${isolation}, ${schedule.name}`, { timeout: 90_000 }, async () => {
+        const directory = mkdtempSync(join(tmpdir(), "uqa-node-concurrent-"));
+        try {
+          await runConcurrentWriterCase(open, join(directory, "concurrent.db"), concurrentWriterOracle, schedule, isolation, assert.deepEqual);
+        } finally {
+          rmSync(directory, { recursive: true, force: true });
+        }
+      });
+    }
+  }
+}
 
 test("close releases persistent files and is idempotent", () => {
   const dir = mkdtempSync(join(tmpdir(), "uqa-node-close-"));

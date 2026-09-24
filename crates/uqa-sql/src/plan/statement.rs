@@ -59,6 +59,9 @@ impl UnifiedPlan {
             Statement::CreateIndex(value) => {
                 Self::Command(Box::new(CommandPlan::CreateIndex(value)))
             }
+            Statement::RenameIndex(value) => {
+                Self::Command(Box::new(CommandPlan::RenameIndex(value)))
+            }
             Statement::Insert(statement) => {
                 let ctes = lower_ctes(&statement.with, aggregates);
                 let source = statement
@@ -324,6 +327,7 @@ impl UnifiedPlan {
             })),
             Statement::Analyze { table } => Self::Command(Box::new(CommandPlan::Analyze { table })),
             Statement::Vacuum(vacuum) => Self::Command(Box::new(CommandPlan::Vacuum(vacuum))),
+            Statement::LockTable(lock) => Self::Command(Box::new(CommandPlan::LockTable(lock))),
             Statement::Truncate {
                 tables,
                 cascade,
@@ -474,6 +478,7 @@ impl UnifiedPlan {
             Statement::GrantRole(value) => Self::Command(Box::new(CommandPlan::GrantRole(value))),
             Statement::CreateRole(value) => Self::Command(Box::new(CommandPlan::CreateRole(value))),
             Statement::AlterRole(value) => Self::Command(Box::new(CommandPlan::AlterRole(value))),
+            Statement::RenameRole(value) => Self::Command(Box::new(CommandPlan::RenameRole(value))),
             Statement::DropRole(value) => Self::Command(Box::new(CommandPlan::DropRole(value))),
             Statement::CreateTrigger(value) => {
                 Self::Command(Box::new(CommandPlan::CreateTrigger(value)))
@@ -524,6 +529,7 @@ impl CommandPlan {
             Self::CreateTable(_) => "CreateTable",
             Self::CreateTableIfNotExists(_) => "CreateTableIfNotExists",
             Self::CreateIndex(_) => "CreateIndex",
+            Self::RenameIndex(_) => "RenameIndex",
             Self::Insert(_) => "Insert",
             Self::Update(_) => "Update",
             Self::Delete(_) => "Delete",
@@ -548,6 +554,7 @@ impl CommandPlan {
             Self::Explain { .. } => "Explain",
             Self::Analyze { .. } => "Analyze",
             Self::Vacuum(_) => "Vacuum",
+            Self::LockTable(_) => "LockTable",
             Self::Truncate { .. } => "Truncate",
             Self::Transaction(_) => "Transaction",
             Self::DeclareCursor { .. } => "DeclareCursor",
@@ -578,6 +585,7 @@ impl CommandPlan {
             Self::GrantRole(_) => "GrantRole",
             Self::CreateRole(_) => "CreateRole",
             Self::AlterRole(_) => "AlterRole",
+            Self::RenameRole(_) => "RenameRole",
             Self::DropRole(_) => "DropRole",
             Self::CreateTrigger(_) => "CreateTrigger",
             Self::DropTrigger(_) => "DropTrigger",

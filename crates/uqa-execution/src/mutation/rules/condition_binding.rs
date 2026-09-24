@@ -8,6 +8,7 @@ use super::{
     bind_expr, BTreeMap, BinaryOp, Expr, ProjectedRuntimeRuleResolver, RuleColumnMetadata,
     RuleContext, RuleRowImage, RuleRowSide, SQLError, Value,
 };
+use uqa_sql::catalog::roles::RoleReference;
 
 fn evaluate_rule_condition_piece<F>(
     context: RuleContext<'_>,
@@ -247,7 +248,7 @@ where
 pub(super) fn rule_condition_matches<F>(
     context: RuleContext<'_>,
     rule: &uqa_sql::catalog::events::StoredRule,
-    privilege_subject: &str,
+    privilege_subject: &RoleReference,
     row_index: usize,
     row: &mut RuleRowImage,
     columns: &BTreeMap<String, RuleColumnMetadata>,

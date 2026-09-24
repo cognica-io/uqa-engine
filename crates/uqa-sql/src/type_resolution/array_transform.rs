@@ -6,13 +6,17 @@
 
 //! PostgreSQL-compatible binding for `array_sort` and `array_reverse`.
 
-use super::common::{base_type, common_context_expression_type};
+use super::call::{BindingCall, InferType};
+use super::common::base_type;
 use super::functions::named_argument_value;
 use super::{FunctionTypeResolver, ResolvedFunctionOverload};
 use crate::ast::{ColumnType, FunctionBinding, FunctionDispatch};
-use crate::{scalar_call_arguments, RowSchema, ScalarExpr};
+use crate::{scalar_call_arguments, schema::ScalarTypeSchema, ScalarExpr};
 use crate::{SQLError, SQLParam};
-use uqa_core::Value;
+use uqa_core::{
+    memory::{MemoryReservation, Produced, ProductionControl, ProductionVec},
+    Value,
+};
 
 pub(super) fn resolve_type(
     name: &str,
@@ -97,47 +101,132 @@ fn resolve_builtin_type(
     args: &[ScalarExpr],
     argument_types: &[Option<ColumnType>],
 ) -> Result<ColumnType, SQLError> {
-    let argument_names = args.iter().map(named_argument_name).collect::<Vec<_>>();
-    let Some(positions) = crate::expr::array_transform_argument_positions(name, &argument_names)?
+    resolve_builtin_type_with_control(
+        name,
+        args,
+        argument_types,
+        &ProductionControl::uncontrolled(),
+    )
+    .map(|ty| {
+        ty.into_uncontrolled()
+            .expect("ordinary array transform type")
+    })
+}
+
+pub(super) fn resolve_type_with_control(
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    args: &[ScalarExpr],
+    argument_types: &[Option<ColumnType>],
+    explicit_variadic: bool,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    control.check()?;
+    let dispatched =
+        binding.and_then(|binding| binding.dispatch) == Some(FunctionDispatch::ArraySortJson);
+    let builtin = if !dispatched
+        && explicit_variadic
+        && args.iter().any(|arg| named_argument_name(arg).is_some())
+    {
+        Err(undefined_function(name, args, argument_types))
+    } else {
+        resolve_builtin_type_with_control(name, args, argument_types, control)
+    };
+    if !dispatched && binding.is_some() {
+        return Err(builtin.err().unwrap_or_else(|| {
+            function_resolution_error_borrowed(
+                "42883",
+                "does not exist",
+                name,
+                args,
+                args.iter().zip(argument_types).map(|(argument, ty)| {
+                    if matches!(
+                        named_argument_value(argument),
+                        ScalarExpr::Literal(Value::Str(_) | Value::Null)
+                    ) {
+                        None
+                    } else {
+                        ty.as_ref()
+                    }
+                }),
+            )
+        }));
+    }
+    builtin.map(Some)
+}
+
+fn resolve_builtin_type_with_control(
+    name: &str,
+    args: &[ScalarExpr],
+    argument_types: &[Option<ColumnType>],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<ColumnType>, SQLError> {
+    let names = argument_names_with_control(args, control)?;
+    let Some(positions) =
+        crate::expr::array_transform_argument_positions_with_control(name, &names, control)?
     else {
         return Err(undefined_function(name, args, argument_types));
     };
-    let effective_types = args
+    // The selected signatures have at most three arguments; only borrowed type slots are reordered.
+    let mut effective = [None; 3];
+    let mut declared = [None; 3];
+    for (index, ((argument, argument_type), position)) in args
         .iter()
         .zip(argument_types)
-        .zip(&positions)
-        .map(|((argument, argument_type), position)| {
-            let argument = named_argument_value(argument);
-            if matches!(argument, ScalarExpr::Literal(Value::Str(_) | Value::Null))
-                || *position > 0 && matches!(argument, ScalarExpr::Param(_))
-            {
-                None
-            } else {
-                argument_type.clone()
-            }
-        })
-        .collect::<Vec<_>>();
-    let mut declared_types = vec![None; args.len()];
-    for (argument_type, position) in effective_types.iter().cloned().zip(positions) {
-        declared_types[position] = argument_type;
+        .zip(positions.iter())
+        .enumerate()
+    {
+        let argument = named_argument_value(argument);
+        let ty = if matches!(argument, ScalarExpr::Literal(Value::Str(_) | Value::Null))
+            || *position > 0 && matches!(argument, ScalarExpr::Param(_))
+        {
+            None
+        } else {
+            argument_type.as_ref()
+        };
+        effective[index] = ty;
+        declared[*position] = ty;
     }
-    if declared_types.iter().skip(1).any(|argument_type| {
-        argument_type
-            .as_ref()
-            .is_some_and(|argument_type| !matches!(base_type(argument_type), ColumnType::Boolean))
-    }) {
-        return Err(undefined_function(name, args, &effective_types));
+    if declared
+        .iter()
+        .skip(1)
+        .flatten()
+        .any(|ty| !matches!(base_type(ty), ColumnType::Boolean))
+    {
+        return Err(function_resolution_error_borrowed(
+            "42883",
+            "does not exist",
+            name,
+            args,
+            effective.into_iter(),
+        ));
     }
-    match declared_types.first().cloned().flatten() {
-        Some(argument_type) if is_array_type(&argument_type) => {
-            Ok(base_type(&argument_type).clone())
-        }
+    match declared[0] {
+        Some(ty) if is_array_type(ty) => Ok(base_type(ty).clone_with_control(control)?),
         None => Err(SQLError::Routine {
             sqlstate: "42804".into(),
             message: "could not determine polymorphic type because input has type unknown".into(),
         }),
-        Some(_) => Err(undefined_function(name, args, &effective_types)),
+        Some(_) => Err(function_resolution_error_borrowed(
+            "42883",
+            "does not exist",
+            name,
+            args,
+            effective.into_iter(),
+        )),
     }
+}
+
+fn argument_names_with_control<'a>(
+    args: &'a [ScalarExpr],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<Option<&'a str>>>, SQLError> {
+    let mut names = ProductionVec::new(*control);
+    names.reserve(args.len())?;
+    for argument in args {
+        names.push_copy(named_argument_name(argument))?;
+    }
+    Ok(names.finish()?)
 }
 
 fn resolve_user_overload(
@@ -187,18 +276,15 @@ fn user_argument_types(
 }
 
 pub(super) fn is_function(name: &str) -> bool {
-    let lower = name.to_ascii_lowercase();
-    matches!(
-        lower.strip_prefix("pg_catalog.").unwrap_or(&lower),
-        "array_sort" | "array_reverse"
-    )
+    let local = local_name(name);
+    local.eq_ignore_ascii_case("array_sort") || local.eq_ignore_ascii_case("array_reverse")
 }
 
 pub(super) fn bind_call(
     name: String,
     binding: &mut Option<FunctionBinding>,
     args: &mut Vec<ScalarExpr>,
-    schema: &RowSchema,
+    schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> String {
@@ -228,52 +314,146 @@ pub(super) fn bind_call(
         *binding = Some(resolved.binding);
         return name;
     }
-    let argument_names = args.iter().map(named_argument_name).collect::<Vec<_>>();
-    let Ok(Some(positions)) =
-        crate::expr::array_transform_argument_positions(&name, &argument_names)
-    else {
-        return name;
+    let control = ProductionControl::uncontrolled();
+    let mut infer = |expression: &ScalarExpr| {
+        super::scalar_type_inner(expression, schema, params, resolver)
+            .ok()
+            .flatten()
+            .map(|ty| {
+                control
+                    .finish(ty, control.empty_reservation())
+                    .map_err(Into::into)
+            })
+            .transpose()
     };
-    let mut reordered = vec![None; args.len()];
-    for (argument, position) in std::mem::take(args).into_iter().zip(positions) {
-        reordered[position] = Some(named_argument_value_owned(argument));
+    let call = control
+        .finish(
+            BindingCall {
+                name,
+                binding: binding.take(),
+                arguments: std::mem::take(args),
+                distinct: false,
+                order_by: Vec::new(),
+                filter: None,
+            },
+            control.empty_reservation(),
+        )
+        .expect("ordinary binding owner");
+    let call = bind_call_with_control(call, &mut infer, &control)
+        .expect("ordinary array binding cannot be cancelled or limited")
+        .into_uncontrolled()
+        .expect("ordinary array binding");
+    *binding = call.binding;
+    *args = call.arguments;
+    call.name
+}
+
+pub(super) fn bind_call_with_control(
+    call: Produced<BindingCall>,
+    infer: &mut InferType<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<BindingCall>, SQLError> {
+    let mut owner = super::call::CallOwner::new(call, control)?;
+    bind_call_in_place_with_control(&mut owner.call, &mut owner.memory, infer, control)?;
+    owner.finish(control)
+}
+
+/// The caller keeps the enclosing expression and its lease alive throughout mutation, including on errors and unwinding.
+pub(super) fn bind_call_in_place_with_control(
+    call: &mut BindingCall,
+    memory: &mut Option<MemoryReservation>,
+    infer: &mut InferType<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    super::call::check_memory(memory.as_ref(), control)?;
+    if call.binding.is_some() || !is_function(&call.name) {
+        return Ok(());
     }
-    *args = reordered
-        .into_iter()
-        .map(|argument| argument.expect("array transform positions fill every argument slot"))
-        .collect();
-    for argument in args.iter_mut().skip(1) {
-        if matches!(argument, ScalarExpr::Param(_))
-            || common_context_expression_type(argument, schema, params, resolver)
-                .ok()
-                .flatten()
-                .is_none()
-        {
-            *argument = ScalarExpr::Cast {
-                expr: Box::new(std::mem::replace(
-                    argument,
-                    ScalarExpr::Literal(Value::Null),
-                )),
-                ty: "boolean".into(),
-            };
+    for argument in &call.arguments {
+        if crate::scalar_call_argument(argument).is_err() {
+            return Ok(());
         }
     }
-    let lower = name.to_ascii_lowercase();
-    let function = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
-    if function == "array_sort"
-        && args
-            .first()
-            .and_then(|argument| {
-                super::scalar_type_inner(argument, schema, params, resolver)
-                    .ok()
-                    .flatten()
-            })
-            .as_ref()
-            .is_some_and(is_json_array_type)
-    {
-        *binding = Some(FunctionBinding::dispatched(FunctionDispatch::ArraySortJson));
+    let mut positions = {
+        let names = argument_names_with_control(&call.arguments, control)?;
+        match crate::expr::array_transform_argument_positions_with_control(
+            &call.name, &names, control,
+        ) {
+            Ok(Some(positions)) => positions,
+            Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
+            Ok(None) | Err(_) => return Ok(()),
+        }
+    };
+    let mut cast_names: [Option<Produced<String>>; 3] = [None, None, None];
+    let mut selected = None;
+    for (argument, position) in call.arguments.iter().zip(positions.iter().copied()) {
+        let argument = named_argument_value(argument);
+        let ty = if position > 0
+            && matches!(
+                argument,
+                ScalarExpr::Param(_) | ScalarExpr::Literal(Value::Str(_) | Value::Null)
+            ) {
+            None
+        } else {
+            match super::call::infer_with_control(argument, infer, control) {
+                Ok(ty) => ty,
+                Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => {
+                    return Err(error)
+                }
+                Err(_) => None,
+            }
+        };
+        if position > 0 && ty.is_none() {
+            cast_names[position] = Some(control.copy_text("boolean")?);
+        } else if position == 0
+            && local_name(&call.name).eq_ignore_ascii_case("array_sort")
+            && ty.as_deref().is_some_and(is_json_array_type)
+        {
+            selected = Some(FunctionBinding::dispatched_with_control(
+                FunctionDispatch::ArraySortJson,
+                control,
+            )?);
+        }
     }
-    name
+    let extra = control.reserve(cast_names.iter().flatten().count() * size_of::<ScalarExpr>())?;
+    *memory = control.combine(memory.take(), extra);
+    for destination in 0..call.arguments.len() {
+        let source = positions
+            .iter()
+            .position(|position| *position == destination)
+            .expect("validated positions fill each slot");
+        call.arguments.swap(destination, source);
+        positions.as_mut_slice().swap(destination, source);
+    }
+    for (position, argument) in call.arguments.iter_mut().enumerate() {
+        let expression = named_argument_value_owned(std::mem::replace(
+            argument,
+            ScalarExpr::Literal(Value::Null),
+        ));
+        *argument = if let Some(ty) = cast_names[position].take() {
+            let (ty, extra) = ty.into_parts();
+            *memory = control.combine(memory.take(), extra);
+            ScalarExpr::Cast {
+                expr: Box::new(expression),
+                ty,
+            }
+        } else {
+            expression
+        };
+    }
+    if let Some(selected) = selected {
+        let (selected, extra) = selected.into_parts();
+        *memory = control.combine(memory.take(), extra);
+        call.binding = Some(selected);
+    }
+    control.check()?;
+    Ok(())
+}
+
+fn local_name(name: &str) -> &str {
+    name.get(..11)
+        .filter(|prefix| prefix.eq_ignore_ascii_case("pg_catalog."))
+        .map_or(name, |_| &name[11..])
 }
 
 fn named_argument_name(expression: &ScalarExpr) -> Option<&str> {
@@ -339,13 +519,28 @@ fn function_resolution_error(
     args: &[ScalarExpr],
     argument_types: &[Option<ColumnType>],
 ) -> SQLError {
+    function_resolution_error_borrowed(
+        sqlstate,
+        description,
+        name,
+        args,
+        argument_types.iter().map(Option::as_ref),
+    )
+}
+
+fn function_resolution_error_borrowed<'a>(
+    sqlstate: &str,
+    description: &str,
+    name: &str,
+    args: &[ScalarExpr],
+    argument_types: impl Iterator<Item = Option<&'a ColumnType>>,
+) -> SQLError {
     let signature = args
         .iter()
         .zip(argument_types)
         .map(|(argument, argument_type)| {
-            let argument_type = argument_type
-                .as_ref()
-                .map_or_else(|| "unknown".into(), ColumnType::regtype_name);
+            let argument_type =
+                argument_type.map_or_else(|| "unknown".into(), ColumnType::regtype_name);
             named_argument_name(argument).map_or(argument_type.clone(), |argument_name| {
                 format!("{argument_name} => {argument_type}")
             })

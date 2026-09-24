@@ -7,15 +7,26 @@
 //! Hashing and base64 helpers for scalar functions.
 
 use crate::error::{Result, SQLError};
+use uqa_core::memory::{Produced, ProductionControl, ProductionString, ProductionVec};
 
 // -------------------------------------------------------------------------
 // MD5 implementation used by the SQL scalar `md5()` builtin.
 // -------------------------------------------------------------------------
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(super) fn md5_hex(input: &[u8]) -> String {
-    let digest = md5_compute(input);
-    digest.iter().map(|b| format!("{b:02x}")).collect()
+    md5_hex_with_control(input, &ProductionControl::uncontrolled())
+        .expect("ordinary MD5 encoding")
+        .into_uncontrolled()
+        .expect("ordinary MD5 owner")
+}
+
+pub(super) fn md5_hex_with_control(
+    input: &[u8],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>> {
+    let digest = md5_compute(input, control)?;
+    hex_encode_with_control(&digest, control)
 }
 
 #[allow(dead_code, clippy::many_single_char_names)]
@@ -23,7 +34,8 @@ pub(super) fn md5_hex(input: &[u8]) -> String {
     clippy::too_many_lines,
     reason = "canonical encoding keeps every SQL value tag in one dispatch"
 )]
-fn md5_compute(input: &[u8]) -> [u8; 16] {
+fn md5_compute(input: &[u8], control: &ProductionControl<'_>) -> Result<[u8; 16]> {
+    control.check()?;
     const S: [u32; 64] = [
         7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5,
         9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10,
@@ -101,16 +113,17 @@ fn md5_compute(input: &[u8]) -> [u8; 16] {
     let mut c0: u32 = 0x98ba_dcfe;
     let mut d0: u32 = 0x1032_5476;
 
-    let mut buf: Vec<u8> = Vec::with_capacity(input.len() + 72);
-    buf.extend_from_slice(input);
-    buf.push(0x80);
-    while buf.len() % 64 != 56 {
-        buf.push(0);
-    }
+    // Full input blocks are borrowed. Only the final one or two padded blocks need storage.
+    let mut chunks = input.chunks_exact(64);
+    let remaining = chunks.remainder();
+    let mut tail = [0_u8; 128];
+    tail[..remaining.len()].copy_from_slice(remaining);
+    tail[remaining.len()] = 0x80;
+    let tail_len = if remaining.len() < 56 { 64 } else { 128 };
     let bits = (input.len() as u64).wrapping_mul(8);
-    buf.extend_from_slice(&bits.to_le_bytes());
-
-    for chunk in buf.chunks_exact(64) {
+    tail[tail_len - 8..tail_len].copy_from_slice(&bits.to_le_bytes());
+    for chunk in chunks.by_ref().chain(tail[..tail_len].chunks_exact(64)) {
+        control.check()?;
         let mut m = [0u32; 16];
         for (i, word) in chunk.chunks_exact(4).enumerate() {
             m[i] = u32::from_le_bytes([word[0], word[1], word[2], word[3]]);
@@ -148,7 +161,7 @@ fn md5_compute(input: &[u8]) -> [u8; 16] {
     out[4..8].copy_from_slice(&b0.to_le_bytes());
     out[8..12].copy_from_slice(&c0.to_le_bytes());
     out[12..16].copy_from_slice(&d0.to_le_bytes());
-    out
+    Ok(out)
 }
 
 // -------------------------------------------------------------------------
@@ -159,34 +172,63 @@ fn md5_compute(input: &[u8]) -> [u8; 16] {
 const BASE64_ALPHABET: &[u8; 64] =
     b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
+#[cfg(test)]
 pub(super) fn base64_encode(input: &[u8]) -> String {
-    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    base64_encode_with_control(input, &ProductionControl::uncontrolled())
+        .expect("ordinary base64 encoding")
+        .into_uncontrolled()
+        .expect("ordinary base64 owner")
+}
+
+pub(super) fn base64_encode_with_control(
+    input: &[u8],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>> {
+    let capacity = input
+        .len()
+        .div_ceil(3)
+        .checked_mul(4)
+        .ok_or_else(|| super::allocation_error("base64 encode"))?;
+    let mut out = ProductionString::new(*control);
+    out.reserve(capacity)?;
     for chunk in input.chunks(3) {
         let b0 = chunk[0];
         let b1 = chunk.get(1).copied().unwrap_or(0);
         let b2 = chunk.get(2).copied().unwrap_or(0);
-        out.push(BASE64_ALPHABET[(b0 >> 2) as usize] as char);
-        out.push(BASE64_ALPHABET[(((b0 & 0b11) << 4) | (b1 >> 4)) as usize] as char);
+        out.push(BASE64_ALPHABET[(b0 >> 2) as usize] as char)?;
+        out.push(BASE64_ALPHABET[(((b0 & 0b11) << 4) | (b1 >> 4)) as usize] as char)?;
         if chunk.len() > 1 {
-            out.push(BASE64_ALPHABET[(((b1 & 0b1111) << 2) | (b2 >> 6)) as usize] as char);
+            out.push(BASE64_ALPHABET[(((b1 & 0b1111) << 2) | (b2 >> 6)) as usize] as char)?;
         } else {
-            out.push('=');
+            out.push('=')?;
         }
         if chunk.len() > 2 {
-            out.push(BASE64_ALPHABET[(b2 & 0b11_1111) as usize] as char);
+            out.push(BASE64_ALPHABET[(b2 & 0b11_1111) as usize] as char)?;
         } else {
-            out.push('=');
+            out.push('=')?;
         }
     }
-    out
+    Ok(out.finish()?)
 }
 
+#[cfg(test)]
 pub(super) fn base64_decode(input: &str) -> Result<Vec<u8>> {
-    let mut decoded: Vec<u8> = Vec::with_capacity(input.len() / 4 * 3);
+    base64_decode_with_control(input, &ProductionControl::uncontrolled())?
+        .into_uncontrolled()
+        .map_err(|_| SQLError::Internal("ordinary base64 owner".into()))
+}
+
+pub(super) fn base64_decode_with_control(
+    input: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<u8>>> {
+    let mut decoded = ProductionVec::new(*control);
+    decoded.reserve(input.len() / 4 * 3)?;
     let mut buf = [0u8; 4];
     let mut idx = 0usize;
     let mut padding = 0;
     for c in input.chars() {
+        control.check()?;
         if c == '=' {
             padding += 1;
             buf[idx] = 0;
@@ -199,12 +241,34 @@ pub(super) fn base64_decode(input: &str) -> Result<Vec<u8>> {
         }
         idx += 1;
         if idx == 4 {
-            decoded.push((buf[0] << 2) | (buf[1] >> 4));
-            decoded.push((buf[1] << 4) | (buf[2] >> 2));
-            decoded.push((buf[2] << 6) | buf[3]);
+            decoded.push_copy((buf[0] << 2) | (buf[1] >> 4))?;
+            decoded.push_copy((buf[1] << 4) | (buf[2] >> 2))?;
+            decoded.push_copy((buf[2] << 6) | buf[3])?;
             idx = 0;
         }
     }
+    let (mut decoded, memory) = decoded.finish()?.into_parts();
     decoded.truncate(decoded.len().saturating_sub(padding));
-    Ok(decoded)
+    Ok(control.finish(decoded, memory)?)
 }
+
+pub(super) fn hex_encode_with_control(
+    bytes: &[u8],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>> {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let capacity = bytes
+        .len()
+        .checked_mul(2)
+        .ok_or_else(|| super::allocation_error("hex encode"))?;
+    let mut out = ProductionString::new(*control);
+    out.reserve(capacity)?;
+    for byte in bytes {
+        out.push(HEX[usize::from(byte >> 4)] as char)?;
+        out.push(HEX[usize::from(byte & 15)] as char)?;
+    }
+    Ok(out.finish()?)
+}
+
+#[cfg(test)]
+mod production_tests;

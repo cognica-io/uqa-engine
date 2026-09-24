@@ -112,7 +112,7 @@ pub fn ensure_routine_drop_owners(
     registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
     targets: &[RoutineDropTarget],
 ) -> Result<(), SQLError> {
-    let current_user = context.catalog.current_user_name();
+    let current_user = context.catalog.current_role();
     let roles = context.roles.role_definitions();
     let memberships = context.roles.role_memberships();
     analysis_binding::ensure_routine_drop_owners(

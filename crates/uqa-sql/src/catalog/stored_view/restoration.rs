@@ -13,7 +13,7 @@ use uqa_core::RelationIdentity;
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
 pub enum RestoredView {
-    Current(StoredView),
+    Current(super::StoredViewDefinition),
     Legacy(QueryPlan),
 }
 
@@ -37,18 +37,9 @@ pub fn validate_restored_view_security(
     view_name: &str,
     view: &StoredView,
 ) -> Result<(), String> {
-    if !roles.role_definitions().contains_key(&view.role_owner) {
-        return Err(format!(
-            "view `{view_name}` is owned by missing role `{}`",
-            view.role_owner
-        ));
-    }
-    crate::catalog::security::table::validate_table_security_invariants(
-        &view.security(),
-        view.output_columns.as_deref(),
-        &roles.role_definitions(),
-    )
-    .map_err(|error| format!("view `{view_name}` has invalid privilege metadata: {error}"))?;
+    view.security
+        .validate(view.output_columns.as_deref(), &roles.role_definitions())
+        .map_err(|error| format!("view `{view_name}` has invalid privilege metadata: {error}"))?;
     Ok(())
 }
 pub fn validate_migrated_view_security(
@@ -62,17 +53,14 @@ pub fn validate_migrated_view_security(
                 relation.qualified_name()
             )
         })?;
-        crate::catalog::security::table::validate_table_security_invariants(
-            &view.security(),
-            Some(output_columns),
-            &roles.role_definitions(),
-        )
-        .map_err(|error| {
-            format!(
-                "view `{}` has invalid privilege metadata after migration: {error}",
-                relation.qualified_name()
-            )
-        })?;
+        view.security
+            .validate(Some(output_columns), &roles.role_definitions())
+            .map_err(|error| {
+                format!(
+                    "view `{}` has invalid privilege metadata after migration: {error}",
+                    relation.qualified_name()
+                )
+            })?;
     }
     Ok(())
 }

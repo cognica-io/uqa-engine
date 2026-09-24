@@ -6,16 +6,27 @@
 
 //! Shared byte allowances with reservations that follow allocation ownership.
 //!
-//! Owners reserve requested buffer layouts before allocating. Allocator bookkeeping, borrowed data, and separately owned immutable resources are outside this allowance.
+//! Owners reserve requested buffer layouts before allocating and charge any additional reported capacity before moving values. Allocator bookkeeping, borrowed data, and separately owned immutable resources are outside this allowance.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 mod deque;
+mod hash_set;
+mod heap;
+mod map;
+mod production;
 mod string;
 mod vec;
 
 pub use deque::BudgetedDeque;
+pub use hash_set::BudgetedHashSet;
+pub use heap::BudgetedBinaryHeap;
+pub use map::{
+    BudgetedMap, BudgetedMapIter, BudgetedSharedMap, BudgetedSharedMapIter, OwnedMap,
+    OwnedMapIntoIter, OwnedSet, OwnedSetIntoIter, OwnedSetIter, PreparedMapEntry,
+};
+pub use production::{Produced, ProductionControl, ProductionString, ProductionVec};
 pub use string::BudgetedString;
 pub use vec::BudgetedVec;
 
@@ -180,6 +191,10 @@ impl<T> Budgeted<T> {
         self.memory.bytes()
     }
 
+    pub fn budget(&self) -> &MemoryBudget {
+        self.memory.budget()
+    }
+
     /// Share the immutable value and its lease, reserving the shared payload before allocation. Reference-count bookkeeping is outside the payload allowance.
     pub fn into_shared(self) -> Result<Arc<Self>, MemoryError> {
         let mut memory = self.memory.budget().reserve(std::mem::size_of::<Self>())?;
@@ -221,6 +236,13 @@ fn buffer_bytes<T>(capacity: usize) -> Result<usize, MemoryError> {
         .checked_mul(std::mem::size_of::<T>())
         .filter(|bytes| isize::try_from(*bytes).is_ok())
         .ok_or(MemoryError::SizeOverflow)
+}
+
+fn reconcile_buffer_capacity<T>(
+    memory: &mut MemoryReservation,
+    capacity: usize,
+) -> Result<(), MemoryError> {
+    memory.grow(buffer_bytes::<T>(capacity)?.saturating_sub(memory.bytes()))
 }
 
 fn replacement<T>(

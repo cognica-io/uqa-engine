@@ -6,6 +6,8 @@
 
 //! Supervised and unsupervised scoring-parameter updates.
 
+use uqa_storage::InvertedIndex;
+
 use super::{
     storage_sql_error, BM25Params, BTreeMap, DocId, Engine, ParameterLearner, SQLError,
     ScoringMode, UnsupervisedBm25ScoreEstimator,
@@ -38,7 +40,7 @@ impl Engine {
         {
             return Err(SQLError::UnknownTable(table.to_string()));
         }
-        let doc_ids = self.table_doc_ids(table)?;
+        let doc_ids = self.query_table_doc_ids(table)?;
         if labels.len() != doc_ids.len() {
             return Err(SQLError::TypeMismatch(format!(
                 "labels length ({}) must match document count ({})",
@@ -118,15 +120,15 @@ impl Engine {
         let queries = self.sample_calibration_queries(table, field, &estimator)?;
         let (params, doc_count) = {
             let index = table_state.inverted_index.read();
+            let index = uqa_execution::serializable::text::ObservedTextIndex::new(
+                index.as_ref(),
+                self.serializable_table_read(table)?,
+                table_state.columns.snapshot(),
+            );
             let params = if queries.is_empty() {
-                estimator.estimate(index.as_ref(), field, BM25Params::default())
+                estimator.estimate(&index, field, BM25Params::default())
             } else {
-                estimator.estimate_with_query_keys(
-                    index.as_ref(),
-                    field,
-                    BM25Params::default(),
-                    &queries,
-                )
+                estimator.estimate_with_query_keys(&index, field, BM25Params::default(), &queries)
             }
             .map_err(|error| storage_sql_error("estimate Bayesian BM25 parameters", error))?;
             let doc_count = index
@@ -178,6 +180,7 @@ impl Engine {
             return Err(SQLError::TypeMismatch("label must be 0 or 1".into()));
         }
         let key = format!("{table}.{field}");
+        self.lock_scoring_parameter_write(&key)?;
         let saved = self.load_scoring_params(&key)?;
         let has_saved_params = match saved.as_deref() {
             Some(json) => {

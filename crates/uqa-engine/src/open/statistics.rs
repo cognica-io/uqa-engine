@@ -16,15 +16,16 @@ impl Engine {
     pub(super) fn restore_schemas_from_catalog(
         &self,
         catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
-        let schemas = catalog.load_schema_rows()?;
-        for schema in &schemas {
-            Self::validate_schema_name(&schema.name)?;
-        }
-        *self.durable.schemas.write() = schemas
-            .into_iter()
-            .map(crate::state::SchemaSecurity::from_row)
-            .collect();
+        let roles = self.durable.roles.read();
+        let schemas = uqa_execution::schema::namespaces::restoration::restore(
+            catalog,
+            &roles,
+            mode.allows_migration(),
+        )?;
+        drop(roles);
+        *self.durable.schemas.write() = schemas;
         Ok(())
     }
 

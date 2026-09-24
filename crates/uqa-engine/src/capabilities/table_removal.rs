@@ -159,7 +159,6 @@ impl TableRemovalPublication for Engine {
             }
         }
         self.storage.tables.write().remove(relation);
-        self.statistics.invalidate_column_stats(name);
         self.forget_constraint_transaction_relation(relation);
         self.clear_regtype_output_cache();
         if temporary {
@@ -181,6 +180,7 @@ impl TableRemovalPublication for Engine {
 impl Engine {
     pub(crate) fn table_removal_context(&self) -> TableRemovalContext<'_> {
         TableRemovalContext {
+            indexes: self.index_registry_context(),
             catalog: self,
             hierarchy: self,
             publication: self,

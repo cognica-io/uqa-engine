@@ -809,7 +809,7 @@ mod tests {
         };
         assert!(error
             .to_string()
-            .contains("truncated schema physical width"));
+            .contains("invalid authenticated temporary file length"));
     }
 
     #[test]

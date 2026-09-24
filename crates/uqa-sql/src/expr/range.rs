@@ -8,7 +8,18 @@
 
 use std::cmp::Ordering;
 
-use uqa_core::{DecimalValue, TemporalValue, Value};
+use uqa_core::{
+    memory::{Produced, ProductionControl},
+    TemporalValue, Value,
+};
+
+mod production;
+mod relationships;
+pub(super) use production::{
+    canonical_multirange_text_with_control, canonical_range_as_multirange_text_with_control,
+    canonical_range_text_with_control, multirange_from_produced_ranges,
+    parse_multirange_with_control, parse_range_with_control,
+};
 
 use crate::ast::RangeSubtype;
 use crate::error::Result;
@@ -68,40 +79,20 @@ impl CanonicalRange {
 
     #[must_use]
     pub fn overlaps(&self, other: &Self) -> bool {
-        self.subtype == other.subtype
-            && !self.empty
-            && !other.empty
-            && !upper_before_lower(self, other)
-            && !upper_before_lower(other, self)
+        self.overlaps_with_control(other, &ProductionControl::uncontrolled())
+            .expect("ordinary range overlap")
     }
 
     #[must_use]
     pub fn adjacent(&self, other: &Self) -> bool {
-        if self.subtype != other.subtype || self.empty || other.empty || self.overlaps(other) {
-            return false;
-        }
-        touching_bounds(
-            self.upper(),
-            self.upper_inclusive,
-            other.lower(),
-            other.lower_inclusive,
-        ) || touching_bounds(
-            other.upper(),
-            other.upper_inclusive,
-            self.lower(),
-            self.lower_inclusive,
-        )
+        self.adjacent_with_control(other, &ProductionControl::uncontrolled())
+            .expect("ordinary range adjacency")
     }
 
     #[must_use]
     pub fn contains_range(&self, other: &Self) -> bool {
-        if self.subtype != other.subtype || self.empty {
-            return false;
-        }
-        if other.empty {
-            return true;
-        }
-        lower_contains(self, other) && upper_contains(self, other)
+        self.contains_range_with_control(other, &ProductionControl::uncontrolled())
+            .expect("ordinary range containment")
     }
 
     #[must_use]
@@ -128,58 +119,29 @@ impl CanonicalRange {
         lower && upper
     }
 
-    fn merge(&self, other: &Self) -> Self {
-        debug_assert!(self.overlaps(other) || self.adjacent(other));
-        let (lower, lower_inclusive) = minimum_lower(self, other);
-        let (upper, upper_inclusive) = maximum_upper(self, other);
-        Self {
-            subtype: self.subtype,
-            lower,
-            upper,
-            lower_inclusive,
-            upper_inclusive,
-            empty: false,
-        }
-    }
-
     /// Smallest range containing both operands. Unlike union, `PostgreSQL`'s
     /// `range_merge` also spans a gap between disjoint ranges.
     #[must_use]
     pub fn merge_cover(&self, other: &Self) -> Self {
-        if self.empty {
-            return other.clone();
-        }
-        if other.empty {
-            return self.clone();
-        }
-        let (lower, lower_inclusive) = minimum_lower(self, other);
-        let (upper, upper_inclusive) = maximum_upper(self, other);
-        Self {
-            subtype: self.subtype,
-            lower,
-            upper,
-            lower_inclusive,
-            upper_inclusive,
-            empty: false,
-        }
+        self.merge_cover_with_control(other, &ProductionControl::uncontrolled())
+            .expect("ordinary range cover")
+            .into_uncontrolled()
+            .expect("ordinary range")
+    }
+
+    pub(super) fn to_text_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<String>> {
+        production::range_text(self, control)
     }
 
     #[must_use]
     pub fn to_text(&self) -> String {
-        if self.empty {
-            return "empty".into();
-        }
-        let mut text = String::new();
-        text.push(if self.lower_inclusive { '[' } else { '(' });
-        if let Some(lower) = &self.lower {
-            text.push_str(&format_bound(lower));
-        }
-        text.push(',');
-        if let Some(upper) = &self.upper {
-            text.push_str(&format_bound(upper));
-        }
-        text.push(if self.upper_inclusive { ']' } else { ')' });
-        text
+        production::range_text(self, &ProductionControl::uncontrolled())
+            .expect("ordinary range formatting")
+            .into_uncontrolled()
+            .expect("ordinary range text")
     }
 }
 
@@ -227,255 +189,54 @@ impl CanonicalMultirange {
 
     #[must_use]
     pub fn merge_cover(&self) -> CanonicalRange {
-        self.ranges
-            .iter()
-            .cloned()
-            .reduce(|left, right| left.merge_cover(&right))
-            .unwrap_or_else(|| CanonicalRange::empty(self.subtype))
+        self.merge_cover_with_control(&ProductionControl::uncontrolled())
+            .expect("ordinary multirange cover")
+            .into_uncontrolled()
+            .expect("ordinary range")
+    }
+
+    pub(super) fn to_text_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<String>> {
+        production::multirange_text(self, control)
     }
 
     #[must_use]
     pub fn to_text(&self) -> String {
-        format!(
-            "{{{}}}",
-            self.ranges
-                .iter()
-                .map(CanonicalRange::to_text)
-                .collect::<Vec<_>>()
-                .join(",")
-        )
+        production::multirange_text(self, &ProductionControl::uncontrolled())
+            .expect("ordinary multirange formatting")
+            .into_uncontrolled()
+            .expect("ordinary multirange text")
     }
 }
 
 pub fn parse_range(text: &str, subtype: RangeSubtype) -> Result<CanonicalRange> {
-    let text = text.trim();
-    if text.eq_ignore_ascii_case("empty") {
-        return Ok(CanonicalRange {
-            subtype,
-            lower: None,
-            upper: None,
-            lower_inclusive: false,
-            upper_inclusive: false,
-            empty: true,
-        });
-    }
-    let mut chars = text.chars();
-    let opening = chars.next().ok_or_else(|| invalid_range(text, subtype))?;
-    let closing = text
-        .chars()
-        .next_back()
-        .ok_or_else(|| invalid_range(text, subtype))?;
-    if !matches!(opening, '[' | '(') || !matches!(closing, ']' | ')') || text.len() < 2 {
-        return Err(invalid_range(text, subtype));
-    }
-    let body = &text[opening.len_utf8()..text.len() - closing.len_utf8()];
-    let (lower_text, upper_text) =
-        split_range_bounds(body).ok_or_else(|| invalid_range(text, subtype))?;
-    let mut lower = parse_bound(lower_text, subtype, text)?;
-    let mut upper = parse_bound(upper_text, subtype, text)?;
-    let mut lower_inclusive = opening == '[' && lower.is_some();
-    let mut upper_inclusive = closing == ']' && upper.is_some();
-    if is_discrete(subtype) {
-        if !lower_inclusive {
-            if let Some(value) = lower.as_ref() {
-                lower = Some(increment_discrete(value, subtype)?);
-                lower_inclusive = true;
-            }
-        }
-        if upper_inclusive {
-            if let Some(value) = upper.as_ref() {
-                upper = Some(increment_discrete(value, subtype)?);
-                upper_inclusive = false;
-            }
-        }
-    }
-    let empty = match (&lower, &upper) {
-        (Some(lower), Some(upper)) => match lower.cmp(upper) {
-            Ordering::Greater => true,
-            Ordering::Equal => !(lower_inclusive && upper_inclusive),
-            Ordering::Less => false,
-        },
-        _ => false,
-    };
-    if empty {
-        return parse_range("empty", subtype);
-    }
-    Ok(CanonicalRange {
-        subtype,
-        lower,
-        upper,
-        lower_inclusive,
-        upper_inclusive,
-        empty: false,
-    })
+    Ok(
+        production::parse_range_with_control(text, subtype, &ProductionControl::uncontrolled())?
+            .into_uncontrolled()
+            .expect("ordinary range"),
+    )
 }
 
 pub fn parse_multirange(text: &str, subtype: RangeSubtype) -> Result<CanonicalMultirange> {
-    let text = text.trim();
-    if !text.starts_with('{') || !text.ends_with('}') {
-        return Err(invalid_multirange(text, subtype));
-    }
-    let body = &text[1..text.len() - 1];
-    let mut ranges = split_multirange_items(body)
-        .ok_or_else(|| invalid_multirange(text, subtype))?
-        .into_iter()
-        .map(|item| parse_range(item, subtype))
-        .collect::<Result<Vec<_>>>()?;
-    ranges.retain(|range| !range.empty);
-    ranges.sort_by(compare_lower_bounds);
-    let mut normalized: Vec<CanonicalRange> = Vec::with_capacity(ranges.len());
-    for range in ranges {
-        if let Some(previous) = normalized.last_mut() {
-            if previous.overlaps(&range) || previous.adjacent(&range) {
-                *previous = previous.merge(&range);
-                continue;
-            }
-        }
-        normalized.push(range);
-    }
-    Ok(CanonicalMultirange {
+    Ok(production::parse_multirange_with_control(
+        text,
         subtype,
-        ranges: normalized,
-    })
+        &ProductionControl::uncontrolled(),
+    )?
+    .into_uncontrolled()
+    .expect("ordinary multirange"))
 }
 
 pub fn multirange_from_ranges(
     subtype: RangeSubtype,
     ranges: impl IntoIterator<Item = CanonicalRange>,
 ) -> CanonicalMultirange {
-    let mut ranges = ranges
-        .into_iter()
-        .filter(|range| !range.empty)
-        .collect::<Vec<_>>();
-    ranges.sort_by(compare_lower_bounds);
-    let mut normalized: Vec<CanonicalRange> = Vec::with_capacity(ranges.len());
-    for range in ranges {
-        if let Some(previous) = normalized.last_mut() {
-            if previous.overlaps(&range) || previous.adjacent(&range) {
-                *previous = previous.merge(&range);
-                continue;
-            }
-        }
-        normalized.push(range);
-    }
-    CanonicalMultirange {
-        subtype,
-        ranges: normalized,
-    }
-}
-
-fn split_range_bounds(body: &str) -> Option<(&str, &str)> {
-    let mut quoted = false;
-    let mut escaped = false;
-    for (index, character) in body.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if character == '\\' {
-            escaped = true;
-            continue;
-        }
-        if character == '"' {
-            quoted = !quoted;
-            continue;
-        }
-        if character == ',' && !quoted {
-            return Some((&body[..index], &body[index + 1..]));
-        }
-    }
-    None
-}
-
-fn split_multirange_items(body: &str) -> Option<Vec<&str>> {
-    if body.trim().is_empty() {
-        return Some(Vec::new());
-    }
-    let mut items = Vec::new();
-    let mut start = None;
-    let mut quoted = false;
-    let mut escaped = false;
-    for (index, character) in body.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if character == '\\' {
-            escaped = true;
-            continue;
-        }
-        if character == '"' {
-            quoted = !quoted;
-            continue;
-        }
-        if quoted {
-            continue;
-        }
-        match character {
-            '[' | '(' if start.is_none() => start = Some(index),
-            ']' | ')' => {
-                let item_start = start.take()?;
-                items.push(body[item_start..=index].trim());
-            }
-            ',' if start.is_none() => {}
-            _ => {}
-        }
-    }
-    if quoted || escaped || start.is_some() || items.is_empty() {
-        None
-    } else {
-        Some(items)
-    }
-}
-
-fn parse_bound(raw: &str, subtype: RangeSubtype, whole: &str) -> Result<Option<Value>> {
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return Ok(None);
-    }
-    let text = unquote_bound(raw).ok_or_else(|| invalid_range(whole, subtype))?;
-    let value = match subtype {
-        RangeSubtype::Integer => text
-            .parse::<i32>()
-            .map(|value| Value::Int(i64::from(value)))
-            .map_err(|_| range_subtype_error(&text, "integer"))?,
-        RangeSubtype::BigInteger => text
-            .parse::<i64>()
-            .map(Value::Int)
-            .map_err(|_| range_subtype_error(&text, "bigint"))?,
-        RangeSubtype::Numeric => DecimalValue::parse(&text)
-            .map(Value::Decimal)
-            .ok_or_else(|| range_subtype_error(&text, "numeric"))?,
-        RangeSubtype::Date => TemporalValue::try_parse_date(&text)
-            .map(Value::Temporal)
-            .map_err(|_| range_subtype_error(&text, "date"))?,
-        RangeSubtype::Timestamp => TemporalValue::parse_timestamp(&text)
-            .map(Value::Temporal)
-            .ok_or_else(|| range_subtype_error(&text, "timestamp without time zone"))?,
-        RangeSubtype::TimestampTz => TemporalValue::parse_timestamp_tz(&text)
-            .map(Value::Temporal)
-            .ok_or_else(|| range_subtype_error(&text, "timestamp with time zone"))?,
-    };
-    Ok(Some(value))
-}
-
-fn unquote_bound(raw: &str) -> Option<String> {
-    if !raw.starts_with('"') {
-        return (!raw.contains('"')).then(|| raw.to_string());
-    }
-    if raw.len() < 2 || !raw.ends_with('"') {
-        return None;
-    }
-    let mut value = String::new();
-    let mut chars = raw[1..raw.len() - 1].chars();
-    while let Some(character) = chars.next() {
-        if character == '\\' {
-            value.push(chars.next()?);
-        } else {
-            value.push(character);
-        }
-    }
-    Some(value)
+    production::normalize_ranges(ranges, subtype, &ProductionControl::uncontrolled(), None)
+        .expect("ordinary multirange normalization")
+        .into_uncontrolled()
+        .expect("ordinary multirange")
 }
 
 fn increment_discrete(value: &Value, subtype: RangeSubtype) -> Result<Value> {
@@ -504,109 +265,6 @@ fn is_discrete(subtype: RangeSubtype) -> bool {
         subtype,
         RangeSubtype::Integer | RangeSubtype::BigInteger | RangeSubtype::Date
     )
-}
-
-fn upper_before_lower(left: &CanonicalRange, right: &CanonicalRange) -> bool {
-    match (left.upper(), right.lower()) {
-        (None, _) | (_, None) => false,
-        (Some(upper), Some(lower)) => match upper.cmp(lower) {
-            Ordering::Less => true,
-            Ordering::Greater => false,
-            Ordering::Equal => !(left.upper_inclusive && right.lower_inclusive),
-        },
-    }
-}
-
-fn touching_bounds(
-    upper: Option<&Value>,
-    upper_inclusive: bool,
-    lower: Option<&Value>,
-    lower_inclusive: bool,
-) -> bool {
-    matches!((upper, lower), (Some(upper), Some(lower)) if upper == lower)
-        && upper_inclusive != lower_inclusive
-}
-
-fn lower_contains(outer: &CanonicalRange, inner: &CanonicalRange) -> bool {
-    match (outer.lower(), inner.lower()) {
-        (None, _) => true,
-        (Some(_), None) => false,
-        (Some(left), Some(right)) => match left.cmp(right) {
-            Ordering::Less => true,
-            Ordering::Greater => false,
-            Ordering::Equal => outer.lower_inclusive || !inner.lower_inclusive,
-        },
-    }
-}
-
-fn upper_contains(outer: &CanonicalRange, inner: &CanonicalRange) -> bool {
-    match (outer.upper(), inner.upper()) {
-        (None, _) => true,
-        (Some(_), None) => false,
-        (Some(left), Some(right)) => match left.cmp(right) {
-            Ordering::Greater => true,
-            Ordering::Less => false,
-            Ordering::Equal => outer.upper_inclusive || !inner.upper_inclusive,
-        },
-    }
-}
-
-fn minimum_lower(left: &CanonicalRange, right: &CanonicalRange) -> (Option<Value>, bool) {
-    match (left.lower(), right.lower()) {
-        (None, _) | (_, None) => (None, false),
-        (Some(left_value), Some(right_value)) => match left_value.cmp(right_value) {
-            Ordering::Less => (Some(left_value.clone()), left.lower_inclusive),
-            Ordering::Greater => (Some(right_value.clone()), right.lower_inclusive),
-            Ordering::Equal => (
-                Some(left_value.clone()),
-                left.lower_inclusive || right.lower_inclusive,
-            ),
-        },
-    }
-}
-
-fn maximum_upper(left: &CanonicalRange, right: &CanonicalRange) -> (Option<Value>, bool) {
-    match (left.upper(), right.upper()) {
-        (None, _) | (_, None) => (None, false),
-        (Some(left_value), Some(right_value)) => match left_value.cmp(right_value) {
-            Ordering::Greater => (Some(left_value.clone()), left.upper_inclusive),
-            Ordering::Less => (Some(right_value.clone()), right.upper_inclusive),
-            Ordering::Equal => (
-                Some(left_value.clone()),
-                left.upper_inclusive || right.upper_inclusive,
-            ),
-        },
-    }
-}
-
-fn compare_lower_bounds(left: &CanonicalRange, right: &CanonicalRange) -> Ordering {
-    match (left.lower(), right.lower()) {
-        (None, None) => Ordering::Equal,
-        (None, Some(_)) => Ordering::Less,
-        (Some(_), None) => Ordering::Greater,
-        (Some(left_value), Some(right_value)) => left_value
-            .cmp(right_value)
-            .then_with(|| right.lower_inclusive.cmp(&left.lower_inclusive)),
-    }
-}
-
-fn format_bound(value: &Value) -> String {
-    let raw = match value {
-        Value::Int(value) => value.to_string(),
-        Value::Decimal(value) => value.to_sql_string(),
-        Value::Temporal(value) => value.to_sql_string(),
-        other => super::value_to_string(other),
-    };
-    if raw.is_empty()
-        || raw.chars().any(|character| {
-            character.is_whitespace()
-                || matches!(character, ',' | '[' | ']' | '(' | ')' | '"' | '\\')
-        })
-    {
-        format!("\"{}\"", raw.replace('\\', "\\\\").replace('"', "\\\""))
-    } else {
-        raw
-    }
 }
 
 fn invalid_range(text: &str, subtype: RangeSubtype) -> SQLError {

@@ -30,9 +30,15 @@ impl Engine {
         let Some(index) = vector_indexes.get(field) else {
             return Err(SQLError::UnknownColumn(field.to_string()));
         };
-        let pl = index
-            .search_knn(query_vector.as_ref(), top_k)
-            .map_err(|error| storage_sql_error("execute KNN search", error))?;
+        let pl = uqa_execution::serializable::vector::search_knn(
+            index,
+            self.serializable_table_read(table)?.as_ref(),
+            &t.columns.snapshot(),
+            field,
+            query_vector.as_ref(),
+            top_k,
+        )
+        .map_err(|error| storage_sql_error("execute KNN search", error))?;
         Ok(uqa_scoring::rank_top_k(&pl, top_k))
     }
 
@@ -63,9 +69,15 @@ impl Engine {
         let index = indexes
             .get(field)
             .ok_or_else(|| SQLError::UnknownColumn(field.to_string()))?;
-        let raw = index
-            .search_knn(query_vector, top_k)
-            .map_err(|error| storage_sql_error("execute calibrated-vector KNN", error))?;
+        let raw = uqa_execution::serializable::vector::search_knn(
+            index,
+            self.serializable_table_read(table)?.as_ref(),
+            &table_state.columns.snapshot(),
+            field,
+            query_vector,
+            top_k,
+        )
+        .map_err(|error| storage_sql_error("execute calibrated-vector KNN", error))?;
         let calibrated = uqa_operators::calibrate_query_pool_postings(
             &raw,
             uqa_operators::RelevantSampleSplit::default(),
@@ -84,13 +96,16 @@ impl Engine {
         query_vector: impl AsRef<[f32]>,
         top_k: usize,
     ) -> Result<Vec<ScoredEntry>, SQLError> {
-        let tree = uqa_operators::OperatorTree::KNN {
-            query_vector: query_vector.as_ref().to_vec(),
-            k: top_k,
-            field: field.to_string(),
-        };
-        let entries = crate::operator_tree_bridge::execute_scored_tree(self, table, &[], &tree)?;
-        Ok(uqa_scoring::rank_scored_entries_top_k(entries, top_k))
+        self.with_direct_table_read(table, |engine, name, _| {
+            let tree = uqa_operators::OperatorTree::KNN {
+                query_vector: query_vector.as_ref().to_vec(),
+                k: top_k,
+                field: field.to_string(),
+            };
+            let entries =
+                crate::operator_tree_bridge::execute_scored_tree(engine, name, table, &[], &tree)?;
+            Ok(uqa_scoring::rank_scored_entries_top_k(entries, top_k))
+        })
     }
 
     /// Apply a persisted/offline vector calibration model to a KNN pool.
@@ -108,71 +123,72 @@ impl Engine {
         model: &uqa_scoring::VectorCalibrationModel,
         target: &uqa_scoring::VectorCalibrationTarget,
     ) -> Result<Vec<ScoredEntry>, SQLError> {
-        model
-            .validate_for(target)
-            .map_err(|error| SQLError::TypeMismatch(error.to_string()))?;
-        let table_name = self
-            .try_resolve_table_name(table)
-            .map_err(|error| storage_sql_error("resolve calibrated-vector table", error))?
-            .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-        let expected_index_id = format!("{table_name}.{field}");
-        if target.corpus_id != table_name {
-            return Err(SQLError::TypeMismatch(format!(
-                "vector calibration corpus_id {:?} does not match table {:?}",
-                target.corpus_id, table_name
-            )));
-        }
-        if target.index_id != expected_index_id {
-            return Err(SQLError::TypeMismatch(format!(
-                "vector calibration index_id {:?} does not match physical index {:?}",
-                target.index_id, expected_index_id
-            )));
-        }
-
-        let table = self
-            .try_query_table(&table_name)
-            .map_err(|error| storage_sql_error("resolve calibrated-vector table", error))?
-            .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?;
-        let indexes = table.vector_indexes.read();
-        let index = indexes
-            .get(field)
-            .ok_or_else(|| SQLError::UnknownColumn(field.to_string()))?;
-        if target.index_kind != index.index_kind() {
-            return Err(SQLError::TypeMismatch(format!(
-                "vector calibration index kind {:?} does not match {:?}",
-                target.index_kind,
-                index.index_kind()
-            )));
-        }
-        if target.dimensions != index.dimensions() {
-            return Err(SQLError::VectorDimMismatch {
-                expected: index.dimensions() as usize,
-                actual: target.dimensions as usize,
-            });
-        }
-        let raw = index
-            .search_knn(query_vector.as_ref(), target.candidate_k)
-            .map_err(|error| storage_sql_error("execute calibrated-vector KNN", error))?;
-        let mut calibrated = Vec::with_capacity(raw.len());
-        for entry in &raw {
-            if !entry.payload.score.is_finite() || !(-1.0..=1.0).contains(&entry.payload.score) {
-                return Err(SQLError::Internal(format!(
-                    "calibrated-vector KNN returned invalid cosine score {} for document {}",
-                    entry.payload.score, entry.doc_id
+        self.with_direct_table_read(table, |engine, table_name, table| {
+            model
+                .validate_for(target)
+                .map_err(|error| SQLError::TypeMismatch(error.to_string()))?;
+            let expected_index_id = format!("{table_name}.{field}");
+            if target.corpus_id != table_name {
+                return Err(SQLError::TypeMismatch(format!(
+                    "vector calibration corpus_id {:?} does not match table {:?}",
+                    target.corpus_id, table_name
                 )));
             }
-            let probability = model
-                .calibrate_one(1.0 - entry.payload.score, target)
-                .map_err(|error| SQLError::Internal(error.to_string()))?;
-            calibrated.push(ScoredEntry {
-                doc_id: entry.doc_id,
-                score: probability,
-            });
-        }
-        Ok(uqa_scoring::rank_scored_entries_top_k(
-            calibrated,
-            target.candidate_k,
-        ))
+            if target.index_id != expected_index_id {
+                return Err(SQLError::TypeMismatch(format!(
+                    "vector calibration index_id {:?} does not match physical index {:?}",
+                    target.index_id, expected_index_id
+                )));
+            }
+
+            let indexes = table.vector_indexes.read();
+            let index = indexes
+                .get(field)
+                .ok_or_else(|| SQLError::UnknownColumn(field.to_string()))?;
+            if target.index_kind != index.index_kind() {
+                return Err(SQLError::TypeMismatch(format!(
+                    "vector calibration index kind {:?} does not match {:?}",
+                    target.index_kind,
+                    index.index_kind()
+                )));
+            }
+            if target.dimensions != index.dimensions() {
+                return Err(SQLError::VectorDimMismatch {
+                    expected: index.dimensions() as usize,
+                    actual: target.dimensions as usize,
+                });
+            }
+            let raw = uqa_execution::serializable::vector::search_knn(
+                index,
+                engine.serializable_table_state_read(table)?.as_ref(),
+                &table.columns.snapshot(),
+                field,
+                query_vector.as_ref(),
+                target.candidate_k,
+            )
+            .map_err(|error| storage_sql_error("execute calibrated-vector KNN", error))?;
+            let mut calibrated = Vec::with_capacity(raw.len());
+            for entry in &raw {
+                if !entry.payload.score.is_finite() || !(-1.0..=1.0).contains(&entry.payload.score)
+                {
+                    return Err(SQLError::Internal(format!(
+                        "calibrated-vector KNN returned invalid cosine score {} for document {}",
+                        entry.payload.score, entry.doc_id
+                    )));
+                }
+                let probability = model
+                    .calibrate_one(1.0 - entry.payload.score, target)
+                    .map_err(|error| SQLError::Internal(error.to_string()))?;
+                calibrated.push(ScoredEntry {
+                    doc_id: entry.doc_id,
+                    score: probability,
+                });
+            }
+            Ok(uqa_scoring::rank_scored_entries_top_k(
+                calibrated,
+                target.candidate_k,
+            ))
+        })
     }
 
     /// All documents whose cosine similarity to `query_vector` is at least
@@ -184,17 +200,20 @@ impl Engine {
         query_vector: Vec<f32>,
         threshold: f32,
     ) -> Result<Vec<ScoredEntry>, SQLError> {
-        let tree = uqa_operators::OperatorTree::VectorSimilarity {
-            query_vector,
-            threshold,
-            field: field.to_string(),
-        };
-        let mut out = crate::operator_tree_bridge::execute_scored_tree(self, table, &[], &tree)?;
-        out.sort_by(|a, b| {
-            b.score
-                .total_cmp(&a.score)
-                .then_with(|| a.doc_id.cmp(&b.doc_id))
-        });
-        Ok(out)
+        self.with_direct_table_read(table, |engine, name, _| {
+            let tree = uqa_operators::OperatorTree::VectorSimilarity {
+                query_vector,
+                threshold,
+                field: field.to_string(),
+            };
+            let mut out =
+                crate::operator_tree_bridge::execute_scored_tree(engine, name, table, &[], &tree)?;
+            out.sort_by(|a, b| {
+                b.score
+                    .total_cmp(&a.score)
+                    .then_with(|| a.doc_id.cmp(&b.doc_id))
+            });
+            Ok(out)
+        })
     }
 }

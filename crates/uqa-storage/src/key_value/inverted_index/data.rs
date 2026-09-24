@@ -9,12 +9,15 @@
 use super::{
     analyze_index_field, decode_occurrence_cluster, decode_term_keys, decode_u64_value, keys,
     other_error, AnalyzerBindings, BTreeMap, DocId, DocumentFields, FieldName, FieldSnapshot,
-    FieldStats, IndexedFieldMetadata, IndexedFieldRevision, KeyValueInvertedIndex,
-    OccurrencePosting, StagedDocuments, StorageBackendResult, TokenTermKey,
+    FieldStats, IndexedFieldMetadata, IndexedFieldRevision, OccurrencePosting, OccurrenceRead,
+    StagedDocuments, StorageBackendResult, TokenTermKey,
 };
 
+#[cfg(test)]
+mod tests;
+
 impl FieldStats {
-    pub(super) fn to_bytes(self) -> StorageBackendResult<[u8; 56]> {
+    pub(in crate::key_value) fn to_bytes(self) -> StorageBackendResult<[u8; 56]> {
         if self.doc_count == 0 {
             return Err(other_error("empty field statistics must be removed"));
         }
@@ -25,7 +28,7 @@ impl FieldStats {
         Ok(bytes)
     }
 
-    pub(super) fn from_bytes(bytes: &[u8]) -> StorageBackendResult<Self> {
+    pub(in crate::key_value) fn from_bytes(bytes: &[u8]) -> StorageBackendResult<Self> {
         if bytes.len() != 56 {
             return Err(other_error("invalid occurrence field statistics"));
         }
@@ -47,13 +50,13 @@ impl FieldStats {
     }
 }
 
-impl KeyValueInvertedIndex {
+impl OccurrenceRead<'_> {
     pub(super) fn stored_field_stats(
         &self,
         field: &str,
     ) -> StorageBackendResult<Option<FieldStats>> {
         self.store
-            .get(&keys::field_prefix(&self.table, keys::FIELD, field)?)?
+            .get(&keys::field_prefix(self.table, keys::FIELD, field)?)?
             .map(|bytes| FieldStats::from_bytes(&bytes))
             .transpose()
     }
@@ -92,25 +95,30 @@ impl KeyValueInvertedIndex {
         cancellation: Option<&uqa_core::CancellationToken>,
     ) -> StorageBackendResult<StagedDocuments> {
         let mut staged = BTreeMap::new();
+        let mut revisions = BTreeMap::new();
         for (doc_id, fields) in documents {
+            self.store.control().check()?;
             if let Some(cancellation) = cancellation {
                 cancellation.check()?;
             }
             let mut snapshot = DocumentFields::new();
             for (field, text) in fields {
-                if !rebuilding {
-                    self.validate_index_revision_change(&field, &self.bindings)?;
+                if !revisions.contains_key(&field) {
+                    if !rebuilding {
+                        self.validate_index_revision_change(&field, self.bindings)?;
+                    }
+                    revisions.insert(field.clone(), self.bindings.index_revision(&field)?);
                 }
-                let revision = self.bindings.index_revision(&field)?;
+                let revision = &revisions[&field];
                 let analyzed = match cancellation {
                     Some(cancellation) => crate::inverted_index::analyze_index_field_cancellable(
-                        &revision,
+                        revision,
                         &text,
                         cancellation,
                     )?,
-                    None => analyze_index_field(&revision, &text)?,
+                    None => analyze_index_field(revision, &text)?,
                 };
-                let metadata = IndexedFieldMetadata::new(&revision, &analyzed);
+                let metadata = IndexedFieldMetadata::new(revision, &analyzed);
                 snapshot.insert(
                     field,
                     FieldSnapshot {
@@ -126,15 +134,15 @@ impl KeyValueInvertedIndex {
 
     pub(super) fn old_document(&self, doc_id: DocId) -> StorageBackendResult<DocumentFields> {
         let mut fields = DocumentFields::new();
-        for (key, value) in
-            self.store
-                .scan_prefix(&keys::document_prefix(&self.table, keys::LENGTH, doc_id)?)?
+        for (key, value) in self
+            .scan_prefix(&keys::document_prefix(self.table, keys::LENGTH, doc_id)?)?
+            .iter()
         {
-            let (_, field) = keys::read_document(&key, keys::LENGTH)?;
+            let (_, field) = keys::read_document(key, keys::LENGTH)?;
             let metadata = self
                 .read_field_metadata(doc_id, &field)?
                 .ok_or_else(|| other_error("indexed field end metadata is missing"))?;
-            if metadata.length != decode_u64_value(&value)? {
+            if metadata.length != decode_u64_value(value)? {
                 return Err(other_error(
                     "indexed field length disagrees with its source metadata",
                 ));
@@ -142,7 +150,7 @@ impl KeyValueInvertedIndex {
             let reverse = self
                 .store
                 .get(&keys::document_key(
-                    &self.table,
+                    self.table,
                     keys::DOCUMENT,
                     doc_id,
                     &field,
@@ -169,7 +177,7 @@ impl KeyValueInvertedIndex {
     ) -> StorageBackendResult<Option<IndexedFieldMetadata>> {
         let Some(bytes) = self
             .store
-            .get(&keys::metadata_key(&self.table, field, doc_id)?)?
+            .get(&keys::metadata_key(self.table, field, doc_id)?)?
         else {
             return Ok(None);
         };
@@ -190,14 +198,14 @@ impl KeyValueInvertedIndex {
         cluster: u64,
     ) -> StorageBackendResult<Vec<OccurrencePosting>> {
         let score = self.store.get(&keys::cluster_key(
-            &self.table,
+            self.table,
             keys::SCORE,
             field,
             term,
             cluster,
         )?)?;
         let positions = self.store.get(&keys::cluster_key(
-            &self.table,
+            self.table,
             keys::POSITIONS,
             field,
             term,

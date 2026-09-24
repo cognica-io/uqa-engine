@@ -94,6 +94,7 @@ impl Engine {
     fn routine_restore_context(&self) -> RoutineRestoreContext<'_> {
         RoutineRestoreContext {
             registry: self,
+            roles: self,
             publication: self,
             schemas: self,
             definition: self.routine_definition_context(),

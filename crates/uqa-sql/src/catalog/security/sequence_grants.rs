@@ -11,6 +11,7 @@ use super::{
     sequence_inquiry::SequencePrivilegeResolution,
     SequenceSecurity,
 };
+use crate::catalog::roles::identity::RoleSubject;
 use crate::{
     ast::{GrantSequenceStmt, SequenceRevokeBehavior},
     catalog::{
@@ -20,6 +21,7 @@ use crate::{
     SQLError,
 };
 use std::collections::BTreeMap;
+use uqa_core::catalog_acl::AclGrantee;
 use uqa_core::RelationIdentity;
 
 pub use super::grants::{
@@ -85,9 +87,9 @@ pub fn sequence_grants_in_schemas<'a>(
 
 pub fn apply_sequence_acl(
     statement: &GrantSequenceStmt,
-    grantees: &[String],
+    grantees: &[AclGrantee],
     privileges: &[AclPrivilege],
-    current_user: &str,
+    current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
     current: &SequenceSecurity,
@@ -134,21 +136,23 @@ pub fn apply_sequence_acl(
 
 pub fn validate_sequence_acl_roles(
     statement: &GrantSequenceStmt,
-    grantees: &[String],
+    grantees: &[AclGrantee],
     requested_grantor: Option<&str>,
-    current_user: &str,
+    current_user: &(impl RoleSubject + ?Sized),
     roles: &BTreeMap<String, RoleDefinition>,
 ) -> Result<(), SQLError> {
     for role in grantees {
-        if role != "PUBLIC" && !roles.contains_key(role) {
+        if role
+            .role_name()
+            .is_some_and(|name| !roles.contains_key(name))
+        {
             return Err(SQLError::Routine {
                 sqlstate: "42704".into(),
                 message: format!("role \"{role}\" does not exist"),
             });
         }
     }
-    if statement.is_grant && statement.grant_option && grantees.iter().any(|role| role == "PUBLIC")
-    {
+    if statement.is_grant && statement.grant_option && grantees.iter().any(AclGrantee::is_public) {
         return Err(SQLError::Routine {
             sqlstate: "0LP01".into(),
             message: "grant options can only be granted to roles".into(),
@@ -161,7 +165,7 @@ pub fn validate_sequence_acl_roles(
                 message: format!("role \"{requested_grantor}\" does not exist"),
             });
         }
-        if requested_grantor != current_user {
+        if current_user.role_name(roles) != Some(requested_grantor) {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),
                 message: "grantor must be current user".into(),

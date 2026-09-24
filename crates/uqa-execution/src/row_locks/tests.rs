@@ -25,6 +25,91 @@ fn wait_until_registered(manager: &RowLockManager, session_id: u64) {
 }
 
 #[test]
+fn index_incarnations_keep_stable_locks_and_release_at_savepoints() {
+    let manager = RowLockManager::new();
+    let peer = RowLockManager::new();
+    let table = manager.table_key("public.idx");
+    let index = manager.index_key([1; 16]);
+    let replacement = manager.index_key([2; 16]);
+    let peer_index = peer.index_key([1; 16]);
+    assert_eq!(
+        manager.relation_bytes(index),
+        peer.relation_bytes(peer_index)
+    );
+    assert_ne!(manager.relation_bytes(index), manager.relation_bytes(table));
+    assert_ne!(
+        manager.relation_bytes(index),
+        manager.relation_bytes(replacement)
+    );
+    let cancel = uqa_core::CancellationToken::new();
+    assert!(manager
+        .try_acquire_relation(1, index, RelationLockMode::ShareUpdateExclusive, 1, &cancel)
+        .unwrap());
+    assert!(!manager
+        .try_acquire_relation(2, index, RelationLockMode::ShareUpdateExclusive, 1, &cancel)
+        .unwrap());
+    assert!(manager
+        .try_acquire_relation(
+            2,
+            replacement,
+            RelationLockMode::AccessExclusive,
+            1,
+            &cancel
+        )
+        .unwrap());
+    assert!(manager
+        .try_acquire_relation(2, table, RelationLockMode::AccessExclusive, 1, &cancel)
+        .unwrap());
+    manager.release_mark_above(1, 0);
+    assert!(manager
+        .try_acquire_relation(2, index, RelationLockMode::AccessExclusive, 1, &cancel)
+        .unwrap());
+}
+
+#[test]
+fn scoring_parameter_names_have_stable_independent_transaction_lock_identities() {
+    let manager = RowLockManager::new();
+    let peer = RowLockManager::new();
+    let sql_table = manager.table_key("docs.body");
+    let signal = manager.scoring_parameters_key("docs.body");
+    let other = manager.scoring_parameters_key("docs.title");
+    // A different local registration order must not change cross-process ownership.
+    let peer_signal = peer.scoring_parameters_key("docs.body");
+    peer.table_key("docs.body");
+    assert_eq!(
+        manager.relation_bytes(signal),
+        peer.relation_bytes(peer_signal)
+    );
+    assert_ne!(
+        manager.relation_bytes(signal),
+        manager.relation_bytes(sql_table)
+    );
+    let first = manager.allocate_session();
+    let second = manager.allocate_session();
+    let cancel = uqa_core::CancellationToken::new();
+    let acquire = |session_id, table| {
+        manager.acquire(&LockRequest {
+            session_id,
+            key: RowLockKey { table, doc_id: 0 },
+            strength: LockStrength::ForUpdate,
+            mark: 1,
+            wait: uqa_sql::ast::LockWait::NoWait,
+            cancel: &cancel,
+            relation: "docs.body",
+        })
+    };
+    assert_granted(acquire(first, signal));
+    assert_eq!(
+        acquire(second, signal).unwrap_err().sqlstate(),
+        Some("55P03")
+    );
+    assert_granted(acquire(second, other));
+    assert_granted(acquire(second, sql_table));
+    manager.release_mark_above(first, 0);
+    assert_granted(acquire(second, signal));
+}
+
+#[test]
 fn postgresql_tuple_lock_conflicts_match_strength_matrix() {
     use LockStrength::{ForKeyShare, ForNoKeyUpdate, ForShare, ForUpdate};
     assert!(!lock_strengths_conflict(ForKeyShare, ForKeyShare));

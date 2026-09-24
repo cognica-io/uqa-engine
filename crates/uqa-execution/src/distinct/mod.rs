@@ -24,7 +24,9 @@ use crate::{
 };
 
 use encoding::encode_key_borrowed;
-pub use encoding::{canonical_row_key, hash_canonical_row, try_pack_compact_text_pair};
+pub use encoding::{
+    canonical_row_key, canonical_row_key_budgeted, hash_canonical_row, try_pack_compact_text_pair,
+};
 pub(crate) use encoding::{encode_key, encode_non_null_key, EncodedKey};
 pub use memory::{CanonicalRowHashSet, ExactRowSet};
 pub(crate) use spill::SeenKeySet;

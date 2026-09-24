@@ -14,6 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use uqa_analysis::Analyzer;
+use uqa_core::memory::{OwnedMap, OwnedSet};
 use uqa_core::{DocId, FieldName, IndexStats, Payload, PostingEntry, PostingList, TokenOccurrence};
 
 use crate::TokenTermKey;
@@ -25,22 +26,29 @@ use crate::clustered_postings::{MaterializedPostingCursor, PostingCursor, Postin
 mod analysis;
 mod batch;
 mod bindings;
+mod changes;
 mod contract;
+pub mod defaults;
+mod footprint;
 mod memory;
 mod metadata;
 mod read_cursor;
+mod retained;
+mod snapshot;
 
 #[cfg(test)]
 mod tests;
 
 pub use analysis::{
-    analyze_index_field, analyze_index_field_cancellable, analyze_query_graph,
-    analyze_query_graph_budgeted, analyze_query_terms, analyze_query_terms_budgeted, AnalyzedField,
-    IndexedFieldMetadata,
+    analyze_index_field, analyze_index_field_budgeted, analyze_index_field_cancellable,
+    analyze_query_graph, analyze_query_graph_budgeted, analyze_query_terms,
+    analyze_query_terms_budgeted, AnalyzedField, IndexedFieldMetadata, RetainedAnalyzedField,
 };
-pub use bindings::AnalyzerBindings;
+pub use bindings::{AnalyzerBindings, AnalyzerDefault, RetainedAnalyzerBindings};
+pub use changes::{visit_field_replacement, InvertedIndexChange, InvertedIndexChangeVisitor};
 pub use contract::{AnalyzerPhase, InvertedIndex};
 pub use metadata::IndexedFieldRevision;
+pub use retained::RetainedInvertedIndexBuilder;
 
 /// Linear term/position stores cannot install morphology without immutable graph revisions.
 pub fn validate_linear_analyzer(analyzer: &Analyzer) -> StorageBackendResult<()> {
@@ -90,6 +98,9 @@ pub struct MemoryInvertedIndex {
     bindings: AnalyzerBindings,
     /// Snapshots share immutable corpus state; validated writes detach it once.
     state: Arc<MemoryIndexState>,
+    /// Controlled readers keep the shared generation's allowance after the source changes or closes.
+    state_memory: Option<Arc<uqa_core::memory::MemoryReservation>>,
+    read_control: Option<crate::read_control::StorageReadControl>,
 }
 
 /// Cloning retains the existing independently owned corpus maps; snapshot APIs share them until a write.
@@ -98,26 +109,29 @@ impl Clone for MemoryInvertedIndex {
         Self {
             bindings: self.bindings.clone(),
             state: Arc::new((*self.state).clone()),
+            state_memory: None,
+            read_control: None,
         }
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 struct MemoryIndexState {
     /// `(field, term) -> doc_id -> entry (positions inside the doc)`
-    index: BTreeMap<PostingKey, BTreeMap<DocId, MemoryPosting>>,
+    index: OwnedMap<PostingKey, OwnedMap<DocId, MemoryPosting>>,
     /// Reverse index for `remove_document` so we touch only relevant
     /// `(field, term)` posting maps instead of scanning the whole index.
-    doc_terms: BTreeMap<DocId, BTreeSet<PostingKey>>,
+    doc_terms: OwnedMap<DocId, OwnedSet<PostingKey>>,
     /// Exact revision, normalization length, and original source end state for each document field.
-    doc_fields: BTreeMap<DocId, BTreeMap<FieldName, IndexedFieldMetadata>>,
+    doc_fields: OwnedMap<DocId, OwnedMap<FieldName, IndexedFieldMetadata>>,
     /// Sum of field lengths across all docs, per field.
-    total_length: BTreeMap<FieldName, u64>,
+    total_length: OwnedMap<FieldName, u64>,
     /// Number of documents with indexed content per field, maintained
     /// incrementally so per-query BM25 statistics never walk
     /// `doc_fields` (O(corpus) at query time otherwise).
-    field_doc_counts: BTreeMap<FieldName, u64>,
+    field_doc_counts: OwnedMap<FieldName, u64>,
     doc_count: u64,
+    retention: footprint::RetainedPayload,
 }
 
 type PostingKey = (FieldName, TokenTermKey);
@@ -128,16 +142,40 @@ struct MemoryPosting {
     occurrences: Vec<TokenOccurrence>,
 }
 
+impl MemoryPosting {
+    fn new(doc_id: DocId, occurrences: Vec<TokenOccurrence>, mut positions: Vec<u32>) -> Self {
+        positions.sort_unstable();
+        positions.dedup();
+        Self {
+            projection: PostingEntry::new(
+                doc_id,
+                Payload {
+                    positions,
+                    score: 0.0,
+                    fields: BTreeMap::new(),
+                },
+            ),
+            occurrences,
+        }
+    }
+}
+
 struct StagedMemoryDocument {
-    fields: BTreeMap<FieldName, IndexedFieldMetadata>,
-    terms: BTreeSet<PostingKey>,
+    fields: OwnedMap<FieldName, IndexedFieldMetadata>,
+    terms: OwnedSet<PostingKey>,
     postings: Vec<(PostingKey, MemoryPosting)>,
 }
 
 struct MemoryReplacementPlan {
-    old_terms: BTreeSet<PostingKey>,
+    old_terms: OwnedSet<PostingKey>,
     next_doc_count: u64,
-    field_counters: BTreeMap<FieldName, (u64, u64)>,
+    field_counters: OwnedMap<FieldName, MemoryFieldCounters>,
+}
+
+struct MemoryFieldCounters {
+    total_key: FieldName,
+    total: u64,
+    docs: u64,
 }
 
 impl MemoryInvertedIndex {
@@ -149,6 +187,8 @@ impl MemoryInvertedIndex {
         Self {
             bindings,
             state: Arc::default(),
+            state_memory: None,
+            read_control: None,
         }
     }
 
@@ -156,7 +196,15 @@ impl MemoryInvertedIndex {
         Self {
             bindings: self.bindings.clone(),
             state: Arc::clone(&self.state),
+            state_memory: self.state_memory.clone(),
+            read_control: self.read_control.clone(),
         }
+    }
+
+    fn check_retained_read(&self) -> StorageBackendResult<()> {
+        self.read_control
+            .as_ref()
+            .map_or(Ok(()), crate::read_control::StorageReadControl::check)
     }
 
     fn stage_document(
@@ -173,8 +221,8 @@ impl MemoryInvertedIndex {
         fields: BTreeMap<FieldName, String>,
         cancellation: Option<&uqa_core::CancellationToken>,
     ) -> StorageBackendResult<StagedMemoryDocument> {
-        let mut metadata = BTreeMap::new();
-        let mut terms = BTreeSet::new();
+        let mut metadata = OwnedMap::new();
+        let mut terms = OwnedSet::new();
         let mut postings = Vec::new();
         for (field, text) in fields {
             if let Some(cancellation) = cancellation {
@@ -195,25 +243,10 @@ impl MemoryInvertedIndex {
                 if let Some(cancellation) = cancellation {
                     cancellation.check()?;
                 }
-                let mut positions: Vec<_> = occurrences.iter().map(|item| item.position).collect();
-                positions.sort_unstable();
-                positions.dedup();
+                let positions = occurrences.iter().map(|item| item.position).collect();
                 let key = (field.clone(), term);
                 terms.insert(key.clone());
-                postings.push((
-                    key,
-                    MemoryPosting {
-                        projection: PostingEntry::new(
-                            doc_id,
-                            Payload {
-                                positions,
-                                score: 0.0,
-                                fields: BTreeMap::new(),
-                            },
-                        ),
-                        occurrences,
-                    },
-                ));
+                postings.push((key, MemoryPosting::new(doc_id, occurrences, positions)));
             }
         }
         Ok(StagedMemoryDocument {
@@ -228,7 +261,16 @@ impl MemoryIndexState {
     fn plan_replacement(
         &self,
         doc_id: DocId,
-        new_fields: &BTreeMap<FieldName, IndexedFieldMetadata>,
+        new_fields: &OwnedMap<FieldName, IndexedFieldMetadata>,
+    ) -> StorageBackendResult<MemoryReplacementPlan> {
+        self.plan_replacement_with_names(doc_id, new_fields, |field| Ok(field.clone()))
+    }
+
+    fn plan_replacement_with_names(
+        &self,
+        doc_id: DocId,
+        new_fields: &OwnedMap<FieldName, IndexedFieldMetadata>,
+        mut copy_name: impl FnMut(&FieldName) -> StorageBackendResult<FieldName>,
     ) -> StorageBackendResult<MemoryReplacementPlan> {
         let has_terms = self.doc_terms.contains_key(&doc_id);
         if has_terms != self.doc_fields.contains_key(&doc_id) {
@@ -237,7 +279,8 @@ impl MemoryIndexState {
             )));
         }
         let old_terms = self.doc_terms.get(&doc_id).cloned().unwrap_or_default();
-        let old_fields = self.doc_fields.get(&doc_id).cloned().unwrap_or_default();
+        let empty_fields = OwnedMap::new();
+        let old_fields = self.doc_fields.get(&doc_id).unwrap_or(&empty_fields);
         let next_doc_count = self
             .doc_count
             .checked_sub(u64::from(has_terms))
@@ -256,16 +299,29 @@ impl MemoryIndexState {
             }
         }
 
-        let mut affected_fields = BTreeSet::new();
-        affected_fields.extend(old_fields.keys().cloned());
-        affected_fields.extend(new_fields.keys().cloned());
-        let mut field_counters = BTreeMap::new();
+        // Merge the two already ordered field views without allocating a temporary set.
+        let mut old_keys = old_fields.keys().peekable();
+        let mut new_keys = new_fields.keys().peekable();
+        let affected_fields = std::iter::from_fn(|| match (old_keys.peek(), new_keys.peek()) {
+            (Some(old), Some(new)) => match old.cmp(new) {
+                std::cmp::Ordering::Less => old_keys.next(),
+                std::cmp::Ordering::Greater => new_keys.next(),
+                std::cmp::Ordering::Equal => {
+                    old_keys.next();
+                    new_keys.next()
+                }
+            },
+            (Some(_), None) => old_keys.next(),
+            (None, Some(_)) => new_keys.next(),
+            (None, None) => None,
+        });
+        let mut field_counters = OwnedMap::new();
         for field in affected_fields {
-            let old_length = old_fields.get(&field).map_or(0, |metadata| metadata.length);
-            let new_length = new_fields.get(&field).map_or(0, |metadata| metadata.length);
+            let old_length = old_fields.get(field).map_or(0, |metadata| metadata.length);
+            let new_length = new_fields.get(field).map_or(0, |metadata| metadata.length);
             let total = self
                 .total_length
-                .get(&field)
+                .get(field)
                 .copied()
                 .unwrap_or(0)
                 .checked_sub(old_length)
@@ -274,14 +330,21 @@ impl MemoryIndexState {
                 .ok_or_else(|| counter_error("total field length"))?;
             let field_docs = self
                 .field_doc_counts
-                .get(&field)
+                .get(field)
                 .copied()
                 .unwrap_or(0)
-                .checked_sub(u64::from(old_fields.contains_key(&field)))
+                .checked_sub(u64::from(old_fields.contains_key(field)))
                 .ok_or_else(|| counter_error("field document count"))?
-                .checked_add(u64::from(new_fields.contains_key(&field)))
+                .checked_add(u64::from(new_fields.contains_key(field)))
                 .ok_or_else(|| counter_error("field document count"))?;
-            field_counters.insert(field, (total, field_docs));
+            field_counters.insert(
+                copy_name(field)?,
+                MemoryFieldCounters {
+                    total_key: copy_name(field)?,
+                    total,
+                    docs: field_docs,
+                },
+            );
         }
         Ok(MemoryReplacementPlan {
             old_terms,
@@ -297,34 +360,29 @@ impl MemoryIndexState {
         plan: MemoryReplacementPlan,
     ) -> StorageBackendResult<()> {
         for key in plan.old_terms {
-            let postings = self.index.get_mut(&key).ok_or_else(|| {
-                StorageBackendError::Other(format!(
-                    "inverted-index document {doc_id} lost a validated posting before replacement"
-                ))
-            })?;
-            postings.remove(&doc_id);
-            if postings.is_empty() {
-                self.index.remove(&key);
-            }
+            self.remove_posting(doc_id, &key)?;
         }
-        self.doc_fields.remove(&doc_id);
-        self.doc_terms.remove(&doc_id);
-        for (field, (total, field_docs)) in plan.field_counters {
-            if field_docs == 0 {
-                self.total_length.remove(&field);
-                self.field_doc_counts.remove(&field);
-            } else {
-                self.total_length.insert(field.clone(), total);
-                self.field_doc_counts.insert(field, field_docs);
-            }
+        self.remove_document_metadata(doc_id);
+        for (field, counters) in plan.field_counters {
+            footprint::set_counter(
+                &mut self.total_length,
+                counters.total_key,
+                (counters.docs != 0).then_some(counters.total),
+                &mut self.retention,
+            );
+            footprint::set_counter(
+                &mut self.field_doc_counts,
+                field,
+                (counters.docs != 0).then_some(counters.docs),
+                &mut self.retention,
+            );
         }
         for (key, entry) in staged.postings {
-            self.index.entry(key).or_default().insert(doc_id, entry);
+            self.insert_posting(doc_id, key, entry);
         }
         self.doc_count = plan.next_doc_count;
         if !staged.fields.is_empty() {
-            self.doc_fields.insert(doc_id, staged.fields);
-            self.doc_terms.insert(doc_id, staged.terms);
+            self.insert_document_metadata(doc_id, staged.fields, staged.terms);
         }
         Ok(())
     }

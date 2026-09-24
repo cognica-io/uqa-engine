@@ -8,10 +8,14 @@
 //!
 //! The handle does not load a graph on open or retain entity/adjacency maps.
 //! Existing per-table schemas and legacy property encodings remain readable.
-//! Mutations use physical transactions/savepoints; multi-read queries pin one
-//! storage snapshot. Owned query results belong to the caller, not the store.
+//! Mutations follow the connection's physical or logical transactions/savepoints;
+//! multi-read queries pin one storage snapshot. Owned query results belong to the caller, not the store.
 
 mod access;
+mod native;
+#[cfg(test)]
+mod observations_tests;
+mod routing;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -34,11 +38,11 @@ pub struct SQLiteGraphStore {
 }
 
 fn graph_store_error(error: &GraphStoreError) -> SQLiteError {
-    SQLiteError::StorageBackend(error.to_string())
+    uqa_storage::StorageBackendError::backend("graph", error.clone()).into()
 }
 
-fn sqlite_graph_error(error: &SQLiteError) -> GraphStoreError {
-    GraphStoreError::Storage(error.to_string())
+fn sqlite_graph_error(error: SQLiteError) -> GraphStoreError {
+    uqa_storage::StorageBackendError::from(error).into()
 }
 
 impl SQLiteGraphStore {
@@ -54,6 +58,7 @@ impl SQLiteGraphStore {
                 "invalid graph table suffix {suffix:?}"
             )));
         }
+        let scope = suffix.to_ascii_lowercase();
         let suffix = if suffix.is_empty() {
             String::new()
         } else {
@@ -61,14 +66,21 @@ impl SQLiteGraphStore {
         };
         let backend: Arc<dyn PersistentStorageBackend> =
             Arc::new(SQLiteStorageBackend::new(conn.clone()));
-        let storage = Arc::new(access::SQLiteGraphStorage {
-            conn,
-            backend: Arc::clone(&backend),
-            vtx_table: format!("_graph_vertices{suffix}"),
-            edge_table: format!("_graph_edges{suffix}"),
-            member_table: format!("_graph_membership{suffix}"),
-            catalog_table: format!("_graph_catalog{suffix}"),
-            metadata_table: format!("_graph_metadata{suffix}"),
+        let storage = Arc::new(routing::RoutedGraphStorage {
+            native: native::NativeGraphStorage {
+                connection: conn.clone(),
+                backend: Arc::clone(&backend),
+                scope,
+            },
+            legacy: access::SQLiteGraphStorage {
+                conn,
+                backend: Arc::clone(&backend),
+                vtx_table: format!("_graph_vertices{suffix}"),
+                edge_table: format!("_graph_edges{suffix}"),
+                member_table: format!("_graph_membership{suffix}"),
+                catalog_table: format!("_graph_catalog{suffix}"),
+                metadata_table: format!("_graph_metadata{suffix}"),
+            },
         });
         let mut inner = PersistentGraphStore::from_storage(storage.clone());
         let mut checkpoint =
@@ -112,7 +124,7 @@ impl SQLiteGraphStore {
         })
     }
 
-    /// Execute several graph reads against one pinned physical snapshot.
+    /// Execute several graph reads against one pinned storage snapshot.
     /// Callers must serialize transaction ownership on this storage session.
     pub fn read_snapshot<T>(
         &self,
@@ -128,7 +140,19 @@ impl SQLiteGraphStore {
         }
         let _operation = self.operation_gate.lock();
         if self.backend.in_transaction() {
-            return read(&self.inner);
+            let context = self
+                .backend
+                .serializable_session()
+                .map(uqa_storage::mvcc::SerializableSession::serializable_read_context)
+                .transpose()?
+                .flatten();
+            return match context {
+                Some(context) => {
+                    let cancellation = self.backend.write_cancellation().unwrap_or_default();
+                    read(&self.inner.with_serializable_read(context, &cancellation))
+                }
+                None => read(&self.inner),
+            };
         }
         self.backend.begin_read_transaction()?;
         let mut checkpoint = ReadCheckpoint(Some(Arc::clone(&self.backend)));
@@ -138,20 +162,39 @@ impl SQLiteGraphStore {
         result
     }
 
+    fn with_graph_mutation<T>(
+        &mut self,
+        operation: impl FnOnce(&mut PersistentGraphStore) -> GraphStoreResult<T>,
+    ) -> GraphStoreResult<T> {
+        let _operation = self.operation_gate.lock();
+        let context = self
+            .backend
+            .serializable_session()
+            .map(uqa_storage::mvcc::SerializableSession::serializable_read_context)
+            .transpose()?
+            .flatten();
+        let mut store = match context {
+            Some(context) => self.inner.with_serializable_read(
+                context,
+                &self.backend.write_cancellation().unwrap_or_default(),
+            ),
+            None => self.inner.clone(),
+        };
+        operation(&mut store)
+    }
+
     /// Borrow the durable handle within an existing storage transaction.
     pub fn as_graph_store(&self) -> &PersistentGraphStore {
         &self.inner
     }
 
     pub fn create_graph(&mut self, name: &str) -> Result<(), SQLiteError> {
-        self.inner
-            .create_graph(name)
+        self.with_graph_mutation(|store| store.create_graph(name))
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn drop_graph(&mut self, name: &str) -> Result<(), SQLiteError> {
-        self.inner
-            .drop_graph(name)
+        self.with_graph_mutation(|store| store.drop_graph(name))
             .map_err(|error| graph_store_error(&error))
     }
 
@@ -166,8 +209,7 @@ impl SQLiteGraphStore {
     }
 
     pub fn union_graphs(&mut self, g1: &str, g2: &str, target: &str) -> Result<(), SQLiteError> {
-        self.inner
-            .union_graphs(g1, g2, target)
+        self.with_graph_mutation(|store| store.union_graphs(g1, g2, target))
             .map_err(|error| graph_store_error(&error))
     }
 
@@ -177,8 +219,7 @@ impl SQLiteGraphStore {
         g2: &str,
         target: &str,
     ) -> Result<(), SQLiteError> {
-        self.inner
-            .intersect_graphs(g1, g2, target)
+        self.with_graph_mutation(|store| store.intersect_graphs(g1, g2, target))
             .map_err(|error| graph_store_error(&error))
     }
 
@@ -188,38 +229,32 @@ impl SQLiteGraphStore {
         g2: &str,
         target: &str,
     ) -> Result<(), SQLiteError> {
-        self.inner
-            .difference_graphs(g1, g2, target)
+        self.with_graph_mutation(|store| store.difference_graphs(g1, g2, target))
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn copy_graph(&mut self, source: &str, target: &str) -> Result<(), SQLiteError> {
-        self.inner
-            .copy_graph(source, target)
+        self.with_graph_mutation(|store| store.copy_graph(source, target))
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn add_vertex(&mut self, vertex: Vertex, graph: &str) -> Result<(), SQLiteError> {
-        self.inner
-            .add_vertex(vertex, graph)
+        self.with_graph_mutation(|store| store.add_vertex(vertex, graph))
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn add_edge(&mut self, edge: Edge, graph: &str) -> Result<(), SQLiteError> {
-        self.inner
-            .add_edge(edge, graph)
+        self.with_graph_mutation(|store| store.add_edge(edge, graph))
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn remove_vertex(&mut self, vertex_id: u64, graph: &str) -> Result<(), SQLiteError> {
-        self.inner
-            .remove_vertex(vertex_id, graph)
+        self.with_graph_mutation(|store| store.remove_vertex(vertex_id, graph))
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn remove_edge(&mut self, edge_id: u64, graph: &str) -> Result<(), SQLiteError> {
-        self.inner
-            .remove_edge(edge_id, graph)
+        self.with_graph_mutation(|store| store.remove_edge(edge_id, graph))
             .map_err(|error| graph_store_error(&error))
     }
 
@@ -314,32 +349,27 @@ impl SQLiteGraphStore {
     }
 
     pub fn next_vertex_id(&mut self) -> Result<u64, SQLiteError> {
-        self.inner
-            .next_vertex_id()
+        self.with_graph_mutation(GraphStore::next_vertex_id)
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn next_edge_id(&mut self) -> Result<u64, SQLiteError> {
-        self.inner
-            .next_edge_id()
+        self.with_graph_mutation(GraphStore::next_edge_id)
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn allocate_vertex_id(&mut self, label: &str, graph: &str) -> Result<u64, SQLiteError> {
-        self.inner
-            .allocate_vertex_id(label, graph)
+        self.with_graph_mutation(|store| store.allocate_vertex_id(label, graph))
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn allocate_edge_id(&mut self, label: &str, graph: &str) -> Result<u64, SQLiteError> {
-        self.inner
-            .allocate_edge_id(label, graph)
+        self.with_graph_mutation(|store| store.allocate_edge_id(label, graph))
             .map_err(|error| graph_store_error(&error))
     }
 
     pub fn clear(&mut self) -> Result<(), SQLiteError> {
-        self.inner
-            .clear()
+        self.with_graph_mutation(GraphStore::clear)
             .map_err(|error| graph_store_error(&error))
     }
 
@@ -380,11 +410,11 @@ impl GraphStore for SQLiteGraphStore {
     }
 
     fn create_graph(&mut self, name: &str) -> GraphStoreResult<()> {
-        self.inner.create_graph(name)
+        self.with_graph_mutation(|store| store.create_graph(name))
     }
 
     fn drop_graph(&mut self, name: &str) -> GraphStoreResult<()> {
-        self.inner.drop_graph(name)
+        self.with_graph_mutation(|store| store.drop_graph(name))
     }
 
     fn graph_names(&self) -> GraphStoreResult<Vec<String>> {
@@ -396,35 +426,35 @@ impl GraphStore for SQLiteGraphStore {
     }
 
     fn union_graphs(&mut self, g1: &str, g2: &str, target: &str) -> GraphStoreResult<()> {
-        self.inner.union_graphs(g1, g2, target)
+        self.with_graph_mutation(|store| store.union_graphs(g1, g2, target))
     }
 
     fn intersect_graphs(&mut self, g1: &str, g2: &str, target: &str) -> GraphStoreResult<()> {
-        self.inner.intersect_graphs(g1, g2, target)
+        self.with_graph_mutation(|store| store.intersect_graphs(g1, g2, target))
     }
 
     fn difference_graphs(&mut self, g1: &str, g2: &str, target: &str) -> GraphStoreResult<()> {
-        self.inner.difference_graphs(g1, g2, target)
+        self.with_graph_mutation(|store| store.difference_graphs(g1, g2, target))
     }
 
     fn copy_graph(&mut self, source: &str, target: &str) -> GraphStoreResult<()> {
-        self.inner.copy_graph(source, target)
+        self.with_graph_mutation(|store| store.copy_graph(source, target))
     }
 
     fn add_vertex(&mut self, vertex: Vertex, graph: &str) -> GraphStoreResult<()> {
-        self.inner.add_vertex(vertex, graph)
+        self.with_graph_mutation(|store| store.add_vertex(vertex, graph))
     }
 
     fn add_edge(&mut self, edge: Edge, graph: &str) -> GraphStoreResult<()> {
-        self.inner.add_edge(edge, graph)
+        self.with_graph_mutation(|store| store.add_edge(edge, graph))
     }
 
     fn remove_vertex(&mut self, vertex_id: u64, graph: &str) -> GraphStoreResult<()> {
-        self.inner.remove_vertex(vertex_id, graph)
+        self.with_graph_mutation(|store| store.remove_vertex(vertex_id, graph))
     }
 
     fn remove_edge(&mut self, edge_id: u64, graph: &str) -> GraphStoreResult<()> {
-        self.inner.remove_edge(edge_id, graph)
+        self.with_graph_mutation(|store| store.remove_edge(edge_id, graph))
     }
 
     fn neighbors(
@@ -504,23 +534,23 @@ impl GraphStore for SQLiteGraphStore {
     }
 
     fn next_vertex_id(&mut self) -> GraphStoreResult<u64> {
-        self.inner.next_vertex_id()
+        self.with_graph_mutation(GraphStore::next_vertex_id)
     }
 
     fn next_edge_id(&mut self) -> GraphStoreResult<u64> {
-        self.inner.next_edge_id()
+        self.with_graph_mutation(GraphStore::next_edge_id)
     }
 
     fn allocate_vertex_id(&mut self, label: &str, graph: &str) -> GraphStoreResult<u64> {
-        self.inner.allocate_vertex_id(label, graph)
+        self.with_graph_mutation(|store| store.allocate_vertex_id(label, graph))
     }
 
     fn allocate_edge_id(&mut self, label: &str, graph: &str) -> GraphStoreResult<u64> {
-        self.inner.allocate_edge_id(label, graph)
+        self.with_graph_mutation(|store| store.allocate_edge_id(label, graph))
     }
 
     fn clear(&mut self) -> GraphStoreResult<()> {
-        self.inner.clear()
+        self.with_graph_mutation(GraphStore::clear)
     }
 
     fn vertices(&self) -> GraphStoreResult<BTreeMap<u64, Vertex>> {
@@ -601,7 +631,7 @@ fn decode_legacy_value(raw: serde_json::Value) -> Result<Value, SQLiteError> {
     }
 }
 
-fn encode_graph_id(kind: &str, id: u64) -> Result<i64, SQLiteError> {
+pub(crate) fn encode_graph_id(kind: &str, id: u64) -> Result<i64, SQLiteError> {
     i64::try_from(id).map_err(|_| {
         SQLiteError::StorageBackend(format!("{kind} id {id} exceeds SQLite INTEGER range"))
     })

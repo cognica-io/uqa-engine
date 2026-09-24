@@ -526,7 +526,7 @@ fn pg18_xmin_eagerly_migrates_legacy_persistent_tuple_metadata() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("legacy-xmin.db");
     let expected_xmin = {
-        let eng = Engine::open(&path).unwrap();
+        let eng = crate::native_storage::legacy_engine(&path);
         eng.sql("CREATE TABLE versioned (a INTEGER)", &[]).unwrap();
         eng.sql("INSERT INTO versioned VALUES (1)", &[]).unwrap();
         integer_column(&eng.sql("SELECT xmin FROM versioned", &[]).unwrap(), "xmin")[0]
@@ -603,6 +603,7 @@ fn legacy_user_xmin_values_are_not_overwritten_by_tuple_version_metadata() {
             not_null: false,
             not_null_explicit: false,
             not_null_name: None,
+            not_null_identity: None,
             not_null_validated: true,
             not_null_no_inherit: false,
             not_null_is_local: true,
@@ -617,6 +618,7 @@ fn legacy_user_xmin_values_are_not_overwritten_by_tuple_version_metadata() {
             check_no_inherit: false,
             check_is_local: true,
             check_object_id: None,
+            check_catalog_oid: None,
             references: None,
         },
     )

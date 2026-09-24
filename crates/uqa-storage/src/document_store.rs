@@ -13,9 +13,25 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use uqa_core::{DocId, FieldName, PathSegment, Value};
+use uqa_core::{memory::BudgetedVec, DocId, FieldName, PathSegment, Value};
 
 use crate::backend::{StorageBackendError, StorageBackendResult};
+use crate::read_control::StorageReadControl;
+
+mod controlled_ids;
+pub use controlled_ids::read_document_ids;
+mod controlled_field;
+pub use controlled_field::read_selected_field;
+mod controlled_rows;
+pub use controlled_rows::{read_stored_documents, RetainedDocumentPage};
+mod controlled_presence;
+pub use controlled_presence::read_field_presence;
+pub mod decoding;
+pub mod identifiers;
+mod retained;
+pub use retained::{RetainedDocumentFields, RetainedStoredDocument};
+mod retained_store;
+pub use retained_store::{RetainedDocumentStore, RetainedDocumentStoreBuilder};
 
 /// Document field map. Keys are field names; values are dynamic.
 pub type Document = BTreeMap<FieldName, Value>;
@@ -170,6 +186,42 @@ pub trait DocumentStore: Send + Sync {
 
     /// Read one typed storage record without projecting metadata into user fields.
     fn get_stored(&self, doc_id: DocId) -> StorageBackendResult<Option<StoredDocument>>;
+
+    /// Read one fixed view into a charged page in exactly the requested order, preserving duplicates and missing rows. The page and every decoded field payload retain the invoking allowance. Unsupported providers must not fall back to unbounded owned materialization.
+    fn get_stored_many_controlled(
+        &self,
+        doc_ids: &[DocId],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<RetainedDocumentPage> {
+        control.check()?;
+        if doc_ids.is_empty() {
+            return Ok(BudgetedVec::new(control.memory()));
+        }
+        Err(StorageBackendError::Other(
+            "controlled whole-document reads are not supported by this store".into(),
+        ))
+    }
+
+    /// Read field existence on one selected view, in document-major and then field order. A stored NULL is present; an absent field or document is not. The returned boolean buffer retains the invoking allowance. The default uses controlled rows without invoking legacy owned materializers; stores can inspect their existing field layout without copying values.
+    fn field_presence_controlled(
+        &self,
+        doc_ids: &[DocId],
+        fields: &[&str],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<BudgetedVec<bool>> {
+        controlled_presence::from_controlled_rows(self, doc_ids, fields, control)
+    }
+
+    /// Borrow one selected field, preserving absence versus stored NULL. The visitor runs exactly once while the provider keeps the value and its decoding allowance alive. Immutable stores can lend an existing scalar without allocating a projection or presence page.
+    fn with_field_ref_controlled(
+        &self,
+        doc_id: DocId,
+        field: &str,
+        control: &StorageReadControl,
+        visitor: &mut dyn FnMut(Option<&Value>) -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<()> {
+        controlled_field::visit_selected_field(self, doc_id, field, control, visitor)
+    }
 
     /// Replace public fields while preserving metadata already owned by the stored tuple. Engine code that creates a new tuple version must call [`DocumentStore::put_stored`] with the new metadata explicitly.
     fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()> {
@@ -476,6 +528,22 @@ pub trait DocumentStore: Send + Sync {
             .collect())
     }
 
+    /// Read at most `limit` identities in strictly ascending order after `after`, retaining the supplied allowance with the output. Implementations reserve producer scratch and output before allocation, preserve this store's selected view, and never read document payloads. The default rejects unsupported providers without calling an unbounded owned cursor; empty requests still honor cancellation. Controlled consumers use [`read_document_ids`] to validate the returned page and its allowance.
+    fn next_doc_ids_controlled(
+        &self,
+        _after: Option<DocId>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<BudgetedVec<DocId>> {
+        control.check()?;
+        if limit == 0 {
+            return Ok(BudgetedVec::new(control.memory()));
+        }
+        Err(StorageBackendError::Other(
+            "controlled document identity reads are not supported".into(),
+        ))
+    }
+
     /// Return the next bounded id range and its shared positional projections
     /// in one storage traversal when stable decoded rows are available.
     /// `None` lets persistent backends use the ordinary id + projection path.
@@ -529,6 +597,11 @@ pub trait DocumentStore: Send + Sync {
     /// backends share their connection; memory backends deep-clone so the
     /// snapshot is isolated from later mutations.
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>>;
+
+    /// Share an already immutable retained view, preserving its selected rows, allocation owners and cancellation boundary. This capability must not capture a new live view or copy row payloads. The default reports that controlled copying is required without invoking the legacy `snapshot` method, whose persistent implementations may share a mutable connection.
+    fn retained_snapshot(&self) -> StorageBackendResult<Option<Arc<dyn DocumentStore>>> {
+        Ok(None)
+    }
 
     /// Independent writable copy used by the in-memory engine transaction
     /// rollback path. Persistent engines restore through their backend

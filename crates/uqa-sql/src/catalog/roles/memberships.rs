@@ -4,25 +4,37 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{RoleDefinition, RoleMembership, RoleMembershipKey};
-use crate::ast::{GrantRoleStmt, RoleAttribute, RoleMembershipOptions};
+use super::{
+    identity::{RoleBinding, RoleSubject},
+    RoleDefinition, RoleIdentity, RoleMembership, RoleMembershipKey,
+};
+use crate::ast::RoleAttribute;
 use crate::SQLError;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use uqa_core::Value;
 
-pub fn role_is_superuser(roles: &BTreeMap<String, RoleDefinition>, role: &str) -> bool {
-    roles
-        .get(role)
+pub mod command;
+mod grants;
+#[cfg(test)]
+pub(crate) mod test_support;
+
+pub fn role_is_superuser(
+    roles: &BTreeMap<String, RoleDefinition>,
+    role: &(impl RoleSubject + ?Sized),
+) -> bool {
+    role.role_definition(roles)
         .is_some_and(|definition| definition.has(RoleAttribute::Superuser))
 }
 
 pub fn require_role_attribute_authority(
     roles: &BTreeMap<String, RoleDefinition>,
-    current: &str,
+    current: &(impl RoleSubject + ?Sized),
     attributes: impl IntoIterator<Item = RoleAttribute>,
     action: &str,
 ) -> Result<(), SQLError> {
-    let current_role = roles.get(current).ok_or_else(|| undefined_role(current))?;
+    let current_role = current
+        .role_definition(roles)
+        .ok_or_else(|| insufficient_privilege(&format!("permission denied to {action}")))?;
     if current_role.has(RoleAttribute::Superuser) {
         return Ok(());
     }
@@ -46,11 +58,13 @@ pub fn require_role_attribute_authority(
 
 pub fn role_has_admin(
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
-    member: &str,
-    role: &str,
+    member: RoleIdentity,
+    role: RoleIdentity,
 ) -> bool {
     memberships.values().any(|membership| {
-        membership.member == member && membership.role == role && membership.admin_option
+        membership.member.identity() == member
+            && membership.role.identity() == role
+            && membership.admin_option
     })
 }
 
@@ -130,7 +144,7 @@ pub fn parse_pg_has_role_privileges(privileges: &str) -> Result<Vec<RolePrivileg
 pub fn pg_has_role_privilege(
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
-    subject: Option<&str>,
+    subject: Option<&(impl RoleSubject + ?Sized)>,
     target: Option<&str>,
     privilege: RolePrivilegeCheck,
 ) -> bool {
@@ -143,31 +157,42 @@ pub fn pg_has_role_privilege(
     let Some(target) = target else {
         return false;
     };
+    let Some(subject) = subject.role_definition(roles) else {
+        return false;
+    };
+    let Some(target) = roles.get(target) else {
+        return false;
+    };
+    let (subject, target) = (subject.identity(), target.identity());
     match privilege {
         RolePrivilegeCheck::Member => role_reaches(memberships, subject, target, |_| true),
-        RolePrivilegeCheck::Usage => role_inherits(roles, memberships, subject, target),
-        RolePrivilegeCheck::Set => role_can_set(roles, memberships, subject, target),
+        RolePrivilegeCheck::Usage => {
+            role_reaches(memberships, subject, target, |edge| edge.inherit_option)
+        }
+        RolePrivilegeCheck::Set => {
+            role_reaches(memberships, subject, target, |edge| edge.set_option)
+        }
         RolePrivilegeCheck::Admin => role_has_transitive_admin(memberships, subject, target),
     }
 }
 
 pub fn role_has_transitive_admin(
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
-    member: &str,
-    role: &str,
+    member: RoleIdentity,
+    role: RoleIdentity,
 ) -> bool {
-    let mut queue = VecDeque::from([member.to_string()]);
-    let mut visited = BTreeSet::from([member.to_string()]);
+    let mut queue = VecDeque::from([member]);
+    let mut visited = BTreeSet::from([member]);
     while let Some(current) = queue.pop_front() {
         for membership in memberships
             .values()
-            .filter(|membership| membership.member == current)
+            .filter(|membership| membership.member.identity() == current)
         {
-            if membership.role == role && membership.admin_option {
+            if membership.role.identity() == role && membership.admin_option {
                 return true;
             }
-            if visited.insert(membership.role.clone()) {
-                queue.push_back(membership.role.clone());
+            if visited.insert(membership.role.identity()) {
+                queue.push_back(membership.role.identity());
             }
         }
     }
@@ -176,25 +201,25 @@ pub fn role_has_transitive_admin(
 
 pub fn role_reaches(
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
-    member: &str,
-    role: &str,
+    member: RoleIdentity,
+    role: RoleIdentity,
     usable: impl Fn(&RoleMembership) -> bool,
 ) -> bool {
     if member == role {
         return true;
     }
-    let mut queue = VecDeque::from([member.to_string()]);
-    let mut visited = BTreeSet::from([member.to_string()]);
+    let mut queue = VecDeque::from([member]);
+    let mut visited = BTreeSet::from([member]);
     while let Some(current) = queue.pop_front() {
         for membership in memberships
             .values()
-            .filter(|membership| membership.member == current && usable(membership))
+            .filter(|membership| membership.member.identity() == current && usable(membership))
         {
-            if membership.role == role {
+            if membership.role.identity() == role {
                 return true;
             }
-            if visited.insert(membership.role.clone()) {
-                queue.push_back(membership.role.clone());
+            if visited.insert(membership.role.identity()) {
+                queue.push_back(membership.role.identity());
             }
         }
     }
@@ -204,24 +229,34 @@ pub fn role_reaches(
 pub fn role_can_set(
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
-    member: &str,
+    member: &(impl RoleSubject + ?Sized),
     role: &str,
 ) -> bool {
-    role_is_superuser(roles, member)
-        || role_reaches(memberships, member, role, |membership| {
-            membership.set_option
+    let Some(member) = member.role_definition(roles) else {
+        return false;
+    };
+    member.has(RoleAttribute::Superuser)
+        || roles.get(role).is_some_and(|role| {
+            role_reaches(memberships, member.identity(), role.identity(), |edge| {
+                edge.set_option
+            })
         })
 }
 
 pub fn role_inherits(
     roles: &BTreeMap<String, RoleDefinition>,
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
-    member: &str,
-    role: &str,
+    member: &(impl RoleSubject + ?Sized),
+    role: &(impl RoleSubject + ?Sized),
 ) -> bool {
-    role_is_superuser(roles, member)
-        || role_reaches(memberships, member, role, |membership| {
-            membership.inherit_option
+    let Some(member) = member.role_definition(roles) else {
+        return false;
+    };
+    member.has(RoleAttribute::Superuser)
+        || role.role_definition(roles).is_some_and(|role| {
+            role_reaches(memberships, member.identity(), role.identity(), |edge| {
+                edge.inherit_option
+            })
         })
 }
 
@@ -239,146 +274,6 @@ pub fn undefined_role(name: &str) -> SQLError {
     }
 }
 
-pub fn apply_grant_role_statement(
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &mut BTreeMap<RoleMembershipKey, RoleMembership>,
-    current: &str,
-    statement: &GrantRoleStmt,
-) -> Result<(), SQLError> {
-    for role in statement
-        .granted_roles
-        .iter()
-        .chain(statement.grantee_roles.iter())
-    {
-        if !roles.contains_key(role) {
-            return Err(undefined_role(role));
-        }
-    }
-    let grantor = statement.grantor.as_deref().unwrap_or(current);
-    if !roles.contains_key(grantor) {
-        return Err(undefined_role(grantor));
-    }
-    if statement.grantor.is_some() && !role_can_set(roles, memberships, current, grantor) {
-        return Err(insufficient_privilege(&format!(
-            "permission denied to grant privileges as role \"{grantor}\""
-        )));
-    }
-    for role in &statement.granted_roles {
-        let superuser_revoke = !statement.is_grant && role_is_superuser(roles, current);
-        if !superuser_revoke
-            && !role_is_superuser(roles, grantor)
-            && !role_has_admin(memberships, grantor, role)
-        {
-            return Err(insufficient_privilege(&format!(
-                "permission denied to {} role \"{role}\"",
-                if statement.is_grant {
-                    "grant"
-                } else {
-                    "revoke"
-                }
-            )));
-        }
-    }
-    for role in &statement.granted_roles {
-        for member in &statement.grantee_roles {
-            let key = RoleMembershipKey {
-                role: role.clone(),
-                member: member.clone(),
-                grantor: grantor.to_string(),
-            };
-            if statement.is_grant {
-                if role_reaches(memberships, role, member, |_| true) {
-                    return Err(membership_error(format!(
-                        "role \"{role}\" is a member of role \"{member}\""
-                    )));
-                }
-                insert_membership(memberships, role, member, grantor, statement.options, roles);
-            } else if statement.options == RoleMembershipOptions::default() {
-                revoke_membership(memberships, &key, statement.cascade, true)?;
-            } else if let Some(existing) = memberships.get(&key).cloned() {
-                if statement.options.admin == Some(false) && existing.admin_option {
-                    clear_membership_admin(memberships, &key, statement.cascade)?;
-                }
-                if let Some(membership) = memberships.get_mut(&key) {
-                    if statement.options.inherit == Some(false) {
-                        membership.inherit_option = false;
-                    }
-                    if statement.options.set == Some(false) {
-                        membership.set_option = false;
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-pub fn insert_membership(
-    memberships: &mut BTreeMap<RoleMembershipKey, RoleMembership>,
-    role: &str,
-    member: &str,
-    grantor: &str,
-    options: RoleMembershipOptions,
-    roles: &BTreeMap<String, RoleDefinition>,
-) {
-    let key = RoleMembershipKey {
-        role: role.to_string(),
-        member: member.to_string(),
-        grantor: grantor.to_string(),
-    };
-    if let Some(existing) = memberships.get_mut(&key) {
-        if let Some(value) = options.admin {
-            existing.admin_option = value;
-        }
-        if let Some(value) = options.inherit {
-            existing.inherit_option = value;
-        }
-        if let Some(value) = options.set {
-            existing.set_option = value;
-        }
-        return;
-    }
-    let oid = allocate_role_membership_oid(memberships, &key);
-    memberships.insert(
-        key,
-        RoleMembership {
-            oid,
-            role: role.to_string(),
-            member: member.to_string(),
-            grantor: grantor.to_string(),
-            admin_option: options.admin.unwrap_or(false),
-            inherit_option: options.inherit.unwrap_or_else(|| {
-                roles
-                    .get(member)
-                    .is_some_and(|role| role.has(RoleAttribute::Inherit))
-            }),
-            set_option: options.set.unwrap_or(true),
-        },
-    );
-}
-
-pub fn allocate_role_membership_oid(
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
-    key: &RoleMembershipKey,
-) -> i64 {
-    let mut hash = 14_695_981_039_346_656_037_u64;
-    for part in [&key.role, &key.member, &key.grantor] {
-        for byte in part.as_bytes().iter().copied().chain(std::iter::once(0)) {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(1_099_511_628_211);
-        }
-    }
-    let mut oid = 2_500_000_000_i64 + i64::try_from(hash % 1_500_000_000).unwrap_or(0);
-    while memberships.values().any(|membership| membership.oid == oid) {
-        oid = if oid == 3_999_999_999 {
-            2_500_000_000
-        } else {
-            oid + 1
-        };
-    }
-    oid
-}
-
 pub fn clear_membership_admin(
     memberships: &mut BTreeMap<RoleMembershipKey, RoleMembership>,
     key: &RoleMembershipKey,
@@ -388,7 +283,7 @@ pub fn clear_membership_admin(
         return Ok(());
     };
     existing.admin_option = false;
-    revoke_dependent_memberships(memberships, &key.role, &key.member, cascade)
+    revoke_dependent_memberships(memberships, key.role, key.member, cascade)
 }
 
 pub fn revoke_membership(
@@ -401,15 +296,20 @@ pub fn revoke_membership(
         return Ok(());
     };
     if check_dependents && existing.admin_option {
-        revoke_dependent_memberships(memberships, &existing.role, &existing.member, cascade)?;
+        revoke_dependent_memberships(
+            memberships,
+            existing.role.identity(),
+            existing.member.identity(),
+            cascade,
+        )?;
     }
     Ok(())
 }
 
 pub fn revoke_dependent_memberships(
     memberships: &mut BTreeMap<RoleMembershipKey, RoleMembership>,
-    role: &str,
-    former_admin: &str,
+    role: RoleIdentity,
+    former_admin: RoleIdentity,
     cascade: bool,
 ) -> Result<(), SQLError> {
     if role_has_admin(memberships, former_admin, role) {
@@ -417,8 +317,10 @@ pub fn revoke_dependent_memberships(
     }
     let dependent = memberships
         .iter()
-        .filter(|(_, membership)| membership.role == role && membership.grantor == former_admin)
-        .map(|(key, _)| key.clone())
+        .filter(|(_, membership)| {
+            membership.role.identity() == role && membership.grantor.identity() == former_admin
+        })
+        .map(|(key, _)| *key)
         .collect::<Vec<_>>();
     if dependent.is_empty() {
         return Ok(());
@@ -444,43 +346,45 @@ pub fn insufficient_privilege(message: &str) -> SQLError {
 
 #[cfg(test)]
 mod tests {
-    use super::super::role_oid;
+    use super::test_support::insert_membership;
     use super::*;
+    use crate::ast::RoleMembershipOptions;
 
-    fn role(name: &str) -> RoleDefinition {
-        RoleDefinition {
-            oid: role_oid(name),
-            name: name.into(),
-            attributes: BTreeSet::new(),
-            connection_limit: -1,
-        }
+    fn role(name: &str, index: usize) -> RoleDefinition {
+        RoleDefinition::from_create(
+            &crate::ast::CreateRoleStmt {
+                name: name.into(),
+                attributes: BTreeSet::new(),
+                connection_limit: -1,
+                in_roles: Vec::new(),
+                role_members: Vec::new(),
+                admin_members: Vec::new(),
+            },
+            20_001 + index as i64,
+            [index as u8 + 1; 16],
+        )
     }
 
     fn membership(
         memberships: &mut BTreeMap<RoleMembershipKey, RoleMembership>,
+        roles: &BTreeMap<String, RoleDefinition>,
         role: &str,
         member: &str,
-        admin: bool,
-        inherit: bool,
-        set: bool,
+        options: (bool, bool, bool),
     ) {
-        let key = RoleMembershipKey {
-            role: role.into(),
-            member: member.into(),
-            grantor: "uqa".into(),
-        };
-        memberships.insert(
-            key.clone(),
-            RoleMembership {
-                oid: role_oid(&format!("{role}/{member}")),
-                role: key.role,
-                member: key.member,
-                grantor: key.grantor,
-                admin_option: admin,
-                inherit_option: inherit,
-                set_option: set,
+        insert_membership(
+            memberships,
+            role,
+            member,
+            "uqa",
+            RoleMembershipOptions {
+                admin: Some(options.0),
+                inherit: Some(options.1),
+                set: Some(options.2),
             },
-        );
+            roles,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -522,15 +426,20 @@ mod tests {
             "admin_leaf",
         ]
         .into_iter()
-        .map(|name| (name.into(), role(name)))
+        .enumerate()
+        .map(|(index, name)| (name.into(), role(name, index)))
         .chain([("uqa".into(), RoleDefinition::bootstrap())])
         .collect::<BTreeMap<_, _>>();
         let mut memberships = BTreeMap::new();
-        membership(&mut memberships, "parent", "middle", false, true, false);
-        membership(&mut memberships, "middle", "leaf", false, true, true);
-        membership(&mut memberships, "parent", "noinherit", false, false, true);
-        membership(&mut memberships, "parent", "admin", true, false, false);
-        membership(&mut memberships, "admin", "admin_leaf", false, false, false);
+        for (target, member, options) in [
+            ("parent", "middle", (false, true, false)),
+            ("middle", "leaf", (false, true, true)),
+            ("parent", "noinherit", (false, false, true)),
+            ("parent", "admin", (true, false, false)),
+            ("admin", "admin_leaf", (false, false, false)),
+        ] {
+            membership(&mut memberships, &roles, target, member, options);
+        }
 
         assert!(pg_has_role_privilege(
             &roles,

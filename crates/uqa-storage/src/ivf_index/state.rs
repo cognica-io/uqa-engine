@@ -22,7 +22,7 @@ pub enum IVFState {
     Stale,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IVFMetadataSnapshot {
     pub state: IVFState,
     pub centroids: Vec<Vec<f32>>,
@@ -122,21 +122,6 @@ impl IVFIndex {
             trained_size: *self.trained_size.lock(),
             deletes_since_train: *self.deletes_since_train.lock(),
             vector_count: vectors.len(),
-        }
-    }
-
-    pub(crate) fn detached_clone(&self) -> Self {
-        Self {
-            dimensions: self.dimensions,
-            nlist: self.nlist,
-            nprobe: Mutex::new(*self.nprobe.lock()),
-            train_threshold: self.train_threshold,
-            state: Mutex::new(*self.state.lock()),
-            vectors: Mutex::new(self.vectors.lock().clone()),
-            centroids: Mutex::new(self.centroids.lock().clone()),
-            inverted_lists: Mutex::new(self.inverted_lists.lock().clone()),
-            trained_size: Mutex::new(*self.trained_size.lock()),
-            deletes_since_train: Mutex::new(*self.deletes_since_train.lock()),
         }
     }
 }

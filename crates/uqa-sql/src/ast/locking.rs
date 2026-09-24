@@ -6,6 +6,32 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Explicit table-lock modes; compatibility is owned by the execution lock manager.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TableLockMode {
+    AccessShare,
+    RowShare,
+    RowExclusive,
+    ShareUpdateExclusive,
+    Share,
+    ShareRowExclusive,
+    Exclusive,
+    AccessExclusive,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LockTableTarget {
+    pub name: String,
+    pub include_descendants: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LockTableStmt {
+    pub targets: Vec<LockTableTarget>,
+    pub mode: TableLockMode,
+    pub nowait: bool,
+}
+
 /// One `PostgreSQL` row-locking clause, including optional `OF` targets and the `NOWAIT` / `SKIP LOCKED` wait policy.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LockingClause {

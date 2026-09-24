@@ -8,17 +8,21 @@
 
 pub(crate) type CteScope = uqa_execution::query::CteScope<crate::session::StatementReadSnapshot>;
 use crate::Engine;
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{catalog::resolution::RelationLookupMode, SQLError};
 
 pub(crate) fn new_for_current_routine(engine: &Engine) -> CteScope {
     new_for_statement(engine, None)
 }
 
-pub(crate) fn new_for_statement(engine: &Engine, privilege_subject: Option<&str>) -> CteScope {
+pub(crate) fn new_for_statement(
+    engine: &Engine,
+    privilege_subject: Option<&RoleReference>,
+) -> CteScope {
     let mut scope = CteScope::with_catalog(
         engine.catalog_read_view(),
         engine.session_execution_view().relation_name_resolution(),
-        privilege_subject.map(str::to_string),
+        privilege_subject.cloned(),
     );
     scope
         .rows
@@ -31,7 +35,7 @@ pub(crate) fn new_for_statement(engine: &Engine, privilege_subject: Option<&str>
 
 pub(crate) fn new_for_command(
     engine: &Engine,
-    privilege_subject: Option<&str>,
+    privilege_subject: Option<&RoleReference>,
     relations_bound: bool,
 ) -> Result<CteScope, SQLError> {
     let mut scope = new_for_statement(engine, privilege_subject);
@@ -54,7 +58,7 @@ impl
 {
     fn command_scope(
         &self,
-        privilege_subject: Option<&str>,
+        privilege_subject: Option<&RoleReference>,
         relations_bound: bool,
     ) -> Result<CteScope, SQLError> {
         new_for_command(self, privilege_subject, relations_bound)

@@ -16,6 +16,7 @@ use uqa_execution::{
     },
     row_locks::LockAcquire,
 };
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::{ColumnDef, ColumnType, ForeignKey, TableCheck},
     catalog::index::EnforcedKey,
@@ -38,13 +39,14 @@ impl Engine {
 }
 impl ConstraintCatalog for Engine {
     fn try_unique_columns(&self, table: &str) -> Result<Vec<String>, String> {
-        Engine::try_unique_columns(self, table).map_err(|error| error.to_string())
+        Engine::unique_columns_in_execution(self, table).map_err(|error| error.to_string())
     }
     fn try_check_constraint_definitions(&self, table: &str) -> Result<Vec<TableCheck>, String> {
-        Engine::try_check_constraint_definitions(self, table).map_err(|error| error.to_string())
+        Engine::check_constraint_definitions_in_execution(self, table)
+            .map_err(|error| error.to_string())
     }
     fn try_foreign_keys(&self, table: &str) -> Result<Vec<ForeignKey>, String> {
-        Engine::try_foreign_keys(self, table).map_err(|error| error.to_string())
+        Engine::foreign_keys_in_execution(self, table).map_err(|error| error.to_string())
     }
     fn column_type(&self, table: &str, column: &str) -> Result<Option<ColumnType>, String> {
         Engine::column_type(self, table, column).map_err(|error| error.to_string())
@@ -59,20 +61,20 @@ impl ConstraintCatalog for Engine {
 }
 impl MutationRead for Engine {
     fn table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError> {
-        Engine::table_doc_ids(self, table)
+        Engine::query_table_doc_ids(self, table)
     }
     fn live_table_doc_ids(&self, table: &str) -> Result<Vec<DocId>, SQLError> {
         Engine::live_table_doc_ids(self, table)
     }
     fn get_document(&self, table: &str, doc_id: DocId) -> Result<Option<Document>, SQLError> {
-        Engine::get_document(self, table, doc_id)
+        Engine::get_live_document(self, table, doc_id)
     }
     fn command_overlay_changed_ids(
         &self,
         table: &str,
     ) -> Result<Option<BTreeSet<DocId>>, SQLError> {
         self.command_overlay_changes(table)
-            .map(|changes| changes.map(|changes| changes.into_keys().collect()))
+            .map(|changes| changes.map(|changes| changes.changes().map(|(id, _)| id).collect()))
     }
 }
 impl MutationIndexRead for Engine {
@@ -82,7 +84,7 @@ impl MutationIndexRead for Engine {
         columns: &[String],
         values: &[Value],
     ) -> Result<Option<DocId>, SQLError> {
-        Engine::find_conflict(self, table, columns, values)
+        Engine::find_mutation_conflict(self, table, columns, values)
     }
     fn value_index_scan_key(
         &self,
@@ -105,13 +107,13 @@ impl ConstraintTransactions for Engine {
     }
 }
 impl MutationNamespace for Engine {
-    fn current_user_name(&self) -> String {
-        Engine::current_user_name(self)
+    fn current_role(&self) -> RoleReference {
+        Engine::current_role(self)
     }
     fn require_schema_privilege(
         &self,
         schema: &str,
-        role: &str,
+        role: &RoleReference,
         privilege: SchemaAclPrivilege,
     ) -> Result<(), SQLError> {
         Engine::require_schema_privilege(self, schema, role, privilege)
@@ -120,7 +122,7 @@ impl MutationNamespace for Engine {
 
 impl uqa_sql::semantics::conflict::ConflictCatalog for Engine {
     fn try_describe_table(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String> {
-        Engine::try_describe_table(self, table).map_err(|error| error.to_string())
+        Engine::describe_table_in_execution(self, table).map_err(|error| error.to_string())
     }
     fn enforced_keys(&self, table: &str) -> Result<Vec<EnforcedKey>, String> {
         Engine::enforced_keys(self, table).map_err(|error| error.to_string())
@@ -151,34 +153,6 @@ impl Engine {
 }
 
 impl Engine {
-    pub(crate) fn index_predicate_accepts(
-        &self,
-        table: &str,
-        predicate: Option<&uqa_sql::ast::Expr>,
-        document: &Document,
-    ) -> Result<bool, SQLError> {
-        uqa_execution::mutation::constraints::index_keys::index_predicate_accepts(
-            self.constraint_execution_context().index_expressions(),
-            table,
-            predicate,
-            document,
-        )
-    }
-
-    pub(crate) fn index_key_values(
-        &self,
-        table: &str,
-        keys: &[uqa_sql::ast::IndexKey],
-        document: &Document,
-    ) -> Result<Vec<Value>, SQLError> {
-        uqa_execution::mutation::constraints::index_keys::index_key_values(
-            self.constraint_execution_context().index_expressions(),
-            table,
-            keys,
-            document,
-        )
-    }
-
     pub(crate) fn validate_deferred_foreign_key_checks(
         &self,
         checks: &[crate::DeferredForeignKeyCheck],

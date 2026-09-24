@@ -36,6 +36,7 @@ struct Inputs {
     snapshot: Cell<bool>,
     cached: Option<(Arc<Statement>, Arc<UnifiedPlan>)>,
     cancel_after_cache_lookup: bool,
+    reject_snapshot: bool,
 }
 
 impl Inputs {
@@ -154,6 +155,9 @@ impl BatchTransactions for Inputs {
     }
     fn prepare_explicit_statement_snapshot(&self, sets_snapshot: bool) -> Result<(), SQLError> {
         self.record(format!("snapshot.{sets_snapshot}"));
+        if self.reject_snapshot {
+            return Err(SQLError::Cancelled(uqa_core::QueryCancelled));
+        }
         self.snapshot.set(true);
         Ok(())
     }
@@ -329,8 +333,30 @@ fn autocommit_failure_rolls_back_before_releasing_the_statement_guard() {
         "cache.write.false",
         "guard.enter",
         "begin.statement.false",
+        "snapshot.true",
         "cache.write.true",
         "optimize.true",
+        "rollback.true",
+        "guard.drop",
+    ]);
+    assert_eq!(inputs.depth.get(), 0);
+    assert!(!inputs.guarded.get());
+}
+
+#[test]
+fn cancelled_snapshot_admission_rolls_back_before_binding_or_executing_autocommit() {
+    let inputs = Inputs {
+        reject_snapshot: true,
+        ..Inputs::default()
+    };
+    let error = execute(&inputs.context(), "DELETE FROM items", &[]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("57014"));
+    inputs.assert_events(&[
+        "cache.lookup",
+        "cache.write.false",
+        "guard.enter",
+        "begin.statement.false",
+        "snapshot.true",
         "rollback.true",
         "guard.drop",
     ]);

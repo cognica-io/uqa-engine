@@ -44,36 +44,7 @@ impl InsertConflictOverlay {
             &constraints,
             on_conflict,
         )?;
-        let directory = tempfile::Builder::new()
-            .prefix("uqa-insert-conflict-")
-            .tempdir()
-            .map_err(|error| {
-                SQLError::Internal(format!("create INSERT conflict overlay directory: {error}"))
-            })?;
-        let connection = rusqlite::Connection::open(directory.path().join("overlay.sqlite"))
-            .map_err(|error| {
-                SQLError::Internal(format!("open INSERT conflict overlay: {error}"))
-            })?;
-        connection
-            .execute_batch(
-                "PRAGMA journal_mode = OFF;
-                 PRAGMA synchronous = OFF;
-                 CREATE TABLE overlay_keys (
-                     physical_table TEXT NOT NULL,
-                     constraint_index INTEGER NOT NULL,
-                     key BLOB NOT NULL,
-                     identity BLOB NOT NULL,
-                     PRIMARY KEY (physical_table, constraint_index, key)
-                 ) WITHOUT ROWID;
-                 CREATE TABLE overridden_documents (
-                     physical_table TEXT NOT NULL,
-                     doc_id BLOB NOT NULL,
-                     PRIMARY KEY (physical_table, doc_id)
-                 ) WITHOUT ROWID;",
-            )
-            .map_err(|error| {
-                SQLError::Internal(format!("initialize INSERT conflict overlay: {error}"))
-            })?;
+        let (connection, directory) = open_conflict_database()?;
         Ok(Self {
             connection,
             _directory: directory,
@@ -207,6 +178,38 @@ impl InsertConflictOverlay {
     }
 }
 
+fn open_conflict_database() -> Result<(rusqlite::Connection, tempfile::TempDir), SQLError> {
+    let directory = tempfile::Builder::new()
+        .prefix("uqa-insert-conflict-")
+        .tempdir()
+        .map_err(|error| {
+            SQLError::Internal(format!("create INSERT conflict overlay directory: {error}"))
+        })?;
+    let connection = crate::temporary_database::open(&directory.path().join("overlay.sqlite"))
+        .map_err(|error| SQLError::Internal(format!("open INSERT conflict overlay: {error}")))?;
+    connection
+        .execute_batch(
+            "PRAGMA journal_mode = OFF;
+             PRAGMA synchronous = OFF;
+             CREATE TABLE overlay_keys (
+                 physical_table TEXT NOT NULL,
+                 constraint_index INTEGER NOT NULL,
+                 key BLOB NOT NULL,
+                 identity BLOB NOT NULL,
+                 PRIMARY KEY (physical_table, constraint_index, key)
+             ) WITHOUT ROWID;
+             CREATE TABLE overridden_documents (
+                 physical_table TEXT NOT NULL,
+                 doc_id BLOB NOT NULL,
+                 PRIMARY KEY (physical_table, doc_id)
+             ) WITHOUT ROWID;",
+        )
+        .map_err(|error| {
+            SQLError::Internal(format!("initialize INSERT conflict overlay: {error}"))
+        })?;
+    Ok((connection, directory))
+}
+
 pub fn find_insert_conflict(
     context: ConstraintContext<'_>,
     table: &str,
@@ -238,3 +241,32 @@ pub fn find_insert_conflict(
 }
 
 pub mod update;
+
+#[cfg(all(test, not(target_os = "emscripten")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn private_conflict_keys_are_encrypted_and_removed_with_the_owner() {
+        const SECRET: &[u8] = b"private-insert-conflict-key-secret-marker";
+        let (connection, directory) = open_conflict_database().unwrap();
+        let path = directory.path().to_owned();
+        let insert = "INSERT INTO overlay_keys VALUES ('public.private_table', 0, ?1, x'01')";
+        connection.execute(insert, [SECRET]).unwrap();
+        assert!(connection.execute(insert, [SECRET]).is_err());
+        assert_eq!(
+            connection
+                .query_row("SELECT key FROM overlay_keys", [], |row| row
+                    .get::<_, Vec<u8>>(0))
+                .unwrap(),
+            SECRET
+        );
+        for entry in std::fs::read_dir(&path).unwrap() {
+            let bytes = std::fs::read(entry.unwrap().path()).unwrap();
+            assert!(!bytes.windows(SECRET.len()).any(|bytes| bytes == SECRET));
+        }
+        drop(connection);
+        drop(directory);
+        assert!(!path.exists());
+    }
+}

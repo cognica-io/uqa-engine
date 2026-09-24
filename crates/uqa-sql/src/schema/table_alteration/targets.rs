@@ -4,14 +4,15 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Bind ALTER TABLE targets to native relation actions before execution enters a transaction.
+//! Resolve ALTER TABLE names before locking and lower the revalidated relation kind afterward.
 use super::syntax::{
     alter_foreign_table_from_table_syntax, alter_sequence_from_table_syntax,
     alter_view_from_table_syntax,
 };
 use crate::{
     ast::{AlterForeignTableStmt, AlterSequence, AlterTableAction, AlterTableStmt, AlterViewStmt},
-    catalog::resolution::{resolve_relation_rename_source, RelationResolution},
+    catalog::resolution::RelationResolution,
+    schema::relation_alteration::RelationAlterTarget,
     SQLError,
 };
 
@@ -20,6 +21,10 @@ pub enum BoundTableAlteration {
     Sequence(AlterSequence),
     View(AlterViewStmt),
     ForeignTable(AlterForeignTableStmt),
+    IndexRename {
+        name: String,
+        new_name: String,
+    },
     ViewEvents {
         name: String,
         actions: Vec<AlterTableAction>,
@@ -30,46 +35,51 @@ pub enum BoundTableAlteration {
     },
 }
 
-pub fn bind_table_alteration(
+pub fn table_alter_target(
     resolution: RelationResolution,
-    mut statement: AlterTableStmt,
+    statement: &AlterTableStmt,
     notice: &mut dyn FnMut(&str),
-) -> Result<Option<BoundTableAlteration>, SQLError> {
-    let resolution = if matches!(
-        statement.actions.as_slice(),
-        [AlterTableAction::RenameTable { .. }]
-    ) {
-        let Some(resolution) = resolve_relation_rename_source(
-            resolution,
-            &statement.table,
-            statement.if_exists,
-            notice,
-        )?
-        else {
-            return Ok(None);
-        };
-        Some(resolution)
-    } else {
-        resolution.into_found()
-    };
-    let bound = match resolution {
-        Some((canonical, "table")) => {
+) -> Result<Option<RelationAlterTarget>, SQLError> {
+    RelationAlterTarget::resolve(resolution, &statement.table, statement.if_exists, notice)
+}
+
+pub fn bind_table_alteration(
+    target: RelationAlterTarget,
+    mut statement: AlterTableStmt,
+) -> Result<BoundTableAlteration, SQLError> {
+    let RelationAlterTarget {
+        canonical, kind, ..
+    } = target;
+    let bound = match kind {
+        "index"
+            if matches!(
+                statement.actions.as_slice(),
+                [AlterTableAction::RenameTable { .. }]
+            ) =>
+        {
+            let AlterTableAction::RenameTable { to } = &statement.actions[0] else {
+                unreachable!();
+            };
+            BoundTableAlteration::IndexRename {
+                name: canonical,
+                new_name: to.clone(),
+            }
+        }
+        "table" => {
             statement.table = canonical;
             BoundTableAlteration::Table(statement)
         }
-        Some((canonical, "sequence")) => BoundTableAlteration::Sequence(
-            alter_sequence_from_table_syntax(&canonical, &statement)?,
-        ),
-        Some((canonical, "foreign table")) => {
-            match alter_foreign_table_from_table_syntax(&canonical, &statement)? {
-                Some(change) => BoundTableAlteration::ForeignTable(change),
-                None => BoundTableAlteration::ForeignTableEvents {
-                    name: canonical,
-                    actions: statement.actions,
-                },
-            }
-        }
-        Some((canonical, kind @ ("view" | "materialized view"))) => {
+        "sequence" => BoundTableAlteration::Sequence(alter_sequence_from_table_syntax(
+            &canonical, &statement,
+        )?),
+        "foreign table" => match alter_foreign_table_from_table_syntax(&canonical, &statement)? {
+            Some(change) => BoundTableAlteration::ForeignTable(change),
+            None => BoundTableAlteration::ForeignTableEvents {
+                name: canonical,
+                actions: statement.actions,
+            },
+        },
+        "view" | "materialized view" => {
             match alter_view_from_table_syntax(&canonical, kind, &statement)? {
                 Some(change) => BoundTableAlteration::View(change),
                 None => BoundTableAlteration::ViewEvents {
@@ -78,25 +88,15 @@ pub fn bind_table_alteration(
                 },
             }
         }
-        Some((canonical, kind)) => {
+        _ => {
             return Err(SQLError::Routine {
                 sqlstate: "42809".into(),
                 message: format!("ALTER TABLE: relation `{canonical}` is a {kind}, not a table"),
             });
         }
-        None if statement.if_exists => {
-            notice(&format!(
-                "relation \"{}\" does not exist, skipping",
-                statement.table
-            ));
-            return Ok(None);
-        }
-        None => {
-            return Err(SQLError::Unsupported(format!(
-                "ALTER TABLE: relation `{}` does not exist",
-                statement.table
-            )));
-        }
     };
-    Ok(Some(bound))
+    Ok(bound)
 }
+
+#[cfg(test)]
+mod tests;

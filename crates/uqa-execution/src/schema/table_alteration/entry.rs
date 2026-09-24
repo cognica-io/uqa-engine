@@ -5,23 +5,21 @@
 //
 
 //! Execute bound ALTER TABLE actions through the native relation transaction boundaries.
-use super::{TableAlterContext, TableEventLifecycle};
+use super::{
+    binding::{bind_table_alteration, TableAlterBindingContext},
+    TableAlterContext, TableEventLifecycle,
+};
 use crate::schema::{
     foreign_table_alteration::{
         alter_foreign_table, ForeignTableAlterAccess, ForeignTableAlterTransactions,
     },
-    relation_alteration::RelationAlterLocks,
     sequences::entry::{run_alter_sequence, SequenceAlterTransactions},
     view_alteration::{alter_view, ViewAlterTransactions},
 };
 use uqa_sql::{
     ast::{AlterTableAction, AlterTableStmt},
-    schema::{
-        relation_alteration::RelationAlterNames,
-        table_alteration::{
-            syntax::validate_alter_table_transaction,
-            targets::{bind_table_alteration, BoundTableAlteration},
-        },
+    schema::table_alteration::{
+        syntax::validate_alter_table_transaction, targets::BoundTableAlteration,
     },
     SQLError, SQLResult,
 };
@@ -47,13 +45,13 @@ pub trait RelationEventAlterTransactions {
 
 pub struct TableAlterEntryContext<'a, S: Clone + 'static> {
     pub session: &'a dyn TableAlterSession,
-    pub names: &'a dyn RelationAlterNames,
-    pub locks: &'a dyn RelationAlterLocks,
+    pub binding: TableAlterBindingContext<'a>,
     pub tables: &'a dyn TableAlterTransactions<S>,
     pub events: &'a dyn RelationEventAlterTransactions,
     pub views: &'a dyn ViewAlterTransactions,
     pub foreign_tables: &'a dyn ForeignTableAlterTransactions,
     pub sequences: &'a dyn SequenceAlterTransactions,
+    pub indexes: &'a dyn crate::schema::indexes::renaming::IndexRenameTransactions,
     pub notices: &'a parking_lot::Mutex<Vec<(String, String)>>,
 }
 
@@ -62,24 +60,47 @@ pub fn run_alter_table<S: Clone + 'static>(
     statement: AlterTableStmt,
 ) -> Result<SQLResult, SQLError> {
     validate_alter_table_transaction(&statement, context.session.in_transaction_block())?;
-    let Some(bound) = bind_table_alteration(
-        context.names.resolve_relation_kind(&statement.table)?,
-        statement,
-        &mut |message| {
-            context
-                .notices
-                .lock()
-                .push(("NOTICE".into(), message.into()));
-        },
-    )?
-    else {
+    let Some(bound) = bind_table_alteration(&context.binding, statement)? else {
         return Ok(SQLResult::empty());
     };
+    execute_bound(context, bound)
+}
+
+pub fn run_rename_index<S: Clone + 'static>(
+    context: &TableAlterEntryContext<'_, S>,
+    statement: &uqa_sql::ast::RenameIndexStmt,
+) -> Result<SQLResult, SQLError> {
+    let (_, qualifier) =
+        uqa_core::RelationIdentity::parse_reference(&statement.name).map_err(SQLError::Internal)?;
+    let statement = AlterTableStmt {
+        table: statement.name.clone(),
+        qualifier,
+        if_exists: statement.if_exists,
+        recurse: false,
+        actions: vec![AlterTableAction::RenameTable {
+            to: statement.new_name.clone(),
+        }],
+    };
+    let Some(bound) = super::binding::bind_alteration(&context.binding, statement, true)? else {
+        return Ok(SQLResult::empty());
+    };
+    execute_bound(context, bound)
+}
+
+fn execute_bound<S: Clone + 'static>(
+    context: &TableAlterEntryContext<'_, S>,
+    bound: BoundTableAlteration,
+) -> Result<SQLResult, SQLError> {
     match bound {
+        BoundTableAlteration::IndexRename { name, new_name } => {
+            context.indexes.with_index_rename(Box::new(move |context| {
+                crate::schema::indexes::renaming::rename_bound_index(context, &name, &new_name)?;
+                Ok(SQLResult::empty())
+            }))
+        }
         BoundTableAlteration::Table(statement) => {
-            context.locks.lock_exclusive(&statement.table)?;
-            context.tables.with_table_write(Box::new(move |context| {
-                super::run_alter_table(context, statement)
+            context.tables.with_table_write(Box::new(move |tables| {
+                super::run_alter_table(tables, statement)
             }))
         }
         BoundTableAlteration::Sequence(statement) => {

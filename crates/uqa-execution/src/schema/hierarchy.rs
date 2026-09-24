@@ -9,15 +9,14 @@ use super::publication::{hierarchy::HierarchySchemaChange, SchemaPublicationCont
 use crate::catalog::RelationResolution;
 use crate::mutation::constraints::context::ConstraintContext;
 use uqa_sql::schema::inheritance::alter::{
-    append_inherited_foreign_keys, append_inherited_keys, detached_bound_check,
-    install_inherited_identity, normalize_parent_sequence_numbers,
-    remove_partition_inherited_constraints, restore_identity_overrides,
+    append_inherited_foreign_keys, append_inherited_keys, install_inherited_identity,
+    normalize_parent_sequence_numbers,
 };
 use uqa_sql::semantics::partition::PartitionContext;
 use uqa_sql::{
     ast::{
-        AlterTableAction, AutoIncrement, ColumnDef, ForeignKey, PartitionBound,
-        RelationPersistence, TableCheck, TableConstraintSet, TableHierarchy, TableKeyConstraint,
+        AlterTableAction, ColumnDef, ForeignKey, PartitionBound, RelationPersistence, TableCheck,
+        TableConstraintSet, TableHierarchy, TableKeyConstraint, TableLockMode,
     },
     SQLError,
 };
@@ -40,7 +39,7 @@ pub trait HierarchyCatalog {
 }
 pub trait HierarchyNamespace {
     fn resolve_visible_relation_kind(&self, name: &str) -> Result<RelationResolution, SQLError>;
-    fn lock_exclusive(&self, table: &str) -> Result<(), SQLError>;
+    fn lock_relation(&self, table: &str, mode: TableLockMode) -> Result<(), SQLError>;
 }
 pub struct HierarchyContext<'a> {
     pub catalog: &'a dyn HierarchyCatalog,
@@ -48,7 +47,11 @@ pub struct HierarchyContext<'a> {
     pub constraints: ConstraintContext<'a>,
     pub partitions: PartitionContext<'a>,
     pub publication: SchemaPublicationContext<'a>,
+    pub constraint_access: &'a dyn super::constraints::ConstraintAlterAccess,
+    pub constraint_modes: &'a dyn detachment::DetachedConstraintModes,
 }
+
+pub mod detachment;
 fn ddl_storage_error(action: &str, error: uqa_storage::StorageBackendError) -> SQLError {
     uqa_sql::catalog::errors::storage_error(action, &error)
 }
@@ -81,7 +84,7 @@ fn add_inheritance(
     requested_parent: &str,
 ) -> Result<(), SQLError> {
     let parent = resolve_table(context, requested_parent)?;
-    lock_secondary_relation(context, child, &parent)?;
+    lock_secondary_relation(context, child, &parent, TableLockMode::ShareUpdateExclusive)?;
     validate_matching_persistence(context, child, &parent, "inherit from")?;
     let mut hierarchy = read_hierarchy(context, child)?;
     let parent_hierarchy = read_hierarchy(context, &parent)?;
@@ -136,7 +139,7 @@ fn drop_inheritance(
     requested_parent: &str,
 ) -> Result<(), SQLError> {
     let parent = resolve_table(context, requested_parent)?;
-    lock_secondary_relation(context, child, &parent)?;
+    lock_secondary_relation(context, child, &parent, TableLockMode::AccessShare)?;
     let mut hierarchy = read_hierarchy(context, child)?;
     if hierarchy.is_partition() {
         return Err(wrong_object("cannot change inheritance of a partition"));
@@ -172,7 +175,7 @@ fn attach_partition(
     bound: PartitionBound,
 ) -> Result<(), SQLError> {
     let partition = resolve_table(context, requested_partition)?;
-    lock_secondary_relation(context, parent, &partition)?;
+    lock_secondary_relation(context, parent, &partition, TableLockMode::AccessExclusive)?;
     validate_matching_persistence(context, &partition, parent, "attach to")?;
     let parent_hierarchy = read_hierarchy(context, parent)?;
     let Some(parent_spec) = parent_hierarchy.partition_spec.as_ref() else {
@@ -297,7 +300,7 @@ fn detach_partition(
     finalize: bool,
 ) -> Result<(), SQLError> {
     let partition = resolve_table(context, requested_partition)?;
-    lock_secondary_relation(context, parent, &partition)?;
+    lock_secondary_relation(context, parent, &partition, TableLockMode::AccessExclusive)?;
     let parent_hierarchy = read_hierarchy(context, parent)?;
     let Some(parent_spec) = parent_hierarchy.partition_spec.as_ref() else {
         return Err(wrong_object(format!(
@@ -340,60 +343,14 @@ fn detach_partition(
         .as_ref()
         .ok_or_else(|| SQLError::Internal("attached partition lost its bound".into()))?
         .clone();
-    let inherited_identity = table_columns(context, parent, "DETACH PARTITION")?
-        .into_iter()
-        .filter_map(|column| {
-            column
-                .auto_increment
-                .filter(AutoIncrement::is_identity)
-                .map(|increment| (column.name, increment))
-        })
-        .collect::<Vec<_>>();
-    let subtree = context
-        .constraints
-        .catalog
-        .hierarchy_scan_tables(&partition, true)?;
-    for target in &subtree {
-        let mut columns = table_columns(context, target, "DETACH PARTITION")?;
-        let mut constraints = declared_constraints(context, target, "DETACH PARTITION")?;
-        restore_identity_overrides(
-            &mut columns,
-            &inherited_identity,
-            &constraints.hierarchy.partition_identity_overrides,
-        );
-        remove_partition_inherited_constraints(&mut constraints);
-        if concurrently {
-            constraints.checks.push(detached_bound_check(
-                target,
-                parent_spec,
-                &bound,
-                &constraints.checks,
-            ));
-        }
-        let mut hierarchy = constraints.hierarchy.clone();
-        hierarchy.partition_identity_overrides.clear();
-        hierarchy.partition_inherited_key_constraints.clear();
-        hierarchy.partition_inherited_foreign_keys.clear();
-        if target == &partition {
-            hierarchy.parents.clear();
-            hierarchy.parent_sequence_numbers.clear();
-            hierarchy.partition_bound = None;
-        }
-        super::publication::hierarchy::replace_hierarchy_components(
-            &context.publication,
-            context.catalog,
-            target,
-            HierarchySchemaChange {
-                columns,
-                checks: constraints.checks,
-                foreign_keys: constraints.foreign_keys,
-                key_constraints: constraints.key_constraints,
-                hierarchy,
-            },
-        )
-        .map_err(|error| ddl_storage_error("DETACH PARTITION", error))?;
-    }
-    Ok(())
+    detachment::publish(
+        context,
+        parent,
+        &partition,
+        parent_spec,
+        &bound,
+        concurrently,
+    )
 }
 
 fn validate_row_type(
@@ -643,9 +600,10 @@ fn lock_secondary_relation(
     context: &HierarchyContext<'_>,
     primary: &str,
     secondary: &str,
+    mode: TableLockMode,
 ) -> Result<(), SQLError> {
     if primary != secondary {
-        context.namespace.lock_exclusive(secondary)?;
+        context.namespace.lock_relation(secondary, mode)?;
     }
     Ok(())
 }

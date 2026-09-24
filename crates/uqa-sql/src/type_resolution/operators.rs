@@ -6,12 +6,128 @@
 
 use crate::ast::{BinaryOp, ColumnType};
 use crate::SQLError;
+use uqa_core::memory::{Produced, ProductionControl};
 
-use super::common::{base_type, common_numeric_type, merge_optional_types, numeric_rank};
+use super::common::{base_type, common_numeric_type, merge_value_types, numeric_rank};
 
 mod catalog;
+pub(super) mod numeric;
 mod resolution;
-pub use resolution::binary_operator_types;
+pub use numeric::{
+    numeric_operator_types, numeric_operator_types_with_control, NumericOperatorTypes,
+};
+pub use resolution::{binary_operator_types, binary_operator_types_with_control};
+
+#[derive(Debug, Clone)]
+pub struct UnaryOperatorCatalogEntry {
+    pub name: &'static str,
+    pub operand_type: ColumnType,
+    pub oid: i64,
+    pub function_oid: i64,
+}
+
+#[must_use]
+pub fn unary_operator_by_oid(oid: i64) -> Option<UnaryOperatorCatalogEntry> {
+    catalog::UNARY_MINUS
+        .iter()
+        .find_map(|&(name, candidate, function_oid)| {
+            (candidate == oid).then(|| UnaryOperatorCatalogEntry {
+                name: "-",
+                operand_type: resolution::catalog_type(name).expect("static unary operator type"),
+                oid,
+                function_oid,
+            })
+        })
+        .or_else(|| numeric::prefix_by_oid(oid))
+}
+
+pub fn unary_minus_catalog_entry(ty: &ColumnType) -> Result<UnaryOperatorCatalogEntry, SQLError> {
+    let operand = unary_minus_result_type(ty)?;
+    let name = super::canonical_column_type_name(&operand);
+    let oid = catalog::UNARY_MINUS
+        .iter()
+        .find_map(|&(candidate, oid, _)| (candidate == name).then_some(oid))
+        .ok_or_else(|| SQLError::Internal("missing unary operator identity".into()))?;
+    Ok(unary_operator_by_oid(oid).expect("resolved unary operator identity"))
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct BinaryOperatorCatalogEntry {
+    pub name: &'static str,
+    pub operand_types: [&'static str; 2],
+    pub result_type: &'static str,
+    pub oid: i64,
+    pub function_oid: i64,
+}
+
+pub fn binary_operator_by_oid(oid: i64) -> Option<BinaryOperatorCatalogEntry> {
+    catalog::SIGNATURES.iter().find_map(
+        |&(name, left, right, result_type, candidate, function_oid)| {
+            (candidate == oid).then_some(BinaryOperatorCatalogEntry {
+                name,
+                operand_types: [left, right],
+                result_type,
+                oid,
+                function_oid,
+            })
+        },
+    )
+}
+
+/// Read the identity of the exact overload chosen by the shared operand resolver.
+pub fn binary_operator_catalog_entry(
+    op: BinaryOp,
+    operands: [&ColumnType; 2],
+) -> Result<BinaryOperatorCatalogEntry, SQLError> {
+    let name = binary_operator_name(op);
+    named_binary_operator_catalog_entry(name, operands)
+}
+
+fn named_binary_operator_catalog_entry(
+    name: &str,
+    operands: [&ColumnType; 2],
+) -> Result<BinaryOperatorCatalogEntry, SQLError> {
+    for polymorphic in [false, true] {
+        for &(candidate, left, right, result_type, oid, function_oid) in catalog::SIGNATURES {
+            if candidate == name
+                && [left, right]
+                    .into_iter()
+                    .zip(operands)
+                    .all(|(declared, actual)| {
+                        let actual = base_type(actual);
+                        resolution::catalog_type(declared).is_some_and(|ty| {
+                            crate::catalog::type_metadata::pg_type_oid(&ty)
+                                == crate::catalog::type_metadata::pg_type_oid(actual)
+                        }) || polymorphic
+                            && match declared {
+                                "anyarray" => matches!(
+                                    actual,
+                                    ColumnType::Array(_)
+                                        | ColumnType::Int2Vector
+                                        | ColumnType::OidVector
+                                ),
+                                "anyrange" => matches!(actual, ColumnType::Range(_)),
+                                "anymultirange" => matches!(actual, ColumnType::Multirange(_)),
+                                _ => false,
+                            }
+                    })
+            {
+                return Ok(BinaryOperatorCatalogEntry {
+                    name: candidate,
+                    operand_types: [left, right],
+                    result_type,
+                    oid,
+                    function_oid,
+                });
+            }
+        }
+    }
+    Err(undefined_binary_operator(
+        name,
+        Some(operands[0]),
+        Some(operands[1]),
+    ))
+}
 
 /// Require the equality semantics used by grouping, duplicate elimination, and set operations. `PostgreSQL` exposes `void` as a result pseudo-type but does not register an equality operator for it.
 pub fn require_equality_operator(ty: &ColumnType) -> Result<(), SQLError> {
@@ -57,6 +173,17 @@ fn ordering_operator_available(ty: &ColumnType) -> bool {
 }
 
 pub(super) fn unary_minus_result_type(ty: &ColumnType) -> Result<ColumnType, SQLError> {
+    unary_minus_result_type_with_control(ty, &ProductionControl::uncontrolled()).map(|ty| {
+        ty.into_uncontrolled()
+            .expect("ordinary unary type has no reservation")
+    })
+}
+
+pub(super) fn unary_minus_result_type_with_control(
+    ty: &ColumnType,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<ColumnType>, SQLError> {
+    control.check()?;
     match base_type(ty) {
         ty @ (ColumnType::SmallInteger
         | ColumnType::Integer
@@ -64,7 +191,7 @@ pub(super) fn unary_minus_result_type(ty: &ColumnType) -> Result<ColumnType, SQL
         | ColumnType::Real
         | ColumnType::DoublePrecision
         | ColumnType::Numeric { .. }
-        | ColumnType::Interval) => Ok(ty.clone()),
+        | ColumnType::Interval) => ty.clone_with_control(control).map_err(Into::into),
         other => Err(SQLError::TypeMismatch(format!(
             "operator does not exist: - {}",
             other.sql_name()
@@ -78,12 +205,39 @@ pub fn binary_result_type(
     left: Option<&ColumnType>,
     right: Option<&ColumnType>,
 ) -> Result<Option<ColumnType>, SQLError> {
+    binary_result_type_with_control(op, left, right, &ProductionControl::uncontrolled()).map(|ty| {
+        ty.map(|ty| {
+            ty.into_uncontrolled()
+                .expect("ordinary binary result type has no reservation")
+        })
+    })
+}
+
+/// Apply the shared result-type rules with owned output and controlled temporary operator selection.
+#[doc(hidden)]
+pub fn binary_result_type_with_control(
+    op: BinaryOp,
+    left: Option<&ColumnType>,
+    right: Option<&ColumnType>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    control.check()?;
     if left
         .into_iter()
         .chain(right)
         .all(|ty| !matches!(base_type(ty), ColumnType::Vector(_) | ColumnType::Tensor(_)))
     {
-        return binary_operator_types(op, left, right).map(|[_, _, result]| Some(result));
+        let selected = binary_operator_types_with_control(op, left, right, control)?;
+        if control.budget().is_none() {
+            let [_, _, result] = selected
+                .into_uncontrolled()
+                .expect("ordinary operator types");
+            return control.finish(result, None).map(Some).map_err(Into::into);
+        }
+        return selected[2]
+            .clone_with_control(control)
+            .map(Some)
+            .map_err(Into::into);
     }
     if matches!(
         op,
@@ -101,23 +255,43 @@ pub fn binary_result_type(
                 ordering_operator_available
             };
         if left.is_some_and(|ty| !available(ty)) || right.is_some_and(|ty| !available(ty)) {
-            return Err(undefined_binary_operator(op, left, right));
+            return Err(undefined_binary_operator(
+                binary_operator_name(op),
+                left,
+                right,
+            ));
         }
-        return Ok(Some(ColumnType::Boolean));
+        return control
+            .finish(ColumnType::Boolean, control.empty_reservation())
+            .map(Some)
+            .map_err(Into::into);
     }
     let (Some(left), Some(right)) = (left, right) else {
-        return merge_optional_types(left.cloned(), right.cloned());
+        return merge_value_types(
+            left.map(|ty| ty.clone_with_control(control)).transpose()?,
+            right.map(|ty| ty.clone_with_control(control)).transpose()?,
+            control,
+        );
     };
     let left = base_type(left);
     let right = base_type(right);
     if let Some(ty) = temporal_binary_result_type(op, left, right) {
-        return Ok(Some(ty));
+        return control
+            .finish(ty, control.empty_reservation())
+            .map(Some)
+            .map_err(Into::into);
     }
     if let Some(ty) = common_numeric_type(left, right) {
         if matches!(ty, ColumnType::Real) && left != right {
-            return Ok(Some(ColumnType::DoublePrecision));
+            return control
+                .finish(ColumnType::DoublePrecision, control.empty_reservation())
+                .map(Some)
+                .map_err(Into::into);
         }
-        return Ok(Some(ty));
+        return control
+            .finish(ty, control.empty_reservation())
+            .map(Some)
+            .map_err(Into::into);
     }
     if matches!(left, ColumnType::JsonB)
         && matches!(op, BinaryOp::Subtract)
@@ -125,7 +299,10 @@ pub fn binary_result_type(
             || matches!(right, ColumnType::SmallInteger | ColumnType::Integer)
             || matches!(right, ColumnType::Array(element) if element.is_character_string()))
     {
-        return Ok(Some(ColumnType::JsonB));
+        return control
+            .finish(ColumnType::JsonB, control.empty_reservation())
+            .map(Some)
+            .map_err(Into::into);
     }
     Err(SQLError::Routine {
         sqlstate: "42883".into(),
@@ -139,7 +316,7 @@ pub fn binary_result_type(
 }
 
 fn undefined_binary_operator(
-    op: BinaryOp,
+    name: &str,
     left: Option<&ColumnType>,
     right: Option<&ColumnType>,
 ) -> SQLError {
@@ -150,7 +327,7 @@ fn undefined_binary_operator(
         message: format!(
             "operator does not exist: {} {} {}",
             type_name(left),
-            binary_operator_name(op),
+            name,
             type_name(right)
         ),
     }
@@ -204,3 +381,6 @@ fn binary_operator_name(op: BinaryOp) -> &'static str {
         BinaryOp::Divide => "/",
     }
 }
+
+#[cfg(test)]
+mod production_tests;

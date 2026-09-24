@@ -62,6 +62,11 @@ impl Engine {
             .map_err(|error| storage_sql_error("resolve text-search table", error))?
             .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
         let index = table_state.inverted_index.read();
+        let index = uqa_execution::serializable::text::ObservedTextIndex::new(
+            index.as_ref(),
+            self.serializable_table_read(table)?,
+            table_state.columns.snapshot(),
+        );
         let (limit, strategy) = match physical_top_k {
             Some(plan) => (
                 plan.k,
@@ -72,7 +77,7 @@ impl Engine {
             ),
             None => (top_k, TextSearchAlgorithm::Exhaustive),
         };
-        uqa_scoring::score_text_query(index.as_ref(), table, field, query, mode, limit, strategy)
+        uqa_scoring::score_text_query(&index, table, field, query, mode, limit, strategy)
             .map_err(super::helpers::scoring_sql_error)
     }
 

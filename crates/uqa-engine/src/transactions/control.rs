@@ -98,6 +98,14 @@ impl Engine {
             false
         };
         if apply_on_commit {
+            if self.versioned_backend_transactions() {
+                if let Err(error) = self.refresh_explicit_statement_snapshot() {
+                    return Err(self.rollback_transaction_completion_failure(
+                        error,
+                        "commit snapshot refresh",
+                    ));
+                }
+            }
             // PostgreSQL alternates deferred-trigger processing with WITH HOLD portal conversion until neither phase can enqueue more work. A cursor query may invoke a mutating routine while it is being materialized, so validating only before portal conversion can otherwise commit a newly queued deferred FK violation.
             loop {
                 self.validate_deferred_constraints_before_outer_commit()?;
@@ -126,9 +134,10 @@ impl Engine {
         let mut stack = self.session.transactions.lock();
         match self.rollback_transaction_frame(&mut stack) {
             Ok(()) => error,
-            Err(rollback_error) => SQLError::Internal(format!(
-                "{error}; {context} rollback also failed: {rollback_error}"
-            )),
+            Err(rollback_error) => Self::rollback_cleanup_error(
+                &rollback_error,
+                format!("{error}; {context} rollback also failed: {rollback_error}"),
+            ),
         }
     }
 
@@ -139,6 +148,28 @@ impl Engine {
         failed: bool,
         apply_on_commit: bool,
     ) -> Result<(), SQLError> {
+        if let Some(
+            status @ (TransactionStatus::CommitPending(transaction)
+            | TransactionStatus::RollbackPending(transaction)),
+        ) = guard.last().map(|frame| frame.status)
+        {
+            let rollback = matches!(status, TransactionStatus::RollbackPending(_));
+            return match tx {
+                TransactionStmt::Commit if rollback => self.rollback_transaction_frame(guard),
+                TransactionStmt::Commit => self.commit_transaction_frame(guard, false),
+                TransactionStmt::CommitAndChain => {
+                    self.finish_transaction_and_chain(guard, "COMMIT", !rollback, false)
+                }
+                TransactionStmt::Rollback => self.rollback_transaction_frame(guard),
+                TransactionStmt::RollbackAndChain => {
+                    self.finish_transaction_and_chain(guard, "ROLLBACK", false, false)
+                }
+                _ => Err(Self::pending_completion_error(
+                    transaction,
+                    "only COMMIT or ROLLBACK can resolve this transaction",
+                )),
+            };
+        }
         match tx {
             TransactionStmt::Rollback => self.rollback_transaction_frame(guard),
             TransactionStmt::Commit if failed => self.rollback_transaction_frame(guard),

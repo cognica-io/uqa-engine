@@ -35,6 +35,7 @@ pub trait TableCreationPublication {
         name: &str,
         persistence: RelationPersistence,
         on_commit: OnCommitAction,
+        owner: &crate::catalog::security::roles::locking::RoleBinding,
     ) -> StorageBackendResult<()>;
     fn create_vector_field(
         &self,
@@ -66,24 +67,26 @@ pub fn run_create_table(
     mut table: CreateTable,
 ) -> Result<SQLResult, SQLError> {
     validate_create_table_columns(&table)?;
+    let owner = context.creation.bind_owner()?;
     let Some(name) = preflight(context, &table.name, table.persistence, table.if_not_exists)?
     else {
         return Ok(SQLResult::empty());
     };
     table.name = name;
-    create_after_preflight(context, table)
+    create_after_preflight(context, table, &owner)
 }
 pub fn run_create_table_if_not_exists(
     context: &CreateTableContext<'_>,
     deferred: DeferredCreateTable,
 ) -> Result<SQLResult, SQLError> {
+    let owner = context.creation.bind_owner()?;
     let Some(name) = preflight(context, &deferred.name, deferred.persistence, true)? else {
         return Ok(SQLResult::empty());
     };
     let mut table = uqa_sql::resolve_deferred_create_table(&deferred)?;
     validate_create_table_columns(&table)?;
     table.name = name;
-    create_after_preflight(context, table)
+    create_after_preflight(context, table, &owner)
 }
 fn preflight(
     context: &CreateTableContext<'_>,
@@ -97,7 +100,7 @@ fn preflight(
     let name = if persistence == RelationPersistence::Temporary {
         context.creation.temporary_name(name)?
     } else {
-        context.creation.persistent_name(name)?
+        context.creation.persistent_relation_name(name)?
     };
     if context.namespace.relation_exists(&name)? {
         let local = uqa_core::RelationIdentity::from_legacy_name(&name)
@@ -120,8 +123,13 @@ fn preflight(
 fn create_after_preflight(
     context: &CreateTableContext<'_>,
     mut table: CreateTable,
+    owner: &crate::catalog::security::roles::locking::RoleBinding,
 ) -> Result<SQLResult, SQLError> {
     declaration::prepare_create_table_declaration(&context.analysis, &mut table)?;
+    context.creation.retain_owner(owner)?;
+    if preflight(context, &table.name, table.persistence, table.if_not_exists)?.is_none() {
+        return Ok(SQLResult::empty());
+    }
     implicit::materialize_implicit_sequences(
         &context.sequences,
         "CREATE TABLE",
@@ -141,7 +149,7 @@ fn create_after_preflight(
     }
     context
         .publication
-        .create_table(&table.name, table.persistence, table.on_commit)
+        .create_table(&table.name, table.persistence, table.on_commit, owner)
         .map_err(|error| storage_error("CREATE TABLE", error))?;
     for (field, dimensions) in vector_fields {
         context
@@ -149,28 +157,7 @@ fn create_after_preflight(
             .create_vector_field(&table.name, field, dimensions)
             .map_err(|error| storage_error("CREATE TABLE vector field", error))?;
     }
-    for column in &table.columns {
-        context
-            .schema_transactions
-            .with_schema_write(Box::new(|schema| {
-                publication::register_column(
-                    schema,
-                    &table.name,
-                    column.clone(),
-                    Some(&table.columns),
-                )
-            }))
-            .map_err(|error| storage_error("CREATE TABLE column", error))?;
-    }
-    let mut registered_columns = context
-        .analysis
-        .foreign_keys
-        .columns
-        .try_describe_table(&table.name)
-        .map_err(|error| {
-            uqa_sql::catalog::errors::storage_error("CREATE TABLE columns", error.as_ref())
-        })?
-        .ok_or_else(|| SQLError::UnknownTable(table.name.clone()))?;
+    let mut registered_columns = table.columns.clone();
     declaration::bind_created_table_foreign_keys(
         &context.analysis.foreign_keys,
         &mut table,

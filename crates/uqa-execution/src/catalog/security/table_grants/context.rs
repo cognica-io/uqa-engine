@@ -11,6 +11,10 @@ use super::super::{
 };
 use crate::{
     catalog::view::ViewRegistryState,
+    row_locks::{
+        binding::{RelationLockCatalog, RelationLockSession},
+        session::RowLockSession,
+    },
     schema::{
         foreign_table_alteration::ForeignTableAlterPublication, namespaces::SchemaStatementWriter,
         publication::dependencies::CatalogPublicationChanges,
@@ -21,14 +25,14 @@ use uqa_core::RelationIdentity;
 use uqa_sql::catalog::{
     roles::{guards::RoleCatalogGuards, RoleReferenceNames},
     security::{
-        grants::GrantNamespace, table_grants::targets::TableGrantResolution, TableSecurity,
+        grants::GrantNamespace, table_grants::targets::TableGrantResolution, BoundTableSecurity,
     },
 };
-use uqa_storage::{CatalogFacade, StorageBackendResult};
-pub type TableSecurityWrite<'a> = Box<dyn DerefMut<Target = TableSecurity> + 'a>;
+use uqa_storage::CatalogFacade;
+pub type TableSecurityWrite<'a> = Box<dyn DerefMut<Target = BoundTableSecurity> + 'a>;
 pub trait TableGrantState: TablePrivilegeState {
     fn security_write(&self) -> TableSecurityWrite<'_>;
-    fn persist_security(&self, name: &str, security: &TableSecurity) -> StorageBackendResult<()>;
+    fn persistence(&self) -> uqa_sql::ast::RelationPersistence;
 }
 pub trait TableGrantRead<'a> {
     fn keys(&self) -> Box<dyn Iterator<Item = &RelationIdentity> + '_>;
@@ -37,9 +41,23 @@ pub trait TableGrantRead<'a> {
 pub trait TableGrantRegistry {
     fn tables(&self) -> Box<dyn TableGrantRead<'_> + '_>;
 }
+/// Persist one bound ACL tuple through the session's catalog before publishing live security.
+pub trait TableGrantPersistence {
+    fn persist_relation_acl(
+        &self,
+        relation: &RelationIdentity,
+        column: Option<&str>,
+        entry: &uqa_storage::catalog::relation_acl::RelationAclTuple,
+    ) -> uqa_storage::StorageBackendResult<()>;
+}
 pub use crate::catalog::notices::CatalogNotices as TableGrantNotices;
 pub struct TableGrantContext<'a> {
     pub writer: &'a dyn SchemaStatementWriter,
+    pub bindings: &'a dyn RelationLockCatalog,
+    pub locks: &'a dyn RelationLockSession,
+    pub shared_locks: &'a dyn crate::row_locks::shared_objects::SharedObjectLockSession,
+    pub rows: &'a dyn RowLockSession,
+    pub system: &'a dyn super::super::system_relations::SystemRelationSecurityState,
     pub resolution: &'a dyn TableGrantResolution,
     pub namespaces: &'a dyn GrantNamespace,
     pub names: &'a dyn RoleReferenceNames,
@@ -48,6 +66,7 @@ pub struct TableGrantContext<'a> {
     pub tables: &'a dyn TableGrantRegistry,
     pub views: &'a dyn ViewRegistryState,
     pub foreign: &'a dyn ForeignTableAlterPublication,
+    pub acls: &'a dyn TableGrantPersistence,
     pub catalog: Option<&'a dyn CatalogFacade>,
     pub changes: &'a dyn CatalogPublicationChanges,
     pub notices: &'a dyn TableGrantNotices,

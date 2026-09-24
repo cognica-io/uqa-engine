@@ -64,7 +64,7 @@ pub struct ConstraintCatalogColumn {
 
 #[derive(Debug, Clone)]
 pub struct ForeignKeyCatalogData {
-    pub referenced_key: Option<String>,
+    pub referenced_index: Option<[u8; 16]>,
     pub schema: String,
     pub table: String,
     pub column_ordinals: Vec<i64>,
@@ -80,6 +80,7 @@ pub struct ConstraintCatalogRow {
     pub table: String,
     pub name: String,
     pub object_id: Option<[u8; 16]>,
+    pub catalog_oid: Option<i64>,
     pub kind: ConstraintCatalogKind,
     pub columns: Vec<ConstraintCatalogColumn>,
     pub state: ConstraintCatalogState,
@@ -184,6 +185,7 @@ pub struct PendingConstraintCatalogRow {
     pub table: String,
     pub requested_name: Option<String>,
     pub object_id: Option<[u8; 16]>,
+    pub catalog_oid: Option<i64>,
     pub kind: ConstraintCatalogKind,
     pub columns: Vec<ConstraintCatalogColumn>,
     pub state: ConstraintCatalogState,
@@ -215,7 +217,16 @@ pub fn constraint_catalog_rows(
                     schema: schema.clone(),
                     table: table.clone(),
                     requested_name: col.not_null_name.clone(),
-                    object_id: None,
+                    object_id: col.not_null_identity.map(|identity| identity.object_id),
+                    catalog_oid: Some(
+                        col.not_null_identity
+                            .ok_or_else(|| {
+                                SQLError::Internal(
+                                    "NOT NULL constraint has no catalog identity".into(),
+                                )
+                            })?
+                            .oid,
+                    ),
                     kind: ConstraintCatalogKind::NotNull,
                     columns: vec![ConstraintCatalogColumn {
                         name: col.name.clone(),
@@ -236,6 +247,7 @@ pub fn constraint_catalog_rows(
                     table: table.clone(),
                     requested_name: col.check_name.clone(),
                     object_id: col.check_object_id,
+                    catalog_oid: col.check_catalog_oid,
                     kind: ConstraintCatalogKind::Check,
                     columns: check_constraint_columns(expr, &columns, &table_name)?,
                     state: ConstraintCatalogState::new(
@@ -248,23 +260,7 @@ pub fn constraint_catalog_rows(
                 });
             }
             if let Some(reference) = &col.references {
-                let foreign_key = ForeignKey {
-                    referenced_key: reference.referenced_key.clone(),
-                    name: reference.name.clone(),
-                    object_id: reference.object_id,
-                    local_columns: vec![col.name.clone()],
-                    ref_table: reference.table.clone(),
-                    ref_columns: reference.column.iter().cloned().collect(),
-                    on_update: reference.on_update,
-                    on_delete: reference.on_delete,
-                    on_delete_set_columns: Vec::new(),
-                    match_type: reference.match_type,
-                    enforced: reference.enforced,
-                    validated: reference.validated,
-                    deferrable: reference.deferrable,
-                    initially_deferred: reference.initially_deferred,
-                    period: reference.period,
-                };
+                let foreign_key = uqa_sql::schema::foreign_keys::column_foreign_key(col, reference);
                 pending.push(foreign_key_catalog_row(
                     catalog,
                     resolution,
@@ -296,6 +292,7 @@ pub fn constraint_catalog_rows(
                 continue;
             }
             key_constraints.push(uqa_sql::ast::TableKeyConstraint {
+                catalog_identity: None,
                 name: None,
                 kind,
                 columns: vec![column.name.clone()],
@@ -308,7 +305,10 @@ pub fn constraint_catalog_rows(
                 schema: schema.clone(),
                 table: table.clone(),
                 requested_name: constraint.name,
-                object_id: None,
+                object_id: constraint
+                    .catalog_identity
+                    .map(|identity| identity.object_id),
+                catalog_oid: constraint.catalog_identity.map(|identity| identity.oid),
                 kind: match constraint.kind {
                     TableKeyConstraintKind::PrimaryKey => ConstraintCatalogKind::PrimaryKey,
                     TableKeyConstraintKind::Unique => ConstraintCatalogKind::Unique {
@@ -332,6 +332,7 @@ pub fn constraint_catalog_rows(
                 table: table.clone(),
                 requested_name: constraint.name.clone(),
                 object_id: constraint.object_id,
+                catalog_oid: constraint.catalog_oid,
                 kind: ConstraintCatalogKind::Check,
                 columns: check_constraint_columns(&constraint.expr, &columns, &table_name)?,
                 state: ConstraintCatalogState::new(
@@ -368,6 +369,7 @@ pub fn constraint_catalog_rows(
                 table: constraint.table,
                 name,
                 object_id: constraint.object_id,
+                catalog_oid: constraint.catalog_oid,
                 kind: constraint.kind,
                 columns: constraint.columns,
                 state: constraint.state,
@@ -387,7 +389,18 @@ pub fn constraint_catalog_rows(
                     schema: schema.clone(),
                     table: table.clone(),
                     requested_name: column.not_null_name.clone(),
-                    object_id: None,
+                    object_id: column.not_null_identity.map(|identity| identity.object_id),
+                    catalog_oid: Some(
+                        column
+                            .not_null_identity
+                            .ok_or_else(|| {
+                                SQLError::Internal(
+                                    "foreign-table NOT NULL constraint has no catalog identity"
+                                        .into(),
+                                )
+                            })?
+                            .oid,
+                    ),
                     kind: ConstraintCatalogKind::NotNull,
                     columns: vec![ConstraintCatalogColumn {
                         name: column.name.clone(),
@@ -408,6 +421,7 @@ pub fn constraint_catalog_rows(
                     table: table.clone(),
                     requested_name: column.check_name.clone(),
                     object_id: column.check_object_id,
+                    catalog_oid: column.check_catalog_oid,
                     kind: ConstraintCatalogKind::Check,
                     columns: check_constraint_columns(expression, &columns, &table_name)?,
                     state: ConstraintCatalogState::new(
@@ -429,6 +443,7 @@ pub fn constraint_catalog_rows(
                 table: table.clone(),
                 requested_name: check.name,
                 object_id: check.object_id,
+                catalog_oid: check.catalog_oid,
                 kind: ConstraintCatalogKind::Check,
                 columns: check_constraint_columns(&check.expr, &columns, &table_name)?,
                 state: ConstraintCatalogState::new(
@@ -452,6 +467,7 @@ pub fn constraint_catalog_rows(
                 table: constraint.table,
                 name,
                 object_id: constraint.object_id,
+                catalog_oid: constraint.catalog_oid,
                 kind: constraint.kind,
                 columns: constraint.columns,
                 state: constraint.state,
@@ -472,6 +488,10 @@ fn foreign_key_catalog_row(
     columns: &[SQLColumnDef],
     foreign_key: &ForeignKey,
 ) -> Result<PendingConstraintCatalogRow, SQLError> {
+    let identity = foreign_key
+        .catalog_identity
+        .filter(|identity| identity.is_valid())
+        .ok_or_else(|| SQLError::Internal("FOREIGN KEY has no valid catalog identity".into()))?;
     let local_columns = named_constraint_columns(&foreign_key.local_columns, columns, table_name)?;
     let referenced_name = catalog
         .table_name(resolution, &foreign_key.ref_table)?
@@ -491,45 +511,30 @@ fn foreign_key_catalog_row(
         referenced_columns,
         &referenced_name,
     )?;
-    let mut referenced_keys = referenced.keys.as_ref().clone();
-    for column in referenced_columns.iter() {
-        let kind = if column.primary_key {
-            Some(TableKeyConstraintKind::PrimaryKey)
-        } else if column.unique {
-            Some(TableKeyConstraintKind::Unique)
-        } else {
-            None
-        };
-        let Some(kind) = kind else {
-            continue;
-        };
-        if referenced_keys.iter().any(|constraint| {
-            constraint.kind == kind
-                && constraint.columns.as_slice() == std::slice::from_ref(&column.name)
-        }) {
-            continue;
-        }
-        referenced_keys.push(uqa_sql::ast::TableKeyConstraint {
-            name: None,
-            kind,
-            columns: vec![column.name.clone()],
-            nulls_not_distinct: false,
-            without_overlaps: false,
-        });
-    }
-    let referenced_key = referenced_keys.iter().find(|constraint| {
-        constraint.columns.len() == foreign_key.ref_columns.len()
-            && foreign_key
-                .ref_columns
-                .iter()
-                .all(|column| constraint.columns.contains(column))
-    });
+    let referenced_key = catalog
+        .catalog_indexes()
+        .find(|row| {
+            crate::catalog::index::index_definition(row)
+                .ok()
+                .is_some_and(|definition| {
+                    definition.catalog.is_some_and(|identity| {
+                        Some(identity.identity.object_id) == foreign_key.referenced_index
+                    })
+                })
+        })
+        .map(|row| serde_json::from_str::<Vec<uqa_sql::ast::IndexKey>>(&row.columns_json))
+        .transpose()
+        .map_err(|error| SQLError::Internal(error.to_string()))?;
     let positions_in_unique_constraint = foreign_key
         .ref_columns
         .iter()
         .map(|column| {
             referenced_key
-                .and_then(|constraint| constraint.columns.iter().position(|item| item == column))
+                .as_ref()
+                .and_then(|keys| {
+                    keys.iter()
+                        .position(|key| key.column() == Some(column.as_str()))
+                })
                 .map(|index| catalog_ordinal(index, "referenced key column"))
                 .transpose()
         })
@@ -539,6 +544,7 @@ fn foreign_key_catalog_row(
         table: table.to_string(),
         requested_name: foreign_key.name.clone(),
         object_id: foreign_key.object_id,
+        catalog_oid: Some(identity.oid),
         kind: ConstraintCatalogKind::ForeignKey,
         columns: local_columns,
         state: ConstraintCatalogState::new(
@@ -548,10 +554,7 @@ fn foreign_key_catalog_row(
         ),
         period: foreign_key.period,
         foreign_key: Some(ForeignKeyCatalogData {
-            referenced_key: foreign_key
-                .referenced_key
-                .clone()
-                .or_else(|| referenced_key.and_then(|key| key.name.clone())),
+            referenced_index: foreign_key.referenced_index,
             schema: referenced_schema,
             table: referenced_table,
             column_ordinals: referenced_column_rows

@@ -22,6 +22,7 @@ pub trait IndexCreationNamespace {
     fn ensure_table_owner(&self, table: &str) -> Result<(), SQLError>;
     fn relation_exists(&self, name: &str) -> Result<bool, SQLError>;
 }
+/// Physical publication joins the caller's active statement or initial-restoration transaction.
 pub trait IndexCreationPublication {
     fn add_text_field(
         &self,
@@ -101,24 +102,8 @@ pub fn run_create_index(
     )?;
     super::validate_unique_index(&context.unique, &c, &name)?;
 
-    match am.as_str() {
-        "gin" => {
-            for col in &c.columns {
-                let analyzer = c
-                    .options
-                    .iter()
-                    .find(|(k, _)| k.eq_ignore_ascii_case("analyzer"))
-                    .map(|(_, v)| v.as_str());
-                let column = require_column_key(col, "gin")?;
-                context
-                    .publication
-                    .add_text_field(&c.table, column, analyzer)?;
-            }
-        }
-        "" | "btree" => {}
-        "ivf" | "hnsw" => create_vector_index(context.vectors, context.publication, &c, &am)?,
-        _ => unreachable!("access method was validated above"),
-    }
+    context.creation.reserve_name(&relation.qualified_name())?;
+    build_physical_index(context.vectors, context.publication, &c, &am)?;
     // Publish the original option values and bound key metadata so reopening restores the same physical index.
     let catalog_index_type = if am.is_empty() { "btree" } else { &am };
     context.publication.register_index(
@@ -130,6 +115,35 @@ pub fn run_create_index(
         &definition,
     )?;
     Ok(SQLResult::empty())
+}
+
+pub(super) fn build_physical_index(
+    vectors: &dyn VectorIndexCatalog,
+    publication: &dyn IndexCreationPublication,
+    c: &CreateIndex,
+    access_method: &str,
+) -> Result<(), SQLError> {
+    match access_method {
+        "gin" => {
+            for col in &c.columns {
+                let analyzer = c
+                    .options
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case("analyzer"))
+                    .map(|(_, v)| v.as_str());
+                let column = require_column_key(col, "gin")?;
+                publication.add_text_field(&c.table, column, analyzer)?;
+            }
+        }
+        "" | "btree" | "gist" => {}
+        "ivf" | "hnsw" => create_vector_index(vectors, publication, c, access_method)?,
+        _ => {
+            return Err(SQLError::Internal(format!(
+                "unknown persisted access method {access_method}"
+            )))
+        }
+    }
+    Ok(())
 }
 
 fn create_vector_index(

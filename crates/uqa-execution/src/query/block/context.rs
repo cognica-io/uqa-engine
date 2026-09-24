@@ -26,13 +26,13 @@ pub trait QueryDocumentRead: Sync {
 
 /// Retrieval planning and execution against the caller's selected relation generation.
 pub trait RelationRetrieval: Sync {
-    fn accelerated(
-        &self,
-        table: &str,
-        signal_table: &str,
+    fn prepare_accelerated<'a>(
+        &'a self,
+        table: &'a str,
+        signal_table: &'a str,
         predicate: Option<&ScalarExpr>,
-        params: &[SQLParam],
-    ) -> Result<Option<Vec<ScoredEntry>>, SQLError>;
+        params: &'a [SQLParam],
+    ) -> Result<Option<crate::query::scored_input::ScoredEntriesProducer<'a>>, SQLError>;
     fn optimized(
         &self,
         table: &str,

@@ -24,6 +24,14 @@ struct CommitDuringRestore {
 }
 
 impl PersistentStorageBackend for CommitDuringRestore {
+    fn identifier_allocator(&self) -> Option<&dyn uqa_storage::mvcc::IdentifierAllocator> {
+        self.inner.identifier_allocator()
+    }
+
+    fn transaction_affinity(&self) -> Option<uqa_storage::StorageSessionAffinity> {
+        self.inner.transaction_affinity()
+    }
+
     fn document_store(&self, table: &str) -> Box<dyn DocumentStore> {
         if self.armed.swap(false, Ordering::AcqRel) {
             assert!(

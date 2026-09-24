@@ -10,6 +10,8 @@ use uqa_sql::SQLError;
 
 pub use uqa_sql::catalog::errors::dml_storage_error;
 
+pub use crate::storage_errors::storage_error as identifier_storage_error;
+
 pub fn missing_document_error(action: &str, table: &str, doc_id: DocId) -> SQLError {
     SQLError::Internal(format!(
         "{action}: document {doc_id} listed by table `{table}` disappeared during the statement"

@@ -751,7 +751,7 @@ impl PhysicalRetrievalDriver<'_> {
         }
         operator
             .execute(&context)
-            .map_err(|error| operator_execution_error("DeepFusion", error))
+            .map_err(|error| crate::storage_errors::storage_error("execute DeepFusion", &error))
     }
 
     pub(super) fn lower_deep_layer(

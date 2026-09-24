@@ -7,6 +7,7 @@
 //! Serializable relational, command, source, and scalar plan data model.
 
 use super::{NullsOrder, ScalarExpr, SetOpKind};
+use crate::catalog::roles::RoleReference;
 
 const fn default_include_descendants() -> bool {
     true
@@ -365,9 +366,9 @@ pub struct InsertPlan {
     /// Whether non-target relation references are stored catalog identities rather than names that must be resolved in the executing session.
     pub relations_bound: bool,
     /// Effective role used for non-target privilege checks in an internally rewritten statement.
-    pub statement_privilege_subject: Option<String>,
+    pub statement_privilege_subject: Option<RoleReference>,
     /// Effective role used only for privilege checks on an internally rewritten target relation.
-    pub target_privilege_subject: Option<String>,
+    pub target_privilege_subject: Option<RoleReference>,
     pub target_qualifier: String,
     pub include_descendants: bool,
     pub columns: Vec<String>,
@@ -409,9 +410,9 @@ pub struct UpdatePlan {
     /// Whether non-target relation references are stored catalog identities rather than names that must be resolved in the executing session.
     pub relations_bound: bool,
     /// Effective role used for non-target privilege checks in an internally rewritten statement.
-    pub statement_privilege_subject: Option<String>,
+    pub statement_privilege_subject: Option<RoleReference>,
     /// Effective role used only for privilege checks on an internally rewritten target relation.
-    pub target_privilege_subject: Option<String>,
+    pub target_privilege_subject: Option<RoleReference>,
     pub target_qualifier: String,
     pub include_descendants: bool,
     pub assignments: Vec<AssignmentPlan>,
@@ -434,9 +435,9 @@ pub struct DeletePlan {
     /// Whether non-target relation references are stored catalog identities rather than names that must be resolved in the executing session.
     pub relations_bound: bool,
     /// Effective role used for non-target privilege checks in an internally rewritten statement.
-    pub statement_privilege_subject: Option<String>,
+    pub statement_privilege_subject: Option<RoleReference>,
     /// Effective role used only for privilege checks on an internally rewritten target relation.
-    pub target_privilege_subject: Option<String>,
+    pub target_privilege_subject: Option<RoleReference>,
     pub target_qualifier: String,
     pub include_descendants: bool,
     pub predicate: Option<ScalarExpr>,
@@ -455,9 +456,9 @@ pub struct MergePlan {
     pub ctes: Vec<CtePlan>,
     pub target: String,
     /// Effective role used for non-target privilege checks in an internally rewritten statement.
-    pub statement_privilege_subject: Option<String>,
+    pub statement_privilege_subject: Option<RoleReference>,
     /// Effective role used only for privilege checks on an internally rewritten target relation.
-    pub target_privilege_subject: Option<String>,
+    pub target_privilege_subject: Option<RoleReference>,
     pub target_qualifier: String,
     pub target_alias: Option<String>,
     pub include_descendants: bool,
@@ -511,6 +512,7 @@ pub enum CommandPlan {
     CreateTable(Box<crate::ast::CreateTable>),
     CreateTableIfNotExists(crate::ast::DeferredCreateTable),
     CreateIndex(crate::ast::CreateIndex),
+    RenameIndex(crate::ast::RenameIndexStmt),
     Insert(Box<InsertPlan>),
     Update(Box<UpdatePlan>),
     Delete(Box<DeletePlan>),
@@ -546,7 +548,7 @@ pub enum CommandPlan {
     },
     AlterSchemaOwner {
         name: String,
-        new_owner: String,
+        new_owner: crate::ast::RoleSpecification,
     },
     Notify {
         channel: String,
@@ -593,6 +595,7 @@ pub enum CommandPlan {
         table: Option<String>,
     },
     Vacuum(crate::ast::VacuumStmt),
+    LockTable(crate::ast::LockTableStmt),
     Truncate {
         tables: Vec<crate::ast::TruncateTarget>,
         cascade: bool,
@@ -653,6 +656,7 @@ pub enum CommandPlan {
     GrantRole(crate::ast::GrantRoleStmt),
     CreateRole(crate::ast::CreateRoleStmt),
     AlterRole(crate::ast::AlterRoleStmt),
+    RenameRole(crate::ast::RenameRoleStmt),
     DropRole(crate::ast::DropRoleStmt),
     CreateTrigger(crate::ast::CreateTrigger),
     DropTrigger(crate::ast::DropTrigger),

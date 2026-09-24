@@ -60,6 +60,7 @@ pub trait TableRemovalTransactions {
     fn with_table_removal_write(&self, write: TableRemovalWrite<'_>) -> StorageBackendResult<()>;
 }
 pub struct TableRemovalContext<'a> {
+    pub indexes: crate::schema::indexes::registry::IndexRegistryContext<'a>,
     pub catalog: &'a dyn TableRemovalCatalog,
     pub hierarchy: &'a dyn HierarchyDropCatalog,
     pub publication: &'a dyn TableRemovalPublication,

@@ -31,6 +31,58 @@ impl KeyValueStorageBackend {
 }
 
 impl PersistentStorageBackend for KeyValueStorageBackend {
+    fn retention_control(&self) -> Option<crate::read_control::StorageReadControl> {
+        self.store.retention_control()
+    }
+
+    fn serializable_session(&self) -> Option<&dyn crate::mvcc::SerializableSession> {
+        self.store.serializable_session()
+    }
+
+    fn vacuum(&self) -> StorageBackendResult<()> {
+        self.store.vacuum()
+    }
+
+    fn write_cancellation(&self) -> Option<uqa_core::CancellationToken> {
+        self.store.write_cancellation()
+    }
+
+    fn open_session_with_cancellation(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        let store = self.store.open_session_with_cancellation(cancellation)?;
+        let catalog: Arc<dyn CatalogFacade> = Arc::new(KeyValueCatalog::new(Arc::clone(&store)));
+        let backend: Arc<dyn PersistentStorageBackend> = Arc::new(Self::new(store));
+        Ok(PersistentStorageSession::new(catalog, backend))
+    }
+
+    fn open_retained_read_session(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        let store = self.store.open_retained_read_session(cancellation)?;
+        let catalog: Arc<dyn CatalogFacade> = Arc::new(KeyValueCatalog::new(Arc::clone(&store)));
+        let backend: Arc<dyn PersistentStorageBackend> = Arc::new(Self::new(store));
+        Ok(PersistentStorageSession::new(catalog, backend))
+    }
+
+    fn transaction_model(&self) -> crate::StorageTransactionModel {
+        self.store.transaction_model()
+    }
+
+    fn supports_concurrent_pinned_read_and_write(&self) -> bool {
+        self.store.transaction_model().is_versioned()
+    }
+
+    fn identifier_allocator(&self) -> Option<&dyn crate::mvcc::IdentifierAllocator> {
+        self.store.identifier_allocator()
+    }
+
+    fn transaction_affinity(&self) -> Option<crate::StorageSessionAffinity> {
+        self.store.transaction_affinity()
+    }
+
     fn storage_identity(&self) -> StorageBackendResult<Option<PersistentStorageIdentity>> {
         self.store.storage_identity()
     }
@@ -132,6 +184,15 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         btree_index::fields(self.store.as_ref(), table)
     }
 
+    fn read_btree_index_entry(
+        &self,
+        table: &str,
+        field: &crate::ValueIndexKey,
+        doc_id: DocId,
+    ) -> StorageBackendResult<crate::ValueIndexEntry> {
+        btree_index::read_entry(self.store.as_ref(), table, field, doc_id)
+    }
+
     fn replace_btree_index(
         &self,
         table: &str,
@@ -175,11 +236,19 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
     }
 
     fn begin_read_transaction(&self) -> StorageBackendResult<()> {
-        self.store.begin_read_transaction()
+        // The backend contract is a read-first hint; the byte-store's read transaction is strictly read-only.
+        self.store.begin_upgradeable_transaction()
     }
 
     fn begin_upgradeable_transaction(&self) -> StorageBackendResult<()> {
         self.store.begin_upgradeable_transaction()
+    }
+
+    fn refresh_transaction_snapshot(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> StorageBackendResult<()> {
+        self.store.refresh_transaction_snapshot(cancellation)
     }
 
     fn in_transaction(&self) -> bool {

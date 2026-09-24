@@ -130,7 +130,7 @@ fn offsets(input: &str, start: u64, end: u64) -> TokenOffsets {
 }
 
 fn project(input: &str, observation: &Value) -> AnalyzedField {
-    let mut field = AnalyzedField {
+    let mut field: AnalyzedField = AnalyzedField {
         length: 0,
         terms: BTreeMap::new(),
         final_offsets: offsets(

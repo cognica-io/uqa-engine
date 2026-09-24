@@ -9,16 +9,15 @@
 use super::{
     guards::RoleCatalogGuards,
     memberships::{
-        apply_grant_role_statement, insert_membership, insufficient_privilege,
-        require_role_attribute_authority, role_has_admin, role_is_superuser,
+        insufficient_privilege, require_role_attribute_authority, role_has_transitive_admin,
+        role_is_superuser,
     },
-    resolve_role_reference, RoleDefinition, RoleMembership, RoleMembershipKey, RoleReferenceNames,
+    RoleDefinition, RoleIdentity, RoleMembership, RoleMembershipKey, RoleReference,
+    RoleReferenceNames,
 };
+use crate::catalog::roles::identity::{RoleBinding, RoleSubject};
 use crate::{
-    ast::{
-        AlterRoleStmt, CreateRoleStmt, DropRoleStmt, GrantRoleStmt, RoleAttribute,
-        RoleMembershipOptions,
-    },
+    ast::{AlterRoleStmt, RoleAttribute, RoleSpecification},
     SQLError,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -35,36 +34,49 @@ pub struct RoleValidationContext<'a> {
 }
 
 pub fn require_role_creation(context: &RoleValidationContext<'_>) -> Result<(), SQLError> {
-    let current = context.names.current_user_name();
-    let allowed = context
-        .roles
-        .role_definitions()
-        .get(&current)
-        .is_some_and(|role| {
-            role.has(RoleAttribute::Superuser) || role.has(RoleAttribute::CreateRole)
-        });
+    let current = context.names.current_role();
+    require_createrole(&context.roles.role_definitions(), &current, "create role")
+}
+
+fn require_createrole(
+    roles: &BTreeMap<String, RoleDefinition>,
+    current: &(impl RoleSubject + ?Sized),
+    action: &str,
+) -> Result<(), SQLError> {
+    let allowed = current.role_definition(roles).is_some_and(|role| {
+        role.has(RoleAttribute::Superuser) || role.has(RoleAttribute::CreateRole)
+    });
     if allowed {
         Ok(())
     } else {
-        Err(insufficient_privilege("permission denied to create role"))
+        Err(insufficient_privilege(&format!(
+            "permission denied to {action}"
+        )))
     }
 }
 
 pub fn require_role_administration_for(
     catalog: &dyn RoleCatalogGuards,
     roles: &BTreeMap<String, RoleDefinition>,
-    current: &str,
+    current: &(impl RoleSubject + ?Sized),
     target: &str,
     action: &str,
 ) -> Result<(), SQLError> {
     if role_is_superuser(roles, current) {
         return Ok(());
     }
-    let can_create_roles = roles
-        .get(current)
+    let can_create_roles = current
+        .role_definition(roles)
         .is_some_and(|role| role.has(RoleAttribute::CreateRole));
     let memberships = catalog.role_memberships();
-    if can_create_roles && role_has_admin(&memberships, current, target) {
+    if can_create_roles
+        && current
+            .role_definition(roles)
+            .zip(roles.get(target))
+            .is_some_and(|(member, role)| {
+                role_has_transitive_admin(&memberships, member.identity(), role.identity())
+            })
+    {
         Ok(())
     } else {
         Err(insufficient_privilege(&format!(
@@ -75,121 +87,25 @@ pub fn require_role_administration_for(
 
 pub fn create_role_candidate(
     roles: &BTreeMap<String, RoleDefinition>,
-    current: &str,
-    statement: &CreateRoleStmt,
+    current: &(impl RoleSubject + ?Sized),
+    definition: RoleDefinition,
 ) -> Result<(BTreeMap<String, RoleDefinition>, bool), SQLError> {
-    if roles.contains_key(&statement.name) {
+    if roles.contains_key(&definition.name) {
         return Err(SQLError::Routine {
             sqlstate: "42710".into(),
-            message: format!("role \"{}\" already exists", statement.name),
+            message: format!("role \"{}\" already exists", definition.name),
         });
     }
     let current_is_superuser = role_is_superuser(roles, current);
     let mut next_roles = roles.clone();
-    next_roles.insert(
-        statement.name.clone(),
-        RoleDefinition::from_create(statement),
-    );
+    next_roles.insert(definition.name.clone(), definition);
     Ok((next_roles, current_is_superuser))
-}
-
-pub fn apply_create_role_memberships(
-    context: &RoleValidationContext<'_>,
-    statement: &CreateRoleStmt,
-    current: &str,
-    current_is_superuser: bool,
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &mut BTreeMap<RoleMembershipKey, RoleMembership>,
-) -> Result<(), SQLError> {
-    if !current_is_superuser {
-        let bootstrap = roles
-            .values()
-            .find(|role| role.has(RoleAttribute::Superuser))
-            .map(|role| role.name.clone())
-            .ok_or_else(|| SQLError::Internal("role catalog has no bootstrap superuser".into()))?;
-        insert_membership(
-            memberships,
-            &statement.name,
-            current,
-            &bootstrap,
-            RoleMembershipOptions {
-                admin: Some(true),
-                inherit: Some(false),
-                set: Some(false),
-            },
-            roles,
-        );
-    }
-    let in_roles = statement
-        .in_roles
-        .iter()
-        .map(|role| resolve_role_reference(context.names, role))
-        .collect::<Vec<_>>();
-    if !in_roles.is_empty() {
-        apply_grant_role_statement(
-            roles,
-            memberships,
-            current,
-            &GrantRoleStmt {
-                granted_roles: in_roles,
-                grantee_roles: vec![statement.name.clone()],
-                is_grant: true,
-                options: RoleMembershipOptions::default(),
-                grantor: None,
-                cascade: false,
-            },
-        )?;
-    }
-    let role_members = statement
-        .role_members
-        .iter()
-        .map(|role| resolve_role_reference(context.names, role))
-        .collect::<Vec<_>>();
-    if !role_members.is_empty() {
-        apply_grant_role_statement(
-            roles,
-            memberships,
-            current,
-            &GrantRoleStmt {
-                granted_roles: vec![statement.name.clone()],
-                grantee_roles: role_members,
-                is_grant: true,
-                options: RoleMembershipOptions::default(),
-                grantor: None,
-                cascade: false,
-            },
-        )?;
-    }
-    let admin_members = statement
-        .admin_members
-        .iter()
-        .map(|role| resolve_role_reference(context.names, role))
-        .collect::<Vec<_>>();
-    if !admin_members.is_empty() {
-        apply_grant_role_statement(
-            roles,
-            memberships,
-            current,
-            &GrantRoleStmt {
-                granted_roles: vec![statement.name.clone()],
-                grantee_roles: admin_members,
-                is_grant: true,
-                options: RoleMembershipOptions {
-                    admin: Some(true),
-                    ..RoleMembershipOptions::default()
-                },
-                grantor: None,
-                cascade: false,
-            },
-        )?;
-    }
-    Ok(())
 }
 
 pub fn alter_role_candidate(
     context: &RoleValidationContext<'_>,
     roles: &BTreeMap<String, RoleDefinition>,
-    current: &str,
+    current: &(impl RoleSubject + ?Sized),
     name: String,
     statement: &AlterRoleStmt,
 ) -> Result<BTreeMap<String, RoleDefinition>, SQLError> {
@@ -204,8 +120,8 @@ pub fn alter_role_candidate(
         statement.attributes.keys().copied(),
         "alter role",
     )?;
-    let current_is_superuser = roles
-        .get(current)
+    let current_is_superuser = current
+        .role_definition(roles)
         .is_some_and(|role| role.has(RoleAttribute::Superuser));
     if (statement.attributes.contains_key(&RoleAttribute::Superuser)
         || existing.has(RoleAttribute::Superuser))
@@ -226,85 +142,146 @@ pub fn alter_role_candidate(
     if let Some(value) = statement.connection_limit {
         updated.connection_limit = value;
     }
+    updated.advance_revision()?;
     let mut next = roles.clone();
     next.insert(name, updated);
     Ok(next)
 }
 
-pub fn resolve_drop_role_names(
-    context: &RoleValidationContext<'_>,
-    statement: &DropRoleStmt,
-    current: &str,
-    session: &str,
-    snapshot: &BTreeMap<String, RoleDefinition>,
-) -> Result<Vec<String>, SQLError> {
-    let mut names = Vec::new();
-    for requested in &statement.names {
-        let name = resolve_role_reference(context.names, requested);
-        if !snapshot.contains_key(&name) {
-            if statement.if_exists {
+/// Initial CREATEROLE authority is checked once; each later target uses the current membership graph after preceding removals.
+pub struct RoleDropAuthority {
+    current: RoleBinding,
+    session: RoleReference,
+}
+
+impl RoleDropAuthority {
+    pub fn new(
+        current: RoleReference,
+        session: RoleReference,
+        roles: &BTreeMap<String, RoleDefinition>,
+    ) -> Result<Self, SQLError> {
+        require_createrole(roles, &current, "drop role")?;
+        let session = match session {
+            RoleReference::Bound(_) => session,
+            RoleReference::Named(_) => {
+                RoleReference::Bound(std::sync::Arc::new(session.bind(roles)?))
+            }
+        };
+        Ok(Self {
+            current: current.bind(roles)?,
+            session,
+        })
+    }
+
+    /// Resolve only the next target. Execution must finish its object wait and remove its memberships before requesting another target.
+    pub fn resolve_target(
+        &self,
+        context: &RoleValidationContext<'_>,
+        requested: &RoleSpecification,
+        if_exists: bool,
+        roles: &BTreeMap<String, RoleDefinition>,
+    ) -> Result<Option<RoleBinding>, SQLError> {
+        // PostgreSQL treats the exact lowercase name public as a role specifier even when quoted.
+        let name = match requested {
+            RoleSpecification::Named(name) if name != "public" => name,
+            _ => {
+                return Err(SQLError::Routine {
+                    sqlstate: "22023".into(),
+                    message: "cannot use special role specifier in DROP ROLE".into(),
+                });
+            }
+        };
+        let Some(role) = roles.get(name) else {
+            if if_exists {
                 context.notices.notice(
                     "NOTICE",
                     &format!("role \"{name}\" does not exist, skipping"),
                 );
-                continue;
+                return Ok(None);
             }
             return Err(SQLError::Routine {
                 sqlstate: "42704".into(),
                 message: format!("role \"{name}\" does not exist"),
             });
-        }
-        if name == current || name == session {
-            return Err(SQLError::Routine {
-                sqlstate: "55006".into(),
-                message: "current user cannot be dropped".into(),
-            });
-        }
-        require_role_administration_for(context.roles, snapshot, current, &name, "drop role")?;
-        names.push(name);
+        };
+        require_role_drop_authority(context, roles, &self.current, &self.session, name)?;
+        RoleBinding::from_definition(role).map(Some)
     }
-    Ok(names)
 }
 
-pub fn bind_grant_role_statement(
+pub fn role_drop_memberships_candidate(
+    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    removed: RoleIdentity,
+) -> BTreeMap<RoleMembershipKey, RoleMembership> {
+    memberships
+        .iter()
+        .filter(|(_, membership)| {
+            membership.role.identity() != removed && membership.member.identity() != removed
+        })
+        .map(|(key, membership)| (*key, membership.clone()))
+        .collect()
+}
+
+fn require_role_drop_authority(
     context: &RoleValidationContext<'_>,
-    statement: &GrantRoleStmt,
-) -> GrantRoleStmt {
-    GrantRoleStmt {
-        granted_roles: statement
-            .granted_roles
-            .iter()
-            .map(|role| resolve_role_reference(context.names, role))
-            .collect(),
-        grantee_roles: statement
-            .grantee_roles
-            .iter()
-            .map(|role| resolve_role_reference(context.names, role))
-            .collect(),
-        is_grant: statement.is_grant,
-        options: statement.options,
-        grantor: statement
-            .grantor
-            .as_ref()
-            .map(|role| resolve_role_reference(context.names, role)),
-        cascade: statement.cascade,
+    roles: &BTreeMap<String, RoleDefinition>,
+    current: &(impl RoleSubject + ?Sized),
+    session: &(impl RoleSubject + ?Sized),
+    name: &str,
+) -> Result<(), SQLError> {
+    let protected_user = if current.role_name(roles) == Some(name)
+        || context.names.outer_role().role_name(roles) == Some(name)
+    {
+        Some("current")
+    } else if session.role_name(roles) == Some(name) {
+        Some("session")
+    } else {
+        None
+    };
+    if let Some(subject) = protected_user {
+        return Err(SQLError::Routine {
+            sqlstate: "55006".into(),
+            message: format!("{subject} user cannot be dropped"),
+        });
+    }
+    if roles
+        .get(name)
+        .is_some_and(|role| role.has(RoleAttribute::Superuser))
+        && !role_is_superuser(roles, current)
+    {
+        return Err(insufficient_privilege("permission denied to drop role"));
+    }
+    if role_is_superuser(roles, current) {
+        return Ok(());
+    }
+    let memberships = context.roles.role_memberships();
+    if current
+        .role_definition(roles)
+        .zip(roles.get(name))
+        .is_some_and(|(member, role)| {
+            role_has_transitive_admin(&memberships, member.identity(), role.identity())
+        })
+    {
+        Ok(())
+    } else {
+        Err(insufficient_privilege("permission denied to drop role"))
     }
 }
 
 pub fn ensure_no_grantor_dependencies(
     memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
-    names_set: &BTreeSet<String>,
+    identities: &BTreeSet<RoleIdentity>,
 ) -> Result<(), SQLError> {
     for membership in memberships.values() {
-        if names_set.contains(&membership.grantor)
-            && !names_set.contains(&membership.role)
-            && !names_set.contains(&membership.member)
+        if identities.contains(&membership.grantor.identity())
+            && !identities.contains(&membership.role.identity())
+            && !identities.contains(&membership.member.identity())
         {
             return Err(SQLError::Routine {
                 sqlstate: "2BP01".into(),
                 message: format!(
                     "role \"{}\" cannot be dropped because some objects depend on it: privileges for membership of role {} in role {}",
-                    membership.grantor, membership.member, membership.role
+                    membership.grantor.name, membership.member.name, membership.role.name
                 ),
             });
         }

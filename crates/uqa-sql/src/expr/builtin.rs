@@ -52,11 +52,14 @@ pub fn builtin_scalar_function_strictness(name: &str, argument_count: usize) -> 
         "array_to_string" if argument_count == 3 => Some(false),
         "string_to_array" | "string_to_table" if matches!(argument_count, 2 | 3) => Some(false),
         "pg_has_role" if matches!(argument_count, 2 | 3) => Some(true),
+        "current_setting" if matches!(argument_count, 1 | 2) => Some(true),
         "has_table_privilege" if matches!(argument_count, 2 | 3) => Some(true),
         "has_column_privilege" if matches!(argument_count, 3 | 4) => Some(true),
         "has_database_privilege" if matches!(argument_count, 2 | 3) => Some(true),
         "has_schema_privilege" if matches!(argument_count, 2 | 3) => Some(true),
-        "has_sequence_privilege" if matches!(argument_count, 2 | 3) => Some(true),
+        "has_sequence_privilege" | "has_function_privilege" if matches!(argument_count, 2 | 3) => {
+            Some(true)
+        }
         "pg_get_sequence_data" | "pg_sequence_last_value" | "pg_sequence_parameters"
             if argument_count == 1 =>
         {
@@ -201,6 +204,7 @@ pub fn bound_scalar_function_strictness(
     };
     if let Some(dispatch) = binding.dispatch {
         return match dispatch {
+            FunctionDispatch::NumericOperator(_) => Some(true),
             FunctionDispatch::ArraySubscripts
             | FunctionDispatch::Subscript
             | FunctionDispatch::BetweenSymmetric
@@ -236,8 +240,23 @@ pub fn eval_bound_builtin_function_call(
     call_args: Vec<(Option<String>, Value)>,
     ctx: &EvalContext<'_>,
 ) -> Result<Value> {
+    if let Some(error) = &binding.resolution_error {
+        return Err(error.sql_error());
+    }
     let Some(dispatch) = binding.dispatch else {
-        return eval_builtin_function_call(&binding.name, call_args, ctx);
+        let value = eval_builtin_function_call(&binding.name, call_args, ctx)?;
+        // Fixed signatures retain widths that the shared integer and floating carriers cannot enforce on their own.
+        if matches!(value, Value::Int(_) | Value::Float(_)) {
+            if let Some(
+                ty @ (crate::ColumnType::SmallInteger
+                | crate::ColumnType::Integer
+                | crate::ColumnType::Real),
+            ) = crate::fixed_builtin_return_type(binding)
+            {
+                return super::cast_value(&value, &ty.sql_name());
+            }
+        }
+        return Ok(value);
     };
     if let Some(result) = random::eval_dispatched_random_function(dispatch, &call_args, ctx) {
         return result;
@@ -252,23 +271,49 @@ pub fn eval_bound_builtin_function_call(
         .into_iter()
         .map(|(_, value)| value)
         .collect::<Vec<_>>();
-    if let Some(result) = scalar_postgres::eval_dispatched_postgres_function(dispatch, &evaluated) {
+    eval_dispatched_builtin_with_control(
+        binding,
+        dispatch,
+        &evaluated,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .map(|value| {
+        value
+            .into_uncontrolled()
+            .expect("ordinary dispatched builtin result")
+    })
+}
+
+pub(super) fn eval_dispatched_builtin_with_control(
+    binding: &FunctionBinding,
+    dispatch: FunctionDispatch,
+    evaluated: &[Value],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<Value>> {
+    if let Some(result) = scalar_postgres::eval_dispatched_postgres_function_with_control(
+        dispatch, evaluated, control,
+    ) {
         return result;
     }
     match dispatch {
+        FunctionDispatch::NumericOperator(operator) => {
+            super::numeric_operator::eval_bound_operator_with_control(
+                operator, binding, evaluated, control,
+            )
+        }
         FunctionDispatch::JsonExtract { as_text, path } => {
-            super::json::json_extract_operator(&evaluated, as_text, path)
+            super::json::json_extract_operator_with_control(evaluated, as_text, path, control)
         }
         FunctionDispatch::ArraySortJson => {
-            scalar_array::eval_dispatched_json_array_sort(&evaluated)
+            scalar_array::eval_dispatched_json_array_sort_with_control(evaluated, control)
         }
         FunctionDispatch::Range {
             operation,
             subtype,
             multirange,
-        } => {
-            scalar_range::eval_dispatched_range_function(operation, subtype, multirange, &evaluated)
-        }
+        } => scalar_range::eval_dispatched_range_function_with_control(
+            operation, subtype, multirange, evaluated, control,
+        ),
         FunctionDispatch::NamedArgument | FunctionDispatch::VariadicArgument => Err(
             SQLError::Internal("call-argument syntax marker reached scalar execution".into()),
         ),

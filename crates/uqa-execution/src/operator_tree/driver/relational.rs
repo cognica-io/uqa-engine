@@ -75,7 +75,7 @@ impl PhysicalRetrievalDriver<'_> {
         let inner_pl = self.execute_posting_node(inner)?;
         let included: BTreeSet<DocId> = inner_pl.entries().iter().map(|e| e.doc_id).collect();
         let mut entries: Vec<PostingEntry> = Vec::new();
-        for doc_id in self.context.relations.table_doc_ids(self.table)? {
+        for doc_id in self.scan_doc_ids()? {
             if !included.contains(&doc_id) {
                 entries.push(PostingEntry::new(doc_id, Payload::default()));
             }
@@ -104,7 +104,7 @@ impl PhysicalRetrievalDriver<'_> {
             .map(|child| self.execute_posting_node(child))
             .transpose()?;
         let doc_ids = source.as_ref().map_or_else(
-            || self.context.relations.table_doc_ids(self.table),
+            || self.scan_doc_ids(),
             |posting| Ok(posting.entries().iter().map(|entry| entry.doc_id).collect()),
         )?;
         let context = self.bridge_context_for_projection(&doc_ids, &[field])?;
@@ -126,7 +126,7 @@ impl PhysicalRetrievalDriver<'_> {
         let source = static_operator(self.execute_posting_node(source)?);
         let op = ScoreOperator::new(scorer.clone(), source, query_terms.to_vec(), field);
         op.execute(&self.bridge_context()?)
-            .map_err(|error| operator_execution_error("Score", error))
+            .map_err(|error| crate::storage_errors::storage_error("Score", &error))
     }
 
     pub(super) fn execute_vector_similarity(
@@ -161,7 +161,7 @@ impl PhysicalRetrievalDriver<'_> {
             .map(|child| self.execute_posting_node(child))
             .transpose()?;
         let doc_ids = source.as_ref().map_or_else(
-            || self.context.relations.table_doc_ids(self.table),
+            || self.scan_doc_ids(),
             |posting| Ok(posting.entries().iter().map(|entry| entry.doc_id).collect()),
         )?;
         let context = self.bridge_context_for_projection(&doc_ids, &[field])?;

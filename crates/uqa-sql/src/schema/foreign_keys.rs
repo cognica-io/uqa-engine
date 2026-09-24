@@ -89,15 +89,23 @@ pub fn validate_bound_foreign_key_definition_with_local_state(
         .catalog
         .bound_table_name(&foreign_key.ref_table)?
         .ok_or_else(|| SQLError::UnknownTable(foreign_key.ref_table.clone()))?;
-    let referenced_columns = context
-        .columns
-        .try_describe_table(&referenced)
-        .map_err(|error| ddl_storage_error("FOREIGN KEY referenced columns", error))?
-        .ok_or_else(|| SQLError::UnknownTable(referenced.clone()))?;
     let local = context
         .catalog
         .bound_table_name(table)?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    let referenced_columns = if referenced == local {
+        local_columns.map(<[crate::ast::ColumnDef]>::to_vec)
+    } else {
+        None
+    }
+    .map(Ok)
+    .unwrap_or_else(|| {
+        context
+            .columns
+            .try_describe_table(&referenced)
+            .map_err(|error| ddl_storage_error("FOREIGN KEY referenced columns", error))?
+            .ok_or_else(|| SQLError::UnknownTable(referenced.clone()))
+    })?;
     let referenced_keys = if referenced == local {
         match local_keys {
             Some(keys) => keys.to_vec(),
@@ -217,8 +225,10 @@ pub fn column_foreign_key(
 ) -> crate::ast::ForeignKey {
     crate::ast::ForeignKey {
         referenced_key: reference.referenced_key.clone(),
+        referenced_index: reference.referenced_index,
         name: reference.name.clone(),
         object_id: reference.object_id,
+        catalog_identity: reference.catalog_identity,
         local_columns: vec![column.name.clone()],
         ref_table: reference.table.clone(),
         ref_columns: reference.column.iter().cloned().collect(),

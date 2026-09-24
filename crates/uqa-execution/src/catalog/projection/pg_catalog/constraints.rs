@@ -14,7 +14,7 @@ use crate::catalog::{CatalogReadView, RelationNameResolution};
 use super::super::helpers::constraints::{
     constraint_catalog_rows, ConstraintCatalogKind, ConstraintCatalogRow,
 };
-use super::super::helpers::oids::{schema_oid, stable_object_oid, stable_oid};
+use super::super::helpers::oids::{namespace_oid, stable_object_oid, stable_oid};
 use super::super::helpers::rows::{
     bool_value, catalog_array, catalog_usize, int_value, row, str_value,
 };
@@ -80,12 +80,13 @@ pub fn build_pg_constraint(
                 None => 0,
             };
             let index_oid = constraint_index_oid(&constraint, &indexes);
+            let parent_index_constraint_oid = key_parent_oid(catalog, &constraint, &indexes);
             let (inheritance_count, is_local) =
                 constraint_inheritance_state(catalog, resolution, &constraint)?;
             Ok(row([
                 (
                     "oid",
-                    int_value(
+                    int_value(constraint.catalog_oid.unwrap_or_else(|| {
                         constraint
                             .object_id
                             .filter(|_| constraint.kind == ConstraintCatalogKind::Check)
@@ -100,11 +101,14 @@ pub fn build_pg_constraint(
                                     )
                                 },
                                 |object_id| stable_object_oid("constraint", &object_id),
-                            ),
-                    ),
+                            )
+                    })),
                 ),
                 ("conname", str_value(constraint.name)),
-                ("connamespace", int_value(schema_oid(&constraint.schema))),
+                (
+                    "connamespace",
+                    int_value(namespace_oid(catalog, &constraint.schema)),
+                ),
                 ("contype", str_value(constraint.kind.pg_type())),
                 ("condeferrable", bool_value(constraint.state.deferrable())),
                 (
@@ -116,7 +120,7 @@ pub fn build_pg_constraint(
                 ("conrelid", int_value(constrained_relation_oid)),
                 ("contypid", int_value(0)),
                 ("conindid", int_value(index_oid)),
-                ("conparentid", int_value(0)),
+                ("conparentid", int_value(parent_index_constraint_oid)),
                 ("confrelid", int_value(referenced_relation_oid)),
                 (
                     "confupdtype",
@@ -280,21 +284,64 @@ fn constraint_index_oid(
     indexes: &[super::CatalogIndexRelation],
 ) -> i64 {
     use super::super::helpers::constraints::ConstraintCatalogKind;
-    let (schema, name) = if let Some(foreign) = &constraint.foreign_key {
-        let Some(name) = foreign.referenced_key.as_deref() else {
-            return 0;
-        };
-        (foreign.schema.as_str(), name)
-    } else if matches!(
-        constraint.kind,
-        ConstraintCatalogKind::PrimaryKey | ConstraintCatalogKind::Unique { .. }
-    ) {
-        (constraint.schema.as_str(), constraint.name.as_str())
-    } else {
-        return 0;
-    };
     indexes
         .iter()
-        .find(|index| index.relation.schema == schema && index.relation.name == name)
+        .find(|index| {
+            if let Some(foreign) = &constraint.foreign_key {
+                foreign.referenced_index.is_some_and(|id| {
+                    index
+                        .definition
+                        .catalog
+                        .as_ref()
+                        .is_some_and(|identity| identity.identity.object_id == id)
+                })
+            } else if matches!(
+                constraint.kind,
+                ConstraintCatalogKind::PrimaryKey | ConstraintCatalogKind::Unique { .. }
+            ) {
+                constraint.object_id.is_some()
+                    && index.definition.relationships.owning_constraint == constraint.object_id
+            } else {
+                false
+            }
+        })
         .map_or(0, super::CatalogIndexRelation::oid)
+}
+
+fn key_parent_oid(
+    catalog: &CatalogReadView,
+    constraint: &ConstraintCatalogRow,
+    indexes: &[super::CatalogIndexRelation],
+) -> i64 {
+    let Some(owner) = constraint.object_id else {
+        return 0;
+    };
+    let Some(parent) = indexes
+        .iter()
+        .find(|index| index.definition.relationships.owning_constraint == Some(owner))
+        .and_then(|index| index.definition.relationships.parent_index)
+    else {
+        return 0;
+    };
+    let Some(owner) = indexes
+        .iter()
+        .find(|index| {
+            index
+                .definition
+                .catalog
+                .as_ref()
+                .is_some_and(|id| id.identity.object_id == parent)
+        })
+        .and_then(|index| index.definition.relationships.owning_constraint)
+    else {
+        return 0;
+    };
+    catalog
+        .snapshot()
+        .tables
+        .values()
+        .flat_map(|table| table.keys.iter())
+        .filter_map(|key| key.catalog_identity)
+        .find(|identity| identity.object_id == owner)
+        .map_or(0, |identity| identity.oid)
 }

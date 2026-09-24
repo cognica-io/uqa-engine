@@ -7,31 +7,30 @@
 //! Bounded graph cursors over durable label, adjacency, and membership keys.
 
 use super::{
-    decode_value, edge_key, graph_membership_graph_prefix, graph_membership_key, key_with_tag,
-    push_str, push_u64, read_str, read_u64, single_str_key, vertex_key, EdgeRow, KeyValueBatch,
-    KeyValueCatalog, StorageBackendError, StorageBackendResult, StoredEdge, StoredVertex, TAG_EDGE,
-    TAG_METADATA, TAG_VERTEX,
+    decode_value, key_with_tag, push_str, push_u64, read_str, read_u64, single_str_key, EdgeRow,
+    KeyValueBatch, KeyValueCatalog, StorageBackendError, StorageBackendResult, StoredEdge,
+    StoredVertex, TAG_EDGE, TAG_METADATA, TAG_VERTEX,
 };
 use crate::key_value::TAG_GRAPH_LOOKUP;
 use crate::{GraphEntityFilter, GraphEntityKind, GraphVertexRow};
 
-const INDEX_VERSION: &str = "graph_lookup_indexes_v1";
+pub(super) const INDEX_VERSION: &str = "graph_lookup_indexes_v1";
 static MIGRATION_SAVEPOINT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
-fn label_prefix(kind: GraphEntityKind, label: &str) -> StorageBackendResult<Vec<u8>> {
+pub(super) fn label_prefix(kind: GraphEntityKind, label: &str) -> StorageBackendResult<Vec<u8>> {
     let mut key = vec![TAG_GRAPH_LOOKUP, b'l'];
     push_str(&mut key, kind.as_str())?;
     push_str(&mut key, label)?;
     Ok(key)
 }
 
-fn endpoint_prefix(outgoing: bool, vertex: u64) -> Vec<u8> {
+pub(super) fn endpoint_prefix(outgoing: bool, vertex: u64) -> Vec<u8> {
     let mut key = vec![TAG_GRAPH_LOOKUP, if outgoing { b'o' } else { b'i' }];
     push_u64(&mut key, vertex);
     key
 }
 
-fn membership_prefix(kind: &str, id: u64) -> StorageBackendResult<Vec<u8>> {
+pub(super) fn membership_prefix(kind: &str, id: u64) -> StorageBackendResult<Vec<u8>> {
     let mut key = vec![TAG_GRAPH_LOOKUP, b'm'];
     push_str(&mut key, kind)?;
     push_u64(&mut key, id);
@@ -48,7 +47,7 @@ pub(super) fn reverse_membership_key(
     Ok(key)
 }
 
-fn identity_key(mut prefix: Vec<u8>, id: u64) -> Vec<u8> {
+pub(super) fn identity_key(mut prefix: Vec<u8>, id: u64) -> Vec<u8> {
     push_u64(&mut prefix, id);
     prefix
 }
@@ -72,67 +71,64 @@ pub(super) fn edge_lookup_keys(id: u64, row: &StoredEdge) -> StorageBackendResul
 }
 
 impl KeyValueCatalog {
-    fn graph_lookup_indexes_ready(&self) -> StorageBackendResult<bool> {
-        match self
-            .store
-            .get(&single_str_key(TAG_METADATA, INDEX_VERSION)?)?
-        {
-            Some(version) if version == b"1" => Ok(true),
-            None => Ok(false),
-            Some(_) => Err(StorageBackendError::Other(
-                "unsupported graph lookup index version".into(),
-            )),
-        }
-    }
-
-    fn require_graph_lookup_indexes(&self) -> StorageBackendResult<()> {
-        if self.graph_lookup_indexes_ready()? {
-            return Ok(());
-        }
-        for prefix in [
-            key_with_tag(TAG_VERTEX),
-            key_with_tag(TAG_EDGE),
-            super::graph_membership_prefix(),
-        ] {
-            if !self
-                .store
-                .scan_prefix_keys_after(&prefix, None, 1)?
-                .is_empty()
-            {
-                return Err(StorageBackendError::Other(
-                    "graph lookup indexes require an explicit catalog migration".into(),
-                ));
-            }
-        }
-        Ok(())
-    }
-
-    pub(super) fn delete_graph_memberships_into(
+    pub(super) fn with_graph_read<T>(
         &self,
-        batch: &mut dyn KeyValueBatch,
-        graph: &str,
-    ) -> StorageBackendResult<()> {
-        self.invalidate_graph_path_data(batch, graph)?;
-        let prefix = graph_membership_graph_prefix(graph)?;
-        let mut after = None;
-        loop {
-            let keys = self
-                .store
-                .scan_prefix_keys_after(&prefix, after.as_deref(), 256)?;
-            if keys.is_empty() {
-                break;
-            }
-            after = keys.last().cloned();
-            for key in keys {
-                let mut offset = prefix.len();
-                let kind = read_str(&key, &mut offset)?;
-                let id = read_u64(&key, &mut offset)?;
-                batch.delete(&reverse_membership_key(&kind, id, graph)?)?;
-            }
-        }
-        batch.delete_prefix(&prefix)
+        operation: impl FnOnce(super::graph_view::GraphRead<'_>) -> StorageBackendResult<T>,
+    ) -> StorageBackendResult<T> {
+        let identifiers = self.store.identifier_allocator().is_some();
+        crate::key_value::index_view::read_view(self.store.as_ref(), |read| {
+            operation(super::graph_view::GraphRead { read, identifiers })
+        })
     }
 
+    pub(super) fn with_graph_mutation(
+        &self,
+        operation: impl FnOnce(
+            &super::graph_view::GraphRead<'_>,
+            &mut dyn KeyValueBatch,
+        ) -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<()> {
+        self.ensure_graph_lookup_indexes()?;
+        let identifiers = self.store.identifier_allocator().is_some();
+        crate::key_value::index_view::evaluate_mutation(self.store.as_ref(), |read, batch| {
+            operation(&super::graph_view::GraphRead { read, identifiers }, batch)
+        })
+    }
+
+    fn graph_lookup_indexes_ready(&self) -> StorageBackendResult<bool> {
+        crate::key_value::index_view::read_view(
+            self.store.as_ref(),
+            super::graph_view::graph_lookup_indexes_ready,
+        )
+    }
+
+    pub(super) fn graph_vertex_impl(
+        &self,
+        id: u64,
+    ) -> StorageBackendResult<Option<GraphVertexRow>> {
+        self.with_graph_read(|read| read.vertex(id))
+    }
+
+    pub(super) fn graph_edge_impl(&self, id: u64) -> StorageBackendResult<Option<EdgeRow>> {
+        self.with_graph_read(|read| read.edge(id))
+    }
+
+    pub(super) fn graph_entity_ids_impl(
+        &self,
+        filter: GraphEntityFilter<'_>,
+        after: Option<u64>,
+        limit: usize,
+    ) -> StorageBackendResult<Vec<u64>> {
+        self.with_graph_read(|read| read.ids(filter, after, limit))
+    }
+
+    pub(super) fn graph_entity_memberships_impl(
+        &self,
+        kind: GraphEntityKind,
+        id: u64,
+    ) -> StorageBackendResult<Vec<String>> {
+        self.with_graph_read(|read| read.memberships(kind, id))
+    }
     pub(super) fn ensure_graph_lookup_indexes(&self) -> StorageBackendResult<()> {
         let _guard = self.graph_indexes_lock.lock();
         let marker = single_str_key(TAG_METADATA, INDEX_VERSION)?;
@@ -231,214 +227,11 @@ impl KeyValueCatalog {
             },
         }
     }
-
-    pub(super) fn graph_vertex_impl(
-        &self,
-        id: u64,
-    ) -> StorageBackendResult<Option<GraphVertexRow>> {
-        self.store
-            .get(&vertex_key(id))?
-            .map(|value| {
-                let row: StoredVertex = decode_value(&value)?;
-                Ok(GraphVertexRow {
-                    vertex_id: id,
-                    label: row.label,
-                    properties_json: row.properties_json,
-                })
-            })
-            .transpose()
-    }
-
-    pub(super) fn graph_edge_impl(&self, id: u64) -> StorageBackendResult<Option<EdgeRow>> {
-        self.store
-            .get(&edge_key(id))?
-            .map(|value| {
-                let row: StoredEdge = decode_value(&value)?;
-                Ok(EdgeRow {
-                    edge_id: id,
-                    source_id: row.source_id,
-                    target_id: row.target_id,
-                    label: row.label,
-                    properties_json: row.properties_json,
-                })
-            })
-            .transpose()
-    }
-
-    pub(super) fn graph_entity_ids_impl(
-        &self,
-        filter: GraphEntityFilter<'_>,
-        after: Option<u64>,
-        limit: usize,
-    ) -> StorageBackendResult<Vec<u64>> {
-        filter.validate()?;
-        crate::catalog::validate_graph_page(limit)?;
-        if filter.source.is_some() || filter.target.is_some() || filter.label.is_some() {
-            self.require_graph_lookup_indexes()?;
-        }
-        let prefix = if let Some(source) = filter.source {
-            endpoint_prefix(true, source)
-        } else if let Some(target) = filter.target {
-            endpoint_prefix(false, target)
-        } else if let Some(label) = filter.label {
-            label_prefix(filter.kind, label)?
-        } else if let Some(graph) = filter.graph {
-            let mut key = graph_membership_graph_prefix(graph)?;
-            push_str(&mut key, filter.kind.as_str())?;
-            key
-        } else {
-            key_with_tag(if filter.kind == GraphEntityKind::Vertex {
-                TAG_VERTEX
-            } else {
-                TAG_EDGE
-            })
-        };
-        let mut cursor = after.map(|id| identity_key(prefix.clone(), id));
-        let mut result = Vec::new();
-        loop {
-            let keys = self
-                .store
-                .scan_prefix_keys_after(&prefix, cursor.as_deref(), 256)?;
-            if keys.is_empty() {
-                break;
-            }
-            cursor = keys.last().cloned();
-            for key in keys {
-                let mut offset = prefix.len();
-                let id = read_u64(&key, &mut offset)?;
-                if let Some(graph) = filter.graph {
-                    if !self.store.contains_key(&graph_membership_key(
-                        filter.kind.as_str(),
-                        id,
-                        graph,
-                    )?)? {
-                        continue;
-                    }
-                }
-                let matches = match filter.kind {
-                    GraphEntityKind::Vertex => {
-                        if filter.label.is_none() {
-                            self.store.contains_key(&vertex_key(id))?
-                        } else {
-                            self.graph_vertex_impl(id)?.is_some_and(|row| {
-                                filter.label.is_none_or(|label| row.label == label)
-                            })
-                        }
-                    }
-                    GraphEntityKind::Edge => {
-                        if filter.label.is_none()
-                            && filter.source.is_none()
-                            && filter.target.is_none()
-                        {
-                            self.store.contains_key(&edge_key(id))?
-                        } else {
-                            self.graph_edge_impl(id)?.is_some_and(|row| {
-                                filter.label.is_none_or(|label| row.label == label)
-                                    && filter.source.is_none_or(|source| row.source_id == source)
-                                    && filter.target.is_none_or(|target| row.target_id == target)
-                            })
-                        }
-                    }
-                };
-                if !matches {
-                    // A surviving index/membership must never conceal an absent entity.
-                    let exists =
-                        self.store
-                            .contains_key(&if filter.kind == GraphEntityKind::Vertex {
-                                vertex_key(id)
-                            } else {
-                                edge_key(id)
-                            })?;
-                    if !exists {
-                        return Err(StorageBackendError::Other(format!(
-                            "graph lookup references missing {} {id}",
-                            filter.kind.as_str()
-                        )));
-                    }
-                    continue;
-                }
-                result.push(id);
-                if result.len() == limit {
-                    return Ok(result);
-                }
-            }
-        }
-        Ok(result)
-    }
-
-    pub(super) fn graph_entity_memberships_impl(
-        &self,
-        kind: GraphEntityKind,
-        id: u64,
-    ) -> StorageBackendResult<Vec<String>> {
-        self.require_graph_lookup_indexes()?;
-        let prefix = membership_prefix(kind.as_str(), id)?;
-        let mut after = None;
-        let mut graphs = Vec::new();
-        loop {
-            let keys = self
-                .store
-                .scan_prefix_keys_after(&prefix, after.as_deref(), 256)?;
-            if keys.is_empty() {
-                break;
-            }
-            after = keys.last().cloned();
-            for key in keys {
-                let mut offset = prefix.len();
-                graphs.push(read_str(&key, &mut offset)?);
-            }
-        }
-        graphs.sort();
-        Ok(graphs)
-    }
-
-    pub(super) fn replace_vertex_lookup(
-        &self,
-        batch: &mut dyn KeyValueBatch,
-        id: u64,
-        row: Option<&StoredVertex>,
-    ) -> StorageBackendResult<()> {
-        for graph in self.graph_entity_memberships_impl(GraphEntityKind::Vertex, id)? {
-            self.invalidate_graph_path_data(batch, &graph)?;
-        }
-        if let Some(old) = self.store.get(&vertex_key(id))? {
-            for key in vertex_lookup_keys(id, &decode_value(&old)?)? {
-                batch.delete(&key)?;
-            }
-        }
-        if let Some(row) = row {
-            for key in vertex_lookup_keys(id, row)? {
-                batch.put(&key, &[])?;
-            }
-        }
-        Ok(())
-    }
-
-    pub(super) fn replace_edge_lookup(
-        &self,
-        batch: &mut dyn KeyValueBatch,
-        id: u64,
-        row: Option<&StoredEdge>,
-    ) -> StorageBackendResult<()> {
-        for graph in self.graph_entity_memberships_impl(GraphEntityKind::Edge, id)? {
-            self.invalidate_graph_path_data(batch, &graph)?;
-        }
-        if let Some(old) = self.store.get(&edge_key(id))? {
-            for key in edge_lookup_keys(id, &decode_value(&old)?)? {
-                batch.delete(&key)?;
-            }
-        }
-        if let Some(row) = row {
-            for key in edge_lookup_keys(id, row)? {
-                batch.put(&key, &[])?;
-            }
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::vertex_key;
     use super::*;
     use crate::{KeyValueStore, MemoryKeyValueStore};
     use std::sync::Arc;

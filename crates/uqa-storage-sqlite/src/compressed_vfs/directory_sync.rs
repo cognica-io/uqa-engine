@@ -36,9 +36,12 @@ pub(super) fn sync_parent_directory(path: &Path) -> std::io::Result<()> {
     File::open(parent)?.sync_all()
 }
 
-/// Directory synchronization is not available through the portable file API
-/// on non-Unix targets, so this operation is a no-op there.
+/// Directory synchronization is not available through the portable file API on non-Unix targets, so this operation preserves the shared fallible call contract without additional I/O there.
 #[cfg(not(unix))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "platform implementations share the fallible Unix directory synchronization contract"
+)]
 pub(super) fn sync_parent_directory(_path: &Path) -> std::io::Result<()> {
     Ok(())
 }

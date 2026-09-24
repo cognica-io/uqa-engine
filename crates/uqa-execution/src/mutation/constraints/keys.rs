@@ -109,7 +109,7 @@ pub fn lock_document_key_dependencies(
         let key =
             crate::canonical_row_key(lock_values).map_err(crate::physical::physical_exec_error)?;
         let mut digest = Sha256::new();
-        digest.update(b"uqa-key-lock-v1");
+        digest.update(b"uqa-key-lock-v2");
         update_key_lock_digest(&mut digest, canonical_table.as_bytes())?;
         digest.update([match constraint.kind {
             uqa_sql::ast::TableKeyConstraintKind::PrimaryKey => 0,
@@ -117,8 +117,12 @@ pub fn lock_document_key_dependencies(
         }]);
         digest.update([u8::from(constraint.nulls_not_distinct)]);
         digest.update([u8::from(constraint.without_overlaps)]);
-        let identity = serde_json::to_vec(&constraint.keys)
-            .map_err(|error| SQLError::Internal(error.to_string()))?;
+        let identity = match &constraint.index_catalog {
+            Some(index) => index.identity.object_id.to_vec(),
+            None => serde_json::to_vec(&constraint.keys)
+                .map_err(|error| SQLError::Internal(error.to_string()))?,
+        };
+        digest.update([u8::from(constraint.index_catalog.is_some())]);
         update_key_lock_digest(&mut digest, &identity)?;
         update_key_lock_digest(&mut digest, &key)?;
         let digest: [u8; 32] = digest.finalize().into();

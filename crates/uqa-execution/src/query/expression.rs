@@ -15,6 +15,9 @@ use std::sync::Arc;
 use uqa_core::Value;
 use uqa_sql::{expr::RowLookup, SQLError, SQLParam};
 
+#[cfg(test)]
+mod tests;
+
 /// Scalar execution services that can intercept a function requiring its unevaluated argument expressions.
 pub trait ScalarExpressionContext: QueryExpressionContext {
     fn intercept_function(
@@ -59,7 +62,7 @@ impl<'a> ScopedExpressionEvaluator<'a> {
             .with_function_hook(hook)
             .with_subquery_runner(hook)
             .with_physical_outer_row(schema, row);
-        if let ScalarExpr::Func { name, args, .. } = expression {
+        if let Some((name, args)) = intercepted_call(expression, self) {
             let mut evaluate = |expr: &ScalarExpr| {
                 eval_physical_scalar(expr, self.context.subquery_plans(), &context)
             };
@@ -85,7 +88,7 @@ impl ExpressionEvaluator for ScopedExpressionEvaluator<'_> {
         let context = PhysicalEvalContext::from_row_lookup(row, self.params)
             .with_function_hook(hook)
             .with_subquery_runner(hook);
-        if let ScalarExpr::Func { name, args, .. } = expression {
+        if let Some((name, args)) = intercepted_call(expression, self) {
             let mut evaluate = |expr: &ScalarExpr| {
                 eval_physical_scalar(expr, self.context.subquery_plans(), &context)
             };
@@ -130,6 +133,32 @@ impl ExpressionEvaluator for ScopedExpressionEvaluator<'_> {
         schema: &crate::RowSchema,
     ) -> ScalarExpr {
         crate::bind_type_introspection_with_resolver(expression, schema, self.params, self)
+    }
+}
+
+fn intercepted_call<'expression>(
+    expression: &'expression ScalarExpr,
+    resolver: &dyn FunctionTypeResolver,
+) -> Option<(&'expression str, &'expression [ScalarExpr])> {
+    let ScalarExpr::Func {
+        name,
+        binding,
+        args,
+        ..
+    } = expression
+    else {
+        return None;
+    };
+    match binding {
+        Some(binding)
+            if binding.builtin
+                && binding.dispatch.is_none()
+                && binding.resolution_error.is_none() =>
+        {
+            Some((&binding.name, args))
+        }
+        None if !resolver.has_untyped_function(name) => Some((name, args)),
+        _ => None,
     }
 }
 

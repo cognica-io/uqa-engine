@@ -70,6 +70,7 @@ pub fn forbidden_command(
         CommandPlan::Drop(drop) if drop.kind == DropKind::Domain => Ok(Some("DROP DOMAIN")),
         CommandPlan::Drop(_) => Ok(Some("DROP")),
         CommandPlan::AlterTable(_) => Ok(Some("ALTER TABLE")),
+        CommandPlan::RenameIndex(_) => Ok(Some("ALTER INDEX")),
         CommandPlan::AlterForeignTable(_) => Ok(Some("ALTER FOREIGN TABLE")),
         CommandPlan::AlterView(_) => Ok(Some("ALTER VIEW")),
         CommandPlan::CreateView { .. } => Ok(Some("CREATE VIEW")),
@@ -78,6 +79,7 @@ pub fn forbidden_command(
         CommandPlan::CreateSchema { .. } => Ok(Some("CREATE SCHEMA")),
         CommandPlan::AlterSchemaOwner { .. } => Ok(Some("ALTER SCHEMA")),
         CommandPlan::Analyze { .. } => Ok(None),
+        CommandPlan::LockTable(_) => Ok(None),
         // VACUUM's transaction-block prohibition has precedence over read-only validation and is enforced by its executor.
         CommandPlan::Vacuum(_) => Ok(None),
         CommandPlan::Truncate { .. } => Ok(Some("TRUNCATE")),
@@ -121,7 +123,7 @@ pub fn forbidden_command(
         CommandPlan::GrantSchema(_) => Ok(Some("GRANT ON SCHEMA")),
         CommandPlan::GrantRole(_) => Ok(Some("GRANT ROLE")),
         CommandPlan::CreateRole(_) => Ok(Some("CREATE ROLE")),
-        CommandPlan::AlterRole(_) => Ok(Some("ALTER ROLE")),
+        CommandPlan::AlterRole(_) | CommandPlan::RenameRole(_) => Ok(Some("ALTER ROLE")),
         CommandPlan::DropRole(_) => Ok(Some("DROP ROLE")),
         CommandPlan::CreateTrigger(_) => Ok(Some("CREATE TRIGGER")),
         CommandPlan::DropTrigger(_) => Ok(Some("DROP TRIGGER")),
@@ -163,6 +165,7 @@ pub fn plan_sets_transaction_snapshot(plan: &UnifiedPlan) -> bool {
                     | CommandPlan::SetConstraints { .. }
                     | CommandPlan::ShowVariable { .. }
                     | CommandPlan::Transaction(_)
+                    | CommandPlan::LockTable(_)
                     | CommandPlan::FetchCursor(_)
                     | CommandPlan::CloseCursor { .. }
                     | CommandPlan::Deallocate { .. }

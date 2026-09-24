@@ -12,6 +12,9 @@ use crate::expr::{value_to_tensor, value_to_vector};
 use crate::{ColumnType, SQLError};
 use uqa_core::Value;
 
+mod budgeted;
+pub use budgeted::index_vectors_for_type_budgeted;
+
 pub fn index_vectors_for_type(value: &Value, ty: &ColumnType) -> Result<Vec<Vec<f32>>, SQLError> {
     // SQL VECTOR/TENSOR columns are nullable unless their declaration says
     // otherwise. A NULL value therefore means that the row has no vectors to

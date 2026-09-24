@@ -122,12 +122,6 @@ fn bind_session_portal_relation_reference(
         return Ok(());
     }
     let requested = name.clone();
-    if let Some(canonical) =
-        crate::binding::view_dependencies::canonical_virtual_relation_reference(&requested)
-    {
-        *name = canonical;
-        return Ok(());
-    }
     if uqa_core::RelationIdentity::parse_reference(&requested)
         .ok()
         .is_some_and(|(schema, relation)| {

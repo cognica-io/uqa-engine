@@ -22,6 +22,7 @@ pub trait ViewCreationCatalog: ViewIdentityAllocation {
     fn synchronize(&self) -> StorageBackendResult<()>;
 }
 pub trait ViewPlanBinding {
+    fn lock_relations(&self, plan: &QueryPlan) -> Result<(), SQLError>;
     fn bind_relations(&self, plan: &mut QueryPlan) -> Result<bool, SQLError>;
     fn bind_routines(
         &self,
@@ -30,17 +31,20 @@ pub trait ViewPlanBinding {
     ) -> Result<RowSchema, SQLError>;
 }
 pub trait MaterializedViewAccess {
-    fn current_user_name(&self) -> String;
     fn ensure_maintenance(&self, name: &str, view: &StoredView) -> Result<(), SQLError>;
 }
 pub type ViewOwnerQuery<'a> =
     Box<dyn FnOnce(&dyn TableAsQuerySource) -> Result<SQLResult, SQLError> + 'a>;
 pub trait ViewQueryOwners {
-    fn with_owner(&self, owner: &str, operation: ViewOwnerQuery<'_>)
-        -> Result<SQLResult, SQLError>;
+    fn with_owner(
+        &self,
+        owner: &uqa_sql::catalog::roles::RoleReference,
+        operation: ViewOwnerQuery<'_>,
+    ) -> Result<SQLResult, SQLError>;
 }
 pub struct ViewCreationContext<'a> {
     pub catalog: &'a dyn ViewCreationCatalog,
+    pub locks: &'a dyn crate::row_locks::binding::RelationDefinitionSession,
     pub views: &'a dyn ViewAlterCatalog,
     pub namespace: crate::schema::namespaces::relations::RelationCreationContext<'a>,
     pub names: &'a dyn RelationAlterNames,

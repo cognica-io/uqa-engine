@@ -10,11 +10,15 @@ use super::{
     publication, ViewRegistration,
 };
 use crate::catalog::view::{StoredView, StoredViewKind};
+use crate::row_locks::{
+    binding::{bind_relation, RelationBinding},
+    RelationLockMode,
+};
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     catalog::{
         regrole_dependencies::StoredRegroleConstants,
-        view::{create_view_output_columns, named_view_schema},
+        view::{create_view_output_columns, named_view_schema, validate_view_column_types},
     },
     plan::{QueryPlan, UnifiedPlan},
     schema::view_creation::{
@@ -68,26 +72,45 @@ fn replacement_view(
     or_replace: bool,
     replacement_schema: &uqa_sql::RowSchema,
 ) -> Result<Option<StoredView>, SQLError> {
-    let kind = context
-        .names
-        .relation_kind_at(name)
-        .map_err(|error| SQLError::Internal(format!("resolve relation `{name}`: {error}")))?;
-    if !replacement_is_view(name, kind, or_replace)? {
-        return Ok(None);
-    }
-    let existing = context.views.view(relation).ok_or_else(|| {
-        SQLError::Internal(format!(
-            "view `{name}` exists in the catalog but has no loaded definition"
-        ))
-    })?;
-    let existing_schema = uqa_sql::semantics::view_rewrite::context::stored_view_schema(
-        context.rewrite,
-        &existing.rewrite_definition(),
+    let binding = bind_relation(
+        context.locks,
+        RelationLockMode::AccessExclusive,
+        false,
+        || {
+            let kind = context.names.relation_kind_at(name).map_err(|error| {
+                SQLError::Internal(format!("resolve relation `{name}`: {error}"))
+            })?;
+            let view = if replacement_is_view(name, kind, or_replace)? {
+                Some(context.views.view(relation).ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "view `{name}` exists in the catalog but has no loaded definition"
+                    ))
+                })?)
+            } else {
+                None
+            };
+            Ok(view.map(|view| RelationBinding {
+                name: name.into(),
+                object_id: Some(view.object_id),
+                value: view,
+            }))
+        },
+        |binding| {
+            context.owners.ensure_owner(name, &binding.value)?;
+            context.namespace.ensure_create(name)
+        },
     )?;
-    validate_replacement_schema(&existing_schema, replacement_schema)?;
-    context.owners.ensure_owner(name, &existing)?;
-    Ok(Some(existing))
+    if let Some(binding) = &binding {
+        let existing = &binding.value;
+        let existing_schema = uqa_sql::semantics::view_rewrite::context::stored_view_schema(
+            context.rewrite,
+            &existing.rewrite_definition(),
+        )?;
+        validate_replacement_schema(&existing_schema, replacement_schema)?;
+    }
+    Ok(binding.map(|binding| binding.value))
 }
+
 pub(super) fn reject_regrole_constants(
     context: &ViewCreationContext<'_>,
     plan: &mut QueryPlan,
@@ -113,6 +136,8 @@ fn register_view_plan_inner(
         .catalog
         .synchronize()
         .map_err(|err| SQLError::Internal(format!("refresh view catalog: {err}")))?;
+    let owner = context.namespace.bind_owner()?;
+    context.bindings.lock_relations(&plan)?;
     let uses_temporary_relation = context.bindings.bind_relations(&mut plan)?;
     let (name, persistence) = view_creation_target(
         &context.namespace,
@@ -125,14 +150,15 @@ fn register_view_plan_inner(
     let query_schema = context.bindings.bind_routines(&mut plan, params)?;
     reject_regrole_constants(context, &mut plan)?;
     let output_columns = create_view_output_columns(&query_schema, column_names)?;
-    for (position, column) in output_columns.iter().enumerate() {
-        if let Some(ty) = query_schema.column_type(position) {
-            uqa_sql::schema::columns::validate_postgres_relation_column_type(column, ty)?;
-        }
-    }
+    validate_view_column_types(&query_schema, &output_columns)?;
     let replacement_schema = named_view_schema(&query_schema, &output_columns)?;
     let existing_view =
         replacement_view(context, &name, &relation, or_replace, &replacement_schema)?;
+    if existing_view.is_none() {
+        context.namespace.retain_owner(&owner)?;
+    }
+    context.locks.prepare_definition_write()?;
+    context.namespace.ensure_create(&name)?;
     let object_id = if let Some(existing) = existing_view.as_ref() {
         existing.object_id
     } else {
@@ -141,31 +167,30 @@ fn register_view_plan_inner(
         })?
     };
     let view = StoredView {
-        object_id,
-        role_owner: existing_view.as_ref().map_or_else(
-            || context.access.current_user_name(),
-            |view| view.role_owner.clone(),
+        security: existing_view.as_ref().map_or_else(
+            || uqa_sql::catalog::security::BoundTableSecurity::owner(owner.identity()),
+            |view| view.security.clone(),
         ),
-        acl: existing_view.as_ref().and_then(|view| view.acl.clone()),
-        column_acls: existing_view
-            .as_ref()
-            .map_or_else(std::collections::BTreeMap::new, |view| {
-                view.column_acls.clone()
-            }),
-        query: plan,
-        output_columns: Some(output_columns),
-        persistence,
-        options: options.to_vec(),
-        kind: StoredViewKind::View,
-        materialized_rows: Vec::new(),
-        materialized_column_types: Vec::new(),
-        populated: true,
+        definition: uqa_sql::catalog::stored_view::StoredViewDefinition {
+            object_id,
+            query: plan,
+            output_columns: Some(output_columns),
+            persistence,
+            options: options.to_vec(),
+            kind: StoredViewKind::View,
+            materialized_rows: Vec::new(),
+            materialized_column_types: Vec::new(),
+            populated: true,
+        },
     };
     uqa_sql::semantics::view_rewrite::validate_view_definition_check_option(
         context.rewrite,
         &name,
         &view.rewrite_definition(),
     )?;
+    if existing_view.is_none() {
+        context.namespace.reserve_row_type_name(&name)?;
+    }
     publication::publish_regular_view(context.publication, context.changes, relation, view, &name)?;
     Ok(())
 }

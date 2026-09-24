@@ -71,22 +71,13 @@ impl Engine {
         definition: &IndexDefinition,
     ) -> StorageBackendResult<()> {
         self.synchronize_catalog_registries()?;
-        let table = self
-            .try_resolve_table_name(table)?
-            .ok_or_else(|| StorageBackendError::Other(format!("table `{table}` does not exist")))?;
-        let table_relation =
-            RelationIdentity::from_legacy_name(&table).map_err(StorageBackendError::Other)?;
-        let (requested_schema, local_name) =
-            RelationIdentity::parse_reference(name).map_err(StorageBackendError::Other)?;
-        if requested_schema
-            .as_deref()
-            .is_some_and(|schema| schema != table_relation.schema)
-        {
-            return Err(StorageBackendError::Other(format!(
-                "index `{name}` cannot belong to a different schema than table `{table}`"
-            )));
-        }
-        let relation = RelationIdentity::new(&table_relation.schema, local_name);
+        let (relation, table_relation) =
+            uqa_execution::schema::indexes::registry::binding::registration(
+                &self.index_registry_context(),
+                name,
+                table,
+            )?;
+        let table = table_relation.qualified_name();
         if let crate::capabilities::RelationResolution::Found(_, kind) = self
             .resolve_bound_relation_kind(&relation.qualified_name())
             .map_err(|error| StorageBackendError::Other(error.to_string()))?
@@ -98,13 +89,13 @@ impl Engine {
                 )));
             }
         }
-        let persistence = self
-            .storage
-            .tables
-            .read()
-            .get(&table_relation)
-            .map(|table| table.persistence)
-            .ok_or_else(|| StorageBackendError::Other(format!("table `{table}` does not exist")))?;
+        let definition = uqa_execution::schema::indexes::registration::prepare(
+            self.catalog_identity_reservation_context(),
+            &relation,
+            &table_relation,
+            definition,
+        )
+        .map_err(|error| StorageBackendError::backend("index catalog identity", error))?;
         let columns_json = serde_json::to_string(columns).map_err(StorageBackendError::from)?;
         let options_map: std::collections::BTreeMap<String, String> =
             options.iter().cloned().collect();
@@ -116,100 +107,12 @@ impl Engine {
             table_name: table.clone(),
             columns_json: columns_json.clone(),
             parameters_json: parameters_json.clone(),
-            definition_json: Some(serde_json::to_string(definition)?),
+            definition_json: Some(serde_json::to_string(&definition)?),
         };
-        let previous = self
-            .durable
-            .catalog_indexes
-            .write()
-            .insert(relation.clone(), row.clone());
-        if let Err(err) = self.refresh_catalog_index_tables(&row, previous.as_ref()) {
-            self.restore_catalog_index_entry(&relation, previous.as_ref());
-            if let Err(cleanup) = self.restore_catalog_index_tables(&row, previous.as_ref()) {
-                return Err(StorageBackendError::Other(format!(
-                    "{err}; restoring value indexes after the index build failure also failed: {cleanup}"
-                )));
-            }
-            return Err(err);
-        }
-        if persistence != uqa_sql::ast::RelationPersistence::Temporary {
-            if let Some(catalog) = self.storage.catalog.as_ref() {
-                if let Err(err) = catalog.save_catalog_index_row(&row) {
-                    self.restore_catalog_index_entry(&relation, previous.as_ref());
-                    if let Err(cleanup) = self.restore_catalog_index_tables(&row, previous.as_ref())
-                    {
-                        return Err(StorageBackendError::Other(format!(
-                            "{err}; restoring value indexes after the catalog write failure also failed: {cleanup}"
-                        )));
-                    }
-                    return Err(err);
-                }
-                self.note_table_catalog_changed();
-            }
-        }
-        self.note_catalog_registry_changed();
-        Ok(())
-    }
-
-    fn refresh_catalog_index_table_tree(&self, table: &str) -> StorageBackendResult<()> {
-        let tables = if self.try_table_hierarchy(table)?.partition_spec.is_some() {
-            self.hierarchy_scan_tables(table, true)
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?
-        } else {
-            vec![table.to_string()]
-        };
-        for table in tables {
-            self.refresh_value_indexes_for_table(&table)?;
-        }
-        Ok(())
-    }
-
-    fn restore_catalog_index_tables(
-        &self,
-        current: &CatalogIndexRow,
-        previous: Option<&CatalogIndexRow>,
-    ) -> StorageBackendResult<()> {
-        let mut tables = std::collections::BTreeSet::new();
-        for row in std::iter::once(current).chain(previous) {
-            if row.index_type.eq_ignore_ascii_case("btree") {
-                tables.insert(row.table_name.as_str());
-            }
-        }
-        for table in tables {
-            if self.try_resolve_table_name(table)?.is_some() {
-                self.refresh_catalog_index_table_tree(table)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn restore_catalog_index_entry(
-        &self,
-        relation: &RelationIdentity,
-        previous: Option<&CatalogIndexRow>,
-    ) {
-        let mut indexes = self.durable.catalog_indexes.write();
-        indexes.remove(relation);
-        if let Some(previous) = previous {
-            indexes.insert(relation.clone(), previous.clone());
-        }
-    }
-
-    fn refresh_catalog_index_tables(
-        &self,
-        current: &CatalogIndexRow,
-        previous: Option<&CatalogIndexRow>,
-    ) -> StorageBackendResult<()> {
-        let mut tables = std::collections::BTreeSet::new();
-        for row in std::iter::once(current).chain(previous) {
-            if row.index_type.eq_ignore_ascii_case("btree") {
-                tables.insert(row.table_name.as_str());
-            }
-        }
-        for table in tables {
-            self.refresh_catalog_index_table_tree(table)?;
-        }
-        Ok(())
+        uqa_execution::schema::indexes::registry::lifecycle::register(
+            &self.index_registry_context(),
+            row,
+        )
     }
 
     pub fn drop_catalog_index(&self, name: &str) -> StorageBackendResult<Option<CatalogIndexRow>> {
@@ -220,10 +123,16 @@ impl Engine {
         &self,
         name: &str,
     ) -> StorageBackendResult<Option<CatalogIndexRow>> {
-        let Some(relation) = self.try_resolve_catalog_index_relation(name)? else {
-            return Ok(None);
-        };
-        self.try_drop_catalog_index_relation(&relation)
+        self.with_implicit_storage_transaction(|engine| {
+            let Some(relation) = engine.try_resolve_catalog_index_relation(name)? else {
+                return Ok(None);
+            };
+            uqa_execution::schema::indexes::registry::binding::removal(
+                &engine.index_registry_context(),
+                &relation,
+            )?;
+            engine.try_drop_catalog_index_inner(&relation, false)
+        })
     }
 
     pub(crate) fn try_drop_catalog_index_relation(
@@ -231,66 +140,31 @@ impl Engine {
         relation: &RelationIdentity,
     ) -> StorageBackendResult<Option<CatalogIndexRow>> {
         self.with_implicit_storage_transaction(|engine| {
-            engine.try_drop_catalog_index_inner(relation)
+            engine.try_drop_catalog_index_inner(relation, true)
         })
     }
 
     fn try_drop_catalog_index_inner(
         &self,
         relation: &RelationIdentity,
+        cascade: bool,
     ) -> StorageBackendResult<Option<CatalogIndexRow>> {
         self.synchronize_catalog_registries()?;
-        let existing = self.durable.catalog_indexes.read().get(relation).cloned();
-        let Some(existing_row) = existing else {
-            return Ok(None);
-        };
-        let removed = self.durable.catalog_indexes.write().remove(relation);
-        if existing_row.index_type.eq_ignore_ascii_case("btree") {
-            if let Err(err) = self.refresh_catalog_index_table_tree(&existing_row.table_name) {
-                self.durable
-                    .catalog_indexes
-                    .write()
-                    .insert(relation.clone(), existing_row.clone());
-                if let Err(cleanup) =
-                    self.refresh_catalog_index_table_tree(&existing_row.table_name)
-                {
-                    return Err(StorageBackendError::Other(format!(
-                        "{err}; restoring value indexes after the index drop failure also failed: {cleanup}"
-                    )));
-                }
-                return Err(err);
-            }
-        }
-        let temporary = RelationIdentity::from_legacy_name(&existing_row.table_name)
-            .ok()
-            .and_then(|table| self.storage.tables.read().get(&table).cloned())
-            .is_some_and(|table| table.persistence == uqa_sql::ast::RelationPersistence::Temporary);
-        if !temporary {
-            if let Some(catalog) = self.storage.catalog.as_ref() {
-                if let Err(err) = catalog.drop_catalog_index(relation) {
-                    self.durable
-                        .catalog_indexes
-                        .write()
-                        .insert(relation.clone(), existing_row.clone());
-                    if existing_row.index_type.eq_ignore_ascii_case("btree") {
-                        if let Err(cleanup) =
-                            self.refresh_catalog_index_table_tree(&existing_row.table_name)
-                        {
-                            return Err(StorageBackendError::Other(format!(
-                                "{err}; restoring value indexes after the catalog delete failure also failed: {cleanup}"
-                            )));
-                        }
-                    }
-                    return Err(err);
-                }
-                self.note_table_catalog_changed();
-            }
-        }
-        self.note_catalog_registry_changed();
-        Ok(removed)
+        uqa_execution::schema::indexes::registry::lifecycle::remove(
+            &self.index_registry_context(),
+            relation,
+            cascade,
+        )
     }
 
     pub fn catalog_index(&self, name: &str) -> StorageBackendResult<Option<CatalogIndexRow>> {
+        self.with_catalog_read_snapshot(|engine| engine.catalog_index_in_execution(name))
+    }
+
+    pub(crate) fn catalog_index_in_execution(
+        &self,
+        name: &str,
+    ) -> StorageBackendResult<Option<CatalogIndexRow>> {
         let Some(relation) = self.try_resolve_catalog_index_relation(name)? else {
             return Ok(None);
         };
@@ -298,7 +172,9 @@ impl Engine {
     }
 
     pub fn has_catalog_index(&self, name: &str) -> StorageBackendResult<bool> {
-        Ok(self.try_resolve_catalog_index_relation(name)?.is_some())
+        self.with_catalog_read_snapshot(|engine| {
+            Ok(engine.try_resolve_catalog_index_relation(name)?.is_some())
+        })
     }
 
     pub(crate) fn try_resolve_catalog_index_relation(

@@ -360,12 +360,33 @@ fn render_expr(expression: &Expr) -> Result<String, SQLError> {
         }
         Expr::Func {
             name,
+            binding,
             args,
             distinct,
             order_by,
             filter,
             ..
         } => {
+            if let Some(crate::ast::FunctionDispatch::NumericOperator(operator)) =
+                binding.as_ref().and_then(|binding| binding.dispatch)
+            {
+                return match args.as_slice() {
+                    [argument] if operator.arity() == 1 => Ok(format!(
+                        "({} {})",
+                        operator.symbol(),
+                        render_expr(argument)?
+                    )),
+                    [left, right] if operator.arity() == 2 => Ok(format!(
+                        "({} {} {})",
+                        render_expr(left)?,
+                        operator.symbol(),
+                        render_expr(right)?
+                    )),
+                    _ => Err(SQLError::Internal(
+                        "invalid numeric operator operands".into(),
+                    )),
+                };
+            }
             let mut arguments = args.iter().map(expr_sql).collect::<Vec<_>>().join(", ");
             if *distinct {
                 arguments = format!("DISTINCT {arguments}");

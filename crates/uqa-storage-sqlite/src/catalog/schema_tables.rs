@@ -6,6 +6,7 @@
 
 //! Metadata, schema, table, and column lifecycle.
 
+use super::native::{optional_text, text, NativeLookup};
 use super::{
     columns_json_references, delete_table_rows_if_exists, drop_fts_aux_tables_for_field,
     drop_fts_aux_tables_for_table, migration_relation, params,
@@ -15,10 +16,54 @@ use super::{
     OptionalExtension, RelationIdentity, RelationKind, Result, SQLiteError, SchemaRow, TableSchema,
     VectorFieldSchema,
 };
+use crate::mvcc::native::NativeRecordFamily as Family;
 
 impl Catalog {
+    pub fn metadata_with_prefix(&self, prefix: &str) -> Result<Vec<(String, String)>> {
+        if let Some(entries) = self.read_native(|snapshot| {
+            let mut entries = Vec::new();
+            snapshot.visit_rows(
+                Family::Metadata,
+                Some(crate::mvcc::native::NativeRecordOwner::Database(
+                    snapshot.database,
+                )),
+                &[],
+                |row| {
+                    let key = super::native::string(row[0])?;
+                    if key.starts_with(prefix) {
+                        entries.push((key, super::native::string(row[1])?));
+                    }
+                    Ok(())
+                },
+            )?;
+            Ok(entries)
+        })? {
+            return Ok(entries);
+        }
+        self.conn.with(|connection| {
+            let mut statement =
+                connection.prepare("SELECT key, value FROM _metadata ORDER BY key")?;
+            let mut entries = Vec::new();
+            let rows = statement.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            for row in rows {
+                let (key, value) = row?;
+                if key.starts_with(prefix) {
+                    entries.push((key, value));
+                }
+            }
+            Ok(entries)
+        })
+    }
     /// Store an arbitrary key/value pair in the `_metadata` table.
     pub fn set_metadata(&self, key: &str, value: &str) -> Result<()> {
+        if self
+            .put_native_named(Family::Metadata, &[text(key), text(value)])?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "INSERT OR REPLACE INTO _metadata (key, value) VALUES (?1, ?2)",
@@ -28,8 +73,22 @@ impl Catalog {
         })
     }
 
+    /// Delete exactly one metadata key in the current catalog transaction.
+    pub fn delete_metadata(&self, key: &str) -> Result<()> {
+        if self.drop_native_named(Family::Metadata, key)?.is_some() {
+            return Ok(());
+        }
+        self.conn.with(|connection| {
+            connection.execute("DELETE FROM _metadata WHERE key = ?1", params![key])?;
+            Ok(())
+        })
+    }
+
     /// Read a key/value pair from the `_metadata` table.
     pub fn get_metadata(&self, key: &str) -> Result<Option<String>> {
+        if let NativeLookup::Value(value) = self.get_native_named(Family::Metadata, key, 1)? {
+            return Ok(value);
+        }
         self.conn.with(|c| {
             let v: Option<String> = c
                 .query_row(
@@ -43,22 +102,38 @@ impl Catalog {
     }
 
     pub fn save_schema(&self, name: &str) -> Result<()> {
-        self.save_schema_row(&SchemaRow::legacy(name))
+        self.save_schema_row(&SchemaRow::bootstrap(name))
     }
 
     pub fn save_schema_row(&self, schema: &SchemaRow) -> Result<()> {
-        let acl_json = schema.acl.as_ref().map(serde_json::to_string).transpose()?;
+        let (owner, acl_json) = super::role_security::encode_schema(schema)?;
+        if self
+            .put_native_named(
+                Family::Schemas,
+                &[
+                    text(schema.name()),
+                    (&owner).into(),
+                    optional_text(acl_json.as_deref()),
+                ],
+            )?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with(|c| {
             c.execute(
                 "INSERT INTO _schemas (name, role_owner, acl_json) VALUES (?1, ?2, ?3)
                  ON CONFLICT(name) DO UPDATE SET role_owner = excluded.role_owner, acl_json = excluded.acl_json",
-                params![schema.name, schema.role_owner, acl_json],
+                params![schema.name(), owner, acl_json],
             )?;
             Ok(())
         })
     }
 
     pub fn drop_schema(&self, name: &str) -> Result<()> {
+        if self.drop_native_schema(name)?.is_some() {
+            return Ok(());
+        }
         self.conn.with(|c| {
             let relation_count: i64 = c.query_row(
                 "SELECT COUNT(*) FROM _relations WHERE schema_name = ?1",
@@ -79,46 +154,48 @@ impl Catalog {
         Ok(self
             .load_schema_rows()?
             .into_iter()
-            .map(|schema| schema.name)
+            .map(|schema| schema.name().to_owned())
             .collect())
     }
 
     pub fn load_schema_rows(&self) -> Result<Vec<SchemaRow>> {
+        if let Some(schemas) = self.load_native_schemas()? {
+            return Ok(schemas);
+        }
         self.conn.with(|c| {
             let mut stmt =
                 c.prepare("SELECT name, role_owner, acl_json FROM _schemas ORDER BY name")?;
             let rows = stmt.query_map([], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
+                    row.get::<_, rusqlite::types::Value>(1)?,
                     row.get::<_, Option<String>>(2)?,
                 ))
             })?;
             let mut out = Vec::new();
             for row in rows {
                 let (name, role_owner, acl_json) = row?;
-                let acl = acl_json
-                    .map(|json| serde_json::from_str(&json))
-                    .transpose()?;
-                out.push(SchemaRow {
+                out.push(super::role_security::decode_schema(
                     name,
-                    role_owner,
-                    acl,
-                });
+                    (&role_owner).into(),
+                    acl_json.as_deref(),
+                )?);
             }
             Ok(out)
         })
     }
 
     pub fn save_table(&self, schema: &TableSchema) -> Result<()> {
+        if self.save_native_table(schema)?.is_some() {
+            return Ok(());
+        }
         let analyzer = schema.analyzer_json.clone();
         let fts = serde_json::to_string(&schema.fts_fields)?;
         let vectors = serde_json::to_string(&schema.vector_fields)?;
         let columns = schema.columns_json.clone();
         let constraints = schema.constraints_json.clone();
-        let role_owner = schema.role_owner.clone();
-        let acl_json = schema.acl.as_ref().map(serde_json::to_string).transpose()?;
-        let column_acls_json = serde_json::to_string(&schema.column_acls)?;
+        let (role_owner, acl_json, column_acls_json) =
+            super::role_security::encode_relation(&schema.security)?;
         let object_id = schema.object_id;
         let storage_generation = schema.storage_generation;
         self.conn.with_mut(|c| {
@@ -162,6 +239,9 @@ impl Catalog {
     }
 
     pub fn load_tables(&self) -> Result<Vec<TableSchema>> {
+        if let Some(tables) = self.load_native_tables()? {
+            return Ok(tables);
+        }
         self.conn.with(|c| {
             let mut stmt = c.prepare(
                 "SELECT schema_name, relation_name, analyzer, fts_fields,
@@ -180,7 +260,7 @@ impl Catalog {
                     r.get::<_, String>(6)?,
                     r.get::<_, Vec<u8>>(7)?,
                     r.get::<_, Vec<u8>>(8)?,
-                    r.get::<_, String>(9)?,
+                    r.get::<_, rusqlite::types::Value>(9)?,
                     r.get::<_, Option<String>>(10)?,
                     r.get::<_, Option<String>>(11)?,
                 ))
@@ -215,18 +295,10 @@ impl Catalog {
                         value.len()
                     ))
                 })?;
-                let acl = acl_json
-                    .map(|json| serde_json::from_str(&json))
-                    .transpose()?;
-                let column_acls = column_acls_json
-                    .map(|json| serde_json::from_str(&json))
-                    .transpose()?
-                    .unwrap_or_default();
+                let security = super::role_security::decode_relation((&role_owner).into(), acl_json.as_deref(), column_acls_json.as_deref())?;
                 out.push(TableSchema {
                     relation: RelationIdentity::new(schema_name, relation_name),
-                    role_owner,
-                    acl,
-                    column_acls,
+                    security,
                     object_id,
                     storage_generation,
                     analyzer_json,
@@ -242,6 +314,9 @@ impl Catalog {
 
     pub fn drop_table(&self, name: &str) -> Result<()> {
         let relation = migration_relation(name)?;
+        if self.drop_native_table(&relation, false)?.is_some() {
+            return Ok(());
+        }
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
             Self::drop_catalog_index_rows_for_table(&tx, &relation)?;
@@ -262,6 +337,9 @@ impl Catalog {
     /// well.
     pub fn purge_table_data(&self, name: &str) -> Result<()> {
         let relation = migration_relation(name)?;
+        if self.purge_native_table_data(&relation)?.is_some() {
+            return Ok(());
+        }
         let storage_names = relation.canonical_and_legacy_public_names();
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
@@ -301,6 +379,9 @@ impl Catalog {
 
     pub fn drop_table_and_data(&self, name: &str) -> Result<()> {
         let relation = migration_relation(name)?;
+        if self.drop_native_table(&relation, true)?.is_some() {
+            return Ok(());
+        }
         let storage_names = relation.canonical_and_legacy_public_names();
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
@@ -359,6 +440,12 @@ impl Catalog {
                 "moving a table between schemas is not supported by the catalog".into(),
             ));
         }
+        if self
+            .rename_native_table(from, to, &from_relation, &to_relation)?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
             Self::claim_relation(&tx, &to_relation, RelationKind::Table)?;
@@ -412,6 +499,12 @@ impl Catalog {
     }
 
     pub fn drop_column_data(&self, table_name: &str, column_name: &str) -> Result<()> {
+        if self
+            .change_native_column(table_name, column_name, None)?
+            .is_some()
+        {
+            return Ok(());
+        }
         let indexes = self.catalog_indexes_referencing_column(table_name, column_name)?;
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
@@ -440,6 +533,7 @@ impl Catalog {
                 "_hnsw_edges",
                 "_btree_index_entries",
                 "_btree_indexes",
+                "_btree_index_repairs",
             ] {
                 if matches!(
                     table,
@@ -481,6 +575,15 @@ impl Catalog {
     }
 
     pub fn rename_column_data(&self, table_name: &str, from: &str, to: &str) -> Result<()> {
+        if from == to {
+            return Ok(());
+        }
+        if self
+            .change_native_column(table_name, from, Some(to))?
+            .is_some()
+        {
+            return Ok(());
+        }
         let index_updates = self.catalog_index_column_renames(table_name, from, to)?;
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;

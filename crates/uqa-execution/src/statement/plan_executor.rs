@@ -9,6 +9,7 @@
 use crate::schema::ctas::CreateTableAsExecution;
 use uqa_core::Value;
 use uqa_sql::ast::{CreateForeignServer, CreateForeignTable};
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::plan::{
     CommandPlan, DeletePlan, ExpressionPlan, InsertPlan, MergePlan, QueryPlan, UnifiedPlan,
     UpdatePlan,
@@ -31,7 +32,7 @@ pub struct UnifiedPlanExecutor<'engine, 'params, S: Clone + 'static> {
     context: StatementExecutionContext<'engine, S>,
     params: &'params [SQLParam],
     nested_statement: bool,
-    privilege_subject: Option<String>,
+    privilege_subject: Option<RoleReference>,
     source_sql: Option<String>,
 }
 
@@ -64,8 +65,8 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         }
     }
 
-    pub fn with_privilege_subject(mut self, subject: &str) -> Self {
-        self.privilege_subject = Some(subject.to_string());
+    pub fn with_privilege_subject(mut self, subject: &RoleReference) -> Self {
+        self.privilege_subject = Some(subject.clone());
         self
     }
 
@@ -99,7 +100,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         let mut ctes = self
             .context
             .queries
-            .statement_scope(self.privilege_subject.as_deref());
+            .statement_scope(self.privilege_subject.as_ref());
         execute_query_plan_with_ctes(
             &self.context.queries.query_context(),
             query,
@@ -128,7 +129,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         let mut ctes = self
             .context
             .queries
-            .statement_scope(self.privilege_subject.as_deref());
+            .statement_scope(self.privilege_subject.as_ref());
         execute_query_plan_output(
             &self.context.queries.query_context(),
             query,
@@ -182,8 +183,8 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
 
     fn apply_statement_privilege_subject(
         &self,
-        statement_subject: &mut Option<String>,
-        target_subject: &mut Option<String>,
+        statement_subject: &mut Option<RoleReference>,
+        target_subject: &mut Option<RoleReference>,
     ) {
         let Some(subject) = self.privilege_subject.as_ref() else {
             return;
@@ -403,19 +404,22 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         reason = "preserves SELECT schema and row identity"
     )]
     fn execute_command(&self, command: &CommandPlan) -> Result<SQLResult, SQLError> {
-        if let Some(error) = uqa_sql::semantics::virtual_relation_mutation_error(
-            &self.context.validation.session.relation_name_resolution(),
-            command,
-        ) {
-            // Semantic errors precede the view's rewrite-time mutation rejection.
+        if uqa_sql::semantics::virtual_relation_mutation_candidate(command) {
             let ctes = self.context.queries.statement_scope(None);
-            crate::query::binding::analyze_command_parameters(
-                self.context.routines.resolution,
+            if let Some(error) = crate::catalog::projection::virtual_relation_mutation_error(
+                &ctes.catalog_read_view()?,
+                &ctes.relation_name_resolution()?,
                 command,
-                self.params,
-                &ctes,
-            )?;
-            return Err(error);
+            )? {
+                // Semantic errors precede the view's rewrite-time mutation rejection.
+                crate::query::binding::analyze_command_parameters(
+                    self.context.routines.resolution,
+                    command,
+                    self.params,
+                    &ctes,
+                )?;
+                return Err(error);
+            }
         }
         match command {
             CommandPlan::CreateTable(statement) => {
@@ -434,6 +438,12 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 crate::schema::indexes::creation::run_create_index(
                     &self.context.schemas.inputs.index_creation_context(),
                     statement.clone(),
+                )
+            }
+            CommandPlan::RenameIndex(statement) => {
+                crate::schema::table_alteration::entry::run_rename_index(
+                    &self.context.schemas.inputs.table_alter_entry_context(),
+                    statement,
                 )
             }
             CommandPlan::Insert(plan) => self.execute_insert(plan),
@@ -511,6 +521,13 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             }
             CommandPlan::AlterRole(statement) => {
                 crate::catalog::security::role_lifecycle::alter_role(
+                    &self.context.roles,
+                    statement,
+                )?;
+                Ok(SQLResult::empty())
+            }
+            CommandPlan::RenameRole(statement) => {
+                crate::catalog::security::role_lifecycle::rename_role(
                     &self.context.roles,
                     statement,
                 )?;
@@ -702,7 +719,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                         return Err(SQLError::UnknownTable(requested.to_string()));
                     };
                     context.privileges.ensure_maintain(&canonical)?;
-                    vec![canonical]
+                    vec![requested.to_string()]
                 } else {
                     context.statistics.table_names("analyze")?
                 };
@@ -710,10 +727,17 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                     context
                         .statistics
                         .analyze_target(&target, &[], true)
-                        .map_err(|err| SQLError::Internal(format!("ANALYZE failed: {err}")))?;
+                        .map_err(|error| {
+                            uqa_sql::catalog::errors::storage_error("ANALYZE", &error)
+                        })?;
                 }
                 Ok(SQLResult::empty())
             }
+            CommandPlan::LockTable(statement) => super::table_locks::execute(
+                self.context.schemas.inputs.table_lock_context(),
+                statement,
+                self.nested_statement,
+            ),
             CommandPlan::Vacuum(statement) => crate::maintenance::run_vacuum(
                 &self.context.schemas.inputs.vacuum_execution_context(),
                 statement,
@@ -741,7 +765,11 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 hold,
                 query,
             } => super::portal::declaration::declare_session_portal(
-                &self.context.portals,
+                &self
+                    .context
+                    .portals
+                    .clone()
+                    .with_source_sql(self.source_sql.as_deref()),
                 self.params,
                 name,
                 *binary,

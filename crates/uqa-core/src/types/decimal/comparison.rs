@@ -56,3 +56,76 @@ impl Ord for DecimalValue {
         }
     }
 }
+
+impl DecimalValue {
+    /// Compare without allocating aligned coefficients. Formatting owns its radix workspace; comparison borrows the admitted digits and supplies fractional zeros without constructing padding.
+    pub fn cmp_with_control(
+        &self,
+        other: &Self,
+        control: &crate::memory::ProductionControl<'_>,
+    ) -> Result<Ordering, crate::ValueRetentionError> {
+        control.check()?;
+        let (
+            DecimalRepr::Finite {
+                coefficient: left,
+                scale: left_scale,
+            },
+            DecimalRepr::Finite {
+                coefficient: right,
+                scale: right_scale,
+            },
+        ) = (self.repr(), other.repr())
+        else {
+            return Ok(self.cmp(other));
+        };
+        if left_scale == right_scale {
+            return Ok(left.cmp(right));
+        }
+        let signs = self.sign().cmp(&other.sign());
+        if signs != Ordering::Equal || self.sign() == 0 {
+            return Ok(signs);
+        }
+        let left = self.to_sql_string_with_control(control)?;
+        let right = other.to_sql_string_with_control(control)?;
+        let (left_integer, left_fraction) = unsigned_text_parts(&left);
+        let (right_integer, right_fraction) = unsigned_text_parts(&right);
+        let mut ordering = left_integer.len().cmp(&right_integer.len());
+        if ordering == Ordering::Equal {
+            for (left, right) in left_integer.bytes().zip(right_integer.bytes()) {
+                control.check()?;
+                ordering = left.cmp(&right);
+                if ordering != Ordering::Equal {
+                    break;
+                }
+            }
+        }
+        if ordering == Ordering::Equal {
+            for index in 0..left_fraction.len().max(right_fraction.len()) {
+                control.check()?;
+                let left = left_fraction.as_bytes().get(index).copied().unwrap_or(b'0');
+                let right = right_fraction
+                    .as_bytes()
+                    .get(index)
+                    .copied()
+                    .unwrap_or(b'0');
+                ordering = left.cmp(&right);
+                if ordering != Ordering::Equal {
+                    break;
+                }
+            }
+        }
+        Ok(if self.sign() < 0 {
+            ordering.reverse()
+        } else {
+            ordering
+        })
+    }
+}
+
+fn unsigned_text_parts(text: &str) -> (&str, &str) {
+    let text = text.strip_prefix('-').unwrap_or(text);
+    text.split_once('.').unwrap_or((text, ""))
+}
+
+#[cfg(test)]
+mod tests;

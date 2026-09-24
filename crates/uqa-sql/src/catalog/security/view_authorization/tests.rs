@@ -21,13 +21,35 @@ use std::{
     collections::BTreeMap,
 };
 
-#[derive(Default)]
 struct Catalog {
     roles: RefCell<BTreeMap<String, RoleDefinition>>,
     memberships: RefCell<BTreeMap<RoleMembershipKey, RoleMembership>>,
     calls: RefCell<Vec<&'static str>>,
     reads: Cell<usize>,
     promote_on_recheck: bool,
+}
+impl Default for Catalog {
+    fn default() -> Self {
+        let roles = ["reader", "owner"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| {
+                let mut role = RoleDefinition::bootstrap();
+                role.name = name.into();
+                role.oid = 20_001 + index as i64;
+                role.object_id = [index as u8 + 1; 16];
+                role.attributes.clear();
+                (name.into(), role)
+            })
+            .collect();
+        Self {
+            roles: RefCell::new(roles),
+            memberships: RefCell::default(),
+            calls: RefCell::default(),
+            reads: Cell::new(0),
+            promote_on_recheck: false,
+        }
+    }
 }
 impl Catalog {
     fn context(&self) -> ViewAuthorizationContext<'_> {
@@ -48,9 +70,10 @@ impl RoleCatalogGuards for Catalog {
             else {
                 panic!("expected role")
             };
-            self.roles
-                .borrow_mut()
-                .insert("reader".into(), RoleDefinition::from_create(&role));
+            self.roles.borrow_mut().insert(
+                "reader".into(),
+                RoleDefinition::from_create(&role, 20_001, [1; 16]),
+            );
         }
         self.reads.set(self.reads.get() + 1);
         self.calls.borrow_mut().push("roles");
@@ -71,22 +94,25 @@ fn view(kind: StoredViewKind) -> StoredView {
         panic!("expected query")
     };
     StoredView {
-        object_id: [1; 16],
-        role_owner: "owner".into(),
-        acl: None,
-        column_acls: BTreeMap::new(),
-        query: *query,
-        output_columns: Some(vec!["allowed".into(), "hidden".into()]),
-        persistence: RelationPersistence::Permanent,
-        options: vec![],
-        kind,
-        materialized_rows: vec![],
-        materialized_column_types: vec![],
-        populated: true,
+        security: crate::catalog::security::BoundTableSecurity::owner(
+            Catalog::default().roles.borrow()["owner"].identity(),
+        ),
+        definition: crate::catalog::stored_view::StoredViewDefinition {
+            object_id: [1; 16],
+            query: *query,
+            output_columns: Some(vec!["allowed".into(), "hidden".into()]),
+            persistence: RelationPersistence::Permanent,
+            options: vec![],
+            kind,
+            materialized_rows: vec![],
+            materialized_column_types: vec![],
+            populated: true,
+        },
     }
 }
 fn grant_column(view: &mut StoredView) {
-    let mut security = view.security();
+    let roles = Catalog::default().roles.into_inner();
+    let mut security = view.security.resolve(&roles).unwrap();
     grant_column_acl(
         &mut security,
         "allowed",
@@ -95,7 +121,7 @@ fn grant_column(view: &mut StoredView) {
         "owner",
         false,
     );
-    view.column_acls = security.column_acls;
+    view.security = crate::catalog::security::BoundTableSecurity::bind(&security, &roles).unwrap();
 }
 
 #[test]

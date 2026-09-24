@@ -6,15 +6,16 @@
 
 //! Search-path and namespace authorization rules for routine names.
 
-use crate::{catalog::security::SchemaSecurity, SQLError};
+use crate::catalog::roles::RoleReference;
+use crate::{catalog::security::BoundSchemaSecurity, SQLError};
 use uqa_core::RelationIdentity;
 
 pub trait RoutineNameCatalog {
-    fn schema_security(&self, schema: &str) -> Option<SchemaSecurity>;
-    fn current_user_name(&self) -> String;
+    fn schema_security(&self, schema: &str) -> Option<BoundSchemaSecurity>;
+    fn current_role(&self) -> RoleReference;
     fn search_path(&self) -> Vec<String>;
-    fn require_schema_usage(&self, schema: &str, role: &str) -> Result<(), SQLError>;
-    fn schema_has_usage(&self, schema: &str, role: &str) -> bool;
+    fn require_schema_usage(&self, schema: &str, role: &RoleReference) -> Result<(), SQLError>;
+    fn schema_has_usage(&self, schema: &str, role: &RoleReference) -> bool;
 }
 
 pub fn routine_lookup_keys(
@@ -33,12 +34,12 @@ pub fn routine_lookup_keys(
                 message: format!("schema \"{schema}\" does not exist"),
             });
         }
-        catalog.require_schema_usage(&schema, &catalog.current_user_name())?;
+        catalog.require_schema_usage(&schema, &catalog.current_role())?;
         return Ok(vec![
             RelationIdentity::new(schema, local_name).qualified_name()
         ]);
     }
-    let current_user = catalog.current_user_name();
+    let current_user = catalog.current_role();
     let search_path = catalog.search_path();
     Ok(search_path
         .into_iter()

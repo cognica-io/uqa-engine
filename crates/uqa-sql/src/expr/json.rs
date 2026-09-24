@@ -6,15 +6,23 @@
 
 //! JSON scalar-function helpers for the expression evaluator.
 
-use uqa_core::{jsonb_equality_key, DecimalValue, TemporalValue, Value};
+use uqa_core::{DecimalValue, TemporalValue, Value};
 
 use crate::error::{Result, SQLError};
 
 use super::{hex_encode, out_of_range, value_to_string};
 
 mod path;
+mod production;
+#[cfg(test)]
+pub(super) use production::json_delete_with_control;
+pub(super) use production::{
+    cast_json_value_with_control, evaluate, format_core_value_as_json_with_control,
+    format_value_as_json_with_control, json_concat_with_control, json_delete_values_with_control,
+    json_extract_operator_with_control, quote_with_control, utf8_lossy_with_control,
+};
 
-pub(super) use path::{jsonpath_candidate, jsonpath_exists, jsonpath_match};
+pub(super) use path::{jsonpath_candidate, jsonpath_match};
 
 pub(super) fn parse_json(s: &str) -> Result<serde_json::Value> {
     serde_json::from_str::<serde_json::Value>(s)
@@ -61,53 +69,14 @@ pub(super) fn format_json(value: &serde_json::Value, jsonb: bool) -> String {
     }
 }
 
-pub(super) fn format_jsonb_pretty(value: &serde_json::Value) -> String {
-    format_jsonb_pretty_at_depth(value, 0)
-}
-
-fn format_jsonb_pretty_at_depth(value: &serde_json::Value, depth: usize) -> String {
-    let indent = " ".repeat(depth * 4);
-    let child_indent = " ".repeat((depth + 1) * 4);
-    match value {
-        serde_json::Value::Array(values) => {
-            if values.is_empty() {
-                return format!("[\n{indent}]");
-            }
-            let values = values
-                .iter()
-                .map(|value| {
-                    format!(
-                        "{child_indent}{}",
-                        format_jsonb_pretty_at_depth(value, depth + 1)
-                    )
-                })
-                .collect::<Vec<_>>();
-            format!("[\n{}\n{indent}]", values.join(",\n"))
-        }
-        serde_json::Value::Object(values) => {
-            if values.is_empty() {
-                return format!("{{\n{indent}}}");
-            }
-            let mut values = values.iter().collect::<Vec<_>>();
-            values.sort_by(|(left, _), (right, _)| {
-                left.len()
-                    .cmp(&right.len())
-                    .then_with(|| left.as_bytes().cmp(right.as_bytes()))
-            });
-            let values = values
-                .into_iter()
-                .map(|(key, value)| {
-                    let key = serde_json::Value::String(key.clone()).to_string();
-                    format!(
-                        "{child_indent}{key}: {}",
-                        format_jsonb_pretty_at_depth(value, depth + 1)
-                    )
-                })
-                .collect::<Vec<_>>();
-            format!("{{\n{}\n{indent}}}", values.join(",\n"))
-        }
-        _ => format_json(value, true),
-    }
+#[cfg(test)]
+fn format_jsonb_pretty(value: &serde_json::Value) -> String {
+    let Value::Str(text) =
+        ordinary("jsonb_pretty", &[Value::Json(value.to_string())]).expect("valid parsed JSON")
+    else {
+        unreachable!("JSON pretty text")
+    };
+    text
 }
 
 pub(super) fn typed_json_value(value: &serde_json::Value, jsonb: bool) -> Result<Value> {
@@ -241,6 +210,7 @@ pub(super) fn json_build_object_value(args: &[Value], jsonb: bool) -> Result<Val
     }
 }
 
+#[cfg(test)]
 pub(super) fn value_to_json(v: &Value) -> serde_json::Value {
     match v {
         Value::Null => serde_json::Value::Null,
@@ -337,446 +307,21 @@ pub(super) fn json_to_value(json: &serde_json::Value) -> Value {
     }
 }
 
-pub(super) fn json_typeof(v: &serde_json::Value) -> &'static str {
-    match v {
-        serde_json::Value::Null => "null",
-        serde_json::Value::Bool(_) => "boolean",
-        serde_json::Value::Number(_) => "number",
-        serde_json::Value::String(_) => "string",
-        serde_json::Value::Array(_) => "array",
-        serde_json::Value::Object(_) => "object",
-    }
-}
-
-pub(super) fn json_extract_path(args: &[Value], as_text: bool, jsonb: bool) -> Result<Value> {
-    if args.len() < 2 {
-        return Err(SQLError::TypeMismatch(
-            "json_extract_path takes 2+ args".into(),
-        ));
-    }
-    extract_json(&args[0], &args[1..], as_text, jsonb, None)
-}
-
-pub(super) fn json_extract_operator(args: &[Value], as_text: bool, path: bool) -> Result<Value> {
-    let [input, key] = args else {
-        return Err(SQLError::Internal(
-            "JSON extraction requires two operands".into(),
-        ));
-    };
-    if matches!(input, Value::Null) || matches!(key, Value::Null) {
-        return Ok(Value::Null);
-    }
-    if path {
-        let Value::Array(keys) = super::casting::cast_value(key, "text[]")? else {
-            return Err(SQLError::Internal(
-                "JSON path cast must return an array".into(),
-            ));
-        };
-        extract_json(input, keys.elements(), as_text, false, None)
-    } else {
-        extract_json(
-            input,
-            std::slice::from_ref(key),
-            as_text,
-            false,
-            Some(matches!(key, Value::Int(_))),
-        )
-    }
-}
-
-fn extract_json(
-    input: &Value,
-    keys: &[Value],
-    as_text: bool,
-    jsonb: bool,
-    array_index: Option<bool>,
-) -> Result<Value> {
-    if matches!(input, Value::Null) || keys.iter().any(|arg| matches!(arg, Value::Null)) {
-        return Ok(Value::Null);
-    }
-    let jsonb = jsonb || matches!(input, Value::JsonB(_));
-    let mut current = parse_json(&value_to_string(input))?;
-    if matches!(
-        (&current, array_index),
-        (serde_json::Value::Object(_), Some(true)) | (serde_json::Value::Array(_), Some(false))
-    ) {
-        return Ok(Value::Null);
-    }
-    for key in keys {
-        let key_str = value_to_string(key);
-        current = match current {
-            serde_json::Value::Object(mut obj) => {
-                let Some(value) = obj.remove(&key_str) else {
-                    return Ok(Value::Null);
-                };
-                value
-            }
-            serde_json::Value::Array(arr) => {
-                let Some(value) =
-                    json_array_index(arr.len(), &key_str).and_then(|idx| arr.into_iter().nth(idx))
-                else {
-                    return Ok(Value::Null);
-                };
-                value
-            }
-            _ => return Ok(Value::Null),
-        };
-    }
-    if as_text {
-        Ok(Value::Str(match current {
-            serde_json::Value::String(s) => s,
-            serde_json::Value::Null => return Ok(Value::Null),
-            other => format_json(&other, jsonb),
-        }))
-    } else {
-        typed_json_value(&current, jsonb)
-    }
+fn ordinary(name: &str, args: &[Value]) -> Result<Value> {
+    Ok(production::evaluate(
+        name,
+        args,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("known JSON builtin")?
+    .into_uncontrolled()
+    .expect("ordinary JSON has no lease"))
 }
 
 fn json_array_index(len: usize, key: &str) -> Option<usize> {
     let index = key.parse::<i64>().ok()?;
     let normalized = if index < 0 { len as i64 + index } else { index };
     usize::try_from(normalized).ok().filter(|idx| *idx < len)
-}
-
-pub(super) fn json_contains(args: &[Value]) -> Result<Value> {
-    if args.len() != 2 {
-        return Err(SQLError::TypeMismatch("json_contains takes 2 args".into()));
-    }
-    let lhs = parse_json(&value_to_string(&args[0]))?;
-    let rhs = parse_json(&value_to_string(&args[1]))?;
-    Ok(Value::Bool(json_contains_value(&lhs, &rhs)))
-}
-
-pub(super) fn json_contained_by(args: &[Value]) -> Result<Value> {
-    if args.len() != 2 {
-        return Err(SQLError::TypeMismatch(
-            "json_contained_by takes 2 args".into(),
-        ));
-    }
-    let lhs = parse_json(&value_to_string(&args[0]))?;
-    let rhs = parse_json(&value_to_string(&args[1]))?;
-    Ok(Value::Bool(json_contains_value(&rhs, &lhs)))
-}
-
-fn json_contains_value(lhs: &serde_json::Value, rhs: &serde_json::Value) -> bool {
-    json_contains_value_at_depth(lhs, rhs, true)
-}
-
-fn json_contains_value_at_depth(
-    lhs: &serde_json::Value,
-    rhs: &serde_json::Value,
-    top_level: bool,
-) -> bool {
-    match (lhs, rhs) {
-        (serde_json::Value::Object(l), serde_json::Value::Object(r)) => r.iter().all(|(k, rv)| {
-            l.get(k)
-                .is_some_and(|lv| json_contains_value_at_depth(lv, rv, false))
-        }),
-        (serde_json::Value::Array(l), serde_json::Value::Array(r)) => r.iter().all(|rv| {
-            l.iter()
-                .any(|lv| json_contains_value_at_depth(lv, rv, false))
-        }),
-        (serde_json::Value::Array(l), r) if top_level && jsonb_is_primitive(r) => l
-            .iter()
-            .any(|lv| json_contains_value_at_depth(lv, r, false)),
-        _ => jsonb_values_equal(lhs, rhs),
-    }
-}
-
-fn jsonb_is_primitive(value: &serde_json::Value) -> bool {
-    !matches!(
-        value,
-        serde_json::Value::Array(_) | serde_json::Value::Object(_)
-    )
-}
-
-fn jsonb_values_equal(lhs: &serde_json::Value, rhs: &serde_json::Value) -> bool {
-    let lhs = serde_json::to_string(lhs).expect("serializing parsed JSON cannot fail");
-    let rhs = serde_json::to_string(rhs).expect("serializing parsed JSON cannot fail");
-    match (jsonb_equality_key(&lhs), jsonb_equality_key(&rhs)) {
-        (Some(lhs), Some(rhs)) => lhs == rhs,
-        _ => false,
-    }
-}
-
-pub(super) fn json_has_key(args: &[Value]) -> Result<Value> {
-    if args.len() != 2 {
-        return Err(SQLError::TypeMismatch("json_has_key takes 2 args".into()));
-    }
-    let obj = parse_json(&value_to_string(&args[0]))?;
-    let key = value_to_string(&args[1]);
-    Ok(Value::Bool(match obj {
-        serde_json::Value::Object(map) => map.contains_key(&key),
-        serde_json::Value::Array(items) => items
-            .iter()
-            .any(|item| matches!(item, serde_json::Value::String(value) if value == &key)),
-        _ => false,
-    }))
-}
-
-pub(super) fn json_has_keys(args: &[Value], require_all: bool) -> Result<Value> {
-    if args.len() != 2 {
-        return Err(SQLError::TypeMismatch("json_has_keys takes 2 args".into()));
-    }
-    let obj = parse_json(&value_to_string(&args[0]))?;
-    let keys = match &args[1] {
-        Value::Array(array) => array_strings(array.elements()),
-        Value::List(items) => array_strings(items),
-        other => {
-            return Err(SQLError::TypeMismatch(format!(
-                "json key list must be array, got {other:?}"
-            )));
-        }
-    };
-    let found = |key: &String| match &obj {
-        serde_json::Value::Object(map) => map.contains_key(key),
-        serde_json::Value::Array(items) => items
-            .iter()
-            .any(|item| matches!(item, serde_json::Value::String(value) if value == key)),
-        _ => false,
-    };
-    Ok(Value::Bool(if require_all {
-        keys.iter().all(found)
-    } else {
-        keys.iter().any(found)
-    }))
-}
-
-pub(super) fn json_concat(args: &[Value]) -> Result<Option<Value>> {
-    if args.len() != 2 {
-        return Err(SQLError::TypeMismatch("json_concat takes 2 args".into()));
-    }
-    if !args.iter().any(|arg| matches!(arg, Value::JsonB(_))) {
-        return Ok(None);
-    }
-    let lhs = value_to_json(&args[0]);
-    let rhs = value_to_json(&args[1]);
-    let out = match (lhs, rhs) {
-        (serde_json::Value::Object(mut left), serde_json::Value::Object(right)) => {
-            for (key, value) in right {
-                left.insert(key, value);
-            }
-            serde_json::Value::Object(left)
-        }
-        (serde_json::Value::Array(mut left), serde_json::Value::Array(right)) => {
-            left.extend(right);
-            serde_json::Value::Array(left)
-        }
-        (serde_json::Value::Array(mut left), right) => {
-            left.push(right);
-            serde_json::Value::Array(left)
-        }
-        (left, serde_json::Value::Array(mut right)) => {
-            let mut out = vec![left];
-            out.append(&mut right);
-            serde_json::Value::Array(out)
-        }
-        (left, right) => serde_json::Value::Array(vec![left, right]),
-    };
-    typed_json_value(&out, true).map(Some)
-}
-
-pub(super) fn json_delete(args: &[Value]) -> Result<Option<Value>> {
-    if args.len() != 2 {
-        return Err(SQLError::TypeMismatch("json_delete takes 2 args".into()));
-    }
-    if !matches!(args[0], Value::JsonB(_) | Value::Map(_) | Value::List(_)) {
-        return Ok(None);
-    }
-    let mut target = value_to_json(&args[0]);
-    match &args[1] {
-        Value::Int(index) => delete_array_index(&mut target, *index),
-        Value::Array(array) => {
-            for key in array_strings(array.elements()) {
-                delete_key_or_string(&mut target, &key);
-            }
-        }
-        Value::List(keys) => {
-            for key in array_strings(keys) {
-                delete_key_or_string(&mut target, &key);
-            }
-        }
-        key => delete_key_or_string(&mut target, &value_to_string(key)),
-    }
-    typed_json_value(&target, true).map(Some)
-}
-
-pub(super) fn json_delete_path(args: &[Value]) -> Result<Value> {
-    if args.len() != 2 {
-        return Err(SQLError::TypeMismatch(
-            "json_delete_path takes 2 args".into(),
-        ));
-    }
-    let mut target = value_to_json(&args[0]);
-    let path = path_arg(&args[1])?;
-    delete_path(&mut target, &path);
-    typed_json_value(&target, true)
-}
-
-fn path_arg(value: &Value) -> Result<Vec<String>> {
-    match value {
-        Value::Array(array) => Ok(array_strings(array.elements())),
-        Value::List(items) => Ok(array_strings(items)),
-        Value::Str(s) => Ok(s
-            .trim_matches(|c| c == '{' || c == '}')
-            .split(',')
-            .filter(|part| !part.is_empty())
-            .map(|part| part.trim().to_string())
-            .collect()),
-        other => Err(SQLError::TypeMismatch(format!(
-            "JSON path must be an array, got {other:?}"
-        ))),
-    }
-}
-
-fn array_strings(values: &[Value]) -> Vec<String> {
-    fn append(values: &[Value], output: &mut Vec<String>) {
-        for value in values {
-            if let Value::List(nested) = value {
-                append(nested, output);
-            } else {
-                output.push(value_to_string(value));
-            }
-        }
-    }
-
-    let mut output = Vec::new();
-    append(values, &mut output);
-    output
-}
-
-fn delete_key_or_string(target: &mut serde_json::Value, key: &str) {
-    match target {
-        serde_json::Value::Object(map) => {
-            map.remove(key);
-        }
-        serde_json::Value::Array(items) => {
-            items.retain(|item| !matches!(item, serde_json::Value::String(value) if value == key));
-        }
-        _ => {}
-    }
-}
-
-fn delete_array_index(target: &mut serde_json::Value, index: i64) {
-    let serde_json::Value::Array(items) = target else {
-        return;
-    };
-    let normalized = if index < 0 {
-        items.len() as i64 + index
-    } else {
-        index
-    };
-    if let Ok(index) = usize::try_from(normalized) {
-        if index < items.len() {
-            items.remove(index);
-        }
-    }
-}
-
-fn delete_path(target: &mut serde_json::Value, path: &[String]) {
-    let Some((head, rest)) = path.split_first() else {
-        return;
-    };
-    if rest.is_empty() {
-        match target {
-            serde_json::Value::Object(map) => {
-                map.remove(head);
-            }
-            serde_json::Value::Array(items) => {
-                if let Some(index) = json_array_index(items.len(), head) {
-                    items.remove(index);
-                }
-            }
-            _ => {}
-        }
-        return;
-    }
-    match target {
-        serde_json::Value::Object(map) => {
-            if let Some(next) = map.get_mut(head) {
-                delete_path(next, rest);
-            }
-        }
-        serde_json::Value::Array(items) => {
-            if let Some(index) = json_array_index(items.len(), head) {
-                delete_path(&mut items[index], rest);
-            }
-        }
-        _ => {}
-    }
-}
-
-pub(super) fn jsonb_set(args: &[Value]) -> Result<Value> {
-    if !(3..=4).contains(&args.len()) {
-        return Err(SQLError::TypeMismatch("jsonb_set takes 3-4 args".into()));
-    }
-    let mut current = parse_json(&value_to_string(&args[0]))?;
-    let path = path_arg(&args[1])?;
-    let new_val = parse_json(&value_to_string(&args[2]))
-        .unwrap_or_else(|_| serde_json::Value::String(value_to_string(&args[2])));
-    let create_missing = args.get(3).is_none_or(|value| match value {
-        Value::Bool(value) => *value,
-        Value::Null => false,
-        other => value_to_string(other).eq_ignore_ascii_case("true"),
-    });
-    json_set_path(&mut current, &path, new_val, create_missing);
-    typed_json_value(&current, true)
-}
-
-pub(super) fn jsonb_insert(args: &[Value]) -> Result<Value> {
-    if !(3..=4).contains(&args.len()) {
-        return Err(SQLError::TypeMismatch("jsonb_insert takes 3-4 args".into()));
-    }
-    let mut current = parse_json(&value_to_string(&args[0]))?;
-    let path = path_arg(&args[1])?;
-    let new_val = parse_json(&value_to_string(&args[2]))
-        .unwrap_or_else(|_| serde_json::Value::String(value_to_string(&args[2])));
-    let insert_after = args.get(3).is_some_and(|value| match value {
-        Value::Bool(value) => *value,
-        other => value_to_string(other).eq_ignore_ascii_case("true"),
-    });
-    json_insert_path(&mut current, &path, new_val, insert_after);
-    typed_json_value(&current, true)
-}
-
-fn json_insert_path(
-    current: &mut serde_json::Value,
-    path: &[String],
-    new_val: serde_json::Value,
-    insert_after: bool,
-) -> bool {
-    let Some((head, rest)) = path.split_first() else {
-        return false;
-    };
-    if rest.is_empty() {
-        return match current {
-            serde_json::Value::Object(map) => {
-                if map.contains_key(head) {
-                    false
-                } else {
-                    map.insert(head.clone(), new_val);
-                    true
-                }
-            }
-            serde_json::Value::Array(items) => {
-                let Some(index) = json_insert_index(items.len(), head, insert_after) else {
-                    return false;
-                };
-                items.insert(index, new_val);
-                true
-            }
-            _ => false,
-        };
-    }
-    match current {
-        serde_json::Value::Object(map) => map
-            .get_mut(head)
-            .is_some_and(|next| json_insert_path(next, rest, new_val, insert_after)),
-        serde_json::Value::Array(items) => json_array_index(items.len(), head)
-            .is_some_and(|index| json_insert_path(&mut items[index], rest, new_val, insert_after)),
-        _ => false,
-    }
 }
 
 fn json_insert_index(len: usize, key: &str, insert_after: bool) -> Option<usize> {
@@ -801,76 +346,6 @@ fn json_insert_index(len: usize, key: &str, insert_after: bool) -> Option<usize>
         }
     };
     usize::try_from(index.clamp(0, len_i64)).ok()
-}
-
-fn json_set_path(
-    current: &mut serde_json::Value,
-    path: &[String],
-    new_val: serde_json::Value,
-    create_missing: bool,
-) -> bool {
-    if path.is_empty() {
-        *current = new_val;
-        return true;
-    }
-    let head = &path[0];
-    let rest = &path[1..];
-    match current {
-        serde_json::Value::Object(obj) => {
-            if !obj.contains_key(head) && !create_missing {
-                return false;
-            }
-            let entry = obj.entry(head.clone()).or_insert(serde_json::Value::Null);
-            json_set_path(entry, rest, new_val, create_missing)
-        }
-        serde_json::Value::Array(arr) => {
-            if let Some(idx) = json_array_index(arr.len(), head) {
-                json_set_path(&mut arr[idx], rest, new_val, create_missing)
-            } else if create_missing && rest.is_empty() {
-                if let Ok(idx) = head.parse::<usize>() {
-                    while arr.len() <= idx {
-                        arr.push(serde_json::Value::Null);
-                    }
-                    arr[idx] = new_val;
-                    true
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        }
-        _ if create_missing => {
-            let mut new_obj = serde_json::Map::new();
-            new_obj.insert(head.clone(), serde_json::Value::Null);
-            let mut wrapper = serde_json::Value::Object(new_obj);
-            let changed = json_set_path(&mut wrapper, path, new_val, create_missing);
-            if changed {
-                *current = wrapper;
-            }
-            changed
-        }
-        _ => false,
-    }
-}
-pub(super) fn strip_nulls(value: &mut serde_json::Value, strip_in_arrays: bool) {
-    match value {
-        serde_json::Value::Object(obj) => {
-            obj.retain(|_, v| !v.is_null());
-            for v in obj.values_mut() {
-                strip_nulls(v, strip_in_arrays);
-            }
-        }
-        serde_json::Value::Array(arr) => {
-            if strip_in_arrays {
-                arr.retain(|value| !value.is_null());
-            }
-            for v in arr.iter_mut() {
-                strip_nulls(v, strip_in_arrays);
-            }
-        }
-        _ => {}
-    }
 }
 
 #[cfg(test)]

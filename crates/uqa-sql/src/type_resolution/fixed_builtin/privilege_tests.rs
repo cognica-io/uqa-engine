@@ -57,6 +57,30 @@ fn has_sequence_privilege_registers_every_postgresql_name_and_oid_overload() {
 }
 
 #[test]
+fn has_function_privilege_registers_every_postgresql_name_and_oid_overload() {
+    let overloads = overloads("has_function_privilege").unwrap();
+
+    assert_eq!(overloads.len(), 6);
+    assert!(overloads
+        .iter()
+        .all(|overload| overload.return_type == ColumnType::Boolean));
+    assert_eq!(
+        overloads
+            .iter()
+            .map(|overload| overload.argument_types.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            vec![ColumnType::Name, ColumnType::Text, ColumnType::Text],
+            vec![ColumnType::Name, ColumnType::Oid, ColumnType::Text],
+            vec![ColumnType::Oid, ColumnType::Text, ColumnType::Text],
+            vec![ColumnType::Oid, ColumnType::Oid, ColumnType::Text],
+            vec![ColumnType::Text, ColumnType::Text],
+            vec![ColumnType::Oid, ColumnType::Text],
+        ]
+    );
+}
+
+#[test]
 fn has_table_privilege_registers_every_postgresql_name_and_oid_overload() {
     let overloads = overloads("has_table_privilege").unwrap();
 

@@ -11,6 +11,15 @@ use super::{
     Serialize, Serializer, TemporalValue,
 };
 
+pub(super) mod comparison_control;
+mod copying;
+mod decoding;
+mod retention;
+pub use decoding::JsonValueDecoder;
+mod tagged;
+pub use retention::ValueRetentionError;
+use tagged::value_from_tagged_map;
+
 /// Dynamic value type for document fields and posting payload extras.
 ///
 /// Covers the JSON-like values the engine round-trips through a posting
@@ -167,162 +176,6 @@ impl Serialize for Value {
     }
 }
 
-fn int_field<T: TryFrom<i64>>(map: &BTreeMap<String, Value>, key: &str) -> Option<T> {
-    match map.get(key)? {
-        Value::Int(number) => T::try_from(*number).ok(),
-        _ => None,
-    }
-}
-
-fn tagged_temporal_value(tag: &str, map: &BTreeMap<String, Value>) -> Option<TemporalValue> {
-    match tag {
-        "date" if map.len() == 2 => Some(TemporalValue::Date {
-            days: int_field(map, "days")?,
-        }),
-        "time" if map.len() == 2 => Some(TemporalValue::Time {
-            micros: int_field(map, "micros")?,
-        }),
-        "time_tz" if map.len() == 3 => Some(TemporalValue::TimeTz {
-            micros: int_field(map, "micros")?,
-            offset_minutes: int_field(map, "offset_minutes")?,
-        }),
-        "timestamp" if map.len() == 2 => Some(TemporalValue::Timestamp {
-            micros: int_field(map, "micros")?,
-        }),
-        "timestamp_tz" if map.len() == 2 => Some(TemporalValue::TimestampTz {
-            micros: int_field(map, "micros")?,
-        }),
-        "interval" if map.len() == 4 => Some(TemporalValue::Interval {
-            months: int_field(map, "months")?,
-            days: int_field(map, "days")?,
-            micros: int_field(map, "micros")?,
-        }),
-        _ => None,
-    }
-}
-
-/// Reconstruct the value a `$uqa_type`-tagged map encodes, or `None`
-/// when the map does not match any tagged encoding and must stay a
-/// plain [`Value::Map`].
-///
-/// Temporal variants mirror the `deny_unknown_fields` internally-tagged
-/// derive on [`TemporalValue`]: the field set must match exactly and
-/// every field must be an in-range integer. The decimal encoding
-/// mirrors the tolerant tagged struct in [`DecimalValue`]'s
-/// `Deserialize`: extra fields are ignored.
-fn value_from_tagged_map(
-    tag: &str,
-    map: &BTreeMap<String, Value>,
-) -> Result<Option<Value>, String> {
-    if matches!(
-        tag,
-        "date" | "time" | "time_tz" | "timestamp" | "timestamp_tz" | "interval"
-    ) {
-        return Ok(tagged_temporal_value(tag, map).map(Value::Temporal));
-    }
-    match tag {
-        "void" if map.len() == 1 => Ok(Some(Value::Void)),
-        "decimal" => {
-            let Some(Value::Str(text)) = map.get("value") else {
-                return Ok(None);
-            };
-            Ok(DecimalValue::parse(text).map(Value::Decimal))
-        }
-        "fixed_char" if map.len() == 2 => {
-            let Some(Value::Str(text)) = map.get("value") else {
-                return Ok(None);
-            };
-            Ok(Some(Value::FixedChar(text.clone())))
-        }
-        "bytes" if map.len() == 2 => {
-            let Some(Value::Str(hex)) = map.get("hex") else {
-                return Ok(None);
-            };
-            decode_hex_bytes(hex).map(|bytes| bytes.map(Value::Bytes))
-        }
-        "json" | "jsonb" if map.len() == 2 => {
-            let Some(Value::Str(text)) = map.get("value") else {
-                return Ok(None);
-            };
-            Ok(Some(if tag == "json" {
-                Value::Json(text.clone())
-            } else {
-                Value::JsonB(text.clone())
-            }))
-        }
-        "array" if map.len() == 3 => {
-            let (Some(Value::List(lower_bounds)), Some(Value::List(values))) =
-                (map.get("lower_bounds"), map.get("values"))
-            else {
-                return Ok(None);
-            };
-            let lower_bounds = lower_bounds
-                .iter()
-                .map(|value| match value {
-                    Value::Int(value) => i32::try_from(*value).ok(),
-                    _ => None,
-                })
-                .collect::<Option<Vec<_>>>();
-            Ok(lower_bounds.and_then(|lower_bounds| {
-                ArrayValue::with_lower_bounds(values.clone(), lower_bounds).map(Value::Array)
-            }))
-        }
-        "row" if map.len() == 2 => {
-            let Some(Value::List(values)) = map.get("values") else {
-                return Ok(None);
-            };
-            Ok(Some(Value::Row(values.clone())))
-        }
-        "record" if map.len() == 2 => {
-            let Some(Value::List(encoded_fields)) = map.get("fields") else {
-                return Ok(None);
-            };
-            let mut fields = Vec::new();
-            fields
-                .try_reserve_exact(encoded_fields.len())
-                .map_err(|error| format!("cannot allocate decoded record fields: {error}"))?;
-            for encoded in encoded_fields {
-                let Value::List(pair) = encoded else {
-                    return Ok(None);
-                };
-                let [Value::Str(name), value] = pair.as_slice() else {
-                    return Ok(None);
-                };
-                fields.push((name.clone(), value.clone()));
-            }
-            Ok(Some(Value::Record(fields)))
-        }
-        _ => Ok(None),
-    }
-}
-
-fn decode_hex_bytes(hex: &str) -> Result<Option<Vec<u8>>, String> {
-    fn nibble(byte: u8) -> Option<u8> {
-        match byte {
-            b'0'..=b'9' => Some(byte - b'0'),
-            b'a'..=b'f' => Some(byte - b'a' + 10),
-            b'A'..=b'F' => Some(byte - b'A' + 10),
-            _ => None,
-        }
-    }
-
-    let encoded = hex.as_bytes();
-    if !encoded.len().is_multiple_of(2) {
-        return Ok(None);
-    }
-    let mut bytes = Vec::new();
-    bytes
-        .try_reserve_exact(encoded.len() / 2)
-        .map_err(|error| format!("cannot allocate decoded byte value: {error}"))?;
-    for pair in encoded.chunks_exact(2) {
-        let (Some(high), Some(low)) = (nibble(pair[0]), nibble(pair[1])) else {
-            return Ok(None);
-        };
-        bytes.push((high << 4) | low);
-    }
-    Ok(Some(bytes))
-}
-
 /// Hand-written [`Deserialize`] for scalar JSON values, explicit tagged
 /// byte/temporal/decimal values, ordinary arrays, and maps, without the untagged
 /// machinery's per-variant trial errors. Untagged deserialization
@@ -426,13 +279,8 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
         }
         if map.len() == 1 {
             if let Some(Value::Str(number)) = map.get("$serde_json::private::Number") {
-                if let Ok(integer) = number.parse::<i64>() {
-                    return Ok(Value::Int(integer));
-                }
-                if let Ok(float) = number.parse::<f64>() {
-                    if float.is_finite() {
-                        return Ok(Value::Float(float));
-                    }
+                if let Some(value) = decoding::primitive_number(number) {
+                    return Ok(value);
                 }
                 if let Some(decimal) = DecimalValue::parse(number) {
                     return Ok(Value::Decimal(decimal));
@@ -442,14 +290,7 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
                 ));
             }
         }
-        if let Some(Value::Str(tag)) = map.get("$uqa_type") {
-            if let Some(value) =
-                value_from_tagged_map(tag, &map).map_err(<A::Error as serde::de::Error>::custom)?
-            {
-                return Ok(value);
-            }
-        }
-        Ok(Value::Map(map))
+        value_from_tagged_map(map).map_err(<A::Error as serde::de::Error>::custom)
     }
 }
 
@@ -523,40 +364,10 @@ fn compare_postgres_container_values(left: &[Value], right: &[Value]) -> std::cm
     left.len().cmp(&right.len())
 }
 
-struct FlattenedArrayValues<'a> {
-    stack: Vec<std::slice::Iter<'a, Value>>,
-}
-
-impl<'a> FlattenedArrayValues<'a> {
-    fn new(values: &'a [Value]) -> Self {
-        Self {
-            stack: vec![values.iter()],
-        }
-    }
-}
-
-impl<'a> Iterator for FlattenedArrayValues<'a> {
-    type Item = &'a Value;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let current = self.stack.last_mut()?;
-            match current.next() {
-                Some(Value::List(values)) => self.stack.push(values.iter()),
-                Some(Value::Array(array)) => self.stack.push(array.elements().iter()),
-                Some(value) => return Some(value),
-                None => {
-                    self.stack.pop();
-                }
-            }
-        }
-    }
-}
-
 fn compare_postgres_arrays(left: &ArrayValue, right: &ArrayValue) -> std::cmp::Ordering {
     use std::cmp::Ordering;
-    let mut left_values = FlattenedArrayValues::new(left.elements());
-    let mut right_values = FlattenedArrayValues::new(right.elements());
+    let mut left_values = left.flattened_elements();
+    let mut right_values = right.flattened_elements();
     loop {
         let ordering = match (left_values.next(), right_values.next()) {
             (Some(Value::Null), Some(Value::Null)) => Ordering::Equal,

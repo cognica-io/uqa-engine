@@ -34,6 +34,68 @@ fn sessions() -> (tempfile::TempDir, Engine, Engine) {
 }
 
 #[test]
+fn automatic_statistics_yield_to_a_serialized_writer_before_ddl_upgrade() {
+    use std::sync::Arc;
+    use uqa_storage_sqlite::{Catalog, ManagedConnection, SQLiteStorageBackend};
+
+    let directory = tempfile::tempdir().unwrap();
+    let connection = ManagedConnection::open(&directory.path().join("serialized.db")).unwrap();
+    let writer = Engine::from_persistent_backends(
+        Arc::new(Catalog::open(connection.clone()).unwrap()),
+        Arc::new(SQLiteStorageBackend::new(connection)),
+    )
+    .unwrap();
+    writer.release_automatic_statistics_client();
+    writer
+        .session
+        .statistics_worker
+        .store(true, Ordering::Release);
+    writer
+        .sql(
+            "CREATE TABLE t (id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1)",
+            &[],
+        )
+        .unwrap();
+    let worker = writer.new_session().unwrap();
+    worker.release_automatic_statistics_client();
+    worker
+        .session
+        .statistics_worker
+        .store(true, Ordering::Release);
+    assert!(!writer.versioned_backend_transactions());
+    assert!(!worker.versioned_backend_transactions());
+    writer.sql("BEGIN; INSERT INTO t VALUES (2)", &[]).unwrap();
+    let cancellation = worker.cancellation_token();
+    let (finished, completion) = std::sync::mpsc::sync_channel(1);
+    let task = std::thread::spawn(move || {
+        let result = worker.run_automatic_analyze("public.t");
+        finished.send(()).unwrap();
+        (worker, result)
+    });
+    let completed = completion
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .is_ok();
+    if !completed {
+        cancellation.cancel();
+        writer.sql("ROLLBACK", &[]).unwrap();
+    }
+    let (worker, result) = task.join().unwrap();
+    assert!(
+        completed,
+        "automatic statistics waited behind the application's serialized writer"
+    );
+    assert!(
+        !result.unwrap(),
+        "contended automatic statistics must remain pending"
+    );
+    writer
+        .sql("CREATE INDEX t_id_idx ON t (id); COMMIT", &[])
+        .unwrap();
+    assert!(worker.run_automatic_analyze("public.t").unwrap());
+    assert_eq!(worker.column_stats("t").unwrap()["id"].row_count, 2);
+}
+
+#[test]
 fn sampling_read_snapshot_allows_writes_and_rejects_obsolete_statistics() {
     let (_directory, writer, worker) = sessions();
     let backend = worker.storage.backend.as_ref().unwrap();
@@ -56,7 +118,7 @@ fn sampling_read_snapshot_allows_writes_and_rejects_obsolete_statistics() {
 }
 
 #[test]
-fn compressed_statistics_publication_releases_reader_before_waiting_for_writer() {
+fn compressed_statistics_publication_can_finish_during_an_uncommitted_row_write() {
     let directory = tempfile::tempdir().unwrap();
     let writer = Engine::open_compressed(
         &directory.path().join("statistics.db"),
@@ -87,27 +149,61 @@ fn compressed_statistics_publication_releases_reader_before_waiting_for_writer()
     backend.rollback_transaction().unwrap();
     writer.sql("BEGIN; INSERT INTO t VALUES (2)", &[]).unwrap();
 
-    let worker_id = worker.session_id;
+    let (finished, receive) = std::sync::mpsc::sync_channel(1);
     let waiting_thread = std::thread::spawn(move || {
         let result = worker.publish_automatic_analysis("public.t", sampled);
+        finished.send(()).unwrap();
         (worker, result)
     });
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    while !writer.row_locks.waiting_for_backend_writer(worker_id) {
-        assert!(std::time::Instant::now() < deadline, "worker did not wait");
-        std::thread::yield_now();
+    let progress = receive.recv_timeout(std::time::Duration::from_secs(30));
+    if progress.is_err() {
+        writer.sql("ROLLBACK", &[]).unwrap();
     }
-    // A maintenance publication starts its own deferred transaction after
-    // sampling. That new reader must also end before the logical writer wait.
-    let committed = writer.sql("COMMIT", &[]);
     let (worker, published) = waiting_thread.join().unwrap();
-    committed.unwrap();
+    progress.expect("statistics publication waited for an unrelated private row write");
+    assert!(published.unwrap());
+    assert_eq!(worker.column_stats("t").unwrap()["id"].row_count, 1);
+    // The later DML commit must dirty the published statistics rather than overwrite its maintenance state with an earlier snapshot.
+    writer.sql("COMMIT", &[]).unwrap();
     assert!(
-        !published.unwrap(),
-        "stale statistics replaced the newer rows"
+        MaintenanceState::load(worker.storage.catalog.as_deref().unwrap(), "public.t")
+            .unwrap()
+            .invalidates_existing_statistics()
     );
-    assert!(worker.run_automatic_analyze("public.t").unwrap());
     assert_eq!(worker.column_stats("t").unwrap()["id"].row_count, 2);
+}
+
+#[test]
+fn statistics_publication_waits_for_table_retirement_and_rechecks_its_identity() {
+    for commit in [false, true] {
+        let (_directory, writer, worker) = sessions();
+        let backend = worker.storage.backend.as_ref().unwrap();
+        backend.begin_read_transaction().unwrap();
+        worker.refresh_pinned_transaction_snapshot().unwrap();
+        let sampled = worker
+            .collect_automatic_analysis("public.t")
+            .unwrap()
+            .unwrap();
+        backend.rollback_transaction().unwrap();
+        writer.sql("BEGIN; DROP TABLE t", &[]).unwrap();
+        let worker_id = worker.session_id;
+        let relation = writer.row_locks.table_key("public.t");
+        let publish =
+            std::thread::spawn(move || worker.publish_automatic_analysis("public.t", sampled));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !writer.row_locks.waiting_for_relation(worker_id, relation)
+            && !publish.is_finished()
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::yield_now();
+        }
+        let waited = writer.row_locks.waiting_for_relation(worker_id, relation);
+        let completion = writer.sql(if commit { "COMMIT" } else { "ROLLBACK" }, &[]);
+        let published = publish.join().unwrap();
+        assert!(waited, "publication did not protect the table's lifetime");
+        completion.unwrap();
+        assert_eq!(published.unwrap(), !commit);
+    }
 }
 
 #[test]

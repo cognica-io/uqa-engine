@@ -7,6 +7,7 @@
 //! State operations used by native role lifecycle execution.
 
 use std::{collections::BTreeMap, ops::DerefMut};
+use uqa_sql::catalog::roles::identity::RoleBinding;
 use uqa_sql::{
     catalog::roles::{
         definition::RoleValidationContext, dependencies::context::RoleDependencyCatalog,
@@ -25,13 +26,19 @@ pub trait RoleRegistry {
 }
 pub trait RolePublication {
     fn prepare_writer(&self) -> Result<(), SQLError>;
-    fn persist_roles(&self, roles: &BTreeMap<String, RoleDefinition>) -> Result<(), SQLError>;
+    fn persist_roles(
+        &self,
+        before: &BTreeMap<String, RoleDefinition>,
+        roles: &BTreeMap<String, RoleDefinition>,
+    ) -> Result<(), SQLError>;
     fn persist_memberships(
         &self,
+        before: &BTreeMap<RoleMembershipKey, RoleMembership>,
         memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
     ) -> Result<(), SQLError>;
     fn catalog_changed(&self);
-    fn set_current_role(&self, target: String);
+    fn set_current_role(&self, target: Option<RoleBinding>);
+    fn set_session_authorization(&self, target: RoleBinding);
 }
 #[derive(Clone, Copy)]
 pub struct RoleExecutionContext<'a> {
@@ -39,4 +46,6 @@ pub struct RoleExecutionContext<'a> {
     pub registry: &'a dyn RoleRegistry,
     pub publication: &'a dyn RolePublication,
     pub dependencies: &'a dyn RoleDependencyCatalog,
+    pub locks: &'a dyn crate::row_locks::shared_objects::SharedObjectLockSession,
+    pub temporary_roles: &'a dyn super::super::roles::temporary::TemporaryRoleDependencyReads,
 }

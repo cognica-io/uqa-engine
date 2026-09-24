@@ -12,7 +12,7 @@ use super::{
     CatalogFacade, GraphSnapshot, GraphVertexRow, StorageBackendError, StorageBackendResult,
 };
 
-pub(super) fn load<C: CatalogFacade + ?Sized>(
+pub(crate) fn load<C: CatalogFacade + ?Sized>(
     catalog: &C,
     name: &str,
 ) -> StorageBackendResult<Option<GraphSnapshot>> {

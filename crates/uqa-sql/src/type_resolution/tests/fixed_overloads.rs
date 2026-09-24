@@ -8,6 +8,53 @@ use super::super::*;
 use crate::ast::FunctionDispatch;
 
 #[test]
+fn current_setting_overloads_preserve_argument_types_and_session_dependence() {
+    for types in [
+        vec![Some(ColumnType::Text)],
+        vec![Some(ColumnType::Text), Some(ColumnType::Boolean)],
+        vec![None, None],
+    ] {
+        let resolved = resolve_fixed_builtin_call(
+            "PG_CATALOG.CURRENT_SETTING",
+            None,
+            &vec![None; types.len()],
+            &types,
+            false,
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(resolved.selected.return_type, ColumnType::Text);
+        assert_eq!(resolved.selected.binding.name, "pg_catalog.current_setting");
+        assert!(resolved.builtin_non_immutable);
+        assert_eq!(resolved.selected.binding.argument_types[0], "text");
+        if types.len() == 2 {
+            assert_eq!(resolved.selected.binding.argument_types[1], "boolean");
+        }
+    }
+    for types in [
+        vec![],
+        vec![Some(ColumnType::Integer)],
+        vec![Some(ColumnType::Text), Some(ColumnType::Integer)],
+        vec![None; 3],
+    ] {
+        assert_eq!(
+            resolve_fixed_builtin_call(
+                "current_setting",
+                None,
+                &vec![None; types.len()],
+                &types,
+                false,
+                None,
+            )
+            .unwrap_err()
+            .sqlstate(),
+            Some("42883")
+        );
+    }
+}
+
+#[test]
 fn compatibility_resolvers_accept_mixed_case_pg_catalog_qualification() {
     let positional: [Option<String>; 1] = [None];
     let bytea = [Some(ColumnType::Bytea)];

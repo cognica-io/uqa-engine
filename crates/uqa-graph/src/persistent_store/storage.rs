@@ -11,6 +11,8 @@ use uqa_storage::{GraphEntityFilter, GraphEntityKind};
 
 use crate::{GraphLabelRegistry, GraphStoreResult};
 
+pub use super::identifiers::{decode_identifier_generation, GraphIdentifierScope};
+
 /// Open a write transaction or a nested savepoint on the exact storage session.
 pub fn begin_graph_write(
     backend: std::sync::Arc<dyn uqa_storage::PersistentStorageBackend>,
@@ -80,6 +82,50 @@ pub trait GraphWriteTransaction {
 /// No entity, membership, or adjacency collection is retained by a handle.
 /// Multi-read operations run in the caller's pinned storage transaction.
 pub trait GraphStorage: Send + Sync {
+    /// A selection can combine an original snapshot with private entities from another clear generation. Visit each physical namespace supplying that view without observing provider validation reads.
+    fn visit_selection_namespaces(
+        &self,
+        visit: &mut dyn FnMut(
+            uqa_storage::catalog::graph_identifiers::GraphIdentifierNamespace,
+        ) -> GraphStoreResult<()>,
+    ) -> GraphStoreResult<()> {
+        let namespace = self.identifiers()?.ok_or_else(|| {
+            crate::GraphStoreError::Storage(
+                "serializable graph selections require an immutable namespace".into(),
+            )
+        })?;
+        visit(namespace.namespace())
+    }
+    /// Select the same physical identity generation as the entity read. An overlay may read untouched entities from its original snapshot and changed entities from its writer.
+    fn entity_observation_namespace(
+        &self,
+        _kind: GraphEntityKind,
+        _id: u64,
+    ) -> GraphStoreResult<Option<uqa_storage::catalog::graph_identifiers::GraphIdentifierNamespace>>
+    {
+        Ok(self.identifiers()?.map(|scope| scope.namespace()))
+    }
+    /// Autonomous identifiers for this physical entity namespace and its current clear generation. Missing capability retains serialized counter updates.
+    fn identifiers(&self) -> GraphStoreResult<Option<GraphIdentifierScope<'_>>> {
+        Ok(None)
+    }
+    fn guard_definition(&self, _graph: Option<&str>) -> GraphStoreResult<()> {
+        if self.identifiers()?.is_some() {
+            return Err(crate::GraphStoreError::Storage(
+                "graph definition guards are not supported".into(),
+            ));
+        }
+        Ok(())
+    }
+    /// Select a fresh durable namespace when clearing every graph and entity. Providers exposing identifiers must implement this transactionally.
+    fn reset_identifiers(&self) -> GraphStoreResult<()> {
+        if self.identifiers()?.is_some() {
+            return Err(crate::GraphStoreError::Storage(
+                "graph storage cannot reset its identifier generation".into(),
+            ));
+        }
+        Ok(())
+    }
     /// Copy only transaction-local write identities when preparing a new
     /// command candidate. The underlying durable snapshots remain shared.
     fn fork_overlay(&self) -> Option<std::sync::Arc<dyn GraphStorage>> {

@@ -26,10 +26,14 @@ const SAMPLES: usize = 7;
 
 pub trait Session {
     type Index: InvertedIndex;
+    const TRANSACTION_MODEL: &'static str;
     fn open(path: &Path) -> Self;
     fn index(&mut self) -> &mut Self::Index;
     fn begin(&self);
     fn finish(&self, rollback: bool);
+    fn retained_transaction_bytes(&self) -> Option<usize> {
+        None
+    }
 }
 
 fn bind(index: &mut impl InvertedIndex, revision: &Arc<CompiledAnalyzer>) {
@@ -109,14 +113,26 @@ fn file_bytes(directory: &Path) -> u64 {
         .sum()
 }
 
-fn probe<S: Session>(
-    name: &str,
+#[derive(Clone, Copy)]
+struct Workload {
+    name: &'static str,
     base: u64,
     added: u64,
     rollback: bool,
+}
+
+fn probe<S: Session>(
+    workload: Workload,
     texts: &[String],
     revision: &Arc<CompiledAnalyzer>,
+    allocation_only: bool,
 ) -> Value {
+    let Workload {
+        name,
+        base,
+        added,
+        rollback,
+    } = workload;
     let documents = base + if rollback { 0 } else { added };
     let seed_dir = tempfile::tempdir().unwrap();
     seed::<S>(&seed_dir.path().join("index.db"), base, texts, revision);
@@ -131,6 +147,7 @@ fn probe<S: Session>(
         copy_seed(seed_dir.path(), directory.path());
         let mut session = S::open(&directory.path().join("index.db"));
         bind(session.index(), revision);
+        assert_eq!(session.retained_transaction_bytes().unwrap_or(0), 0);
         (session, directory)
     };
     let mutate = |session: &mut S| {
@@ -139,6 +156,11 @@ fn probe<S: Session>(
         session.finish(rollback);
     };
     let verify = |mut session: S, directory: &Path| {
+        assert_eq!(
+            session.retained_transaction_bytes().unwrap_or(0),
+            0,
+            "completed transaction retained private buffers"
+        );
         let live = graph(session.index(), documents);
         assert_eq!(live, expected, "live provider graph differs from Memory");
         drop(session);
@@ -151,40 +173,58 @@ fn probe<S: Session>(
         );
         drop(reopened);
     };
-    let mut elapsed_ns = Vec::with_capacity(SAMPLES);
-    opt_out(|| {
-        for sample in 0..=SAMPLES {
-            let (mut session, directory) = setup();
-            let start = Instant::now();
-            mutate(black_box(&mut session));
-            let elapsed = start.elapsed().as_nanos() as u64;
-            if sample > 0 {
-                elapsed_ns.push(elapsed);
+    let mut elapsed_ns = Vec::new();
+    if !allocation_only {
+        elapsed_ns.reserve(SAMPLES);
+        opt_out(|| {
+            for sample in 0..=SAMPLES {
+                let (mut session, directory) = setup();
+                let start = Instant::now();
+                mutate(black_box(&mut session));
+                let elapsed = start.elapsed().as_nanos() as u64;
+                if sample > 0 {
+                    elapsed_ns.push(elapsed);
+                }
+                verify(session, directory.path());
             }
-            verify(session, directory.path());
-        }
-    });
+        });
+    }
     let (mut session, directory) = setup();
     let info = measure(|| mutate(&mut session));
+    let retained_transaction_bytes = session.retained_transaction_bytes();
     verify(session, directory.path());
-    let mut ordered = elapsed_ns.clone();
-    ordered.sort_unstable();
     eprintln!("measured {name}");
-    json!({
+    let mut row = json!({
         "name": name, "documents_after": documents,
-        "elapsed_ns": elapsed_ns, "median_ns": ordered[SAMPLES / 2],
         "allocation": {
             "count_total": info.count_total, "count_peak": info.count_max, "count_net": info.count_current,
             "bytes_total": info.bytes_total, "bytes_peak": info.bytes_max, "bytes_net": info.bytes_current,
         },
+        "retained_transaction_bytes": retained_transaction_bytes,
         "graph_sha256": expected["graph_sha256"], "field_length": expected["field_length"],
-        "posting_count": expected["posting_count"], "verified_live_and_reopened_samples": SAMPLES + 2,
+        "posting_count": expected["posting_count"],
+        "verified_live_and_reopened_samples": if allocation_only { 1 } else { SAMPLES + 2 },
         "closed_seed_file_bytes": file_bytes(seed_dir.path()),
         "closed_result_file_bytes": file_bytes(directory.path()),
-    })
+    });
+    if !allocation_only {
+        let mut ordered = elapsed_ns.clone();
+        ordered.sort_unstable();
+        row["elapsed_ns"] = json!(elapsed_ns);
+        row["median_ns"] = json!(ordered[SAMPLES / 2]);
+    }
+    row
 }
 
 pub fn run<S: Session>(owner: &str, durability: &str) {
+    let mut allocation_only = false;
+    for argument in std::env::args().skip(1) {
+        match argument.as_str() {
+            "--allocation-only" => allocation_only = true,
+            "--bench" => {}
+            _ => panic!("unknown persistent benchmark argument: {argument}"),
+        }
+    }
     let corpus: Value = serde_json::from_str(CORPUS).unwrap();
     let texts: Vec<_> = corpus["cases"]
         .as_array()
@@ -205,21 +245,36 @@ pub fn run<S: Session>(owner: &str, durability: &str) {
         ("commit_batch_16/2048", 2048, 16, false),
         ("rollback_batch_16/2048", 2048, 16, true),
     ] {
-        measurements.push(probe::<S>(name, base, added, rollback, &texts, &revision));
+        measurements.push(probe::<S>(
+            Workload {
+                name,
+                base,
+                added,
+                rollback,
+            },
+            &texts,
+            &revision,
+            allocation_only,
+        ));
     }
-    println!(
-        "{}",
-        json!({
-            "schema_version": 1, "owner": owner, "target_arch": std::env::consts::ARCH,
-            "target_os": std::env::consts::OS, "pointer_bits": usize::BITS, "threads": 1,
-            "protocol": {"samples": SAMPLES, "warmup": 1, "timed_operations_per_sample": 1},
-            "timing_scope": "input construction, index mutation and explicit transaction begin/commit/rollback; excludes seed copying, open, close, graph verification and reopen",
-            "allocation_scope": "current-thread Rust allocator requests during mutation and transaction; excludes base index, dictionary, C allocator, OS cache, stack and host heap",
-            "filesystem": if cfg!(target_os = "emscripten") { "Emscripten virtual filesystem; no host durability measurement" } else { "temporary directory on host filesystem" },
-            "durability": durability,
-            "corpus_sha256": format!("{:x}", Sha256::digest(CORPUS.as_bytes())),
-            "analyzer_fingerprint": revision.descriptor().fingerprint().to_string(),
-            "measurements": measurements,
-        })
-    );
+    let mut report = json!({
+        "schema_version": 1, "owner": owner, "target_arch": std::env::consts::ARCH,
+        "target_os": std::env::consts::OS, "pointer_bits": usize::BITS, "threads": 1,
+        "protocol": if allocation_only {
+            json!({"allocation_samples": 1, "samples": 0, "warmup": 0, "timed_operations_per_sample": 0})
+        } else {
+            json!({"samples": SAMPLES, "warmup": 1, "timed_operations_per_sample": 1})
+        },
+        "allocation_scope": "current-thread Rust allocator requests during mutation and transaction; excludes base index, dictionary, C allocator, OS cache, stack and host heap",
+        "filesystem": if cfg!(target_os = "emscripten") { "Emscripten virtual filesystem; no host durability measurement" } else { "temporary directory on host filesystem" },
+        "durability": durability,
+        "transaction_model": S::TRANSACTION_MODEL,
+        "corpus_sha256": format!("{:x}", Sha256::digest(CORPUS.as_bytes())),
+        "analyzer_fingerprint": revision.descriptor().fingerprint().to_string(),
+        "measurements": measurements,
+    });
+    if !allocation_only {
+        report["timing_scope"] = json!("input construction, index mutation and explicit transaction begin/commit/rollback; excludes seed copying, open, close, graph verification and reopen");
+    }
+    println!("{report}");
 }

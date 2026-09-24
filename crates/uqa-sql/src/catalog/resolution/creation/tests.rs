@@ -9,7 +9,7 @@ use crate::catalog::{
     resolution::candidates::SearchPathRead,
     security::{
         schema_inquiry::{GraphNamespaceRead, SchemaRegistryRead},
-        SchemaSecurity,
+        BoundSchemaSecurity,
     },
 };
 use std::{
@@ -17,9 +17,11 @@ use std::{
     collections::BTreeMap,
 };
 
+mod type_names;
+
 struct Catalog {
     path: RefCell<Vec<String>>,
-    schemas: RefCell<BTreeMap<String, SchemaSecurity>>,
+    schemas: RefCell<BTreeMap<String, BoundSchemaSecurity>>,
     path_guard_expected: Cell<bool>,
     reads: RefCell<Vec<&'static str>>,
 }
@@ -34,7 +36,7 @@ impl Catalog {
             ),
             schemas: RefCell::new(
                 ["pg_catalog", "information_schema", "tenant"]
-                    .map(|name| (name.into(), SchemaSecurity::legacy(name)))
+                    .map(|name| (name.into(), BoundSchemaSecurity::bootstrap(name)))
                     .into_iter()
                     .collect(),
             ),

@@ -19,10 +19,18 @@ impl SQLiteDocumentStore {
         Self {
             conn,
             table: table.into(),
+            retained: None,
         }
     }
 
+    #[expect(
+        clippy::redundant_closure_for_method_calls,
+        reason = "a method item cannot satisfy the borrowed reader's higher-ranked lifetimes"
+    )]
     pub fn max_doc_id(&self) -> StorageBackendResult<DocId> {
+        if let Some(max) = self.read_native(|read| read.max_doc_id())? {
+            return Ok(max);
+        }
         Ok(self.conn.with(|c| {
             let id: Option<i64> = c
                 .prepare_cached("SELECT MAX(doc_id) FROM _documents WHERE table_name = ?1")?
@@ -37,6 +45,12 @@ impl SQLiteDocumentStore {
         document: &Document,
         metadata: DocumentMetadata,
     ) -> SQLiteResult<()> {
+        if self
+            .write_native(|read, batch| read.put(batch, doc_id, document, metadata))?
+            .is_some()
+        {
+            return Ok(());
+        }
         let sqlite_doc_id = sqlite_doc_id(doc_id)?;
         let document: Document = document
             .iter()
@@ -81,6 +95,9 @@ impl SQLiteDocumentStore {
     }
 
     pub(super) fn get_stored_inner(&self, doc_id: DocId) -> SQLiteResult<Option<StoredDocument>> {
+        if let Some(document) = self.read_native(|read| read.get_stored(doc_id))? {
+            return Ok(document);
+        }
         let sqlite_doc_id = sqlite_doc_id(doc_id)?;
         self.conn.with(|c| {
             let stored: Option<(String, Option<i64>)> = c
@@ -119,6 +136,9 @@ impl SQLiteDocumentStore {
         doc_id: DocId,
         field: &str,
     ) -> SQLiteResult<Option<Value>> {
+        if let Some(value) = self.read_native(|read| read.get_field(doc_id, field))? {
+            return Ok(value);
+        }
         let sqlite_doc_id = sqlite_doc_id(doc_id)?;
         let path = sqlite_json_path(field);
         self.conn.with(|c| {
@@ -144,6 +164,9 @@ impl SQLiteDocumentStore {
         field: &str,
         value: &Value,
     ) -> SQLiteResult<Option<DocId>> {
+        if let Some(id) = self.read_native(|read| read.find(field, value))? {
+            return Ok(id);
+        }
         let path = sqlite_json_path(field);
         match value {
             Value::Str(value) => self
@@ -196,6 +219,9 @@ impl SQLiteDocumentStore {
         doc_id: DocId,
         updates: &BTreeMap<String, Value>,
     ) -> SQLiteResult<bool> {
+        if let Some(found) = self.write_native(|read, batch| read.patch(batch, doc_id, updates))? {
+            return Ok(found);
+        }
         if updates.is_empty() {
             return Ok(true);
         }

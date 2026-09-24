@@ -6,19 +6,14 @@
 
 //! Retained relation state, physical publication and session boundaries used by VACUUM.
 use crate::mutation::publication::DocumentVectors;
-use std::{
-    collections::BTreeMap,
-    ops::{Deref, DerefMut},
-};
+use std::ops::{Deref, DerefMut};
 use uqa_core::DocId;
 use uqa_sql::{
     ast::RelationPersistence,
     maintenance::{VacuumCatalog, VacuumPrivileges},
     SQLError,
 };
-use uqa_storage::{
-    document_store::Document, DocumentStore, StorageBackendResult, StoredDocument, VectorIndex,
-};
+use uqa_storage::{document_store::Document, DocumentStore, StorageBackendResult, StoredDocument};
 /// Saved statistics for the retained relation; maintenance chooses when to restore and persist them.
 pub trait VacuumStatistics {
     fn loaded(&self) -> bool;
@@ -28,7 +23,7 @@ pub trait VacuumStatistics {
 }
 pub type VacuumDocuments<'a> = Box<dyn Deref<Target = Box<dyn DocumentStore>> + 'a>;
 pub type VacuumVectorIndexes<'a> =
-    Box<dyn DerefMut<Target = BTreeMap<String, Box<dyn VectorIndex>>> + 'a>;
+    Box<dyn DerefMut<Target = uqa_storage::vector_index::VectorIndexes> + 'a>;
 pub trait VacuumTable {
     fn statistics(&self) -> Box<dyn VacuumStatistics + '_>;
     fn documents(&self) -> VacuumDocuments<'_>;

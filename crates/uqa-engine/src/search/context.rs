@@ -35,10 +35,11 @@ impl Engine {
         else {
             return Ok(None);
         };
+        let control = self.query_retention_control()?;
         let inv = t
             .inverted_index
             .read()
-            .snapshot()
+            .snapshot_with_control(&control)
             .map_err(|error| storage_sql_error("snapshot inverted index", error))?;
         let documents = match documents {
             Some(documents) => documents,
@@ -49,15 +50,27 @@ impl Engine {
                 .map_err(|error| storage_sql_error("snapshot document store", error))?,
         };
 
+        let read = self.serializable_table_read(table)?;
+        let columns = t.columns.snapshot();
         let mut ctx = ExecutionContext::new()
-            .with_inverted_index(inv)
+            .with_inverted_index(uqa_execution::serializable::text::observe_snapshot(
+                read.as_ref(),
+                columns.clone(),
+                inv,
+            ))
             .with_document_store(documents);
 
         for (field, idx) in t.vector_indexes.read().iter() {
             ctx = ctx.with_vector_index(
                 field.clone(),
-                idx.snapshot()
-                    .map_err(|error| storage_sql_error("snapshot vector index", error))?,
+                uqa_execution::serializable::vector::observe_snapshot(
+                    read.as_ref(),
+                    &columns,
+                    field,
+                    idx.snapshot_with_control(&control)
+                        .map_err(|error| storage_sql_error("snapshot vector index", error))?,
+                )
+                .map_err(|error| storage_sql_error("retain vector search participant", error))?,
             );
         }
 

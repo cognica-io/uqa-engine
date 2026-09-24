@@ -226,6 +226,7 @@ struct ContainerFile {
     dirty_chunks: BTreeSet<u64>,
     compression: SQLiteCompressionOptions,
     keys: Option<ContainerKeys>,
+    initial_key: Option<uqa_storage::StorageEncryptionKey>,
     salt: [u8; SALT_LEN],
     file_id: [u8; FILE_ID_LEN],
     generation: u64,

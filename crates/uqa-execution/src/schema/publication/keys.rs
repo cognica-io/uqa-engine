@@ -26,8 +26,17 @@ pub fn append_key_constraint(
     let mut constraints = state.constraints();
     constraints.key_constraints = key_constraints;
     materialize_metadata(context, &table_name, &mut columns, &mut constraints)?;
+    let indexes = crate::schema::indexes::registry::prepare_constraint_indexes(
+        &context.indexes,
+        &table_name,
+        state.object_id(),
+        &mut columns,
+        &mut constraints,
+    )?;
+    let state = super::current_table_state(context.catalog, &table_name, state.as_ref())?;
     state.persist_candidate(&columns, &constraints)?;
     state.publish_constraints(columns, constraints);
+    indexes.publish(&context.indexes)?;
     state.refresh_value_indexes()?;
     Ok(())
 }

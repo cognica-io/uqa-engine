@@ -13,10 +13,10 @@ use uqa_storage::StorageBackendResult;
 
 impl GraphLifecycle for Engine {
     fn has_graph(&self, name: &str) -> StorageBackendResult<bool> {
-        self.has_graph(name)
+        self.has_graph_in_execution(name)
     }
     fn has_namespace(&self, name: &str) -> StorageBackendResult<bool> {
-        self.has_namespace(name)
+        self.has_namespace_in_execution(name)
     }
     fn create_graph(&self, name: String) -> StorageBackendResult<bool> {
         self.create_graph(name)
@@ -25,7 +25,7 @@ impl GraphLifecycle for Engine {
         self.drop_graph(name)
     }
     fn list_graph_labels(&self, graph: &str) -> StorageBackendResult<Option<Vec<GraphLabelInfo>>> {
-        self.list_graph_labels(graph)
+        self.graph_labels_in_execution(graph)
     }
     fn create_graph_label(
         &self,

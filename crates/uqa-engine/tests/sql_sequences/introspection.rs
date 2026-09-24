@@ -197,6 +197,46 @@ fn sequence_introspection_functions_return_postgresql_records() {
 }
 
 #[test]
+fn qualified_sequence_introspection_preserves_bound_catalog_calls() {
+    let engine = Engine::new();
+    engine
+        .sql("CREATE SEQUENCE qualified_ids START 7", &[])
+        .unwrap();
+    engine.sql("SELECT nextval('qualified_ids')", &[]).unwrap();
+
+    for prefix in ["", "pg_catalog."] {
+        for call in [
+            format!("{prefix}pg_sequence_parameters('qualified_ids'::regclass)"),
+            format!("{prefix}pg_get_sequence_data('qualified_ids'::regclass)"),
+        ] {
+            let scalar = engine.sql(&format!("SELECT {call} AS value"), &[]).unwrap();
+            let record = engine.sql(&format!("SELECT * FROM {call}"), &[]).unwrap();
+            let expected = Value::Record(
+                record
+                    .columns
+                    .iter()
+                    .map(|column| (column.clone(), record.rows[0][column].clone()))
+                    .collect(),
+            );
+            assert_eq!(scalar.rows[0]["value"], expected, "{call}");
+        }
+        let sql = format!("SELECT coalesce({prefix}pg_sequence_last_value('qualified_ids'::regclass), 0) + 1 AS value");
+        assert_eq!(
+            engine.sql(&sql, &[]).unwrap().rows[0]["value"],
+            Value::Int(8)
+        );
+    }
+
+    engine.sql("CREATE FUNCTION public.pg_sequence_last_value(regclass) RETURNS bigint LANGUAGE SQL AS 'SELECT 99::bigint'", &[]).unwrap();
+    engine
+        .sql("SET search_path = public, pg_catalog", &[])
+        .unwrap();
+    let values = engine.sql("SELECT pg_sequence_last_value('qualified_ids'::regclass) AS shadow, pg_catalog.pg_sequence_last_value('qualified_ids'::regclass) AS builtin", &[]).unwrap();
+    assert_eq!(values.rows[0]["shadow"], Value::Int(99));
+    assert_eq!(values.rows[0]["builtin"], Value::Int(7));
+}
+
+#[test]
 fn sequence_introspection_obeys_each_postgresql_privilege_rule() {
     let engine = Engine::new();
     engine.sql("CREATE ROLE sequence_reader", &[]).unwrap();

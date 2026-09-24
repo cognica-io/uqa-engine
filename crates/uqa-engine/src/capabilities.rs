@@ -9,6 +9,7 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use uqa_sql::catalog::roles::RoleReference;
 
 use uqa_sql::ast::TransactionIsolationLevel;
 use uqa_sql::SQLError;
@@ -44,6 +45,10 @@ pub(crate) struct SessionExecutionView<'a> {
 }
 
 impl SessionExecutionView<'_> {
+    pub(crate) fn cursors(&self) -> Vec<uqa_sql::catalog::session::CursorMetadata> {
+        self.session.portal_registry.snapshot()
+    }
+
     pub(crate) fn prepared_statements(
         &self,
     ) -> Vec<super::statement_cache::PreparedStatementMetadata> {
@@ -60,12 +65,12 @@ impl SessionExecutionView<'_> {
         self.session.state.read().search_path.clone()
     }
 
-    pub(crate) fn current_user(&self) -> String {
-        self.session.state.read().current_user.clone()
+    pub(crate) fn current_role(&self) -> RoleReference {
+        RoleReference::Bound(self.session.state.read().authorization.current().clone())
     }
 
-    pub(crate) fn session_user(&self) -> String {
-        self.session.state.read().session_user.clone()
+    pub(crate) fn session_role(&self) -> RoleReference {
+        RoleReference::Bound(self.session.state.read().authorization.session().clone())
     }
 
     pub(crate) fn transaction_depth(&self) -> usize {
@@ -86,28 +91,37 @@ impl SessionExecutionView<'_> {
             search_path: state.search_path.clone(),
             temporary_schema: self.temporary_schema_name(),
             temporary_namespace_allocated: state.temporary_namespace_allocated,
-            current_user: state.current_user.clone(),
+            current_user: RoleReference::Bound(state.authorization.current().clone()),
             lookup_mode: RelationLookupMode::Dynamic,
         }
     }
 
     pub(crate) fn show_variable(&self, name: &str) -> Result<String, SQLError> {
-        if name.eq_ignore_ascii_case("search_path") {
-            return Ok(self.search_path().join(","));
-        }
-        if let Some(value) = self.transaction_parameter_value(name) {
-            return Ok(value);
-        }
-        let session = self.session.state.read();
-        if let Some(value) = session_value(&session.session_vars, name) {
-            return Ok(value);
-        }
-        default_runtime_parameter(name)
-            .map(str::to_string)
+        self.runtime_parameter(name)
             .ok_or_else(|| SQLError::Routine {
                 sqlstate: "42704".into(),
                 message: format!("unrecognized configuration parameter \"{name}\""),
             })
+    }
+
+    pub(crate) fn runtime_parameter(&self, name: &str) -> Option<String> {
+        if name.eq_ignore_ascii_case("search_path") {
+            return Some(self.search_path().join(","));
+        }
+        if let Some(value) = self.transaction_parameter_value(name) {
+            return Some(value);
+        }
+        let session = self.session.state.read();
+        if name.eq_ignore_ascii_case("role") {
+            return Some(session.authorization.show_role().to_owned());
+        }
+        if name.eq_ignore_ascii_case("session_authorization") {
+            return Some(session.authorization.session().name.clone());
+        }
+        if let Some(value) = session_value(&session.session_vars, name) {
+            return Some(value);
+        }
+        default_runtime_parameter(name).map(str::to_string)
     }
 
     pub(crate) fn runtime_parameter_source(&self, name: &str) -> &'static str {
@@ -183,7 +197,8 @@ impl MutationCoordinator<'_> {
         &self,
         name: &str,
         if_not_exists: bool,
-        role_owner: &str,
+        role_owner: uqa_core::catalog_role::RoleIdentity,
+        tuple: uqa_core::catalog_schema::SchemaTupleIdentity,
     ) -> StorageBackendResult<bool> {
         uqa_execution::schema::namespaces::register_schema(
             &uqa_execution::schema::namespaces::SchemaRegistrationContext {
@@ -194,6 +209,7 @@ impl MutationCoordinator<'_> {
             name,
             if_not_exists,
             role_owner,
+            tuple,
         )
     }
 
@@ -289,6 +305,7 @@ impl Engine {
                 sequence_object_ids: durable.sequence_object_ids.clone(),
                 sequence_security: durable.sequence_security.clone(),
                 foreign_table_security: durable.foreign_table_security.clone(),
+                system_relation_security: durable.system_relation_security.clone(),
                 roles: durable.roles.clone(),
                 triggers: durable.triggers.clone(),
                 rules: durable.rules.clone(),
@@ -327,6 +344,12 @@ impl Engine {
 }
 
 pub(super) fn default_runtime_parameter(name: &str) -> Option<&'static str> {
+    if name.eq_ignore_ascii_case("role") {
+        return Some("none");
+    }
+    if name.eq_ignore_ascii_case("session_authorization") {
+        return Some("uqa");
+    }
     if name.eq_ignore_ascii_case("application_name") {
         return Some("");
     }
@@ -384,6 +407,8 @@ pub(super) fn is_known_runtime_parameter(name: &str) -> bool {
 
 pub(super) fn is_mutable_runtime_parameter(name: &str) -> bool {
     name.eq_ignore_ascii_case("application_name")
+        || name.eq_ignore_ascii_case("role")
+        || name.eq_ignore_ascii_case("session_authorization")
         || name.eq_ignore_ascii_case("search_path")
         || name.eq_ignore_ascii_case("client_encoding")
         || name.eq_ignore_ascii_case("datestyle")
@@ -501,8 +526,9 @@ pub(super) fn parse_work_mem_bytes(raw: &str) -> Result<usize, SQLError> {
     })
 }
 
-pub(crate) fn validate_schema_name(name: &str) -> StorageBackendResult<()> {
-    uqa_sql::schema::namespaces::validate_schema_name(name).map_err(StorageBackendError::Other)
+pub(crate) fn validate_stored_schema_name(name: &str) -> StorageBackendResult<()> {
+    uqa_sql::schema::namespaces::validate_stored_schema_name(name)
+        .map_err(StorageBackendError::Other)
 }
 
 #[cfg(test)]
@@ -580,7 +606,6 @@ mod roles;
 mod sequences;
 
 mod schema_publication;
-pub(crate) use schema_publication::allocate_catalog_object_id;
 
 mod hierarchy;
 
@@ -601,6 +626,7 @@ mod copy;
 mod cypher;
 
 mod maintenance;
+mod table_locks;
 
 mod index_removal;
 

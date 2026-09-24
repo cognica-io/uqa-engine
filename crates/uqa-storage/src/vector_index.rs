@@ -17,9 +17,20 @@ use uqa_core::{DocId, Payload, PostingEntry, PostingList};
 
 use crate::{StorageBackendError, StorageBackendResult};
 
+mod collection;
 mod config;
+mod memory_snapshot;
+pub mod query;
+pub(crate) mod retained;
 
+pub use collection::{
+    RetainedVectorIndexesBuilder, VectorIndexSource, VectorIndexes, VectorIndexesIter,
+};
 pub use config::{HNSWIndexParams, IVFIndexParams, VectorIndexOpenMode, VectorIndexSpec};
+pub use retained::{RetainedVectorIndex, RetainedVectorIndexBuilder};
+
+#[cfg(test)]
+mod physical_snapshots;
 
 pub fn validate_vector_values(dimensions: u32, vector: &[f32]) -> StorageBackendResult<()> {
     let dimensions = usize::try_from(dimensions).map_err(|_| {
@@ -74,9 +85,9 @@ pub fn select_top_k_scored(scored: &mut Vec<(DocId, f32)>, k: usize) {
 /// Collapse tensor-vector scores to the best score for each document without
 /// allocating one tree node per candidate. The final sort performed by each
 /// caller restores the posting-list invariant after top-k selection.
-pub(crate) fn deduplicate_scored_by_doc(scored: &mut Vec<(DocId, f32)>) {
+pub(crate) fn deduplicate_scored_values(scored: &mut [(DocId, f32)]) -> usize {
     if scored.len() < 2 {
-        return;
+        return scored.len();
     }
     scored.sort_unstable_by_key(|(doc_id, _)| *doc_id);
     let mut write = 1;
@@ -89,7 +100,7 @@ pub(crate) fn deduplicate_scored_by_doc(scored: &mut Vec<(DocId, f32)>) {
             write += 1;
         }
     }
-    scored.truncate(write);
+    write
 }
 
 pub(crate) fn vector_norm(vector: &[f32]) -> f32 {
@@ -149,7 +160,34 @@ pub trait VectorIndex: Send + Sync {
     fn clear(&mut self) -> StorageBackendResult<()>;
     fn search_knn(&self, query: &[f32], k: usize) -> StorageBackendResult<PostingList>;
     fn search_threshold(&self, query: &[f32], threshold: f32) -> StorageBackendResult<PostingList>;
+    /// Request a controlled search. The default checks cancellation and delegates to the provider's existing read boundary; in-memory physical algorithms override it to charge query workspace to the supplied allowance.
+    fn search_knn_with_control(
+        &self,
+        query: &[f32],
+        k: usize,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<PostingList> {
+        control.check()?;
+        self.search_knn(query, k)
+    }
+    /// Controlled threshold search keeps the same result and caller-owned posting boundary as ordinary search.
+    fn search_threshold_with_control(
+        &self,
+        query: &[f32],
+        threshold: f32,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<PostingList> {
+        control.check()?;
+        self.search_threshold(query, threshold)
+    }
     fn count(&self) -> StorageBackendResult<usize>;
+
+    /// Test canonical membership at this handle's visibility boundary without searching or materializing the corpus. Empty tensor replacements have no membership. This is a maintenance probe, not a logical query observation.
+    fn contains_document(&self, _doc_id: DocId) -> StorageBackendResult<bool> {
+        Err(StorageBackendError::Other(
+            "canonical vector membership is not supported by this backend".into(),
+        ))
+    }
 
     /// Build any auxiliary physical metadata required by this index from its
     /// current vector contents. Brute-force indexes need no extra work;
@@ -161,6 +199,15 @@ pub trait VectorIndex: Send + Sync {
 
     /// Read-only handle suitable for an `ExecutionContext`.
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>>;
+
+    /// Capture using the caller's retention allowance and cancellation. Owners that copy index data override this method to reserve construction before allocation. The default preserves the provider's existing snapshot and its independently retained control.
+    fn snapshot_with_control(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Arc<dyn VectorIndex>> {
+        control.check()?;
+        self.snapshot()
+    }
 
     /// Independent writable copy used by in-memory engine rollback. The
     /// default keeps third-party and persistent implementations source
@@ -192,6 +239,10 @@ impl MemoryVectorIndex {
 }
 
 impl VectorIndex for MemoryVectorIndex {
+    fn contains_document(&self, doc_id: DocId) -> StorageBackendResult<bool> {
+        Ok(self.vectors.contains_key(&doc_id))
+    }
+
     fn dimensions(&self) -> u32 {
         self.dimensions
     }
@@ -283,6 +334,13 @@ impl VectorIndex for MemoryVectorIndex {
         Ok(Arc::new(self.clone()))
     }
 
+    fn snapshot_with_control(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Arc<dyn VectorIndex>> {
+        memory_snapshot::capture(self, control)
+    }
+
     fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn VectorIndex>> {
         Ok(Box::new(self.clone()))
     }
@@ -304,6 +362,30 @@ fn best_vector_score(query: &[f32], vectors: &[Vec<f32>]) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canonical_membership_tracks_tensor_replacement_and_retained_snapshots() {
+        let indexes: [Box<dyn VectorIndex>; 3] = [
+            Box::new(MemoryVectorIndex::new(2)),
+            Box::new(crate::IVFIndex::new(2)),
+            Box::new(crate::HNSWIndex::new(2)),
+        ];
+        for mut index in indexes {
+            assert!(!index.contains_document(1).unwrap());
+            index
+                .add_many(1, vec![vec![1.0, 0.0], vec![0.0, 1.0]])
+                .unwrap();
+            let retained = index.snapshot().unwrap();
+            assert!(index.contains_document(1).unwrap());
+            assert!(!index.contains_document(2).unwrap());
+            index.add_many(1, Vec::new()).unwrap();
+            assert!(!index.contains_document(1).unwrap());
+            assert!(retained.contains_document(1).unwrap());
+            index.add(1, vec![0.5, 0.5]).unwrap();
+            index.delete(1).unwrap();
+            assert!(!index.contains_document(1).unwrap());
+        }
+    }
 
     fn approx_eq(a: f32, b: f32, eps: f32) {
         assert!((a - b).abs() < eps, "expected {a} ~ {b} within {eps}");
@@ -370,7 +452,8 @@ mod tests {
     #[test]
     fn score_deduplication_keeps_best_tensor_vector() {
         let mut scored = vec![(7, 0.3), (2, 0.8), (7, 0.9), (2, 0.4), (9, -0.2)];
-        deduplicate_scored_by_doc(&mut scored);
+        let count = deduplicate_scored_values(&mut scored);
+        scored.truncate(count);
         assert_eq!(scored, vec![(2, 0.8), (7, 0.9), (9, -0.2)]);
     }
 

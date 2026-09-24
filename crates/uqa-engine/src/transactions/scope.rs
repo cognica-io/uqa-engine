@@ -12,6 +12,7 @@ use super::{Engine, SQLError};
 enum TransactionScopeState {
     Active,
     Finished,
+    AwaitingResolution,
 }
 
 pub(super) struct TransactionScope<'engine> {
@@ -21,6 +22,19 @@ pub(super) struct TransactionScope<'engine> {
 }
 
 impl<'engine> TransactionScope<'engine> {
+    pub(super) fn begin_implicit_statement(
+        engine: &'engine Engine,
+        read_only: bool,
+    ) -> Result<Self, SQLError> {
+        let depth_before = engine.transaction_depth();
+        engine.begin_implicit_statement_transaction(read_only)?;
+        Ok(Self {
+            engine,
+            depth_before,
+            state: TransactionScopeState::Active,
+        })
+    }
+
     pub(super) fn begin(engine: &'engine Engine) -> Result<Self, SQLError> {
         let depth_before = engine.transaction_depth();
         engine.begin()?;
@@ -40,7 +54,7 @@ impl<'engine> TransactionScope<'engine> {
             ));
             return match self.rollback() {
                 Ok(()) => Err(depth_error),
-                Err(rollback_error) => Err(SQLError::Internal(format!(
+                Err(rollback_error) => Err(Engine::rollback_cleanup_error(&rollback_error, format!(
                     "transaction cleanup after an unbalanced callback failed: {rollback_error}; original error: {depth_error}"
                 ))),
             };
@@ -56,7 +70,7 @@ impl<'engine> TransactionScope<'engine> {
                     );
                     match self.rollback() {
                         Ok(()) => Err(depth_error),
-                        Err(rollback_error) => Err(SQLError::Internal(format!(
+                        Err(rollback_error) => Err(Engine::rollback_cleanup_error(&rollback_error, format!(
                             "transaction cleanup after an incomplete commit failed: {rollback_error}; original error: {depth_error}"
                         ))),
                     }
@@ -67,9 +81,13 @@ impl<'engine> TransactionScope<'engine> {
                 if self.state == TransactionScopeState::Finished {
                     return Err(commit_error);
                 }
+                if self.engine.pending_transaction_completion().is_some() {
+                    self.state = TransactionScopeState::AwaitingResolution;
+                    return Err(commit_error);
+                }
                 match self.rollback() {
                     Ok(()) => Err(commit_error),
-                    Err(rollback_error) => Err(SQLError::Internal(format!(
+                    Err(rollback_error) => Err(Engine::rollback_cleanup_error(&rollback_error, format!(
                         "transaction rollback after commit failure failed: {rollback_error}; original commit error: {commit_error}"
                     ))),
                 }
@@ -86,7 +104,7 @@ impl<'engine> TransactionScope<'engine> {
                 if first_error.is_none() {
                     first_error = Some(error);
                 } else {
-                    additional_errors.push(error.to_string());
+                    additional_errors.push(error);
                 }
             }
             if self.engine.transaction_depth() >= depth_before_rollback {
@@ -94,6 +112,9 @@ impl<'engine> TransactionScope<'engine> {
             }
         }
         self.finish_if_closed();
+        if self.engine.pending_transaction_completion().is_some() {
+            self.state = TransactionScopeState::AwaitingResolution;
+        }
         if self.state == TransactionScopeState::Active && first_error.is_none() {
             first_error = Some(SQLError::Internal(
                 "transaction rollback did not close its scoped frame".into(),
@@ -102,10 +123,20 @@ impl<'engine> TransactionScope<'engine> {
         match (first_error, additional_errors.is_empty()) {
             (None, _) => Ok(()),
             (Some(error), true) => Err(error),
-            (Some(error), false) => Err(SQLError::Internal(format!(
-                "{error}; additional transaction rollback failures: {}",
-                additional_errors.join("; ")
-            ))),
+            (Some(error), false) => Err(Engine::rollback_cleanup_error(
+                additional_errors
+                    .iter()
+                    .find(|error| error.sqlstate() == Some("08007"))
+                    .unwrap_or(&error),
+                format!(
+                    "{error}; additional transaction rollback failures: {}",
+                    additional_errors
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                ),
+            )),
         }
     }
 

@@ -6,24 +6,53 @@
 
 //! Shared `PostgreSQL` 18 signatures for array transformations.
 
-use super::{validate_named_argument_order, Result, Value};
+use super::{validate_named_argument_order_with_control, Result, Value};
+use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
 /// Map call-order arguments onto the declared `array_sort` and `array_reverse` slots. `None` means the arity or a named argument does not select a catalogued overload.
 pub fn argument_positions(
     name: &str,
     argument_names: &[Option<&str>],
 ) -> Result<Option<Vec<usize>>> {
-    validate_named_argument_order(argument_names.iter().copied())?;
-    let lower = name.to_ascii_lowercase();
-    let function = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
-    let parameter_names: &[Option<&str>] = match (function, argument_names.len()) {
-        ("array_reverse", 1) | ("array_sort", 1) => &[None],
-        ("array_sort", 2) => &[Some("array"), Some("descending")],
-        ("array_sort", 3) => &[Some("array"), Some("descending"), Some("nulls_first")],
-        _ => return Ok(None),
+    argument_positions_with_control(name, argument_names, &ProductionControl::uncontrolled()).map(
+        |positions| {
+            positions.map(|positions| {
+                positions
+                    .into_uncontrolled()
+                    .expect("ordinary argument positions")
+            })
+        },
+    )
+}
+
+pub fn argument_positions_with_control(
+    name: &str,
+    argument_names: &[Option<&str>],
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Vec<usize>>>> {
+    control.check()?;
+    validate_named_argument_order_with_control(argument_names.iter().copied(), control)?;
+    let function = name
+        .get(..11)
+        .filter(|prefix| prefix.eq_ignore_ascii_case("pg_catalog."))
+        .map_or(name, |_| &name[11..]);
+    let parameter_names: &[Option<&str>] = if argument_names.len() == 1
+        && (function.eq_ignore_ascii_case("array_reverse")
+            || function.eq_ignore_ascii_case("array_sort"))
+    {
+        &[None]
+    } else if function.eq_ignore_ascii_case("array_sort") {
+        match argument_names.len() {
+            2 => &[Some("array"), Some("descending")],
+            3 => &[Some("array"), Some("descending"), Some("nulls_first")],
+            _ => return Ok(None),
+        }
+    } else {
+        return Ok(None);
     };
-    let mut occupied = vec![false; parameter_names.len()];
-    let mut positions = Vec::with_capacity(argument_names.len());
+    let mut occupied = [false; 3];
+    let mut positions = ProductionVec::new(*control);
+    positions.reserve(argument_names.len())?;
     let mut positional = 0;
     for argument_name in argument_names {
         let position = if let Some(argument_name) = argument_name {
@@ -35,32 +64,42 @@ pub fn argument_positions(
             positional += 1;
             Some(position)
         };
-        let Some(position) = position.filter(|position| *position < occupied.len()) else {
+        let Some(position) = position.filter(|position| *position < parameter_names.len()) else {
             return Ok(None);
         };
         if occupied[position] {
             return Ok(None);
         }
         occupied[position] = true;
-        positions.push(position);
+        positions.push_copy(position)?;
     }
-    Ok(occupied.into_iter().all(|slot| slot).then_some(positions))
+    Ok(occupied[..parameter_names.len()]
+        .iter()
+        .all(|slot| *slot)
+        .then(|| positions.finish())
+        .transpose()?)
 }
 
-pub(super) fn reorder_named_values(
+pub(super) fn reorder_named_values_with_control(
     function: &str,
     call_args: &[(Option<String>, Value)],
-) -> Option<Vec<Value>> {
-    let argument_names = call_args
-        .iter()
-        .map(|(name, _)| name.as_deref())
-        .collect::<Vec<_>>();
-    let positions = argument_positions(function, &argument_names)
-        .ok()
-        .flatten()?;
-    let mut values = vec![None; call_args.len()];
-    for ((_, value), position) in call_args.iter().zip(positions) {
-        values[position] = Some(value.clone());
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Vec<Value>>>> {
+    let names = super::call_arguments::evaluated_argument_names_with_control(call_args, control)?;
+    let positions = match argument_positions_with_control(function, &names, control) {
+        Ok(Some(positions)) => positions,
+        Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
+        Ok(None) | Err(_) => return Ok(None),
+    };
+    let mut values = [None; 3];
+    for ((_, value), position) in call_args.iter().zip(positions.iter().copied()) {
+        values[position] = Some(value);
     }
-    values.into_iter().collect()
+    let mut output = ProductionVec::new(*control);
+    output.reserve(call_args.len())?;
+    for value in &values[..call_args.len()] {
+        let Some(value) = value else { return Ok(None) };
+        output.push_produced(control.copy_value(value)?)?;
+    }
+    Ok(Some(output.finish()?))
 }

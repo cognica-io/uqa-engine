@@ -8,6 +8,13 @@ use serde::{Deserialize, Serialize};
 
 use super::{IntervalFields, RangeSubtype};
 
+mod modifiers;
+mod names;
+mod parsing;
+mod production;
+
+pub(crate) use modifiers::split_type_modifier_with_control;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ColumnType {
     /// A declaration awaiting catalog type resolution. This variant is never a stored column type.
@@ -177,16 +184,12 @@ impl ColumnType {
     /// Retain the SQL type identity without a declaration's length, scale, or temporal precision.
     #[must_use]
     pub fn without_type_modifiers(&self) -> Self {
-        match self {
-            Self::Varchar(_) => Self::Varchar(None),
-            Self::Character(_) => Self::Bpchar,
-            Self::Numeric { .. } => Self::Numeric {
-                precision: None,
-                scale: None,
-            },
-            Self::Array(element) => Self::Array(Box::new(element.without_type_modifiers())),
-            other => other.without_temporal_modifiers().clone(),
-        }
+        self.without_type_modifiers_with_control(
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary type modifier removal cannot be limited or cancelled")
+        .into_uncontrolled()
+        .expect("ordinary type modifier removal has no reservation")
     }
 
     #[must_use]
@@ -283,279 +286,5 @@ impl ColumnType {
             Self::Domain { base, .. } => base.is_character_string(),
             _ => false,
         }
-    }
-
-    /// Parse the canonical or accepted spelling of one implemented SQL type.
-    /// This is shared by expression binding and row-schema propagation so a
-    /// cast's declared type is not reconstructed from its runtime value.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "exhaustive AST migration preserves every serialized variant"
-    )]
-    pub fn from_sql_name(name: &str) -> Result<Self, crate::SQLError> {
-        let normalized = name.trim().to_ascii_lowercase();
-        if let Some(element) = builtin_array_element_name(&normalized) {
-            return Self::from_sql_name(element).map(|ty| Self::Array(Box::new(ty)));
-        }
-        if let Some(element) = normalized.strip_suffix("[]") {
-            let element_type = Self::from_sql_name(element)?;
-            if matches!(element_type, Self::Void) {
-                return Err(crate::SQLError::Routine {
-                    sqlstate: "42704".into(),
-                    message: format!("type \"{normalized}\" does not exist"),
-                });
-            }
-            return Ok(Self::Array(Box::new(element_type)));
-        }
-        let (base, modifier) = split_type_modifier(&normalized);
-        let base = base.strip_prefix("pg_catalog.").unwrap_or(&base);
-        let temporal_precision = || {
-            modifier
-                .map(|value| {
-                    value.trim().parse::<i64>().map_err(|_| {
-                        crate::SQLError::TypeMismatch(format!(
-                            "invalid temporal precision: {value}"
-                        ))
-                    })
-                })
-                .transpose()
-        };
-        let character_length = || -> Result<Option<u32>, crate::SQLError> {
-            modifier
-                .map(|value| {
-                    value
-                        .parse::<u32>()
-                        .ok()
-                        .filter(|length| *length > 0)
-                        .ok_or_else(|| {
-                            crate::SQLError::TypeMismatch(format!(
-                                "character length must be greater than zero, got {value}"
-                            ))
-                        })
-                })
-                .transpose()
-        };
-        match base {
-            "smallint" | "int2" => Ok(Self::SmallInteger),
-            "integer" | "int" | "int4" => Ok(Self::Integer),
-            "bigint" | "int8" => Ok(Self::BigInteger),
-            "oid" => Ok(Self::Oid),
-            "xid" => Ok(Self::Xid),
-            "boolean" | "bool" => Ok(Self::Boolean),
-            "void" => Ok(Self::Void),
-            "text" => Ok(Self::Text),
-            "refcursor" => Ok(Self::RefCursor),
-            "name" => Ok(Self::Name),
-            "uuid" => Ok(Self::Uuid),
-            "varchar" | "character varying" => Ok(Self::Varchar(character_length()?)),
-            "character" | "char" => Ok(Self::Character(character_length()?.unwrap_or(1))),
-            "bpchar" => Ok(character_length()?.map_or(Self::Bpchar, Self::Character)),
-            "real" | "float4" => Ok(Self::Real),
-            "double" | "double precision" | "float8" => Ok(Self::DoublePrecision),
-            "numeric" | "decimal" => {
-                let (precision, scale) = match modifier {
-                    None => (None, None),
-                    Some(modifier) => {
-                        let mut parts = modifier.split(',').map(str::trim);
-                        let precision = parts
-                            .next()
-                            .and_then(|value| value.parse::<u32>().ok())
-                            .ok_or_else(|| {
-                                crate::SQLError::TypeMismatch(format!(
-                                    "invalid numeric modifier `{modifier}`"
-                                ))
-                            })?;
-                        let scale = parts
-                            .next()
-                            .map(|value| value.parse::<i32>())
-                            .transpose()
-                            .map_err(|_| {
-                                crate::SQLError::TypeMismatch(format!(
-                                    "invalid numeric modifier `{modifier}`"
-                                ))
-                            })?
-                            .unwrap_or(0);
-                        if parts.next().is_some() {
-                            return Err(crate::SQLError::TypeMismatch(format!(
-                                "invalid numeric modifier `{modifier}`"
-                            )));
-                        }
-                        (Some(precision), Some(scale))
-                    }
-                };
-                Ok(Self::Numeric { precision, scale })
-            }
-            "json" => Ok(Self::Json),
-            "jsonb" => Ok(Self::JsonB),
-            "bytea" => Ok(Self::Bytea),
-            "\"char\"" => Ok(Self::InternalChar),
-            "regproc" => Ok(Self::Regproc),
-            "regprocedure" => Ok(Self::Regprocedure),
-            "regclass" => Ok(Self::Regclass),
-            "regnamespace" => Ok(Self::Regnamespace),
-            "regrole" => Ok(Self::Regrole),
-            "regtype" => Ok(Self::Regtype),
-            "pg_node_tree" => Ok(Self::PgNodeTree),
-            "aclitem" => Ok(Self::AclItem),
-            "int2vector" => Ok(Self::Int2Vector),
-            "oidvector" => Ok(Self::OidVector),
-            "anyarray" => Ok(Self::AnyArray),
-            "record" => Ok(Self::Record),
-            "date" => Ok(Self::Date),
-            "time" | "time without time zone" => {
-                Self::Time.with_temporal_precision(temporal_precision()?)
-            }
-            "timetz" | "time with time zone" => {
-                Self::TimeTz.with_temporal_precision(temporal_precision()?)
-            }
-            "timestamp" | "datetime" | "timestamp without time zone" => {
-                Self::Timestamp.with_temporal_precision(temporal_precision()?)
-            }
-            "timestamptz" | "timestamp with time zone" => {
-                Self::TimestampTz.with_temporal_precision(temporal_precision()?)
-            }
-            "interval" => Self::with_interval_modifiers(IntervalFields::All, temporal_precision()?),
-            other if other.starts_with("interval ") => {
-                let fields = IntervalFields::from_sql_suffix(&other[9..]).ok_or_else(|| {
-                    crate::SQLError::TypeMismatch(format!("invalid interval fields: {other}"))
-                })?;
-                Self::with_interval_modifiers(fields, temporal_precision()?)
-            }
-            "int4range" => Ok(Self::Range(RangeSubtype::Integer)),
-            "int8range" => Ok(Self::Range(RangeSubtype::BigInteger)),
-            "numrange" => Ok(Self::Range(RangeSubtype::Numeric)),
-            "daterange" => Ok(Self::Range(RangeSubtype::Date)),
-            "tsrange" => Ok(Self::Range(RangeSubtype::Timestamp)),
-            "tstzrange" => Ok(Self::Range(RangeSubtype::TimestampTz)),
-            "int4multirange" => Ok(Self::Multirange(RangeSubtype::Integer)),
-            "int8multirange" => Ok(Self::Multirange(RangeSubtype::BigInteger)),
-            "nummultirange" => Ok(Self::Multirange(RangeSubtype::Numeric)),
-            "datemultirange" => Ok(Self::Multirange(RangeSubtype::Date)),
-            "tsmultirange" => Ok(Self::Multirange(RangeSubtype::Timestamp)),
-            "tstzmultirange" => Ok(Self::Multirange(RangeSubtype::TimestampTz)),
-            "vector" => modifier
-                .and_then(|value| value.parse::<u32>().ok())
-                .filter(|dimension| *dimension > 0)
-                .map(Self::Vector)
-                .ok_or_else(|| crate::SQLError::TypeMismatch("VECTOR requires a dimension".into())),
-            "tensor" => modifier
-                .and_then(|value| value.parse::<u32>().ok())
-                .filter(|dimension| *dimension > 0)
-                .map(Self::Tensor)
-                .ok_or_else(|| crate::SQLError::TypeMismatch("TENSOR requires a dimension".into())),
-            other => Err(crate::SQLError::Unsupported(format!(
-                "SQL type `{other}` is not supported"
-            ))),
-        }
-    }
-
-    #[must_use]
-    pub fn sql_name(&self) -> String {
-        match self {
-            Self::Named(name) => name.clone(),
-            Self::SmallInteger => "smallint".into(),
-            Self::Integer => "integer".into(),
-            Self::BigInteger => "bigint".into(),
-            Self::Oid => "oid".into(),
-            Self::Xid => "xid".into(),
-            Self::Boolean => "boolean".into(),
-            Self::Void => "void".into(),
-            Self::Text => "text".into(),
-            Self::RefCursor => "refcursor".into(),
-            Self::Name => "name".into(),
-            Self::Uuid => "uuid".into(),
-            Self::Varchar(Some(length)) => format!("character varying({length})"),
-            Self::Varchar(None) => "character varying".into(),
-            Self::Bpchar => "bpchar".into(),
-            Self::Character(length) => format!("character({length})"),
-            Self::Real => "real".into(),
-            Self::DoublePrecision => "double precision".into(),
-            Self::Numeric {
-                precision: Some(precision),
-                scale: Some(scale),
-            } => format!("numeric({precision},{scale})"),
-            Self::Numeric { .. } => "numeric".into(),
-            Self::Json => "json".into(),
-            Self::JsonB => "jsonb".into(),
-            Self::Bytea => "bytea".into(),
-            Self::InternalChar => "\"char\"".into(),
-            Self::Regproc => "regproc".into(),
-            Self::Regprocedure => "regprocedure".into(),
-            Self::Regclass => "regclass".into(),
-            Self::Regnamespace => "regnamespace".into(),
-            Self::Regrole => "regrole".into(),
-            Self::Regtype => "regtype".into(),
-            Self::PgNodeTree => "pg_node_tree".into(),
-            Self::AclItem => "aclitem".into(),
-            Self::Int2Vector => "int2vector".into(),
-            Self::OidVector => "oidvector".into(),
-            Self::AnyArray => "anyarray".into(),
-            Self::Record => "record".into(),
-            Self::Array(element) => format!("{}[]", element.sql_name()),
-            Self::Date => "date".into(),
-            Self::Time => "time without time zone".into(),
-            Self::TimePrecision(p) => format!("time({p}) without time zone"),
-            Self::TimeTz => "time with time zone".into(),
-            Self::TimeTzPrecision(p) => format!("time({p}) with time zone"),
-            Self::Timestamp => "timestamp without time zone".into(),
-            Self::TimestampPrecision(p) => format!("timestamp({p}) without time zone"),
-            Self::TimestampTz => "timestamp with time zone".into(),
-            Self::TimestampTzPrecision(p) => format!("timestamp({p}) with time zone"),
-            Self::Interval => "interval".into(),
-            Self::IntervalWithFields { fields, precision } => {
-                let precision =
-                    precision.map_or_else(String::new, |precision| format!("({precision})"));
-                format!("interval{}{precision}", fields.sql_suffix())
-            }
-            Self::Range(subtype) => subtype.range_name().into(),
-            Self::Multirange(subtype) => subtype.multirange_name().into(),
-            Self::Vector(dimension) => format!("vector({dimension})"),
-            Self::Tensor(dimension) => format!("tensor({dimension})"),
-            Self::Domain { schema, name, .. } => format!(
-                "{}.{}",
-                crate::compiler::render_relation_component(schema),
-                crate::compiler::render_relation_component(name)
-            ),
-        }
-    }
-
-    /// Name emitted by `PostgreSQL`'s `regtype` output, including
-    /// `pg_typeof(...)`.
-    #[must_use]
-    pub fn regtype_name(&self) -> String {
-        if matches!(self, Self::IntervalWithFields { .. }) {
-            return "interval".into();
-        }
-        if self.temporal_precision().is_some() {
-            return self.without_temporal_modifiers().regtype_name();
-        }
-        match self {
-            Self::Varchar(_) => "character varying".into(),
-            Self::Bpchar | Self::Character(_) => "character".into(),
-            Self::Numeric { .. } => "numeric".into(),
-            Self::Vector(_) => "vector".into(),
-            Self::Tensor(_) => "tensor".into(),
-            Self::Domain { .. } => self.sql_name(),
-            Self::Array(element) => format!("{}[]", element.regtype_name()),
-            other => other.sql_name(),
-        }
-    }
-}
-
-/// Split a SQL type modifier while retaining qualifiers after its parentheses.
-pub(crate) fn split_type_modifier(ty: &str) -> (std::borrow::Cow<'_, str>, Option<&str>) {
-    use std::borrow::Cow;
-    match (ty.find('('), ty.rfind(')')) {
-        (Some(open), Some(close)) if close > open => {
-            let prefix = ty[..open].trim_end();
-            let suffix = ty[close + 1..].trim();
-            let base = if suffix.is_empty() {
-                Cow::Borrowed(prefix)
-            } else {
-                Cow::Owned(format!("{prefix} {suffix}"))
-            };
-            (base, Some(ty[open + 1..close].trim()))
-        }
-        _ => (Cow::Borrowed(ty), None),
     }
 }

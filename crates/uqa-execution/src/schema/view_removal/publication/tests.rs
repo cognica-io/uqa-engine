@@ -33,22 +33,27 @@ impl Fixture {
             views: RefCell::new(BTreeMap::from([(
                 RelationIdentity::new("public", "v"),
                 StoredView {
-                    object_id: [7; 16],
-                    role_owner: "owner".into(),
-                    acl: None,
-                    column_acls: BTreeMap::new(),
-                    query: *query,
-                    output_columns: Some(vec!["value".into()]),
-                    persistence: if temporary {
-                        RelationPersistence::Temporary
-                    } else {
-                        RelationPersistence::Permanent
+                    security: uqa_sql::catalog::security::BoundTableSecurity::owner(
+                        uqa_sql::catalog::roles::RoleIdentity {
+                            oid: 42,
+                            object_id: [42; 16],
+                        },
+                    ),
+                    definition: uqa_sql::catalog::stored_view::StoredViewDefinition {
+                        object_id: [7; 16],
+                        query: *query,
+                        output_columns: Some(vec!["value".into()]),
+                        persistence: if temporary {
+                            RelationPersistence::Temporary
+                        } else {
+                            RelationPersistence::Permanent
+                        },
+                        options: Vec::new(),
+                        kind: StoredViewKind::View,
+                        materialized_rows: Vec::new(),
+                        materialized_column_types: Vec::new(),
+                        populated: true,
                     },
-                    options: Vec::new(),
-                    kind: StoredViewKind::View,
-                    materialized_rows: Vec::new(),
-                    materialized_column_types: Vec::new(),
-                    populated: true,
                 },
             )])),
             events: RefCell::new(Vec::new()),

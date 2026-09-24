@@ -9,7 +9,10 @@
 use std::sync::atomic::{AtomicI64, Ordering as AtomicOrdering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use uqa_core::{TemporalValue, Value};
+use uqa_core::{
+    memory::{Produced, ProductionControl},
+    TemporalValue, Value,
+};
 
 use crate::error::{Result, SQLError};
 
@@ -30,17 +33,27 @@ const UUID_V7_MINIMUM_STEP_NANOS: i64 =
     NANOS_PER_MILLISECOND / (1_i64 << UUID_V7_CLOCK_PRECISION_BITS) + 1;
 static UUID_V7_PREVIOUS_NANOS: AtomicI64 = AtomicI64::new(0);
 
-pub(super) fn canonicalize_uuid(text: &str) -> Result<String> {
-    parse_uuid_bytes(text).map(format_uuid)
+pub(super) fn canonicalize_uuid_with_control(
+    text: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>> {
+    let bytes = parse_uuid_bytes_with_control(text, control)?;
+    format_uuid_with_control(bytes, control)
 }
 
-pub(super) fn extract_uuid_version(value: &Value) -> Result<Value> {
-    let bytes = uuid_value_bytes(value)?;
+pub(super) fn extract_uuid_version(
+    value: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<Value> {
+    let bytes = uuid_value_bytes(value, control)?;
     Ok(uuid_version(&bytes).map_or(Value::Null, |version| Value::Int(i64::from(version))))
 }
 
-pub(super) fn extract_uuid_timestamp(value: &Value) -> Result<Value> {
-    let bytes = uuid_value_bytes(value)?;
+pub(super) fn extract_uuid_timestamp(
+    value: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<Value> {
+    let bytes = uuid_value_bytes(value, control)?;
     let Some(version) = uuid_version(&bytes) else {
         return Ok(Value::Null);
     };
@@ -94,6 +107,11 @@ pub(super) fn generate_uuid_v7(shift: Option<&TemporalValue>) -> Result<String> 
 
 /// Parse every UUID input spelling accepted by `PostgreSQL` into network-order bytes.
 pub fn parse_uuid_bytes(text: &str) -> Result<[u8; 16]> {
+    parse_uuid_bytes_with_control(text, &ProductionControl::uncontrolled())
+}
+
+fn parse_uuid_bytes_with_control(text: &str, control: &ProductionControl<'_>) -> Result<[u8; 16]> {
+    control.check()?;
     let digits = text
         .strip_prefix('{')
         .and_then(|text| text.strip_suffix('}'))
@@ -101,9 +119,11 @@ pub fn parse_uuid_bytes(text: &str) -> Result<[u8; 16]> {
     if digits.starts_with('{') || digits.ends_with('}') {
         return Err(invalid_uuid(text));
     }
-    let mut normalized = String::with_capacity(32);
+    let mut normalized = [0_u8; 32];
+    let mut digit_count = 0;
     let mut group_digits = 0_usize;
     for character in digits.chars() {
+        control.check()?;
         if character == '-' {
             if group_digits == 0 || !group_digits.is_multiple_of(4) {
                 return Err(invalid_uuid(text));
@@ -114,22 +134,26 @@ pub fn parse_uuid_bytes(text: &str) -> Result<[u8; 16]> {
         if !character.is_ascii_hexdigit() {
             return Err(invalid_uuid(text));
         }
-        normalized.push(character.to_ascii_lowercase());
+        let Some(digit) = normalized.get_mut(digit_count) else {
+            return Err(invalid_uuid(text));
+        };
+        *digit = character.to_ascii_lowercase() as u8;
+        digit_count += 1;
         group_digits += 1;
     }
-    if normalized.len() != 32 || group_digits == 0 {
+    if digit_count != 32 || group_digits == 0 {
         return Err(invalid_uuid(text));
     }
     let mut bytes = [0_u8; 16];
-    for (index, pair) in normalized.as_bytes().chunks_exact(2).enumerate() {
+    for (index, pair) in normalized.chunks_exact(2).enumerate() {
         bytes[index] = (hex_value(pair[0]) << 4) | hex_value(pair[1]);
     }
     Ok(bytes)
 }
 
-fn uuid_value_bytes(value: &Value) -> Result<[u8; 16]> {
+fn uuid_value_bytes(value: &Value, control: &ProductionControl<'_>) -> Result<[u8; 16]> {
     match value {
-        Value::Str(text) | Value::FixedChar(text) => parse_uuid_bytes(text),
+        Value::Str(text) | Value::FixedChar(text) => parse_uuid_bytes_with_control(text, control),
         other => Err(SQLError::TypeMismatch(format!(
             "expected uuid value, got {other:?}"
         ))),
@@ -211,14 +235,24 @@ fn generate_uuid_v7_at(unix_millis: u64, sub_millisecond_nanos: u32) -> Result<S
 }
 
 fn format_uuid(bytes: [u8; 16]) -> String {
-    format!(
+    format_uuid_with_control(bytes, &ProductionControl::uncontrolled())
+        .expect("ordinary UUID formatting")
+        .into_uncontrolled()
+        .expect("ordinary UUID text")
+}
+
+fn format_uuid_with_control(
+    bytes: [u8; 16],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>> {
+    Ok(control.format(format_args!(
         "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
         bytes[0], bytes[1], bytes[2], bytes[3],
         bytes[4], bytes[5],
         bytes[6], bytes[7],
         bytes[8], bytes[9],
         bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
-    )
+    ))?)
 }
 
 fn hex_value(byte: u8) -> u8 {

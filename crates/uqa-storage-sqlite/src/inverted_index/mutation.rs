@@ -13,9 +13,48 @@ use super::{
     SQLiteError, SQLiteInvertedIndex, SQLiteResult, StagedField, TokenTermKey,
 };
 use uqa_storage::clustered_postings::{cluster_id, encode_term_keys};
+use uqa_storage::inverted_index::{
+    visit_field_replacement, InvertedIndexChange, InvertedIndexChangeVisitor,
+};
+use uqa_storage::read_control::StorageReadControl;
 
-type Documents = BTreeMap<DocId, BTreeMap<FieldName, StagedField>>;
+type DocumentFields = BTreeMap<FieldName, StagedField>;
+type Documents = BTreeMap<DocId, DocumentFields>;
 type Changes = BTreeMap<(FieldName, TokenTermKey, u64), BTreeMap<DocId, Option<OccurrencePosting>>>;
+
+fn visit_replacement(
+    visit: &mut InvertedIndexChangeVisitor<'_>,
+    doc_id: DocId,
+    old: &DocumentFields,
+    fields: &DocumentFields,
+) -> SQLiteResult<()> {
+    for field in old
+        .keys()
+        .chain(fields.keys().filter(|field| !old.contains_key(*field)))
+    {
+        let before = old.get(field);
+        let after = fields.get(field);
+        visit_field_replacement(
+            visit,
+            doc_id,
+            field,
+            before.map(|snapshot| snapshot.metadata.length),
+            after.map(|snapshot| snapshot.metadata.length),
+        )
+        .map_err(SQLiteError::from)?;
+        for snapshot in before.into_iter().chain(after) {
+            for term in snapshot.postings.keys() {
+                visit(InvertedIndexChange::Posting {
+                    doc_id,
+                    field,
+                    term,
+                })
+                .map_err(SQLiteError::from)?;
+            }
+        }
+    }
+    Ok(())
+}
 
 fn invalid(message: &str) -> SQLiteError {
     SQLiteError::StorageBackend(message.into())
@@ -142,6 +181,14 @@ impl SQLiteInvertedIndex {
         &self,
         documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
     ) -> SQLiteResult<()> {
+        self.add_documents_observed(documents, None)
+    }
+
+    pub(super) fn add_documents_observed(
+        &self,
+        documents: Vec<(DocId, BTreeMap<FieldName, String>)>,
+        mut visit: Option<&mut InvertedIndexChangeVisitor<'_>>,
+    ) -> SQLiteResult<()> {
         let staged = self.stage_documents(documents)?;
         if staged.is_empty() {
             return self.require_graph_format();
@@ -153,6 +200,9 @@ impl SQLiteInvertedIndex {
             let mut changes = Changes::new();
             for (doc_id, fields) in &staged {
                 let old = self.old_document_on(&tx, encode_index_u64("document", *doc_id)?)?;
+                if let Some(visit) = visit.as_mut() {
+                    visit_replacement(*visit, *doc_id, &old, fields)?;
+                }
                 for field in old.keys().chain(fields.keys()) {
                     if !totals.contains_key(field) {
                         if let Some(stats) = self.stored_field_stats_on(&tx, field)? {
@@ -184,33 +234,33 @@ impl SQLiteInvertedIndex {
                 tx.commit()?;
                 return Ok(());
             }
-            for (doc_id, fields) in &staged {
-                add_statistics(&mut totals, fields)?;
+            for (doc_id, fields) in staged {
+                add_statistics(&mut totals, &fields)?;
+                self.write_document_on(&tx, doc_id, &fields)?;
+                // The document metadata is now staged in this savepoint. Transfer its evaluated occurrences into cluster changes instead of retaining a second complete copy until publication.
                 for (field, snapshot) in fields {
-                    for (term, occurrences) in &snapshot.postings {
+                    for (term, occurrences) in snapshot.postings {
                         changes
-                            .entry((field.clone(), term.clone(), cluster_id(*doc_id)))
+                            .entry((field.clone(), term, cluster_id(doc_id)))
                             .or_default()
                             .insert(
-                                *doc_id,
+                                doc_id,
                                 Some(OccurrencePosting {
-                                    doc_id: *doc_id,
+                                    doc_id,
                                     doc_length: snapshot.metadata.length,
-                                    occurrences: occurrences.clone(),
+                                    occurrences,
                                 }),
                             );
                     }
                 }
             }
+            let encoding = StorageReadControl::with_limit(usize::MAX);
             for ((field, term, cluster), updates) in changes {
                 let merged = merge_cluster_changes(
                     load_cluster(&tx, &self.table, &field, &term, cluster)?,
                     updates,
                 );
-                write_cluster(&tx, &self.table, &field, &term, cluster, &merged)?;
-            }
-            for (doc_id, fields) in &staged {
-                self.write_document_on(&tx, *doc_id, fields)?;
+                write_cluster(&tx, &self.table, &field, &term, cluster, &merged, &encoding)?;
             }
             self.write_statistics_on(&tx, &totals)?;
             for field in totals.keys() {
@@ -282,11 +332,28 @@ impl SQLiteInvertedIndex {
                 cancellation.check()?;
             }
             self.clear_index_on(&tx)?;
+            let encoding = cancellation.map_or_else(
+                || StorageReadControl::with_limit(usize::MAX),
+                |cancellation| {
+                    StorageReadControl::new(
+                        &uqa_core::memory::MemoryBudget::new(usize::MAX),
+                        cancellation,
+                    )
+                },
+            );
             for ((field, term, cluster), entries) in clusters {
                 if let Some(cancellation) = cancellation {
                     cancellation.check()?;
                 }
-                write_cluster(&tx, &self.table, &field, &term, cluster, &entries)?;
+                write_cluster(
+                    &tx,
+                    &self.table,
+                    &field,
+                    &term,
+                    cluster,
+                    &entries,
+                    &encoding,
+                )?;
             }
             for (doc_id, fields) in &staged {
                 if let Some(cancellation) = cancellation {

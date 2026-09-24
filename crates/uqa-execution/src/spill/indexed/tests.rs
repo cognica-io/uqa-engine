@@ -11,6 +11,26 @@ use uqa_core::Value;
 use uqa_sql::expr::RowLookup as _;
 
 use super::*;
+
+#[test]
+fn retained_random_access_rows_never_write_plaintext_payloads() {
+    const SECRET: &str = "retained-indexed-cursor-tuple-secret-marker";
+    let schema = RowSchema::new(vec!["payload".into()]);
+    let mut spill = IndexedSpill::new(schema).unwrap();
+    let row = PhysicalRow::from_values(vec![Value::Str(SECRET.into())]);
+    spill.push(&row).unwrap();
+    let path = spill.data.path().to_owned();
+    let bytes = std::fs::read(&path).unwrap();
+    assert!(!bytes
+        .windows(SECRET.len())
+        .any(|bytes| bytes == SECRET.as_bytes()));
+    assert_eq!(
+        spill.get(0).unwrap().value(0),
+        Some(&Value::Str(SECRET.into()))
+    );
+    drop(spill);
+    assert!(!path.exists());
+}
 use crate::ColumnIdentity;
 
 fn indexed_id_schema() -> RowSchema {
@@ -43,6 +63,27 @@ fn indexed_spill_reads_large_partitions_without_an_offset_vector() {
         );
     }
     assert!(spill.get(4096).unwrap_err().to_string().contains("outside"));
+}
+
+#[test]
+fn indexed_offsets_use_independent_eight_byte_authenticated_blocks() {
+    let mut spill = IndexedSpill::new(indexed_id_schema()).unwrap();
+    spill.push(&indexed_id_row(1)).unwrap();
+    let first_offset = std::fs::read(spill.offsets.path()).unwrap();
+    // One selector plus two nonce/eight-byte-ciphertext/tag slots. Appending an offset never rewrites its predecessor's ciphertext or selector.
+    assert_eq!(first_offset.len(), 97);
+    for value in 2..=17 {
+        spill.push(&indexed_id_row(value)).unwrap();
+    }
+    let offsets = std::fs::read(spill.offsets.path()).unwrap();
+    assert_eq!(offsets.len(), 17 * 97);
+    assert_eq!(&offsets[..97], first_offset);
+    for index in [16, 0, 8] {
+        assert_eq!(
+            spill.get(index).unwrap().value(0),
+            Some(&Value::Int(index as i64 + 1))
+        );
+    }
 }
 
 #[test]

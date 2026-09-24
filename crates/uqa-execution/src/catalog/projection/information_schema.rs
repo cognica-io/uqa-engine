@@ -23,7 +23,7 @@ use super::helpers::information_schema_types::{
 use super::helpers::oids::{current_user_name, split_schema_name};
 use super::helpers::rows::{catalog_name, catalog_ordinal, int_value, row, str_value};
 use super::helpers::type_metadata::{catalog_regtype_name, catalog_type_name};
-use super::helpers::views::{all_schema_names, view_columns_for};
+use super::helpers::views::view_columns_for;
 use super::pg_proc::user_routine_catalog_oid;
 use crate::catalog::context::CatalogContext;
 use crate::catalog::{services::CatalogSession, CatalogReadView, RelationNameResolution};
@@ -44,7 +44,8 @@ pub fn build_info_schemata(
     resolution: &RelationNameResolution,
 ) -> Result<Vec<ResultRow>, SQLError> {
     let current_user = resolution.current_user();
-    Ok(all_schema_names(catalog, resolution)?
+    catalog
+        .all_schema_names(resolution)
         .into_iter()
         .filter(|schema| {
             catalog.schema_security(schema).is_none()
@@ -60,11 +61,11 @@ pub fn build_info_schemata(
                 )
         })
         .map(|schema| {
-            let owner = catalog.schema_security(&schema).map_or_else(
+            let owner = catalog.schema_security_names(&schema)?.map_or_else(
                 || current_user_name().to_string(),
-                |security| security.role_owner.clone(),
+                |security| security.role_owner,
             );
-            row([
+            Ok(row([
                 ("catalog_name", catalog_name()),
                 ("schema_name", str_value(schema)),
                 ("schema_owner", str_value(owner)),
@@ -72,9 +73,9 @@ pub fn build_info_schemata(
                 ("default_character_set_schema", str_value("pg_catalog")),
                 ("default_character_set_name", str_value("UTF8")),
                 ("sql_path", Value::Null),
-            ])
+            ]))
         })
-        .collect())
+        .collect()
 }
 
 pub fn build_info_tables(
@@ -393,7 +394,16 @@ pub fn build_info_columns(
     Ok(out)
 }
 
-type ColumnPrivilegeCatalogRow = (String, String, String, String, String, String, String, bool);
+type ColumnPrivilegeCatalogRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    uqa_core::catalog_acl::AclGrantee,
+    String,
+    bool,
+);
 
 fn insert_column_privilege_rows(
     rows: &mut BTreeSet<ColumnPrivilegeCatalogRow>,
@@ -443,7 +453,7 @@ fn insert_column_privilege_rows(
 
 fn default_table_acl_entry(owner: &str) -> TableAclEntry {
     TableAclEntry {
-        role: owner.to_string(),
+        role: owner.into(),
         grantor: Some(owner.to_string()),
         privileges: TablePrivileges {
             select: true,
@@ -465,11 +475,12 @@ fn insert_view_column_privileges(
     for (view_name, view) in catalog.views_of_kind(crate::catalog::view::StoredViewKind::View) {
         let (schema, table) = split_schema_name(&view_name)?;
         let columns = view_columns_for(context, catalog, resolution, &view)?;
+        let security = catalog.relation_security_names(&view.security)?;
         let default_view_acl;
-        let view_acl = if let Some(acl) = view.acl.as_deref() {
+        let view_acl = if let Some(acl) = security.acl.as_deref() {
             acl
         } else {
-            default_view_acl = [default_table_acl_entry(&view.role_owner)];
+            default_view_acl = [default_table_acl_entry(&security.role_owner)];
             &default_view_acl
         };
         for column in &columns {
@@ -479,18 +490,18 @@ fn insert_view_column_privileges(
                     &schema,
                     &table,
                     &column.name,
-                    &view.role_owner,
+                    &security.role_owner,
                     entry,
                 );
             }
-            if let Some(column_acl) = view.column_acls.get(&column.name) {
+            if let Some(column_acl) = security.column_acls.get(&column.name) {
                 for entry in column_acl {
                     insert_column_privilege_rows(
                         privileges,
                         &schema,
                         &table,
                         &column.name,
-                        &view.role_owner,
+                        &security.role_owner,
                         entry,
                     );
                 }
@@ -513,11 +524,12 @@ pub fn build_info_column_privileges(
             .table(resolution, &table_name)?
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?;
         let (schema, table) = split_schema_name(&table_name)?;
+        let security = catalog.relation_security_names(&table_snapshot.security)?;
         let default_table_acl;
-        let table_acl = if let Some(acl) = table_snapshot.security.acl.as_deref() {
+        let table_acl = if let Some(acl) = security.acl.as_deref() {
             acl
         } else {
-            default_table_acl = [default_table_acl_entry(&table_snapshot.security.role_owner)];
+            default_table_acl = [default_table_acl_entry(&security.role_owner)];
             &default_table_acl
         };
         for column in table_snapshot.columns.iter() {
@@ -527,18 +539,18 @@ pub fn build_info_column_privileges(
                     &schema,
                     &table,
                     &column.name,
-                    &table_snapshot.security.role_owner,
+                    &security.role_owner,
                     entry,
                 );
             }
-            if let Some(column_acl) = table_snapshot.security.column_acls.get(&column.name) {
+            if let Some(column_acl) = security.column_acls.get(&column.name) {
                 for entry in column_acl {
                     insert_column_privilege_rows(
                         &mut privileges,
                         &schema,
                         &table,
                         &column.name,
-                        &table_snapshot.security.role_owner,
+                        &security.role_owner,
                         entry,
                     );
                 }
@@ -553,17 +565,22 @@ pub fn build_info_column_privileges(
         .filter_map(
             |(schema, table, column, owner, grantor, grantee, privilege_type, grantable)| {
                 let grantor_enabled = catalog.role_is_enabled_for(current_user, &grantor);
-                let grantee_enabled =
-                    grantee != "PUBLIC" && catalog.role_is_enabled_for(current_user, &grantee);
-                if (role_grants_only || grantee != "PUBLIC") && !grantor_enabled && !grantee_enabled
+                let grantee_name = grantee.to_string();
+                // PostgreSQL's information-schema views filter the displayed recipient name. Grantability below still distinguishes the role from PUBLIC.
+                let grantee_enabled = catalog.role_is_enabled_for(current_user, &grantee_name);
+                if (role_grants_only || grantee_name != "PUBLIC")
+                    && !grantor_enabled
+                    && !grantee_enabled
                 {
                     return None;
                 }
                 let is_grantable = grantable
-                    || grantee != "PUBLIC" && catalog.role_is_enabled_for(&grantee, &owner);
+                    || grantee
+                        .role_name()
+                        .is_some_and(|name| catalog.role_is_enabled_for(name, &owner));
                 Some(row([
                     ("grantor", str_value(grantor)),
-                    ("grantee", str_value(grantee)),
+                    ("grantee", str_value(grantee_name)),
                     ("table_catalog", catalog_name()),
                     ("table_schema", str_value(schema)),
                     ("table_name", str_value(table)),
@@ -600,14 +617,15 @@ pub fn build_info_views(
         let trigger_deletable = context
             .views
             .has_instead_of_trigger(&name, uqa_sql::ast::TriggerEvent::Delete)?;
-        let definition =
-            if catalog.role_is_enabled_for(resolution.current_user(), &stored.role_owner) {
-                str_value(super::view_definition::view_definition(
-                    catalog, resolution, &stored, false, 0,
-                )?)
-            } else {
-                Value::Null
-            };
+        let definition = if catalog
+            .role_is_enabled_for(resolution.current_user(), &stored.security.role_owner)
+        {
+            str_value(super::view_definition::view_definition(
+                catalog, resolution, &stored, false, 0,
+            )?)
+        } else {
+            Value::Null
+        };
         rows.push(row([
             ("table_catalog", catalog_name()),
             ("table_schema", str_value(schema)),
@@ -817,11 +835,11 @@ pub fn build_info_routines(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, 
 pub fn build_info_sequences(
     catalog: &CatalogReadView,
     session: &dyn CatalogSession,
-) -> Vec<ResultRow> {
-    let current_user = session.current_user();
+) -> Result<Vec<ResultRow>, SQLError> {
+    let current_user = session.current_role();
     let temporary_schema = session.temporary_schema_name();
-    catalog
-        .sequence_states()
+    Ok(catalog
+        .sequence_states()?
         .into_iter()
         .filter(|(relation, state, persistence, security)| {
             (*persistence != uqa_sql::ast::RelationPersistence::Temporary
@@ -860,7 +878,7 @@ pub fn build_info_sequences(
                 ),
             ])
         })
-        .collect()
+        .collect())
 }
 
 pub fn build_info_table_constraints(

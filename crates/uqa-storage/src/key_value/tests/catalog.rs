@@ -28,9 +28,13 @@ fn key_value_catalog_preserves_core_registries() {
     catalog
         .save_table(&TableSchema {
             relation: crate::catalog::RelationIdentity::new("public", "docs"),
-            role_owner: "docs_owner".into(),
-            acl: Some(table_acl.clone()),
-            column_acls: std::collections::BTreeMap::default(),
+            security: crate::RelationSecurityRow::Legacy(
+                uqa_core::catalog_acl::LegacyRelationSecurity {
+                    role_owner: "docs_owner".into(),
+                    acl: Some(table_acl.clone()),
+                    column_acls: std::collections::BTreeMap::new(),
+                },
+            ),
             object_id: [1; 16],
             storage_generation: [1; 16],
             analyzer_json: "{}".into(),
@@ -52,8 +56,14 @@ fn key_value_catalog_preserves_core_registries() {
         catalog.load_tables().unwrap()[0].relation.qualified_name(),
         "public.docs"
     );
-    assert_eq!(catalog.load_tables().unwrap()[0].role_owner, "docs_owner");
-    assert_eq!(catalog.load_tables().unwrap()[0].acl, Some(table_acl));
+    assert_eq!(
+        catalog.load_tables().unwrap()[0].security,
+        crate::RelationSecurityRow::Legacy(uqa_core::catalog_acl::LegacyRelationSecurity {
+            role_owner: "docs_owner".into(),
+            acl: Some(table_acl),
+            column_acls: std::collections::BTreeMap::new()
+        })
+    );
     assert_eq!(
         catalog.load_model("reranker").unwrap().as_deref(),
         Some("{\"model\":1}")
@@ -76,9 +86,7 @@ fn key_value_catalog_rejects_a_table_without_its_parent_schema() {
     let error = catalog
         .save_table(&TableSchema {
             relation: crate::catalog::RelationIdentity::new("missing", "docs"),
-            role_owner: "docs_owner".into(),
-            acl: None,
-            column_acls: std::collections::BTreeMap::default(),
+            security: crate::RelationSecurityRow::legacy("docs_owner"),
             object_id: [2; 16],
             storage_generation: [3; 16],
             analyzer_json: "{}".into(),

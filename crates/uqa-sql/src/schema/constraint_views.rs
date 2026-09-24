@@ -14,6 +14,7 @@ pub fn column_checks(columns: &[ColumnDef]) -> Vec<TableCheck> {
     for column in columns {
         if let Some(expr) = column.check.clone() {
             out.push(TableCheck {
+                catalog_oid: column.check_catalog_oid,
                 name: column
                     .check_name
                     .clone()
@@ -60,6 +61,7 @@ pub fn append_column_keys(columns: &[ColumnDef], constraints: &mut Vec<TableKeyC
             continue;
         }
         constraints.push(TableKeyConstraint {
+            catalog_identity: None,
             name: None,
             kind,
             columns: vec![column.name.clone()],
@@ -133,3 +135,34 @@ pub fn bind_stored_foreign_key_targets(
     }
     Ok(())
 }
+
+/// Canonicalize legacy declarations before attaching durable index identities. Resolve against all stored relations, never a caller's search path.
+pub fn bind_stored_foreign_key_declarations(
+    catalog: &dyn StoredTableNames,
+    columns: &mut [ColumnDef],
+    constraints: &mut crate::ast::TableConstraintSet,
+) -> Result<bool, String> {
+    let mut changed = false;
+    let mut bind = |target: &mut String| -> Result<(), String> {
+        let canonical = canonical_stored_foreign_key_target(catalog, target)?;
+        changed |= *target != canonical;
+        *target = canonical;
+        Ok(())
+    };
+    for column in columns {
+        if let Some(reference) = &mut column.references {
+            bind(&mut reference.table)?;
+        }
+    }
+    for key in constraints
+        .foreign_keys
+        .iter_mut()
+        .chain(&mut constraints.hierarchy.partition_inherited_foreign_keys)
+    {
+        bind(&mut key.ref_table)?;
+    }
+    Ok(changed)
+}
+
+#[cfg(test)]
+mod tests;

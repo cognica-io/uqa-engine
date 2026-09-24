@@ -1,0 +1,408 @@
+[
+  {
+    "base": "int",
+    "check": "VALUE::bigint>0",
+    "conbin": "{OPEXPR :opno 419 :opfuncid 477 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 481 :funcresulttype 20 :funcretset false :funcvariadic false :funcformat 1 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "((VALUE)::bigint > 0)",
+    "pretty": "VALUE::bigint > 0"
+  },
+  {
+    "base": "int",
+    "check": "VALUE+0.5>0",
+    "conbin": "{OPEXPR :opno 1756 :opfuncid 1720 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 1758 :opfuncid 1724 :opresulttype 1700 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 1740 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 8 [ 32 0 0 0 255 128 136 19 ]}) :location -1} {FUNCEXPR :funcid 1740 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "(((VALUE)::numeric + 0.5) > (0)::numeric)",
+    "pretty": "(VALUE::numeric + 0.5) > 0::numeric"
+  },
+  {
+    "base": "int",
+    "check": "VALUE::float8>0",
+    "conbin": "{OPEXPR :opno 674 :opfuncid 297 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 316 :funcresulttype 701 :funcretset false :funcvariadic false :funcformat 1 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 316 :funcresulttype 701 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "((VALUE)::double precision > (0)::double precision)",
+    "pretty": "VALUE::double precision > 0::double precision"
+  },
+  {
+    "base": "varchar(10)",
+    "check": "VALUE::varchar(2)<>''",
+    "conbin": "{OPEXPR :opno 531 :opfuncid 157 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 100 :args ({RELABELTYPE :arg {FUNCEXPR :funcid 669 :funcresulttype 1043 :funcretset false :funcvariadic false :funcformat 1 :funccollid 100 :inputcollid 100 :args ({COERCETODOMAINVALUE :typeId 1043 :typeMod 14 :collation 100 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 6 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]}) :location -1} :resulttype 25 :resulttypmod -1 :resultcollid 100 :relabelformat 2 :location -1} {CONST :consttype 25 :consttypmod -1 :constcollid 100 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 4 [ 16 0 0 0 ]}) :location -1}",
+    "sql": "(((VALUE)::character varying(2))::text <> ''::text)",
+    "pretty": "VALUE::character varying(2)::text <> ''::text"
+  },
+  {
+    "base": "numeric",
+    "check": "VALUE::numeric(5,2)>0",
+    "conbin": "{OPEXPR :opno 1756 :opfuncid 1720 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 1703 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 1 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 6 0 5 0 0 0 0 0 ]}) :location -1} {FUNCEXPR :funcid 1740 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "((VALUE)::numeric(5,2) > (0)::numeric)",
+    "pretty": "VALUE::numeric(5,2) > 0::numeric"
+  },
+  {
+    "base": "text",
+    "check": "VALUE::integer>0",
+    "conbin": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCEVIAIO :arg {COERCETODOMAINVALUE :typeId 25 :typeMod -1 :collation 100 :location -1} :resulttype 23 :resultcollid 0 :coerceformat 1 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "((VALUE)::integer > 0)",
+    "pretty": "VALUE::integer > 0"
+  },
+  {
+    "base": "d_base",
+    "check": "VALUE::bigint>0",
+    "conbin": "{OPEXPR :opno 419 :opfuncid 477 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 481 :funcresulttype 20 :funcretset false :funcvariadic false :funcformat 1 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 16385 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "((VALUE)::bigint > 0)",
+    "pretty": "VALUE::bigint > 0"
+  },
+  {
+    "base": "int",
+    "check": "(VALUE>0 OR VALUE IS NULL) AND VALUE<10",
+    "conbin": "{BOOLEXPR :boolop and :args ({BOOLEXPR :boolop or :args ({OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1} {NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 0 :argisrow false :location -1}) :location -1} {OPEXPR :opno 97 :opfuncid 66 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 10 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "(((VALUE > 0) OR (VALUE IS NULL)) AND (VALUE < 10))",
+    "pretty": "(VALUE > 0 OR VALUE IS NULL) AND VALUE < 10"
+  },
+  {
+    "base": "int",
+    "check": "VALUE>0 AND VALUE<10 OR VALUE IS NULL",
+    "conbin": "{BOOLEXPR :boolop or :args ({BOOLEXPR :boolop and :args ({OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1} {OPEXPR :opno 97 :opfuncid 66 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 10 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 0 :argisrow false :location -1}) :location -1}",
+    "sql": "(((VALUE > 0) AND (VALUE < 10)) OR (VALUE IS NULL))",
+    "pretty": "VALUE > 0 AND VALUE < 10 OR VALUE IS NULL"
+  },
+  {
+    "base": "numeric",
+    "check": "VALUE>0.00",
+    "conbin": "{OPEXPR :opno 1756 :opfuncid 1720 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 0 129 ]}) :location -1}",
+    "sql": "(VALUE > 0.00)",
+    "pretty": "VALUE > 0.00"
+  },
+  {
+    "base": "numeric",
+    "check": "VALUE>-12345.6700",
+    "conbin": "{OPEXPR :opno 1756 :opfuncid 1720 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 12 [ 48 0 0 0 1 162 1 0 41 9 44 26 ]}) :location -1}",
+    "sql": "(VALUE > '-12345.6700'::numeric)",
+    "pretty": "VALUE > '-12345.6700'::numeric"
+  },
+  {
+    "base": "numeric",
+    "check": "VALUE>0.00000000000000000000000000000000000000000000000000000000000000001",
+    "conbin": "{OPEXPR :opno 1756 :opfuncid 1720 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 10 [ 40 0 0 0 65 0 239 255 232 3 ]}) :location -1}",
+    "sql": "(VALUE > 0.00000000000000000000000000000000000000000000000000000000000000001)",
+    "pretty": "VALUE > 0.00000000000000000000000000000000000000000000000000000000000000001"
+  },
+  {
+    "base": "numeric",
+    "check": "VALUE<>'NaN'::numeric",
+    "conbin": "{OPEXPR :opno 1753 :opfuncid 1719 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 0 192 ]}) :location -1}",
+    "sql": "(VALUE <> 'NaN'::numeric)",
+    "pretty": "VALUE <> 'NaN'::numeric"
+  },
+  {
+    "base": "numeric",
+    "check": "VALUE<'Infinity'::numeric",
+    "conbin": "{OPEXPR :opno 1754 :opfuncid 1722 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 0 208 ]}) :location -1}",
+    "sql": "(VALUE < 'Infinity'::numeric)",
+    "pretty": "VALUE < 'Infinity'::numeric"
+  },
+  {
+    "base": "numeric",
+    "check": "VALUE>'-Infinity'::numeric",
+    "conbin": "{OPEXPR :opno 1756 :opfuncid 1720 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 6 [ 24 0 0 0 0 240 ]}) :location -1}",
+    "sql": "(VALUE > '-Infinity'::numeric)",
+    "pretty": "VALUE > '-Infinity'::numeric"
+  },
+  {
+    "base": "int",
+    "check": "coalesce(VALUE,0)>0",
+    "conbin": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COALESCEEXPR :coalescetype 23 :coalescecollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "(COALESCE(VALUE, 0) > 0)",
+    "pretty": "COALESCE(VALUE, 0) > 0"
+  },
+  {
+    "base": "int",
+    "check": "greatest(VALUE,0)>0",
+    "conbin": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({MINMAXEXPR :minmaxtype 23 :minmaxcollid 0 :inputcollid 0 :op 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "(GREATEST(VALUE, 0) > 0)",
+    "pretty": "GREATEST(VALUE, 0) > 0"
+  },
+  {
+    "base": "int",
+    "check": "CASE WHEN VALUE>0 THEN VALUE<10 ELSE VALUE IS NULL END",
+    "conbin": "{CASEEXPR :casetype 16 :casecollid 0 :arg <> :args ({CASEWHEN :expr {OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1} :result {OPEXPR :opno 97 :opfuncid 66 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 10 0 0 0 0 0 0 0 ]}) :location -1} :location -1}) :defresult {NULLTEST :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :nulltesttype 0 :argisrow false :location -1} :location -1}",
+    "sql": "\nCASE\n    WHEN (VALUE > 0) THEN (VALUE < 10)\n    ELSE (VALUE IS NULL)\nEND",
+    "pretty": "\nCASE\n    WHEN VALUE > 0 THEN VALUE < 10\n    ELSE VALUE IS NULL\nEND"
+  },
+  {
+    "base": "int",
+    "check": "CASE VALUE WHEN 0 THEN false ELSE true END",
+    "conbin": "{CASEEXPR :casetype 16 :casecollid 0 :arg {COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} :args ({CASEWHEN :expr {OPEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({CASETESTEXPR :typeId 23 :typeMod -1 :collation 0} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1} :result {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 0 0 0 0 0 0 0 0 ]} :location -1}) :defresult {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 1 0 0 0 0 0 0 0 ]} :location -1}",
+    "sql": "\nCASE VALUE\n    WHEN 0 THEN false\n    ELSE true\nEND",
+    "pretty": "\nCASE VALUE\n    WHEN 0 THEN false\n    ELSE true\nEND"
+  },
+  {
+    "base": "int",
+    "check": "VALUE IN (1,2)",
+    "conbin": "{SCALARARRAYOPEXPR :opno 96 :opfuncid 65 :hashfuncid 0 :negfuncid 0 :useOr true :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1}",
+    "sql": "(VALUE = ANY (ARRAY[1, 2]))",
+    "pretty": "VALUE = ANY (ARRAY[1, 2])"
+  },
+  {
+    "base": "int",
+    "check": "VALUE NOT IN(1,2)",
+    "conbin": "{SCALARARRAYOPEXPR :opno 518 :opfuncid 144 :hashfuncid 0 :negfuncid 0 :useOr false :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1}",
+    "sql": "(VALUE <> ALL (ARRAY[1, 2]))",
+    "pretty": "VALUE <> ALL (ARRAY[1, 2])"
+  },
+  {
+    "base": "int",
+    "check": "VALUE IN (1)",
+    "conbin": "{OPEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "(VALUE = 1)",
+    "pretty": "VALUE = 1"
+  },
+  {
+    "base": "int",
+    "check": "VALUE IN (VALUE+1,2,3)",
+    "conbin": "{SCALARARRAYOPEXPR :opno 96 :opfuncid 65 :hashfuncid 0 :negfuncid 0 :useOr true :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({OPEXPR :opno 551 :opfuncid 177 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 3 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1}",
+    "sql": "(VALUE = ANY (ARRAY[(VALUE + 1), 2, 3]))",
+    "pretty": "VALUE = ANY (ARRAY[VALUE + 1, 2, 3])"
+  },
+  {
+    "base": "int",
+    "check": "VALUE=ANY(ARRAY[1,2])",
+    "conbin": "{SCALARARRAYOPEXPR :opno 96 :opfuncid 65 :hashfuncid 0 :negfuncid 0 :useOr true :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1}",
+    "sql": "(VALUE = ANY (ARRAY[1, 2]))",
+    "pretty": "VALUE = ANY (ARRAY[1, 2])"
+  },
+  {
+    "base": "int",
+    "check": "VALUE>ALL(ARRAY[1,2])",
+    "conbin": "{SCALARARRAYOPEXPR :opno 521 :opfuncid 147 :hashfuncid 0 :negfuncid 0 :useOr false :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :location -1}",
+    "sql": "(VALUE > ALL (ARRAY[1, 2]))",
+    "pretty": "VALUE > ALL (ARRAY[1, 2])"
+  },
+  {
+    "base": "int",
+    "check": "VALUE IS DISTINCT FROM 0",
+    "conbin": "{DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "(VALUE IS DISTINCT FROM 0)",
+    "pretty": "VALUE IS DISTINCT FROM 0"
+  },
+  {
+    "base": "int",
+    "check": "VALUE IS NOT DISTINCT FROM 0",
+    "conbin": "{BOOLEXPR :boolop not :args ({DISTINCTEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "(NOT (VALUE IS DISTINCT FROM 0))",
+    "pretty": "NOT VALUE IS DISTINCT FROM 0"
+  },
+  {
+    "base": "int",
+    "check": "-VALUE<0",
+    "conbin": "{OPEXPR :opno 97 :opfuncid 66 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 558 :opfuncid 212 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "((- VALUE) < 0)",
+    "pretty": "(- VALUE) < 0"
+  },
+  {
+    "base": "int",
+    "check": "VALUE > -1",
+    "conbin": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 255 255 255 255 255 255 255 255 ]}) :location -1}",
+    "sql": "(VALUE > '-1'::integer)",
+    "pretty": "VALUE > '-1'::integer"
+  },
+  {
+    "base": "date",
+    "check": "VALUE>DATE '2000-01-01'",
+    "conbin": "{OPEXPR :opno 1097 :opfuncid 1089 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1082 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1082 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "(VALUE > '2000-01-01'::date)",
+    "pretty": "VALUE > '2000-01-01'::date"
+  },
+  {
+    "base": "date",
+    "check": "VALUE>DATE '1999-12-31'",
+    "conbin": "{OPEXPR :opno 1097 :opfuncid 1089 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1082 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1082 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 255 255 255 255 255 255 255 255 ]}) :location -1}",
+    "sql": "(VALUE > '1999-12-31'::date)",
+    "pretty": "VALUE > '1999-12-31'::date"
+  },
+  {
+    "base": "time",
+    "check": "VALUE>TIME '01:02:03.000004'",
+    "conbin": "{OPEXPR :opno 1112 :opfuncid 1104 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1083 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1083 :consttypmod -1 :constcollid 0 :constlen 8 :constbyval true :constisnull false :location -1 :constvalue 8 [ 196 120 232 221 0 0 0 0 ]}) :location -1}",
+    "sql": "(VALUE > '01:02:03.000004'::time without time zone)",
+    "pretty": "VALUE > '01:02:03.000004'::time without time zone"
+  },
+  {
+    "base": "timestamptz",
+    "check": "VALUE>TIMESTAMPTZ '2000-01-01 01:00:00+00'",
+    "conbin": "{OPEXPR :opno 1324 :opfuncid 1157 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1184 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1184 :consttypmod -1 :constcollid 0 :constlen 8 :constbyval true :constisnull false :location -1 :constvalue 8 [ 0 164 147 214 0 0 0 0 ]}) :location -1}",
+    "sql": "(VALUE > '2000-01-01 01:00:00+00'::timestamp with time zone)",
+    "pretty": "VALUE > '2000-01-01 01:00:00+00'::timestamp with time zone"
+  },
+  {
+    "base": "interval",
+    "check": "VALUE>INTERVAL '1 month 2 days 3 seconds'",
+    "conbin": "{OPEXPR :opno 1334 :opfuncid 1167 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1186 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1186 :consttypmod -1 :constcollid 0 :constlen 16 :constbyval false :constisnull false :location -1 :constvalue 16 [ 192 198 45 0 0 0 0 0 2 0 0 0 1 0 0 0 ]}) :location -1}",
+    "sql": "(VALUE > '1 mon 2 days 00:00:03'::interval)",
+    "pretty": "VALUE > '1 mon 2 days 00:00:03'::interval"
+  },
+  {
+    "base": "int[]",
+    "check": "VALUE=ARRAY[[1,2],[3,4]]",
+    "conbin": "{OPEXPR :opno 1070 :opfuncid 744 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1007 :typeMod -1 :collation 0 :location -1} {ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1} {ARRAYEXPR :array_typeid 1007 :array_collid 0 :element_typeid 23 :elements ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 3 0 0 0 0 0 0 0 ]} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 4 0 0 0 0 0 0 0 ]}) :multidims false :list_start -1 :list_end -1 :location -1}) :multidims true :list_start -1 :list_end -1 :location -1}) :location -1}",
+    "sql": "(VALUE = ARRAY[ARRAY[1, 2], ARRAY[3, 4]])",
+    "pretty": "VALUE = ARRAY[ARRAY[1, 2], ARRAY[3, 4]]"
+  },
+  {
+    "base": "int2",
+    "check": "VALUE % 2::int2 = 0",
+    "conbin": "{OPEXPR :opno 532 :opfuncid 158 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 529 :opfuncid 155 :opresulttype 21 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 21 :typeMod -1 :collation 0 :location -1} {FUNCEXPR :funcid 314 :funcresulttype 21 :funcretset false :funcvariadic false :funcformat 1 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "((VALUE % (2)::smallint) = 0)",
+    "pretty": "(VALUE % 2::smallint) = 0"
+  },
+  {
+    "base": "int4",
+    "check": "VALUE % 2 = 0",
+    "conbin": "{OPEXPR :opno 96 :opfuncid 65 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 530 :opfuncid 156 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "((VALUE % 2) = 0)",
+    "pretty": "(VALUE % 2) = 0"
+  },
+  {
+    "base": "int8",
+    "check": "VALUE % 2 = 0",
+    "conbin": "{OPEXPR :opno 416 :opfuncid 474 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 439 :opfuncid 945 :opresulttype 20 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 20 :typeMod -1 :collation 0 :location -1} {FUNCEXPR :funcid 481 :funcresulttype 20 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "((VALUE % (2)::bigint) = 0)",
+    "pretty": "(VALUE % 2::bigint) = 0"
+  },
+  {
+    "base": "numeric",
+    "check": "VALUE % 2.50 = 0",
+    "conbin": "{OPEXPR :opno 1752 :opfuncid 1718 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 1762 :opfuncid 1729 :opresulttype 1700 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1} {CONST :consttype 1700 :consttypmod -1 :constcollid 0 :constlen -1 :constbyval false :constisnull false :location -1 :constvalue 10 [ 40 0 0 0 0 129 2 0 136 19 ]}) :location -1} {FUNCEXPR :funcid 1740 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "((VALUE % 2.50) = (0)::numeric)",
+    "pretty": "(VALUE % 2.50) = 0::numeric"
+  },
+  {
+    "base": "numeric",
+    "check": "VALUE ^ 2 > 0",
+    "conbin": "{OPEXPR :opno 1756 :opfuncid 1720 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 1038 :opfuncid 1739 :opresulttype 1700 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1} {FUNCEXPR :funcid 1740 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {FUNCEXPR :funcid 1740 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "((VALUE ^ (2)::numeric) > (0)::numeric)",
+    "pretty": "(VALUE ^ 2::numeric) > 0::numeric"
+  },
+  {
+    "base": "float8",
+    "check": "VALUE ^ 2 > 0",
+    "conbin": "{OPEXPR :opno 674 :opfuncid 297 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 965 :opfuncid 232 :opresulttype 701 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 701 :typeMod -1 :collation 0 :location -1} {FUNCEXPR :funcid 316 :funcresulttype 701 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {FUNCEXPR :funcid 316 :funcresulttype 701 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "((VALUE ^ (2)::double precision) > (0)::double precision)",
+    "pretty": "(VALUE ^ 2::double precision) > 0::double precision"
+  },
+  {
+    "base": "int4",
+    "check": "VALUE ^ 2 > 0",
+    "conbin": "{OPEXPR :opno 674 :opfuncid 297 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 965 :opfuncid 232 :opresulttype 701 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 316 :funcresulttype 701 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 316 :funcresulttype 701 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 2 0 0 0 0 0 0 0 ]}) :location -1}) :location -1} {FUNCEXPR :funcid 316 :funcresulttype 701 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "(((VALUE)::double precision ^ (2)::double precision) > (0)::double precision)",
+    "pretty": "(VALUE::double precision ^ 2::double precision) > 0::double precision"
+  },
+  {
+    "base": "int2",
+    "check": "+ VALUE > 0",
+    "conbin": "{OPEXPR :opno 536 :opfuncid 162 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 1917 :opfuncid 1911 :opresulttype 21 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 21 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "((+ VALUE) > 0)",
+    "pretty": "(+ VALUE) > 0"
+  },
+  {
+    "base": "int4",
+    "check": "+ VALUE > 0",
+    "conbin": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 1918 :opfuncid 1912 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "((+ VALUE) > 0)",
+    "pretty": "(+ VALUE) > 0"
+  },
+  {
+    "base": "int8",
+    "check": "+ VALUE > 0",
+    "conbin": "{OPEXPR :opno 419 :opfuncid 477 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 1916 :opfuncid 1910 :opresulttype 20 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 20 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "((+ VALUE) > 0)",
+    "pretty": "(+ VALUE) > 0"
+  },
+  {
+    "base": "float4",
+    "check": "+ VALUE > 0",
+    "conbin": "{OPEXPR :opno 1123 :opfuncid 303 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 1919 :opfuncid 1913 :opresulttype 700 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 700 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 316 :funcresulttype 701 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "((+ VALUE) > (0)::double precision)",
+    "pretty": "(+ VALUE) > 0::double precision"
+  },
+  {
+    "base": "float8",
+    "check": "+ VALUE > 0",
+    "conbin": "{OPEXPR :opno 674 :opfuncid 297 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 1920 :opfuncid 1914 :opresulttype 701 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 701 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 316 :funcresulttype 701 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "((+ VALUE) > (0)::double precision)",
+    "pretty": "(+ VALUE) > 0::double precision"
+  },
+  {
+    "base": "numeric",
+    "check": "+ VALUE > 0",
+    "conbin": "{OPEXPR :opno 1756 :opfuncid 1720 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 1921 :opfuncid 1915 :opresulttype 1700 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 1740 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "((+ VALUE) > (0)::numeric)",
+    "pretty": "(+ VALUE) > 0::numeric"
+  },
+  {
+    "base": "int2",
+    "check": "@ VALUE > 0",
+    "conbin": "{OPEXPR :opno 536 :opfuncid 162 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 682 :opfuncid 1253 :opresulttype 21 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 21 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "((@ VALUE) > 0)",
+    "pretty": "(@ VALUE) > 0"
+  },
+  {
+    "base": "int4",
+    "check": "@ VALUE > 0",
+    "conbin": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 773 :opfuncid 1251 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "((@ VALUE) > 0)",
+    "pretty": "(@ VALUE) > 0"
+  },
+  {
+    "base": "int8",
+    "check": "@ VALUE > 0",
+    "conbin": "{OPEXPR :opno 419 :opfuncid 477 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 473 :opfuncid 1230 :opresulttype 20 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 20 :typeMod -1 :collation 0 :location -1}) :location -1} {CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}",
+    "sql": "((@ VALUE) > 0)",
+    "pretty": "(@ VALUE) > 0"
+  },
+  {
+    "base": "float4",
+    "check": "@ VALUE > 0",
+    "conbin": "{OPEXPR :opno 1123 :opfuncid 303 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 590 :opfuncid 207 :opresulttype 700 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 700 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 316 :funcresulttype 701 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "((@ VALUE) > (0)::double precision)",
+    "pretty": "(@ VALUE) > 0::double precision"
+  },
+  {
+    "base": "float8",
+    "check": "@ VALUE > 0",
+    "conbin": "{OPEXPR :opno 674 :opfuncid 297 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 595 :opfuncid 221 :opresulttype 701 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 701 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 316 :funcresulttype 701 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "((@ VALUE) > (0)::double precision)",
+    "pretty": "(@ VALUE) > 0::double precision"
+  },
+  {
+    "base": "numeric",
+    "check": "@ VALUE > 0",
+    "conbin": "{OPEXPR :opno 1756 :opfuncid 1720 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 1763 :opfuncid 1704 :opresulttype 1700 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 1740 :funcresulttype 1700 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "((@ VALUE) > (0)::numeric)",
+    "pretty": "(@ VALUE) > 0::numeric"
+  },
+  {
+    "base": "int4",
+    "check": "|/ VALUE > 0",
+    "conbin": "{OPEXPR :opno 674 :opfuncid 297 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 596 :opfuncid 230 :opresulttype 701 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 316 :funcresulttype 701 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1}) :location -1}) :location -1} {FUNCEXPR :funcid 316 :funcresulttype 701 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "((|/ (VALUE)::double precision) > (0)::double precision)",
+    "pretty": "(|/ VALUE::double precision) > 0::double precision"
+  },
+  {
+    "base": "numeric",
+    "check": "|/ VALUE > 0",
+    "conbin": "{OPEXPR :opno 674 :opfuncid 297 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 596 :opfuncid 230 :opresulttype 701 :opretset false :opcollid 0 :inputcollid 0 :args ({FUNCEXPR :funcid 1746 :funcresulttype 701 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 1700 :typeMod -1 :collation 0 :location -1}) :location -1}) :location -1} {FUNCEXPR :funcid 316 :funcresulttype 701 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "((|/ (VALUE)::double precision) > (0)::double precision)",
+    "pretty": "(|/ VALUE::double precision) > 0::double precision"
+  },
+  {
+    "base": "float8",
+    "check": "||/ VALUE > 0",
+    "conbin": "{OPEXPR :opno 674 :opfuncid 297 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({OPEXPR :opno 597 :opfuncid 231 :opresulttype 701 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 701 :typeMod -1 :collation 0 :location -1}) :location -1} {FUNCEXPR :funcid 316 :funcresulttype 701 :funcretset false :funcvariadic false :funcformat 2 :funccollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 0 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "((||/ VALUE) > (0)::double precision)",
+    "pretty": "(||/ VALUE) > 0::double precision"
+  },
+  {
+    "base": "int4",
+    "check": "VALUE > + 1",
+    "conbin": "{OPEXPR :opno 521 :opfuncid 147 :opresulttype 16 :opretset false :opcollid 0 :inputcollid 0 :args ({COERCETODOMAINVALUE :typeId 23 :typeMod -1 :collation 0 :location -1} {OPEXPR :opno 1918 :opfuncid 1912 :opresulttype 23 :opretset false :opcollid 0 :inputcollid 0 :args ({CONST :consttype 23 :consttypmod -1 :constcollid 0 :constlen 4 :constbyval true :constisnull false :location -1 :constvalue 4 [ 1 0 0 0 0 0 0 0 ]}) :location -1}) :location -1}",
+    "sql": "(VALUE > (+ 1))",
+    "pretty": "VALUE > (+ 1)"
+  }
+]

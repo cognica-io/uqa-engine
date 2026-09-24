@@ -32,13 +32,16 @@ type EncodedDocument = (Document, Vec<(String, Vec<u8>)>);
 
 mod batching;
 mod blob;
+mod controlled;
+mod native;
 mod store;
 mod trait_impl;
 mod typed_value;
 
+pub(crate) use batching::document_id_from_sqlite;
 use batching::{
-    allocation_error, chunk_bind_values, doc_id_in_placeholders, document_id_from_sqlite,
-    read_doc_id, should_probe_doc_ids, sorted_unique_doc_ids, sqlite_doc_id,
+    allocation_error, chunk_bind_values, doc_id_in_placeholders, read_doc_id, should_probe_doc_ids,
+    sorted_unique_doc_ids, sqlite_doc_id,
 };
 use blob::{
     blob_marker, blob_marker_info, decode_json_field_value, delete_document_blob,
@@ -54,6 +57,7 @@ use typed_value::{
 pub struct SQLiteDocumentStore {
     conn: ManagedConnection,
     table: String,
+    retained: Option<Arc<crate::mvcc::native::NativeSnapshot>>,
 }
 
 #[cfg(test)]

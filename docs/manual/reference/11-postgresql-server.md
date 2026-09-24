@@ -49,3 +49,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 `ServerConfig::max_message_bytes` defaults to 16 MiB and limits frontend messages. `max_protocol_version` limits negotiated protocol versions. `Server::shutdown`, or dropping the server, closes its connections, cancels active work, and joins its workers.
+
+The TCP transaction acceptance tests use independent socket sessions over native SQLite. They require a second writer to commit before the first transaction completes, check READ UNCOMMITTED/READ COMMITTED refresh and REPEATABLE READ/SERIALIZABLE fixed visibility, and verify commit, rollback, savepoint undo and disconnect rollback. Assertions include `CommandComplete`, `ReadyForQuery` transaction status, row column types and values, plus visibility from newly connected sessions. The shared PostgreSQL fixture supplies expected commit/rollback/savepoint outcomes.

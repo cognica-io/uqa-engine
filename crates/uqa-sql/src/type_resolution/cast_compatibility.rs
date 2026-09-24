@@ -10,47 +10,109 @@ mod catalog;
 
 use crate::ast::ColumnType;
 use crate::SQLError;
+use uqa_core::memory::{Produced, ProductionControl};
 
 use super::common::base_type;
+
+/// A `PostgreSQL` cast's implementation, separate from its value conversion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CastMethod {
+    Binary,
+    Function { oid: i64, arguments: usize },
+    InputOutput,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CastCatalogEntry {
+    /// `i`, `a`, and `e` identify implicit, assignment, and explicit casts.
+    pub context: u8,
+    pub method: CastMethod,
+}
+
+/// Return the same cast identity used by static coercion compatibility.
+#[must_use]
+pub fn cast_catalog_entry(source: &ColumnType, target: &ColumnType) -> Option<CastCatalogEntry> {
+    let (context, method, oid, arguments) =
+        catalog::entry(&cast_catalog_name(source), &cast_catalog_name(target))?;
+    let method = match method {
+        b'b' => CastMethod::Binary,
+        b'f' => CastMethod::Function { oid, arguments },
+        b'i' => CastMethod::InputOutput,
+        _ => unreachable!("invalid static cast method"),
+    };
+    Some(CastCatalogEntry { context, method })
+}
 
 /// Whether an explicit SQL cast has a `PostgreSQL` coercion path, independently of its value. NULL input does not make an otherwise missing cast valid.
 #[must_use]
 pub fn explicit_type_compatible(source: &ColumnType, target: &ColumnType) -> bool {
-    let source = base_type(source).without_type_modifiers();
-    let target = base_type(target).without_type_modifiers();
-    if source == target || embedding_input_compatible(&source, &target) {
-        return true;
+    explicit_type_compatible_with_control(source, target, &ProductionControl::uncontrolled())
+        .expect("ordinary explicit cast compatibility has no resource failure")
+}
+
+pub(super) fn explicit_type_compatible_with_control(
+    source: &ColumnType,
+    target: &ColumnType,
+    control: &ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    control.check()?;
+    let source = base_type(source).without_type_modifiers_with_control(control)?;
+    let target = base_type(target).without_type_modifiers_with_control(control)?;
+    if *source == *target || embedding_input_compatible(&source, &target) {
+        return Ok(true);
     }
-    if catalog::context(&cast_catalog_name(&source), &cast_catalog_name(&target)).is_some() {
-        return true;
+    if catalog::context(
+        &cast_catalog_name_with_control(&source, control)?,
+        &cast_catalog_name_with_control(&target, control)?,
+    )
+    .is_some()
+    {
+        return Ok(true);
     }
-    if let ColumnType::Array(target) = &target {
-        let source = match &source {
+    if let ColumnType::Array(target) = &*target {
+        let source = match &*source {
             ColumnType::Array(source) => Some(source.as_ref()),
             ColumnType::Int2Vector => Some(&ColumnType::SmallInteger),
             ColumnType::OidVector => Some(&ColumnType::Oid),
             _ => None,
         };
         if let Some(source) = source {
-            return explicit_type_compatible(array_element(source), array_element(target));
+            return explicit_type_compatible_with_control(
+                array_element(source),
+                array_element(target),
+                control,
+            );
         }
     }
-    is_string_io_type(&source) || is_string_io_type(&target)
+    Ok(is_string_io_type(&source) || is_string_io_type(&target))
 }
 
 fn cast_catalog_name(ty: &ColumnType) -> String {
+    cast_catalog_name_with_control(ty, &ProductionControl::uncontrolled())
+        .expect("ordinary cast catalog name has no resource failure")
+        .into_uncontrolled()
+        .expect("ordinary cast catalog name has no reservation")
+}
+
+fn cast_catalog_name_with_control(
+    ty: &ColumnType,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>, SQLError> {
     match ty {
-        ColumnType::InternalChar => "char".into(),
-        _ => super::canonical_column_type_name(ty),
+        ColumnType::InternalChar => control.copy_text("char").map_err(Into::into),
+        _ => super::overload_resolution::canonical_column_type_name_with_control(ty, control)
+            .map_err(Into::into),
     }
 }
 
-pub(super) fn validate_explicit_cast(
+pub(super) fn validate_explicit_cast_with_control(
     source: Option<&ColumnType>,
     target: &ColumnType,
+    control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
+    control.check()?;
     if let Some(source) = source {
-        if !explicit_type_compatible(source, target) {
+        if !explicit_type_compatible_with_control(source, target, control)? {
             return Err(undefined_cast(source, target));
         }
     }
@@ -149,3 +211,6 @@ fn undefined_cast(source: &ColumnType, target: &ColumnType) -> SQLError {
         ),
     }
 }
+
+#[cfg(test)]
+mod production_tests;

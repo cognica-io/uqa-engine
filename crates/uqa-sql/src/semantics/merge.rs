@@ -249,7 +249,7 @@ pub fn ensure_merge_mutation_privileges(
     let privilege_subject = stmt
         .target_privilege_subject
         .clone()
-        .unwrap_or_else(|| catalog.current_user_name());
+        .unwrap_or_else(|| catalog.current_role());
     for clause in &stmt.when_clauses {
         match clause {
             MergeWhenPlan::InsertNotMatched {

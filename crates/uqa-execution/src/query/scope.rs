@@ -13,6 +13,7 @@ use crate::row_locks::recheck::{
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{atomic::AtomicU64, Arc};
 use uqa_sql::catalog::resolution::{RelationLookupMode, RelationNameResolution};
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::plan::{CtePlan, QueryPlan};
 use uqa_sql::SQLError;
 
@@ -42,7 +43,7 @@ pub struct CteScope<S: Clone = ()> {
         Arc<parking_lot::Mutex<BTreeMap<(u64, usize), ScalarSubqueryCacheEntry>>>,
     catalog: Option<CatalogReadView>,
     catalog_resolution: Option<RelationNameResolution>,
-    privilege_subject: Option<String>,
+    privilege_subject: Option<RoleReference>,
     command_cte_snapshot: Option<Arc<S>>,
 }
 
@@ -76,7 +77,7 @@ impl<S: Clone> CteScope<S> {
     pub fn with_catalog(
         catalog: CatalogReadView,
         resolution: RelationNameResolution,
-        privilege_subject: Option<String>,
+        privilege_subject: Option<RoleReference>,
     ) -> Self {
         Self {
             catalog: Some(catalog),
@@ -133,8 +134,8 @@ impl<S: Clone> CteScope<S> {
         })
     }
 
-    pub fn privilege_subject(&self) -> Result<&str, SQLError> {
-        if let Some(subject) = self.privilege_subject.as_deref() {
+    pub fn privilege_subject(&self) -> Result<&RoleReference, SQLError> {
+        if let Some(subject) = self.privilege_subject.as_ref() {
             return Ok(subject);
         }
         self.catalog_resolution

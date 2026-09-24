@@ -19,7 +19,7 @@ pub struct AggregateValueRecord {
 }
 
 pub struct JsonSpillRun {
-    pub(super) file: tempfile::NamedTempFile,
+    pub(super) file: uqa_storage::temporary_file::TemporaryFile,
     pub(super) max_record_bytes: usize,
 }
 
@@ -210,7 +210,7 @@ impl AggregateValueBuffer {
             return Ok(());
         }
         self.rows.sort_by(compare_aggregate_value_records);
-        let mut run = tempfile::NamedTempFile::new().map_err(|err| {
+        let mut run = uqa_storage::temporary_file::TemporaryFile::new().map_err(|err| {
             SQLError::Internal(format!("failed to create aggregate spill file: {err}"))
         })?;
         let mut max_record_bytes = 0;
@@ -307,7 +307,7 @@ impl AggregateValueRunReader {
 }
 
 pub fn read_aggregate_value_record(
-    reader: &mut BufReader<File>,
+    reader: &mut impl std::io::BufRead,
     max_record_bytes: usize,
 ) -> Result<Option<AggregateValueRecord>, SQLError> {
     let Some(record) =
@@ -327,7 +327,7 @@ pub fn merge_aggregate_value_runs(runs: Vec<JsonSpillRun>) -> Result<JsonSpillRu
         .iter()
         .map(AggregateValueRunReader::file)
         .collect::<Result<Vec<_>, _>>()?;
-    let mut output = tempfile::NamedTempFile::new().map_err(|error| {
+    let mut output = uqa_storage::temporary_file::TemporaryFile::new().map_err(|error| {
         SQLError::Internal(format!("failed to create aggregate merge run: {error}"))
     })?;
     let mut max_record_bytes = 0;

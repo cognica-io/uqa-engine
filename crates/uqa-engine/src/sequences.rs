@@ -199,14 +199,9 @@ impl Engine {
 
     /// Snapshot of all registered sequences as `(name, state)` pairs.
     pub fn try_sequences_snapshot(&self) -> StorageBackendResult<BTreeMap<String, SequenceState>> {
-        self.refresh_sequences_from_catalog()?;
-        Ok(self
-            .durable
-            .sequences
-            .read()
-            .iter()
-            .map(|(relation, state)| (relation.qualified_name(), *state))
-            .collect())
+        self.with_catalog_read_snapshot(|engine| {
+            Ok(engine.query_sequence_snapshot()?.named_states())
+        })
     }
 
     pub fn sequences_snapshot(&self) -> StorageBackendResult<BTreeMap<String, SequenceState>> {
@@ -219,11 +214,9 @@ impl Engine {
         &self,
         name: &str,
     ) -> StorageBackendResult<Option<(String, SequenceState)>> {
-        let Some(canonical) = self.try_resolve_sequence_name(name)? else {
-            return Ok(None);
-        };
-        let relation = Self::resolved_relation_identity(&canonical)?;
-        let seqs = self.durable.sequences.read();
-        Ok(seqs.get(&relation).copied().map(|state| (canonical, state)))
+        self.with_catalog_read_snapshot(|engine| {
+            let snapshot = engine.query_sequence_snapshot()?;
+            Ok(snapshot.first_state(&engine.relation_lookup_candidates(name)?))
+        })
     }
 }

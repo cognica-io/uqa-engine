@@ -68,6 +68,23 @@ fn json_error(error: &serde_json::Error) -> GraphStoreError {
     GraphStoreError::CorruptGraph(error.to_string())
 }
 
+fn observed_store(
+    catalog: Arc<dyn CatalogFacade>,
+    backend: Arc<dyn PersistentStorageBackend>,
+) -> GraphStoreResult<PersistentGraphStore> {
+    let context = backend
+        .serializable_session()
+        .map(uqa_storage::mvcc::SerializableSession::serializable_read_context)
+        .transpose()?
+        .flatten();
+    let cancellation = backend.write_cancellation().unwrap_or_default();
+    let store = PersistentGraphStore::from_catalog(catalog, backend);
+    Ok(match context {
+        Some(context) => store.with_serializable_read(context, &cancellation),
+        None => store,
+    })
+}
+
 impl PathIndex {
     pub fn build<G: GraphStore>(
         store: &G,
@@ -119,8 +136,7 @@ impl PathIndex {
         sequences: &[Vec<String>],
     ) -> GraphStoreResult<Self> {
         let definition = serde_json::to_string(sequences).map_err(|error| json_error(&error))?;
-        let mut store =
-            PersistentGraphStore::from_catalog(Arc::clone(&catalog), Arc::clone(&backend));
+        let mut store = observed_store(Arc::clone(&catalog), Arc::clone(&backend))?;
         store.transaction(|store| {
             catalog.save_path_index(key, &definition)?;
             catalog.clear_path_index_data(key)?;
@@ -254,15 +270,14 @@ impl DurablePathIndex {
         }
         let _read = self.read_gate.lock();
         if self.backend.in_transaction() {
-            return self.lookup_in_snapshot(
-                Arc::clone(&self.catalog),
-                Arc::clone(&self.backend),
-                sequence,
-            );
+            return self.lookup_in_snapshot(&self.catalog, Arc::clone(&self.backend), sequence);
         }
-        // An escaped index handle must not borrow transaction ownership from
-        // another concurrent direct query on its original engine session.
-        let session = if self.backend.supports_concurrent_pinned_read_and_write() {
+        // Own completion independently while retaining this handle's selected view and original participant, including an already retained reader.
+        let session = if self.backend.transaction_model().is_versioned() {
+            self.backend.open_retained_read_session(
+                &self.backend.write_cancellation().unwrap_or_default(),
+            )?
+        } else if self.backend.supports_concurrent_pinned_read_and_write() {
             self.backend.open_session()?
         } else {
             // Single-session providers are supported too; their caller owns
@@ -276,7 +291,7 @@ impl DurablePathIndex {
         let backend = session.backend;
         backend.begin_read_transaction()?;
         let mut checkpoint = ReadCheckpoint(Some(Arc::clone(&backend)));
-        let result = self.lookup_in_snapshot(catalog, Arc::clone(&backend), sequence);
+        let result = self.lookup_in_snapshot(&catalog, Arc::clone(&backend), sequence);
         backend.rollback_transaction()?;
         checkpoint.0 = None;
         result
@@ -284,10 +299,15 @@ impl DurablePathIndex {
 
     fn lookup_in_snapshot(
         &self,
-        catalog: Arc<dyn CatalogFacade>,
+        catalog: &Arc<dyn CatalogFacade>,
         backend: Arc<dyn PersistentStorageBackend>,
         sequence: &[String],
     ) -> GraphStoreResult<Pairs> {
+        let store = observed_store(Arc::clone(catalog), backend)?;
+        store.observe_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::PathIndex,
+            Some(&self.key),
+        )?;
         let definition = catalog
             .load_path_indexes()?
             .into_iter()
@@ -300,6 +320,7 @@ impl DurablePathIndex {
         }
         let mut result = Pairs::new();
         if catalog.path_index_data_is_current(&self.key, &self.definition)? {
+            store.observe_cached_paths(&self.graph, sequence)?;
             let sequence_key =
                 serde_json::to_string(sequence).map_err(|error| json_error(&error))?;
             let mut after = None;
@@ -315,7 +336,6 @@ impl DurablePathIndex {
             // A legacy or invalidated index is not a valid access path.
             // Evaluate only this requested sequence in the current read
             // snapshot; do not rebuild/retain a whole index or write on read.
-            let store = PersistentGraphStore::from_catalog(catalog, backend);
             visit_pairs(&store, &self.graph, sequence, |pair| {
                 result.insert(pair);
                 Ok(())

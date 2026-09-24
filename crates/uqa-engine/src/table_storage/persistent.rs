@@ -54,7 +54,7 @@ impl Engine {
             let idx = self.build_vector_index_for_restore(table_name, &field, dimensions, spec)?;
             rebound.insert(field, idx);
         }
-        *table.vector_indexes.write() = rebound;
+        *table.vector_indexes.write().live_mut()? = rebound;
         Ok(())
     }
 
@@ -66,25 +66,15 @@ impl Engine {
         if matches!(value, Value::Null) {
             return Ok(None);
         }
-        let ty = table
-            .columns
-            .read()
+        let columns = table.columns.read();
+        let ty = columns
             .iter()
             .find(|column| column.name == field)
-            .map(|column| column.ty.clone());
+            .map(|column| &column.ty);
         match ty {
-            Some(uqa_sql::ast::ColumnType::Tensor(dim)) => {
-                let tensor = uqa_sql::expr::value_to_tensor(value)?;
-                for vector in &tensor {
-                    uqa_sql::assignment::conversion::validate_vector_dimensions(dim, vector.len())?;
-                }
-                Ok(Some(tensor))
-            }
-            Some(uqa_sql::ast::ColumnType::Vector(dim)) => {
-                let vector = uqa_sql::expr::value_to_vector(value)?;
-                uqa_sql::assignment::conversion::validate_vector_dimensions(dim, vector.len())?;
-                Ok(Some(vec![vector]))
-            }
+            Some(
+                ty @ (uqa_sql::ast::ColumnType::Tensor(_) | uqa_sql::ast::ColumnType::Vector(_)),
+            ) => uqa_sql::assignment::vectors::index_vectors_for_type(value, ty).map(Some),
             _ => Ok(Some(vec![uqa_sql::expr::value_to_vector(value)?])),
         }
     }

@@ -47,13 +47,7 @@ pub trait DomainViewDependencies {
     fn cascade_view_closure(&self, names: Vec<String>) -> Result<Vec<String>, SQLError>;
     fn drop_views_inner(&self, names: &[String], cascade: bool) -> Result<(), SQLError>;
 }
-pub trait DomainRegistryPublication {
-    fn persist_domain_definitions(
-        &self,
-        registry: &BTreeMap<String, StoredDomain>,
-    ) -> Result<(), SQLError>;
-    fn publish_domain_definitions(&self, registry: BTreeMap<String, StoredDomain>);
-}
+pub use crate::catalog::domain::DomainRegistryPublication;
 pub trait DomainTableRemoval {
     fn drop_constraint_dependency(&self, table: &str, name: &str) -> Result<(), SQLError>;
     fn clear_column_default(&self, table: &str, column: &str) -> StorageBackendResult<()>;
@@ -275,10 +269,10 @@ pub fn drop_domain_routine_checks(
     if checks.is_empty() {
         return Ok(());
     }
-    let mut registry = context.catalog.domain_definitions();
+    let before = context.catalog.domain_definitions();
+    let mut registry = before.clone();
     analysis::remove_domain_routine_checks(&mut registry, checks)?;
-    context.publication.persist_domain_definitions(&registry)?;
-    context.publication.publish_domain_definitions(registry);
+    crate::catalog::domain::publish(context.publication, &before, registry)?;
     context.changes.catalog_registry_changed();
     Ok(())
 }
@@ -290,13 +284,13 @@ pub fn commit_domain_drop(
     if targets.is_empty() {
         return Ok(());
     }
-    let mut registry = context.catalog.domain_definitions();
+    let before = context.catalog.domain_definitions();
+    let mut registry = before.clone();
     let dependents = domain_drop_dependents(context, targets)?;
     drop_domain_view_dependents(context, targets, &dependents)?;
     drop_domain_schema_dependents(context, &dependents)?;
     analysis::remove_domain_references(context.types, &mut registry, targets)?;
-    context.publication.persist_domain_definitions(&registry)?;
-    context.publication.publish_domain_definitions(registry);
+    crate::catalog::domain::publish(context.publication, &before, registry)?;
     context.changes.catalog_registry_changed();
     Ok(())
 }
@@ -333,7 +327,7 @@ fn domain_dependent_indexes(
         let definition =
             crate::catalog::index::index_definition(row).map_err(|error| storage_error(&error))?;
         let keys = analysis::parse_domain_index_keys(&row.columns_json)?;
-        if analysis::index_references_domain(context.types, &definition, &keys, targets)? {
+        if analysis::index_directly_references_domain(context.types, &definition, &keys, targets)? {
             indexes.insert(row.relation.clone());
         }
     }

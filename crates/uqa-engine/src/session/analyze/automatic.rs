@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Sample with a read snapshot, then validate and publish in a short write.
+//! Retain the analysis relation lock through read sampling, validation and short physical publication.
 
 mod sampling;
 #[cfg(test)]
@@ -43,29 +43,23 @@ fn automatic_column(ty: &ColumnType) -> bool {
 impl Engine {
     pub(crate) fn run_automatic_analyze(&self, name: &str) -> StorageBackendResult<bool> {
         let _statement = self.runtime.statement_gate.lock();
-        let Some(backend) = self.storage.backend.as_ref() else {
+        if self.storage.backend.is_none() {
             return Ok(false);
-        };
-        backend.begin_read_transaction()?;
-        let result = self
-            .refresh_pinned_transaction_snapshot()
-            .and_then(|()| self.collect_automatic_analysis(name));
-        // Release the read snapshot before acquiring a writer, including on
-        // rollback-journal storage. Only this independent worker's gate is held.
-        let rollback = backend.rollback_transaction();
-        let analysis = match (result, rollback) {
-            (Ok(analysis), Ok(())) => analysis,
-            (Err(error), Ok(())) | (Ok(_), Err(error)) => return Err(error),
-            (Err(error), Err(rollback)) => {
-                return Err(StorageBackendError::Other(format!(
-                    "automatic analysis failed: {error}; read cleanup failed: {rollback}"
-                )))
-            }
-        };
-        let Some(analysis) = analysis else {
-            return Ok(false);
-        };
-        self.publish_automatic_analysis(name, analysis)
+        }
+        self.with_storage_maintenance_scope(|engine| {
+            let Some(target) = uqa_execution::maintenance::analyze::prepare_optional_target(
+                &engine.analyze_execution_context(false),
+                name,
+            )
+            .map_err(|error| StorageBackendError::backend("automatic ANALYZE locking", error))?
+            else {
+                return Ok(false);
+            };
+            let Some(analysis) = engine.collect_automatic_analysis(&target.name)? else {
+                return Ok(false);
+            };
+            engine.publish_automatic_analysis(&target.name, analysis)
+        })
     }
 
     fn collect_automatic_analysis(
@@ -80,7 +74,11 @@ impl Engine {
         };
         let maintenance = MaintenanceState::load_for(catalog, name, table.object_id())?;
         let missing = maintenance.missing(table.column_stats.read().is_empty());
-        if !maintenance.due(missing, now_ms()) {
+        if !maintenance.due(
+            missing,
+            now_ms(),
+            crate::statistics::value_size::FORMAT_VERSION,
+        ) {
             return Ok(None);
         }
         let columns = table
@@ -110,7 +108,22 @@ impl Engine {
         name: &str,
         analysis: AutomaticAnalysis,
     ) -> StorageBackendResult<bool> {
-        self.with_read_only_compatible_storage_transaction(|engine| {
+        self.with_storage_maintenance_scope(|engine| {
+            let Some(target) = uqa_execution::maintenance::analyze::prepare_optional_target(
+                &engine.analyze_execution_context(false),
+                name,
+            )
+            .map_err(|error| StorageBackendError::backend("automatic ANALYZE locking", error))?
+            else {
+                return Ok(false);
+            };
+            if target.object_id != analysis.object_id {
+                return Ok(false);
+            }
+            let name = target.name.as_str();
+            if !engine.try_prepare_storage_maintenance_writer()? {
+                return Ok(false);
+            }
             let Some(table) = engine.try_table(name)? else {
                 return Ok(false);
             };
@@ -125,8 +138,13 @@ impl Engine {
             {
                 return Ok(false);
             }
-            Self::persist_column_stats(catalog, name, &analysis.statistics)?;
-            MaintenanceState::analyzed_for(catalog, name, table.object_id(), analysis.row_count)?;
+            Self::persist_column_stats(
+                catalog,
+                name,
+                &analysis.statistics,
+                table.object_id(),
+                analysis.row_count,
+            )?;
             *table.column_stats.write() = analysis.statistics;
             table.column_stats_loaded.store(true, Ordering::Release);
             table.column_stats_dirty.store(false, Ordering::Release);

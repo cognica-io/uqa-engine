@@ -7,8 +7,10 @@
 use super::*;
 use std::{
     cell::{Cell, RefCell},
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
+    sync::Arc,
 };
+use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::catalog::{
     resolution::{candidates::SearchPathRead, creation::CreationRelationNames},
     roles::{
@@ -16,10 +18,10 @@ use uqa_sql::catalog::{
         RoleDefinition, RoleMembership, RoleMembershipKey,
     },
     security::{
-        database::DatabaseSecurity,
+        database::BoundDatabaseSecurity,
         database_inquiry::DatabaseSecurityRead,
         schema_inquiry::{GraphNamespaceRead, SchemaRegistryRead},
-        SchemaSecurity,
+        BoundSchemaSecurity,
     },
 };
 use uqa_storage::StorageBackendError;
@@ -27,15 +29,18 @@ use uqa_storage::StorageBackendError;
 struct Fixture {
     user: String,
     path: Vec<String>,
-    schemas: RefCell<BTreeMap<String, SchemaSecurity>>,
+    schemas: RefCell<BTreeMap<String, BoundSchemaSecurity>>,
     roles: BTreeMap<String, RoleDefinition>,
     memberships: BTreeMap<RoleMembershipKey, RoleMembership>,
-    database: DatabaseSecurity,
+    database: BoundDatabaseSecurity,
     events: RefCell<Vec<&'static str>>,
     allocated: Cell<bool>,
     deferred: bool,
     publish_on_fence: bool,
     fail: Option<&'static str>,
+    locks: Arc<crate::row_locks::RowLockManager>,
+    cancellation: uqa_core::CancellationToken,
+    refreshes: RefCell<VecDeque<BTreeMap<String, BoundSchemaSecurity>>>,
 }
 impl Fixture {
     fn new() -> Self {
@@ -45,18 +50,22 @@ impl Fixture {
             schemas: RefCell::new(BTreeMap::new()),
             roles: BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]),
             memberships: BTreeMap::new(),
-            database: DatabaseSecurity::bootstrap(),
+            database: BoundDatabaseSecurity::bootstrap(),
             events: RefCell::new(Vec::new()),
             allocated: Cell::new(false),
             deferred: true,
             publish_on_fence: false,
             fail: None,
+            locks: Arc::new(crate::row_locks::RowLockManager::new()),
+            cancellation: uqa_core::CancellationToken::new(),
+            refreshes: RefCell::new(VecDeque::new()),
         }
     }
     fn context(&self) -> RelationCreationContext<'_> {
         RelationCreationContext {
             names: self,
             roles: self,
+            locks: self,
             schemas: self,
             database: self,
             state: self,
@@ -71,6 +80,43 @@ impl Fixture {
         } else {
             Ok(())
         }
+    }
+}
+impl SharedObjectLockSession for Fixture {
+    fn acquire_shared_catalog(
+        &self,
+        target: crate::row_locks::shared_objects::SharedCatalogLock<'_>,
+        mode: crate::row_locks::RelationLockMode,
+    ) -> Result<crate::row_locks::ScopedRelationLock<'_>, SQLError> {
+        self.events.borrow_mut().push("namespace_lock");
+        if self.fail == Some("namespace_lock") {
+            return Err(SQLError::Routine {
+                sqlstate: "55P03".into(),
+                message: "namespace lock unavailable".into(),
+            });
+        }
+        assert!(matches!(
+            target,
+            crate::row_locks::shared_objects::SharedCatalogLock::Object {
+                class_id: super::super::identity::SCHEMA_CATALOG_CLASS_ID,
+                ..
+            }
+        ));
+        assert_eq!(mode, RelationLockMode::AccessShare);
+        self.locks.acquire_scoped_relation(
+            1,
+            self.locks.shared_catalog_key(target),
+            mode,
+            (0, 1),
+            &self.cancellation,
+        )
+    }
+    fn refresh_shared_catalog(&self) -> Result<(), SQLError> {
+        self.events.borrow_mut().push("locked_refresh");
+        if let Some(schemas) = self.refreshes.borrow_mut().pop_front() {
+            *self.schemas.borrow_mut() = schemas;
+        }
+        Ok(())
     }
 }
 struct EmptyNames;
@@ -88,11 +134,14 @@ impl GraphNamespaceRead for EmptyNames {
     }
 }
 impl RoleReferenceNames for Fixture {
-    fn current_user_name(&self) -> String {
-        self.events.borrow_mut().push("user");
-        self.user.clone()
+    fn outer_role(&self) -> uqa_sql::catalog::roles::RoleReference {
+        self.current_role()
     }
-    fn session_user_name(&self) -> String {
+    fn current_role(&self) -> RoleReference {
+        self.events.borrow_mut().push("user");
+        self.user.clone().into()
+    }
+    fn session_role(&self) -> RoleReference {
         panic!("creation authorization uses current role")
     }
 }
@@ -138,6 +187,9 @@ impl DatabasePrivilegeCatalog for Fixture {
     }
 }
 impl CreationRelationGuards for Fixture {
+    fn named_type_exists(&self, _: &RelationIdentity) -> bool {
+        false
+    }
     fn tables(&self) -> Box<dyn CreationRelationNames + '_> {
         self.events.borrow_mut().push("table_names");
         Box::new(EmptyNames)
@@ -177,7 +229,7 @@ impl RelationCreationRuntime for Fixture {
         if self.publish_on_fence {
             self.schemas
                 .borrow_mut()
-                .insert("tenant".into(), SchemaSecurity::legacy("tenant"));
+                .insert("tenant".into(), BoundSchemaSecurity::bootstrap("tenant"));
         }
         Ok(())
     }
@@ -249,7 +301,7 @@ fn creation_refresh_failures_precede_namespace_reads_and_keep_call_specific_diag
     fixture.events.borrow_mut().clear();
     fixture.fail = Some("catalog");
     assert_eq!(
-        fixture.context().api_name("docs").unwrap_err(),
+        fixture.context().api_name("docs").unwrap_err().to_string(),
         "refresh schema catalog: catalog failed"
     );
     assert_eq!(&*fixture.events.borrow(), &["catalog"]);
@@ -289,3 +341,6 @@ fn temporary_creation_authorizes_before_syntax_and_allocates_only_after_validati
     assert!(fixture.allocated.get());
     assert_eq!(fixture.events.borrow().last(), Some(&"allocate"));
 }
+
+mod lifetime;
+mod relocation;

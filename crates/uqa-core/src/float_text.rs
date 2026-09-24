@@ -6,52 +6,79 @@
 
 //! `PostgreSQL` floating-point text formatting shared by SQL and graph values.
 
+use crate::{
+    memory::{Produced, ProductionControl, ProductionString},
+    ValueRetentionError,
+};
+
 /// `PostgreSQL` `float8out` shortest-round-trip formatting: fixed notation while the decimal exponent is in `[-4, 15)`, scientific (`1e+15`, `1e-05`) otherwise, with `NaN` and `Infinity` spelled out.
 #[must_use]
 pub fn format_float_pg(f: f64) -> String {
+    format_float_pg_with_control(f, &ProductionControl::uncontrolled())
+        .expect("ordinary float formatting")
+        .into_uncontrolled()
+        .expect("ordinary float text")
+}
+
+pub fn format_float_pg_with_control(
+    f: f64,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>, ValueRetentionError> {
     if f.is_nan() {
-        return "NaN".into();
+        return control.copy_text("NaN");
     }
     if f.is_infinite() {
-        return if f > 0.0 { "Infinity" } else { "-Infinity" }.into();
+        return control.copy_text(if f > 0.0 { "Infinity" } else { "-Infinity" });
     }
-    // `{:e}` prints the shortest round-trip mantissa in scientific
-    // form (`-3.25e-2`); re-shape it into PostgreSQL conventions.
-    let sci = format!("{f:e}");
+    let sci = control.format(format_args!("{f:e}"))?;
     let Some((mantissa, exp)) = sci.split_once('e') else {
-        return sci;
+        return Ok(sci);
     };
     let Ok(exp) = exp.parse::<i32>() else {
-        return sci;
+        return Ok(sci);
     };
-    let negative = mantissa.starts_with('-');
-    let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
-    let sign = if negative { "-" } else { "" };
-
+    let mut digits = ProductionString::new(*control);
+    for character in mantissa.chars().filter(char::is_ascii_digit) {
+        digits.push(character)?;
+    }
+    let sign = if mantissa.starts_with('-') { "-" } else { "" };
+    let mut output = ProductionString::new(*control);
+    output.push_str(sign)?;
     if (-4..15).contains(&exp) {
         if exp >= 0 {
             let Ok(int_len) = usize::try_from(exp + 1) else {
-                return sci;
+                return Ok(sci);
             };
             if digits.len() > int_len {
-                format!("{sign}{}.{}", &digits[..int_len], &digits[int_len..])
+                output.push_str(&digits[..int_len])?;
+                output.push('.')?;
+                output.push_str(&digits[int_len..])?;
             } else {
-                let zeros = "0".repeat(int_len - digits.len());
-                format!("{sign}{digits}{zeros}")
+                output.push_str(&digits)?;
+                for _ in digits.len()..int_len {
+                    output.push('0')?;
+                }
             }
         } else {
             let Ok(zero_count) = usize::try_from(-exp - 1) else {
-                return sci;
+                return Ok(sci);
             };
-            let zeros = "0".repeat(zero_count);
-            format!("{sign}0.{zeros}{digits}")
+            output.push_str("0.")?;
+            for _ in 0..zero_count {
+                output.push('0')?;
+            }
+            output.push_str(&digits)?;
         }
     } else {
-        let mantissa_text = if digits.len() > 1 {
-            format!("{}.{}", &digits[..1], &digits[1..])
-        } else {
-            digits
-        };
-        format!("{sign}{mantissa_text}e{exp:+03}")
+        output.push_str(&digits[..1])?;
+        if digits.len() > 1 {
+            output.push('.')?;
+            output.push_str(&digits[1..])?;
+        }
+        output.push_str(&control.format(format_args!("e{exp:+03}"))?)?;
     }
+    output.finish()
 }
+
+#[cfg(test)]
+mod tests;

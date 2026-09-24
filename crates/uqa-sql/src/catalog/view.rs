@@ -56,6 +56,18 @@ pub fn named_view_schema(
     ))
 }
 
+pub fn validate_view_column_types(
+    query_schema: &RowSchema,
+    output_columns: &[String],
+) -> Result<(), SQLError> {
+    for (position, column) in output_columns.iter().enumerate() {
+        if let Some(ty) = query_schema.column_type(position) {
+            crate::schema::columns::validate_postgres_relation_column_type(column, ty)?;
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum StoredViewKind {
     #[default]

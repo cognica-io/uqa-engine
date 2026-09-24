@@ -4,8 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+mod alteration_authority;
 mod dependencies;
+mod lifecycle;
 mod ownership;
+mod privileges;
 mod removal;
 mod restoration;
 mod values;

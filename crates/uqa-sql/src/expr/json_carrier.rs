@@ -70,21 +70,35 @@ pub fn core_value_to_json(value: &Value) -> serde_json::Value {
 }
 
 pub fn value_to_text(value: &Value) -> String {
-    match value {
-        Value::Null => String::new(),
-        Value::Void => String::new(),
-        Value::Bool(b) => b.to_string(),
-        Value::Int(i) => i.to_string(),
-        Value::Float(f) => f.to_string(),
-        Value::Decimal(d) => d.to_sql_string(),
-        Value::Str(s) => s.clone(),
-        Value::FixedChar(s) => s.trim_end_matches(' ').to_string(),
-        Value::Bytes(bytes) => String::from_utf8_lossy(bytes).into_owned(),
-        Value::Temporal(t) => t.to_sql_string(),
-        Value::Json(text) | Value::JsonB(text) => text.clone(),
-        Value::Array(array) => crate::expr::array_value_to_string(array),
-        Value::List(_) | Value::Map(_) => serde_json::to_string(&core_value_to_json(value))
-            .unwrap_or_else(|_| format!("{value:?}")),
-        Value::Row(_) | Value::Record(_) => crate::expr::value_to_string(value),
-    }
+    value_to_text_with_control(value, &uqa_core::memory::ProductionControl::uncontrolled())
+        .expect("ordinary carrier text production")
+        .into_uncontrolled()
+        .expect("ordinary carrier text")
+}
+
+pub fn value_to_text_with_control(
+    value: &Value,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> crate::error::Result<uqa_core::memory::Produced<String>> {
+    control.check()?;
+    Ok(match value {
+        Value::Null | Value::Void => control.copy_text("")?,
+        Value::Bool(value) => control.format(format_args!("{value}"))?,
+        Value::Int(value) => control.format(format_args!("{value}"))?,
+        Value::Float(value) => control.format(format_args!("{value}"))?,
+        Value::Decimal(value) => value.to_sql_string_with_control(control)?,
+        Value::Str(value) | Value::Json(value) | Value::JsonB(value) => control.copy_text(value)?,
+        Value::FixedChar(value) => control.copy_text(value.trim_end_matches(' '))?,
+        Value::Bytes(value) => super::json::utf8_lossy_with_control(value, control)?,
+        Value::Temporal(value) => value.to_sql_string_with_control(control)?,
+        Value::Array(array) => {
+            super::conversion::array_value_to_string_with_control(array, control)?
+        }
+        Value::List(_) | Value::Map(_) => {
+            super::json::format_core_value_as_json_with_control(value, control)?
+        }
+        Value::Row(_) | Value::Record(_) => {
+            super::conversion::value_to_string_with_control(value, control)?
+        }
+    })
 }

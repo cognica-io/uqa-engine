@@ -6,13 +6,13 @@
 
 //! Execute constraint lifecycle operations against scoped metadata, row, and publication services.
 use crate::mutation::constraints::context::ConstraintContext;
+use crate::row_locks::binding::{RelationLockCatalog, RelationLockSession};
 use crate::schema::{
     hierarchy::{HierarchyCatalog, HierarchyNamespace},
     publication::{SchemaPublicationContext, SchemaWriteTransaction},
 };
 pub use uqa_sql::schema::constraint_changes::{
-    constraint_error, ensure_constraint_name_available, ensure_not_null_inheritable,
-    find_constraint, ConstraintLocation,
+    constraint_error, ensure_not_null_inheritable, find_constraint, ConstraintLocation,
 };
 use uqa_sql::{
     ast::{ColumnDef, ForeignKey, TableHierarchy},
@@ -39,6 +39,8 @@ pub struct ConstraintAlterContext<'a> {
     pub relations: &'a dyn ConstraintRelations,
     pub access: &'a dyn ConstraintAlterAccess,
     pub locks: &'a dyn HierarchyNamespace,
+    pub lock_catalog: &'a dyn RelationLockCatalog,
+    pub lock_session: &'a dyn RelationLockSession,
     pub modes: &'a dyn ConstraintModes,
     pub names: &'a dyn IndexNameCatalog,
     pub rows: ConstraintContext<'a>,
@@ -52,8 +54,14 @@ fn ddl_storage_error(action: &str, error: StorageBackendError) -> SQLError {
 }
 pub mod checks;
 pub mod drop;
+mod inheritance;
 mod lifecycle;
+pub mod names;
+pub mod renaming;
+pub mod restoration;
+mod validation;
 pub use lifecycle::*;
+pub use validation::validate_constraint;
 
 pub fn table_constraint_state(
     context: &ConstraintAlterContext<'_>,
@@ -97,17 +105,18 @@ fn materialize_constraint_candidate(
         &canonical,
         &mut constraints.key_constraints,
     )?;
-    let mut allocate = context.publication.allocate_identity;
-    uqa_sql::schema::constraint_metadata::materialize_constraint_metadata(
+    let mut allocate = context.publication.identity_allocator();
+    uqa_sql::schema::constraint_metadata::materialize_constraint_metadata_with_names(
         &relation,
         columns,
         constraints,
         &mut allocate,
+        &context.publication.constraint_names().name_scope(&relation),
     )
     .map_err(|error| {
         ddl_storage_error(
             "ALTER TABLE constraint naming",
-            StorageBackendError::Other(error.to_string()),
+            StorageBackendError::backend("constraint identity", error),
         )
     })?;
     Ok(())

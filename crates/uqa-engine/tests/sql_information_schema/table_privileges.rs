@@ -246,6 +246,14 @@ fn assert_table_acl_maintenance_reference_truncate_and_owner_rights(engine: &Eng
         Value::Bool(true)
     );
     assert_eq!(
+        sqlstate(engine, "SELECT count(*) FROM table_acl.items"),
+        "42501"
+    );
+    execute(
+        engine,
+        "GRANT SELECT ON TABLE table_acl.items TO table_acl_owner",
+    );
+    assert_eq!(
         scalar(engine, "SELECT count(*) FROM table_acl.items"),
         Value::Int(0)
     );

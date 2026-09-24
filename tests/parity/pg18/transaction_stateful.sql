@@ -921,7 +921,7 @@ UPDATE vacuum_target SET value = 'updated' WHERE id = 2;
 SELECT 'target' AS relation, id, value FROM vacuum_target UNION ALL SELECT 'other', id, value FROM vacuum_other ORDER BY relation, id;
 -- @end
 
--- ANALYZE is allowed in an explicit read-only transaction and does not turn it into a writer transaction.
+-- ANALYZE is allowed in an explicit read-only transaction without relaxing SQL write restrictions.
 -- @case analyze_in_read_only_transaction ok
 BEGIN READ ONLY;
 ANALYZE vacuum_target;
@@ -935,7 +935,7 @@ PREPARE prepared_snapshot_probe AS SELECT 1;
 SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
 -- @end
 
--- ANALYZE remains nontransactional after the transaction has already written and then becomes read-only.
+-- ANALYZE remains allowed after writes followed by SET TRANSACTION READ ONLY. This case checks command acceptance and row rollback, not column-statistics visibility.
 -- @case analyze_after_write_in_read_only_transaction ok
 BEGIN;
 INSERT INTO vacuum_target VALUES (3, 'rolled back');

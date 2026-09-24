@@ -94,3 +94,58 @@ fn nested_callback_query_retains_the_outer_statement_scope() {
         73
     );
 }
+
+#[test]
+fn query_for_portals_retain_a_read_only_statement_scope_and_clean_up_after_failure() {
+    fn verify(engine: &Engine) {
+        engine.sql("CREATE TABLE loop_input(v integer); INSERT INTO loop_input VALUES (1), (2); CREATE FUNCTION loop_reader() RETURNS integer LANGUAGE plpgsql AS $$ DECLARE rec record; total integer := 0; BEGIN FOR rec IN SELECT v FROM loop_input ORDER BY v LOOP total := total + rec.v; END LOOP; RETURN total; END $$; CREATE FUNCTION loop_failure() RETURNS integer LANGUAGE plpgsql AS $$ DECLARE rec record; BEGIN FOR rec IN SELECT v FROM loop_input LOOP RAISE EXCEPTION 'loop failed'; END LOOP; RETURN 0; END $$", &[]).unwrap();
+        for _ in 0..2 {
+            assert_eq!(
+                engine
+                    .sql("SELECT loop_reader() AS total", &[])
+                    .unwrap()
+                    .rows[0]["total"],
+                Value::Int(3)
+            );
+            assert_eq!(engine.transaction_depth(), 0);
+            let cursor = engine
+                .sql_cursor("SELECT loop_reader() AS total", &[])
+                .unwrap();
+            assert_eq!(cursor.row_count(), 1);
+            drop(cursor);
+            assert_eq!(engine.transaction_depth(), 0);
+        }
+        engine.sql("BEGIN READ ONLY", &[]).unwrap();
+        assert_eq!(
+            engine
+                .sql("SELECT loop_reader() AS total", &[])
+                .unwrap()
+                .rows[0]["total"],
+            Value::Int(3)
+        );
+        assert_eq!(engine.transaction_depth(), 1);
+        assert!(engine.current_transaction_is_read_only());
+        engine.sql("COMMIT", &[]).unwrap();
+        assert_eq!(
+            engine
+                .sql("SELECT loop_failure()", &[])
+                .unwrap_err()
+                .sqlstate(),
+            Some("P0001")
+        );
+        assert_eq!(engine.transaction_depth(), 0);
+        assert!(engine.session.portals.lock().is_empty());
+        assert_eq!(
+            engine
+                .sql("SELECT loop_reader() AS total", &[])
+                .unwrap()
+                .rows[0]["total"],
+            Value::Int(3)
+        );
+    }
+    verify(&Engine::new());
+    for provider in 0..3 {
+        let (_directory, engine, _) = crate::tests::relation_lock_support::sessions(provider);
+        verify(&engine);
+    }
+}
