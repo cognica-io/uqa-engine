@@ -243,7 +243,7 @@ struct PreparedCrossSubscription {
 struct CrossProcessState {
     database_path: std::path::PathBuf,
     encryption_key: Option<uqa_storage::StorageEncryptionKey>,
-    registry: Mutex<Option<uqa_storage_sqlite::ManagedConnection>>,
+    registry: Mutex<Option<uqa_storage_sqlite::notifications::NotificationRegistry>>,
     hub: Weak<NotificationHub>,
     coordinator: Mutex<Option<Arc<CrossProcessCoordinator>>>,
 }
@@ -253,7 +253,9 @@ struct CrossProcessState;
 
 impl CrossProcessState {
     #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
-    fn registry(&self) -> Result<uqa_storage_sqlite::ManagedConnection, SQLError> {
+    fn registry(
+        &self,
+    ) -> Result<uqa_storage_sqlite::notifications::NotificationRegistry, SQLError> {
         let mut initialized = self.registry.lock();
         if let Some(registry) = initialized.as_ref() {
             return Ok(registry.clone());

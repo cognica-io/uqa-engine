@@ -8,10 +8,12 @@
 
 pub mod conformance;
 mod publication;
+mod registry;
 pub use publication::{
     NotificationMessageRef, NotificationPublication, NotificationPublicationHeader,
     NotificationPublicationView,
 };
+pub use registry::{NotificationListenerRow, NotificationQueueEntry, NotificationQueueState};
 
 /// Fresh committed publication access is independent of the caller's SQL snapshot. Publication is an auxiliary effect of its current transaction, not a user-data write.
 pub trait NotificationPublicationStore: Send + Sync {
