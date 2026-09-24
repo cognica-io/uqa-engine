@@ -228,9 +228,42 @@ fn final_local_lease_release_returns_registry_capacity_without_another_operation
 }
 
 #[test]
+fn inline_lease_payload_drops_before_its_allowance_after_the_last_clone() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct Owner(MemoryBudget, Arc<AtomicBool>);
+    impl Drop for Owner {
+        fn drop(&mut self) {
+            assert!(
+                self.0.used() > 0,
+                "the payload must retain its allowance during destruction"
+            );
+            self.1.store(true, Ordering::Relaxed);
+        }
+    }
+    let control = StorageReadControl::with_limit(4096);
+    let leases = Arc::new(LocalSerializableLeases::new(control.memory()));
+    let id = SerializableTransactionId::new(DatabaseId::from_bytes([1; 16]), [2; 16], 1).unwrap();
+    let dropped = Arc::new(AtomicBool::new(false));
+    let actor = leases
+        .retain_with(
+            id,
+            Owner(control.memory().clone(), dropped.clone()),
+            &control,
+        )
+        .unwrap();
+    let nested = actor.clone();
+    drop(actor);
+    assert_eq!(nested.id(), id);
+    assert!(leases.is_alive(id));
+    assert!(!dropped.load(Ordering::Relaxed));
+    drop(nested);
+    assert!(dropped.load(Ordering::Relaxed));
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn failed_local_lease_publication_returns_every_admitted_buffer() {
-    let payload =
-        size_of::<LocalLeaseOwner<()>>() + size_of::<Participant>() + 2 * size_of::<usize>();
+    let payload = size_of::<Participant<LocalLeaseOwner<()>>>() + 2 * size_of::<usize>();
     for limit in [
         0,
         payload - 1,
