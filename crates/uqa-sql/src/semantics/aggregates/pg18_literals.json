@@ -1,0 +1,512 @@
+{
+  "postgresql": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "image": "sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636",
+  "setup": [
+    "CREATE TABLE grouping_literal_probe(n integer)",
+    "INSERT INTO grouping_literal_probe VALUES (10),(20),(10)"
+  ],
+  "cases": [
+    {
+      "name": "decimal_identical",
+      "sql": "SELECT n + 1.0 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1.0 ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11.0",
+          "2"
+        ],
+        [
+          "21.0",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "decimal_scale_identical",
+      "sql": "SELECT n + 1.00 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1.00 ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11.00",
+          "2"
+        ],
+        [
+          "21.00",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "decimal_scale_distinct",
+      "sql": "SELECT n + 1.0 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1.00 ORDER BY shifted",
+      "sqlstate": "42803",
+      "message": "column \"t.n\" must appear in the GROUP BY clause or be used in an aggregate function"
+    },
+    {
+      "name": "decimal_exponent_equivalent",
+      "sql": "SELECT n + 1e0 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1. ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11",
+          "2"
+        ],
+        [
+          "21",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "decimal_exponent_scaled",
+      "sql": "SELECT n + 1.00e1 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 10.0 ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "20.0",
+          "2"
+        ],
+        [
+          "30.0",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "decimal_exponent_scale_distinct",
+      "sql": "SELECT n + 1.00e1 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 10. ORDER BY shifted",
+      "sqlstate": "42803",
+      "message": "column \"t.n\" must appear in the GROUP BY clause or be used in an aggregate function"
+    },
+    {
+      "name": "decimal_negative_zero",
+      "sql": "SELECT n + -0.0 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 0.0 ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "10.0",
+          "2"
+        ],
+        [
+          "20.0",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "decimal_unary_plus",
+      "sql": "SELECT n + +1.0 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1.0 ORDER BY shifted",
+      "sqlstate": "42803",
+      "message": "column \"t.n\" must appear in the GROUP BY clause or be used in an aggregate function"
+    },
+    {
+      "name": "decimal_noop_cast",
+      "sql": "SELECT n + 1.0::numeric AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1.0 ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11.0",
+          "2"
+        ],
+        [
+          "21.0",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "decimal_string_cast",
+      "sql": "SELECT n + '1.0'::numeric AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1.0 ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11.0",
+          "2"
+        ],
+        [
+          "21.0",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "decimal_typed_syntax",
+      "sql": "SELECT n + numeric '1.0' AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1.0 ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11.0",
+          "2"
+        ],
+        [
+          "21.0",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "decimal_typmod_identical",
+      "sql": "SELECT n + 1.0::numeric(3,1) AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1.0::numeric(3,1) ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11.0",
+          "2"
+        ],
+        [
+          "21.0",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "decimal_typmod_distinct",
+      "sql": "SELECT n + 1.0::numeric(3,1) AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1.0::numeric(4,1) ORDER BY shifted",
+      "sqlstate": "42803",
+      "message": "column \"t.n\" must appear in the GROUP BY clause or be used in an aggregate function"
+    },
+    {
+      "name": "decimal_typmod_vs_plain",
+      "sql": "SELECT n + 1.0::numeric(3,1) AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1.0 ORDER BY shifted",
+      "sqlstate": "42803",
+      "message": "column \"t.n\" must appear in the GROUP BY clause or be used in an aggregate function"
+    },
+    {
+      "name": "integer_identical",
+      "sql": "SELECT n + 1 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1 ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11",
+          "2"
+        ],
+        [
+          "21",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "integer_vs_numeric",
+      "sql": "SELECT n + 1 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1.0 ORDER BY shifted",
+      "sqlstate": "42803",
+      "message": "column \"t.n\" must appear in the GROUP BY clause or be used in an aggregate function"
+    },
+    {
+      "name": "integer_vs_bigint",
+      "sql": "SELECT n + 1::bigint AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1 ORDER BY shifted",
+      "sqlstate": "42803",
+      "message": "column \"t.n\" must appear in the GROUP BY clause or be used in an aggregate function"
+    },
+    {
+      "name": "numeric_vs_float",
+      "sql": "SELECT n + 1.0 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1.0::double precision ORDER BY shifted",
+      "sqlstate": "42803",
+      "message": "column \"t.n\" must appear in the GROUP BY clause or be used in an aggregate function"
+    },
+    {
+      "name": "float_identical",
+      "sql": "SELECT n + 1.0::double precision AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1.0::double precision ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11",
+          "2"
+        ],
+        [
+          "21",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "float_scale_spelling",
+      "sql": "SELECT n + 1.0::double precision AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1.00::double precision ORDER BY shifted",
+      "sqlstate": "42803",
+      "message": "column \"t.n\" must appear in the GROUP BY clause or be used in an aggregate function"
+    },
+    {
+      "name": "numeric_cast_scale_distinct",
+      "sql": "SELECT n + 1::numeric AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1.0 ORDER BY shifted",
+      "sqlstate": "42803",
+      "message": "column \"t.n\" must appear in the GROUP BY clause or be used in an aggregate function"
+    },
+    {
+      "name": "qualified_column",
+      "sql": "SELECT t.n + 1.0 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1.0 ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11.0",
+          "2"
+        ],
+        [
+          "21.0",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "date_literal",
+      "sql": "SELECT DATE '2020-01-01' + n AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY DATE '2020-01-01' + n ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "2020-01-11",
+          "2"
+        ],
+        [
+          "2020-01-21",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "interval_literal",
+      "sql": "SELECT n * INTERVAL '1 month' AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n * INTERVAL '1 month' ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "10 mons",
+          "2"
+        ],
+        [
+          "1 year 8 mons",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "interval_representation_distinct",
+      "sql": "SELECT n * INTERVAL '1 month' AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n * INTERVAL '30 days' ORDER BY shifted",
+      "sqlstate": "42803",
+      "message": "column \"t.n\" must appear in the GROUP BY clause or be used in an aggregate function"
+    },
+    {
+      "name": "output_alias",
+      "sql": "SELECT n + 1.0 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY shifted ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11.0",
+          "2"
+        ],
+        [
+          "21.0",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "duplicate_alias_identical",
+      "sql": "SELECT n + 1.0 AS shifted, n + 1.0 AS shifted FROM grouping_literal_probe AS t GROUP BY shifted ORDER BY 1",
+      "columns": [
+        "shifted",
+        "shifted"
+      ],
+      "rows": [
+        [
+          "11.0",
+          "11.0"
+        ],
+        [
+          "21.0",
+          "21.0"
+        ]
+      ]
+    },
+    {
+      "name": "duplicate_alias_scale_distinct",
+      "sql": "SELECT n + 1.0 AS shifted, n + 1.00 AS shifted FROM grouping_literal_probe AS t GROUP BY shifted ORDER BY 1",
+      "sqlstate": "42702",
+      "message": "GROUP BY \"shifted\" is ambiguous"
+    },
+    {
+      "name": "grouping_sets",
+      "sql": "SELECT n + 1.0 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY GROUPING SETS ((n + 1.0), ()) ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11.0",
+          "2"
+        ],
+        [
+          "21.0",
+          "1"
+        ],
+        [
+          null,
+          "3"
+        ]
+      ]
+    },
+    {
+      "name": "rollup",
+      "sql": "SELECT n + 1.0 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY ROLLUP(n + 1.0) ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11.0",
+          "2"
+        ],
+        [
+          "21.0",
+          "1"
+        ],
+        [
+          null,
+          "3"
+        ]
+      ]
+    },
+    {
+      "name": "distinct_sets_identical",
+      "sql": "SELECT n + 1.0 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY DISTINCT GROUPING SETS ((n + 1.0), (n + 1.0)) ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11.0",
+          "2"
+        ],
+        [
+          "21.0",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "distinct_sets_scale_distinct",
+      "sql": "SELECT count(*) AS tally FROM grouping_literal_probe AS t GROUP BY DISTINCT GROUPING SETS ((n + 1.0), (n + 1.00)) ORDER BY tally",
+      "columns": [
+        "tally"
+      ],
+      "rows": [
+        [
+          "1"
+        ],
+        [
+          "1"
+        ],
+        [
+          "2"
+        ],
+        [
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "having_group_expression",
+      "sql": "SELECT n + 1.0 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1.0 HAVING sum(n) > n + 1.0 ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11.0",
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "hidden_order_expression",
+      "sql": "SELECT count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + 1.0 ORDER BY n + 1.0",
+      "columns": [
+        "tally"
+      ],
+      "rows": [
+        [
+          "2"
+        ],
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "empty_input_scale_mismatch",
+      "sql": "SELECT n + 1.0 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t WHERE false GROUP BY n + 1.00 ORDER BY shifted",
+      "sqlstate": "42803",
+      "message": "column \"t.n\" must appear in the GROUP BY clause or be used in an aggregate function"
+    },
+    {
+      "name": "prepared_decimal",
+      "sql": "PREPARE literal_group(numeric) AS SELECT n + $1 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + $1 ORDER BY shifted; EXECUTE literal_group(1.00)",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11.00",
+          "2"
+        ],
+        [
+          "21.00",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "prepared_distinct_parameters",
+      "sql": "PREPARE literal_group(numeric,numeric) AS SELECT n + $1 AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + $2 ORDER BY shifted; EXECUTE literal_group(1.0,1.0)",
+      "sqlstate": "42803",
+      "message": "column \"t.n\" must appear in the GROUP BY clause or be used in an aggregate function"
+    }
+  ]
+}
