@@ -161,24 +161,7 @@ fn hash_decimal_numeric<H: Hasher>(value: &DecimalValue, state: &mut H) {
 }
 
 fn hash_float_numeric<H: Hasher>(value: f64, state: &mut H) {
-    if value.is_nan() {
-        7_u8.hash(state);
-    } else if value == f64::INFINITY {
-        8_u8.hash(state);
-    } else if value == f64::NEG_INFINITY {
-        9_u8.hash(state);
-    } else if let Some(decimal) = DecimalValue::from_f64_lossy(value) {
-        hash_decimal_numeric(&decimal, state);
-    } else {
-        // A finite float outside PostgreSQL's NUMERIC domain only compares
-        // equal to the same f64 value. Normalize signed zero for completeness.
-        10_u8.hash(state);
-        if value == 0.0 {
-            0.0_f64.to_bits().hash(state);
-        } else {
-            value.to_bits().hash(state);
-        }
-    }
+    hash_decimal_numeric(&DecimalValue::from_f64_exact(value), state);
 }
 
 fn hash_temporal<H: Hasher>(value: &TemporalValue, state: &mut H) {
@@ -821,6 +804,54 @@ mod tests {
             .len(),
             1
         );
+    }
+
+    #[test]
+    fn hash_join_keys_preserve_exact_numeric_equivalence_in_nested_keys() {
+        for value in [
+            0.1,
+            -0.1,
+            9_223_372_036_854_774_784_i64 as f64,
+            f64::from_bits(1),
+            f64::MAX,
+            -0.0,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ] {
+            let float = Value::Float(value);
+            let decimal = Value::Decimal(DecimalValue::from_f64_exact(value));
+            let left = vec![row([("k", float.clone())])];
+            let right = vec![row([("k", decimal.clone())])];
+            let joined = hash_inner_join(
+                &left,
+                &right,
+                |row| row.get("k").map(JoinKey::new),
+                |row| row.get("k").map(JoinKey::new),
+            );
+            assert_eq!(joined, sort_merge_inner_join(&left, &right, "k", "k"));
+            assert_eq!(joined.len(), 1);
+            for (left, right) in [
+                (JoinKey::new(&float), JoinKey::new(&decimal)),
+                (
+                    JoinKey::composite(&[&float]),
+                    JoinKey::composite(&[&decimal]),
+                ),
+                (
+                    JoinKey::new(&Value::Array(
+                        uqa_core::ArrayValue::try_new(vec![float.clone()]).unwrap(),
+                    )),
+                    JoinKey::new(&Value::Array(
+                        uqa_core::ArrayValue::try_new(vec![decimal.clone()]).unwrap(),
+                    )),
+                ),
+            ] {
+                assert_eq!(left, right);
+                let mut index = HashMap::new();
+                index.insert(left, true);
+                assert_eq!(index.get(&right), Some(&true));
+            }
+        }
     }
 
     #[test]
