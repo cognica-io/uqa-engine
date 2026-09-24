@@ -53,7 +53,7 @@ pub(super) fn restoration_header(
     let row = rows
         .next()?
         .ok_or(VersionError::InvalidEncoding("missing record metadata"))?;
-    if row.get::<_, i64>(1)? != 46 {
+    if row.get::<_, i64>(1)? != 47 {
         return Err(VersionError::InvalidEncoding("unknown record format").into());
     }
     let database = identity(bytes(row, 2)?)?;
