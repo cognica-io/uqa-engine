@@ -7,7 +7,7 @@
 //! Canonical encoded index, disk buckets, match flags, and spill transition.
 
 use std::collections::{BTreeMap, HashMap};
-use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use uqa_storage::temporary_file::TemporaryFile as File;
 
@@ -245,65 +245,65 @@ impl DiskHashIndex {
             .metadata()
             .map_err(|error| join_io_error("inspect hash bucket", error))?
             .len();
-        let mut matched = false;
-        while let Some(key_len) = read_u64(file, "read hash key length")? {
-            let key_start = file
-                .stream_position()
-                .map_err(|error| join_io_error("locate hash key", error))?;
-            let key_end = key_start
-                .checked_add(key_len)
-                .ok_or_else(|| ExecError::Other("join hash key offset overflow".into()))?;
-            let record_end = key_end
-                .checked_add(8)
-                .ok_or_else(|| ExecError::Other("join hash record offset overflow".into()))?;
-            if record_end > file_len {
-                return Err(ExecError::Other(format!(
-                    "join hash key length {key_len} exceeds remaining bucket record bytes"
-                )));
-            }
-            let key_matches = compare_hash_key(file, key_start, key_end, key_len, key)?;
-            let row_index = read_u64(file, "read hash row index")?
-                .ok_or_else(|| ExecError::Other("truncated join hash row index".into()))?;
-            if key_matches {
-                visitor(row_index)?;
-                matched = true;
-            }
-        }
-        Ok(matched)
+        visit_bucket(file, file_len, key, visitor)
     }
 }
 
-fn compare_hash_key(
-    file: &mut File,
-    key_start: u64,
-    key_end: u64,
-    stored_len: u64,
-    expected: &[u8],
+fn visit_bucket(
+    file: &mut impl Read,
+    file_len: u64,
+    key: &[u8],
+    visitor: &mut dyn FnMut(u64) -> ExecResult<()>,
 ) -> ExecResult<bool> {
-    let expected_len = u64::try_from(expected.len())
-        .map_err(|_| ExecError::Other("join probe key length is invalid".into()))?;
-    if stored_len != expected_len {
-        file.seek(SeekFrom::Start(key_end))
-            .map_err(|error| join_io_error("skip non-matching hash key", error))?;
-        return Ok(false);
+    // Keep a single bounded probe buffer, independent of key size and bucket count.
+    let mut reader = BufReader::with_capacity(8 * 1024, file);
+    let mut position = 0_u64;
+    let mut matched = false;
+    while let Some(key_len) = read_u64(&mut reader, "read hash key length")? {
+        let record_end = position
+            .checked_add(16)
+            .and_then(|position| position.checked_add(key_len))
+            .ok_or_else(|| ExecError::Other("join hash record offset overflow".into()))?;
+        if record_end > file_len {
+            return Err(ExecError::Other(format!(
+                "join hash key length {key_len} exceeds remaining bucket record bytes"
+            )));
+        }
+        let key_matches = compare_hash_key(&mut reader, key_len, key)?;
+        let row_index = read_u64(&mut reader, "read hash row index")?
+            .ok_or_else(|| ExecError::Other("truncated join hash row index".into()))?;
+        if key_matches {
+            visitor(row_index)?;
+            matched = true;
+        }
+        position = record_end;
     }
+    Ok(matched)
+}
 
-    file.seek(SeekFrom::Start(key_start))
-        .map_err(|error| join_io_error("seek hash key", error))?;
-    let mut buffer = [0_u8; 8 * 1024];
-    let mut compared = 0_usize;
-    let mut matches = true;
-    while compared < expected.len() {
-        let take = (expected.len() - compared).min(buffer.len());
-        file.read_exact(&mut buffer[..take])
+fn compare_hash_key(file: &mut impl BufRead, stored_len: u64, expected: &[u8]) -> ExecResult<bool> {
+    let mut remaining = stored_len;
+    let mut compared = 0;
+    let mut matches = stored_len == expected.len() as u64;
+    while remaining > 0 {
+        let bytes = file
+            .fill_buf()
             .map_err(|error| join_io_error("read hash key", error))?;
-        matches &= buffer[..take] == expected[compared..compared + take];
-        compared += take;
+        if bytes.is_empty() {
+            return Err(ExecError::Other("truncated join hash key".into()));
+        }
+        let take = remaining.min(bytes.len() as u64) as usize;
+        if matches {
+            matches = bytes[..take] == expected[compared..compared + take];
+            compared += take;
+        }
+        file.consume(take);
+        remaining -= take as u64;
     }
     Ok(matches)
 }
 
-fn read_u64(file: &mut File, operation: &str) -> ExecResult<Option<u64>> {
+fn read_u64(file: &mut impl Read, operation: &str) -> ExecResult<Option<u64>> {
     let mut encoded = [0_u8; 8];
     match file.read(&mut encoded[..1]) {
         Ok(0) => return Ok(None),
@@ -334,4 +334,64 @@ pub(super) fn stable_hash(bytes: &[u8]) -> u64 {
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
     hash
+}
+
+#[cfg(test)]
+mod probe_tests {
+    use super::*;
+    use std::io::{self, Cursor};
+
+    struct Reads {
+        input: Cursor<Vec<u8>>,
+        count: usize,
+    }
+
+    impl Read for Reads {
+        fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+            self.count += 1;
+            self.input.read(bytes)
+        }
+    }
+
+    #[test]
+    fn bucket_probe_coalesces_records_and_visits_every_matching_row() {
+        let mut data = Vec::new();
+        let key = 7_u64.to_le_bytes();
+        for index in 0_u64..128 {
+            data.extend_from_slice(&8_u64.to_le_bytes());
+            data.extend_from_slice(&(index % 8).to_le_bytes());
+            data.extend_from_slice(&index.to_le_bytes());
+        }
+        let length = data.len() as u64;
+        let mut source = Reads {
+            input: Cursor::new(data),
+            count: 0,
+        };
+        let mut matched = Vec::new();
+        assert!(visit_bucket(&mut source, length, &key, &mut |row| {
+            matched.push(row);
+            Ok(())
+        })
+        .unwrap());
+        assert_eq!(matched, (7..128).step_by(8).collect::<Vec<_>>());
+        assert!(
+            source.count <= 2,
+            "{} physical reads for one small bucket",
+            source.count
+        );
+    }
+
+    #[test]
+    fn truncated_nonmatching_key_does_not_skip_bucket_validation() {
+        let data = [100_u64.to_le_bytes(), 1_u64.to_le_bytes()].concat();
+        assert!(visit_bucket(
+            &mut data.as_slice(),
+            data.len() as u64,
+            b"short",
+            &mut |_| Ok(())
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("exceeds remaining bucket record bytes"));
+    }
 }

@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Coalesce encrypted DISTINCT and hash-join bucket reads through one bounded probe buffer, avoiding repeated block decryption for each short record field while preserving exact key comparison and malformed-record rejection.
+
 - Advance SQLite main record format to 47, redb main record format to 46 and native SQLite mapping format to 9; catalog format remains 49. Atomic upgrades preserve records, identities, histories and identifier allocations, while preserving existing receipt capacity, acknowledgement and ownership; predecessors without ownership retain their receipts as manually owned outcomes. Reopened and retained incompatible readers and writers are rejected. Restore a pre-upgrade backup to return to an earlier format. See the [writer compatibility contract](docs/manual/reference/10-upgrading.md#unreleased-mvcc-writer-compatibility).
 
 - Keep produced and retained query values under their original memory and cancellation allowance through defaults, generated expressions, row/page construction and callback handoff. Selected analyzer/catalog generations, text-index nodes and vector collections retain their owners until the final reader releases them; failed production preserves previously admitted results and the original error.

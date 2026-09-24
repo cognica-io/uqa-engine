@@ -7,7 +7,7 @@
 //! Memory-to-disk transition and exact bucketed spill storage.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use uqa_storage::temporary_file::TemporaryFile as File;
 
@@ -138,11 +138,8 @@ impl DiskKeySet {
         file.seek(SeekFrom::Start(0)).map_err(|error| {
             distinct_error(format!("failed to seek DISTINCT spill bucket: {error}"))
         })?;
-        while let Some(record_len) = read_record_len(file)? {
-            let matches = compare_record(file, record_len, key)?;
-            if matches {
-                return Ok(false);
-            }
+        if contains_record(file, key)? {
+            return Ok(false);
         }
 
         let original_len = file.seek(SeekFrom::End(0)).map_err(|error| {
@@ -181,16 +178,22 @@ impl DiskKeySet {
         file.seek(SeekFrom::Start(0)).map_err(|error| {
             distinct_error(format!("failed to seek DISTINCT spill bucket: {error}"))
         })?;
-        while let Some(record_len) = read_record_len(file)? {
-            if compare_record(file, record_len, key)? {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+        contains_record(file, key)
     }
 }
 
-fn read_record_len(file: &mut File) -> ExecResult<Option<u64>> {
+fn contains_record(file: &mut impl Read, key: &[u8]) -> ExecResult<bool> {
+    // One fixed workspace serves this probe, rather than retaining a buffer in every bucket.
+    let mut reader = BufReader::with_capacity(COPY_BUFFER_BYTES, file);
+    while let Some(record_len) = read_record_len(&mut reader)? {
+        if compare_record(&mut reader, record_len, key)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn read_record_len(file: &mut impl Read) -> ExecResult<Option<u64>> {
     let mut encoded = [0_u8; 8];
     match file.read(&mut encoded[..1]) {
         Ok(0) => return Ok(None),
@@ -217,35 +220,26 @@ fn read_record_len(file: &mut File) -> ExecResult<Option<u64>> {
 }
 
 /// Compare one disk record without allocating a second key-sized buffer.
-fn compare_record(file: &mut File, record_len: u64, key: &[u8]) -> ExecResult<bool> {
+fn compare_record(file: &mut impl BufRead, record_len: u64, key: &[u8]) -> ExecResult<bool> {
     let key_len = u64::try_from(key.len())
         .map_err(|_| distinct_error("DISTINCT key length exceeds the on-disk format"))?;
     let mut remaining = record_len;
-    let mut offset = 0_usize;
+    let mut offset = 0;
     let mut matches = record_len == key_len;
-    let mut buffer = [0_u8; COPY_BUFFER_BYTES];
     while remaining > 0 {
-        let copy_buffer_bytes = u64::try_from(COPY_BUFFER_BYTES)
-            .map_err(|_| distinct_error("DISTINCT copy buffer exceeds the on-disk length range"))?;
-        let take = usize::try_from(remaining.min(copy_buffer_bytes)).map_err(|_| {
-            distinct_error("DISTINCT spill key chunk exceeds the addressable memory range")
+        let bytes = file.fill_buf().map_err(|error| {
+            distinct_error(format!("failed to read DISTINCT spill key: {error}"))
         })?;
-        file.read_exact(&mut buffer[..take]).map_err(|error| {
-            if error.kind() == ErrorKind::UnexpectedEof {
-                distinct_error("truncated DISTINCT spill key")
-            } else {
-                distinct_error(format!("failed to read DISTINCT spill key: {error}"))
-            }
-        })?;
-        if matches && buffer[..take] != key[offset..offset + take] {
-            matches = false;
+        if bytes.is_empty() {
+            return Err(distinct_error("truncated DISTINCT spill key"));
         }
+        let take = remaining.min(bytes.len() as u64) as usize;
         if matches {
+            matches = bytes[..take] == key[offset..offset + take];
             offset += take;
         }
-        let consumed = u64::try_from(take)
-            .map_err(|_| distinct_error("DISTINCT spill key chunk exceeds the length range"))?;
-        remaining -= consumed;
+        file.consume(take);
+        remaining -= take as u64;
     }
     Ok(matches)
 }
@@ -263,4 +257,53 @@ pub(super) fn stable_hash(bytes: &[u8]) -> u64 {
 
 fn distinct_error(message: impl Into<String>) -> ExecError {
     ExecError::Other(message.into())
+}
+
+#[cfg(test)]
+mod probe_tests {
+    use super::*;
+    use std::io::{self, Cursor};
+
+    struct Reads {
+        input: Cursor<Vec<u8>>,
+        count: usize,
+    }
+
+    impl Read for Reads {
+        fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+            self.count += 1;
+            self.input.read(bytes)
+        }
+    }
+
+    #[test]
+    fn bucket_probe_coalesces_short_records_and_checks_the_complete_key() {
+        let mut data = Vec::new();
+        for index in 0_u64..128 {
+            data.extend_from_slice(&8_u64.to_le_bytes());
+            data.extend_from_slice(&index.to_le_bytes());
+        }
+        let mut source = Reads {
+            input: Cursor::new(data),
+            count: 0,
+        };
+        assert!(!contains_record(&mut source, &128_u64.to_le_bytes()).unwrap());
+        assert!(
+            source.count <= 2,
+            "{} physical reads for one small bucket",
+            source.count
+        );
+        source.input.set_position(0);
+        assert!(contains_record(&mut source, &127_u64.to_le_bytes()).unwrap());
+    }
+
+    #[test]
+    fn oversized_nonmatching_keys_still_report_truncation() {
+        let mut data = (COPY_BUFFER_BYTES as u64 + 17).to_le_bytes().to_vec();
+        data.extend(vec![1; COPY_BUFFER_BYTES + 16]);
+        assert!(contains_record(&mut data.as_slice(), b"short")
+            .unwrap_err()
+            .to_string()
+            .contains("truncated DISTINCT spill key"));
+    }
 }
