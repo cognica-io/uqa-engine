@@ -105,7 +105,11 @@ fn hash_value<H: Hasher>(value: &Value, state: &mut H) {
         }
         Value::JsonB(value) => {
             9_u8.hash(state);
-            value.hash(state);
+            if let Some(key) = uqa_core::jsonb_equality_key(value) {
+                key.hash(state);
+            } else {
+                value.hash(state);
+            }
         }
         Value::Array(array) => {
             12_u8.hash(state);
@@ -868,5 +872,67 @@ mod tests {
         let out = index_inner_join(&l, &idx, |row| row.get("id").map(JoinKey::new));
         assert_eq!(out.len(), 1);
         assert_eq!(out[0]["name"], Value::Str("x".into()));
+    }
+
+    #[test]
+    fn jsonb_join_hashes_match_postgresql_semantic_equality() {
+        let oracle: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../uqa-core/src/types/tests/pg18_jsonb.json"
+        )))
+        .unwrap();
+        let values: Vec<_> = oracle["values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|text| Value::JsonB(text.as_str().unwrap().into()))
+            .collect();
+        let mut expected = std::collections::BTreeSet::new();
+        for pair in oracle["comparisons"].as_array().unwrap() {
+            let left = pair[0].as_u64().unwrap() as usize;
+            let right = pair[1].as_u64().unwrap() as usize;
+            let equal = pair[2].as_bool().unwrap();
+            let mut index = HashMap::new();
+            index.insert(JoinKey::new(&values[left]), true);
+            assert_eq!(
+                index.contains_key(&JoinKey::new(&values[right])),
+                equal,
+                "{}, {}",
+                oracle["values"][left],
+                oracle["values"][right]
+            );
+            if equal {
+                expected.insert((left as i64, right as i64));
+            }
+        }
+        let rows = |id, key| {
+            values
+                .iter()
+                .enumerate()
+                .map(|(i, value)| row([(id, Value::Int(i as i64)), (key, value.clone())]))
+                .collect::<Vec<_>>()
+        };
+        let left = rows("left_id", "left_key");
+        let right = rows("right_id", "right_key");
+        let joined = hash_inner_join(
+            &left,
+            &right,
+            |row| row.get("left_key").map(JoinKey::new),
+            |row| row.get("right_key").map(JoinKey::new),
+        );
+        let actual: std::collections::BTreeSet<_> = joined
+            .iter()
+            .map(|row| {
+                let Value::Int(left) = row["left_id"] else {
+                    panic!("left identity");
+                };
+                let Value::Int(right) = row["right_id"] else {
+                    panic!("right identity");
+                };
+                (left, right)
+            })
+            .collect();
+        assert_eq!(joined.len(), expected.len());
+        assert_eq!(actual, expected);
     }
 }

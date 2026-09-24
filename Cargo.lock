@@ -3879,6 +3879,7 @@ dependencies = [
 name = "uqa-joins"
 version = "0.3.8"
 dependencies = [
+ "serde_json",
  "uqa-analysis",
  "uqa-core",
  "uqa-graph",
