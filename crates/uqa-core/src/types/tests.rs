@@ -9,6 +9,7 @@ use super::*;
 
 mod array_elements;
 mod jsonb_keys;
+mod numeric_keys;
 mod temporal_keys;
 
 #[test]

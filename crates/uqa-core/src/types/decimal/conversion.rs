@@ -10,6 +10,8 @@ use num_bigint::BigInt;
 
 use super::DecimalValue;
 
+mod exact;
+
 impl DecimalValue {
     pub fn from_i64(value: i64) -> Self {
         Self::from_i64_with_control(value, &crate::memory::ProductionControl::uncontrolled())
