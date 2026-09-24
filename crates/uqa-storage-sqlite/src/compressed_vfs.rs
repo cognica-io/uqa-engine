@@ -219,6 +219,7 @@ struct AuthenticatedChunkRecord {
 #[derive(Debug)]
 struct ContainerFile {
     path: PathBuf,
+    committed_file: Option<File>,
     logical_len: usize,
     append_offset: u64,
     chunks: BTreeMap<u64, ChunkEntry>,

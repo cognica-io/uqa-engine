@@ -9,11 +9,12 @@
 use super::{
     build_commit_entry, build_entry, build_header, chunk_payload_tag, commit_authentication_tag,
     fs, invalid_data, sync_parent_directory, usize_to_u64, AuthenticatedChunkRecord, BTreeMap,
-    ChunkEntry, ContainerFile, File, Path, PathBuf, Write, AEAD_TAG_LEN, AUTH_TAG_LEN, ENTRY_SIZE,
-    FLAG_ENCRYPTED, HEADER_SIZE, MAX_COMPACT_STALE_BYTES, MIN_COMPACT_STALE_BYTES,
+    ChunkEntry, ContainerFile, File, OpenOptions, Path, PathBuf, Write, AEAD_TAG_LEN, AUTH_TAG_LEN,
+    ENTRY_SIZE, FLAG_ENCRYPTED, HEADER_SIZE, MAX_COMPACT_STALE_BYTES, MIN_COMPACT_STALE_BYTES,
 };
 
 struct CompactedState {
+    file: File,
     append_offset: u64,
     chunks: BTreeMap<u64, ChunkEntry>,
     state_tag: [u8; AUTH_TAG_LEN],
@@ -40,6 +41,7 @@ impl ContainerFile {
         self.append_offset = compacted.append_offset;
         self.committed_file_len = compacted.append_offset;
         self.chunks = compacted.chunks;
+        self.committed_file = Some(compacted.file);
         sync_parent_directory(&self.path)
     }
 
@@ -90,7 +92,12 @@ impl ContainerFile {
         path: &Path,
         generation: u64,
     ) -> std::io::Result<CompactedState> {
-        let mut file = File::create(path)?;
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)?;
         self.write_compacted_header(&mut file, generation)?;
         let (commit_offset, chunks, records) =
             self.write_compacted_chunks(&mut file, generation)?;
@@ -99,6 +106,7 @@ impl ContainerFile {
         file.set_len(append_offset)?;
         file.sync_all()?;
         Ok(CompactedState {
+            file,
             append_offset,
             chunks,
             state_tag,

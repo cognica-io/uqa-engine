@@ -542,6 +542,10 @@ fn compaction_state_survives_parent_directory_sync_failure() {
         if let Err(error) = container.flush() {
             assert_eq!(error.to_string(), "injected parent directory sync failure");
             injected_failures += 1;
+            container.cache.clear();
+            let mut committed = [0; 2];
+            container.read_at(17, &mut committed).unwrap();
+            assert_eq!(committed, i.to_le_bytes());
         }
     }
     assert_eq!(injected_failures, 1);

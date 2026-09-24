@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! An unlocked initial SQLite header read must use the same file as its decoded chunk map.
+//! An unlocked initial `SQLite` header read must use the same file as its decoded chunk map.
 
 use super::*;
 
@@ -95,6 +95,10 @@ fn initial_header_uses_its_opened_generation_after_another_writer_compacts(
         compacted,
         "fixture must replace the pathname through real compaction"
     );
+    writer.cache.clear();
+    let mut current = [0; 100];
+    writer.read_at(0, &mut current).unwrap();
+    assert_eq!(current, latest);
     writer_locks.unlock(SQLITE_LOCK_NONE).unwrap();
     // SQLite reads its first 100 header bytes before acquiring the first shared lock. Its decoded chunk map still describes the file selected by xOpen.
     assert_eq!(reader.header(), [b'a'; 100]);
