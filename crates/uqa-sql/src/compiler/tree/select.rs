@@ -62,16 +62,11 @@ pub(in crate::compiler) fn compile_select(
     let limit = compile_limit_offset_expr(stmt.limit_count.as_deref(), !with_ties)?;
     let offset = compile_limit_offset_expr(stmt.limit_offset.as_deref(), true)?;
     let (group_by, grouping_sets) = compile_group_clause(&stmt.group_clause)?;
-    // Resolve GROUP BY 1 / GROUP BY <alias> against the SELECT list.
-    // Postgres prefers a real column when one matches, falling back to
-    // the alias; we don't have schema info here, so we only rewrite
-    // when the alias clearly cannot be a column on the source row
-    // (i.e., the projection's expression is something other than a
-    // bare reference to that same name).
-    let group_by = resolve_group_by_aliases(group_by, &projections);
+    // Named GROUP BY references require the input schema: PostgreSQL prefers input columns over output aliases. Only ordinals can be resolved here.
+    let group_by = resolve_group_by_ordinals(group_by, &projections);
     let grouping_sets: Vec<Vec<Expr>> = grouping_sets
         .into_iter()
-        .map(|s| resolve_group_by_aliases(s, &projections))
+        .map(|s| resolve_group_by_ordinals(s, &projections))
         .collect();
     let having = stmt
         .having_clause
@@ -467,7 +462,7 @@ pub(in crate::compiler) fn compile_from_list(nodes: &[Node]) -> Result<Option<Fr
     Ok(Some(current))
 }
 
-pub(in crate::compiler) fn resolve_group_by_aliases(
+pub(in crate::compiler) fn resolve_group_by_ordinals(
     group_by: Vec<Expr>,
     projections: &[Projection],
 ) -> Vec<Expr> {
@@ -481,25 +476,6 @@ pub(in crate::compiler) fn resolve_group_by_aliases(
                 }
                 _ => g,
             },
-            // GROUP BY <alias>: only rewrite when the alias points at
-            // a non-trivial expression. If the projection is just a
-            // column reference with the same name the original AST is
-            // already correct.
-            Expr::Column(name) => {
-                for p in projections {
-                    if let Some(alias) = &p.alias {
-                        if alias == name {
-                            if let Expr::Column(col_name) = &p.expr {
-                                if col_name == name {
-                                    return g;
-                                }
-                            }
-                            return p.expr.clone();
-                        }
-                    }
-                }
-                g
-            }
             _ => g,
         })
         .collect()

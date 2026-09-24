@@ -11,13 +11,23 @@ The [official upstream regression harness](upstream/README.md) separately import
 
 ## Numeric comparison reference
 
-The compact [`pg18.json`](../../../crates/uqa-sql/src/expr/binary/comparison/pg18.json) records 44 operand pairs across six comparison operators, plus typed-column filters, grouping, joins and unique constraints. Expectations come from PostgreSQL 18.4, including SQLSTATEs and result types, and retain the Docker image identity. Core's internal exact numeric ordering is checked separately from SQL's operator-selected casts; Execution tests exercise SQL binding and both scalar evaluators against the reference, and Engine tests exercise public SQL without starting Docker. Engine tests compare scans, indexes and reopened native SQLite, SQLite Key/Value and redb databases.
+The compact [`pg18.json`](../../../crates/uqa-sql/src/expr/binary/comparison/pg18.json) records 44 operand pairs across six comparison operators, plus typed-column filters, grouping, joins and unique constraints. Expectations come from PostgreSQL 18.4, including SQLSTATEs and result types, and retain the Docker image identity. Core's internal exact numeric ordering is checked separately from SQL's operator-selected casts; Planner tests check constant folding, Execution tests exercise SQL binding and both scalar evaluators, and Engine tests exercise public SQL without starting Docker. Engine tests compare scans, indexes and reopened native SQLite, SQLite Key/Value and redb databases.
 
 ```sh
 python3 tests/parity/pg18/capture_numeric_comparisons.py --container uqa-pg18 --output target/numeric-comparisons.reference.json
 ```
 
 The collector reads only the checked-in operand and statement inputs, obtains every expected result from PostgreSQL, and rolls back its temporary relational setup. Compare the resulting small fixture with the committed reference before accepting any changed expectation.
+
+## Grouping name reference
+
+The compact [`pg18_names.json`](../../../crates/uqa-sql/src/semantics/grouping_sets/pg18_names.json) records PostgreSQL 18.4 input-column precedence, output-alias fallback, ordinals, grouping sets and ambiguity/context errors. SQL owner tests verify schema-aware resolution, and Engine tests consume the external results and verify prepared statements and stored views across column renaming and reopen.
+
+```sh
+python3 tests/parity/pg18/capture_grouping_names.py --container uqa-pg18 --output target/grouping-names.reference.json
+```
+
+This collector also rolls back each temporary setup and derives expectations only from PostgreSQL.
 
 ## Concurrent writer reference
 

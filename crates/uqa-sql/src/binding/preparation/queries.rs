@@ -144,7 +144,16 @@ impl Preparation<'_> {
             .iter()
             .chain(block.grouping_sets.iter().flatten())
         {
-            self.alias_expression(expression, &input, &projected, &block.subqueries)?;
+            let expression = crate::semantics::grouping_sets::resolve_grouping_expression(
+                self.routines,
+                expression,
+                &block.projections,
+                &source,
+                &self.parameters.values(),
+            )?;
+            let mut value = self.expression(&expression, &input, &block.subqueries)?;
+            self.parameters
+                .coerce_unknown(&mut value, &ColumnType::Text)?;
         }
         for expression in &block.distinct_on {
             self.alias_expression(expression, &projected, &input, &block.subqueries)?;

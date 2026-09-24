@@ -21,6 +21,35 @@ This plan distinguishes a PostgreSQL 18 baseline from complete compatibility. Th
 - A compatibility claim is no broader than its passing evidence. The manual must identify the current milestone until the complete-compatibility gates pass.
 - Add every newly confirmed compatibility gap to the manifest and this plan immediately with an incomplete status; promote it to `verified` only after focused tests and the PostgreSQL 18 differential oracle pass.
 
+## Prioritized issue correction
+
+The 2026-09-24 queue starts from merged main `57e74e23`. Process one defect at a time, with logical commits and a synchronized PR, preserving the remaining queue until its own evidence passes. The initial inventory comprised 18 defects and #41, a usage report that does not request a defect correction. Numeric differential testing additionally reproduced non-finite float data loss (#138), which takes priority and blocks persistent comparison acceptance. The same external fixture then reproduced premature GROUP BY alias substitution (#139); its correction is also required by the numeric grouping gate. Reassess a defect against current source before changing it or closing its issue; source-inspection reports are not executed reproductions.
+
+| Order | Issue | Required result |
+| --- | --- | --- |
+| 1 | [#138](https://github.com/cognica-io/uqa-engine/issues/138), non-finite float data loss | Preserve NaN/Infinity through typed JSON, nested values, provider writes and reopen; fence incompatible older binaries without losing existing receipt ownership or capacity. In progress. |
+| 2 | [#120](https://github.com/cognica-io/uqa-engine/issues/120), numeric comparison | Restore internal numeric order/equality/hash coherence and PostgreSQL-selected SQL comparisons, including `1.0 > 0`, both operand directions and precision boundaries. In progress. |
+| 3 | [#139](https://github.com/cognica-io/uqa-engine/issues/139), GROUP BY name precedence | Prefer input columns over output aliases after source binding. Reproduced while verifying numeric grouping; this dependency must be corrected before numeric acceptance can finish. |
+| 4 | [#121](https://github.com/cognica-io/uqa-engine/issues/121), TIME/TIMETZ | Correct day-boundary and timezone tie-breaking expectations against PostgreSQL; align grouping, containers and persistent keys. |
+| 5 | [#122](https://github.com/cognica-io/uqa-engine/issues/122), JSONB numeric order | Order zero, fractions, exponents and nested values consistently across comparisons and indexes. |
+| 6 | [#123](https://github.com/cognica-io/uqa-engine/issues/123), legacy-vector domains | Use consistent representations for casts, assignment, equality, uniqueness and index/reopen behavior. |
+| 7 | [#129](https://github.com/cognica-io/uqa-engine/issues/129), committed notification recovery | Recover committed publication after sender loss without duplicate delivery or replay of evaluated effects. |
+| 8 | [#124](https://github.com/cognica-io/uqa-engine/issues/124), direct SQLite index snapshots | Preserve the captured read view through later replacement/deletion and nested retained lifetimes. |
+| 9 | [#130](https://github.com/cognica-io/uqa-engine/issues/130), ALTER TABLE column visibility | Add a unique text column with its default atomically while preserving the existing row. |
+| 10 | [#117](https://github.com/cognica-io/uqa-engine/issues/117), JSON extraction | Match declared operand resolution, NULL/error timing, stored syntax and reopen behavior. |
+| 11 | [#118](https://github.com/cognica-io/uqa-engine/issues/118), NULLIF | Select the equality operator, operand casts and resulting left-input type before evaluation. |
+| 12 | [#131](https://github.com/cognica-io/uqa-engine/issues/131), lock timeout | Implement setting scope, units, lock wait deadlines, cleanup and PostgreSQL SQLSTATEs. |
+| 13 | [#135](https://github.com/cognica-io/uqa-engine/issues/135), range elements | Resolve range/multirange element containment through declared operand types in both directions. |
+| 14 | [#133](https://github.com/cognica-io/uqa-engine/issues/133), empty ranges | Match empty range/multirange containment without type or NULL exemptions. |
+| 15 | [#134](https://github.com/cognica-io/uqa-engine/issues/134), factorial | Preserve exact numeric results, PostgreSQL bounds/errors and cancellation. |
+| 16 | [#128](https://github.com/cognica-io/uqa-engine/issues/128), current schema | Return SQL NULL for an empty effective path and respect temporary namespace allocation. |
+| 17 | [#127](https://github.com/cognica-io/uqa-engine/issues/127), AGE regclass | Resolve label identities consistently across catalogs, casts, names and search paths. |
+| 18 | [#119](https://github.com/cognica-io/uqa-engine/issues/119), catalog expressions | Complete remaining typed expression/Datum codecs and constraint projections after their operand semantics are corrected. |
+| 19 | [#132](https://github.com/cognica-io/uqa-engine/issues/132), debug WASM parser | Resolve cold Node stack failure without warm-up retries or larger runtime stacks. |
+| 20 | [#125](https://github.com/cognica-io/uqa-engine/issues/125), macOS test startup | Diagnose the pre-harness loader wait and establish reliable startup without conflating it with query performance. |
+
+Comparison acceptance uses PostgreSQL 18 Docker output as the external SQL oracle and tests internal total-order transitivity separately from SQL operator-selected coercions. It checks both operand directions, signed zero, infinities/NaN and precision/day boundaries, followed by equality versus canonical hash keys, ordered containers, DISTINCT/grouping, scan/index agreement and reopen where affected. Existing expected values must be audited against the oracle; a passing incorrect expectation is not evidence. Preserve compact executable fixtures and provenance, keep raw diagnostics outside the repository, and run only checks affected by each change.
+
 ## Current implementation status and open PostgreSQL 18 bugs
 
 The historical starting point used `pg_query` 6.1.1 with PostgreSQL 17 grammar, reported `server_version` as `17.0-uqa`, stored the active TPC-H-derived oracle in `expected/pg17.json`, and accepted only frontend/backend protocol 3.0 primitives. Active assets now use `pg18`, session metadata reports `18.0-uqa`, and the checked-in 22-query oracle records PostgreSQL 18.4 server and platform provenance.
@@ -135,6 +164,10 @@ The following compact ledger is the readable projection of the machine-readable 
 | `ddl.schema-drop-cascade` | `M3` | `partial` |
 | `ddl.stored-relation-routine-dependencies` | `M3` | `partial` |
 | `ddl.domain-drop-cascade` | `M3` | `partial` |
+| `types.numeric-comparison-coherence` | `M4` | `partial` |
+| `types.time-timetz-key-coherence` | `M4` | `partial` |
+| `types.nonfinite-float-persistence` | `M4` | `partial` |
+| `query.group-by-input-precedence` | `M4` | `partial` |
 
 <!-- pg18-manifest-status:end -->
 
