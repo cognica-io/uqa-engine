@@ -238,13 +238,7 @@ fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
                         stack.push(Children::Values(array.elements().iter()))?;
                     }
                 }
-                Value::LegacyVector(vector) => {
-                    if output.invokes_sql_hash_operator() {
-                        uqa_sql::expr::validate_legacy_vector_comparison(vector)?;
-                    }
-                    output.push_byte(14)?;
-                    vector.write_comparison_key(|bytes| output.extend_bytes(bytes))?;
-                }
+                Value::LegacyVector(vector) => encode_legacy_vector(vector, output)?,
                 Value::List(values) | Value::Row(values) => {
                     output.push_byte(if matches!(value, Value::List(_)) {
                         5
@@ -292,6 +286,17 @@ fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
             return output.check();
         }
     }
+}
+
+fn encode_legacy_vector(
+    vector: &uqa_core::LegacyVectorValue,
+    output: &mut impl KeyOutput,
+) -> ExecResult<()> {
+    if output.invokes_sql_hash_operator() {
+        uqa_sql::expr::validate_legacy_vector_comparison(vector)?;
+    }
+    output.push_byte(14)?;
+    vector.write_comparison_key(|bytes| output.extend_bytes(bytes))
 }
 
 fn encode_decimal_numeric(value: &DecimalValue, output: &mut impl KeyOutput) -> ExecResult<()> {

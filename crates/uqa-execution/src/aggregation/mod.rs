@@ -7,7 +7,6 @@
 //! SQL aggregate planning, bounded execution, and finalization.
 
 use std::cmp::Ordering;
-use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, BufWriter, Seek, SeekFrom, Write};
 use std::sync::Arc;
 use uqa_storage::temporary_file::TemporaryFile as File;
@@ -31,6 +30,7 @@ mod analysis;
 mod distinct;
 mod executor;
 mod finalize;
+mod ordering;
 mod output;
 mod partial_state;
 mod projected;
@@ -46,6 +46,7 @@ pub use analysis::*;
 pub use distinct::*;
 pub use executor::PhysicalAggregateExecutor;
 pub use finalize::*;
+pub use ordering::compare_extrema;
 pub use registered_buffer::*;
 pub use rewrite::*;
 pub use value_buffer::*;

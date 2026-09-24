@@ -22,9 +22,7 @@ pub struct AggregateAccumulator {
     pub(super) numeric_inputs: NumericInputKind,
     pub(super) min: Option<Value>,
     pub(super) max: Option<Value>,
-    /// Distinct-bookkeeping. Filled by the dispatcher when the
-    /// aggregate was annotated with `DISTINCT`. Holds canonical-form
-    /// keys so `Int(1)` and `Float(1.0)` collapse to the same bucket.
+    /// DISTINCT arguments are sorted with their SQL comparison operators before finalization.
     pub(super) distinct: DistinctTracker,
     /// Only collection, ordered-set, and statistical aggregates need
     /// their complete input. Streaming aggregates keep constant-size
@@ -255,7 +253,10 @@ impl AggregateAccumulator {
         Self::from_plan_with_budget(AggregateStatePlan::builtin(name), budget_bytes)
     }
 
-    fn from_plan_with_budget(state_plan: AggregateStatePlan, budget_bytes: usize) -> Self {
+    pub(super) fn from_plan_with_budget(
+        state_plan: AggregateStatePlan,
+        budget_bytes: usize,
+    ) -> Self {
         let mut accumulator = Self::with_budget(budget_bytes);
         accumulator.state_plan = state_plan;
         accumulator
@@ -338,8 +339,8 @@ impl AggregateAccumulator {
                 if matches!(value, Value::Int(_) | Value::Float(_) | Value::Decimal(_)) {
                     self.observe_sum(value)?;
                 }
-                self.observe_min(value);
-                self.observe_max(value);
+                self.observe_min(value)?;
+                self.observe_max(value)?;
                 if matches!(value, Value::Bool(_)) {
                     self.observe_bool_and(value)?;
                     self.observe_bool_or(value)?;
@@ -358,8 +359,8 @@ impl AggregateAccumulator {
                     .ok_or_else(|| SQLError::TypeMismatch("aggregate count overflow".into()))?;
                 self.observe_sum(value)?;
             }
-            AggregateStatePlan::Min => self.observe_min(value),
-            AggregateStatePlan::Max => self.observe_max(value),
+            AggregateStatePlan::Min => self.observe_min(value)?,
+            AggregateStatePlan::Max => self.observe_max(value)?,
             AggregateStatePlan::BoolAnd => self.observe_bool_and(value)?,
             AggregateStatePlan::BoolOr => self.observe_bool_or(value)?,
             AggregateStatePlan::Buffered => {}
@@ -561,18 +562,20 @@ impl AggregateAccumulator {
         }
     }
 
-    pub(super) fn observe_min(&mut self, value: &Value) {
+    pub(super) fn observe_min(&mut self, value: &Value) -> Result<(), SQLError> {
         match &self.min {
-            Some(cur) if !value_lt(value, cur) => {}
+            Some(cur) if !value_lt(value, cur)? => {}
             _ => self.min = Some(value.clone()),
         }
+        Ok(())
     }
 
-    pub(super) fn observe_max(&mut self, value: &Value) {
+    pub(super) fn observe_max(&mut self, value: &Value) -> Result<(), SQLError> {
         match &self.max {
-            Some(cur) if !value_gt(value, cur) => {}
+            Some(cur) if !value_gt(value, cur)? => {}
             _ => self.max = Some(value.clone()),
         }
+        Ok(())
     }
 
     pub(super) fn observe_bool_and(&mut self, value: &Value) -> Result<(), SQLError> {

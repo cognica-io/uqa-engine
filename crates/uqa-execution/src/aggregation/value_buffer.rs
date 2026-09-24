@@ -6,6 +6,8 @@
 
 //! Spillable ordered aggregate-value buffering.
 
+use super::ordering::{compare_sort_keys, minimum_by, sort_records};
+
 use super::{
     BufRead, BufReader, BufWriter, File, Ordering, SQLError, Seek, SeekFrom, Value, Write,
     AGGREGATE_MERGE_FAN_IN,
@@ -186,7 +188,7 @@ impl AggregateValueBuffer {
         mut visit: impl FnMut(AggregateValueRecord) -> Result<(), SQLError>,
     ) -> Result<(), SQLError> {
         let mut memory = self.rows.clone();
-        memory.sort_by(compare_aggregate_value_records);
+        sort_records(&mut memory, compare_aggregate_value_records)?;
         let mut readers = Vec::with_capacity(self.runs.len() + usize::from(!memory.is_empty()));
         if !memory.is_empty() {
             readers.push(AggregateValueRunReader::memory(memory));
@@ -194,12 +196,13 @@ impl AggregateValueBuffer {
         for run in &self.runs {
             readers.push(AggregateValueRunReader::file(run)?);
         }
-        while let Some((index, _)) = readers
-            .iter()
-            .enumerate()
-            .filter_map(|(index, reader)| reader.current().map(|record| (index, record)))
-            .min_by(|(_, left), (_, right)| compare_aggregate_value_records(left, right))
-        {
+        while let Some((index, _)) = minimum_by(
+            readers
+                .iter()
+                .enumerate()
+                .filter_map(|(index, reader)| reader.current().map(|record| (index, record))),
+            |(_, left), (_, right)| compare_aggregate_value_records(left, right),
+        )? {
             visit(readers[index].take_current()?)?;
         }
         Ok(())
@@ -209,7 +212,7 @@ impl AggregateValueBuffer {
         if self.rows.is_empty() {
             return Ok(());
         }
-        self.rows.sort_by(compare_aggregate_value_records);
+        sort_records(&mut self.rows, compare_aggregate_value_records)?;
         let mut run = uqa_storage::temporary_file::TemporaryFile::new().map_err(|err| {
             SQLError::Internal(format!("failed to create aggregate spill file: {err}"))
         })?;
@@ -333,12 +336,13 @@ pub fn merge_aggregate_value_runs(runs: Vec<JsonSpillRun>) -> Result<JsonSpillRu
     let mut max_record_bytes = 0;
     {
         let mut writer = BufWriter::new(output.as_file_mut());
-        while let Some((index, _)) = readers
-            .iter()
-            .enumerate()
-            .filter_map(|(index, reader)| reader.current().map(|record| (index, record)))
-            .min_by(|(_, left), (_, right)| compare_aggregate_value_records(left, right))
-        {
+        while let Some((index, _)) = minimum_by(
+            readers
+                .iter()
+                .enumerate()
+                .filter_map(|(index, reader)| reader.current().map(|record| (index, record))),
+            |(_, left), (_, right)| compare_aggregate_value_records(left, right),
+        )? {
             let record = readers[index].take_current()?;
             let record_bytes =
                 write_json_spill_record(&mut writer, &record, "aggregate merge row")?;
@@ -363,13 +367,7 @@ pub fn merge_aggregate_value_runs(runs: Vec<JsonSpillRun>) -> Result<JsonSpillRu
 pub fn compare_aggregate_value_records(
     a: &AggregateValueRecord,
     b: &AggregateValueRecord,
-) -> Ordering {
-    for ((av, ad), (bv, _bd)) in a.sort_keys.iter().zip(b.sort_keys.iter()) {
-        let cmp = av.cmp(bv);
-        let cmp = if *ad { cmp.reverse() } else { cmp };
-        if cmp != Ordering::Equal {
-            return cmp;
-        }
-    }
-    a.sequence.cmp(&b.sequence)
+) -> Result<Ordering, SQLError> {
+    let ordering = compare_sort_keys(&a.sort_keys, &b.sort_keys)?;
+    Ok(ordering.then_with(|| a.sequence.cmp(&b.sequence)))
 }

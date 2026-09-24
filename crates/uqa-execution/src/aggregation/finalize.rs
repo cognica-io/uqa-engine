@@ -25,6 +25,31 @@ pub fn aggregate_value_with_args(
     acc: &AggregateAccumulator,
     args: &[ScalarExpr],
 ) -> Result<Value, SQLError> {
+    if !acc.distinct.is_empty() {
+        let budget = acc.distinct.values.budget_bytes;
+        let mut unique = match &acc.registered {
+            Some(function) => AggregateAccumulator::registered_with_budget(
+                std::sync::Arc::clone(function),
+                budget,
+            ),
+            None => AggregateAccumulator::from_plan_with_budget(acc.state_plan, budget),
+        };
+        acc.distinct.for_each(|value| {
+            if acc.registered.is_some() {
+                let Value::List(arguments) = value else {
+                    return Err(SQLError::Internal(
+                        "registered DISTINCT input is not an argument tuple".into(),
+                    ));
+                };
+                unique.observe_registered(arguments.clone(), Vec::new())
+            } else if super::is_json_array_aggregate(name) {
+                unique.observe_including_null(value, Vec::new())
+            } else {
+                unique.observe(value)
+            }
+        })?;
+        return aggregate_value_with_args(name, &unique, args);
+    }
     if let Some(value) = acc.registered_value() {
         return value;
     }

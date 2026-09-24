@@ -31,6 +31,20 @@ pub struct Sort<'a> {
 }
 
 impl Sort<'static> {
+    pub fn with_work_mem(
+        child: Box<dyn PhysicalOperator>,
+        keys: Vec<SortKey>,
+        params: Vec<SQLParam>,
+        work_mem_bytes: usize,
+    ) -> Self {
+        Self::with_evaluator_and_work_mem(
+            child,
+            keys,
+            DefaultExpressionEvaluator::shared(params),
+            work_mem_bytes,
+        )
+    }
+
     pub fn new(
         child: Box<dyn PhysicalOperator>,
         keys: Vec<SortKey>,
@@ -162,9 +176,12 @@ pub(crate) fn compare_sort_key_values_by<'a>(
     Ok(Ordering::Equal)
 }
 
-pub(super) fn compare_values(a: &Value, b: &Value) -> std::cmp::Ordering {
+pub(super) fn compare_values(
+    a: &Value,
+    b: &Value,
+) -> Result<std::cmp::Ordering, uqa_sql::SQLError> {
     use std::cmp::Ordering::*;
-    match (a, b) {
+    Ok(match (a, b) {
         (Value::Null, Value::Null) => Equal,
         (Value::Null, _) => Less,
         (_, Value::Null) => Greater,
@@ -174,8 +191,8 @@ pub(super) fn compare_values(a: &Value, b: &Value) -> std::cmp::Ordering {
         (Value::Str(x), Value::Temporal(y)) => y
             .parse_same_kind(x)
             .map_or_else(|| a.cmp(b), |parsed| parsed.cmp(y)),
-        _ => a.cmp(b),
-    }
+        _ => crate::aggregation::compare_extrema(a, b)?,
+    })
 }
 
 impl PhysicalOperator for Sort<'_> {

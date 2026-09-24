@@ -152,37 +152,42 @@ fn collection_aggregate_rejects_a_spill_record_larger_than_writer_metadata() {
 }
 
 #[test]
-fn tiny_budget_distinct_tracker_migrates_to_disk() {
-    let mut tracker = DistinctTracker::new(1);
-    assert!(tracker.insert(&Value::Str("alpha".into())).unwrap());
-    assert!(tracker.disk.is_some());
-    assert!(tracker.memory.is_empty());
-    assert!(!tracker.insert(&Value::Str("alpha".into())).unwrap());
-    assert!(tracker.insert(&Value::Str("beta".into())).unwrap());
+fn distinct_inputs_sort_and_deduplicate_across_memory_and_spill() {
+    for budget in [1, 1024] {
+        let mut tracker = DistinctTracker::new(budget);
+        for value in [
+            Value::Int(2),
+            Value::Int(1),
+            Value::Float(1.0),
+            Value::Decimal(DecimalValue::parse("1.00").unwrap()),
+        ] {
+            tracker.insert(&value, Vec::new()).unwrap();
+        }
+        let mut values = Vec::new();
+        tracker
+            .for_each(|value| {
+                values.push(value.clone());
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(values, vec![Value::Int(1), Value::Int(2)]);
+        assert_eq!(!tracker.values.runs.is_empty(), budget == 1);
+    }
 }
 
 #[test]
-fn distinct_tracker_uses_value_numeric_equality_without_string_keys() {
-    let mut tracker = DistinctTracker::new(1024);
-    assert!(tracker.insert(&Value::Int(1)).unwrap());
-    assert!(!tracker.insert(&Value::Float(1.0)).unwrap());
-    assert!(!tracker
-        .insert(&Value::Decimal(DecimalValue::parse("1.00").unwrap()))
-        .unwrap());
-}
-
-#[test]
-fn distinct_tracker_rejects_a_spill_record_larger_than_writer_metadata() {
+fn distinct_inputs_reject_a_spill_record_larger_than_writer_metadata() {
     let mut tracker = DistinctTracker::new(1);
-    assert!(tracker.insert(&Value::Str("alpha".into())).unwrap());
-    let file = tracker.disk.as_mut().unwrap().as_file_mut();
-    file.seek(SeekFrom::End(0)).unwrap();
-    file.write_all(&vec![b'x'; tracker.max_disk_record_bytes])
+    tracker
+        .insert(&Value::Str("alpha".into()), Vec::new())
         .unwrap();
+    let run = tracker.values.runs.first_mut().unwrap();
+    let file = run.file.as_file_mut();
+    file.seek(SeekFrom::End(0)).unwrap();
+    file.write_all(&vec![b'x'; run.max_record_bytes]).unwrap();
     file.write_all(b"\n").unwrap();
     file.flush().unwrap();
-
-    let error = tracker.insert(&Value::Str("missing".into())).unwrap_err();
+    let error = tracker.for_each(|_| Ok(())).unwrap_err();
     assert!(error.to_string().contains("exceeds recorded maximum"));
 }
 

@@ -205,13 +205,13 @@ fn builtin_window_partition_value(
             }
             WindowKind::AggMin(_) => {
                 min = Some(match min.take() {
-                    Some(previous) if compare_values(&previous, &value).is_le() => previous,
+                    Some(previous) if compare_values(&previous, &value)?.is_le() => previous,
                     _ => value,
                 });
             }
             WindowKind::AggMax(_) => {
                 max = Some(match max.take() {
-                    Some(previous) if compare_values(&previous, &value).is_ge() => previous,
+                    Some(previous) if compare_values(&previous, &value)?.is_ge() => previous,
                     _ => value,
                 });
             }

@@ -217,8 +217,8 @@ pub(super) fn merge_accumulators(
         0.0
     };
     merge_statistics(target, &source)?;
-    merge_min(&mut target.min, source.min);
-    merge_max(&mut target.max, source.max);
+    merge_min(&mut target.min, source.min)?;
+    merge_max(&mut target.max, source.max)?;
     target.bool_and = match (target.bool_and, source.bool_and) {
         (Some(left), Some(right)) => Some(left && right),
         (Some(value), None) | (None, Some(value)) => Some(value),
@@ -386,26 +386,30 @@ fn decimal_component(accumulator: &AggregateAccumulator) -> Result<Option<Decima
         .ok_or_else(|| SQLError::TypeMismatch("integer aggregate does not fit decimal".into()))
 }
 
-fn merge_min(target: &mut Option<Value>, source: Option<Value>) {
+fn merge_min(target: &mut Option<Value>, source: Option<Value>) -> Result<(), SQLError> {
     if let Some(source) = source {
-        if target
-            .as_ref()
-            .is_none_or(|current| value_lt(&source, current))
-        {
+        let replace = match target.as_ref() {
+            Some(current) => value_lt(&source, current)?,
+            None => true,
+        };
+        if replace {
             *target = Some(source);
         }
     }
+    Ok(())
 }
 
-fn merge_max(target: &mut Option<Value>, source: Option<Value>) {
+fn merge_max(target: &mut Option<Value>, source: Option<Value>) -> Result<(), SQLError> {
     if let Some(source) = source {
-        if target
-            .as_ref()
-            .is_none_or(|current| value_gt(&source, current))
-        {
+        let replace = match target.as_ref() {
+            Some(current) => value_gt(&source, current)?,
+            None => true,
+        };
+        if replace {
             *target = Some(source);
         }
     }
+    Ok(())
 }
 
 fn numeric_kind_code(kind: NumericInputKind) -> i64 {

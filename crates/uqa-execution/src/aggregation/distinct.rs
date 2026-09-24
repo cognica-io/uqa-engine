@@ -4,20 +4,15 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Budgeted DISTINCT tracking with disk fallback.
+//! Bounded, ordered DISTINCT input and aggregate value comparisons.
 
-use super::{
-    read_bounded_json_spill_record, BTreeSet, BufReader, BufWriter, SQLError, Seek, SeekFrom,
-    Value, Write,
-};
+use super::{AggregateValueBuffer, SQLError, Value};
+use uqa_core::memory::ProductionControl;
 
+/// Aggregate DISTINCT uses SQL ordering before eliminating adjacent equal inputs.
+/// Reusing sorted runs keeps both comparisons and spill behavior fallible.
 pub struct DistinctTracker {
-    pub(super) memory: BTreeSet<Value>,
-    pub(super) memory_bytes: usize,
-    pub(super) max_memory_record_bytes: usize,
-    pub(super) budget_bytes: usize,
-    pub(super) disk: Option<uqa_storage::temporary_file::TemporaryFile>,
-    pub(super) max_disk_record_bytes: usize,
+    pub(super) values: AggregateValueBuffer,
 }
 
 impl Default for DistinctTracker {
@@ -29,148 +24,46 @@ impl Default for DistinctTracker {
 impl DistinctTracker {
     pub(super) fn new(budget_bytes: usize) -> Self {
         Self {
-            memory: BTreeSet::new(),
-            memory_bytes: 0,
-            max_memory_record_bytes: 0,
-            budget_bytes: budget_bytes.max(1),
-            disk: None,
-            max_disk_record_bytes: 0,
+            values: AggregateValueBuffer::new(budget_bytes),
         }
     }
 
-    pub(super) fn insert(&mut self, value: &Value) -> Result<bool, SQLError> {
-        if self.memory.contains(value) || self.disk_contains(value)? {
-            return Ok(false);
-        }
-        let encoded_bytes = encoded_value_size(value)?
-            .checked_add(1)
-            .ok_or_else(|| SQLError::Internal("aggregate DISTINCT size overflow".into()))?;
-        self.memory_bytes = self
-            .memory_bytes
-            .checked_add(encoded_bytes)
-            .ok_or_else(|| SQLError::Internal("aggregate DISTINCT size overflow".into()))?;
-        self.max_memory_record_bytes = self.max_memory_record_bytes.max(encoded_bytes);
-        self.memory.insert(value.clone());
-        if self.memory_bytes > self.budget_bytes {
-            self.spill()?;
-        }
-        Ok(true)
+    pub(super) fn is_empty(&self) -> bool {
+        self.values.next_sequence == 0
     }
 
-    pub(super) fn disk_contains(&self, wanted: &Value) -> Result<bool, SQLError> {
-        let Some(file) = self.disk.as_ref() else {
-            return Ok(false);
-        };
-        let file = file.reopen().map_err(|error| {
-            SQLError::Internal(format!(
-                "failed to reopen aggregate DISTINCT spill: {error}"
-            ))
-        })?;
-        let mut reader = BufReader::new(file);
-        loop {
-            let Some(record) = read_bounded_json_spill_record(
-                &mut reader,
-                self.max_disk_record_bytes,
-                "aggregate DISTINCT spill row",
-            )?
-            else {
-                return Ok(false);
-            };
-            let value: Value = serde_json::from_slice(&record).map_err(|error| {
-                SQLError::Internal(format!(
-                    "failed to decode aggregate DISTINCT spill: {error}"
-                ))
-            })?;
-            if &value == wanted {
-                return Ok(true);
-            }
-        }
+    pub(super) fn insert(
+        &mut self,
+        value: &Value,
+        mut sort_keys: Vec<(Value, bool)>,
+    ) -> Result<(), SQLError> {
+        // Explicit ORDER BY keys come first; the complete argument tuple resolves their ties.
+        sort_keys.push((value.clone(), false));
+        self.values.push(value.clone(), sort_keys)
     }
 
-    pub(super) fn spill(&mut self) -> Result<(), SQLError> {
-        if self.memory.is_empty() {
-            return Ok(());
-        }
-        if self.disk.is_none() {
-            self.disk = Some(uqa_storage::temporary_file::TemporaryFile::new().map_err(
-                |error| {
-                    SQLError::Internal(format!(
-                        "failed to create aggregate DISTINCT spill: {error}"
-                    ))
-                },
-            )?);
-        }
-        let file = self.disk.as_mut().ok_or_else(|| {
-            SQLError::Internal("aggregate DISTINCT spill file was not initialized".into())
-        })?;
-        let original_length = file.as_file_mut().seek(SeekFrom::End(0)).map_err(|error| {
-            SQLError::Internal(format!("failed to seek aggregate DISTINCT spill: {error}"))
-        })?;
-        let next_max_disk_record_bytes =
-            self.max_disk_record_bytes.max(self.max_memory_record_bytes);
-        let result = {
-            let mut writer = BufWriter::new(file.as_file_mut());
-            let result = (|| -> Result<(), SQLError> {
-                for value in &self.memory {
-                    serde_json::to_writer(&mut writer, value).map_err(|error| {
-                        SQLError::Internal(format!(
-                            "failed to encode aggregate DISTINCT key: {error}"
-                        ))
-                    })?;
-                    writer.write_all(b"\n").map_err(|error| {
-                        SQLError::Internal(format!(
-                            "failed to write aggregate DISTINCT key: {error}"
-                        ))
-                    })?;
+    pub(super) fn for_each(
+        &self,
+        mut observe: impl FnMut(&Value) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        let mut previous: Option<Value> = None;
+        self.values.for_each_ordered(|record| {
+            if let Some(previous) = &previous {
+                if uqa_sql::expr::compare_typed_values_with_control(
+                    previous,
+                    &record.value,
+                    &ProductionControl::uncontrolled(),
+                )?
+                .is_eq()
+                {
+                    return Ok(());
                 }
-                writer.flush().map_err(|error| {
-                    SQLError::Internal(format!("failed to flush aggregate DISTINCT spill: {error}"))
-                })
-            })();
-            drop(writer);
-            result
-        };
-        if let Err(error) = result {
-            file.as_file_mut()
-                .set_len(original_length)
-                .map_err(|rollback| {
-                    SQLError::Internal(format!(
-                        "{error}; failed to roll back aggregate DISTINCT spill: {rollback}"
-                    ))
-                })?;
-            return Err(error);
-        }
-        self.memory.clear();
-        self.memory_bytes = 0;
-        self.max_memory_record_bytes = 0;
-        self.max_disk_record_bytes = next_max_disk_record_bytes;
-        Ok(())
-    }
-}
-
-fn encoded_value_size(value: &Value) -> Result<usize, SQLError> {
-    #[derive(Default)]
-    struct ByteCounter(usize);
-
-    impl std::io::Write for ByteCounter {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0 = self
-                .0
-                .checked_add(bytes.len())
-                .ok_or_else(|| std::io::Error::other("aggregate DISTINCT encoded size overflow"))?;
-            Ok(bytes.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
+            }
+            observe(&record.value)?;
+            previous = Some(record.value);
             Ok(())
-        }
+        })
     }
-
-    let mut counter = ByteCounter::default();
-    serde_json::to_writer(&mut counter, value).map_err(|error| {
-        SQLError::Internal(format!("failed to size aggregate DISTINCT value: {error}"))
-    })?;
-    Ok(counter.0)
 }
 
 pub fn value_as_f64(v: &Value) -> Result<f64, SQLError> {
@@ -186,8 +79,8 @@ pub fn value_as_f64(v: &Value) -> Result<f64, SQLError> {
     }
 }
 
-pub fn value_lt(a: &Value, b: &Value) -> bool {
-    match (a, b) {
+pub fn value_lt(a: &Value, b: &Value) -> Result<bool, SQLError> {
+    Ok(match (a, b) {
         (
             Value::Int(_) | Value::Float(_) | Value::Decimal(_),
             Value::Int(_) | Value::Float(_) | Value::Decimal(_),
@@ -203,12 +96,12 @@ pub fn value_lt(a: &Value, b: &Value) -> bool {
         (Value::Array(_), Value::Array(_))
         | (Value::List(_), Value::List(_))
         | (Value::Row(_), Value::Row(_))
-        | (Value::Record(_), Value::Record(_)) => a.cmp(b).is_lt(),
+        | (Value::Record(_), Value::Record(_)) => super::compare_extrema(a, b)?.is_lt(),
         (Value::Map(x), Value::Map(y)) => x < y,
         _ => false,
-    }
+    })
 }
 
-pub fn value_gt(a: &Value, b: &Value) -> bool {
+pub fn value_gt(a: &Value, b: &Value) -> Result<bool, SQLError> {
     value_lt(b, a)
 }

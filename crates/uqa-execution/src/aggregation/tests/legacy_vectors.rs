@@ -6,6 +6,98 @@
 
 use super::*;
 
+fn dimensionless_oidvector() -> Value {
+    Value::LegacyVector(
+        uqa_core::LegacyVectorValue::try_from_array(
+            uqa_core::LegacyVectorKind::Oid,
+            ArrayValue::with_lower_bounds(vec![], vec![]).unwrap(),
+        )
+        .unwrap(),
+    )
+}
+
+#[test]
+fn legacy_vector_nested_extrema_propagate_comparison_errors_in_partial_merges() {
+    let scalar = dimensionless_oidvector();
+    let nested = Value::Array(ArrayValue::try_new(vec![scalar.clone()]).unwrap());
+    for name in ["min", "max"] {
+        let mut valid = AggregateAccumulator::builtin(name);
+        valid.observe(&scalar).unwrap();
+        valid.observe(&scalar).unwrap();
+        let mut left = AggregateAccumulator::builtin(name);
+        left.observe(&nested).unwrap();
+        let mut right = AggregateAccumulator::builtin(name);
+        right.observe(&nested).unwrap();
+        let error = super::super::partial_state::merge_accumulators(&mut left, right).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42804"));
+        let error = left.observe(&nested).unwrap_err();
+        assert_eq!(error.to_string(), "array is not a valid oidvector");
+    }
+}
+
+#[derive(Default)]
+struct ObservedValues(Vec<Value>);
+
+impl SQLAggregateState for ObservedValues {
+    fn observe(&mut self, values: &[Value]) -> Result<(), SQLError> {
+        self.0.extend_from_slice(values);
+        Ok(())
+    }
+    fn finish(&self) -> Result<Value, SQLError> {
+        Ok(Value::List(self.0.clone()))
+    }
+}
+
+#[test]
+fn legacy_vector_ordered_aggregates_preserve_errors_across_memory_and_merge_runs() {
+    for budget in [1, 1 << 20] {
+        for count in [1, 2, 18] {
+            let mut builtin = AggregateValueBuffer::new(budget);
+            let mut registered = RegisteredAggregateBuffer::new(budget);
+            let keys = vec![(dimensionless_oidvector(), false)];
+            let builtin_result = (|| {
+                for value in 0..count {
+                    builtin.push(Value::Int(value), keys.clone())?;
+                }
+                builtin.ordered_values()
+            })();
+            let mut state = ObservedValues::default();
+            let registered_result = (|| {
+                for value in 0..count {
+                    registered.push(vec![Value::Int(value)], keys.clone())?;
+                }
+                registered.observe_ordered_into(&mut state)
+            })();
+            if count == 1 {
+                assert_eq!(builtin_result.unwrap(), vec![Value::Int(0)]);
+                registered_result.unwrap();
+                assert_eq!(state.0, vec![Value::Int(0)]);
+            } else {
+                for error in [builtin_result.unwrap_err(), registered_result.unwrap_err()] {
+                    assert_eq!(error.sqlstate(), Some("42804"));
+                    assert_eq!(error.to_string(), "array is not a valid oidvector");
+                }
+            }
+        }
+        let mut buffer = AggregateValueBuffer::new(budget);
+        for value in [1, 0] {
+            buffer
+                .push(
+                    Value::Int(value),
+                    vec![
+                        (Value::Int(value), false),
+                        (dimensionless_oidvector(), false),
+                    ],
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            buffer.ordered_values().unwrap(),
+            vec![Value::Int(0), Value::Int(1)]
+        );
+    }
+}
+
 #[test]
 fn legacy_vector_extrema_use_postgresql_array_aggregate_order() {
     let oracle: serde_json::Value = serde_json::from_str(include_str!(
@@ -57,6 +149,42 @@ fn legacy_vector_json_object_keys_match_postgresql_errors_in_memory_and_spill() 
                     error.to_string(),
                     "key value must be scalar, not array, composite, or json"
                 );
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_vector_distinct_aggregates_compare_before_deduplicating_in_memory_and_spill() {
+    for budget in [1, 1 << 20] {
+        for count in [1, 2, 18] {
+            for registered in [false, true] {
+                let mut acc = if registered {
+                    AggregateAccumulator::registered_with_budget(
+                        Arc::new(ObservedValues::default),
+                        budget,
+                    )
+                } else {
+                    AggregateAccumulator::builtin_with_budget("count", budget)
+                };
+                let mut input = dimensionless_oidvector();
+                if registered {
+                    input = Value::List(vec![input]);
+                }
+                let result = (|| {
+                    for _ in 0..count {
+                        acc.distinct.insert(&input, Vec::new())?;
+                    }
+                    aggregate_value("count", &acc)
+                })();
+                if count == 1 {
+                    let expected = if registered { input } else { Value::Int(1) };
+                    assert_eq!(result.unwrap(), expected);
+                } else {
+                    let error = result.unwrap_err();
+                    assert_eq!(error.sqlstate(), Some("42804"));
+                    assert_eq!(error.to_string(), "array is not a valid oidvector");
+                }
             }
         }
     }
