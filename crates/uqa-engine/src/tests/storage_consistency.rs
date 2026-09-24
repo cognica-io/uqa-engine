@@ -7,6 +7,7 @@
 use super::*;
 use uqa_storage_sqlite::{Catalog, SQLiteStorageBackend};
 
+mod legacy_vectors;
 mod retained;
 
 #[derive(Clone)]

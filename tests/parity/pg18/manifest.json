@@ -192,7 +192,8 @@
       "query.group-by-input-precedence",
       "query.decimal-grouping-expression-identity",
       "types.jsonb-numeric-order",
-      "aggregates.mode-equality-and-ties"
+      "aggregates.mode-equality-and-ties",
+      "types.legacy-vector-coherence"
     ],
     "M5": [
       "protocol.frontend-backend-3.2-extended",
@@ -995,6 +996,14 @@
       "supported_version": "Execution groups consecutive sorted values using Core equality and preserves the first group on frequency ties. All 28 owner aggregate tests and 3 public mode tests pass. The 58 PostgreSQL outcomes cover original/reversed inputs, memory/spill merge, ordinary/prepared SQL, NULL/empty inputs, signed zero, NaN, numeric scale, intervals, TIME/TIMETZ, JSONB, bpchar and arrays. Final CI and consolidated PR #137 review remain pending.",
       "status": "partial",
       "open_issue": "#145: final CI and review of the locally verified mode equality and tie correction in consolidated PR #137."
+    },
+    {
+      "id": "types.legacy-vector-coherence",
+      "postgresql_reference": "crates/uqa-core/src/types/tests/pg18_legacy_vectors.json; independently captured PostgreSQL 18.4 Docker comparisons, array metadata, domain inputs, relational rows and SQLSTATEs",
+      "uqa_test": "cargo test -p uqa-core --lib legacy_vector; cargo test -p uqa-sql --lib legacy_vector; cargo test -p uqa-execution --lib legacy_vector; cargo test -p uqa-engine --lib legacy_vectors; cargo test -p uqa-engine --test integration sql_legacy_vectors",
+      "supported_version": "Uncommitted implementation: dedicated Core scalar carriers, fixed zero-based empty metadata, atomic outer-array elements, SQL base/domain conversion, declared index keys and initial typed row/index restoration. The compact oracle records 864 comparison outcomes plus query/error/update cases. Public/provider runtime validation is pending.",
+      "status": "partial",
+      "open_issue": "#123: complete focused runtime verification, stored-expression/retained-history audit, provider migration and strict lint before committing the follow-up."
     }
   ]
 }

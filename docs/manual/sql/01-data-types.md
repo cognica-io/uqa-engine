@@ -10,6 +10,7 @@ UQA Engine has PostgreSQL 18-compatible type names mapped to the value carriers 
 | `INT2`, `INT4`, `INT8`, `INT` | PostgreSQL aliases preserving the corresponding declared width |
 | `SMALLSERIAL`, `SERIAL2`, `SERIAL`, `SERIAL4`, `BIGSERIAL`, `SERIAL8` | Width-preserving integer column with generated sequence behavior |
 | `OID`, `XID` | Distinct unsigned 32-bit PostgreSQL identities over the integer carrier |
+| `INT2VECTOR`, `OIDVECTOR` | Distinct catalog-vector carriers with one zero-based dimension, including empty values; atomic elements inside an outer SQL array |
 | `REGTYPE` | Type-catalog OID over the integer carrier; cast to text or use PostgreSQL result formatting for its visible SQL name |
 | User-defined domains | A distinct catalog type over its base value, with [declaration defaults and conversion-time constraints](02-ddl.md#domain-declarations-and-deletion) |
 | `REAL`, `FLOAT4` | IEEE 754 single-precision inputs, arithmetic, and sums over a widened floating runtime carrier |
@@ -39,6 +40,22 @@ UQA Engine has PostgreSQL 18-compatible type names mapped to the value carriers 
 `SMALLINT`, `INTEGER`, and `BIGINT` retain distinct declared identities and enforce PostgreSQL's signed 16-bit, 32-bit, and 64-bit ranges at casts, writes, schema rewrites, and supported migration boundaries. `OID` casts preserve the source integer width, including PostgreSQL's sign-extension behavior for negative `SMALLINT` and `INTEGER`, while negative `BIGINT` to `OID` raises `22003`; `XID` accepts its PostgreSQL text input but rejects integer and OID cast sources with `42846`.
 
 Serial declarations allocate generated integer identities. Sequence functions `nextval`, `currval`, `lastval`, and `setval` are available, and standalone sequences can be created explicitly. Identity-owned sequence syntax is not implemented.
+
+## Catalog vectors
+
+`int2vector` and `oidvector` accept space-separated integer text and preserve their declared identity through domains, assignment, prepared parameters and persistence. Elements are non-NULL signed 16-bit integers or unsigned 32-bit OIDs, respectively. Text input creates exactly one dimension with lower bound zero; an empty text vector has bounds `[0:-1]`, length zero and cardinality zero. Polymorphic array functions preserve the vector type while changing its array metadata: `trim_array` and `array_sample` return nonempty results with lower bound one, or dimensionless empty results. An outer `int2vector[]` or `oidvector[]` treats each vector as one element, even when its contents are empty or have different lengths.
+
+`int2vector` equality and ordering include array dimensions and lower bounds after comparing elements lexicographically. `oidvector` scalar operators ignore lower bounds and compare length before elements; they reject dimensionless arrays with `42804`. SQL equality, grouping, joins and unique indexes use those same declared semantics. PostgreSQL resolves `MIN` and `MAX` over these types to its array aggregate, which compares elements before dimensions; consequently `MIN(oidvector)` can choose a different value from ascending scalar `ORDER BY`. A cast to the corresponding `smallint[]` or `oid[]` preserves bounds, including the empty vector dimension. Element-converting casts can change empty-array shape: `''::int2vector::integer[]` is dimensionless, while the binary-compatible `''::oidvector::integer[]` retains `[0:-1]`.
+
+Casting an ordinary array to either vector type fails with `42846`, including a NULL array. Comparing a vector directly with an ordinary array fails with `42883`. Invalid integer input reports `22P02`; out-of-range elements report `22003`. Converting a dimensionless vector to text reports `42804` with `array is not a valid int2vector` or `array is not a valid oidvector`; array introspection and JSON conversion can still consume that value.
+
+```sql execute
+SELECT '1 2'::int2vector AS items,
+       array_dims(''::oidvector) AS empty_bounds,
+       array_dims(ARRAY[''::int2vector, '1 2'::int2vector]) AS outer_bounds;
+```
+
+The result is `1 2`, `[0:-1]`, and `[1:2]`. Rust exposes `Value::LegacyVector(LegacyVectorValue)` with an explicit `LegacyVectorKind`; it is distinct from an ordinary `Value::Array` or untyped `Value::List`. See the [upgrade contract](../reference/10-upgrading.md#unreleased-catalog-vector-carriers) for existing stored values.
 
 ## Floating point
 

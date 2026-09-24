@@ -24,6 +24,7 @@ mod registries;
 mod session_seed;
 mod statistics;
 mod table_restore;
+mod value_restoration;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CatalogRestoreMode {
