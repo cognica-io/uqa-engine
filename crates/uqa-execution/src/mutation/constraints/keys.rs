@@ -167,11 +167,29 @@ pub fn validate_key_constraints(
     document: &Document,
     ignored_doc_id: Option<DocId>,
 ) -> Result<(), SQLError> {
-    for constraint in context
+    // Ignoring the row's own identity also applies to schema validation; it does not establish that existing index entries can be retained. Only a rewrite with an explicit previous image may skip unchanged inputs.
+    validate_key_constraints_with_previous(context, table, document, ignored_doc_id, None)
+}
+
+pub fn validate_key_constraints_with_previous(
+    context: ConstraintContext<'_>,
+    table: &str,
+    document: &Document,
+    ignored_doc_id: Option<DocId>,
+    previous: Option<&Document>,
+) -> Result<(), SQLError> {
+    let constraints = context
         .catalog
         .enforced_keys(table)
-        .map_err(|err| dml_storage_error("constraint validation", err))?
-    {
+        .map_err(|err| dml_storage_error("constraint validation", err))?;
+    let indexes = context.indexes.index_definitions()?;
+    let retain_entries = previous
+        .is_some_and(|previous| indexes.inputs_unchanged(table, &constraints, previous, document));
+    for constraint in constraints {
+        // PostgreSQL retains entries only when no indexed input changes, including expression, predicate and INCLUDE dependencies in other indexes.
+        if retain_entries && !constraint.without_overlaps {
+            continue;
+        }
         let Some(values) = constraint.values(context, table, document)? else {
             continue;
         };
@@ -198,6 +216,18 @@ pub fn validate_key_constraints(
             sqlstate: "23505".into(),
             message: format!("duplicate key value violates unique constraint \"{name}\""),
         });
+    }
+    if !retain_entries {
+        indexes.validate_key_comparisons(
+            context,
+            table,
+            document,
+            if previous.is_some() {
+                None
+            } else {
+                ignored_doc_id
+            },
+        )?;
     }
     Ok(())
 }

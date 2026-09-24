@@ -69,6 +69,15 @@ pub(super) fn base_type(mut ty: &ColumnType) -> &ColumnType {
     ty.without_temporal_modifiers()
 }
 
+pub(crate) fn array_element_type(ty: &ColumnType) -> Option<&ColumnType> {
+    match base_type(ty) {
+        ColumnType::Array(element) => Some(element),
+        ColumnType::Int2Vector => Some(&ColumnType::SmallInteger),
+        ColumnType::OidVector => Some(&ColumnType::Oid),
+        _ => None,
+    }
+}
+
 pub fn values_column_types(
     rows: &[Vec<ScalarExpr>],
     params: &[SQLParam],
@@ -253,6 +262,10 @@ pub(crate) fn value_type_with_control(
         }),
         Value::Json(_) => Some(ColumnType::Json),
         Value::JsonB(_) => Some(ColumnType::JsonB),
+        Value::LegacyVector(vector) => Some(match vector.kind() {
+            uqa_core::LegacyVectorKind::SmallInteger => ColumnType::Int2Vector,
+            uqa_core::LegacyVectorKind::Oid => ColumnType::OidVector,
+        }),
         Value::Array(array) => {
             let mut element = None;
             if !merge_array_element_types(array.elements(), &mut element, control)? {

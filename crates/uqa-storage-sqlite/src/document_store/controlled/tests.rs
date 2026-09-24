@@ -7,7 +7,7 @@
 use super::*;
 use crate::document_store::{blob as ordinary, typed_value::StoredValue};
 use std::collections::BTreeMap;
-use uqa_core::{ArrayValue, DecimalValue, TemporalValue};
+use uqa_core::{ArrayValue, DecimalValue, LegacyVectorKind, LegacyVectorValue, TemporalValue};
 
 mod identities;
 mod native;
@@ -70,6 +70,16 @@ fn typed_blob_round_trips_every_persisted_variant() {
             ArrayValue::with_lower_bounds(vec![Value::Int(1), Value::Int(2)], vec![-2]).unwrap(),
         ),
         Value::Array(ArrayValue::with_lower_bounds(Vec::new(), Vec::new()).unwrap()),
+        Value::LegacyVector(
+            LegacyVectorValue::try_new(LegacyVectorKind::SmallInteger, Vec::new()).unwrap(),
+        ),
+        Value::LegacyVector(
+            LegacyVectorValue::try_new(
+                LegacyVectorKind::Oid,
+                vec![Value::Int(0), Value::Int(4_294_967_295)],
+            )
+            .unwrap(),
+        ),
         Value::Array(
             ArrayValue::try_new(vec![
                 Value::Float(f64::NAN),
@@ -125,6 +135,35 @@ fn typed_envelopes_preserve_serde_sequence_duplicate_and_ignored_field_rules() {
         r#"{"kind":"float_bits","value":18446744073709551615}"#,
     ] {
         parity(input.as_bytes());
+    }
+}
+
+#[test]
+fn typed_legacy_vectors_validate_kind_elements_and_empty_shape() {
+    for content in [
+        r#"{"$uqa_type":"int2vector","values":[1,2],"lower_bounds":[1]}"#,
+        r#"{"$uqa_type":"oidvector","values":[],"lower_bounds":[]}"#,
+        r#"{"$uqa_type":"int2vector","values":[1],"lower_bounds":[]}"#,
+        r#"{"$uqa_type":"oidvector","values":[],"lower_bounds":[1,2]}"#,
+        r#"{"$uqa_type":"int2vector","values":[]}"#,
+        r#"{"$uqa_type":"int2vector","values":[-32768,32767]}"#,
+        r#"{"$uqa_type":"oidvector","values":[0,4294967295]}"#,
+        r#"{"$uqa_type":"int2vector","values":[32768]}"#,
+        r#"{"$uqa_type":"oidvector","values":[-1]}"#,
+        r#"{"$uqa_type":"oidvector","values":[4294967296]}"#,
+        r#"{"$uqa_type":"int2vector","values":[null]}"#,
+        r#"{"$uqa_type":"int2vector","values":[[1]]}"#,
+        r#"{"$uqa_type":"oidvector","values":[1.0]}"#,
+        r#"{"$uqa_type":"integer","values":[1]}"#,
+        r#"{"$uqa_type":"int2vector"}"#,
+    ] {
+        for encoded in [
+            format!(r#"{{"kind":"legacy_vector","value":{content}}}"#),
+            format!(r#"{{"value":{content},"kind":"legacy_vector"}}"#),
+            format!(r#"["legacy_vector",{content}]"#),
+        ] {
+            parity(encoded.as_bytes());
+        }
     }
 }
 

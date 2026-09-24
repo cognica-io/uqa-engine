@@ -36,18 +36,55 @@ pub fn matches_fields(
     columns: &[String],
     values: &[Value],
     presence: FieldPresence,
-) -> bool {
-    columns
-        .iter()
-        .zip(values)
-        .all(|(column, expected)| matches_value(document.get(column), expected, presence))
+) -> Result<bool, SQLError> {
+    matches_fields_with_control(
+        document,
+        columns,
+        values,
+        presence,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
 }
 
-fn matches_value(actual: Option<&Value>, expected: &Value, presence: FieldPresence) -> bool {
-    match presence {
-        FieldPresence::Required => actual == Some(expected),
-        FieldPresence::MissingIsNull => actual.unwrap_or(&Value::Null) == expected,
+pub(crate) fn matches_fields_with_control(
+    document: &Document,
+    columns: &[String],
+    values: &[Value],
+    presence: FieldPresence,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    for (column, expected) in columns.iter().zip(values) {
+        let actual = document.get(column);
+        if matches!(presence, FieldPresence::Required) && actual.is_none() {
+            return Ok(false);
+        }
+        if !uqa_sql::expr::compare_typed_values_with_control(
+            actual.unwrap_or(&Value::Null),
+            expected,
+            control,
+        )?
+        .is_eq()
+        {
+            return Ok(false);
+        }
     }
+    Ok(true)
+}
+
+fn matches_value(
+    actual: Option<&Value>,
+    expected: &Value,
+    presence: FieldPresence,
+) -> Result<bool, SQLError> {
+    if matches!(presence, FieldPresence::Required) && actual.is_none() {
+        return Ok(false);
+    }
+    uqa_sql::expr::compare_typed_values_with_control(
+        actual.unwrap_or(&Value::Null),
+        expected,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .map(std::cmp::Ordering::is_eq)
 }
 
 impl ExactLookupOverlay for BTreeMap<DocId, Option<StoredDocument>> {
@@ -63,12 +100,14 @@ impl ExactLookupOverlay for BTreeMap<DocId, Option<StoredDocument>> {
         values: &[Value],
         presence: FieldPresence,
     ) -> Result<Option<DocId>, SQLError> {
-        Ok(self.iter().find_map(|(id, document)| {
-            document
-                .as_ref()
-                .filter(|document| matches_fields(document.fields(), columns, values, presence))
-                .map(|_| *id)
-        }))
+        for (id, document) in self {
+            if let Some(document) = document {
+                if matches_fields(document.fields(), columns, values, presence)? {
+                    return Ok(Some(*id));
+                }
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -96,7 +135,7 @@ impl ExactLookupOverlay for super::document_changes::DocumentChanges {
                 let actual = self
                     .get_field(id, column)
                     .map_err(|error| storage_error("read private exact key", &error))?;
-                if !matches_value(actual.as_ref(), expected, presence) {
+                if !matches_value(actual.as_ref(), expected, presence)? {
                     matches = false;
                     break;
                 }
@@ -228,7 +267,7 @@ impl ExactLookup<'_> {
                     let actual = documents
                         .get_field(entry.doc_id, column)
                         .map_err(|error| storage_error("verify conflicting document", &error))?;
-                    if actual.unwrap_or(Value::Null) != *expected {
+                    if !matches_value(actual.as_ref(), expected, FieldPresence::MissingIsNull)? {
                         matches = false;
                         break;
                     }
@@ -255,7 +294,12 @@ impl ExactLookup<'_> {
             return Ok(Some(id));
         }
         let documents = self.table.read_documents();
-        if self.overlay.is_empty()? {
+        let comparison_can_fail = values.iter().any(uqa_sql::expr::value_comparison_can_fail)
+            || self.table.column_definitions().iter().any(|column| {
+                columns.contains(&column.name)
+                    && uqa_sql::expr::type_comparison_can_fail(&column.ty)
+            });
+        if self.overlay.is_empty()? && !comparison_can_fail {
             return match presence {
                 FieldPresence::Required => documents.find_doc_id_by_field(&columns[0], &values[0]),
                 FieldPresence::MissingIsNull => documents.find_doc_id_by_fields(columns, values),
@@ -280,7 +324,7 @@ impl ExactLookup<'_> {
                     let actual = documents.get_field(id, column).map_err(|error| {
                         storage_error("read command-visible document field", &error)
                     })?;
-                    if !matches_value(actual.as_ref(), expected, presence) {
+                    if !matches_value(actual.as_ref(), expected, presence)? {
                         matches = false;
                         break;
                     }

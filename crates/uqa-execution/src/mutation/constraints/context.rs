@@ -26,6 +26,9 @@ pub trait MutationRead {
         -> Result<Option<BTreeSet<DocId>>, SQLError>;
 }
 pub trait MutationIndexRead {
+    fn index_definitions(
+        &self,
+    ) -> Result<std::sync::Arc<crate::catalog::index::physical::PhysicalIndexDefinitions>, SQLError>;
     fn find_conflict(
         &self,
         table: &str,

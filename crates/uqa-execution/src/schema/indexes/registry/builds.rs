@@ -10,7 +10,6 @@ use super::{
     index_definition, BTreeMap, BTreeSet, CatalogIndexRow, IndexRegistryContext, RelationIdentity,
     StorageBackendError, StorageBackendResult,
 };
-use uqa_sql::ast::CreateIndex;
 
 pub(in crate::schema::indexes) fn new_descendants(
     previous: &BTreeMap<RelationIdentity, CatalogIndexRow>,
@@ -44,21 +43,7 @@ pub(super) fn build(
     context: &IndexRegistryContext<'_>,
     row: &CatalogIndexRow,
 ) -> StorageBackendResult<()> {
-    let definition = index_definition(row)?;
-    let options: BTreeMap<String, String> = serde_json::from_str(&row.parameters_json)?;
-    let statement = CreateIndex {
-        name: Some(row.relation.name.clone()),
-        table: row.table_name.clone(),
-        access_method: row.index_type.clone(),
-        columns: serde_json::from_str(&row.columns_json)?,
-        included_columns: definition.included_columns,
-        column_order: definition.column_order,
-        predicate: definition.predicate,
-        unique: definition.unique,
-        nulls_not_distinct: definition.nulls_not_distinct,
-        if_not_exists: false,
-        options: options.into_iter().collect(),
-    };
+    let statement = uqa_sql::catalog::index::stored::declaration(row)?;
     super::super::creation::build_physical_index(
         context.vectors,
         context.builds,

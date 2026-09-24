@@ -7,7 +7,9 @@
 //! `PostgreSQL` 18 declarative-partition catalog rendering and helpers.
 
 use super::expression_text::schema_expr_text;
-use super::helpers::rows::{catalog_usize, int_value, row, str_value};
+use super::helpers::rows::{
+    catalog_int2vector, catalog_oidvector, catalog_usize, int_value, row, str_value,
+};
 use super::helpers::type_metadata::{
     pg_type_by_value, pg_type_collation_oid, pg_type_len, pg_type_modifier, pg_type_oid,
 };
@@ -88,10 +90,19 @@ pub fn build_pg_partitioned_table(
             ),
             (
                 "partattrs",
-                Value::List(attributes.into_iter().map(Value::Int).collect()),
+                catalog_int2vector(
+                    attributes.into_iter().map(Value::Int).collect(),
+                    "pg_partitioned_table.partattrs",
+                )?,
             ),
-            ("partclass", Value::List(operator_classes)),
-            ("partcollation", Value::List(collations)),
+            (
+                "partclass",
+                catalog_oidvector(operator_classes, "pg_partitioned_table.partclass")?,
+            ),
+            (
+                "partcollation",
+                catalog_oidvector(collations, "pg_partitioned_table.partcollation")?,
+            ),
             (
                 "partexprs",
                 if expressions.is_empty() {

@@ -19,7 +19,8 @@ pub use context::ConstraintContext;
 pub use deferred::validate_deferred_foreign_key_checks;
 use index_keys::EnforcedKeyExecution;
 pub use keys::{
-    lock_document_key_dependencies, validate_key_constraints, without_overlaps_conflict,
+    lock_document_key_dependencies, validate_key_constraints,
+    validate_key_constraints_with_previous, without_overlaps_conflict,
 };
 use period::period_foreign_key_coverage;
 use uqa_core::{DocId, Value};
@@ -59,7 +60,13 @@ pub fn validate_document_rewrite_constraints(
         params,
         Some(old_document),
     )?;
-    validate_key_constraints(context, table, new_document, Some(doc_id))
+    validate_key_constraints_with_previous(
+        context,
+        table,
+        new_document,
+        Some(doc_id),
+        Some(old_document),
+    )
 }
 
 pub fn validate_document_non_key_constraints(

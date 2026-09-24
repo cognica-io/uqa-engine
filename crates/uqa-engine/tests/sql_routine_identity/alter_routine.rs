@@ -31,7 +31,7 @@ fn assert_pg_proc_attributes(
         )
         .unwrap();
     let expected_argument_oids =
-        Value::List(argument_oids.iter().copied().map(Value::Int).collect());
+        crate::legacy_vectors::oidvector(argument_oids.iter().copied().map(Value::Int).collect());
     let matching = result
         .rows
         .iter()

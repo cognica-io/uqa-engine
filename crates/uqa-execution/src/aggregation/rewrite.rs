@@ -150,13 +150,13 @@ pub fn observe_aggregate(
 ) -> Result<(), SQLError> {
     if acc.registered.is_some() {
         let values = aggregate_input_values(args, ctx)?;
-        if distinct && !acc.distinct.insert(&Value::List(values.clone()))? {
-            return Ok(());
-        }
         let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
         for ob in order_by {
             let v = eval_scalar(&ob.expr, ctx)?;
             sort_keys.push((v, ob.descending));
+        }
+        if distinct {
+            return acc.distinct.insert(&Value::List(values), sort_keys);
         }
         acc.observe_registered(values, sort_keys)?;
         return Ok(());
@@ -175,16 +175,16 @@ pub fn observe_builtin_aggregate_value(
     ctx: &ScalarEvalContext<'_>,
 ) -> Result<(), SQLError> {
     let preserves_null_inputs = is_json_array_aggregate(name);
-    if distinct
-        && (preserves_null_inputs || !matches!(value, Value::Null))
-        && !acc.distinct.insert(value)?
-    {
-        return Ok(());
-    }
     let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
     for ob in order_by {
         let v = eval_scalar(&ob.expr, ctx)?;
         sort_keys.push((v, ob.descending));
+    }
+    if distinct {
+        if preserves_null_inputs || !matches!(value, Value::Null) {
+            acc.distinct.insert(value, sort_keys)?;
+        }
+        return Ok(());
     }
     if preserves_null_inputs {
         acc.observe_including_null(value, sort_keys)?;

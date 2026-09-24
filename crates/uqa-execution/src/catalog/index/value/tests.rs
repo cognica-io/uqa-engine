@@ -121,3 +121,46 @@ fn selected_reads_observe_before_empty_or_cached_results_and_propagate_failure()
         vec![1]
     );
 }
+
+#[test]
+fn legacy_vector_index_probes_preserve_operator_failures_without_rejecting_single_keys() {
+    let invalid = Value::LegacyVector(
+        uqa_core::LegacyVectorValue::try_from_array(
+            uqa_core::LegacyVectorKind::Oid,
+            uqa_core::ArrayValue::with_lower_bounds(vec![], vec![]).unwrap(),
+        )
+        .unwrap(),
+    );
+    let valid = uqa_sql::expr::cast_value(&Value::Str("2".into()), "oidvector").unwrap();
+    let empty = ColumnValueIndex::build("v", std::iter::empty());
+    assert!(empty
+        .scan_observing(&Predicate::Equals(invalid.clone()), || Ok(()))
+        .unwrap()
+        .unwrap()
+        .is_empty());
+    for stored in [invalid.clone(), valid.clone()] {
+        let index = ColumnValueIndex::build("v", [(1, stored)].into_iter());
+        assert_eq!(
+            index
+                .scan_observing(&Predicate::Equals(invalid.clone()), || Ok(()))
+                .unwrap_err()
+                .sqlstate(),
+            Some("42804")
+        );
+        assert_eq!(
+            ids(&index
+                .scan_observing(&Predicate::IsNotNull, || Ok(()))
+                .unwrap()
+                .unwrap()),
+            vec![1]
+        );
+    }
+    let index = ColumnValueIndex::build("v", [(1, invalid)].into_iter());
+    assert_eq!(
+        index
+            .scan_observing(&Predicate::Equals(valid), || Ok(()))
+            .unwrap_err()
+            .sqlstate(),
+        Some("42804")
+    );
+}

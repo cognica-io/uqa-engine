@@ -85,11 +85,16 @@ impl<'a> Workspace<'a> {
     pub(super) fn shape(
         &mut self,
         elements: &[Value],
+        bound_count: usize,
     ) -> Result<Option<Vec<usize>>, ValueRetentionError> {
         match (&self.memory, self.cancellation) {
             (Some(memory), Some(cancellation)) => {
-                let Some(shape) =
-                    ArrayValue::decoded_shape_budgeted(elements, memory.budget(), cancellation)?
+                let Some(shape) = ArrayValue::decoded_shape_budgeted(
+                    elements,
+                    bound_count,
+                    memory.budget(),
+                    cancellation,
+                )?
                 else {
                     return Ok(None);
                 };
@@ -97,7 +102,7 @@ impl<'a> Workspace<'a> {
                 self.absorb(memory);
                 Ok(Some(dimensions))
             }
-            _ => Ok(ArrayValue::decoded_shape(elements)),
+            _ => Ok(ArrayValue::decoded_shape(elements, bound_count)),
         }
     }
 

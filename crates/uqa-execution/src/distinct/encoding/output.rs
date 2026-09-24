@@ -16,6 +16,10 @@ pub(super) trait KeyOutput {
         None
     }
 
+    fn invokes_sql_hash_operator(&self) -> bool {
+        false
+    }
+
     fn legacy_numeric_reservation(&self) -> bool {
         false
     }

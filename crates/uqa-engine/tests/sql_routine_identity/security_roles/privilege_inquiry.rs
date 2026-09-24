@@ -263,7 +263,7 @@ fn pg18_function_privilege_catalog_identifies_all_six_overloads() {
         assert_eq!(row["oid"], Value::Int(oid));
         assert_eq!(
             row["proargtypes"],
-            Value::List(types.into_iter().map(Value::Int).collect())
+            crate::legacy_vectors::oidvector(types.into_iter().map(Value::Int).collect())
         );
         assert_eq!(
             row["prosrc"],

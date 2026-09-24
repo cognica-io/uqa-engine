@@ -317,3 +317,61 @@ fn controlled_result_inference_rejects_foreign_callback_owners() {
     assert_eq!(budget.used(), 0);
     assert_eq!(foreign_budget.used(), 0);
 }
+
+#[test]
+fn legacy_vector_compatible_array_functions_return_and_bind_true_arrays() {
+    let control = ProductionControl::uncontrolled();
+    for (vector, element) in [
+        (ColumnType::Int2Vector, ColumnType::SmallInteger),
+        (ColumnType::OidVector, ColumnType::Oid),
+    ] {
+        let array = ColumnType::Array(Box::new(element.clone()));
+        for (name, types) in [
+            (
+                "array_cat",
+                vec![Some(vector.clone()), Some(vector.clone())],
+            ),
+            (
+                "array_append",
+                vec![Some(vector.clone()), Some(element.clone())],
+            ),
+            (
+                "array_prepend",
+                vec![Some(element.clone()), Some(vector.clone())],
+            ),
+            (
+                "array_remove",
+                vec![Some(vector.clone()), Some(element.clone())],
+            ),
+            (
+                "array_replace",
+                vec![
+                    Some(vector.clone()),
+                    Some(element.clone()),
+                    Some(element.clone()),
+                ],
+            ),
+        ] {
+            let result = super::super::compatible_array_result_type(name, &types, &control)
+                .unwrap()
+                .unwrap();
+            assert_eq!(*result, array, "{name}");
+            let targets = super::super::builtin_function_argument_targets(name, &types);
+            assert!(!targets.iter().flatten().any(|ty| ty == &vector));
+        }
+        assert_eq!(
+            *array_element_type(Some(&vector), &control)
+                .unwrap()
+                .unwrap(),
+            element
+        );
+    }
+    let result = super::super::compatible_array_result_type(
+        "array_append",
+        &[Some(ColumnType::Int2Vector), Some(ColumnType::Integer)],
+        &control,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(*result, ColumnType::Array(Box::new(ColumnType::Integer)));
+}

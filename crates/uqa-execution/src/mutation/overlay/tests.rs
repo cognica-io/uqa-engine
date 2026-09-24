@@ -508,3 +508,60 @@ fn canonical_cache_matches_the_value_equality_oracle_for_normalized_nested_value
         );
     }
 }
+
+#[test]
+fn legacy_vector_overlay_probes_compare_visible_keys_in_declared_order() {
+    let control = StorageReadControl::with_limit(1 << 20);
+    let invalid = Value::LegacyVector(
+        uqa_core::LegacyVectorValue::try_from_array(
+            uqa_core::LegacyVectorKind::Oid,
+            uqa_core::ArrayValue::with_lower_bounds(vec![], vec![]).unwrap(),
+        )
+        .unwrap(),
+    );
+    let mut overlays = [
+        CommandMutationOverlay::default(),
+        CommandMutationOverlay::default(),
+    ];
+    stage(
+        &mut overlays[0],
+        1,
+        BTreeMap::from([("z".into(), Value::Int(1)), ("a".into(), invalid.clone())]),
+        &control,
+    );
+    assert_eq!(
+        find(
+            &mut overlays,
+            &["z", "a"],
+            &[Value::Int(2), invalid.clone()],
+            FieldPresence::MissingIsNull,
+            &control
+        )
+        .unwrap(),
+        None
+    );
+    assert_eq!(
+        find(
+            &mut overlays,
+            &["z", "a"],
+            &[Value::Int(1), invalid.clone()],
+            FieldPresence::MissingIsNull,
+            &control
+        )
+        .unwrap_err()
+        .sqlstate(),
+        Some("42804")
+    );
+    overlays[1].stage("items", 1, None, &control).unwrap();
+    assert_eq!(
+        find(
+            &mut overlays,
+            &["a"],
+            &[invalid],
+            FieldPresence::MissingIsNull,
+            &control
+        )
+        .unwrap(),
+        None
+    );
+}

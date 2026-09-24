@@ -16,7 +16,7 @@ use uqa_core::RelationIdentity;
 use super::super::helpers::index_definitions::{index_columns, indexdef};
 use super::super::helpers::oids::{relation_oid, split_schema_name};
 use super::super::helpers::rows::{
-    bool_value, catalog_ordinal, catalog_usize, int_value, row, str_value,
+    bool_value, catalog_int2vector, catalog_ordinal, catalog_usize, int_value, row, str_value,
 };
 use super::table_relation_oid_from;
 
@@ -226,28 +226,14 @@ pub fn build_pg_index(
             ("indisreplident", bool_value(false)),
             (
                 "indkey",
-                Value::List(keys.into_iter().map(Value::Int).collect()),
+                catalog_int2vector(
+                    keys.into_iter().map(Value::Int).collect(),
+                    "pg_index.indkey",
+                )?,
             ),
             ("indcollation", Value::Null),
             ("indclass", Value::Null),
-            (
-                "indoption",
-                Value::List(
-                    (0..index.columns.len())
-                        .map(|position| {
-                            let order = index
-                                .definition
-                                .column_order
-                                .get(position)
-                                .copied()
-                                .unwrap_or_default();
-                            Value::Int(
-                                i64::from(order.descending) + 2 * i64::from(order.nulls_first),
-                            )
-                        })
-                        .collect(),
-                ),
-            ),
+            ("indoption", index_options(&index)?),
             (
                 "indexprs",
                 if expressions.is_empty() {
@@ -273,6 +259,23 @@ pub fn build_pg_index(
         ]));
     }
     Ok(rows)
+}
+
+fn index_options(index: &CatalogIndexRelation) -> Result<Value, SQLError> {
+    catalog_int2vector(
+        (0..index.columns.len())
+            .map(|position| {
+                let order = index
+                    .definition
+                    .column_order
+                    .get(position)
+                    .copied()
+                    .unwrap_or_default();
+                Value::Int(i64::from(order.descending) + 2 * i64::from(order.nulls_first))
+            })
+            .collect(),
+        "pg_index.indoption",
+    )
 }
 
 pub fn build_pg_indexes(

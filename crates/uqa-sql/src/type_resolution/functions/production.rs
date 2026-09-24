@@ -75,12 +75,10 @@ fn array_element_type(
     ty: Option<&ColumnType>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
-    match ty {
-        Some(ColumnType::Array(element)) => copy(Some(element), control),
-        Some(ColumnType::Int2Vector) => inline(ColumnType::SmallInteger, control),
-        Some(ColumnType::OidVector) => inline(ColumnType::Oid, control),
-        _ => Ok(None),
-    }
+    copy(
+        ty.and_then(crate::type_resolution::array_element_type),
+        control,
+    )
 }
 
 fn push_type(
@@ -617,8 +615,10 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
             optional_inline(first().and_then(aggregate_average_type), control)
         }
         "min" | "max" | "lag" | "lead" | "first_value" | "last_value" | "nth_value" | "nullif"
-        | "array_cat" | "array_remove" | "array_replace" | "trim_array" | "array_sample"
-        | "array_append" | "generate_series" => copy(first(), control),
+        | "trim_array" | "array_sample" | "generate_series" => copy(first(), control),
+        "array_cat" | "array_remove" | "array_replace" | "array_append" | "array_prepend" => {
+            super::compatible_array_result_type(name, &argument_types, control)
+        }
         "mode" | "percentile_disc" => copy(ordered_argument(), control),
         "percentile_cont" => optional_inline(
             ordered_argument().map(|ty| match base_type(ty) {
@@ -691,7 +691,6 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         }
         "array_positions" => array(Some(&ColumnType::Integer), control),
         "decode" => inline(ColumnType::Bytea, control),
-        "array_prepend" => copy(argument(1), control),
         "array_fill" => array(first(), control),
         "unnest" => array_element_type(first(), control),
         "now"

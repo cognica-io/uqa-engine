@@ -45,6 +45,9 @@ pub fn core_value_to_json(value: &Value) -> serde_json::Value {
         Value::Array(array) => {
             serde_json::Value::Array(array.elements().iter().map(core_value_to_json).collect())
         }
+        Value::LegacyVector(vector) => {
+            serde_json::Value::Array(vector.elements().iter().map(core_value_to_json).collect())
+        }
         Value::List(items) => {
             serde_json::Value::Array(items.iter().map(core_value_to_json).collect())
         }
@@ -97,7 +100,7 @@ pub fn value_to_text_with_control(
         Value::List(_) | Value::Map(_) => {
             super::json::format_core_value_as_json_with_control(value, control)?
         }
-        Value::Row(_) | Value::Record(_) => {
+        Value::Row(_) | Value::Record(_) | Value::LegacyVector(_) => {
             super::conversion::value_to_string_with_control(value, control)?
         }
     })

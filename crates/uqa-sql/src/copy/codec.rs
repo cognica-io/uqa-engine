@@ -453,7 +453,7 @@ fn copy_value_text(
         return Ok(Some(text));
     }
     if matches!(ty, Some(ColumnType::Int2Vector | ColumnType::OidVector)) {
-        return Ok(crate::expr::vector_value_to_string(value));
+        return crate::expr::vector_value_to_string(value);
     }
     Ok(Some(match value {
         Value::Bool(true) => "t".into(),
@@ -462,7 +462,7 @@ fn copy_value_text(
         Value::Float(value) if *value == f64::INFINITY => "Infinity".into(),
         Value::Float(value) if *value == f64::NEG_INFINITY => "-Infinity".into(),
         Value::FixedChar(value) => value.clone(),
-        other => crate::expr::value_to_string(other),
+        other => crate::expr::value_to_string(other)?,
     }))
 }
 

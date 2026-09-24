@@ -148,6 +148,14 @@ fn payload(
         "record" => return structured::record(content, control, depth, buffered),
         "map" => return structured::map(content, control, depth, buffered),
         "array" => return structured::sql_array(content, control, depth, buffered),
+        "legacy_vector" => {
+            let value = modern(content, control, depth - 1)?;
+            return if matches!(&*value, Value::LegacyVector(_)) {
+                Ok(value)
+            } else {
+                Err(JsonReadError::InvalidJson)
+            };
+        }
         "temporal" => return structured::temporal(content, control, depth),
         _ => return Err(JsonReadError::InvalidJson),
     };

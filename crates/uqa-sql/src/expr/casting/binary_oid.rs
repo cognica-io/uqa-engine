@@ -15,6 +15,43 @@ use crate::error::{Result, SQLError};
 
 use super::{canonical_cast_source_with_control, out_of_range, text_value, undefined_cast};
 
+/// OID-family values and signed int4 share a binary cast; converting their runtime i64 carrier must preserve those 32 bits.
+pub(super) fn cast_integer_from(
+    value: &Value,
+    source_ty: Option<&str>,
+    control: &ProductionControl<'_>,
+) -> Result<Value> {
+    control.check()?;
+    let source = source_ty
+        .map(str::trim)
+        .map(|source| source.strip_prefix("pg_catalog.").unwrap_or(source));
+    if matches!(
+        source,
+        Some(
+            "oid"
+                | "regclass"
+                | "regcollation"
+                | "regconfig"
+                | "regdictionary"
+                | "regnamespace"
+                | "regoper"
+                | "regoperator"
+                | "regproc"
+                | "regprocedure"
+                | "regrole"
+                | "regtype"
+        )
+    ) {
+        if let Value::Int(value) = value {
+            let bits = u32::try_from(*value).map_err(|_| out_of_range("oid"))?;
+            return Ok(Value::Int(i64::from(i32::from_ne_bytes(
+                bits.to_ne_bytes(),
+            ))));
+        }
+    }
+    super::cast_integer(value, "integer", control)
+}
+
 pub(super) fn cast_oid(
     value: &Value,
     source_ty: Option<&str>,

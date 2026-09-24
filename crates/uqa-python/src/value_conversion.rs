@@ -66,20 +66,9 @@ pub(super) fn value_to_py(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> 
         }
         Value::Bytes(value) => Ok(PyBytes::new(py, value).into_any().unbind()),
         Value::Temporal(value) => temporal_to_string(value).into_py_any(py),
-        Value::Array(array) => {
-            let list = PyList::empty(py);
-            for value in array.elements() {
-                list.append(value_to_py(py, value)?)?;
-            }
-            Ok(list.into_any().unbind())
-        }
-        Value::List(values) => {
-            let list = PyList::empty(py);
-            for value in values {
-                list.append(value_to_py(py, value)?)?;
-            }
-            Ok(list.into_any().unbind())
-        }
+        Value::Array(array) => values_to_py_list(py, array.elements()),
+        Value::LegacyVector(vector) => values_to_py_list(py, vector.elements()),
+        Value::List(values) => values_to_py_list(py, values),
         Value::Row(values) => {
             let items = values
                 .iter()
@@ -90,6 +79,14 @@ pub(super) fn value_to_py(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> 
         Value::Record(values) => record_to_py(py, values),
         Value::Map(values) => map_to_py(py, values),
     }
+}
+
+fn values_to_py_list(py: Python<'_>, values: &[Value]) -> PyResult<Py<PyAny>> {
+    let list = PyList::empty(py);
+    for value in values {
+        list.append(value_to_py(py, value)?)?;
+    }
+    Ok(list.into_any().unbind())
 }
 
 fn record_to_py(py: Python<'_>, values: &[(String, Value)]) -> PyResult<Py<PyAny>> {

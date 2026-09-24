@@ -49,7 +49,9 @@ pub fn coerce_routine_value_from(
             }),
         },
         "anyarray" => match value {
-            Value::Array(_) | Value::List(_) | Value::Null => Ok(value.clone()),
+            Value::Array(_) | Value::LegacyVector(_) | Value::List(_) | Value::Null => {
+                Ok(value.clone())
+            }
             _ => Err(SQLError::Routine {
                 sqlstate: "42804".into(),
                 message: "cannot cast non-array value to type anyarray".into(),

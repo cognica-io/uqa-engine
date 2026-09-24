@@ -40,8 +40,24 @@ pub fn bool_value(value: bool) -> Value {
     Value::Bool(value)
 }
 
-pub fn list_int(values: &[i64]) -> Value {
-    Value::List(values.iter().copied().map(Value::Int).collect())
+pub fn catalog_int2vector(values: Vec<Value>, label: &str) -> Result<Value, SQLError> {
+    catalog_vector(uqa_core::LegacyVectorKind::SmallInteger, values, label)
+}
+
+pub fn catalog_oidvector(values: Vec<Value>, label: &str) -> Result<Value, SQLError> {
+    catalog_vector(uqa_core::LegacyVectorKind::Oid, values, label)
+}
+
+fn catalog_vector(
+    kind: uqa_core::LegacyVectorKind,
+    values: Vec<Value>,
+    label: &str,
+) -> Result<Value, SQLError> {
+    uqa_core::LegacyVectorValue::try_new(kind, values)
+        .map(Value::LegacyVector)
+        .ok_or_else(|| {
+            SQLError::Internal(format!("{label} has invalid {} elements", kind.type_name()))
+        })
 }
 
 pub fn catalog_array(values: Vec<Value>, label: &str) -> Result<Value, SQLError> {

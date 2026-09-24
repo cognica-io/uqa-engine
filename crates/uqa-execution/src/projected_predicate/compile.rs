@@ -116,8 +116,11 @@ pub(super) fn compile(
             if matches!(&escape, Some(Value::Null)) {
                 return Ok(Some(ProjectedExpr::Literal(Value::Null)));
             }
-            let pattern_text = uqa_sql::expr::value_to_string(&pattern);
-            let escape_text = escape.as_ref().map(uqa_sql::expr::value_to_string);
+            let pattern_text = uqa_sql::expr::value_to_string(&pattern)?;
+            let escape_text = escape
+                .as_ref()
+                .map(uqa_sql::expr::value_to_string)
+                .transpose()?;
             ProjectedExpr::Like {
                 expression: Box::new(require(expression, schema, params)?),
                 pattern: uqa_sql::expr::CompiledLikePattern::with_escape(

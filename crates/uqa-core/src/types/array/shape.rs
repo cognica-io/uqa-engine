@@ -13,20 +13,24 @@ use crate::{
 
 type Shape = Option<(Vec<usize>, Option<MemoryReservation>)>;
 
-pub(super) fn unbounded(elements: &[Value]) -> Option<Vec<usize>> {
-    validate(elements, None, &mut || Ok(()))
+pub(super) fn unbounded(elements: &[Value], preserve_empty_dimension: bool) -> Option<Vec<usize>> {
+    validate(elements, preserve_empty_dimension, None, &mut || Ok(()))
         .ok()?
         .map(|(dimensions, _)| dimensions)
 }
 
 pub(super) fn budgeted(
     elements: &[Value],
+    preserve_empty_dimension: bool,
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<Option<Budgeted<Vec<usize>>>, ValueRetentionError> {
-    validate(elements, Some(memory), &mut || {
-        cancellation.check().map_err(Into::into)
-    })
+    validate(
+        elements,
+        preserve_empty_dimension,
+        Some(memory),
+        &mut || cancellation.check().map_err(Into::into),
+    )
     .map(|shape| {
         shape.map(|(dimensions, memory)| {
             Budgeted::new(dimensions, memory.expect("controlled array dimensions"))
@@ -36,11 +40,17 @@ pub(super) fn budgeted(
 
 pub(super) fn produced(
     elements: &[Value],
+    preserve_empty_dimension: bool,
     control: &crate::memory::ProductionControl<'_>,
 ) -> Result<Option<crate::memory::Produced<Vec<usize>>>, ValueRetentionError> {
-    validate(elements, control.budget(), &mut || control.check())?
-        .map(|(dimensions, memory)| control.finish(dimensions, memory))
-        .transpose()
+    validate(
+        elements,
+        preserve_empty_dimension,
+        control.budget(),
+        &mut || control.check(),
+    )?
+    .map(|(dimensions, memory)| control.finish(dimensions, memory))
+    .transpose()
 }
 
 fn nested(value: &Value) -> Option<&[Value]> {
@@ -53,12 +63,16 @@ fn nested(value: &Value) -> Option<&[Value]> {
 
 fn validate(
     elements: &[Value],
+    preserve_empty_dimension: bool,
     memory: Option<&MemoryBudget>,
     check: &mut impl FnMut() -> Result<(), ValueRetentionError>,
 ) -> Result<Shape, ValueRetentionError> {
     check()?;
     let mut dimensions = Buffer::new(memory);
     if elements.is_empty() {
+        if preserve_empty_dimension {
+            dimensions.push(0)?;
+        }
         return Ok(Some(dimensions.into_parts()));
     }
     let mut first = elements;

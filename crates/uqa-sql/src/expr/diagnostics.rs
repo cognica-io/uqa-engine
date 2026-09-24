@@ -26,6 +26,7 @@ pub fn value_type_name(v: &Value) -> &'static str {
         Value::Json(_) => "json",
         Value::JsonB(_) => "jsonb",
         Value::Array(_) => "anyarray",
+        Value::LegacyVector(vector) => vector.kind().type_name(),
         Value::List(_) => "anyarray",
         Value::Row(_) | Value::Record(_) => "record",
         Value::Map(_) => "jsonb",

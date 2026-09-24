@@ -100,7 +100,7 @@ pub fn run_create_index(
         context.bindings,
         &mut c,
     )?;
-    super::validate_unique_index(&context.unique, &c, &name)?;
+    super::validate_index_keys(&context.unique, &c, &name, &definition.key_types)?;
 
     context.creation.reserve_name(&relation.qualified_name())?;
     build_physical_index(context.vectors, context.publication, &c, &am)?;

@@ -43,15 +43,41 @@ pub fn scalar_operand_type_name_with_control(
     params: &[SQLParam],
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<String>>, SQLError> {
+    operand_type_name(expression, schema, params, control, false)
+}
+
+/// Casts retain a source domain's identity so an identity cast cannot re-run its constraints. Operator consumers continue to use the underlying type.
+pub fn scalar_cast_source_type_name_with_control(
+    expression: &ScalarExpr,
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<String>>, SQLError> {
+    operand_type_name(expression, schema, params, control, true)
+}
+
+fn operand_type_name(
+    expression: &ScalarExpr,
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    control: &ProductionControl<'_>,
+    preserve_domain: bool,
+) -> Result<Option<Produced<String>>, SQLError> {
     control.check()?;
+    let type_name = |ty: &ColumnType| {
+        let ty = if preserve_domain {
+            ty
+        } else {
+            base_type(ty, control)?
+        };
+        ty.sql_name_with_control(control).map_err(SQLError::from)
+    };
     let name = match expression {
         ScalarExpr::TypedLiteral {
             bound_type: Some(ty),
             ..
         } => {
-            return Ok(Some(
-                base_type(ty, control)?.sql_name_with_control(control)?,
-            ));
+            return type_name(ty).map(Some);
         }
         ScalarExpr::Func {
             binding: Some(binding),
@@ -78,9 +104,7 @@ pub fn scalar_operand_type_name_with_control(
             let Some(ty) = inferred_type(expression, schema, params, control)? else {
                 return Ok(None);
             };
-            return Ok(Some(
-                base_type(&ty, control)?.sql_name_with_control(control)?,
-            ));
+            return type_name(&ty).map(Some);
         }
     };
     name.map(|name| control.copy_text(name).map_err(Into::into))

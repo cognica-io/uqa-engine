@@ -7,7 +7,9 @@
 //! Tagged value recognition validates borrowed shapes before moving decoded buffers.
 
 use super::{ArrayValue, BTreeMap, TemporalValue, Value};
-use crate::{memory::Budgeted, CancellationToken, ValueRetentionError};
+use crate::{
+    memory::Budgeted, CancellationToken, LegacyVectorKind, LegacyVectorValue, ValueRetentionError,
+};
 
 mod allocation;
 use allocation::Workspace;
@@ -115,6 +117,16 @@ fn convert(
                 return Ok(Value::Array(array));
             }
         }
+        "int2vector" | "oidvector" if map.len() == 2 || map.len() == 3 => {
+            let kind = if tag == "int2vector" {
+                LegacyVectorKind::SmallInteger
+            } else {
+                LegacyVectorKind::Oid
+            };
+            if let Some(vector) = decoded_legacy_vector(&mut map, kind, workspace)? {
+                return Ok(Value::LegacyVector(vector));
+            }
+        }
         "row" if map.len() == 2 => {
             if matches!(map.get("values"), Some(Value::List(_))) {
                 return Ok(Value::Row(take_list(&mut map, "values")));
@@ -150,6 +162,42 @@ fn convert(
     Ok(Value::Map(map))
 }
 
+fn decoded_legacy_vector(
+    map: &mut BTreeMap<String, Value>,
+    kind: LegacyVectorKind,
+    workspace: &mut Workspace<'_>,
+) -> Result<Option<LegacyVectorValue>, ValueRetentionError> {
+    let Some(Value::List(values)) = map.get("values") else {
+        return Ok(None);
+    };
+    for value in values {
+        workspace.check()?;
+        if !kind.accepts(value) {
+            return Ok(None);
+        }
+    }
+    if map.contains_key("lower_bounds") {
+        let Some(Value::List(bounds)) = map.get("lower_bounds") else {
+            return Ok(None);
+        };
+        if bounds.len() > 1 {
+            return Ok(None);
+        }
+        return Ok(decoded_array(map, workspace)?
+            .map(|array| LegacyVectorValue::from_validated_array(kind, array)));
+    }
+    if map.len() != 2 {
+        return Ok(None);
+    }
+    let mut dimensions = workspace.vector(1)?;
+    dimensions.push(values.len());
+    let mut bounds = workspace.vector(1)?;
+    bounds.push(0);
+    workspace.reserve(ArrayValue::decoded_header_bytes())?;
+    let array = ArrayValue::from_decoded_parts(take_list(map, "values"), dimensions, bounds);
+    Ok(Some(LegacyVectorValue::from_validated_array(kind, array)))
+}
+
 fn decoded_array(
     map: &mut BTreeMap<String, Value>,
     workspace: &mut Workspace<'_>,
@@ -165,7 +213,7 @@ fn decoded_array(
             return Ok(None);
         }
     }
-    let Some(dimensions) = workspace.shape(values)? else {
+    let Some(dimensions) = workspace.shape(values, bounds.len())? else {
         return Ok(None);
     };
     if dimensions.len() != bounds.len() {

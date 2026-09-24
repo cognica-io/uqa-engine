@@ -236,7 +236,10 @@ fn trigger_catalog_matches_postgresql_18_shape_and_definition_helpers() {
     assert_eq!(rows[0].get("tgenabled"), Some(&Value::Str("O".into())));
     assert_eq!(rows[0].get("tgisinternal"), Some(&Value::Bool(false)));
     assert_eq!(rows[0].get("tgnargs"), Some(&Value::Int(0)));
-    assert_eq!(rows[0].get("tgattr"), Some(&Value::List(Vec::new())));
+    assert_eq!(
+        rows[0].get("tgattr"),
+        Some(&crate::legacy_vectors::int2vector(Vec::new()))
+    );
     assert_eq!(rows[0].get("tgargs"), Some(&Value::Bytes(Vec::new())));
     assert_eq!(
         rows[1].get("tgname"),
@@ -246,7 +249,7 @@ fn trigger_catalog_matches_postgresql_18_shape_and_definition_helpers() {
     assert_eq!(rows[1].get("tgnargs"), Some(&Value::Int(1)));
     assert_eq!(
         rows[1].get("tgattr"),
-        Some(&Value::List(vec![Value::Int(2)]))
+        Some(&crate::legacy_vectors::int2vector(vec![Value::Int(2)]))
     );
     assert_eq!(
         rows[1].get("tgargs"),

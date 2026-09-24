@@ -111,6 +111,7 @@ fn scalar_parameter(value: &Value) -> Result<SQLParameter, HttpEngineError> {
         | Value::Json(_)
         | Value::JsonB(_)
         | Value::Array(_)
+        | Value::LegacyVector(_)
         | Value::List(_)
         | Value::Row(_)
         | Value::Record(_)
@@ -129,6 +130,7 @@ fn finite_value(value: &Value) -> bool {
         Value::Record(values) => values.iter().all(|(_, value)| finite_value(value)),
         Value::Map(values) => values.values().all(finite_value),
         Value::Null
+        | Value::LegacyVector(_)
         | Value::Void
         | Value::Bool(_)
         | Value::Int(_)

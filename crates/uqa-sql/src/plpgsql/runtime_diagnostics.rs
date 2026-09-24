@@ -147,7 +147,7 @@ pub fn format_raise_message(format: &str, args: &[Value]) -> Result<String, SQLE
             });
         };
         next_arg += 1;
-        out.push_str(&raise_text(value));
+        out.push_str(&raise_text(value)?);
     }
     if next_arg < args.len() {
         return Err(SQLError::Routine {
@@ -160,8 +160,8 @@ pub fn format_raise_message(format: &str, args: &[Value]) -> Result<String, SQLE
 
 /// Text form of a value inside a RAISE message (`NULL` renders as
 /// `<NULL>`, booleans as `t` / `f`, arrays in brace form).
-pub fn raise_text(value: &Value) -> String {
-    match value {
+pub fn raise_text(value: &Value) -> Result<String, SQLError> {
+    Ok(match value {
         Value::Null => "<NULL>".into(),
         Value::Void => String::new(),
         Value::Bool(b) => (if *b { "t" } else { "f" }).into(),
@@ -172,7 +172,7 @@ pub fn raise_text(value: &Value) -> String {
         Value::FixedChar(s) => s.trim_end_matches(' ').to_string(),
         Value::Temporal(t) => t.to_sql_string(),
         Value::Json(text) | Value::JsonB(text) => text.clone(),
-        Value::Array(array) => crate::expr::array_value_to_string(array),
+        Value::Array(_) | Value::LegacyVector(_) => crate::expr::value_to_string(value)?,
         Value::Bytes(b) => {
             use std::fmt::Write as _;
             let mut out = String::with_capacity(2 + b.len() * 2);
@@ -183,23 +183,31 @@ pub fn raise_text(value: &Value) -> String {
             out
         }
         Value::List(items) => {
-            let inner = items.iter().map(raise_text).collect::<Vec<_>>().join(",");
+            let inner = items
+                .iter()
+                .map(raise_text)
+                .collect::<Result<Vec<_>, _>>()?
+                .join(",");
             format!("{{{inner}}}")
         }
         Value::Row(items) => {
-            let inner = items.iter().map(raise_text).collect::<Vec<_>>().join(",");
+            let inner = items
+                .iter()
+                .map(raise_text)
+                .collect::<Result<Vec<_>, _>>()?
+                .join(",");
             format!("({inner})")
         }
         Value::Record(fields) => {
             let inner = fields
                 .iter()
                 .map(|(_, value)| raise_text(value))
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, _>>()?
                 .join(",");
             format!("({inner})")
         }
         Value::Map(map) => serde_json::to_string(map).unwrap_or_else(|_| format!("{map:?}")),
-    }
+    })
 }
 
 #[cfg(test)]

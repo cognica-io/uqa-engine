@@ -453,6 +453,11 @@ impl Engine {
                     restore_backend.as_ref(),
                     super::CatalogRestoreMode::InitialMigration,
                 )?;
+                uqa_execution::catalog::value_restoration::normalize_legacy_vectors(
+                    restore_catalog.as_ref(),
+                    restore_backend.as_ref(),
+                    &engine,
+                )?;
                 engine.repair_reset_fts_storage(restore_catalog.as_ref())?;
                 Ok(cache_revisions)
             })();

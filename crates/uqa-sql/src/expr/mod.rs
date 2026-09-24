@@ -32,7 +32,7 @@ pub use array_transform::{
     argument_positions as array_transform_argument_positions,
     argument_positions_with_control as array_transform_argument_positions_with_control,
 };
-pub use json::value_to_json_text;
+pub use json::{validate_json_object_key_type, value_to_json_text};
 pub use json_strip::argument_positions as json_strip_nulls_argument_positions;
 pub use range::{
     multirange_from_ranges, parse_multirange, parse_range, CanonicalMultirange, CanonicalRange,
@@ -62,10 +62,11 @@ mod session_settings;
 #[cfg(test)]
 use binary::eval_comparison_op;
 pub use binary::{
-    compare_nullable_with_control, compare_with_control, eval_binary_values,
-    eval_binary_values_with_control, eval_binary_values_with_integer_width,
+    compare_nullable_with_control, compare_typed_values_with_control, compare_with_control,
+    eval_binary_values, eval_binary_values_with_control, eval_binary_values_with_integer_width,
     eval_binary_values_with_integer_width_with_control, eval_comparison_truth,
     eval_comparison_truth_with_control, integer_width_for_literal, integer_width_for_type, truthy,
+    type_comparison_can_fail, validate_legacy_vector_comparison, value_comparison_can_fail,
     values_equal_nullable_with_control, values_equal_with_control, IntegerWidth,
 };
 pub(crate) use binary::{division_by_zero, out_of_range};

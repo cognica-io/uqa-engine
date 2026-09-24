@@ -129,7 +129,7 @@ fn eval_postgres_function(name: &str, args: &[Value]) -> Result<Value> {
                 if args.len() != 2 {
                     return Err(SQLError::TypeMismatch("array_sample takes 2 args".into()));
                 }
-                let Value::Array(array) = &args[0] else {
+                let Some(array) = args[0].array_view() else {
                     if matches!(args[0], Value::Null) {
                         return Ok(Value::Null);
                     }
@@ -164,7 +164,14 @@ fn eval_postgres_function(name: &str, args: &[Value]) -> Result<Value> {
                 if let Some(lower_bound) = lower_bounds.first_mut() {
                     *lower_bound = 1;
                 }
-                rebuild_array_with_bounds(out, lower_bounds)
+                let result = rebuild_array_with_bounds(out, lower_bounds)?;
+                let control = ProductionControl::uncontrolled();
+                let result = super::scalar_array::preserve_polymorphic_array_type(
+                    &args[0],
+                    control.finish(result, None)?,
+                    &control,
+                )?;
+                Ok(result.into_uncontrolled().expect("ordinary array sample"))
             }
             _ => unreachable!("function family membership was checked before dispatch"),
         }

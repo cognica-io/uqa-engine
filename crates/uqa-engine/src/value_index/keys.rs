@@ -62,7 +62,7 @@ impl Engine {
         })
     }
 
-    fn physical_index_definitions(
+    pub(crate) fn physical_index_definitions(
         &self,
     ) -> StorageBackendResult<std::sync::Arc<PhysicalIndexDefinitions>> {
         self.runtime

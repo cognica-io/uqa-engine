@@ -248,6 +248,8 @@ fn schema_literal_text(value: &Value) -> String {
         Value::Decimal(value) => format!("{value:?}"),
         Value::Json(value) => format!("'{}'::json", value.replace('\'', "''")),
         Value::JsonB(value) => format!("'{}'::jsonb", value.replace('\'', "''")),
+        Value::LegacyVector(vector) => crate::render::legacy_vector_expression(vector)
+            .expect("stored SQL vector has SQL-produced bounds"),
         Value::Array(array)
             if array
                 .lower_bounds()
@@ -256,7 +258,9 @@ fn schema_literal_text(value: &Value) -> String {
         {
             format!(
                 "'{}'",
-                crate::expr::array_value_to_string(array).replace('\'', "''")
+                crate::expr::array_value_to_string(array)
+                    .expect("stored array literal text")
+                    .replace('\'', "''")
             )
         }
         Value::Array(array) => format!(

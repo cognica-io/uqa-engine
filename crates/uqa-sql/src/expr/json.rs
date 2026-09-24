@@ -10,7 +10,7 @@ use uqa_core::{DecimalValue, TemporalValue, Value};
 
 use crate::error::{Result, SQLError};
 
-use super::{hex_encode, out_of_range, value_to_string};
+use super::{hex_encode, out_of_range};
 
 mod path;
 mod production;
@@ -126,6 +126,7 @@ pub fn value_to_json_text(value: &Value) -> String {
         }
         Value::Temporal(value) => serde_json::Value::String(value.to_sql_string()).to_string(),
         Value::Json(text) | Value::JsonB(text) => text.clone(),
+        Value::LegacyVector(vector) => legacy_vector_json(vector).to_string(),
         Value::Array(array) => {
             let values = array
                 .elements()
@@ -160,6 +161,24 @@ pub fn value_to_json_text(value: &Value) -> String {
     }
 }
 
+fn legacy_vector_json(vector: &uqa_core::LegacyVectorValue) -> serde_json::Value {
+    serde_json::Value::Array(
+        vector
+            .elements()
+            .iter()
+            .map(|value| {
+                let Value::Int(value) = value else {
+                    unreachable!("validated legacy vector element");
+                };
+                match vector.kind() {
+                    uqa_core::LegacyVectorKind::SmallInteger => (*value).into(),
+                    uqa_core::LegacyVectorKind::Oid => value.to_string().into(),
+                }
+            })
+            .collect(),
+    )
+}
+
 fn record_json_text<'a>(fields: impl IntoIterator<Item = (String, &'a Value)>) -> String {
     let fields = fields
         .into_iter()
@@ -186,6 +205,27 @@ pub(super) fn json_build_array_value(args: &[Value], jsonb: bool) -> Result<Valu
     }
 }
 
+/// JSON object keys must be scalar SQL datums, including when an array-shaped catalog vector has a distinct runtime carrier. Each constructor retains its own NULL-key diagnostic.
+pub fn validate_json_object_key_type(value: &Value) -> Result<()> {
+    if matches!(
+        value,
+        Value::Array(_)
+            | Value::LegacyVector(_)
+            | Value::List(_)
+            | Value::Row(_)
+            | Value::Record(_)
+            | Value::Map(_)
+            | Value::Json(_)
+            | Value::JsonB(_)
+    ) {
+        return Err(SQLError::Routine {
+            sqlstate: "22023".into(),
+            message: "key value must be scalar, not array, composite, or json".into(),
+        });
+    }
+    Ok(())
+}
+
 pub(super) fn json_build_object_value(args: &[Value], jsonb: bool) -> Result<Value> {
     if !args.len().is_multiple_of(2) {
         return Err(SQLError::TypeMismatch(
@@ -199,7 +239,8 @@ pub(super) fn json_build_object_value(args: &[Value], jsonb: bool) -> Result<Val
                 "json_build_object key must not be NULL".into(),
             ));
         }
-        let key = serde_json::Value::String(value_to_string(&pair[0])).to_string();
+        validate_json_object_key_type(&pair[0])?;
+        let key = serde_json::Value::String(super::value_to_string(&pair[0])?).to_string();
         fields.push(format!("{key} : {}", value_to_json_text(&pair[1])));
     }
     let text = format!("{{{}}}", fields.join(", "));
@@ -247,6 +288,7 @@ pub(super) fn value_to_json(v: &Value) -> serde_json::Value {
         Value::Json(text) | Value::JsonB(text) => {
             serde_json::from_str(text).unwrap_or_else(|_| serde_json::Value::String(text.clone()))
         }
+        Value::LegacyVector(vector) => legacy_vector_json(vector),
         Value::Array(array) => {
             serde_json::Value::Array(array.elements().iter().map(value_to_json).collect())
         }

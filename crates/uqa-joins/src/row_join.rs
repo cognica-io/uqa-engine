@@ -119,6 +119,15 @@ fn hash_value<H: Hasher>(value: &Value, state: &mut H) {
                 hash_value(value, state);
             }
         }
+        Value::LegacyVector(vector) => {
+            14_u8.hash(state);
+            vector
+                .write_comparison_key(|bytes| {
+                    state.write(bytes);
+                    Ok::<_, std::convert::Infallible>(())
+                })
+                .expect("hash sink cannot fail");
+        }
         Value::List(values) => {
             5_u8.hash(state);
             values.len().hash(state);

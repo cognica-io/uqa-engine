@@ -42,6 +42,7 @@ pub fn unnest_row_stream(
                 flatten(array.elements(), &mut values);
                 Ok(values)
             }
+            Value::LegacyVector(vector) => Ok(vector.into_array().into_elements()),
             Value::List(items) => Ok(items),
             Value::Null => Ok(Vec::new()),
             _ => Err(SQLError::UnknownFunction(

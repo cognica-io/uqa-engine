@@ -169,3 +169,29 @@ fn nested_values_use_a_charged_traversal_stack_without_cloning_their_payload() {
     );
     assert_eq!(control.memory().used(), key.capacity());
 }
+
+#[test]
+fn legacy_vector_hash_validation_does_not_reject_opaque_reservation_addresses() {
+    use uqa_core::{ArrayValue, LegacyVectorKind, LegacyVectorValue};
+    let invalid = Value::LegacyVector(
+        LegacyVectorValue::try_from_array(
+            LegacyVectorKind::Oid,
+            ArrayValue::try_new(Vec::new()).unwrap(),
+        )
+        .unwrap(),
+    );
+    for value in [
+        invalid.clone(),
+        Value::Array(ArrayValue::try_new(vec![invalid]).unwrap()),
+    ] {
+        crate::canonical_row_key(std::slice::from_ref(&value)).unwrap();
+        let hasher = std::collections::hash_map::RandomState::new();
+        let ExecError::SQL(error) =
+            crate::hash_canonical_row(&hasher, std::iter::once(Some(&value))).unwrap_err()
+        else {
+            panic!("expected SQL hash failure")
+        };
+        assert_eq!(error.sqlstate(), Some("42804"));
+        assert_eq!(error.to_string(), "array is not a valid oidvector");
+    }
+}

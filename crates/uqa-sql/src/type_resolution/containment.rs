@@ -44,7 +44,10 @@ pub(super) fn resolve_operator_type_with_control(
     let compatible = match (&left, &right) {
         (Some(left), Some(right)) => match (base_type(left), base_type(right)) {
             (ColumnType::JsonB, ColumnType::JsonB) => true,
-            (left @ ColumnType::Array(_), right @ ColumnType::Array(_)) => {
+            (left, right)
+                if super::array_element_type(left).is_some()
+                    && super::array_element_type(right).is_some() =>
+            {
                 super::common::same_operator_type_with_control(left, right, control)?
             }
             (
@@ -199,7 +202,12 @@ fn is_unknown_literal(expression: &ScalarExpr) -> bool {
 fn supported_type(ty: &ColumnType) -> bool {
     matches!(
         base_type(ty),
-        ColumnType::Array(_) | ColumnType::JsonB | ColumnType::Range(_) | ColumnType::Multirange(_)
+        ColumnType::Array(_)
+            | ColumnType::Int2Vector
+            | ColumnType::OidVector
+            | ColumnType::JsonB
+            | ColumnType::Range(_)
+            | ColumnType::Multirange(_)
     )
 }
 

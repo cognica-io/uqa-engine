@@ -59,7 +59,7 @@ fn object_keys(args: &[Value]) -> Result<Value> {
             "json_object_keys takes 1 arg".into(),
         ));
     }
-    match json::parse_json(&super::value_to_string(&args[0]))? {
+    match json::parse_json(&super::value_to_string(&args[0])?)? {
         serde_json::Value::Object(map) => Ok(Value::List(
             map.into_iter().map(|(key, _)| Value::Str(key)).collect(),
         )),

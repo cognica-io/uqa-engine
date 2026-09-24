@@ -15,6 +15,22 @@ use crate::error::{Result, SQLError};
 
 use super::cast_value_from_with_control;
 
+/// Binary array coercion retains even an empty explicit dimension; element conversion constructs an ordinary dimensionless empty array.
+pub(super) fn binary_compatible_elements(
+    source: Option<&str>,
+    target: &str,
+    control: &ProductionControl<'_>,
+) -> Result<bool> {
+    let Some(source) = source else {
+        return Ok(true);
+    };
+    let source = crate::ColumnType::from_sql_name_with_control(source, control)?;
+    let target = crate::ColumnType::from_sql_name_with_control(target, control)?;
+    Ok(*source == *target
+        || crate::type_resolution::cast_catalog_entry_with_control(&source, &target, control)?
+            .is_some_and(|entry| entry.method == crate::type_resolution::CastMethod::Binary))
+}
+
 type ArrayDimensions = Produced<Vec<(i32, usize)>>;
 
 /// Parse a `PostgreSQL` array literal (`{1,2,3}`, `{"a b",NULL}`,

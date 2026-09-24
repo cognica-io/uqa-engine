@@ -38,9 +38,11 @@ impl CompiledLikePattern {
             .expect("the default LIKE escape is exactly one character")
     }
 
-    #[must_use]
-    pub fn from_value(pattern: &Value, case_insensitive: bool) -> Self {
-        Self::new(&crate::expr::value_to_string(pattern), case_insensitive)
+    pub fn from_value(pattern: &Value, case_insensitive: bool) -> Result<Self> {
+        Ok(Self::new(
+            &crate::expr::value_to_string(pattern)?,
+            case_insensitive,
+        ))
     }
 
     pub fn with_escape(

@@ -86,8 +86,8 @@ pub(super) fn fold_into(
             state.sum = Some(state.sum.unwrap_or(0.0) + numeric);
             state.count = checked_count_add(state.count, 1)?;
         }
-        AggregateKind::Min => merge_min(&mut state.min, Some(value)),
-        AggregateKind::Max => merge_max(&mut state.max, Some(value)),
+        AggregateKind::Min => merge_min(&mut state.min, Some(value))?,
+        AggregateKind::Max => merge_max(&mut state.max, Some(value))?,
         AggregateKind::CountStar => unreachable!("COUNT(*) returned before argument evaluation"),
     }
     Ok(())
@@ -105,8 +105,8 @@ pub(super) fn merge_fold(target: &mut AggFold, source: AggFold) -> ExecResult<()
         (Some(value), None) | (None, Some(value)) => Some(value),
         (None, None) => None,
     };
-    merge_min(&mut target.min, source.min);
-    merge_max(&mut target.max, source.max);
+    merge_min(&mut target.min, source.min)?;
+    merge_max(&mut target.max, source.max)?;
     Ok(())
 }
 
@@ -115,26 +115,30 @@ fn checked_count_add(left: u64, right: u64) -> ExecResult<u64> {
         .ok_or_else(|| ExecError::Other("aggregate count overflow".into()))
 }
 
-fn merge_min(target: &mut Option<Value>, source: Option<Value>) {
+fn merge_min(target: &mut Option<Value>, source: Option<Value>) -> ExecResult<()> {
     if let Some(source) = source {
-        if target
-            .as_ref()
-            .is_none_or(|current| compare_values(&source, current).is_lt())
-        {
+        let replace = match target.as_ref() {
+            Some(current) => compare_values(&source, current)?.is_lt(),
+            None => true,
+        };
+        if replace {
             *target = Some(source);
         }
     }
+    Ok(())
 }
 
-fn merge_max(target: &mut Option<Value>, source: Option<Value>) {
+fn merge_max(target: &mut Option<Value>, source: Option<Value>) -> ExecResult<()> {
     if let Some(source) = source {
-        if target
-            .as_ref()
-            .is_none_or(|current| compare_values(&source, current).is_gt())
-        {
+        let replace = match target.as_ref() {
+            Some(current) => compare_values(&source, current)?.is_gt(),
+            None => true,
+        };
+        if replace {
             *target = Some(source);
         }
     }
+    Ok(())
 }
 
 pub(super) fn finalise_builtin_group(

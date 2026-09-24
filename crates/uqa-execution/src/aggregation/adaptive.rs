@@ -598,7 +598,7 @@ fn estimate_group_bytes(key: &[Value], accumulators: &[AggregateAccumulator]) ->
                                 .as_ref()
                                 .map_or(0, DecimalValue::retained_bytes),
                         )
-                        .saturating_add(accumulator.distinct.memory_bytes)
+                        .saturating_add(accumulator.distinct.values.memory_bytes)
                         .saturating_add(accumulator.values.memory_bytes)
                         .saturating_add(accumulator.registered_ordered.memory_bytes)
                 })
@@ -612,6 +612,7 @@ fn value_retained_bytes(value: &Value) -> usize {
             value.capacity()
         }
         Value::Bytes(value) => value.capacity(),
+        Value::LegacyVector(vector) => vector.retained_bytes(),
         Value::Array(array) => array
             .retained_header_bytes()
             .saturating_add(

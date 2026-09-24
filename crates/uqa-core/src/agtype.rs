@@ -179,7 +179,7 @@ pub fn agtype_type_ordinal(value: &Value) -> u8 {
             Value::Int(_) => 3,
             Value::Float(_) => 4,
             Value::Bool(_) => 5,
-            Value::Array(_) | Value::List(_) | Value::Row(_) => 9,
+            Value::Array(_) | Value::LegacyVector(_) | Value::List(_) | Value::Row(_) => 9,
             Value::Record(_) | Value::Map(_) => 10,
             Value::Json(text) | Value::JsonB(text) => json_type_ordinal(text),
             Value::Bytes(_) | Value::Temporal(_) => 11,
@@ -201,7 +201,7 @@ pub fn agtype_type_name(value: &Value) -> &'static str {
             Value::Int(_) => "integer",
             Value::Float(_) => "float",
             Value::Decimal(_) => "numeric",
-            Value::Array(_) | Value::List(_) | Value::Row(_) => "list",
+            Value::Array(_) | Value::LegacyVector(_) | Value::List(_) | Value::Row(_) => "list",
             Value::Record(_) | Value::Map(_) => "map",
             Value::Json(text) | Value::JsonB(text) => json_type_name(text),
             Value::Bytes(_) => "bytea",
@@ -286,6 +286,16 @@ fn render_into(value: &Value, out: &mut String) {
             Value::Array(array) => {
                 out.push('[');
                 for (index, item) in array.elements().iter().enumerate() {
+                    if index > 0 {
+                        out.push_str(", ");
+                    }
+                    render_into(item, out);
+                }
+                out.push(']');
+            }
+            Value::LegacyVector(vector) => {
+                out.push('[');
+                for (index, item) in vector.elements().iter().enumerate() {
                     if index > 0 {
                         out.push_str(", ");
                     }
@@ -392,7 +402,7 @@ fn sort_priority(value: &Value) -> u8 {
         Some(EntityKind::Vertex) => 2,
         None => match value {
             Value::Record(_) | Value::Map(_) => 3,
-            Value::Array(_) | Value::List(_) | Value::Row(_) => 4,
+            Value::Array(_) | Value::LegacyVector(_) | Value::List(_) | Value::Row(_) => 4,
             Value::Json(text) | Value::JsonB(text) => json_sort_priority(text),
             Value::Void
             | Value::Str(_)

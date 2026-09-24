@@ -7,7 +7,7 @@
 //! Container predicates retain precise empty ranges and original keys through provider publication.
 
 use super::*;
-use uqa_core::{ArrayValue, Value};
+use uqa_core::{ArrayValue, LegacyVectorKind, LegacyVectorValue, Value};
 
 fn array(values: Vec<Value>) -> Value {
     Value::Array(ArrayValue::try_new(values).unwrap())
@@ -31,12 +31,42 @@ fn tables(seed: &Session, ty: &str, initial: Option<&str>) {
 }
 
 #[rstest::rstest]
+fn legacy_vector_predicates_exclude_other_runtime_carriers(
+    #[values("INT2VECTOR", "OIDVECTOR", "item_int2", "item_oid")] ty: &str,
+) {
+    let (_directory, sessions) = empty_fixtures();
+    for seed in sessions {
+        tables(&seed, ty, None);
+        let a = seed.sibling();
+        let b = seed.sibling();
+        a.begin();
+        b.begin();
+        for value in [
+            array(vec![Value::Int(1), Value::Int(2)]),
+            Value::List(vec![Value::Int(1), Value::Int(2)]),
+        ] {
+            let predicate = Predicate::Equals(value);
+            assert_eq!(index_only(&a, "left_items", &predicate), 0);
+            assert_eq!(index_only(&b, "right_items", &predicate), 0);
+        }
+        a.sql("INSERT INTO right_items VALUES (1, '1 2', 0)");
+        b.sql("INSERT INTO left_items VALUES (1, '1 2', 0)");
+        finish(&a, &b, false);
+    }
+}
+
+#[rstest::rstest]
 fn empty_container_index_ranges_observe_only_matching_future_keys(
     #[values(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)] case_index: usize,
     #[values(false, true)] conflict: bool,
 ) {
     let integers = || array(vec![Value::Int(1), Value::Int(2)]);
     let vector = || Value::List(vec![Value::Int(1), Value::Int(2)]);
+    let legacy = |kind| {
+        Value::LegacyVector(
+            LegacyVectorValue::try_new(kind, vec![Value::Int(1), Value::Int(2)]).unwrap(),
+        )
+    };
     let cases = [
         (
             "INTEGER[]",
@@ -46,37 +76,37 @@ fn empty_container_index_ranges_observe_only_matching_future_keys(
         ),
         (
             "INT2VECTOR",
-            Predicate::Equals(integers()),
+            Predicate::Equals(legacy(LegacyVectorKind::SmallInteger)),
             "'1 2'::int2vector",
             "'1 3'::int2vector",
         ),
         (
             "OIDVECTOR",
-            Predicate::Equals(integers()),
+            Predicate::Equals(legacy(LegacyVectorKind::Oid)),
             "'1 2'::oidvector",
             "'1 3'::oidvector",
         ),
         (
             "item_int2",
-            Predicate::Equals(integers()),
+            Predicate::Equals(legacy(LegacyVectorKind::SmallInteger)),
             "'1 2'::int2vector",
             "'1 3'::int2vector",
         ),
         (
             "item_int2",
-            Predicate::Equals(vector()),
+            Predicate::Equals(legacy(LegacyVectorKind::SmallInteger)),
             "'1 2'::item_int2",
             "'1 3'::item_int2",
         ),
         (
             "item_oid",
-            Predicate::Equals(integers()),
+            Predicate::Equals(legacy(LegacyVectorKind::Oid)),
             "'1 2'::oidvector",
             "'1 3'::oidvector",
         ),
         (
             "item_oid",
-            Predicate::Equals(vector()),
+            Predicate::Equals(legacy(LegacyVectorKind::Oid)),
             "'1 2'::item_oid",
             "'1 3'::item_oid",
         ),

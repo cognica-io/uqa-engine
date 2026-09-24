@@ -82,7 +82,9 @@ fn transcript_cell(value: &Value, ty: Option<&ColumnType>) -> Option<String> {
         Value::Int(value) => value.to_string(),
         Value::Bool(value) => if *value { "t" } else { "f" }.into(),
         value if matches!(ty, Some(ColumnType::OidVector)) => {
-            uqa_sql::expr::vector_value_to_string(value).unwrap()
+            uqa_sql::expr::vector_value_to_string(value)
+                .unwrap()
+                .unwrap()
         }
         value => panic!("unexpected transcript value {value:?}"),
     })

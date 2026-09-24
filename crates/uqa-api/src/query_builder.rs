@@ -805,6 +805,51 @@ mod tests {
     }
 
     #[test]
+    fn legacy_vector_literals_retain_array_function_shapes() {
+        use uqa_core::{ArrayValue, LegacyVectorKind, LegacyVectorValue};
+        for kind in [LegacyVectorKind::SmallInteger, LegacyVectorKind::Oid] {
+            let ty = kind.type_name();
+            for (elements, bounds, expected) in [
+                (vec![Value::Int(1)], vec![0], format!("'1'::{ty}")),
+                (
+                    vec![Value::Int(1)],
+                    vec![1],
+                    format!("trim_array('1'::{ty}, 0)"),
+                ),
+                (vec![], vec![], format!("trim_array('0'::{ty}, 1)")),
+            ] {
+                let value = Value::LegacyVector(
+                    LegacyVectorValue::try_from_array(
+                        kind,
+                        ArrayValue::with_lower_bounds(elements, bounds).unwrap(),
+                    )
+                    .unwrap(),
+                );
+                assert_eq!(render_value(&value).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_vector_arrow_output_reports_invalid_text_layout() {
+        let value = Value::LegacyVector(
+            uqa_core::LegacyVectorValue::try_from_array(
+                uqa_core::LegacyVectorKind::SmallInteger,
+                uqa_core::ArrayValue::try_new(vec![]).unwrap(),
+            )
+            .unwrap(),
+        );
+        let result = SQLResult::from_rows(
+            vec!["value".into()],
+            vec![BTreeMap::from([("value".into(), value)])],
+        );
+        let error = sql_result_to_record_batch(&result).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("42804: array is not a valid int2vector"));
+    }
+
+    #[test]
     fn mixed_numeric_arrow_output_does_not_round_large_integers() {
         let result = SQLResult::from_rows(
             vec!["value".into()],

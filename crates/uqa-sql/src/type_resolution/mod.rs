@@ -19,6 +19,7 @@ mod call;
 mod cast_compatibility;
 mod checksum;
 mod common;
+pub(crate) use common::array_element_type;
 pub(crate) use common::value_type;
 pub(crate) use common::value_type_with_control;
 mod containment;
@@ -40,11 +41,13 @@ mod reverse;
 mod routine_signature;
 mod scalar_input;
 pub use scalar_input::{
-    scalar_integer_operation_width, scalar_integer_operation_width_with_control,
-    scalar_operand_type_name, scalar_operand_type_name_with_control,
+    scalar_cast_source_type_name_with_control, scalar_integer_operation_width,
+    scalar_integer_operation_width_with_control, scalar_operand_type_name,
+    scalar_operand_type_name_with_control,
 };
 mod string_binary;
 
+pub(crate) use cast_compatibility::cast_catalog_entry_with_control;
 pub use cast_compatibility::{
     assignment_type_compatible, cast_catalog_entry, explicit_type_compatible, CastCatalogEntry,
     CastMethod,

@@ -19,6 +19,8 @@ use crate::SQLError;
 
 mod commands;
 use commands::{delete_sql, insert_sql, merge_sql, update_sql};
+mod legacy_vector;
+pub use legacy_vector::legacy_vector_expression;
 
 /// Render one executable statement represented by UQA's durable SQL AST.
 pub fn statement_sql(statement: &Statement) -> Result<String, SQLError> {
@@ -328,8 +330,8 @@ fn render_expr(expression: &Expr) -> Result<String, SQLError> {
                 "executor-only column {column:?} reached durable SQL rendering"
             )))
         }
-        Expr::Literal(value) => value_sql(value),
-        Expr::TypedLiteral { value, ty } => format!("({})::{ty}", value_sql(value)),
+        Expr::Literal(value) => value_sql(value)?,
+        Expr::TypedLiteral { value, ty } => format!("({})::{ty}", value_sql(value)?),
         Expr::Param(index) => format!("${index}"),
         Expr::Func {
             binding: Some(binding),
@@ -829,8 +831,8 @@ fn string_literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
 
-fn value_sql(value: &Value) -> String {
-    match value {
+fn value_sql(value: &Value) -> Result<String, SQLError> {
+    Ok(match value {
         Value::Null => "NULL".into(),
         Value::Void => "''::void".into(),
         Value::Bool(value) => if *value { "true" } else { "false" }.into(),
@@ -863,29 +865,38 @@ fn value_sql(value: &Value) -> String {
         Value::Decimal(value) => format!("{}::numeric", value.to_sql_string()),
         Value::Json(value) => format!("{}::json", string_literal(value)),
         Value::JsonB(value) => format!("{}::jsonb", string_literal(value)),
+        Value::LegacyVector(vector) => legacy_vector_expression(vector)?,
         Value::Array(array) => format!(
             "ARRAY[{}]",
             array
                 .elements()
                 .iter()
                 .map(value_sql)
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, _>>()?
                 .join(", ")
         ),
         Value::List(values) => format!(
             "ARRAY[{}]",
-            values.iter().map(value_sql).collect::<Vec<_>>().join(", ")
+            values
+                .iter()
+                .map(value_sql)
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", ")
         ),
         Value::Row(values) => format!(
             "ROW({})",
-            values.iter().map(value_sql).collect::<Vec<_>>().join(", ")
+            values
+                .iter()
+                .map(value_sql)
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", ")
         ),
         Value::Record(fields) => format!(
             "ROW({})",
             fields
                 .iter()
                 .map(|(_, value)| value_sql(value))
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, _>>()?
                 .join(", ")
         ),
         Value::Map(value) => format!(
@@ -895,7 +906,7 @@ fn value_sql(value: &Value) -> String {
                     .expect("serializing an in-memory Value map cannot fail")
             )
         ),
-    }
+    })
 }
 
 #[cfg(test)]

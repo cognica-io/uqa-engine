@@ -327,15 +327,16 @@ fn physical_sort_comparison_preserves_numeric_total_order() {
         compare_values(
             &Value::Int(9_007_199_254_740_993),
             &Value::Float(9_007_199_254_740_992.0),
-        ),
+        )
+        .unwrap(),
         std::cmp::Ordering::Greater
     );
     assert_eq!(
-        compare_values(&Value::Float(f64::NAN), &Value::Float(f64::INFINITY)),
+        compare_values(&Value::Float(f64::NAN), &Value::Float(f64::INFINITY)).unwrap(),
         std::cmp::Ordering::Greater
     );
     assert_ne!(
-        compare_values(&Value::Bytes(vec![1]), &Value::Bytes(vec![2])),
+        compare_values(&Value::Bytes(vec![1]), &Value::Bytes(vec![2])).unwrap(),
         std::cmp::Ordering::Equal
     );
 }

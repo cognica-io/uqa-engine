@@ -20,6 +20,7 @@ pub(super) fn evaluate(
             }
             let array = match &args[0] {
                 Value::Array(array) => array,
+                Value::LegacyVector(vector) => vector.as_array(),
                 Value::Null => return Ok(Value::Null),
                 other => return Err(not_an_array(name, other)),
             };
@@ -32,9 +33,6 @@ pub(super) fn evaluate(
             let Some(length) = array.dimensions().get(dimension) else {
                 return Ok(Value::Null);
             };
-            if *length == 0 {
-                return Ok(Value::Null);
-            }
             match name {
                 "array_length" => i64::try_from(*length)
                     .map(Value::Int)
@@ -54,21 +52,21 @@ pub(super) fn evaluate(
             if args.len() != 1 {
                 return Err(SQLError::TypeMismatch("array_ndims takes 1 arg".into()));
             }
-            match &args[0] {
-                Value::Array(array) if array.dimensions().is_empty() => Ok(Value::Null),
-                Value::Array(array) => i64::try_from(array.dimensions().len())
+            match args[0].array_view() {
+                Some(array) if array.dimensions().is_empty() => Ok(Value::Null),
+                Some(array) => i64::try_from(array.dimensions().len())
                     .map(Value::Int)
                     .map_err(|_| out_of_range("array dimensions")),
-                Value::Null => Ok(Value::Null),
-                other => Err(not_an_array("array_ndims", other)),
+                None if matches!(args[0], Value::Null) => Ok(Value::Null),
+                None => Err(not_an_array("array_ndims", &args[0])),
             }
         }
         "cardinality" => {
             if args.len() != 1 {
                 return Err(SQLError::TypeMismatch("cardinality takes 1 arg".into()));
             }
-            match &args[0] {
-                Value::Array(array) => {
+            match args[0].array_view() {
+                Some(array) => {
                     let cardinality = array.dimensions().iter().try_fold(
                         i64::from(!array.dimensions().is_empty()),
                         |total, length| {
@@ -82,8 +80,8 @@ pub(super) fn evaluate(
                     )?;
                     Ok(Value::Int(cardinality))
                 }
-                Value::Null => Ok(Value::Null),
-                other => Err(not_an_array("cardinality", other)),
+                None if matches!(args[0], Value::Null) => Ok(Value::Null),
+                None => Err(not_an_array("cardinality", &args[0])),
             }
         }
         _ => unreachable!("scalar array property"),

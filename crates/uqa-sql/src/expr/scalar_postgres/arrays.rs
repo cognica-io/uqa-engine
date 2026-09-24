@@ -56,8 +56,8 @@ fn positions(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced
             "array_positions takes 2 args".into(),
         ));
     }
-    match &args[0] {
-        Value::Array(array) if array.dimensions().len() <= 1 => {
+    match args[0].array_view() {
+        Some(array) if array.dimensions().len() <= 1 => {
             let lower = i64::from(array.lower_bound(0).unwrap_or(1));
             let mut positions = ProductionVec::new(*control);
             for (index, value) in array.elements().iter().enumerate() {
@@ -71,12 +71,13 @@ fn positions(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced
             }
             build(positions.finish()?, None, control, "invalid array result")
         }
-        Value::Array(_) => Err(SQLError::TypeMismatch(
+        Some(_) => Err(SQLError::TypeMismatch(
             "searching for elements in multidimensional arrays is not supported".into(),
         )),
-        Value::Null => inline(Value::Null, control),
-        other => Err(SQLError::TypeMismatch(format!(
-            "array_positions: not an array {other:?}"
+        None if matches!(args[0], Value::Null) => inline(Value::Null, control),
+        None => Err(SQLError::TypeMismatch(format!(
+            "array_positions: not an array {:?}",
+            args[0]
         ))),
     }
 }
@@ -85,8 +86,8 @@ fn replace(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<V
     if args.len() != 3 {
         return Err(SQLError::TypeMismatch("array_replace takes 3 args".into()));
     }
-    match &args[0] {
-        Value::Array(array) => {
+    match args[0].array_view() {
+        Some(array) => {
             let elements = replace_elements(array.elements(), &args[1], &args[2], control)?;
             build(
                 elements,
@@ -95,9 +96,10 @@ fn replace(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<V
                 "array dimensions do not match",
             )
         }
-        Value::Null => inline(Value::Null, control),
-        other => Err(SQLError::TypeMismatch(format!(
-            "array_replace: not an array {other:?}"
+        None if matches!(args[0], Value::Null) => inline(Value::Null, control),
+        None => Err(SQLError::TypeMismatch(format!(
+            "array_replace: not an array {:?}",
+            args[0]
         ))),
     }
 }
@@ -127,7 +129,7 @@ fn join(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Valu
             "array_to_string takes 2-3 args".into(),
         ));
     }
-    let Value::Array(array) = &args[0] else {
+    let Some(array) = args[0].array_view() else {
         if matches!(args[0], Value::Null) {
             return inline(Value::Null, control);
         }
@@ -269,7 +271,7 @@ fn trim(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Valu
     if args.len() != 2 {
         return Err(SQLError::TypeMismatch("trim_array takes 2 args".into()));
     }
-    let Value::Array(array) = &args[0] else {
+    let Some(array) = args[0].array_view() else {
         if matches!(args[0], Value::Null) {
             return inline(Value::Null, control);
         }
@@ -294,21 +296,22 @@ fn trim(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Valu
     for _ in array.lower_bounds() {
         lower_bounds.push_copy(1)?;
     }
-    build(
+    let output = build(
         elements.finish()?,
         Some(lower_bounds.finish()?),
         control,
         "array dimensions do not match",
-    )
+    )?;
+    crate::expr::scalar_array::preserve_polymorphic_array_type(&args[0], output, control)
 }
 
 fn overlap(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
     if args.len() != 2 {
         return Err(SQLError::TypeMismatch("array overlap takes 2 args".into()));
     }
-    match (&args[0], &args[1]) {
-        (Value::Null, _) | (_, Value::Null) => inline(Value::Null, control),
-        (Value::Array(left), Value::Array(right)) => {
+    match (args[0].array_view(), args[1].array_view()) {
+        _ if args.iter().any(|value| matches!(value, Value::Null)) => inline(Value::Null, control),
+        (Some(left), Some(right)) => {
             let mut left = left.elements_with_control(control)?;
             while let Some(value) = left.next_element()? {
                 if matches!(value, Value::Null) {
@@ -355,8 +358,8 @@ fn containment(
     } else {
         (&args[1], &args[0])
     };
-    match (left, right) {
-        (Value::Array(left), Value::Array(right)) => {
+    match (left.array_view(), right.array_view()) {
+        (Some(left), Some(right)) => {
             let mut right = right.elements_with_control(control)?;
             while let Some(value) = right.next_element()? {
                 if matches!(value, Value::Null) || !contains(left, value, control)? {
@@ -365,7 +368,11 @@ fn containment(
             }
             inline(Value::Bool(true), control)
         }
-        (Value::JsonB(_), Value::JsonB(_) | Value::Str(_)) | (Value::Str(_), Value::JsonB(_)) => {
+        _ if matches!(
+            (left, right),
+            (Value::JsonB(_), Value::JsonB(_) | Value::Str(_)) | (Value::Str(_), Value::JsonB(_))
+        ) =>
+        {
             let name = if name == "contains_op" {
                 "json_contains"
             } else {

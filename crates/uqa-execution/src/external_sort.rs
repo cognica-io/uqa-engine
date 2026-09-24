@@ -180,15 +180,19 @@ impl<'a> ExternalSort<'a> {
         force_spill: bool,
     ) -> ExecResult<Option<SortedRun>> {
         let mut records = records;
-        records.sort_unstable_by(|left, right| {
-            compare_records(
-                &self.keys,
-                &self.run_schema,
-                self.input_slots.len(),
-                left,
-                right,
-            )
-        });
+        uqa_core::ordering::sort_by_with_control(
+            &mut records,
+            &mut || Ok(()),
+            |left, right, _| {
+                compare_records(
+                    &self.keys,
+                    &self.run_schema,
+                    self.input_slots.len(),
+                    left,
+                    right,
+                )
+            },
+        )?;
         if let Some(keep) = self.keep {
             records.truncate(keep);
         }
@@ -356,8 +360,8 @@ fn compare_records(
     source_width: usize,
     left: &DecoratedRow,
     right: &DecoratedRow,
-) -> Ordering {
-    compare_sort_key_values_by(keys, |index| {
+) -> ExecResult<Ordering> {
+    Ok(compare_sort_key_values_by(keys, |index| {
         (
             left.row
                 .value(source_width + index)
@@ -367,8 +371,8 @@ fn compare_records(
                 .value(source_width + index)
                 .expect("validated external sort run key"),
         )
-    })
-    .then_with(|| left.sequence.cmp(&right.sequence))
+    })?
+    .then_with(|| left.sequence.cmp(&right.sequence)))
 }
 
 struct RunBatchWriter {
@@ -493,14 +497,14 @@ fn merge_group(
                 keys,
                 run_schema,
                 source_width,
-            );
+            )?;
         }
     }
 
     let mut writer = RunBatchWriter::new(run_schema.clone())?;
     let mut emitted = 0_usize;
     while !heap.is_empty() && keep.is_none_or(|keep| emitted < keep) {
-        let item = heap_pop(&mut heap, keys, run_schema, source_width)
+        let item = heap_pop(&mut heap, keys, run_schema, source_width)?
             .ok_or_else(|| ExecError::Other("external sort merge heap became empty".into()))?;
         let cursor = item.cursor;
         writer.push(&mut output, item.record.row)?;
@@ -514,7 +518,7 @@ fn merge_group(
                 keys,
                 run_schema,
                 source_width,
-            );
+            )?;
         }
     }
     writer.finish(&mut output)?;
@@ -528,7 +532,7 @@ fn compare_heap_items(
     source_width: usize,
     left: &HeapItem,
     right: &HeapItem,
-) -> Ordering {
+) -> ExecResult<Ordering> {
     compare_records(keys, schema, source_width, &left.record, &right.record)
 }
 
@@ -538,12 +542,12 @@ fn heap_push(
     keys: &[SortKey],
     schema: &RowSchema,
     source_width: usize,
-) {
+) -> ExecResult<()> {
     heap.push(item);
     let mut child = heap.len() - 1;
     while child > 0 {
         let parent = (child - 1) / 2;
-        if compare_heap_items(keys, schema, source_width, &heap[child], &heap[parent])
+        if compare_heap_items(keys, schema, source_width, &heap[child], &heap[parent])?
             != Ordering::Less
         {
             break;
@@ -551,6 +555,7 @@ fn heap_push(
         heap.swap(child, parent);
         child = parent;
     }
+    Ok(())
 }
 
 fn heap_pop(
@@ -558,9 +563,9 @@ fn heap_pop(
     keys: &[SortKey],
     schema: &RowSchema,
     source_width: usize,
-) -> Option<HeapItem> {
+) -> ExecResult<Option<HeapItem>> {
     if heap.is_empty() {
-        return None;
+        return Ok(None);
     }
     let smallest = heap.swap_remove(0);
     let mut parent = 0;
@@ -571,14 +576,14 @@ fn heap_pop(
         }
         let right = left + 1;
         let child = if right < heap.len()
-            && compare_heap_items(keys, schema, source_width, &heap[right], &heap[left])
+            && compare_heap_items(keys, schema, source_width, &heap[right], &heap[left])?
                 == Ordering::Less
         {
             right
         } else {
             left
         };
-        if compare_heap_items(keys, schema, source_width, &heap[child], &heap[parent])
+        if compare_heap_items(keys, schema, source_width, &heap[child], &heap[parent])?
             != Ordering::Less
         {
             break;
@@ -586,11 +591,12 @@ fn heap_pop(
         heap.swap(parent, child);
         parent = child;
     }
-    Some(smallest)
+    Ok(Some(smallest))
 }
 
 #[cfg(test)]
 mod tests {
+    mod legacy_vectors;
     use crate::RowSchemaExecution;
     use std::collections::BTreeMap;
     use std::io::Write as _;

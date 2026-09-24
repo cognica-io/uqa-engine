@@ -333,7 +333,7 @@ fn pg_get_serial_sequence_has_postgresql_catalog_identity() {
     assert_eq!(row["prorettype"], Value::Int(25));
     assert_eq!(
         row["proargtypes"],
-        Value::List(vec![Value::Int(25), Value::Int(25)])
+        crate::legacy_vectors::oidvector(vec![Value::Int(25), Value::Int(25)])
     );
 }
 

@@ -56,6 +56,8 @@ mod sql_join;
 mod sql_joins;
 #[path = "sql_lateral.rs"]
 mod sql_lateral;
+#[path = "queries/sql_legacy_vectors.rs"]
+mod sql_legacy_vectors;
 #[path = "sql_limit_offset.rs"]
 mod sql_limit_offset;
 #[path = "sql_nulls_order.rs"]

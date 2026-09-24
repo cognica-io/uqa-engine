@@ -7,7 +7,7 @@
 //! Tabular and expanded query-result rendering.
 
 use super::{ColumnType, PathBuf, SQLResult, Value, Write, HISTORY_FILE};
-use uqa_sql::expr::EngineHook;
+use uqa_sql::{expr::EngineHook, SQLError};
 
 /// Render the result one column per line per row -- mirrors
 /// `PostgreSQL` `psql`'s `\x` expanded display mode.
@@ -15,20 +15,20 @@ pub(super) fn print_result_expanded_with_engine(
     result: &SQLResult,
     engine: &dyn EngineHook,
     out: &mut (impl Write + ?Sized),
-) {
-    print_result_expanded_impl(result, Some(engine), out);
+) -> Result<(), SQLError> {
+    print_result_expanded_impl(result, Some(engine), out)
 }
 
 fn print_result_expanded_impl(
     result: &SQLResult,
     engine: Option<&dyn EngineHook>,
     out: &mut (impl Write + ?Sized),
-) {
+) -> Result<(), SQLError> {
     if result.rows.is_empty() && result.columns.is_empty() {
         if result.affected_rows > 0 {
             let _ = writeln!(out, "{} row(s) affected", result.affected_rows);
         }
-        return;
+        return Ok(());
     }
     let columns: Vec<String> = if result.columns.is_empty() {
         let mut keys: std::collections::BTreeSet<&String> = std::collections::BTreeSet::new();
@@ -49,35 +49,42 @@ fn print_result_expanded_impl(
                 result.value_at(idx, column),
                 result.column_types.get(column).and_then(Option::as_ref),
                 engine,
-            );
+            )?;
             let _ = writeln!(out, "{col:<label_width$} | {value}");
         }
     }
     let _ = writeln!(out, "({} row(s))", result.rows.len());
+    Ok(())
 }
 
 pub(super) fn print_result(result: &SQLResult, out: &mut (impl Write + ?Sized)) {
-    print_result_impl(result, None, out);
+    if let Err(error) = print_result_impl(result, None, out) {
+        let _ = writeln!(
+            out,
+            "ERROR: {}: {error}",
+            error.sqlstate().unwrap_or("XX000")
+        );
+    }
 }
 
 pub(super) fn print_result_with_engine(
     result: &SQLResult,
     engine: &dyn EngineHook,
     out: &mut (impl Write + ?Sized),
-) {
-    print_result_impl(result, Some(engine), out);
+) -> Result<(), SQLError> {
+    print_result_impl(result, Some(engine), out)
 }
 
 fn print_result_impl(
     result: &SQLResult,
     engine: Option<&dyn EngineHook>,
     out: &mut (impl Write + ?Sized),
-) {
+) -> Result<(), SQLError> {
     if result.rows.is_empty() && result.columns.is_empty() {
         if result.affected_rows > 0 {
             let _ = writeln!(out, "{} row(s) affected", result.affected_rows);
         }
-        return;
+        return Ok(());
     }
     let columns: Vec<String> = if result.columns.is_empty() {
         let mut keys: std::collections::BTreeSet<&String> = std::collections::BTreeSet::new();
@@ -111,9 +118,9 @@ fn print_result_impl(
                         engine,
                     )
                 })
-                .collect()
+                .collect::<Result<Vec<_>, _>>()
         })
-        .collect();
+        .collect::<Result<_, _>>()?;
     for row in &stringified_rows {
         for (i, cell) in row.iter().enumerate() {
             if cell.len() > widths[i] {
@@ -134,27 +141,28 @@ fn print_result_impl(
         write_row(out, row, &widths);
     }
     let _ = writeln!(out, "({} row(s))", result.rows.len());
+    Ok(())
 }
 
 /// Emit rows in `PostgreSQL` `COPY TO STDOUT` text format.
 #[cfg(test)]
 fn print_result_copy_text(result: &SQLResult, out: &mut (impl Write + ?Sized)) {
-    print_result_copy_text_impl(result, None, out);
+    print_result_copy_text_impl(result, None, out).unwrap();
 }
 
 pub(super) fn print_result_copy_text_with_engine(
     result: &SQLResult,
     engine: &dyn EngineHook,
     out: &mut (impl Write + ?Sized),
-) {
-    print_result_copy_text_impl(result, Some(engine), out);
+) -> Result<(), SQLError> {
+    print_result_copy_text_impl(result, Some(engine), out)
 }
 
 fn print_result_copy_text_impl(
     result: &SQLResult,
     engine: Option<&dyn EngineHook>,
     out: &mut (impl Write + ?Sized),
-) {
+) -> Result<(), SQLError> {
     let columns: Vec<String> = if result.columns.is_empty() {
         let mut keys: std::collections::BTreeSet<&String> = std::collections::BTreeSet::new();
         for row in &result.rows {
@@ -178,28 +186,29 @@ fn print_result_copy_text_impl(
                     engine,
                 )
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
         let _ = writeln!(out, "{}", cells.join("\t"));
     }
+    Ok(())
 }
 
 #[cfg(test)]
 fn copy_text_cell(value: Option<&Value>) -> String {
-    copy_text_cell_typed(value, None, None)
+    copy_text_cell_typed(value, None, None).unwrap()
 }
 
 fn copy_text_cell_typed(
     value: Option<&Value>,
     ty: Option<&ColumnType>,
     engine: Option<&dyn EngineHook>,
-) -> String {
+) -> Result<String, SQLError> {
     let Some(value) = value.filter(|value| !matches!(value, Value::Null)) else {
-        return "\\N".to_string();
+        return Ok("\\N".to_string());
     };
     let text = match value {
         Value::Bool(true) => "t".to_string(),
         Value::Bool(false) => "f".to_string(),
-        other => value_to_display_typed(Some(other), ty, engine),
+        other => value_to_display_typed(Some(other), ty, engine)?,
     };
     let mut escaped = String::new();
     for character in text.chars() {
@@ -214,25 +223,32 @@ fn copy_text_cell_typed(
             other => escaped.push(other),
         }
     }
-    escaped
+    Ok(escaped)
 }
 
 fn value_to_display_typed(
     value: Option<&Value>,
     ty: Option<&ColumnType>,
     engine: Option<&dyn EngineHook>,
-) -> String {
+) -> Result<String, SQLError> {
     if let Some(text) = value
         .zip(ty)
-        .and_then(|(value, ty)| uqa_sql::expr::format_regtype_value(value, ty, engine).ok())
+        .map(|(value, ty)| uqa_sql::expr::format_regtype_value(value, ty, engine))
+        .transpose()?
         .flatten()
     {
-        return text;
+        return Ok(text);
     }
-    if matches!(ty, Some(ColumnType::Int2Vector | ColumnType::OidVector)) {
-        if let Some(value) = value.and_then(uqa_sql::expr::vector_value_to_string) {
-            return value;
+    if let Some((value, ty)) = value.zip(ty) {
+        if !matches!(value, Value::Null)
+            && uqa_sql::assignment::conversion::contains_legacy_vectors(ty)
+        {
+            return uqa_sql::result::format_postgres_text(value, ty, engine);
         }
+    }
+    if let Some(value @ Value::LegacyVector(_)) = value {
+        return uqa_sql::expr::vector_value_to_string(value)?
+            .ok_or_else(|| SQLError::Internal("invalid vector display carrier".into()));
     }
     value_to_display(value)
 }
@@ -267,8 +283,8 @@ pub(super) fn history_path() -> Option<PathBuf> {
     None
 }
 
-pub(super) fn value_to_display(v: Option<&Value>) -> String {
-    match v {
+pub(super) fn value_to_display(v: Option<&Value>) -> Result<String, SQLError> {
+    Ok(match v {
         Some(Value::Null) | None => "NULL".to_string(),
         Some(Value::Void) => String::new(),
         Some(Value::Bool(b)) => b.to_string(),
@@ -289,27 +305,28 @@ pub(super) fn value_to_display(v: Option<&Value>) -> String {
         }
         Some(Value::Temporal(t)) => t.to_sql_string(),
         Some(Value::Json(text) | Value::JsonB(text)) => text.clone(),
-        Some(Value::Array(array)) => uqa_sql::expr::array_value_to_string(array),
-        Some(Value::List(items)) => pg_array_display(items),
-        Some(value @ (Value::Row(_) | Value::Record(_))) => uqa_sql::expr::value_to_string(value),
+        Some(Value::List(items)) => pg_array_display(items)?,
+        Some(
+            value @ (Value::Array(_) | Value::Row(_) | Value::Record(_) | Value::LegacyVector(_)),
+        ) => uqa_sql::expr::value_to_string(value)?,
         // Maps come from JSON/JSONB values: render canonical JSON the
         // way psql prints jsonb, not a Rust-debug-ish map.
         Some(value @ Value::Map(_)) => json_value_display(value),
-    }
+    })
 }
 
 /// `PostgreSQL` array-literal output: `{1,2,3}`, strings quoted when
 /// they contain structural characters, `NULL` for nulls, booleans as
 /// `t`/`f`, nested arrays recursive.
-pub(super) fn pg_array_display(items: &[Value]) -> String {
-    fn element(v: &Value) -> String {
-        match v {
+pub(super) fn pg_array_display(items: &[Value]) -> Result<String, SQLError> {
+    fn element(v: &Value) -> Result<String, SQLError> {
+        Ok(match v {
             Value::Null => "NULL".to_string(),
             Value::Bool(b) => if *b { "t" } else { "f" }.to_string(),
-            Value::List(items) => pg_array_display(items),
+            Value::List(items) => pg_array_display(items)?,
             Value::Map(_) => json_value_display(v),
             other => {
-                let s = value_to_display(Some(other));
+                let s = value_to_display(Some(other))?;
                 let needs_quotes = s.is_empty()
                     || s.eq_ignore_ascii_case("null")
                     || s.chars()
@@ -320,10 +337,10 @@ pub(super) fn pg_array_display(items: &[Value]) -> String {
                     s
                 }
             }
-        }
+        })
     }
-    let inner: Vec<String> = items.iter().map(element).collect();
-    format!("{{{}}}", inner.join(","))
+    let inner: Vec<String> = items.iter().map(element).collect::<Result<_, _>>()?;
+    Ok(format!("{{{}}}", inner.join(",")))
 }
 
 /// Canonical JSON rendering for JSON/JSONB values inside result
@@ -339,7 +356,8 @@ pub(super) fn json_value_display(v: &Value) -> String {
         Value::Decimal(d) => d.to_sql_string(),
         Value::Str(s) | Value::FixedChar(s) => serde_json::Value::String(s.clone()).to_string(),
         Value::Bytes(_) | Value::Temporal(_) => {
-            serde_json::Value::String(value_to_display(Some(v))).to_string()
+            serde_json::Value::String(value_to_display(Some(v)).expect("byte and temporal output"))
+                .to_string()
         }
         Value::Json(text) | Value::JsonB(text) => text.clone(),
         Value::Array(array) => {
@@ -348,6 +366,10 @@ pub(super) fn json_value_display(v: &Value) -> String {
                 .iter()
                 .map(json_value_display)
                 .collect::<Vec<_>>();
+            format!("[{}]", inner.join(", "))
+        }
+        Value::LegacyVector(vector) => {
+            let inner: Vec<_> = vector.elements().iter().map(json_value_display).collect();
             format!("[{}]", inner.join(", "))
         }
         Value::List(items) | Value::Row(items) => {
@@ -389,17 +411,20 @@ mod tests {
 
     #[test]
     fn float_output_matches_postgresql_special_and_scientific_spelling() {
-        assert_eq!(value_to_display(Some(&Value::Float(f64::NAN))), "NaN");
         assert_eq!(
-            value_to_display(Some(&Value::Float(f64::INFINITY))),
+            value_to_display(Some(&Value::Float(f64::NAN))).unwrap(),
+            "NaN"
+        );
+        assert_eq!(
+            value_to_display(Some(&Value::Float(f64::INFINITY))).unwrap(),
             "Infinity"
         );
         assert_eq!(
-            value_to_display(Some(&Value::Float(f64::NEG_INFINITY))),
+            value_to_display(Some(&Value::Float(f64::NEG_INFINITY))).unwrap(),
             "-Infinity"
         );
         assert_eq!(
-            value_to_display(Some(&Value::Float(7.257_415_615_307_999e306))),
+            value_to_display(Some(&Value::Float(7.257_415_615_307_999e306))).unwrap(),
             "7.257415615307999e+306"
         );
     }
@@ -441,7 +466,7 @@ mod tests {
             )
             .unwrap();
         let mut output = Vec::new();
-        print_result_copy_text_with_engine(&result, &engine, &mut output);
+        print_result_copy_text_with_engine(&result, &engine, &mut output).unwrap();
         assert_eq!(
             String::from_utf8(output).unwrap(),
             "-\tpg_catalog.random\tpg_class\tpg_catalog\tinteger\t{-,integer,999999}\n"

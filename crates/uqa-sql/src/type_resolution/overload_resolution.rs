@@ -57,7 +57,9 @@ pub fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool 
     if actual == declared {
         return true;
     }
-    if declared == "anyarray" && actual.ends_with("[]") {
+    if declared == "anyarray"
+        && (actual.ends_with("[]") || matches!(actual, "int2vector" | "oidvector"))
+    {
         return true;
     }
     if let (Some(actual), Some(declared)) = (actual.strip_suffix("[]"), declared.strip_suffix("[]"))

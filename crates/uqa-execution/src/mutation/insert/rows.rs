@@ -13,6 +13,7 @@ use crate::{
         constraints::{
             lock_document_key_dependencies, lock_existing_document_foreign_key_dependencies,
             validate_document_non_key_constraints, validate_key_constraints,
+            validate_key_constraints_with_previous,
         },
         events::ReferentialActionContext,
         identity::refresh_insert_identity_after_trigger,
@@ -271,11 +272,12 @@ pub fn stage_prepared_insert_row<S: Clone + 'static>(
                 .map(|(_, doc_id)| *doc_id)
                 .or(primary_key_doc_id)
                 .unwrap_or(old_doc_id);
-            validate_key_constraints(
+            validate_key_constraints_with_previous(
                 services.referential.constraints,
                 &new_storage_table,
                 &prepared.new_document,
                 (new_storage_table == old_storage_table).then_some(old_doc_id),
+                (new_storage_table == old_storage_table).then_some(&prepared.old_document),
             )?;
             validate_view_checks(ViewCheckContext {
                 services: services.referential.assignment,

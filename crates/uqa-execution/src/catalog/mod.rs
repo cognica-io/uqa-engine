@@ -11,6 +11,7 @@ pub mod foreign;
 pub mod identity;
 pub mod security;
 pub mod sequence;
+pub mod value_restoration;
 pub mod view;
 
 use security::{

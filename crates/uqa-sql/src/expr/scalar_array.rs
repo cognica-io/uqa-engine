@@ -73,11 +73,17 @@ fn eval_array_function(
         "array_dims" => dimensions(args, control),
         "array_cat" => {
             require_arity(name, args, 2)?;
-            match (&args[0], &args[1]) {
-                (Value::Null, Value::Null) => inline(Value::Null, control),
-                (Value::Null, Value::Array(_)) => Ok(control.copy_value(&args[1])?),
-                (Value::Array(_), Value::Null) => Ok(control.copy_value(&args[0])?),
-                (Value::Array(left), Value::Array(right)) => concatenate(left, right, control),
+            match (args[0].array_view(), args[1].array_view()) {
+                (None, None) if args.iter().all(|value| matches!(value, Value::Null)) => {
+                    inline(Value::Null, control)
+                }
+                (None, Some(array)) if matches!(args[0], Value::Null) => {
+                    rebuild_array(array, copy_elements(array.elements(), control)?, control)
+                }
+                (Some(array), None) if matches!(args[1], Value::Null) => {
+                    rebuild_array(array, copy_elements(array.elements(), control)?, control)
+                }
+                (Some(left), Some(right)) => concatenate(left, right, control),
                 _ => Err(SQLError::TypeMismatch(
                     "array_cat: both args must be arrays".into(),
                 )),
@@ -92,6 +98,7 @@ fn eval_array_function(
             let mut values = ProductionVec::new(*control);
             match &args[0] {
                 Value::Array(array) => flatten_elements(array.elements(), &mut values, control)?,
+                Value::LegacyVector(vector) => copy_into(vector.elements(), &mut values, control)?,
                 Value::Null => {}
                 other => return Err(not_an_array(name, other)),
             }
@@ -116,12 +123,13 @@ fn dimensions(args: &[Value], control: &ProductionControl<'_>) -> Result<Produce
     require_arity("array_dims", args, 1)?;
     let array = match &args[0] {
         Value::Null => return inline(Value::Null, control),
-        Value::Array(array) if array.dimensions().is_empty() => {
-            return inline(Value::Null, control)
-        }
         Value::Array(array) => array,
+        Value::LegacyVector(vector) => vector.as_array(),
         other => return Err(not_an_array("array_dims", other)),
     };
+    if array.dimensions().is_empty() {
+        return inline(Value::Null, control);
+    }
     let mut output = ProductionString::new(*control);
     for (lower, length) in array.lower_bounds().iter().zip(array.dimensions()) {
         let length = i64::try_from(*length).map_err(|_| out_of_range("array dimension"))?;
@@ -143,6 +151,7 @@ fn append(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result
     };
     let array = match source {
         Value::Array(array) if array.dimensions().len() <= 1 => Some(array),
+        Value::LegacyVector(vector) => Some(vector.as_array()),
         Value::Array(_) => {
             return Err(SQLError::TypeMismatch(
                 "argument must be an empty or one-dimensional array".into(),
@@ -177,6 +186,7 @@ fn remove(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Va
     let array = match &args[0] {
         Value::Null => return inline(Value::Null, control),
         Value::Array(array) if array.dimensions().len() <= 1 => array,
+        Value::LegacyVector(vector) => vector.as_array(),
         Value::Array(_) => {
             return Err(SQLError::TypeMismatch(
                 "removing elements from multidimensional arrays is not supported".into(),
@@ -202,6 +212,7 @@ fn position(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<
     let array = match &args[0] {
         Value::Null => return inline(Value::Null, control),
         Value::Array(array) if array.dimensions().len() <= 1 => array,
+        Value::LegacyVector(vector) => vector.as_array(),
         Value::Array(_) => {
             return Err(SQLError::TypeMismatch(
                 "searching for elements in multidimensional arrays is not supported".into(),
@@ -248,7 +259,7 @@ fn reordered(
     if args.iter().any(|arg| matches!(arg, Value::Null)) {
         return inline(Value::Null, control);
     }
-    let Value::Array(array) = &args[0] else {
+    let Some(array) = args[0].array_view() else {
         return Err(not_an_array(name, &args[0]));
     };
     let elements = if name == "array_reverse" {
@@ -259,7 +270,39 @@ fn reordered(
             boolean_option(args.get(2), "array_sort: nulls_first")?.unwrap_or(descending);
         order::sorted_elements(array, descending, nulls_first, json_sort, control)?
     };
-    rebuild_array(array, elements, control)
+    let output = finish_array(
+        ArrayValue::with_lower_bounds_with_control(
+            elements,
+            bounds(array.lower_bounds(), control)?,
+            control,
+        )?,
+        control,
+        || SQLError::Internal("array reorder changed dimensions".into()),
+    )?;
+    preserve_polymorphic_array_type(&args[0], output, control)
+}
+
+pub(in crate::expr) fn preserve_polymorphic_array_type(
+    source: &Value,
+    output: Produced<Value>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let Value::LegacyVector(source) = source else {
+        return Ok(output);
+    };
+    let (Value::Array(array), memory) = output.into_parts() else {
+        return Err(SQLError::Internal(
+            "array function returned a non-array".into(),
+        ));
+    };
+    let array = control.finish(array, memory)?;
+    let vector =
+        uqa_core::LegacyVectorValue::try_from_array_with_control(source.kind(), array, control)?
+            .ok_or_else(|| {
+                SQLError::Internal("array function changed legacy vector element type".into())
+            })?;
+    let (vector, memory) = vector.into_parts();
+    Ok(control.finish(Value::LegacyVector(vector), memory)?)
 }
 
 fn boolean_option(value: Option<&Value>, label: &str) -> Result<Option<bool>> {

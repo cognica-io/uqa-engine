@@ -144,6 +144,11 @@ impl EnforcedKeyExecution for EnforcedKey {
         values: &[Value],
         ignored: Option<DocId>,
     ) -> Result<Option<DocId>, SQLError> {
+        if let Some(ignored) =
+            ignored.filter(|_| values.iter().any(uqa_sql::expr::value_comparison_can_fail))
+        {
+            return find_conflict_excluding(self, context, table, values, ignored);
+        }
         if self.keys.iter().any(|key| key.column().is_none()) {
             let key = local_physical_key(self, context, table)?;
             let indexed = context
@@ -172,8 +177,10 @@ impl EnforcedKeyExecution for EnforcedKey {
                     continue;
                 }
                 if let Some(document) = context.reads.get_document(table, *id)? {
-                    if self.values(context, table, &document)?.as_deref() == Some(values) {
-                        return Ok(Some(*id));
+                    if let Some(actual) = self.values(context, table, &document)? {
+                        if key_values_equal(&actual, values)? {
+                            return Ok(Some(*id));
+                        }
                     }
                 }
             }
@@ -225,12 +232,53 @@ impl EnforcedKeyExecution for EnforcedKey {
             let Some(document) = context.reads.get_document(table, id)? else {
                 continue;
             };
-            if self.values(context, table, &document)?.as_deref() == Some(values) {
-                return Ok(Some(id));
+            if let Some(actual) = self.values(context, table, &document)? {
+                if key_values_equal(&actual, values)? {
+                    return Ok(Some(id));
+                }
             }
         }
         Ok(None)
     }
+}
+
+fn find_conflict_excluding(
+    key: &EnforcedKey,
+    context: ConstraintContext<'_>,
+    table: &str,
+    values: &[Value],
+    ignored: DocId,
+) -> Result<Option<DocId>, SQLError> {
+    // A probe would compare the excluded row with its own key before applying its identity filter. Only other visible rows participate in this uniqueness check; rewrite validation separately compares any retained old index entry.
+    for id in context.reads.live_table_doc_ids(table)? {
+        if id == ignored {
+            continue;
+        }
+        let Some(document) = context.reads.get_document(table, id)? else {
+            continue;
+        };
+        if let Some(actual) = key.values(context, table, &document)? {
+            if key_values_equal(&actual, values)? {
+                return Ok(Some(id));
+            }
+        }
+    }
+    Ok(None)
+}
+
+pub(crate) fn key_values_equal(left: &[Value], right: &[Value]) -> Result<bool, SQLError> {
+    for (left, right) in left.iter().zip(right) {
+        if !uqa_sql::expr::compare_typed_values_with_control(
+            left,
+            right,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )?
+        .is_eq()
+        {
+            return Ok(false);
+        }
+    }
+    Ok(left.len() == right.len())
 }
 
 fn local_physical_key(

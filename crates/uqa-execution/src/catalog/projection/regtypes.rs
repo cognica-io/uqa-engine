@@ -156,7 +156,11 @@ fn type_oid_in_schema(
         .types
         .iter()
         .find(|(_, entry)| entry.namespace_oid == namespace_oid && entry.name == local)?;
-    if array_dimensions == 0 || entry.element_oid != 0 {
+    let true_array = catalog
+        .types
+        .get(&entry.element_oid)
+        .is_some_and(|element| element.array_oid == *oid);
+    if array_dimensions == 0 || true_array {
         return Some(*oid);
     }
     (entry.array_oid != 0).then_some(entry.array_oid)
@@ -426,10 +430,11 @@ fn catalog_int(row: &ResultRow, column: &str) -> Option<i64> {
 }
 
 fn catalog_int_list(row: &ResultRow, column: &str) -> Option<Vec<i64>> {
-    let Some(Value::List(values)) = row.get(column) else {
+    let Some(Value::LegacyVector(vector)) = row.get(column) else {
         return None;
     };
-    values
+    vector
+        .elements()
         .iter()
         .map(|value| match value {
             Value::Int(value) => Some(*value),
@@ -454,6 +459,9 @@ struct RegtypeCatalogEntry {
     array_oid: i64,
     element_oid: i64,
 }
+
+#[cfg(test)]
+mod tests;
 
 /// One immutable catalog snapshot shared by every `reg*` value formatted until catalog state changes.
 #[derive(Debug)]

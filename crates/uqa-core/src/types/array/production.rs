@@ -33,7 +33,11 @@ impl ArrayValue {
         lower_bounds: Option<Produced<Vec<i32>>>,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Produced<Self>>, ValueRetentionError> {
-        let Some(dimensions) = shape::produced(&elements, control)? else {
+        let preserve_empty_dimension = lower_bounds
+            .as_ref()
+            .is_some_and(|bounds| bounds.len() == 1);
+        let Some(dimensions) = shape::produced(&elements, preserve_empty_dimension, control)?
+        else {
             return Ok(None);
         };
         let lower_bounds = match lower_bounds {

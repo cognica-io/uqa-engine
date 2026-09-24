@@ -10,11 +10,10 @@ use super::{out_of_range, ArrayValue, DecimalValue, Result, SQLError, Value};
 
 use uqa_core::memory::{Produced, ProductionControl, ProductionString, ProductionVec};
 
-pub fn value_to_string(value: &Value) -> String {
+/// Produce SQL text, including errors from type output functions.
+pub fn value_to_string(value: &Value) -> Result<String> {
     value_to_string_with_control(value, &ProductionControl::uncontrolled())
-        .expect("ordinary value text production")
-        .into_uncontrolled()
-        .expect("ordinary value text")
+        .map(|text| text.into_uncontrolled().expect("ordinary value text"))
 }
 
 pub fn value_to_string_with_control(
@@ -32,6 +31,9 @@ pub fn value_to_string_with_control(
         Value::Bool(value) => control.copy_text(if *value { "true" } else { "false" })?,
         Value::Temporal(value) => value.to_sql_string_with_control(control)?,
         Value::Array(value) => array_value_to_string_with_control(value, control)?,
+        Value::LegacyVector(_) => {
+            vector_value_to_string_with_control(value, control)?.expect("validated legacy vector")
+        }
         Value::List(_) | Value::Map(_) => {
             return super::json::format_value_as_json_with_control(value, control)
         }
@@ -53,10 +55,9 @@ pub fn value_to_string_with_control(
 }
 
 /// `PostgreSQL`'s legacy vector text format separates values with spaces.
-pub fn vector_value_to_string(value: &Value) -> Option<String> {
+pub fn vector_value_to_string(value: &Value) -> Result<Option<String>> {
     vector_value_to_string_with_control(value, &ProductionControl::uncontrolled())
-        .expect("ordinary vector formatting")
-        .map(|text| text.into_uncontrolled().expect("ordinary vector text"))
+        .map(|text| text.map(|text| text.into_uncontrolled().expect("ordinary vector text")))
 }
 
 pub(super) fn vector_value_to_string_with_control(
@@ -65,6 +66,15 @@ pub(super) fn vector_value_to_string_with_control(
 ) -> Result<Option<Produced<String>>> {
     control.check()?;
     let elements = match value {
+        Value::LegacyVector(vector) => {
+            if !vector.has_vector_layout() {
+                return Err(SQLError::Routine {
+                    sqlstate: "42804".into(),
+                    message: format!("array is not a valid {}", vector.kind().type_name()),
+                });
+            }
+            vector.elements()
+        }
         Value::List(elements) => elements.as_slice(),
         Value::Array(array) if array.dimensions().len() <= 1 => array.elements(),
         _ => return Ok(None),
@@ -79,11 +89,9 @@ pub(super) fn vector_value_to_string_with_control(
     Ok(Some(text.finish()?))
 }
 
-pub fn array_value_to_string(array: &ArrayValue) -> String {
+pub fn array_value_to_string(array: &ArrayValue) -> Result<String> {
     array_value_to_string_with_control(array, &ProductionControl::uncontrolled())
-        .expect("ordinary array formatting")
-        .into_uncontrolled()
-        .expect("ordinary array text")
+        .map(|text| text.into_uncontrolled().expect("ordinary array text"))
 }
 
 pub(super) fn array_value_to_string_with_control(
@@ -100,7 +108,7 @@ fn append_array(
     array: &ArrayValue,
     control: &ProductionControl<'_>,
 ) -> Result<()> {
-    if array.lower_bounds().iter().any(|lower| *lower != 1) {
+    if !array.elements().is_empty() && array.lower_bounds().iter().any(|lower| *lower != 1) {
         for (lower, length) in array.lower_bounds().iter().zip(array.dimensions()) {
             let upper = i64::from(*lower) + i64::try_from(*length).unwrap_or(i64::MAX) - 1;
             text.push_str(&control.format(format_args!("[{lower}:{upper}]"))?)?;

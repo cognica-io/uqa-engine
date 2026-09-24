@@ -7,7 +7,7 @@
 //! Prepare UPDATE row images, routing, transition events, and RETURNING before publication.
 use super::{
     assignment::{validate_view_checks, ViewCheckContext},
-    constraints::validate_key_constraints,
+    constraints::validate_key_constraints_with_previous,
     events::ReferentialActionContext,
     identity::integer_primary_key_doc_id,
     preparation::MutationPreparationContext,
@@ -99,11 +99,12 @@ pub fn prepare_update_row<S: Clone + 'static>(
         .destination
         .as_ref()
         .map_or_else(|| rewrite.table.clone(), |(table, _)| table.clone());
-    validate_key_constraints(
+    validate_key_constraints_with_previous(
         context.referential.constraints,
         &rewritten_storage_table,
         &rewrite.new_document,
         (rewritten_storage_table == rewrite.table).then_some(rewrite.doc_id),
+        (rewritten_storage_table == rewrite.table).then_some(&rewrite.old_document),
     )?;
     validate_view_checks(ViewCheckContext {
         services: context.referential.assignment,

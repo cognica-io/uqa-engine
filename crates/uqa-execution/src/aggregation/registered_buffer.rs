@@ -6,6 +6,8 @@
 
 //! Spillable ordered input buffering for registered aggregates.
 
+use super::ordering::{compare_sort_keys, minimum_by, sort_records};
+
 use super::{
     read_bounded_json_spill_record, write_json_spill_record, BufReader, BufWriter, File,
     JsonSpillRun, Ordering, SQLAggregateState, SQLError, Seek, SeekFrom, Value, Write,
@@ -97,7 +99,7 @@ impl RegisteredAggregateBuffer {
     ) -> Result<(), SQLError> {
         if self.runs.is_empty() {
             let mut rows = self.rows.clone();
-            rows.sort_by(compare_registered_aggregate_records);
+            sort_records(&mut rows, compare_registered_aggregate_records)?;
             for row in rows {
                 state.observe(&row.values)?;
             }
@@ -105,7 +107,7 @@ impl RegisteredAggregateBuffer {
         }
 
         let mut rows = self.rows.clone();
-        rows.sort_by(compare_registered_aggregate_records);
+        sort_records(&mut rows, compare_registered_aggregate_records)?;
         let mut readers = Vec::with_capacity(self.runs.len() + usize::from(!rows.is_empty()));
         if !rows.is_empty() {
             readers.push(RegisteredAggregateRunReader::memory(rows));
@@ -114,12 +116,13 @@ impl RegisteredAggregateBuffer {
             readers.push(RegisteredAggregateRunReader::file(run)?);
         }
 
-        while let Some((idx, _)) = readers
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, reader)| reader.current().map(|record| (idx, record)))
-            .min_by(|(_, a), (_, b)| compare_registered_aggregate_records(a, b))
-        {
+        while let Some((idx, _)) = minimum_by(
+            readers
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, reader)| reader.current().map(|record| (idx, record))),
+            |(_, a), (_, b)| compare_registered_aggregate_records(a, b),
+        )? {
             let record = readers[idx].take_current()?;
             state.observe(&record.values)?;
         }
@@ -130,7 +133,7 @@ impl RegisteredAggregateBuffer {
         if self.rows.is_empty() {
             return Ok(());
         }
-        self.rows.sort_by(compare_registered_aggregate_records);
+        sort_records(&mut self.rows, compare_registered_aggregate_records)?;
         let mut run = uqa_storage::temporary_file::TemporaryFile::new().map_err(|err| {
             SQLError::Internal(format!(
                 "failed to create registered aggregate spill file: {err}"
@@ -264,12 +267,13 @@ pub fn merge_registered_aggregate_runs(runs: Vec<JsonSpillRun>) -> Result<JsonSp
     let mut max_record_bytes = 0;
     {
         let mut writer = BufWriter::new(output.as_file_mut());
-        while let Some((index, _)) = readers
-            .iter()
-            .enumerate()
-            .filter_map(|(index, reader)| reader.current().map(|record| (index, record)))
-            .min_by(|(_, left), (_, right)| compare_registered_aggregate_records(left, right))
-        {
+        while let Some((index, _)) = minimum_by(
+            readers
+                .iter()
+                .enumerate()
+                .filter_map(|(index, reader)| reader.current().map(|record| (index, record))),
+            |(_, left), (_, right)| compare_registered_aggregate_records(left, right),
+        )? {
             let record = readers[index].take_current()?;
             let record_bytes =
                 write_json_spill_record(&mut writer, &record, "registered aggregate merge row")?;
@@ -298,13 +302,7 @@ pub fn merge_registered_aggregate_runs(runs: Vec<JsonSpillRun>) -> Result<JsonSp
 pub fn compare_registered_aggregate_records(
     a: &RegisteredAggregateRecord,
     b: &RegisteredAggregateRecord,
-) -> Ordering {
-    for ((av, ad), (bv, _bd)) in a.sort_keys.iter().zip(b.sort_keys.iter()) {
-        let cmp = av.cmp(bv);
-        let cmp = if *ad { cmp.reverse() } else { cmp };
-        if cmp != Ordering::Equal {
-            return cmp;
-        }
-    }
-    a.sequence.cmp(&b.sequence)
+) -> Result<Ordering, SQLError> {
+    let ordering = compare_sort_keys(&a.sort_keys, &b.sort_keys)?;
+    Ok(ordering.then_with(|| a.sequence.cmp(&b.sequence)))
 }

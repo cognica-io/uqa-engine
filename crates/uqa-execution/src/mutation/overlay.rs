@@ -15,6 +15,7 @@ use uqa_sql::SQLError;
 use uqa_storage::document_store::{Document, DocumentMetadata, RetainedDocumentFields};
 use uqa_storage::{read_control::StorageReadControl, StorageBackendResult};
 
+mod comparison;
 mod exact;
 mod keys;
 use exact::CommandExactIndex;
@@ -47,6 +48,7 @@ pub struct CommandMutationOverlay {
 struct CommandTableOverlay {
     documents: BudgetedMap<DocId, Option<CommandStoredDocument>>,
     exact_indexes: BudgetedMap<FieldSet, CommandExactIndex>,
+    has_fallible_comparison: bool,
     _name_memory: MemoryReservation,
 }
 
@@ -100,6 +102,7 @@ impl CommandMutationOverlay {
         let mut rows = CommandTableOverlay {
             documents: BudgetedMap::new(control.memory()),
             exact_indexes: BudgetedMap::new(control.memory()),
+            has_fallible_comparison: false,
             _name_memory: names,
         };
         rows.stage(id, document, control)?;
@@ -130,6 +133,17 @@ impl CommandMutationOverlay {
             .all(|overlay| overlay.documents(table).is_none())
         {
             return Ok(None);
+        }
+        if values.iter().any(uqa_sql::expr::value_comparison_can_fail)
+            || overlays.iter().any(|overlay| {
+                overlay
+                    .tables
+                    .as_ref()
+                    .and_then(|tables| tables.get(table))
+                    .is_some_and(|table| table.has_fallible_comparison)
+            })
+        {
+            return comparison::find_match(overlays, table, fields, values, presence, control);
         }
         let (fields, key) = keys::lookup_parts(fields, values, control)?;
         for overlay in overlays.iter_mut() {
@@ -200,6 +214,12 @@ impl CommandTableOverlay {
         mut document: Option<CommandStoredDocument>,
         control: &StorageReadControl,
     ) -> Result<(), SQLError> {
+        let has_fallible_comparison = document.as_ref().is_some_and(|document| {
+            document
+                .fields
+                .values()
+                .any(uqa_sql::expr::value_comparison_can_fail)
+        });
         let previous = self.documents.get(&id).and_then(Option::as_ref);
         let mut updates = BudgetedVec::new(control.memory());
         for (fields, index) in &self.exact_indexes {
@@ -218,6 +238,7 @@ impl CommandTableOverlay {
         };
         control.check().map_err(resource_error)?;
         // Every fallible operation precedes publication. Borrow each prepared update in the same immutable field-set order used above; no field-name copies or lookup allocations are needed here.
+        self.has_fallible_comparison |= has_fallible_comparison;
         let mut changes = updates.iter_mut();
         self.exact_indexes.for_each_mut(|_, index| {
             index.apply(id, changes.next().expect("prepared index change").take());

@@ -8,12 +8,13 @@
 
 use super::{
     jsonb::compare_jsonb_text, ArrayValue, BTreeMap, DecimalValue, Deserialize, Deserializer,
-    Serialize, Serializer, TemporalValue,
+    LegacyVectorValue, Serialize, Serializer, TemporalValue,
 };
 
 pub(super) mod comparison_control;
 mod copying;
 mod decoding;
+mod identity;
 mod nonfinite;
 mod retention;
 pub use decoding::JsonValueDecoder;
@@ -49,6 +50,8 @@ pub enum Value {
     JsonB(String),
     /// SQL array value with `PostgreSQL` dimension lower bounds.
     Array(ArrayValue),
+    /// Atomic `int2vector` or `oidvector` with a zero-based array view.
+    LegacyVector(LegacyVectorValue),
     /// Internal generic sequence carrier for vectors, tensors, JSON arrays,
     /// graph lists, and callback payloads. SQL arrays use [`Value::Array`].
     List(Vec<Value>),
@@ -59,6 +62,17 @@ pub enum Value {
     Record(Vec<(String, Value)>),
     /// JSON/document object value. This is not a SQL composite record.
     Map(BTreeMap<String, Value>),
+}
+
+impl Value {
+    /// Borrow SQL array metadata, including a legacy vector's own zero-based dimension. Array construction and row-major traversal still treat a legacy vector as one atomic element.
+    pub fn array_view(&self) -> Option<&ArrayValue> {
+        match self {
+            Self::Array(array) => Some(array),
+            Self::LegacyVector(vector) => Some(vector.as_array()),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -161,6 +175,7 @@ impl Serialize for Value {
                 values: value.elements(),
             }
             .serialize(serializer),
+            Self::LegacyVector(value) => value.serialize(serializer),
             Self::List(value) => value.serialize(serializer),
             Self::Row(values) => TaggedRow {
                 kind: "row",
@@ -362,7 +377,7 @@ fn compare_postgres_container_values(left: &[Value], right: &[Value]) -> std::cm
     left.len().cmp(&right.len())
 }
 
-fn compare_postgres_arrays(left: &ArrayValue, right: &ArrayValue) -> std::cmp::Ordering {
+pub(super) fn compare_postgres_arrays(left: &ArrayValue, right: &ArrayValue) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     let mut left_values = left.flattened_elements();
     let mut right_values = right.flattened_elements();
@@ -435,6 +450,7 @@ impl Ord for Value {
             (Value::Bytes(a), Value::Bytes(b)) => a.cmp(b),
             (Value::Temporal(a), Value::Temporal(b)) => a.cmp(b),
             (Value::Array(a), Value::Array(b)) => compare_postgres_arrays(a, b),
+            (Value::LegacyVector(a), Value::LegacyVector(b)) => a.cmp(b),
             (Value::List(a), Value::List(b)) | (Value::Row(a), Value::Row(b)) => {
                 compare_postgres_container_values(a, b)
             }
@@ -461,6 +477,7 @@ fn discriminant(v: &Value) -> u8 {
         Value::Row(_) => 11,
         Value::Record(_) => 12,
         Value::Map(_) => 13,
+        Value::LegacyVector(_) => 14,
     }
 }
 

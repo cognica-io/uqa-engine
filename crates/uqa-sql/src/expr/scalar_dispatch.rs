@@ -89,11 +89,11 @@ pub(super) fn eval_sequence_function(
         return Ok(Value::Null);
     }
     let value = match name {
-        "nextval" => engine.nextval(&value_to_string(&args[0])),
-        "currval" => engine.currval(&value_to_string(&args[0])),
+        "nextval" => engine.nextval(&value_to_string(&args[0])?),
+        "currval" => engine.currval(&value_to_string(&args[0])?),
         "lastval" => engine.lastval(),
         "setval" => {
-            let seq_name = value_to_string(&args[0]);
+            let seq_name = value_to_string(&args[0])?;
             let n = to_i64(&args[1])?;
             let is_called = match args.get(2) {
                 None => true,

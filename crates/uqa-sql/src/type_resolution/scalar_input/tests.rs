@@ -18,6 +18,40 @@ fn domain(base: ColumnType) -> ColumnType {
 }
 
 #[test]
+fn legacy_vector_cast_sources_retain_domain_identity_without_changing_operators() {
+    let budget = MemoryBudget::new(65_536);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let ty = domain(ColumnType::Int2Vector);
+    let schema = RowSchema::with_types(vec!["value".into()], vec![Some(ty.clone())]);
+    let params = [SQLParam::typed_scalar(Value::Null, ty.clone())];
+    for expression in [
+        ScalarExpr::Column("value".into()),
+        ScalarExpr::Position(0),
+        ScalarExpr::Param(1),
+        ScalarExpr::TypedLiteral {
+            value: Value::Null,
+            ty: "ignored_spelling".into(),
+            bound_type: Some(ty.clone()),
+            parameter_index: None,
+        },
+    ] {
+        let name =
+            scalar_cast_source_type_name_with_control(&expression, &schema, &params, &control)
+                .unwrap()
+                .unwrap();
+        assert_eq!(&*name, &ty.sql_name());
+        drop(name);
+        let name = scalar_operand_type_name_with_control(&expression, &schema, &params, &control)
+            .unwrap()
+            .unwrap();
+        assert_eq!(&*name, "int2vector");
+        drop(name);
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
 fn operand_names_keep_bound_type_and_unknown_literal_precedence() {
     let budget = MemoryBudget::new(65_536);
     let token = CancellationToken::new();
