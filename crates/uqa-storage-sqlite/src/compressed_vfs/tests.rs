@@ -7,6 +7,7 @@
 use super::*;
 
 mod initialization;
+mod read_generation;
 
 #[test]
 fn read_only_database_reopens_with_read_only_lock_sidecars() {
