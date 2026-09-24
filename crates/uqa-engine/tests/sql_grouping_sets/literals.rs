@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Group-expression identities compared with independently captured PostgreSQL results.
+//! Group-expression identities compared with independently captured `PostgreSQL` results.
 
 use super::*;
 use std::{path::Path, sync::Arc};
