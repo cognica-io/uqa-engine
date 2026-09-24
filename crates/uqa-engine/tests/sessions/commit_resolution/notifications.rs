@@ -8,15 +8,16 @@
 
 use super::*;
 
-#[test]
-fn file_notification_publication_retains_its_original_read_only_commit_attempt() {
-    for resolve_with_rollback in [false, true] {
-        let (directory, fixtures) = fixtures();
-        for (index, persistence) in fixtures.into_iter().enumerate() {
+fn file_engines() -> (tempfile::TempDir, Vec<(Arc<FaultPersistence>, Engine)>) {
+    let (directory, fixtures) = fixtures();
+    let engines = fixtures
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, persistence)| {
             let name = match index {
                 0 => "plain.db",
                 4 => "receipt.redb",
-                _ => continue,
+                _ => return None,
             };
             let store: Arc<dyn KeyValueStore> = Arc::new(VersionedKeyValueStore::new(
                 persistence.clone(),
@@ -25,13 +26,25 @@ fn file_notification_publication_retains_its_original_read_only_commit_attempt()
                 )),
                 VersionedSessionOptions::default(),
             ));
-            let root = Engine::from_persistent_backends(
+            let engine = Engine::from_persistent_backends(
                 Arc::new(KeyValueCatalog::new(store.clone())),
                 Arc::new(KeyValueStorageBackend::new(store)),
             )
             .unwrap();
+            Some((persistence, engine))
+        })
+        .collect();
+    (directory, engines)
+}
+
+#[test]
+fn file_notification_publication_retains_its_original_read_only_commit_attempt() {
+    for resolve_with_rollback in [false, true] {
+        let (_directory, engines) = file_engines();
+        for (persistence, root) in engines {
             let listener = root.new_session().unwrap();
             listener.sql("LISTEN commit_events", &[]).unwrap();
+            let peer = root.new_session().unwrap();
             let calls = Arc::new(AtomicUsize::new(0));
             let callback_calls = calls.clone();
             root.register_scalar_function_with_options(
@@ -53,9 +66,21 @@ fn file_notification_publication_retains_its_original_read_only_commit_attempt()
                 .store(LOSE_COMMITTED_REPLY, Ordering::Release);
             assert_unknown(&root.commit().unwrap_err());
             let identity = root.pending_commit().unwrap();
+            listener.poll_sql_notifications().unwrap();
+            let delivered = listener.take_sql_notifications();
+            assert_eq!(delivered.len(), 1);
+            assert_eq!(delivered[0].process_id, root.backend_process_id());
+            assert_eq!(delivered[0].payload, "original payload");
+            peer.sql("NOTIFY commit_events, 'later payload'", &[])
+                .unwrap();
             assert_unknown(&root.commit().unwrap_err());
             assert_eq!(root.pending_commit(), Some(identity));
             assert_eq!(calls.load(Ordering::Acquire), 1);
+            listener.poll_sql_notifications().unwrap();
+            let delivered = listener.take_sql_notifications();
+            assert_eq!(delivered.len(), 1);
+            assert_eq!(delivered[0].process_id, peer.backend_process_id());
+            assert_eq!(delivered[0].payload, "later payload");
             persistence.fault.store(HEALTHY, Ordering::Release);
             if resolve_with_rollback {
                 assert_eq!(root.rollback().unwrap_err().sqlstate(), Some("25000"));
@@ -64,13 +89,57 @@ fn file_notification_publication_retains_its_original_read_only_commit_attempt()
             }
             assert!(root.pending_commit().is_none());
             listener.poll_sql_notifications().unwrap();
-            let delivered = listener.take_sql_notifications();
-            assert_eq!(delivered.len(), 1);
-            assert_eq!(delivered[0].process_id, root.backend_process_id());
-            assert_eq!(delivered[0].payload, "original payload");
-            listener.poll_sql_notifications().unwrap();
             assert!(listener.take_sql_notifications().is_empty());
             assert_eq!(calls.load(Ordering::Acquire), 1);
+        }
+    }
+}
+
+#[test]
+fn unresolved_uncommitted_notifications_allow_consumers_to_finish_transactions() {
+    for resolve_with_rollback in [false, true] {
+        let (_directory, engines) = file_engines();
+        for (persistence, root) in engines {
+            let listener = root.new_session().unwrap();
+            listener.sql("LISTEN commit_events", &[]).unwrap();
+            let peer = root.new_session().unwrap();
+            root.sql("BEGIN READ ONLY; NOTIFY commit_events, 'reserved'", &[])
+                .unwrap();
+            persistence
+                .fault
+                .store(LOSE_UNCOMMITTED_REPLY, Ordering::Release);
+            assert_unknown(&root.commit().unwrap_err());
+            let identity = root.pending_commit().unwrap();
+            listener.sql("BEGIN; SELECT 1; COMMIT", &[]).unwrap();
+            listener.poll_sql_notifications().unwrap();
+            assert!(listener.take_sql_notifications().is_empty());
+            assert_unknown(&root.commit().unwrap_err());
+            assert_eq!(root.pending_commit(), Some(identity));
+            listener.sql("BEGIN; ROLLBACK", &[]).unwrap();
+
+            persistence.fault.store(HEALTHY, Ordering::Release);
+            if resolve_with_rollback {
+                root.rollback().unwrap();
+            } else {
+                root.commit().unwrap();
+            }
+            assert!(root.pending_commit().is_none());
+            listener.poll_sql_notifications().unwrap();
+            let delivered = listener.take_sql_notifications();
+            if resolve_with_rollback {
+                assert!(delivered.is_empty());
+            } else {
+                assert_eq!(delivered.len(), 1);
+                assert_eq!(delivered[0].payload, "reserved");
+                assert_eq!(delivered[0].process_id, root.backend_process_id());
+            }
+            peer.sql("NOTIFY commit_events, 'after resolution'", &[])
+                .unwrap();
+            listener.poll_sql_notifications().unwrap();
+            let delivered = listener.take_sql_notifications();
+            assert_eq!(delivered.len(), 1);
+            assert_eq!(delivered[0].payload, "after resolution");
+            assert_eq!(delivered[0].process_id, peer.backend_process_id());
         }
     }
 }

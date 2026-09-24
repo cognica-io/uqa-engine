@@ -210,7 +210,7 @@ impl<'a> NotificationPublicationView<'a> {
             }
         }
         let subscription = subscription::decode(&mut cursor, bytes.len(), control)?;
-        if !cursor.rest.is_empty() || (count == 0 && subscription.is_none()) {
+        if !cursor.rest.is_empty() {
             return Err(invalid());
         }
         if subscription.is_some_and(|subscription| {

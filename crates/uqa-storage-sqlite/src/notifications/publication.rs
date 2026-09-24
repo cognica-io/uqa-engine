@@ -21,16 +21,17 @@ use uqa_storage::{
     read_control::StorageReadControl,
 };
 
-struct PublicationState {
-    registry_id: [u8; 16],
-    next_publication: u64,
-    acknowledged: Option<[u8; 32]>,
+pub(super) struct PublicationState {
+    pub(super) registry_id: [u8; 16],
+    pub(super) next_publication: u64,
+    pub(super) acknowledged: Option<[u8; 32]>,
+    pub(super) reservation: Option<([u8; 32], [u8; 16])>,
 }
 
-fn state(connection: &Connection) -> StorageBackendResult<PublicationState> {
-    let (registry_id, next, acknowledged) = connection.query_row(
-        "SELECT registry_id, next_publication, acknowledged_fingerprint FROM publication_state WHERE singleton = 1", [],
-        |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, i64>(1)?, row.get::<_, Option<Vec<u8>>>(2)?)),
+pub(super) fn state(connection: &Connection) -> StorageBackendResult<PublicationState> {
+    let (registry_id, next, acknowledged, reserved, owner) = connection.query_row(
+        "SELECT registry_id, next_publication, acknowledged_fingerprint, reserved_fingerprint, reservation_owner FROM publication_state WHERE singleton = 1", [],
+        |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, i64>(1)?, row.get::<_, Option<Vec<u8>>>(2)?, row.get::<_, Option<Vec<u8>>>(3)?, row.get::<_, Option<Vec<u8>>>(4)?)),
     ).map_err(|error| registry_error("read publication state", &error))?;
     Ok(PublicationState {
         registry_id: fixed_bytes(registry_id, "registry identity")?,
@@ -38,6 +39,18 @@ fn state(connection: &Connection) -> StorageBackendResult<PublicationState> {
         acknowledged: acknowledged
             .map(|value| fixed_bytes(value, "publication acknowledgement"))
             .transpose()?,
+        reservation: match (reserved, owner) {
+            (Some(reserved), Some(owner)) => Some((
+                fixed_bytes(reserved, "reserved publication")?,
+                fixed_bytes(owner, "publication reservation owner")?,
+            )),
+            (None, None) => None,
+            _ => {
+                return Err(StorageBackendError::Other(
+                    "incomplete notification reservation".into(),
+                ))
+            }
+        },
     })
 }
 
@@ -203,6 +216,14 @@ fn apply(
             "committed notification conflicts with the registry publication boundary".into(),
         ));
     }
+    if state
+        .reservation
+        .is_some_and(|(reserved, _)| reserved != fingerprint)
+    {
+        return Err(StorageBackendError::Other(
+            "committed notification conflicts with the reserved publication".into(),
+        ));
+    }
     apply_subscription(connection, publication, control)?;
     let mut insert = connection.prepare_cached("INSERT INTO queue_entries (sequence, process_id, channel, payload) VALUES (?1, ?2, ?3, ?4)")
         .map_err(|error| registry_error("prepare recovered queue append", &error))?;
@@ -230,7 +251,7 @@ fn apply(
             ],
         )
         .map_err(|error| registry_error("advance recovered queue state", &error))?;
-    connection.execute("UPDATE publication_state SET next_publication = ?1, acknowledged_fingerprint = ?2 WHERE singleton = 1", params![sqlite_integer(header.publication_sequence + 1, "publication sequence")?, fingerprint.as_slice()])
+    connection.execute("UPDATE publication_state SET next_publication = ?1, acknowledged_fingerprint = ?2, reserved_fingerprint = NULL, reservation_owner = NULL WHERE singleton = 1", params![sqlite_integer(header.publication_sequence + 1, "publication sequence")?, fingerprint.as_slice()])
         .map_err(|error| registry_error("acknowledge recovered publication", &error))?;
     Ok(())
 }

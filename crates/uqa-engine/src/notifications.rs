@@ -60,6 +60,21 @@ mod cross_process {
     pub(super) struct CrossProcessRegistryTransaction;
 
     impl CrossProcessRegistryTransaction {
+        pub(super) fn suspend_publication(
+            &mut self,
+            _publication: &uqa_storage::notifications::NotificationPublication,
+            _owner: [u8; 16],
+        ) -> Result<(), SQLError> {
+            Err(unsupported())
+        }
+        pub(super) fn resume_publication(
+            &mut self,
+            _publication: &uqa_storage::notifications::NotificationPublication,
+            _owner: [u8; 16],
+            _control: &StorageReadControl,
+        ) -> Result<bool, SQLError> {
+            Err(unsupported())
+        }
         pub(super) fn prepare_publication(
             &mut self,
             _process_id: i32,
@@ -114,6 +129,16 @@ mod cross_process {
     pub(super) struct CrossProcessCoordinator;
 
     impl CrossProcessCoordinator {
+        pub(super) fn begin_publication_transaction(
+            &self,
+            _control: &StorageReadControl,
+            _resume: Option<(
+                &uqa_storage::notifications::NotificationPublication,
+                [u8; 16],
+            )>,
+        ) -> Result<CrossProcessRegistryTransaction, SQLError> {
+            Err(unsupported())
+        }
         pub(super) fn initialize_recovery(
             &self,
             _backend: &Arc<dyn PersistentStorageBackend>,
@@ -249,6 +274,8 @@ struct PreparedDelivery {
 pub(super) struct CrossNotificationCommit {
     registry: Option<CrossProcessRegistryTransaction>,
     new_lease: Option<ListenerLease>,
+    publisher_lease: Option<ListenerLease>,
+    publication_applied: bool,
     publication: Option<uqa_storage::notifications::NotificationPublication>,
     previous_publication: Option<[u8; 32]>,
     wake_ports: Vec<u16>,
@@ -352,8 +379,28 @@ pub(super) struct NotificationCommitGuard<'a> {
 }
 
 impl NotificationCommitGuard<'_> {
-    pub(super) fn retain(self) -> Option<Box<CrossNotificationCommit>> {
-        self.cross
+    pub(super) fn retain(mut self) -> (Option<Box<CrossNotificationCommit>>, Result<(), SQLError>) {
+        let suspended = self.cross.as_mut().map_or(Ok(()), |prepared| {
+            if !prepared.publication_applied {
+                if let (Some(registry), Some(publication)) =
+                    (prepared.registry.as_mut(), prepared.publication.as_ref())
+                {
+                    let owner = prepared
+                        .publisher_lease
+                        .as_ref()
+                        .ok_or_else(|| {
+                            SQLError::Internal(
+                                "retained notification has no publication lease".into(),
+                            )
+                        })?
+                        .owner_id();
+                    registry.suspend_publication(publication, owner)?;
+                }
+            }
+            prepared.registry.take();
+            Ok(())
+        });
+        (self.cross, suspended)
     }
 }
 

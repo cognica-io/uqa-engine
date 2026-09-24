@@ -89,11 +89,13 @@ impl Engine {
             if let Err(error) = commit_result {
                 if let Some(error) = Self::retain_pending_completion(stack, &error, false) {
                     if let Some(notification) = publication.notifications.take() {
-                        *stack
-                            .last()
-                            .expect("retained completion has a transaction frame")
-                            .pending_notification_commit
-                            .lock() = notification.retain();
+                        return Err(Self::retain_notification_resources(
+                            stack
+                                .last()
+                                .expect("retained completion has a transaction frame"),
+                            notification,
+                            error,
+                        ));
                     }
                     return Err(error);
                 }
@@ -158,11 +160,11 @@ impl Engine {
                 Err(error) => {
                     if let TransactionStatus::CommitPending(transaction) = status {
                         if let Some(notification) = notification_commit {
-                            *stack
-                                .last()
-                                .expect("retained completion frame")
-                                .pending_notification_commit
-                                .lock() = notification.retain();
+                            return Err(Self::retain_notification_resources(
+                                stack.last().expect("retained completion frame"),
+                                notification,
+                                Self::pending_completion_error(transaction, error),
+                            ));
                         }
                         return Err(Self::pending_completion_error(transaction, error));
                     }
@@ -182,6 +184,21 @@ impl Engine {
             notifications: notification_commit,
             changes: change_publication,
         })
+    }
+
+    fn retain_notification_resources(
+        frame: &TransactionFrame,
+        notification: NotificationCommitGuard<'_>,
+        original: SQLError,
+    ) -> SQLError {
+        let (retained, suspended) = notification.retain();
+        *frame.pending_notification_commit.lock() = retained;
+        match (suspended, frame.status) {
+            (Err(error), TransactionStatus::CommitPending(transaction)) => {
+                Self::pending_completion_error(transaction, format!("{original}; notification reservation could not release its writer: {error}"))
+            }
+            _ => original,
+        }
     }
 
     fn rollback_failed_statistics_preparation(

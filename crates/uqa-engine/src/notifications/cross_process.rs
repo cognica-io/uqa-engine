@@ -75,6 +75,27 @@ impl CrossProcessRegistryTransaction {
             .map_err(registry_error)
     }
 
+    pub(super) fn suspend_publication(
+        &mut self,
+        publication: &NotificationPublication,
+        owner: [u8; 16],
+    ) -> Result<(), SQLError> {
+        self.transaction
+            .suspend_publication(publication, owner)
+            .map_err(registry_error)
+    }
+
+    pub(super) fn resume_publication(
+        &mut self,
+        publication: &NotificationPublication,
+        owner: [u8; 16],
+        control: &StorageReadControl,
+    ) -> Result<bool, SQLError> {
+        self.transaction
+            .resume_publication(publication, owner, control)
+            .map_err(registry_error)
+    }
+
     pub(super) fn allocate_backend_process_id(&self) -> Result<i32, SQLError> {
         self.transaction
             .allocate_backend_process_id()
@@ -287,6 +308,31 @@ impl CrossProcessCoordinator {
             });
         }
         Ok(())
+    }
+
+    pub(super) fn begin_publication_transaction(
+        &self,
+        control: &StorageReadControl,
+        resume: Option<(&NotificationPublication, [u8; 16])>,
+    ) -> Result<CrossProcessRegistryTransaction, SQLError> {
+        let recovery = self.recovery.lock().clone().ok_or_else(|| {
+            SQLError::Internal("notification recovery has no independent storage session".into())
+        })?;
+        let store = recovery
+            .backend
+            .notification_publications()
+            .ok_or_else(|| {
+                SQLError::Internal(
+                    "notification recovery session omitted atomic publication".into(),
+                )
+            })?;
+        self.registry
+            .begin_publishing(store, control, resume, &mut |owner| {
+                self.listener_is_alive(owner, &[])
+                    .map_err(|error| uqa_storage::StorageBackendError::Other(error.to_string()))
+            })
+            .map(|transaction| CrossProcessRegistryTransaction { transaction })
+            .map_err(registry_error)
     }
 
     pub(super) fn recovery_control(&self) -> Result<StorageReadControl, SQLError> {

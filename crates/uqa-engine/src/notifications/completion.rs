@@ -7,8 +7,8 @@
 //! Retained notification resources follow the authoritative storage transaction outcome.
 
 use super::{
-    CrossNotificationRequest, CrossProcessState, Engine, NotificationCommitGuard,
-    NotificationSessionCommit, SQLError,
+    CrossNotificationCommit, CrossNotificationRequest, CrossProcessState, Engine,
+    NotificationCommitGuard, NotificationSessionCommit, SQLError,
 };
 
 impl Engine {
@@ -37,7 +37,14 @@ impl Engine {
         if !outer {
             return Ok(None);
         }
-        if let Some(prepared) = transaction.pending_notification_commit.lock().take() {
+        let retained = transaction.pending_notification_commit.lock().take();
+        if let Some(mut prepared) = retained {
+            if prepared.registry.is_none() {
+                if let Err(error) = self.restore_notification_commit(transaction, &mut prepared) {
+                    *transaction.pending_notification_commit.lock() = Some(prepared);
+                    return Err(error);
+                }
+            }
             return Ok(Some(NotificationCommitGuard {
                 _gate: self.notification_hub.commit_gate.lock(),
                 cross: Some(prepared),
@@ -61,7 +68,13 @@ impl Engine {
             .transpose()?;
         let registry = cross
             .as_ref()
-            .map(|cross| cross.begin_registry_transaction())
+            .map(|cross| {
+                if self.prepares_persistent_notification(transaction) {
+                    cross.begin_publication_transaction(&control, None)
+                } else {
+                    cross.begin_registry_transaction()
+                }
+            })
             .transpose()?;
         let commit = self.notification_hub.commit_gate.lock();
         let prepared = if let (Some(cross), Some(registry)) = (cross, registry) {
@@ -114,6 +127,51 @@ impl Engine {
             _gate: commit,
             cross: prepared,
         }))
+    }
+
+    fn restore_notification_commit(
+        &self,
+        transaction: &crate::TransactionFrame,
+        prepared: &mut CrossNotificationCommit,
+    ) -> Result<(), SQLError> {
+        let cross = self
+            .notification_hub
+            .cross
+            .as_ref()
+            .ok_or_else(|| SQLError::Internal("retained notification lost its coordinator".into()))?
+            .coordinator()?;
+        let control = cross.recovery_control()?;
+        if let Some(publication) = prepared.publication.as_ref() {
+            let owner = prepared
+                .publisher_lease
+                .as_ref()
+                .ok_or_else(|| {
+                    SQLError::Internal("retained notification lost its publication lease".into())
+                })?
+                .owner_id();
+            let mut registry =
+                cross.begin_publication_transaction(&control, Some((publication, owner)))?;
+            prepared.publication_applied =
+                registry.resume_publication(publication, owner, &control)?;
+            prepared.registry = Some(registry);
+        } else {
+            let channels =
+                transaction.final_listened_channels(&self.session.state.read().listened_channels);
+            let registry = cross.begin_registry_transaction()?;
+            *prepared = self.notification_hub.prepare_cross_commit(
+                &cross,
+                registry,
+                CrossNotificationRequest {
+                    session_id: self.session_id,
+                    process_id: self.backend_process_id(),
+                    channels: &channels,
+                    pending: &[],
+                    control: &control,
+                    durable_publication: false,
+                },
+            )?;
+        }
+        Ok(())
     }
 
     pub(crate) fn commit_notification_state(

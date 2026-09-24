@@ -7,6 +7,7 @@
 //! Physical notification registry transactions and encrypted connection ownership.
 
 mod publication;
+mod reservations;
 mod schema;
 #[cfg(test)]
 mod tests;
@@ -43,6 +44,7 @@ pub struct NotificationRegistryTransaction {
     finished: bool,
     poisoned: bool,
     pending_acknowledgement: Option<[u8; 32]>,
+    preparing: bool,
 }
 
 impl NotificationRegistryTransaction {
@@ -325,6 +327,7 @@ fn open_registry_transaction(
         finished: false,
         poisoned: false,
         pending_acknowledgement: None,
+        preparing: false,
     };
     schema::validate_writer(&transaction.connection).map_err(StorageBackendError::Other)?;
     Ok(transaction)

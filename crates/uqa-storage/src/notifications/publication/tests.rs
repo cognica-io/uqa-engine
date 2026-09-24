@@ -90,6 +90,33 @@ fn publication_matches_independent_framing_and_page_boundary_expectations() {
 }
 
 #[test]
+fn publication_without_receivers_preserves_identity_without_advancing_the_queue() {
+    let control = StorageReadControl::with_limit(4_096);
+    let first =
+        NotificationPublication::encode(start([0xab; 16], 17, 8_180, 42), &[], None, &control)
+            .unwrap();
+    let expected = concat!(
+        "UQA notification publication 2\n",
+        "abababababababababababababababab\n11\n17\n8180\n42\n0\n\n0\n"
+    );
+    assert_eq!(first.bytes(), expected.as_bytes());
+    let decoded = NotificationPublicationView::decode(
+        expected.as_bytes(),
+        &StorageReadControl::with_limit(0),
+    )
+    .unwrap();
+    assert_eq!(decoded.header().first_sequence, 17);
+    assert_eq!(decoded.header().next_sequence, 17);
+    assert_eq!(decoded.header().end_position, 8_180);
+    assert!(decoded.messages().next().is_none());
+    assert!(decoded.subscription().is_none());
+    let mut later = start([0xab; 16], 17, 8_180, 42);
+    later.publication_sequence = 12;
+    let later = NotificationPublication::encode(later, &[], None, &control).unwrap();
+    assert_ne!(first.fingerprint(), later.fingerprint());
+}
+
+#[test]
 fn every_truncated_record_and_trailing_data_are_rejected() {
     let control = StorageReadControl::with_limit(0);
     for end in 0..RECORD.len() {
@@ -240,10 +267,6 @@ fn identities_and_position_arithmetic_cannot_wrap() {
         ));
         assert_eq!(control.memory().used(), 0);
     }
-    assert!(matches!(
-        NotificationPublication::encode(start([1; 16], 0, 0, 1), &[], None, &control),
-        Err(VersionError::InvalidEncoding(_))
-    ));
 }
 
 #[test]

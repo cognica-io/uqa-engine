@@ -467,16 +467,15 @@ impl NotificationHub {
         }
 
         let pending = if listeners.is_empty() { &[] } else { pending };
-        let publication = if !durable_publication || (pending.is_empty() && subscription.is_none())
-        {
-            None
-        } else {
+        let publication = if durable_publication {
             Some(registry.prepare_publication(
                 process_id,
                 pending,
                 subscription.as_ref(),
                 control,
             )?)
+        } else {
+            None
         };
         let queue_state = Self::load_cross_queue_state(&registry)?;
         let local_owner_ids = Self::local_owner_ids(&state);
@@ -493,9 +492,15 @@ impl NotificationHub {
         wake_ports.dedup();
 
         let warning = self.cross_queue_warning(&state, &listeners, queue_state);
+        let publisher_lease = publication
+            .as_ref()
+            .map(|_| cross.create_listener_lease())
+            .transpose()?;
         Ok(CrossNotificationCommit {
             registry: Some(registry),
             new_lease,
+            publisher_lease,
+            publication_applied: false,
             publication,
             previous_publication,
             wake_ports,

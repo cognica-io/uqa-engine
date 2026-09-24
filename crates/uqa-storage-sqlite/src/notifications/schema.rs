@@ -170,12 +170,15 @@ fn create_publication_schema(transaction: &rusqlite::Transaction<'_>) -> Result<
              singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
              registry_id BLOB NOT NULL CHECK (length(registry_id) = 16 AND registry_id != zeroblob(16)),
              next_publication INTEGER NOT NULL CHECK (next_publication >= 0),
-             acknowledged_fingerprint BLOB CHECK (acknowledged_fingerprint IS NULL OR length(acknowledged_fingerprint) = 32)
+             acknowledged_fingerprint BLOB CHECK (acknowledged_fingerprint IS NULL OR length(acknowledged_fingerprint) = 32),
+             reserved_fingerprint BLOB CHECK (reserved_fingerprint IS NULL OR length(reserved_fingerprint) = 32),
+             reservation_owner BLOB CHECK (reservation_owner IS NULL OR length(reservation_owner) = 16),
+             CHECK ((reserved_fingerprint IS NULL) = (reservation_owner IS NULL))
          ) STRICT;"
     ).map_err(|error| format!("create asynchronous notification publication state: {error}"))?;
     transaction
         .execute(
-            "INSERT INTO publication_state VALUES (1, ?1, 0, NULL)",
+            "INSERT INTO publication_state VALUES (1, ?1, 0, NULL, NULL, NULL)",
             [registry_id.as_slice()],
         )
         .map_err(|error| {
@@ -200,7 +203,7 @@ fn create_publication_schema(transaction: &rusqlite::Transaction<'_>) -> Result<
 
 fn validate_publication_schema(transaction: &rusqlite::Transaction<'_>) -> Result<(), String> {
     let valid_rows = transaction.query_row(
-        "SELECT count(*) FROM publication_state WHERE singleton = 1 AND typeof(registry_id) = 'blob' AND length(registry_id) = 16 AND registry_id != zeroblob(16) AND typeof(next_publication) = 'integer' AND next_publication >= 0 AND (acknowledged_fingerprint IS NULL OR (typeof(acknowledged_fingerprint) = 'blob' AND length(acknowledged_fingerprint) = 32))", [], |row| row.get::<_, i64>(0),
+        "SELECT count(*) FROM publication_state WHERE singleton = 1 AND typeof(registry_id) = 'blob' AND length(registry_id) = 16 AND registry_id != zeroblob(16) AND typeof(next_publication) = 'integer' AND next_publication >= 0 AND (acknowledged_fingerprint IS NULL OR (typeof(acknowledged_fingerprint) = 'blob' AND length(acknowledged_fingerprint) = 32)) AND ((reserved_fingerprint IS NULL AND reservation_owner IS NULL) OR (typeof(reserved_fingerprint) = 'blob' AND length(reserved_fingerprint) = 32 AND typeof(reservation_owner) = 'blob' AND length(reservation_owner) = 16))", [], |row| row.get::<_, i64>(0),
     ).map_err(|error| format!("validate asynchronous notification publication state: {error}"))?;
     let rows = transaction
         .query_row("SELECT count(*) FROM publication_state", [], |row| {
