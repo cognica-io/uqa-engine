@@ -5,12 +5,13 @@
 //
 
 use super::*;
+mod context;
 use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 use uqa_core::{ArrayValue, LegacyVectorKind, LegacyVectorValue, RelationIdentity, Value};
 use uqa_storage::{
     catalog::{ColumnStatsInput, RelationSecurityRow, TableSchema},
-    DocumentMetadata, KeyValueCatalog, KeyValueStorageBackend, KeyValueStore, MemoryKeyValueStore,
-    StoredDocument, ValueIndexEntry, ValueIndexKey,
+    DocumentMetadata, KeyValueCatalog, KeyValueStorageBackend, KeyValueStore, StoredDocument,
+    ValueIndexEntry, ValueIndexKey,
 };
 
 const TABLE: &str = "public.legacy_items";
@@ -23,7 +24,7 @@ struct Fixture {
 
 impl Fixture {
     fn new(rows: u64) -> Self {
-        let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
+        let store: Arc<dyn KeyValueStore> = Arc::new(context::ControlledStore::new());
         let catalog = KeyValueCatalog::new(store.clone());
         catalog.save_schema("public").unwrap();
         let backend = KeyValueStorageBackend::new(store.clone());
@@ -158,7 +159,15 @@ struct Rebuild<'a> {
 
 impl ValueRestorationSession for Rebuild<'_> {
     fn index_build_context(&self) -> crate::schema::indexes::IndexBuildContext<'_> {
-        unreachable!("these scheduler fixtures contain only non-unique indexes")
+        crate::schema::indexes::IndexBuildContext {
+            catalog: self.fixture,
+            reads: self.fixture,
+            expressions: crate::mutation::constraints::index_keys::IndexExpressionContext {
+                catalog: self.fixture,
+                expressions: self.fixture,
+            },
+            memory: self.fixture,
+        }
     }
 
     fn rebuild_value_indexes_and_refresh_statistics(
@@ -272,6 +281,56 @@ fn failed_rebuild_rolls_back_rows_indexes_statistics_and_version() {
         );
     }
     assert_eq!(fixture.catalog.get_metadata(VERSION_KEY).unwrap(), None);
+}
+
+#[test]
+fn restored_unique_keys_are_validated_before_rebuilding_or_marking_completion() {
+    let fixture = Fixture::new(2);
+    let duplicate = fixture.row(1);
+    fixture
+        .backend
+        .document_store(TABLE)
+        .put_stored(2, duplicate.clone())
+        .unwrap();
+    let mut index = fixture.catalog.load_catalog_indexes().unwrap().remove(0);
+    let mut definition = super::super::index::index_definition(&index).unwrap();
+    definition.unique = true;
+    index.definition_json = Some(serde_json::to_string(&definition).unwrap());
+    fixture.catalog.save_catalog_index_row(&index).unwrap();
+    let restore = fixture.restore(false);
+    fixture.backend.begin_transaction().unwrap();
+    let error = normalize_legacy_vectors(&fixture.catalog, &fixture.backend, &restore).unwrap_err();
+    assert!(error.to_string().contains("legacy_key"), "{error}");
+    assert!(restore.calls.borrow().is_empty());
+    assert_eq!(fixture.catalog.get_metadata(VERSION_KEY).unwrap(), None);
+    fixture.backend.rollback_transaction().unwrap();
+    assert_eq!(fixture.row(1), duplicate);
+    assert_eq!(fixture.row(2), duplicate);
+    assert_eq!(
+        fixture.backend.retention_control().unwrap().memory().used(),
+        0
+    );
+}
+
+#[test]
+fn restoration_uses_the_backend_allowance_and_preserves_rows_on_exhaustion() {
+    let fixture = Fixture::new(2);
+    let original = fixture.row(1);
+    let restore = fixture.restore(false);
+    let control = fixture.backend.retention_control().unwrap();
+    let exhausted = control.memory().reserve(control.memory().limit()).unwrap();
+    fixture.backend.begin_transaction().unwrap();
+    assert!(matches!(
+        normalize_legacy_vectors(&fixture.catalog, &fixture.backend, &restore),
+        Err(StorageBackendError::Memory(_))
+    ));
+    fixture.backend.rollback_transaction().unwrap();
+    assert!(restore.calls.borrow().is_empty());
+    assert_eq!(fixture.row(1), original);
+    assert_eq!(fixture.catalog.get_metadata(VERSION_KEY).unwrap(), None);
+    assert_eq!(control.memory().used(), control.memory().limit());
+    drop(exhausted);
+    assert_eq!(control.memory().used(), 0);
 }
 
 #[test]
