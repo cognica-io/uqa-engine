@@ -6,7 +6,7 @@
 
 use crate::ast::{ColumnType, FunctionBinding};
 use crate::{SQLError, SQLParam};
-use uqa_core::memory::ProductionControl;
+use uqa_core::memory::{Produced, ProductionControl};
 
 use crate::{scalar_call_argument, schema::ScalarTypeSchema, ScalarExpr};
 
@@ -44,6 +44,24 @@ pub fn builtin_function_argument_targets(
     }
     let mut targets = argument_types.to_vec();
     match name {
+        "array_cat" | "array_append" | "array_prepend" | "array_remove" | "array_replace" => {
+            if let Ok(Some(array)) = compatible_array_result_type(
+                name,
+                argument_types,
+                &ProductionControl::uncontrolled(),
+            ) {
+                let ColumnType::Array(element) = &*array else {
+                    unreachable!("compatible array result");
+                };
+                for (position, target) in targets.iter_mut().enumerate() {
+                    *target = Some(if compatible_array_argument(name, position) {
+                        (*array).clone()
+                    } else {
+                        (**element).clone()
+                    });
+                }
+            }
+        }
         "upper" | "lower" | "initcap" | "trim" | "btrim" | "ltrim" | "rtrim" | "analyze_text"
         | "create_analyzer" | "drop_analyzer" | "set_table_analyzer" | "fts_index_stats" => {
             targets.fill(Some(ColumnType::Text));
@@ -63,6 +81,39 @@ pub fn builtin_function_argument_targets(
         _ => {}
     }
     targets
+}
+
+fn compatible_array_argument(name: &str, position: usize) -> bool {
+    name == "array_cat" || position == usize::from(name == "array_prepend")
+}
+
+pub(super) fn compatible_array_result_type(
+    name: &str,
+    argument_types: &[Option<ColumnType>],
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    let mut element: Option<Produced<ColumnType>> = None;
+    for (position, argument) in argument_types.iter().enumerate() {
+        control.check()?;
+        let Some(argument) = argument else { continue };
+        let candidate = if compatible_array_argument(name, position) {
+            let Some(element) = super::array_element_type(argument) else {
+                return Ok(None);
+            };
+            element
+        } else {
+            argument
+        };
+        element = Some(match element {
+            None => candidate.clone_with_control(control)?,
+            Some(previous) => {
+                super::common::common_type_with_control(&previous, candidate, control)?
+            }
+        });
+    }
+    element
+        .map(|element| ColumnType::array_with_control(element, control).map_err(Into::into))
+        .transpose()
 }
 
 pub(super) fn builtin_function_type_inner(

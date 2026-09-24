@@ -237,10 +237,10 @@ fn duplicate_normalized_keys_roll_back_initial_open(#[values(0, 1, 2)] provider:
     let backend = engine.storage.backend.as_ref().unwrap().clone();
     let catalog = engine.storage.catalog.as_ref().unwrap().clone();
     let before = snapshot(backend.as_ref(), catalog.as_ref());
+    let provider = engine.storage.provider.as_ref().unwrap().clone();
     drop(engine);
-    let error = match open(provider, &path) {
-        Ok(_) => panic!("duplicate normalized keys must abort initial restoration"),
-        Err(error) => error,
+    let Err(error) = Engine::from_persistent_provider(provider) else {
+        panic!("duplicate normalized keys must abort initial restoration");
     };
     let StorageBackendError::Backend { source, .. } = error else {
         panic!("expected the typed unique-index validation error: {error}")

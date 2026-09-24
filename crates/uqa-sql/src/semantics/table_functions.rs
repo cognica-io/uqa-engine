@@ -252,10 +252,13 @@ fn builtin_table_function_overloads(
             ),
         ],
         "unnest" => {
-            let [Some(ColumnType::Array(element))] = argument_types else {
+            let [Some(argument)] = argument_types else {
                 return Vec::new();
             };
-            vec![overload(vec![ColumnType::AnyArray], 0, (**element).clone())]
+            let Some(element) = crate::type_resolution::array_element_type(argument) else {
+                return Vec::new();
+            };
+            vec![overload(vec![ColumnType::AnyArray], 0, element.clone())]
         }
         "regexp_split_to_table" | "string_to_table" => vec![overload(
             vec![ColumnType::Text, ColumnType::Text],
@@ -517,10 +520,7 @@ pub fn table_function_column_types(
                     crate::scalar_type_with_resolver(argument, input_schema, params, resolver)
                         .ok()
                         .flatten()
-                        .and_then(|ty| match ty {
-                            ColumnType::Array(element) => Some(*element),
-                            _ => None,
-                        })
+                        .and_then(|ty| crate::type_resolution::array_element_type(&ty).cloned())
                 })
                 .collect(),
             "regexp_split_to_table"

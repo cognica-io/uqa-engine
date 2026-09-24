@@ -208,7 +208,12 @@ pub(super) fn eval_scalar_inner(
             control,
         ),
         ScalarExpr::Cast { expr, ty } => {
-            let source_ty = scalar_source_type(expr, context, control)?;
+            let source_ty = uqa_sql::type_resolution::scalar_cast_source_type_name_with_control(
+                expr,
+                context.row_schema().unwrap_or(&crate::RowSchema::default()),
+                context.params(),
+                control,
+            )?;
             let value = eval_scalar_inner(expr, context, control)?;
             cast_value_with_type_resolution_with_control(
                 &value,

@@ -73,11 +73,17 @@ fn eval_array_function(
         "array_dims" => dimensions(args, control),
         "array_cat" => {
             require_arity(name, args, 2)?;
-            match (&args[0], &args[1]) {
-                (Value::Null, Value::Null) => inline(Value::Null, control),
-                (Value::Null, Value::Array(_)) => Ok(control.copy_value(&args[1])?),
-                (Value::Array(_), Value::Null) => Ok(control.copy_value(&args[0])?),
-                (Value::Array(left), Value::Array(right)) => concatenate(left, right, control),
+            match (args[0].array_view(), args[1].array_view()) {
+                (None, None) if args.iter().all(|value| matches!(value, Value::Null)) => {
+                    inline(Value::Null, control)
+                }
+                (None, Some(array)) if matches!(args[0], Value::Null) => {
+                    rebuild_array(array, copy_elements(array.elements(), control)?, control)
+                }
+                (Some(array), None) if matches!(args[1], Value::Null) => {
+                    rebuild_array(array, copy_elements(array.elements(), control)?, control)
+                }
+                (Some(left), Some(right)) => concatenate(left, right, control),
                 _ => Err(SQLError::TypeMismatch(
                     "array_cat: both args must be arrays".into(),
                 )),

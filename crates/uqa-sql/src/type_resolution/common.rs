@@ -69,6 +69,15 @@ pub(super) fn base_type(mut ty: &ColumnType) -> &ColumnType {
     ty.without_temporal_modifiers()
 }
 
+pub(crate) fn array_element_type(ty: &ColumnType) -> Option<&ColumnType> {
+    match base_type(ty) {
+        ColumnType::Array(element) => Some(element),
+        ColumnType::Int2Vector => Some(&ColumnType::SmallInteger),
+        ColumnType::OidVector => Some(&ColumnType::Oid),
+        _ => None,
+    }
+}
+
 pub fn values_column_types(
     rows: &[Vec<ScalarExpr>],
     params: &[SQLParam],
