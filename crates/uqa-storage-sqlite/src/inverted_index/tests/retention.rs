@@ -10,6 +10,40 @@ use uqa_storage::{
 };
 
 #[test]
+fn unbound_snapshots_preserve_replacement_deletion_and_nested_lifetimes() {
+    let mut index = idx_with_analyzer(uqa_analysis::whitespace_analyzer());
+    index
+        .add_document(1, fields([("body", "alpha alpha")]))
+        .unwrap();
+    index
+        .add_document(2, fields([("body", "alpha beta")]))
+        .unwrap();
+    let revision = index.index_analyzer_revision("body").unwrap();
+    let before = index
+        .get_occurrence_postings("body", &TokenTermKey::from_text("alpha"))
+        .unwrap();
+    let captured = index.snapshot().unwrap();
+    index.add_document(1, fields([("body", "gamma")])).unwrap();
+    index.remove_document(2).unwrap();
+    assert_eq!(index.doc_freq("body", "alpha").unwrap(), 0);
+    assert_eq!(captured.doc_freq("body", "alpha").unwrap(), 2);
+    let nested = captured.snapshot().unwrap();
+    drop((captured, index));
+    assert_eq!(
+        nested
+            .get_occurrence_postings("body", &TokenTermKey::from_text("alpha"))
+            .unwrap(),
+        before
+    );
+    assert_eq!(nested.get_doc_length(1, "body").unwrap(), 2);
+    assert_eq!(nested.doc_count().unwrap(), 2);
+    assert!(Arc::ptr_eq(
+        &nested.index_analyzer_revision("body").unwrap(),
+        &revision
+    ));
+}
+
+#[test]
 fn native_capture_admits_binding_names_and_releases_them_with_the_last_reader() {
     let mut index = idx_with_analyzer(uqa_analysis::whitespace_analyzer());
     let field = "native_field_".repeat(8192);
