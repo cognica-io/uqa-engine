@@ -170,3 +170,76 @@ fn jsonb_key_failures_preserve_prefixes_and_release_original_allowance() {
     assert_eq!(&*output, &[99]);
     assert_eq!(memory.used(), 1);
 }
+
+#[test]
+fn jsonb_numeric_order_matches_postgresql_and_preserves_equality_keys() {
+    use std::{cmp::Ordering, collections::BTreeSet};
+    let reference: serde_json::Value =
+        serde_json::from_str(include_str!("pg18_jsonb.json")).unwrap();
+    let texts: Vec<_> = reference["values"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect();
+    let values: Vec<_> = texts
+        .iter()
+        .map(|text| Value::JsonB((*text).into()))
+        .collect();
+    let keys: Vec<_> = texts.iter().map(|text| key(text)).collect();
+    let equality: Vec<_> = texts
+        .iter()
+        .map(|text| jsonb_equality_key(text).unwrap())
+        .collect();
+    let mut ordering = vec![vec![Ordering::Equal; values.len()]; values.len()];
+    let budget = MemoryBudget::new(64 * 1024);
+    let token = CancellationToken::new();
+    let control = crate::memory::ProductionControl::new(&budget, &token, &token);
+    for pair in reference["comparisons"].as_array().unwrap() {
+        let left = pair[0].as_u64().unwrap() as usize;
+        let right = pair[1].as_u64().unwrap() as usize;
+        let expected = if pair[2] == true {
+            Ordering::Equal
+        } else if pair[3] == true {
+            Ordering::Less
+        } else {
+            Ordering::Greater
+        };
+        ordering[left][right] = values[left].cmp(&values[right]);
+        assert_eq!(
+            ordering[left][right], expected,
+            "{}, {}",
+            texts[left], texts[right]
+        );
+        assert_eq!(
+            values[left]
+                .cmp_with_control(&values[right], &control)
+                .unwrap(),
+            expected
+        );
+        assert_eq!(keys[left].cmp(&keys[right]), expected);
+        assert_eq!(values[left] == values[right], pair[2] == true);
+        assert_eq!(equality[left] == equality[right], pair[2] == true);
+        assert_eq!(budget.used(), 0);
+    }
+    for left in 0..values.len() {
+        for middle in 0..values.len() {
+            for right in 0..values.len() {
+                if ordering[left][middle].is_le() && ordering[middle][right].is_le() {
+                    assert!(ordering[left][right].is_le());
+                }
+            }
+        }
+    }
+    let forward: BTreeSet<_> = values.iter().cloned().collect();
+    let reverse: BTreeSet<_> = values.iter().rev().cloned().collect();
+    assert_eq!(forward, reverse);
+    for value in &values {
+        assert!(forward.contains(value));
+    }
+    // Zero's existing equality bytes remain stable even though its ordered key changes.
+    let zero = [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, b'0'];
+    for text in ["0", "-0", "0.000", "0e12", "-0e-12"] {
+        assert_eq!(jsonb_equality_key(text).unwrap(), zero);
+    }
+}
