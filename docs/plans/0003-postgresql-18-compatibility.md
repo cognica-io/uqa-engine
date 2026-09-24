@@ -31,7 +31,7 @@ The 2026-09-24 queue starts from merged main `57e74e23`. Process one defect at a
 | 2 | [#120](https://github.com/cognica-io/uqa-engine/issues/120), numeric comparison | Restore internal numeric order/equality/hash coherence and PostgreSQL-selected SQL comparisons, including `1.0 > 0`, both operand directions and precision boundaries. Focused public/owner acceptance passes in PR #137; review and full CI remain pending. |
 | 3 | [#139](https://github.com/cognica-io/uqa-engine/issues/139), GROUP BY name precedence | Prefer input columns over output aliases after source binding. Fixed in PR #137; all 16 PostgreSQL grouping-name outcomes and prepared/stored-view acceptance pass. |
 | 4 | [#121](https://github.com/cognica-io/uqa-engine/issues/121), TIME/TIMETZ | Implemented in PR #143; all 65 focused owner/public/provider tests and strict Clippy pass. Final CI and review remain pending. |
-| 5 | [#122](https://github.com/cognica-io/uqa-engine/issues/122), JSONB numeric order | Order zero, fractions, exponents and nested values consistently across comparisons and indexes. |
+| 5 | [#122](https://github.com/cognica-io/uqa-engine/issues/122), JSONB numeric order | Core comparison and order-key corrections are implemented with 2,352 PostgreSQL outcomes and 88 relational queries. Focused owner/public/provider acceptance is running; review and CI remain pending. |
 | 6 | [#123](https://github.com/cognica-io/uqa-engine/issues/123), legacy-vector domains | Use consistent representations for casts, assignment, equality, uniqueness and index/reopen behavior. |
 | 7 | [#140](https://github.com/cognica-io/uqa-engine/issues/140), decimal grouping expression identity | Match an identical decimal/typed expression without merging different PostgreSQL analyzed representations. Reproduced and queued separately from the current comparison correction. |
 | 8 | [#129](https://github.com/cognica-io/uqa-engine/issues/129), committed notification recovery | Recover committed publication after sender loss without duplicate delivery or replay of evaluated effects. |
@@ -172,6 +172,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `types.nonfinite-float-persistence` | `M4` | `partial` |
 | `query.group-by-input-precedence` | `M4` | `partial` |
 | `query.decimal-grouping-expression-identity` | `M4` | `partial` |
+| `types.jsonb-numeric-order` | `M4` | `partial` |
 
 <!-- pg18-manifest-status:end -->
 

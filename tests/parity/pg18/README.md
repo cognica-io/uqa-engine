@@ -29,6 +29,16 @@ python3 tests/parity/pg18/capture_temporal_comparisons.py --container uqa-pg18 -
 
 The collector reads only fixture inputs, records the PostgreSQL version and Docker image identity, and rolls back each temporary setup. Keep the compact reference in Git and generated diagnostics under ignored output directories.
 
+## JSONB comparison reference
+
+The compact [`pg18_jsonb.json`](../../../crates/uqa-core/src/types/tests/pg18_jsonb.json) records 2,352 scalar comparison outcomes, 88 relational queries and uniqueness errors from PostgreSQL 18.4. Cases include signed zero, equivalent scale/exponent spellings, positive and negative fractions, large exponents and nested arrays/objects. Core checks the independent outcomes, transitivity and ordered containers; Execution checks ordered ranges, controlled keys and equality/hash consistency. Public Engine tests cover ordinary and prepared SQL, scan/index/group/join/unique paths, serializable ranges and reopen on all three providers.
+
+```sh
+python3 tests/parity/pg18/capture_jsonb_comparisons.py --container uqa-pg18 --output target/jsonb-comparisons.reference.json
+```
+
+The collector reads only fixture inputs, obtains all expectations from PostgreSQL and rolls back temporary setup. It records the exact reference version and Docker image; generated diagnostics stay outside Git.
+
 ## Grouping name reference
 
 The compact [`pg18_names.json`](../../../crates/uqa-sql/src/semantics/grouping_sets/pg18_names.json) records PostgreSQL 18.4 input-column precedence, output-alias fallback, ordinals, grouping sets and ambiguity/context errors. SQL owner tests verify schema-aware resolution, and Engine tests consume the external results and verify prepared statements and stored views across column renaming and reopen.

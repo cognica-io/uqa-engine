@@ -135,7 +135,7 @@ SELECT jsonb_extract_path_text(payload, 'kind') AS kind
 FROM records;
 ```
 
-Object key order and formatting are not an application contract for JSONB. Use JSON text only when original textual representation matters.
+Object key order and formatting are not an application contract for JSONB. Use JSON text only when original textual representation matters. JSONB numeric comparisons use numeric magnitude, so zero precedes positive fractions and follows negative values regardless of scale or exponent spelling. The same rule applies to numeric members of arrays and objects. Equality, grouping, uniqueness and ordered index lookups agree on these numeric values.
 
 ## BYTEA
 

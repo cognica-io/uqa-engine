@@ -190,7 +190,8 @@
       "types.time-timetz-key-coherence",
       "types.nonfinite-float-persistence",
       "query.group-by-input-precedence",
-      "query.decimal-grouping-expression-identity"
+      "query.decimal-grouping-expression-identity",
+      "types.jsonb-numeric-order"
     ],
     "M5": [
       "protocol.frontend-backend-3.2-extended",
@@ -977,6 +978,14 @@
       "supported_version": "The local usql reproduces SQLSTATE 0A000 instead of rows; current SQL expression identity does not match Decimal literals even to identical clones. Correction and focused PostgreSQL acceptance are pending.",
       "status": "partial",
       "open_issue": "#140: make decimal and typed grouping-expression identity reflexive while preserving PostgreSQL analyzed types and representations; verify ordinary/grouping-set, prepared and stored execution."
+    },
+    {
+      "id": "types.jsonb-numeric-order",
+      "postgresql_reference": "PostgreSQL 18.4 Docker JSONB comparisons; https://www.postgresql.org/docs/18/datatype-json.html#JSON-INDEXING",
+      "uqa_test": "cargo test -p uqa-core --lib jsonb; cargo test -p uqa-execution --lib serializable::index_key::tests::jsonb; cargo test -p uqa-engine --test integration -- jsonb_comparisons sessions::serializable_observations::jsonb",
+      "supported_version": "Core comparison and ordered keys explicitly place zero between negative and positive magnitudes. A compact PostgreSQL 18.4 fixture records 2,352 scalar outcomes and 88 relational queries. Focused owner, public API and provider acceptance is in progress; review and CI remain pending.",
+      "status": "partial",
+      "open_issue": "#122: preserve PostgreSQL numeric magnitude order for zero, signed fractions, exponent forms and nested JSONB; verify transitivity, equality/hash/index agreement, serializable ranges and all-provider reopen."
     }
   ]
 }

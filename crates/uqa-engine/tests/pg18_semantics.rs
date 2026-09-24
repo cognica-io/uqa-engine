@@ -14,6 +14,9 @@
 use uqa_core::{ArrayValue, DecimalValue, TemporalValue, Value};
 use uqa_engine::Engine;
 
+#[path = "pg18_semantics/jsonb_comparisons.rs"]
+mod jsonb_comparisons;
+
 fn engine() -> Engine {
     Engine::new()
 }
