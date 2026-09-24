@@ -7,7 +7,7 @@
 //! Canonical encoded index, disk buckets, match flags, and spill transition.
 
 use std::collections::{BTreeMap, HashMap};
-use std::io::{BufRead, BufReader, ErrorKind, Read, Seek, SeekFrom, Write};
+use std::io::{BufRead, BufReader, ErrorKind, IoSlice, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use uqa_storage::temporary_file::TemporaryFile as File;
 
@@ -213,9 +213,11 @@ impl DiskHashIndex {
         let key_len = u64::try_from(key.len())
             .map_err(|_| ExecError::Other("join hash key is too large".into()))?;
         let write_result = (|| -> std::io::Result<()> {
-            file.write_all(&key_len.to_le_bytes())?;
-            file.write_all(key)?;
-            file.write_all(&row_index.to_le_bytes())?;
+            file.write_all_vectored(&mut [
+                IoSlice::new(&key_len.to_le_bytes()),
+                IoSlice::new(key),
+                IoSlice::new(&row_index.to_le_bytes()),
+            ])?;
             file.flush()
         })();
         if let Err(error) = write_result {

@@ -198,6 +198,34 @@ fn vectored_records_share_one_block_publication_and_preserve_slice_order() {
 }
 
 #[test]
+fn complete_vectored_records_skip_empty_slices_and_publish_each_block_once() {
+    let mut file = BlockTemporaryFile::<8>::new().unwrap();
+    file.write_all(b"prefix-").unwrap();
+    let written = file.owner.lock().faults.written_bytes;
+    file.write_all_vectored(&mut [
+        IoSlice::new(b""),
+        IoSlice::new(b"one"),
+        IoSlice::new(b""),
+        IoSlice::new(b"two-three"),
+        IoSlice::new(b""),
+    ])
+    .unwrap();
+    assert_eq!(
+        file.owner.lock().faults.written_bytes - written,
+        3 * (NONCE_BYTES + 8 + TAG_BYTES + 1) as u64
+    );
+    let mut bytes = Vec::new();
+    file.reopen().unwrap().read_to_end(&mut bytes).unwrap();
+    assert_eq!(bytes, b"prefix-onetwo-three");
+    let written = file.owner.lock().faults.written_bytes;
+    file.write_all_vectored(&mut []).unwrap();
+    file.write_all_vectored(&mut [IoSlice::new(b""), IoSlice::new(b"")])
+        .unwrap();
+    assert_eq!(file.owner.lock().faults.written_bytes, written);
+    assert_eq!(file.stream_position().unwrap(), bytes.len() as u64);
+}
+
+#[test]
 fn impossible_offsets_fail_without_changing_existing_data() {
     let mut file = TemporaryFile::new().unwrap();
     file.write_all(b"retained").unwrap();

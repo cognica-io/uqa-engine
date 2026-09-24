@@ -14,7 +14,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Coalesce encrypted DISTINCT and hash-join bucket reads through one bounded probe buffer, avoiding repeated block decryption for each short record field while preserving exact key comparison and malformed-record rejection.
+- Coalesce encrypted DISTINCT and hash-join bucket reads through one bounded probe buffer and publish adjacent record fields through Storage's complete vectored writes, avoiding repeated block cryptography for each short field while preserving exact key comparison, malformed-record rejection and partial-append rollback. Indexed spill records reuse the same complete-write implementation.
 - Run Linux and macOS workspace tests from one reusable build per platform across eight shards, with individual results and a five-minute failing timeout. Split catalog-concurrency and SQLite upgrade matrices into independently named cases and remove busy polling from lock-observation helpers without reducing their assertions or provider coverage.
 
 - Advance SQLite main record format to 47, redb main record format to 46 and native SQLite mapping format to 9; catalog format remains 49. Atomic upgrades preserve records, identities, histories and identifier allocations, while preserving existing receipt capacity, acknowledgement and ownership; predecessors without ownership retain their receipts as manually owned outcomes. Reopened and retained incompatible readers and writers are rejected. Restore a pre-upgrade backup to return to an earlier format. See the [writer compatibility contract](docs/manual/reference/10-upgrading.md#unreleased-mvcc-writer-compatibility).

@@ -7,7 +7,7 @@
 //! Memory-to-disk transition and exact bucketed spill storage.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{BufRead, BufReader, ErrorKind, Read, Seek, SeekFrom, Write};
+use std::io::{BufRead, BufReader, ErrorKind, IoSlice, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use uqa_storage::temporary_file::TemporaryFile as File;
 
@@ -148,12 +148,10 @@ impl DiskKeySet {
         let key_len = u64::try_from(key.len())
             .map_err(|_| distinct_error("DISTINCT key length exceeds the on-disk format"))?;
         let write_result = (|| {
-            file.write_all(&key_len.to_le_bytes()).map_err(|error| {
-                distinct_error(format!("failed to write DISTINCT key length: {error}"))
-            })?;
-            file.write_all(key).map_err(|error| {
-                distinct_error(format!("failed to write DISTINCT key: {error}"))
-            })?;
+            file.write_all_vectored(&mut [IoSlice::new(&key_len.to_le_bytes()), IoSlice::new(key)])
+                .map_err(|error| {
+                    distinct_error(format!("failed to write DISTINCT key: {error}"))
+                })?;
             file.flush().map_err(|error| {
                 distinct_error(format!("failed to flush DISTINCT spill bucket: {error}"))
             })

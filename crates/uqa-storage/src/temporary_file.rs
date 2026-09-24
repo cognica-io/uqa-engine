@@ -100,6 +100,25 @@ impl<const BYTES: usize> BlockTemporaryFile<BYTES> {
         self
     }
 
+    /// Write the complete concatenation of the slices, sharing one authenticated block publication across adjacent fields. Like `Write::write_all`, an error can leave a written prefix; record owners retain responsibility for rolling back incomplete records.
+    pub fn write_all_vectored(&mut self, mut input: &mut [IoSlice<'_>]) -> io::Result<()> {
+        IoSlice::advance_slices(&mut input, 0);
+        while !input.is_empty() {
+            match self.write_vectored(input) {
+                Ok(0) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::WriteZero,
+                        "incomplete temporary file write",
+                    ));
+                }
+                Ok(written) => IoSlice::advance_slices(&mut input, written),
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+
     pub fn reopen(&self) -> io::Result<Self> {
         self.owner.lock().validate_length()?;
         Ok(Self {

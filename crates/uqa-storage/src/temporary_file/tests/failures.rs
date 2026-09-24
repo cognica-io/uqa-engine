@@ -128,7 +128,10 @@ fn two_file_append_rollback_keeps_old_rows_after_data_or_offset_failure() {
             offsets.owner.lock().faults.fail_after_bytes = Some(30);
         }
         let append = data
-            .write_all(b"new-row-crosses-several-authenticated-blocks")
+            .write_all_vectored(&mut [
+                IoSlice::new(b"new-row-"),
+                IoSlice::new(b"crosses-several-authenticated-blocks"),
+            ])
             .and_then(|()| offsets.write_all(&old_data.to_le_bytes()));
         assert!(append.is_err());
         data.set_len(old_data).unwrap();
