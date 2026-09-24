@@ -10,6 +10,9 @@ use crate::plan::{AggregateClassifier, ProjectionPlan, QueryBlockPlan};
 use crate::ScalarExpr;
 use uqa_core::Value;
 
+#[cfg(test)]
+mod tests;
+
 pub fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
     match (lhs, rhs) {
         (ScalarExpr::Star, ScalarExpr::Star) => true,
@@ -29,6 +32,20 @@ pub fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
         (ScalarExpr::Column(c), ScalarExpr::QualifiedColumn { column, .. })
         | (ScalarExpr::QualifiedColumn { column, .. }, ScalarExpr::Column(c)) => c == column,
         (ScalarExpr::Literal(a), ScalarExpr::Literal(b)) => literals_equal(a, b),
+        (
+            ScalarExpr::TypedLiteral {
+                value: av,
+                ty: at,
+                bound_type: ab,
+                parameter_index: ap,
+            },
+            ScalarExpr::TypedLiteral {
+                value: bv,
+                ty: bt,
+                bound_type: bb,
+                parameter_index: bp,
+            },
+        ) => at == bt && ab == bb && ap == bp && literals_equal(av, bv),
         (ScalarExpr::Param(a), ScalarExpr::Param(b)) => a == b,
         (ScalarExpr::Position(a), ScalarExpr::Position(b)) => a == b,
         (ScalarExpr::InternalColumn(a), ScalarExpr::InternalColumn(b)) => a == b,
@@ -92,16 +109,7 @@ pub fn exprs_match(lhs: &ScalarExpr, rhs: &ScalarExpr) -> bool {
 }
 
 pub fn literals_equal(a: &Value, b: &Value) -> bool {
-    match (a, b) {
-        (Value::Null, Value::Null) => true,
-        (Value::Bool(x), Value::Bool(y)) => x == y,
-        (Value::Int(x), Value::Int(y)) => x == y,
-        (Value::Float(x), Value::Float(y)) => x.to_bits() == y.to_bits(),
-        (Value::Str(x), Value::Str(y)) => x == y,
-        (Value::Bytes(x), Value::Bytes(y)) => x == y,
-        (Value::Temporal(x), Value::Temporal(y)) => x == y,
-        _ => false,
-    }
+    a.has_same_representation(b)
 }
 
 pub fn has_aggregate(aggregates: &dyn AggregateClassifier, projections: &[ProjectionPlan]) -> bool {
