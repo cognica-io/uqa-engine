@@ -106,6 +106,56 @@ fn normalization_failures_keep_memory_and_cancellation_diagnostics() {
 }
 
 #[test]
+fn canonical_numeric_keys_match_value_equality_at_precision_boundaries() {
+    let decimal = |text| Value::Decimal(DecimalValue::parse(text).unwrap());
+    let values = [
+        Value::Int(9_223_372_036_854_774_784),
+        Value::Float(9_223_372_036_854_774_784_i64 as f64),
+        decimal("9223372036854774784"),
+        decimal("9223372036854775000"),
+        Value::Float(0.1),
+        decimal("0.1"),
+        decimal("0.1000000000000000055511151231257827021181583404541015625"),
+        Value::Float(f64::from_bits(1)),
+        Value::Int(0),
+        Value::Float(-0.0),
+        decimal("0.000"),
+        Value::Float(f64::NAN),
+        decimal("NaN"),
+        Value::Float(f64::INFINITY),
+        decimal("Infinity"),
+        Value::Float(f64::NEG_INFINITY),
+        decimal("-Infinity"),
+    ];
+    let control = StorageReadControl::with_limit(64 * 1024);
+    let hash_state = std::collections::hash_map::RandomState::new();
+    for left in &values {
+        let left_key = canonical_row_key(std::slice::from_ref(left)).unwrap();
+        let controlled = canonical_row_key_budgeted(std::iter::once(Some(left)), &control).unwrap();
+        assert_eq!(&*controlled, &left_key);
+        drop(controlled);
+        assert_eq!(control.memory().used(), 0);
+        for right in &values {
+            let right_key = canonical_row_key(std::slice::from_ref(right)).unwrap();
+            assert_eq!(left_key == right_key, left == right, "{left:?}, {right:?}");
+            if left == right {
+                assert_eq!(
+                    hash_canonical_row(&hash_state, std::iter::once(Some(left))).unwrap(),
+                    hash_canonical_row(&hash_state, std::iter::once(Some(right))).unwrap()
+                );
+            }
+            let left_row = Value::Row(vec![left.clone(), Value::Null]);
+            let right_row = Value::Row(vec![right.clone(), Value::Null]);
+            assert_eq!(
+                canonical_row_key(std::slice::from_ref(&left_row)).unwrap()
+                    == canonical_row_key(std::slice::from_ref(&right_row)).unwrap(),
+                left_row == right_row
+            );
+        }
+    }
+}
+
+#[test]
 fn nested_values_use_a_charged_traversal_stack_without_cloning_their_payload() {
     let control = StorageReadControl::with_limit(1024 * 1024);
     let mut value = Value::Str("original payload".into());

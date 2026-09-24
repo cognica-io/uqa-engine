@@ -13,8 +13,10 @@ use uqa_core::{memory::BudgetedVec, DecimalValue, TemporalValue, Value};
 use uqa_storage::read_control::StorageReadControl;
 
 mod output;
+mod reservations;
 mod traversal;
 use output::{BudgetedOutput, KeyOutput};
+pub(crate) use reservations::canonical_row_lock_keys;
 use traversal::{Children, Frames};
 
 use crate::{ExecError, ExecResult};
@@ -75,7 +77,7 @@ fn compact_text_component(value: Option<&Value>) -> Option<u32> {
     }
 }
 
-/// Encode positional SQL values in the exact equality domain used by DISTINCT and spill-backed row-key state. Callers that need an external exact index can persist this representation without relying on `Value`'s serialization format.
+/// Encode positional values in Core's exact equality domain used by DISTINCT and spill-backed row-key state. SQL operator coercions must precede encoding. This is an execution key, not a versioned durable storage format.
 pub fn canonical_row_key(values: &[Value]) -> ExecResult<Vec<u8>> {
     encode_key(values)
 }
@@ -97,7 +99,7 @@ pub fn canonical_row_key_budgeted<'a>(
 
 /// Collision-free binary key encoding. Numeric values deliberately share one
 /// canonical domain so `1`, `1.0`, `DECIMAL '1'`, and `TRUE` retain the same
-/// equality behavior as UQA's SQL comparisons. Every structural value carries
+/// equality behavior as Core values. SQL operands must first receive their selected casts. Every structural value carries
 /// lengths/counts, preventing concatenation and nested-container collisions.
 pub(crate) fn encode_key(values: &[Value]) -> ExecResult<Vec<u8>> {
     encode_key_borrowed(values.iter().map(Some))
@@ -312,29 +314,25 @@ fn encode_float_numeric(value: f64, output: &mut impl KeyOutput) -> ExecResult<(
         output.extend_bytes(&[1, 2])?;
     } else if value == f64::INFINITY {
         output.extend_bytes(&[1, 3])?;
-    } else if let Some(control) = output.control() {
-        let text = output::NumberText::new(value)?;
-        let decimal =
-            DecimalValue::parse_budgeted(text.as_str(), control.memory(), control.cancellation())
-                .map_err(output::resource_error)?;
-        match decimal {
-            Some(decimal) if value == 0.0 || !decimal.is_zero() => {
-                encode_decimal_numeric(&decimal, output)?;
-            }
-            _ => {
-                output.extend_bytes(&[1, 4])?;
-                let normalized = if value == 0.0 { 0.0 } else { value };
-                output.extend_bytes(&normalized.to_bits().to_be_bytes())?;
-            }
+    } else if output.legacy_numeric_reservation() {
+        // Keep the predecessor's opaque lock address alongside the exact key while older and newer processes share a database. This alias is never used for equality or ordering.
+        if let Some(decimal) = DecimalValue::from_f64_lossy(value) {
+            encode_decimal_numeric(&decimal, output)?;
+        } else {
+            output.extend_bytes(&[1, 4])?;
+            output.extend_bytes(&value.to_bits().to_be_bytes())?;
         }
-    } else if let Some(decimal) = DecimalValue::from_f64_lossy(value) {
+    } else if let Some(control) = output.control() {
+        let production = uqa_core::memory::ProductionControl::new(
+            control.memory(),
+            control.cancellation(),
+            control.cancellation(),
+        );
+        let decimal = DecimalValue::from_f64_exact_with_control(value, &production)
+            .map_err(output::resource_error)?;
         encode_decimal_numeric(&decimal, output)?;
     } else {
-        // Preserve a finite value that cannot enter PostgreSQL's NUMERIC
-        // domain. Normalize signed zero before storing bits.
-        output.extend_bytes(&[1, 4])?;
-        let normalized = if value == 0.0 { 0.0 } else { value };
-        output.extend_bytes(&normalized.to_bits().to_be_bytes())?;
+        encode_decimal_numeric(&DecimalValue::from_f64_exact(value), output)?;
     }
     Ok(())
 }
