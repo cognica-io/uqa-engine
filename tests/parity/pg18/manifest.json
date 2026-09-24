@@ -941,7 +941,7 @@
     {
       "id": "types.numeric-comparison-coherence",
       "postgresql_reference": "PostgreSQL 18.4 Docker operator selection and numeric comparison results; https://www.postgresql.org/docs/18/typeconv-oper.html; https://www.postgresql.org/docs/18/datatype-numeric.html",
-      "uqa_test": "cargo test -p uqa-core --lib numeric_keys_; cargo test -p uqa-sql --lib comparison; cargo test -p uqa-planner --lib constant_numeric_comparisons; cargo test -p uqa-execution --lib distinct; cargo test -p uqa-engine --test integration numeric_comparisons",
+      "uqa_test": "cargo test -p uqa-core --lib numeric_keys_; cargo test -p uqa-sql --lib comparison; cargo test -p uqa-planner --lib constant_numeric_comparisons; cargo test -p uqa-execution --lib distinct::; cargo test -p uqa-engine --test integration numeric_comparisons",
       "supported_version": "Exact Core ordering, canonical hash keys and 264 PostgreSQL outcomes pass owner, constant-fold and public SQL tests. Typed scan/index/group/join, unique errors, prepared comparisons, inherited retrieval and generated definitions pass, including native SQLite, SQLite Key/Value and redb reopen. Final CI is pending.",
       "status": "partial",
       "open_issue": "#120: remove shortest-display rounding from internal float/decimal keys; prove total ordering, equality and canonical hash-key agreement; preserve PostgreSQL operator-selected coercion through SQL, generated execution, grouping and indexed access, including 1.0 > 0 and precision boundaries."
@@ -949,8 +949,8 @@
     {
       "id": "types.time-timetz-key-coherence",
       "postgresql_reference": "PostgreSQL 18.4 Docker TIME/TIMETZ comparisons; PostgreSQL REL_18_STABLE date.c time_cmp and timetz_cmp_internal",
-      "uqa_test": "cargo test -p uqa-core --lib temporal_keys; cargo test -p uqa-execution --lib distinct; cargo test -p uqa-engine --test integration sql_temporal_types",
-      "supported_version": "Temporal parsing and value/index consumers exist, but current time keys wrap at a day and TIMETZ equality omits the offset tie-break.",
+      "uqa_test": "cargo test -p uqa-core --lib temporal; cargo test -p uqa-execution --lib temporal; cargo test -p uqa-engine --test integration temporal",
+      "supported_version": "Core comparison and equality keys retain TIME endpoints and the TIMETZ offset tie-break. A compact PostgreSQL 18.4 fixture supplies 780 scalar outcomes and 75 relational queries. Core/Execution comparison, equality/hash/index keys and transitivity pass. All 10 public tests pass, covering constant/prepared SQL, all three providers and serializable absent-update conflicts. Provider-upgrade checks and final CI remain pending.",
       "status": "partial",
       "open_issue": "#121: replace incorrect expected equality with PostgreSQL results, preserve TIME 24:00, compare unwrapped adjusted TIMETZ times with the timezone tie-break, and verify equality, ordering, hash/grouping, containers and persistent index/reopen behavior."
     },

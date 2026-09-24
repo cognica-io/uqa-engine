@@ -83,6 +83,8 @@ Temporal types support comparisons, extraction, truncation, construction, format
 
 `TIME(p)`, `TIMESTAMP(p)`, and their timezone variants retain a fractional-second precision from 0 through 6 in column declarations, casts, function-source column definitions, array elements, result metadata, and persistent catalogs. Values are rounded when a cast or assignment applies the declaration. Rounding at the end of a day can produce `24:00:00`, which remains distinct from `00:00:00` as a time value. `pg_attribute.atttypmod` and `information_schema.columns.datetime_precision` expose the declared modifier after reopen.
 
+`TIME` compares the stored time without wrapping the day, so `24:00:00` sorts after `00:00:00`. `TIMETZ` first compares UTC-adjusted time without day wrapping, then the original timezone offset in PostgreSQL's seconds-west order. Consequently, `12:00:00+00` sorts after and is unequal to `13:00:00+01`, even though their UTC-adjusted times match. DISTINCT, grouping, uniqueness and ordered indexes use the same equality and order. Time arithmetic retains its separate day-wrapping behavior.
+
 `INTERVAL` supports the fields `YEAR`, `MONTH`, `DAY`, `HOUR`, `MINUTE`, and `SECOND`, plus `YEAR TO MONTH`, `DAY TO HOUR`, `DAY TO MINUTE`, `DAY TO SECOND`, `HOUR TO MINUTE`, `HOUR TO SECOND`, and `MINUTE TO SECOND`. The least significant field determines truncation: for example, `INTERVAL HOUR TO MINUTE` preserves years, months, days, hours, and minutes while discarding seconds. `INTERVAL(p)` and ranges ending in `SECOND(p)` round fractional seconds. `information_schema.columns.interval_type` exposes an explicit field restriction, including its precision when present.
 
 ```sql execute

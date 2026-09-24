@@ -19,6 +19,16 @@ python3 tests/parity/pg18/capture_numeric_comparisons.py --container uqa-pg18 --
 
 The collector reads only the checked-in operand and statement inputs, obtains every expected result from PostgreSQL, and rolls back its temporary relational setup. Compare the resulting small fixture with the committed reference before accepting any changed expectation.
 
+## Temporal comparison reference
+
+The compact [`pg18_temporal.json`](../../../crates/uqa-core/src/types/tests/pg18_temporal.json) records 780 TIME/TIMETZ scalar outcomes, 75 relational queries and unique-constraint outcomes from PostgreSQL 18.4. It includes day endpoints, UTC-adjusted times crossing midnight, offset ties and equivalent textual spellings. Core checks the independent results, transitivity and ordered containers; Execution checks equality, controlled keys, hashes and serializable index ordering; public Engine tests cover constant/prepared comparisons, scans, indexes, grouping, joins, uniqueness and provider reopen. The oracle expectations are never derived from UQA's comparator.
+
+```sh
+python3 tests/parity/pg18/capture_temporal_comparisons.py --container uqa-pg18 --output target/temporal-comparisons.reference.json
+```
+
+The collector reads only fixture inputs, records the PostgreSQL version and Docker image identity, and rolls back each temporary setup. Keep the compact reference in Git and generated diagnostics under ignored output directories.
+
 ## Grouping name reference
 
 The compact [`pg18_names.json`](../../../crates/uqa-sql/src/semantics/grouping_sets/pg18_names.json) records PostgreSQL 18.4 input-column precedence, output-alias fallback, ordinals, grouping sets and ambiguity/context errors. SQL owner tests verify schema-aware resolution, and Engine tests consume the external results and verify prepared statements and stored views across column renaming and reopen.
