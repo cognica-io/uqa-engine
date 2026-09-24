@@ -183,8 +183,8 @@ fn empty_field_map_removes_existing_index_document() {
 
     assert_eq!(idx.doc_count().unwrap(), 0);
     assert_eq!(idx.doc_freq("title", "rust").unwrap(), 0);
-    assert!(!idx.state.doc_terms.contains_key(&1));
-    assert!(!idx.state.doc_terms.contains_key(&2));
+    assert!(!idx.state.documents.contains_key(&1));
+    assert!(!idx.state.documents.contains_key(&2));
 }
 
 #[test]
@@ -222,7 +222,7 @@ fn add_overflow_does_not_partially_insert_document() {
         .unwrap_err();
     assert!(error.to_string().contains("document count"));
     assert_eq!(idx.state.doc_count, u64::MAX);
-    assert!(!idx.state.doc_terms.contains_key(&7));
+    assert!(!idx.state.documents.contains_key(&7));
     assert!(idx.get_posting_list("title", "rust").unwrap().is_empty());
 }
 
@@ -231,15 +231,17 @@ fn field_length_overflow_preserves_existing_document() {
     let mut idx = MemoryInvertedIndex::new(standard_analyzer("english"));
     idx.add_document(1, fields([("title", "rust")])).unwrap();
     Arc::make_mut(&mut idx.state)
-        .total_length
-        .insert("title".into(), u64::MAX);
+        .field_counters
+        .get_mut("title")
+        .unwrap()
+        .total = u64::MAX;
 
     let error = idx.add_document(2, fields([("title", "go")])).unwrap_err();
     assert!(error.to_string().contains("total field length"));
     assert_eq!(idx.doc_count().unwrap(), 1);
     assert_eq!(idx.doc_freq("title", "rust").unwrap(), 1);
     assert_eq!(idx.doc_freq("title", "go").unwrap(), 0);
-    assert!(!idx.state.doc_terms.contains_key(&2));
+    assert!(!idx.state.documents.contains_key(&2));
 }
 
 #[test]
@@ -247,8 +249,10 @@ fn corrupt_counter_rejects_remove_without_mutating_postings() {
     let mut idx = MemoryInvertedIndex::new(standard_analyzer("english"));
     idx.add_document(1, fields([("title", "rust")])).unwrap();
     Arc::make_mut(&mut idx.state)
-        .total_length
-        .insert("title".into(), 0);
+        .field_counters
+        .get_mut("title")
+        .unwrap()
+        .total = 0;
 
     let error = idx.remove_document(1).unwrap_err();
     assert!(error.to_string().contains("total field length"));
@@ -261,12 +265,16 @@ fn corrupt_counter_rejects_remove_without_mutating_postings() {
 fn stats_reports_cross_field_total_overflow() {
     let mut idx = MemoryInvertedIndex::new(standard_analyzer("english"));
     Arc::make_mut(&mut idx.state).doc_count = 1;
+    Arc::make_mut(&mut idx.state).field_counters.insert(
+        "a".into(),
+        MemoryFieldCounters {
+            total: u64::MAX,
+            docs: 1,
+        },
+    );
     Arc::make_mut(&mut idx.state)
-        .total_length
-        .insert("a".into(), u64::MAX);
-    Arc::make_mut(&mut idx.state)
-        .total_length
-        .insert("b".into(), 1);
+        .field_counters
+        .insert("b".into(), MemoryFieldCounters { total: 1, docs: 1 });
 
     let error = idx.stats().unwrap_err();
     assert!(error.to_string().contains("total document length"));
@@ -290,7 +298,7 @@ fn replacement_merges_borrowed_field_names_once_in_order() {
             Ok(field.clone())
         })
         .unwrap();
-    assert_eq!(copied, ["a", "a", "b", "b", "c", "c", "d", "d", "e", "e"]);
+    assert_eq!(copied, ["a", "b", "c", "d", "e"]);
     assert_eq!(
         plan.field_counters
             .keys()

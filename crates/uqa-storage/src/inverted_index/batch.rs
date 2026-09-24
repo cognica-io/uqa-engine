@@ -34,15 +34,8 @@ impl MemoryBatch {
         let staged = &mut batch.state;
         staged.doc_count = source.state.doc_count;
         for &id in &batch.documents {
-            let terms = source.state.doc_terms.get(&id);
-            let fields = source.state.doc_fields.get(&id);
-            if terms.is_some() != fields.is_some() {
-                return Err(StorageBackendError::Other(format!(
-                    "inverted-index document {id} has inconsistent reverse-index state"
-                )));
-            }
-            if let (Some(terms), Some(fields)) = (terms, fields) {
-                for key in terms {
+            if let Some(document) = source.state.document(id)? {
+                for key in &document.terms {
                     let posting = source
                         .state
                         .index
@@ -55,24 +48,20 @@ impl MemoryBatch {
                         })?;
                     staged.insert_posting(id, key.clone(), posting.clone());
                 }
-                batch.fields.extend(fields.keys().cloned());
-                staged.insert_document_metadata(id, fields.clone(), terms.clone());
+                batch.fields.extend(document.fields.keys().cloned());
+                staged.insert_document_metadata(
+                    id,
+                    document.fields.clone(),
+                    document.terms.clone(),
+                );
             }
         }
         for field in &batch.fields {
-            if let Some(&length) = source.state.total_length.get(field) {
+            if let Some(&counters) = source.state.field_counters.get(field) {
                 super::footprint::set_counter(
-                    &mut staged.total_length,
+                    &mut staged.field_counters,
                     field.clone(),
-                    Some(length),
-                    &mut staged.retention,
-                );
-            }
-            if let Some(&count) = source.state.field_doc_counts.get(field) {
-                super::footprint::set_counter(
-                    &mut staged.field_doc_counts,
-                    field.clone(),
-                    Some(count),
+                    Some(counters),
                     &mut staged.retention,
                 );
             }
@@ -85,38 +74,26 @@ impl MemoryBatch {
         let staged = self.state;
         let target = Arc::make_mut(&mut target.state);
         for id in self.documents {
-            if let Some(terms) = target.take_document_terms(id) {
-                for key in &terms {
+            if let Some(document) = target.take_document_metadata(id) {
+                for key in &document.terms {
                     target
                         .remove_posting(id, key)
                         .expect("validated batch posting");
                 }
             }
-            target.remove_document_metadata(id);
         }
         for (key, postings) in staged.index {
             target.insert_postings(key, postings);
         }
-        let mut terms = staged.doc_terms;
-        for (id, fields) in staged.doc_fields {
-            target.insert_document_metadata(
-                id,
-                fields,
-                terms.remove(&id).expect("validated batch reverse terms"),
-            );
+        for (id, document) in staged.documents {
+            target.insert_document_metadata(id, document.fields, document.terms);
         }
         for field in self.fields {
+            let counters = staged.field_counters.get(&field).copied();
             super::footprint::set_counter(
-                &mut target.total_length,
-                field.clone(),
-                staged.total_length.get(&field).copied(),
-                &mut target.retention,
-            );
-            let count = staged.field_doc_counts.get(&field).copied();
-            super::footprint::set_counter(
-                &mut target.field_doc_counts,
+                &mut target.field_counters,
                 field,
-                count,
+                counters,
                 &mut target.retention,
             );
         }
@@ -162,7 +139,7 @@ impl MemoryIndexState {
         doc_id: DocId,
         replacement: &super::StagedMemoryDocument,
     ) -> StorageBackendResult<()> {
-        let previous = self.doc_fields.get(&doc_id);
+        let previous = self.documents.get(&doc_id).map(|document| &document.fields);
         for field in previous.into_iter().flat_map(OwnedMap::keys).chain(
             replacement
                 .fields
@@ -183,10 +160,10 @@ impl MemoryIndexState {
             )?;
         }
         for (field, term) in self
-            .doc_terms
+            .documents
             .get(&doc_id)
             .into_iter()
-            .flatten()
+            .flat_map(|document| &document.terms)
             .chain(&replacement.terms)
         {
             visit(super::InvertedIndexChange::Posting {

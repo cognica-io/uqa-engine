@@ -36,6 +36,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Remove duplicate memory-index position buffers and reverse-term nodes, share document metadata and field counters with their existing owners, and move staged posting nodes during batch publication. Preserve complete token graphs, atomic mutation, retained snapshots and exact memory admission while restoring the existing Nori allocation contract.
 - Release local MVCC participant and receipt registry capacity when the final owner drops, including failed lease admission and redb commit/rollback with retained readers. Completed transactions no longer retain an empty 48-byte lease buffer.
 
 - Preserve PostgreSQL `int2vector` and `oidvector` identity, array-type OIDs, bounds and atomic outer-array elements through base/domain casts, UNNEST, compatible-array functions and storage. Ordered aggregates, DISTINCT, extrema and B-tree keys propagate comparison errors; UPDATE retains index entries only when all indexed inputs keep their stored representations, including expression, predicate and included-column dependencies. Existing-row schema validation still checks other rows, including during partition attachment. Initial restoration normalizes predecessor carriers and validates rebuilt indexes atomically without repeating domain checks; failed validation rolls back the conversion. Fixes [#123](https://github.com/cognica-io/uqa-engine/issues/123).

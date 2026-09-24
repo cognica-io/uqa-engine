@@ -11,11 +11,11 @@ use super::{
     StorageBackendResult, StorageReadControl,
 };
 use crate::inverted_index::{analyze_index_field_budgeted, MemoryPosting, PostingKey};
-use uqa_core::memory::{Budgeted, BudgetedMap, BudgetedVec, MemoryReservation, OwnedMap, OwnedSet};
+use uqa_core::memory::{Budgeted, BudgetedMap, BudgetedVec, MemoryReservation, OwnedMap};
 
 struct Staging {
     fields: OwnedMap<FieldName, IndexedFieldMetadata>,
-    terms: OwnedSet<PostingKey>,
+    terms: BudgetedVec<PostingKey>,
     postings: BudgetedVec<(PostingKey, MemoryPosting)>,
     payload: MemoryReservation,
 }
@@ -28,7 +28,7 @@ pub(super) fn stage(
 ) -> StorageBackendResult<Budgeted<StagedMemoryDocument>> {
     let mut staged = Staging {
         fields: OwnedMap::new(),
-        terms: OwnedSet::new(),
+        terms: BudgetedVec::new(control.memory()),
         postings: BudgetedVec::new(control.memory()),
         payload: control.memory().empty_reservation(),
     };
@@ -36,12 +36,14 @@ pub(super) fn stage(
         staged.add_field(index, doc_id, field, text, control)?;
     }
     control.check()?;
+    let (terms, memory) = staged.terms.into_parts();
+    staged.payload.absorb(memory);
     let (postings, memory) = staged.postings.into_parts();
     staged.payload.absorb(memory);
     Ok(Budgeted::new(
         StagedMemoryDocument {
             fields: staged.fields,
-            terms: staged.terms,
+            terms,
             postings,
         },
         staged.payload,
@@ -77,26 +79,16 @@ impl Staging {
         for (term, occurrences) in analyzed.terms {
             control.check()?;
             self.postings.reserve(1)?;
-            self.payload.grow(OwnedSet::<PostingKey>::entry_bytes())?;
+            self.terms.reserve(1)?;
             let reverse_field = copy_name(field, &mut self.payload, control)?;
             let reverse_term = term.clone_budgeted(control.memory(), || control.check())?;
             let (reverse_term, memory) = reverse_term.into_parts();
             self.payload.absorb(memory);
-            self.terms.insert((reverse_field, reverse_term));
+            self.terms.push((reverse_field, reverse_term))?;
 
             let name = copy_name(field, &mut self.payload, control)?;
-            let mut positions = BudgetedVec::new(control.memory());
-            positions.reserve(occurrences.len())?;
-            for occurrence in &occurrences {
-                control.check()?;
-                positions.push(occurrence.position)?;
-            }
-            let (positions, memory) = positions.into_parts();
-            self.payload.absorb(memory);
-            self.postings.push((
-                (name, term),
-                MemoryPosting::new(doc_id, occurrences, positions),
-            ))?;
+            self.postings
+                .push(((name, term), MemoryPosting::new(doc_id, occurrences)))?;
         }
         drop(self.payload.split(scratch_entries));
         Ok(())

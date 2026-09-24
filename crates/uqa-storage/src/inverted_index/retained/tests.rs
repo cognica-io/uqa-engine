@@ -8,7 +8,7 @@ use super::*;
 use crate::inverted_index::{AnalyzerPhase, MemoryPosting, PostingKey};
 use crate::TokenTermKey;
 use std::collections::BTreeMap;
-use uqa_core::memory::{OwnedMap, OwnedSet};
+use uqa_core::memory::OwnedMap;
 use uqa_core::{memory::MemoryBudget, TokenOccurrence};
 
 fn builder(control: &StorageReadControl) -> RetainedInvertedIndexBuilder {
@@ -45,48 +45,43 @@ pub(in crate::inverted_index) fn corpus_bytes(state: &MemoryIndexState) -> usize
                         .values()
                         .map(|posting| {
                             OwnedMap::<DocId, MemoryPosting>::entry_bytes()
-                                + posting.projection.payload.positions.capacity() * size_of::<u32>()
                                 + posting.occurrences.capacity() * size_of::<TokenOccurrence>()
                         })
                         .sum::<usize>()
             })
             .sum::<usize>()
         + state
-            .doc_terms
+            .documents
             .values()
-            .map(|terms| {
-                OwnedMap::<DocId, OwnedSet<PostingKey>>::entry_bytes()
-                    + terms
+            .map(|document| {
+                OwnedMap::<DocId, super::super::MemoryDocument>::entry_bytes()
+                    + document.terms.capacity() * size_of::<PostingKey>()
+                    + document
+                        .terms
                         .iter()
-                        .map(|(field, term)| {
-                            OwnedSet::<PostingKey>::entry_bytes()
-                                + field.capacity()
-                                + term.allocated_bytes()
-                        })
+                        .map(|(field, term)| field.capacity() + term.allocated_bytes())
                         .sum::<usize>()
             })
             .sum::<usize>()
         + state
-            .doc_fields
+            .documents
             .values()
-            .map(|fields| {
-                OwnedMap::<DocId, OwnedMap<FieldName, IndexedFieldMetadata>>::entry_bytes()
-                    + fields
-                        .keys()
-                        .map(|field| {
-                            OwnedMap::<FieldName, IndexedFieldMetadata>::entry_bytes()
-                                + field.capacity()
-                        })
-                        .sum::<usize>()
+            .map(|document| {
+                document
+                    .fields
+                    .keys()
+                    .map(|field| {
+                        OwnedMap::<FieldName, IndexedFieldMetadata>::entry_bytes()
+                            + field.capacity()
+                    })
+                    .sum::<usize>()
             })
             .sum::<usize>()
-        + [&state.total_length, &state.field_doc_counts]
-            .into_iter()
-            .map(|fields| {
-                fields
-                    .keys()
-                    .map(|field| OwnedMap::<FieldName, u64>::entry_bytes() + field.capacity())
-                    .sum::<usize>()
+        + state
+            .field_counters
+            .keys()
+            .map(|field| {
+                OwnedMap::<FieldName, MemoryFieldCounters>::entry_bytes() + field.capacity()
             })
             .sum::<usize>()
 }
@@ -424,11 +419,10 @@ fn complete_node_admission_precedes_document_publication() {
     .unwrap();
     let plan = index.plan(2, &staged.fields).unwrap();
     let charge = charge::new_document(&index.index.state, &staged, &plan, &control).unwrap();
-    let expected = OwnedMap::<DocId, OwnedMap<FieldName, IndexedFieldMetadata>>::entry_bytes()
-        + OwnedMap::<DocId, OwnedSet<PostingKey>>::entry_bytes()
+    let expected = OwnedMap::<DocId, super::super::MemoryDocument>::entry_bytes()
         + 2 * OwnedMap::<DocId, MemoryPosting>::entry_bytes()
         + OwnedMap::<PostingKey, OwnedMap<DocId, MemoryPosting>>::entry_bytes()
-        + 2 * OwnedMap::<FieldName, u64>::entry_bytes();
+        + OwnedMap::<FieldName, MemoryFieldCounters>::entry_bytes();
     assert_eq!(charge.new_entries, expected);
     let blocker = control
         .memory()
@@ -465,7 +459,7 @@ fn staged_field_term_and_plan_nodes_have_complete_leases_before_publication() {
     .unwrap();
     let staged_bytes = staged.fields.allocated_bytes()
         + staged.fields.keys().map(String::capacity).sum::<usize>()
-        + staged.terms.allocated_bytes()
+        + staged.terms.capacity() * size_of::<PostingKey>()
         + staged
             .terms
             .iter()
@@ -479,7 +473,6 @@ fn staged_field_term_and_plan_nodes_have_complete_leases_before_publication() {
                 field.capacity()
                     + term.allocated_bytes()
                     + posting.occurrences.capacity() * size_of::<TokenOccurrence>()
-                    + posting.projection.payload.positions.capacity() * size_of::<u32>()
             })
             .sum::<usize>();
     assert_eq!(staged.reserved_bytes(), staged_bytes);
@@ -502,8 +495,8 @@ fn staged_field_term_and_plan_nodes_have_complete_leases_before_publication() {
     let plan_bytes = plan.field_counters.allocated_bytes()
         + plan
             .field_counters
-            .iter()
-            .map(|(field, counters)| field.capacity() + counters.total_key.capacity())
+            .keys()
+            .map(String::capacity)
             .sum::<usize>();
     assert_eq!(plan.reserved_bytes(), plan_bytes);
     assert_eq!(control.memory().used(), prior + staged_bytes + plan_bytes);

@@ -10,8 +10,8 @@ use super::{
     DocId, FieldName, IndexedFieldMetadata, MemoryIndexState, MemoryReplacementPlan,
     StagedMemoryDocument, StorageBackendResult, StorageReadControl,
 };
-use crate::inverted_index::{MemoryPosting, PostingKey};
-use uqa_core::memory::{MemoryError, OwnedMap, OwnedSet};
+use crate::inverted_index::{MemoryDocument, MemoryPosting, PostingKey};
+use uqa_core::memory::{MemoryError, OwnedMap};
 
 pub(super) struct Charge {
     pub retained: usize,
@@ -49,16 +49,21 @@ pub(super) fn new_document(
         retained: 0,
         new_entries: 0,
     };
-    charge.entries::<DocId, OwnedMap<FieldName, IndexedFieldMetadata>>(1)?;
-    charge.entries::<DocId, OwnedSet<PostingKey>>(1)?;
+    charge.entries::<DocId, MemoryDocument>(1)?;
     for field in staged.fields.keys() {
         control.check()?;
         charge.keep(OwnedMap::<FieldName, IndexedFieldMetadata>::entry_bytes())?;
         charge.keep(field.capacity())?;
     }
+    charge.keep(
+        staged
+            .terms
+            .capacity()
+            .checked_mul(size_of::<PostingKey>())
+            .ok_or(MemoryError::SizeOverflow)?,
+    )?;
     for (field, term) in &staged.terms {
         control.check()?;
-        charge.keep(OwnedSet::<PostingKey>::entry_bytes())?;
         charge.keep(field.capacity())?;
         charge.keep(term.allocated_bytes())?;
     }
@@ -75,14 +80,10 @@ pub(super) fn new_document(
             charge.keep(key.1.allocated_bytes())?;
         }
     }
-    for (field, counters) in &plan.field_counters {
+    for field in plan.field_counters.keys() {
         control.check()?;
-        if !state.total_length.contains_key(field) {
-            charge.entries::<FieldName, u64>(1)?;
-            charge.keep(counters.total_key.capacity())?;
-        }
-        if !state.field_doc_counts.contains_key(field) {
-            charge.entries::<FieldName, u64>(1)?;
+        if !state.field_counters.contains_key(field) {
+            charge.entries::<FieldName, super::super::MemoryFieldCounters>(1)?;
             charge.keep(field.capacity())?;
         }
     }

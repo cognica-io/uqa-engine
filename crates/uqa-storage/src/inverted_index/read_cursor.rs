@@ -83,9 +83,9 @@ impl<'a> MemoryPostingReadCursor<'a> {
                     doc_length: self
                         .index
                         .state
-                        .doc_fields
+                        .documents
                         .get(&doc_id)
-                        .and_then(|fields| fields.get(self.field))
+                        .and_then(|document| document.fields.get(self.field))
                         .map_or(0, |metadata| metadata.length),
                 })
             })

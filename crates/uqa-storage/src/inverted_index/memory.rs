@@ -95,19 +95,13 @@ impl InvertedIndex for MemoryInvertedIndex {
     }
 
     fn remove_document(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
-        let Some(keys) = self.state.doc_terms.get(&doc_id).cloned() else {
-            if self.state.doc_fields.contains_key(&doc_id) {
-                return Err(StorageBackendError::Other(format!(
-                    "inverted-index document {doc_id} has lengths but no reverse postings"
-                )));
-            }
+        let Some(super::MemoryDocument {
+            terms: keys,
+            fields: lengths,
+        }) = self.state.document(doc_id)?.cloned()
+        else {
             return Ok(());
         };
-        let lengths = self.state.doc_fields.get(&doc_id).cloned().ok_or_else(|| {
-            StorageBackendError::Other(format!(
-                "inverted-index document {doc_id} has reverse postings but no lengths"
-            ))
-        })?;
         let next_doc_count = self
             .state
             .doc_count
@@ -129,18 +123,16 @@ impl InvertedIndex for MemoryInvertedIndex {
         for (field, metadata) in &lengths {
             let total = self
                 .state
-                .total_length
+                .field_counters
                 .get(field)
-                .copied()
-                .unwrap_or(0)
+                .map_or(0, |counters| counters.total)
                 .checked_sub(metadata.length)
                 .ok_or_else(|| counter_error("total field length"))?;
             let field_docs = self
                 .state
-                .field_doc_counts
+                .field_counters
                 .get(field)
-                .copied()
-                .unwrap_or(0)
+                .map_or(0, |counters| counters.docs)
                 .checked_sub(1)
                 .ok_or_else(|| counter_error("field document count"))?;
             next_field_counters.insert(field.clone(), (total, field_docs));
@@ -153,15 +145,12 @@ impl InvertedIndex for MemoryInvertedIndex {
         state.remove_document_metadata(doc_id);
         for (field, (total, field_docs)) in next_field_counters {
             super::footprint::set_counter(
-                &mut state.total_length,
-                field.clone(),
-                (field_docs != 0).then_some(total),
-                &mut state.retention,
-            );
-            super::footprint::set_counter(
-                &mut state.field_doc_counts,
+                &mut state.field_counters,
                 field,
-                (field_docs != 0).then_some(field_docs),
+                (field_docs != 0).then_some(super::MemoryFieldCounters {
+                    total,
+                    docs: field_docs,
+                }),
                 &mut state.retention,
             );
         }
@@ -226,7 +215,7 @@ impl InvertedIndex for MemoryInvertedIndex {
             .get(&(field.to_owned(), term.clone()))
             .into_iter()
             .flat_map(uqa_core::memory::OwnedMap::values)
-            .map(|posting| posting.projection.clone())
+            .map(super::MemoryPosting::projection)
             .collect();
         Ok(PostingList::from_sorted_unchecked(entries))
     }
@@ -254,9 +243,9 @@ impl InvertedIndex for MemoryInvertedIndex {
             .flat_map(uqa_core::memory::OwnedMap::values)
             .map(|posting| {
                 Ok(PostingScore {
-                    doc_id: posting.projection.doc_id,
+                    doc_id: posting.doc_id,
                     term_freq: usize_to_u64(posting.occurrences.len(), "term frequency")?,
-                    doc_length: self.get_doc_length(posting.projection.doc_id, field)?,
+                    doc_length: self.get_doc_length(posting.doc_id, field)?,
                 })
             })
             .collect::<StorageBackendResult<Vec<_>>>()?;
@@ -276,8 +265,8 @@ impl InvertedIndex for MemoryInvertedIndex {
             .flat_map(uqa_core::memory::OwnedMap::values)
             .map(|posting| {
                 Ok(crate::clustered_postings::OccurrencePosting {
-                    doc_id: posting.projection.doc_id,
-                    doc_length: self.get_doc_length(posting.projection.doc_id, field)?,
+                    doc_id: posting.doc_id,
+                    doc_length: self.get_doc_length(posting.doc_id, field)?,
                     occurrences: posting.occurrences.clone(),
                 })
             })
@@ -307,9 +296,9 @@ impl InvertedIndex for MemoryInvertedIndex {
         self.check_retained_read()?;
         Ok(self
             .state
-            .doc_fields
+            .documents
             .get(&doc_id)
-            .and_then(|fields| fields.get(field))
+            .and_then(|document| document.fields.get(field))
             .copied())
     }
 
@@ -326,7 +315,7 @@ impl InvertedIndex for MemoryInvertedIndex {
             .get(&(field.to_owned(), TokenTermKey::from_text(term)))
         {
             for posting in postings.values() {
-                visit(&posting.projection);
+                visit(&posting.projection());
             }
         }
         Ok(())
@@ -346,7 +335,7 @@ impl InvertedIndex for MemoryInvertedIndex {
         {
             for posting in postings.values() {
                 visit(
-                    posting.projection.doc_id,
+                    posting.doc_id,
                     usize_to_u64(posting.occurrences.len(), "term frequency")?,
                 );
             }
@@ -373,9 +362,9 @@ impl InvertedIndex for MemoryInvertedIndex {
         self.check_retained_read()?;
         Ok(self
             .state
-            .doc_fields
+            .documents
             .get(&doc_id)
-            .and_then(|fields| fields.get(field))
+            .and_then(|document| document.fields.get(field))
             .map_or(0, |metadata| metadata.length))
     }
 
@@ -407,7 +396,11 @@ impl InvertedIndex for MemoryInvertedIndex {
 
     fn total_field_length(&self, field: &str) -> StorageBackendResult<u64> {
         self.check_retained_read()?;
-        Ok(self.state.total_length.get(field).copied().unwrap_or(0))
+        Ok(self
+            .state
+            .field_counters
+            .get(field)
+            .map_or(0, |counters| counters.total))
     }
 
     fn vocabulary_terms(&self, field: &str) -> StorageBackendResult<Vec<String>> {
@@ -435,7 +428,10 @@ impl InvertedIndex for MemoryInvertedIndex {
         s.total_docs = self.state.doc_count;
         if self.state.doc_count > 0 {
             let total = checked_sum_u64(
-                self.state.total_length.values().copied(),
+                self.state
+                    .field_counters
+                    .values()
+                    .map(|counters| counters.total),
                 "total document length",
             )?;
             s.avg_doc_length = total as f64 / self.state.doc_count as f64;
@@ -470,12 +466,14 @@ impl InvertedIndex for MemoryInvertedIndex {
         Ok(match field {
             Some(target) => self
                 .state
-                .field_doc_counts
+                .field_counters
                 .get(target)
-                .copied()
-                .unwrap_or(0),
+                .map_or(0, |counters| counters.docs),
             None => checked_sum_u64(
-                self.state.field_doc_counts.values().copied(),
+                self.state
+                    .field_counters
+                    .values()
+                    .map(|counters| counters.docs),
                 "document-length row count",
             )?,
         })
@@ -520,7 +518,7 @@ impl InvertedIndex for MemoryInvertedIndex {
 
     fn field_names(&self) -> StorageBackendResult<Vec<FieldName>> {
         self.check_retained_read()?;
-        Ok(self.state.total_length.keys().cloned().collect())
+        Ok(self.state.field_counters.keys().cloned().collect())
     }
 
     fn set_field_analyzer(
@@ -664,7 +662,12 @@ impl MemoryInvertedIndex {
         field: &str,
         candidate: &AnalyzerBindings,
     ) -> Result<(), String> {
-        if self.state.field_doc_counts.get(field).copied().unwrap_or(0) > 0 {
+        if self
+            .state
+            .field_counters
+            .get(field)
+            .is_some_and(|counters| counters.docs > 0)
+        {
             let current = self
                 .bindings
                 .index_revision(field)

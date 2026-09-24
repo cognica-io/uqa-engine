@@ -11,7 +11,7 @@ use crate::inverted_index::{
 };
 use crate::{StorageBackendError, TokenTermKey};
 use std::collections::BTreeMap;
-use uqa_core::memory::{MemoryBudget, MemoryError, MemoryReservation, OwnedMap, OwnedSet};
+use uqa_core::memory::{MemoryBudget, MemoryError, MemoryReservation, OwnedMap};
 use uqa_core::CancellationToken;
 
 fn fields(text: &str) -> BTreeMap<String, String> {
@@ -301,39 +301,36 @@ fn shared_capture_admits_complete_nodes_and_reuses_the_same_corpus_after_lease_e
             .values()
             .map(OwnedMap::allocated_bytes)
             .sum::<usize>()
-        + state.doc_fields.allocated_bytes()
+        + state.documents.allocated_bytes()
         + state
-            .doc_fields
+            .documents
             .values()
-            .map(OwnedMap::allocated_bytes)
+            .map(|document| document.fields.allocated_bytes())
             .sum::<usize>()
-        + state.doc_terms.allocated_bytes()
         + state
-            .doc_terms
+            .documents
             .values()
-            .map(OwnedSet::allocated_bytes)
+            .map(|document| document.terms.capacity() * size_of::<PostingKey>())
             .sum::<usize>()
-        + state.total_length.allocated_bytes()
-        + state.field_doc_counts.allocated_bytes();
+        + state.field_counters.allocated_bytes();
     let entries = state.index.len() * size_of::<(PostingKey, OwnedMap<u64, MemoryPosting>)>()
         + state
             .index
             .values()
             .map(|postings| postings.len() * size_of::<(u64, MemoryPosting)>())
             .sum::<usize>()
-        + state.doc_fields.len() * size_of::<(u64, OwnedMap<String, IndexedFieldMetadata>)>()
+        + state.documents.len() * size_of::<(u64, super::super::MemoryDocument)>()
         + state
-            .doc_fields
+            .documents
             .values()
-            .map(|fields| fields.len() * size_of::<(String, IndexedFieldMetadata)>())
+            .map(|document| document.fields.len() * size_of::<(String, IndexedFieldMetadata)>())
             .sum::<usize>()
-        + state.doc_terms.len() * size_of::<(u64, OwnedSet<PostingKey>)>()
         + state
-            .doc_terms
+            .documents
             .values()
-            .map(|terms| terms.len() * size_of::<PostingKey>())
+            .map(|document| document.terms.len() * size_of::<PostingKey>())
             .sum::<usize>()
-        + (state.total_length.len() + state.field_doc_counts.len()) * size_of::<(String, u64)>();
+        + state.field_counters.len() * size_of::<(String, super::super::MemoryFieldCounters)>();
     assert!(nodes > entries);
     let entry_only_limit = capture_bytes(&index) - (nodes - entries);
     let short = StorageReadControl::with_limit(entry_only_limit);
