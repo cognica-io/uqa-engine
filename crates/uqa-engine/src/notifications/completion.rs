@@ -140,7 +140,11 @@ impl Engine {
             .as_ref()
             .ok_or_else(|| SQLError::Internal("retained notification lost its coordinator".into()))?
             .coordinator()?;
-        let control = cross.recovery_control()?;
+        let recovery = cross.recovery_control()?;
+        let control = uqa_storage::read_control::StorageReadControl::new(
+            recovery.memory(),
+            &self.runtime.cancellation,
+        );
         if let Some(publication) = prepared.publication.as_ref() {
             let owner = prepared
                 .publisher_lease

@@ -29,6 +29,66 @@ fn cancelled_serialized_notification_commit_clears_its_transaction_frame() {
 
 const KEY: &str = "notification-recovery-fixture-key";
 
+#[rstest::rstest]
+fn cancelled_retained_publication_admission_preserves_original_resources(
+    #[values(0, 1, 2, 3)] provider: usize,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let sender = open(provider, &directory.path().join("cancelled-retained.db"));
+    sender.sql("CREATE TABLE items(id INTEGER)", &[]).unwrap();
+    let listener = sender.new_session().unwrap();
+    listener.sql("LISTEN retained_event", &[]).unwrap();
+    sender
+        .sql(
+            "BEGIN; INSERT INTO items VALUES (1); NOTIFY retained_event, 'original'",
+            &[],
+        )
+        .unwrap();
+    let stack = sender.session.transactions.lock();
+    let frame = stack.last().unwrap();
+    let prepared = sender
+        .begin_notification_commit(true, frame)
+        .unwrap()
+        .unwrap();
+    let (retained, suspended) = prepared.retain();
+    suspended.unwrap();
+    let fingerprint = retained
+        .as_ref()
+        .unwrap()
+        .publication
+        .as_ref()
+        .unwrap()
+        .fingerprint();
+    *frame.pending_notification_commit.lock() = retained;
+
+    sender.runtime.cancellation.cancel();
+    let error = sender
+        .begin_notification_commit(true, frame)
+        .err()
+        .expect("cancelled resumption must not admit a registry publisher");
+    assert_eq!(error.sqlstate(), Some("57014"), "{error}");
+    assert_eq!(
+        frame
+            .pending_notification_commit
+            .lock()
+            .as_ref()
+            .unwrap()
+            .publication
+            .as_ref()
+            .unwrap()
+            .fingerprint(),
+        fingerprint
+    );
+    sender.runtime.cancellation.reset();
+    drop(stack);
+    sender.commit().unwrap();
+    listener.poll_sql_notifications().unwrap();
+    let delivered = listener.take_sql_notifications();
+    assert_eq!(delivered.len(), 1);
+    assert_eq!(delivered[0].payload, "original");
+    assert_eq!(delivered[0].process_id, sender.backend_process_id());
+}
+
 fn open(provider: usize, path: &Path) -> Engine {
     match provider {
         0 => Engine::open(path).unwrap(),
