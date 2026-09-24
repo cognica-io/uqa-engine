@@ -23,31 +23,32 @@ This plan distinguishes a PostgreSQL 18 baseline from complete compatibility. Th
 
 ## Prioritized issue correction
 
-The 2026-09-24 queue starts from merged main `57e74e23`. Process one defect at a time, with logical commits and a synchronized PR, preserving the remaining queue until its own evidence passes. The initial inventory comprised 18 defects and #41, a usage report that does not request a defect correction. Numeric differential testing additionally reproduced non-finite float data loss (#138), which takes priority and blocks persistent comparison acceptance. The same external fixture then reproduced premature GROUP BY alias substitution (#139); its correction is also required by the numeric grouping gate. Reassess a defect against current source before changing it or closing its issue; source-inspection reports are not executed reproductions.
+The 2026-09-24 queue starts from merged main `57e74e23`. Process one defect at a time, with logical commits and a synchronized PR, preserving the remaining queue until its own evidence passes. Comparison, temporal and JSONB corrections are consolidated into PR #137; #143 and #144 are superseded. Finish this bounded comparison correction, including its mode consumer (#145), before opening another implementation PR. CI runs in the background while review and documentation proceed. The initial inventory comprised 18 defects and #41, a usage report that does not request a defect correction. Numeric differential testing additionally reproduced non-finite float data loss (#138), which takes priority and blocks persistent comparison acceptance. The same external fixture then reproduced premature GROUP BY alias substitution (#139); its correction is also required by the numeric grouping gate. Reassess a defect against current source before changing it or closing its issue; source-inspection reports are not executed reproductions.
 
 | Order | Issue | Required result |
 | --- | --- | --- |
 | 1 | [#138](https://github.com/cognica-io/uqa-engine/issues/138), non-finite float data loss | Preserve NaN/Infinity through typed JSON, nested values, provider writes and reopen; fence incompatible older binaries without losing existing receipt ownership or capacity. Focused public/owner acceptance passes in PR #137; review and full CI remain pending. |
 | 2 | [#120](https://github.com/cognica-io/uqa-engine/issues/120), numeric comparison | Restore internal numeric order/equality/hash coherence and PostgreSQL-selected SQL comparisons, including `1.0 > 0`, both operand directions and precision boundaries. Focused public/owner acceptance passes in PR #137; review and full CI remain pending. |
 | 3 | [#139](https://github.com/cognica-io/uqa-engine/issues/139), GROUP BY name precedence | Prefer input columns over output aliases after source binding. Fixed in PR #137; all 16 PostgreSQL grouping-name outcomes and prepared/stored-view acceptance pass. |
-| 4 | [#121](https://github.com/cognica-io/uqa-engine/issues/121), TIME/TIMETZ | Implemented in PR #143; all 65 focused owner/public/provider tests and strict Clippy pass. Final CI and review remain pending. |
-| 5 | [#122](https://github.com/cognica-io/uqa-engine/issues/122), JSONB numeric order | Core comparison and order-key corrections are implemented with 2,352 PostgreSQL outcomes and 88 relational queries. Focused owner/public/provider acceptance is running; review and CI remain pending. |
-| 6 | [#123](https://github.com/cognica-io/uqa-engine/issues/123), legacy-vector domains | Use consistent representations for casts, assignment, equality, uniqueness and index/reopen behavior. |
-| 7 | [#140](https://github.com/cognica-io/uqa-engine/issues/140), decimal grouping expression identity | Match an identical decimal/typed expression without merging different PostgreSQL analyzed representations. Reproduced and queued separately from the current comparison correction. |
-| 8 | [#129](https://github.com/cognica-io/uqa-engine/issues/129), committed notification recovery | Recover committed publication after sender loss without duplicate delivery or replay of evaluated effects. |
-| 9 | [#124](https://github.com/cognica-io/uqa-engine/issues/124), direct SQLite index snapshots | Preserve the captured read view through later replacement/deletion and nested retained lifetimes. |
-| 10 | [#130](https://github.com/cognica-io/uqa-engine/issues/130), ALTER TABLE column visibility | Add a unique text column with its default atomically while preserving the existing row. |
-| 11 | [#117](https://github.com/cognica-io/uqa-engine/issues/117), JSON extraction | Match declared operand resolution, NULL/error timing, stored syntax and reopen behavior. |
-| 12 | [#118](https://github.com/cognica-io/uqa-engine/issues/118), NULLIF | Select the equality operator, operand casts and resulting left-input type before evaluation. |
-| 13 | [#131](https://github.com/cognica-io/uqa-engine/issues/131), lock timeout | Implement setting scope, units, lock wait deadlines, cleanup and PostgreSQL SQLSTATEs. |
-| 14 | [#135](https://github.com/cognica-io/uqa-engine/issues/135), range elements | Resolve range/multirange element containment through declared operand types in both directions. |
-| 15 | [#133](https://github.com/cognica-io/uqa-engine/issues/133), empty ranges | Match empty range/multirange containment without type or NULL exemptions. |
-| 16 | [#134](https://github.com/cognica-io/uqa-engine/issues/134), factorial | Preserve exact numeric results, PostgreSQL bounds/errors and cancellation. |
-| 17 | [#128](https://github.com/cognica-io/uqa-engine/issues/128), current schema | Return SQL NULL for an empty effective path and respect temporary namespace allocation. |
-| 18 | [#127](https://github.com/cognica-io/uqa-engine/issues/127), AGE regclass | Resolve label identities consistently across catalogs, casts, names and search paths. |
-| 19 | [#119](https://github.com/cognica-io/uqa-engine/issues/119), catalog expressions | Complete remaining typed expression/Datum codecs and constraint projections after their operand semantics are corrected. |
-| 20 | [#132](https://github.com/cognica-io/uqa-engine/issues/132), debug WASM parser | Resolve cold Node stack failure without warm-up retries or larger runtime stacks. |
-| 21 | [#125](https://github.com/cognica-io/uqa-engine/issues/125), macOS test startup | Diagnose the pre-harness loader wait and establish reliable startup without conflating it with query performance. |
+| 4 | [#121](https://github.com/cognica-io/uqa-engine/issues/121), TIME/TIMETZ | Implemented in consolidated PR #137; all 65 focused owner/public/provider tests and strict Clippy pass. Final CI and review remain pending. |
+| 5 | [#122](https://github.com/cognica-io/uqa-engine/issues/122), JSONB numeric order | Core comparison and order-key corrections are implemented with 2,352 PostgreSQL outcomes and 88 relational queries. All 31 focused owner/public/provider tests and 38 combined comparison follow-up tests pass; review and CI remain pending in consolidated PR #137. |
+| 6 | [#145](https://github.com/cognica-io/uqa-engine/issues/145), ordered-set mode | Count Core-equal values together and retain the first sorted group on frequency ties; 58 independent PostgreSQL outcomes cover ordinary/prepared SQL and owner memory/spill execution. All 28 aggregate-owner tests and 3 public mode tests pass; final CI and review remain pending within PR #137. |
+| 7 | [#123](https://github.com/cognica-io/uqa-engine/issues/123), legacy-vector domains | Use consistent representations for casts, assignment, equality, uniqueness and index/reopen behavior. |
+| 8 | [#140](https://github.com/cognica-io/uqa-engine/issues/140), decimal grouping expression identity | Match an identical decimal/typed expression without merging different PostgreSQL analyzed representations. Reproduced and queued separately from the current comparison correction. |
+| 9 | [#129](https://github.com/cognica-io/uqa-engine/issues/129), committed notification recovery | Recover committed publication after sender loss without duplicate delivery or replay of evaluated effects. |
+| 10 | [#124](https://github.com/cognica-io/uqa-engine/issues/124), direct SQLite index snapshots | Preserve the captured read view through later replacement/deletion and nested retained lifetimes. |
+| 11 | [#130](https://github.com/cognica-io/uqa-engine/issues/130), ALTER TABLE column visibility | Add a unique text column with its default atomically while preserving the existing row. |
+| 12 | [#117](https://github.com/cognica-io/uqa-engine/issues/117), JSON extraction | Match declared operand resolution, NULL/error timing, stored syntax and reopen behavior. |
+| 13 | [#118](https://github.com/cognica-io/uqa-engine/issues/118), NULLIF | Select the equality operator, operand casts and resulting left-input type before evaluation. |
+| 14 | [#131](https://github.com/cognica-io/uqa-engine/issues/131), lock timeout | Implement setting scope, units, lock wait deadlines, cleanup and PostgreSQL SQLSTATEs. |
+| 15 | [#135](https://github.com/cognica-io/uqa-engine/issues/135), range elements | Resolve range/multirange element containment through declared operand types in both directions. |
+| 16 | [#133](https://github.com/cognica-io/uqa-engine/issues/133), empty ranges | Match empty range/multirange containment without type or NULL exemptions. |
+| 17 | [#134](https://github.com/cognica-io/uqa-engine/issues/134), factorial | Preserve exact numeric results, PostgreSQL bounds/errors and cancellation. |
+| 18 | [#128](https://github.com/cognica-io/uqa-engine/issues/128), current schema | Return SQL NULL for an empty effective path and respect temporary namespace allocation. |
+| 19 | [#127](https://github.com/cognica-io/uqa-engine/issues/127), AGE regclass | Resolve label identities consistently across catalogs, casts, names and search paths. |
+| 20 | [#119](https://github.com/cognica-io/uqa-engine/issues/119), catalog expressions | Complete remaining typed expression/Datum codecs and constraint projections after their operand semantics are corrected. |
+| 21 | [#132](https://github.com/cognica-io/uqa-engine/issues/132), debug WASM parser | Resolve cold Node stack failure without warm-up retries or larger runtime stacks. |
+| 22 | [#125](https://github.com/cognica-io/uqa-engine/issues/125), macOS test startup | Diagnose the pre-harness loader wait and establish reliable startup without conflating it with query performance. |
 
 Existing non-SQL CI failures are tracked independently: [#141](https://github.com/cognica-io/uqa-engine/issues/141) for native Nori indexing allocation ceilings and [#142](https://github.com/cognica-io/uqa-engine/issues/142) for 48 retained redb bytes after a completed Nori transaction. Main `7ab04890` and PR #137 `b7e57006` report identical counters; their existing CI logs establish the baseline without new timing runs. These failures remain open and do not change the comparison-correctness order above.
 
@@ -173,6 +174,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `query.group-by-input-precedence` | `M4` | `partial` |
 | `query.decimal-grouping-expression-identity` | `M4` | `partial` |
 | `types.jsonb-numeric-order` | `M4` | `partial` |
+| `aggregates.mode-equality-and-ties` | `M4` | `partial` |
 
 <!-- pg18-manifest-status:end -->
 
