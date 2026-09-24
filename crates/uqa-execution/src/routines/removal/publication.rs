@@ -32,6 +32,30 @@ pub fn commit_sql_function_drop(
             .iter()
             .map(|(table, column, _)| (table.clone(), column.clone())),
     );
+    let tables = columns
+        .iter()
+        .map(|(table, _)| table.as_str())
+        .chain(
+            dependents
+                .defaults
+                .iter()
+                .map(|(table, _, _)| table.as_str()),
+        )
+        .chain(dependents.checks.iter().map(|(table, _, _)| table.as_str()))
+        .collect::<std::collections::BTreeSet<_>>();
+    for table in &tables {
+        crate::row_locks::binding::acquire_relation(
+            context.locks,
+            table,
+            crate::row_locks::RelationLockMode::AccessExclusive,
+            false,
+        )?
+        .retain();
+    }
+    if !tables.is_empty() {
+        // Statistics publication can finish while waiting for a dependent relation lock. Advance the write view before staging any schema or statistics removal, retaining already prepared private definitions.
+        context.locks.prepare_definition_write()?;
+    }
     let rewritten = super::prepare_routine_column_alias_drop(context, columns, &bindings)?;
     domain_dependencies::drop_domain_routine_checks(&context.domains, &bindings)?;
     drop_routine_object_dependents(context, &dependents)?;

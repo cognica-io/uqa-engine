@@ -10,6 +10,7 @@ use crate::tests::relation_lock_support::{after_wait, error, sessions, sql};
 use crate::Engine;
 use uqa_core::Value;
 
+mod cascading_columns;
 mod catalog_addresses;
 mod column_checks;
 mod constraint_names;

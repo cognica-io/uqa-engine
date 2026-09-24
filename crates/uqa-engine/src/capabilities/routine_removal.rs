@@ -54,6 +54,7 @@ use uqa_storage::StorageBackendResult;
 impl Engine {
     pub(crate) fn routine_removal_context(&self) -> RoutineRemovalContext<'_> {
         RoutineRemovalContext {
+            locks: self,
             names: self,
             registry: self,
             publication: self,

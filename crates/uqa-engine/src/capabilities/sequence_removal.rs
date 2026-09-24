@@ -17,6 +17,7 @@ impl SequenceRemovalInputs for Engine {
 impl Engine {
     pub(crate) fn sequence_removal_context(&self) -> SequenceRemovalContext<'_> {
         SequenceRemovalContext {
+            locks: self,
             names: self,
             publication: self,
             privileges: self.sequence_privilege_inquiry(),

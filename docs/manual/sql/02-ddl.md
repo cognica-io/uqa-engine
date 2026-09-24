@@ -423,6 +423,8 @@ SELECT renamed_amount_reader();
 
 CASCADE follows stored routine dependencies through generated columns, views, owned sequences, other routines, and domains, and removes dependent defaults, CHECK constraints, indexes, and inbound foreign keys through the corresponding object lifecycle. Unrelated columns, rows, and routines survive. The table owner's authority permits removal of a dependent routine in an inaccessible schema. Statement and savepoint failures roll back the column and dependent objects together, committed changes refresh sibling engines, and stored definitions survive SQLite reopen. The Rust `Engine::drop_column` API also protects stored readers with RESTRICT behavior.
 
+Removing dependent columns, defaults or CHECK constraints through `DROP FUNCTION`, `DROP SCHEMA`, `DROP DOMAIN` or `DROP SEQUENCE ... CASCADE` retains an `ACCESS EXCLUSIVE` lock on each affected table until transaction end or rollback to a preceding savepoint. These changes wait for concurrent `ANALYZE` and prepare their storage writes after the lock is acquired.
+
 Stored SQL-standard routines retain the creation-time input columns of ordinary and foreign table sources. Deleting an unread column removes its positional alias from table and enclosing join alias lists; adding columns, including reuse of a deleted name, does not change the surviving bindings or expanded projections. Renames update the retained physical names while preserving SQL aliases. This applies to nested joins, CTEs, subqueries, query and mutation-command bodies, and procedures. Source shape metadata alone does not create a read dependency: a routine that only counts rows can survive removal of every column.
 
 ```sql execute
