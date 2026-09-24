@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Public comparison, key and persisted-index results captured independently from PostgreSQL 18.
+//! Public comparison, key and persisted-index results captured independently from `PostgreSQL` 18.
 
 use super::*;
 use serde_json::Value as JSONValue;
@@ -42,8 +42,7 @@ fn numeric_comparisons_match_postgresql_values_types_and_errors() {
                 );
                 let expected = case["values"][index]
                     .as_bool()
-                    .map(Value::Bool)
-                    .unwrap_or(Value::Null);
+                    .map_or(Value::Null, Value::Bool);
                 assert_eq!(result.rows[0]["result"], expected, "{sql}");
             }
         }

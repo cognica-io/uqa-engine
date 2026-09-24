@@ -35,8 +35,7 @@ fn constant_numeric_comparisons_match_postgresql_before_replacing_the_expression
                 let folded = result.unwrap();
                 let expected = case["values"][index]
                     .as_bool()
-                    .map(Value::Bool)
-                    .unwrap_or(Value::Null);
+                    .map_or(Value::Null, Value::Bool);
                 assert_eq!(literal_value(&folded), Some(&expected), "{sql}");
                 assert_eq!(
                     scalar_type(&folded, &RowSchema::default(), &[]).unwrap(),
