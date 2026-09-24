@@ -94,6 +94,8 @@ mod numeric_comparisons;
 mod numeric_exactness;
 #[path = "pg18_semantics/numeric_power_statistics.rs"]
 mod numeric_power_statistics;
+#[path = "pg18_semantics/ordered_mode.rs"]
+mod ordered_mode;
 #[path = "pg18_semantics/pattern_escape.rs"]
 mod pattern_escape;
 #[path = "pg18_semantics/pg18_additions.rs"]

@@ -7,6 +7,8 @@
 use super::*;
 use uqa_core::ArrayValue;
 
+mod mode;
+
 #[test]
 fn numeric_extrema_preserve_total_order_and_nan_regardless_of_input_order() {
     for (small, large) in [

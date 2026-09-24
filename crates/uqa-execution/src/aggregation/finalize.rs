@@ -7,8 +7,8 @@
 //! Built-in aggregate finalization and percentile/statistical helpers.
 
 use super::{
-    cast_value, core_value_to_json, distinct_key, value_as_f64, value_to_json_text,
-    AggregateAccumulator, AggregateValueBuffer, DecimalValue, SQLError, ScalarExpr, Value,
+    cast_value, core_value_to_json, value_as_f64, value_to_json_text, AggregateAccumulator,
+    AggregateValueBuffer, DecimalValue, SQLError, ScalarExpr, Value,
 };
 use uqa_core::ArrayValue;
 
@@ -394,22 +394,20 @@ pub fn mode_value(values: &AggregateValueBuffer) -> Result<Value, SQLError> {
     if values.next_sequence == 0 {
         return Ok(Value::Null);
     }
-    let mut current_key = None;
     let mut current_value = Value::Null;
     let mut current_count = 0_u64;
     let mut best_value = Value::Null;
     let mut best_count = 0_u64;
     values.for_each_ordered(|record| {
-        let key = distinct_key(&record.value)?;
-        if current_key.as_ref().is_some_and(|current| current != &key) {
-            if current_count >= best_count {
+        // Group with the same equality as sorting; retain the first group on ties.
+        if current_count != 0 && current_value != record.value {
+            if current_count > best_count {
                 best_count = current_count;
                 best_value = current_value.clone();
             }
             current_count = 0;
         }
-        if current_key.as_ref() != Some(&key) {
-            current_key = Some(key);
+        if current_count == 0 {
             current_value = record.value;
         }
         current_count = current_count
@@ -417,7 +415,7 @@ pub fn mode_value(values: &AggregateValueBuffer) -> Result<Value, SQLError> {
             .ok_or_else(|| SQLError::Internal("mode aggregate count overflow".into()))?;
         Ok(())
     })?;
-    if current_count >= best_count {
+    if current_count > best_count {
         best_value = current_value;
     }
     Ok(best_value)

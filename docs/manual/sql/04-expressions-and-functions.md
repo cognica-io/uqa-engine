@@ -356,6 +356,8 @@ SELECT lastval() AS last_allocated;
 
 Aggregates support `DISTINCT`, aggregate-local `ORDER BY`, and `FILTER` where the function shape permits it. `min` and `max` compare arrays and record-like map values lexicographically in addition to their scalar inputs.
 
+`mode() WITHIN GROUP (ORDER BY value [ASC | DESC])` returns the most frequent non-NULL value with the input's type, or NULL for empty or all-NULL input. SQL-equal values count together, including signed floating zero, equal intervals and equivalent JSONB representations. When frequencies tie, the first value in the requested ordering wins. Memory and spilled aggregate execution use the same equality and tie rules.
+
 ```sql
 SELECT department,
        count(*) FILTER (WHERE active) AS active_count,

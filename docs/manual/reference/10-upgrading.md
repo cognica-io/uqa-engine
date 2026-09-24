@@ -10,6 +10,10 @@ The 0.3.0 release added native Korean Nori analysis, durable analyzer revisions 
 
 The 0.2 series includes SQL object and privilege lifecycle changes, durable expression and unique indexes, expanded sequences and PL/pgSQL, native cross-process notifications, and a Node.js HTTP client that runs without native addons. These changes were introduced in [0.2.0](../../../HISTORY.md#020---2026-09-05); the [compatibility guide](../sql/09-compatibility.md) defines the verified PostgreSQL 18 surface and the behavior still being implemented.
 
+## Unreleased ordered-set aggregation
+
+The unused low-level `uqa_execution::aggregation::distinct_key` string encoder is removed. Its representation-based keys split values that SQL considers equal. Aggregate grouping now uses `uqa_core::Value` equality directly; native callers that used the helper for grouping should likewise compare values instead of their textual encodings. `mode()` also retains the first group in the requested ordering when frequencies tie. These changes require no additional persisted-format upgrade.
+
 ## Unreleased SQLite backup restoration
 
 `ManagedConnection::open_restored` and its encrypted/compressed counterparts restore an existing closed native or Key/Value backup using a caller-persisted `DatabaseRestore` source/target request. All destination owners must close first. SQLite main format 44 preserves the pending transition introduced in format 43 across the separate main and SSI databases; ordinary opens reject an incomplete transition and the exact original request resumes it. Completed retries preserve later work. Native mapping 9 preserves data addresses, record versions and allocation watermarks while old receipts and SSI identity are retired. See [backups and copies](04-storage-and-security.md#backups-and-copies) for the ownership, cancellation, credential and anchor contracts. Normal restarts use the ordinary open methods and preserve the current history.

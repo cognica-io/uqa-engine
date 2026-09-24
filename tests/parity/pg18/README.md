@@ -39,6 +39,16 @@ python3 tests/parity/pg18/capture_jsonb_comparisons.py --container uqa-pg18 --ou
 
 The collector reads only fixture inputs, obtains all expectations from PostgreSQL and rolls back temporary setup. It records the exact reference version and Docker image; generated diagnostics stay outside Git.
 
+## Ordered-set mode reference
+
+The compact [`pg18_mode.json`](../../../crates/uqa-execution/src/aggregation/tests/pg18_mode.json) records 58 ascending/descending outcomes from PostgreSQL 18.4. Each expected result identifies the first input belonging to the returned value's SQL equality class, or NULL for empty/all-NULL input. Cases include ties, signed zero, NaN, decimal precision, equivalent intervals, TIME/TIMETZ, JSONB, bpchar and arrays. Execution tests consume those expectations with original and reversed inputs in memory and encrypted spill, including merged runs; public tests use ordinary and prepared SQL.
+
+```sh
+python3 tests/parity/pg18/capture_mode.py --container uqa-pg18 --output target/mode.reference.json
+```
+
+The collector records the PostgreSQL version and Docker image and uses read-only queries. Expected winners come only from PostgreSQL, independently of UQA's comparator and mode implementation.
+
 ## Grouping name reference
 
 The compact [`pg18_names.json`](../../../crates/uqa-sql/src/semantics/grouping_sets/pg18_names.json) records PostgreSQL 18.4 input-column precedence, output-alias fallback, ordinals, grouping sets and ambiguity/context errors. SQL owner tests verify schema-aware resolution, and Engine tests consume the external results and verify prepared statements and stored views across column renaming and reopen.

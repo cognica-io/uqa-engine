@@ -33,6 +33,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Count SQL-equal values together in `mode()` and retain the first group in the requested order when frequencies tie. Signed zero, equivalent intervals, JSONB spellings and NaN use Core equality in both memory and spilled execution. Fixes [#145](https://github.com/cognica-io/uqa-engine/issues/145).
 - Order JSONB zero between negative and positive numbers, including fractions, exponents and nested values. Comparisons and ordered index keys follow independently captured PostgreSQL results; join hashes use semantic JSONB equality while persisted equality keys remain stable. Fixes [#122](https://github.com/cognica-io/uqa-engine/issues/122).
 - Preserve PostgreSQL TIME day endpoints and TIMETZ timezone tie-breaking in comparisons, equality keys, grouping and indexes. Independently captured PostgreSQL results replace the former incorrect equality expectations; predecessor reservation aliases remain available during upgrades. Fixes [#121](https://github.com/cognica-io/uqa-engine/issues/121).
 - Resolve `GROUP BY` input columns before output aliases, including grouping sets, prepared queries and stored views. Retain PostgreSQL ambiguity and aggregate/window context errors. Fixes [#139](https://github.com/cognica-io/uqa-engine/issues/139).

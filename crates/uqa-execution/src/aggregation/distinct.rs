@@ -173,39 +173,6 @@ fn encoded_value_size(value: &Value) -> Result<usize, SQLError> {
     Ok(counter.0)
 }
 
-pub fn distinct_key(v: &Value) -> Result<String, SQLError> {
-    Ok(match v {
-        Value::Null => "\x00".into(),
-        Value::Bool(b) => format!("b:{b}"),
-        Value::Int(n) => format!("i:{n}"),
-        Value::Float(f) => format!("f:{:016x}", f.to_bits()),
-        Value::Decimal(d) => format!("n:{}", d.to_canonical_string()),
-        Value::Str(s) => format!("s:{s}"),
-        Value::Bytes(bytes) => {
-            const HEX: &[u8; 16] = b"0123456789abcdef";
-            let capacity = bytes
-                .len()
-                .checked_mul(2)
-                .and_then(|length| length.checked_add(2))
-                .ok_or_else(|| SQLError::Internal("aggregate DISTINCT key size overflow".into()))?;
-            let mut key = String::new();
-            key.try_reserve_exact(capacity).map_err(|error| {
-                SQLError::Internal(format!(
-                    "unable to allocate aggregate DISTINCT key of {capacity} bytes: {error}"
-                ))
-            })?;
-            key.push_str("y:");
-            for byte in bytes {
-                key.push(char::from(HEX[usize::from(byte >> 4)]));
-                key.push(char::from(HEX[usize::from(byte & 0x0f)]));
-            }
-            key
-        }
-        Value::Temporal(t) => format!("t:{}", t.to_sql_string()),
-        other => format!("o:{other:?}"),
-    })
-}
-
 pub fn value_as_f64(v: &Value) -> Result<f64, SQLError> {
     match v {
         Value::Int(n) => Ok(*n as f64),
