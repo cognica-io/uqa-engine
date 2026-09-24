@@ -34,6 +34,7 @@ pub mod mvcc;
 #[allow(unsafe_code)]
 // Narrow OS file calls; callers retain descriptor ownership and local arbitration.
 pub mod native_file;
+pub mod notifications;
 pub mod read_control;
 mod read_only_snapshot;
 pub use read_only_snapshot::ReadOnlySnapshot;

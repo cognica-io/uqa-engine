@@ -1,6 +1,6 @@
 # Committed notification publication recovery
 
-Status: Active; three-provider loss reproduced, implementation pending.
+Status: Active; three-provider loss reproduced and shared queue ownership verified; atomic recovery remains pending.
 
 Issue: [#129](https://github.com/cognica-io/uqa-engine/issues/129). Initial source: merged main `b2a94f3c`. Work branch: `fix/committed-notification-recovery`. No additional PR opens while PR #151 is active.
 
@@ -24,6 +24,18 @@ The relevant manifests and `scripts/workspace-dependency-policy.json` were inspe
 
 An ordinary catalog metadata write is insufficient by itself: it can turn a legal read-only NOTIFY transaction into a storage write, follow an old session snapshot during recovery, or leave unbounded acknowledged records. Select a typed auxiliary publication contract after inspecting both physical commit implementations, preserving logical read-only status and the existing outcome-resolution owner. Do not enlarge or retain every ordinary transaction receipt merely to implement notifications.
 
+The inspected `VersionedSession::commit_transaction` acknowledges completion before releasing its active transaction; managed receipt owners therefore cannot serve as an indefinitely recoverable notification reference. A missing reclaimed receipt is not proof of rollback. Publication must retain its own authoritative committed record until the queue acknowledgement allows reclamation.
+
+## Selected publication record
+
+Use one bounded pending-publication slot per notification registry. The existing registry transaction serializes preparation through the main commit; recovery must finish a prior committed slot before another sender prepares its slot. A fixed record avoids leaving one permanent MVCC head tombstone per historical notification transaction. Retained versions continue to obey the provider's existing snapshot and reclamation contracts.
+
+Common Storage owns an immutable intent containing registry incarnation, sequence/position boundaries, sender identity and original ordered payloads. Stage it as an explicit auxiliary transaction effect, separately from user-record mutation accounting, so legal read-only SQL remains read-only. Materialize the slot under the existing current-snapshot/atomic-commit mechanism; reuse controlled record buffers and native/Key/Value record layouts so provider encryption and conditional publication remain effective. Ordinary catalog `set_metadata` calls from Engine must not bypass the storage read-only checks.
+
+The registry commits its message publication and an acknowledgement identity together. If the sender disappears before that commit, a surviving listener reconstructs the messages from the main-store intent. If it disappears after that commit but before slot cleanup, the acknowledgement prevents duplicate append. Clear only the matching intent through fresh autonomous storage state, and keep acknowledgement storage bounded. A registry incarnation mismatch or incompatible format must fail explicitly. Migration must also fence already-open incompatible registry users.
+
+Audit receiver cursors at the same boundary: a sender-owned deferred in-memory delivery must not permanently advance another live listener's durable cursor before that listener can receive or recover the message. Preserve the distinction between publication recovery and an application acknowledging a drained client notification.
+
 ## Required storage contract
 
 - Retain an immutable, bounded publication intent with the sender identity, original ordered notifications and the identity needed for idempotent recovery. The intent becomes committed atomically with the authoritative data outcome. A transaction with notifications but no data writes follows the same completion contract without becoming an SQL write.
@@ -44,4 +56,6 @@ An ordinary catalog metadata write is insufficient by itself: it can turn a lega
 
 ## Current acceptance
 
-The source reproduction is executed and fails in the expected place for all three providers. Implementation, passing recovery tests, independent-process acceptance, reclamation/encryption checks and final review remain. Existing successful notification tests establish ordinary behavior only and do not close the recovered-publication requirement.
+The source reproduction is executed and fails in the expected place for all three providers. Shared notification payloads, page alignment and queue-capacity calculations now live in `uqa-storage::notifications`; Engine imports that owner instead of maintaining its own implementation. The unchanged layout regression moved with the algorithm. That owner test, the Engine warning test and all three registry owner tests pass in Linux Docker. Strict all-target Storage/SQL/Execution/Engine Clippy and dependency/ownership/harness checks pass for this extraction.
+
+Atomic intent persistence and recovery, passing sender-loss regressions, independent-process acceptance, reclamation/encryption checks and final review remain. Existing successful notification tests establish ordinary behavior only and do not close the recovered-publication requirement.
