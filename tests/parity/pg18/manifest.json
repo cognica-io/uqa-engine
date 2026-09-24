@@ -942,9 +942,9 @@
       "id": "types.numeric-comparison-coherence",
       "postgresql_reference": "PostgreSQL 18.4 Docker operator selection and numeric comparison results; https://www.postgresql.org/docs/18/typeconv-oper.html; https://www.postgresql.org/docs/18/datatype-numeric.html",
       "uqa_test": "cargo test -p uqa-core --lib numeric_keys_; cargo test -p uqa-sql --lib comparison; cargo test -p uqa-planner --lib constant_numeric_comparisons; cargo test -p uqa-execution --lib distinct; cargo test -p uqa-engine --test integration numeric_comparisons",
-      "supported_version": "Exact Core ordering, canonical hash keys and 264 PostgreSQL outcomes pass owner, constant-fold and public SQL tests. Typed scan/index/group/join, unique errors, prepared comparisons, inherited retrieval and generated definitions pass, including native SQLite, SQLite Key/Value and redb reopen. Final CI is pending.",
+      "supported_version": "Exact Core ordering, canonical hash keys and 264 PostgreSQL outcomes pass owner, constant-fold and public SQL tests. Typed scan/index/group/join, unique errors, prepared comparisons, inherited retrieval and generated definitions pass, including native SQLite, SQLite Key/Value and redb reopen. Final CI is pending. Review follow-up also corrects the join-specific numeric hash, native DECIMAL float bounds and numeric extrema; its focused acceptance is pending.",
       "status": "partial",
-      "open_issue": "#120: remove shortest-display rounding from internal float/decimal keys; prove total ordering, equality and canonical hash-key agreement; preserve PostgreSQL operator-selected coercion through SQL, generated execution, grouping and indexed access, including 1.0 > 0 and precision boundaries."
+      "open_issue": "#120: finish focused acceptance, final CI and review of exact join hashes, DECIMAL index boundaries and numeric extrema; the previously verified SQL comparison/coercion surface remains covered by its PostgreSQL reference."
     },
     {
       "id": "types.time-timetz-key-coherence",
@@ -960,7 +960,7 @@
       "uqa_test": "cargo test -p uqa-core --lib nonfinite; cargo test -p uqa-storage --lib nonfinite; cargo test -p uqa-engine --test integration numeric_comparisons",
       "supported_version": "Core/common Storage preserve scalar and nested non-finite IEEE bits. SQLite format 45 and redb format 44 upgrades preserve history, identity and receipt state. Public scalar/array storage, NULL distinction, index lookup and reopen pass on all three providers; final CI is pending.",
       "status": "partial",
-      "open_issue": "#138: retain exact non-finite float carriers through nested typed values, document/index persistence and reopen; preserve predecessor receipt limits, acknowledgement and ownership during atomic format upgrades."
+      "open_issue": "#138: final CI and review remain pending for the locally verified typed non-finite scalar/nested persistence and all-provider reopen behavior."
     },
     {
       "id": "query.group-by-input-precedence",
@@ -968,7 +968,7 @@
       "uqa_test": "cargo test -p uqa-sql --lib grouping; cargo test -p uqa-engine --test integration sql_grouping_sets; cargo test -p uqa-engine --test integration numeric_comparisons",
       "supported_version": "SQL owner tests, all 16 PostgreSQL public grouping-name rows/errors, prepared grouping and stored-view column rename/reopen pass. Complete computed grouping-set keys remain aggregate dependencies, and physical pruning cannot invent source columns from implicit output aliases. Final CI is pending.",
       "status": "partial",
-      "open_issue": "#139: defer named GROUP BY alias resolution until source binding; prefer input names, preserve alias fallback, ordinals, grouping sets and stored queries, and return PostgreSQL ambiguity/context errors."
+      "open_issue": "#139: final CI and review remain pending for the 16 independently verified GROUP BY binding cases, including grouping sets, prepared queries and stored-view rename/reopen behavior."
     },
     {
       "id": "query.decimal-grouping-expression-identity",

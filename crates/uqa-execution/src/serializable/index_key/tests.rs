@@ -166,12 +166,18 @@ fn decimal_keys_preserve_exact_order_and_display_scale_equivalence() {
             "-1.01",
             "-1.00",
             "-0.001",
+            "-0.1",
+            "-0.1000000000000000055511151231257827021181583404541015625",
             "0",
             "0.00",
             "0.00100",
+            "0.1",
+            "0.1000000000000000055511151231257827021181583404541015625",
             "1.00",
             "1.01",
             "1200",
+            "9223372036854774784",
+            "9223372036854775000",
             "1e1000",
             "Infinity",
             "NaN",
@@ -183,10 +189,52 @@ fn decimal_keys_preserve_exact_order_and_display_scale_equivalence() {
         Value::Int(0),
         Value::Int(1),
         Value::Float(0.1),
+        Value::Float(-0.1),
+        Value::Float(f64::from_bits(1)),
+        Value::Float(f64::MAX),
+        Value::Float(f64::NAN),
         Value::Float(9_223_372_036_854_774_784_i64 as f64),
         Value::Str("x".into()),
     ]);
     verify(ScalarIndexDomain::Decimal, &values, &targets);
+}
+
+#[test]
+fn decimal_float_bound_conversion_uses_the_original_allowance_and_cancellation() {
+    let target = Predicate::Equals(Value::Float(f64::from_bits(1)));
+    for cancelled in [false, true] {
+        let control = StorageReadControl::with_limit(1);
+        if cancelled {
+            control.cancellation().cancel();
+        }
+        let mut visited = false;
+        let error = ScalarIndexDomain::Decimal
+            .visit_predicate(&target, &control, &mut |_| {
+                visited = true;
+                Ok(())
+            })
+            .unwrap_err();
+        assert!(!visited);
+        assert_eq!(
+            error.sqlstate(),
+            Some(if cancelled { "57014" } else { "53200" })
+        );
+        assert_eq!(control.memory().used(), 0);
+    }
+    let control = StorageReadControl::with_limit(64 * 1024);
+    let mut visited = false;
+    ScalarIndexDomain::Decimal
+        .visit_predicate(&target, &control, &mut |range| {
+            visited = true;
+            let Bound::Included(key) = &range.lower else {
+                panic!("inclusive numeric point");
+            };
+            assert!(key.budget().shares_allowance(control.memory()));
+            Ok(())
+        })
+        .unwrap();
+    assert!(visited);
+    assert_eq!(control.memory().used(), 0);
 }
 
 #[test]
