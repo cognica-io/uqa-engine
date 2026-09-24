@@ -254,7 +254,7 @@ fn reject_predecessor_access(
 #[test]
 fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
     let control = control();
-    for (mode, format) in (0..3).flat_map(|mode| (1..=46).map(move |format| (mode, format))) {
+    for (mode, format) in (0..3).flat_map(|mode| (1..=47).map(move |format| (mode, format))) {
         let connection = ManagedConnection::open_in_memory().unwrap();
         if mode == 2 {
             crate::Catalog::open(connection.clone()).unwrap();

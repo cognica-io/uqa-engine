@@ -187,7 +187,9 @@ impl PhysicalIndexDefinitions {
     }
 }
 
+mod comparison;
 pub mod rebuild;
+mod update;
 
 #[cfg(test)]
 mod tests;

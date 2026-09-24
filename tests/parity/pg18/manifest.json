@@ -193,7 +193,8 @@
       "query.decimal-grouping-expression-identity",
       "types.jsonb-numeric-order",
       "aggregates.mode-equality-and-ties",
-      "types.legacy-vector-coherence"
+      "types.legacy-vector-coherence",
+      "dml.assignment-subscripts"
     ],
     "M5": [
       "protocol.frontend-backend-3.2-extended",
@@ -945,33 +946,33 @@
       "id": "types.numeric-comparison-coherence",
       "postgresql_reference": "PostgreSQL 18.4 Docker operator selection and numeric comparison results; https://www.postgresql.org/docs/18/typeconv-oper.html; https://www.postgresql.org/docs/18/datatype-numeric.html",
       "uqa_test": "cargo test -p uqa-core --lib numeric_keys_; cargo test -p uqa-sql --lib comparison; cargo test -p uqa-planner --lib constant_numeric_comparisons; cargo test -p uqa-execution --lib distinct; cargo test -p uqa-engine --test integration numeric_comparisons",
-      "supported_version": "Exact Core ordering, canonical and join hash keys, native DECIMAL float bounds and numeric extrema pass owner and public tests against PostgreSQL 18.4. Typed scan/index/group/join, unique errors, prepared comparisons, inherited retrieval and generated definitions pass, including native SQLite, SQLite Key/Value and redb reopen. All 38 comparison review follow-up tests pass. Consolidated PR #137 final CI and review remain pending.",
-      "status": "partial",
-      "open_issue": "#120: final CI and review of the locally verified numeric comparison, coercion, hash, index and aggregate correction in consolidated PR #137."
+      "supported_version": "Exact Core ordering, canonical and join hash keys, native DECIMAL float bounds and numeric extrema pass owner and public tests against PostgreSQL 18.4. Typed scan/index/group/join, unique errors, prepared comparisons, inherited retrieval and generated definitions pass, including native SQLite, SQLite Key/Value and redb reopen. All 38 comparison review follow-up tests pass. Merged in PR #137 as 20d5f75f after all sixteen Linux/macOS test slices passed.",
+      "status": "verified",
+      "open_issue": null
     },
     {
       "id": "types.time-timetz-key-coherence",
       "postgresql_reference": "PostgreSQL 18.4 Docker TIME/TIMETZ comparisons; PostgreSQL REL_18_STABLE date.c time_cmp and timetz_cmp_internal",
       "uqa_test": "cargo test -p uqa-core -p uqa-execution --lib -- temporal distinct::; cargo test -p uqa-engine --test integration -- temporal_comparisons sql_temporal_types sessions::serializable_observations::temporal",
-      "supported_version": "Core comparison and equality keys retain TIME endpoints and the TIMETZ offset tie-break. A compact PostgreSQL 18.4 fixture supplies 780 scalar outcomes and 75 relational queries. Core/Execution comparison, equality/hash/index keys and transitivity pass. All 10 public tests pass, covering constant/prepared SQL, all three providers and serializable absent-update conflicts. All 10 provider upgrade/restore/fencing tests and strict affected-crate Clippy pass. All 65 focused tests pass. Final CI and consolidated PR #137 review remain pending.",
-      "status": "partial",
-      "open_issue": "#121: final CI and review of the locally verified TIME endpoints, unwrapped TIMETZ ordering, timezone tie-break, equality keys and all-provider index/reopen behavior in consolidated PR #137."
+      "supported_version": "Core comparison and equality keys retain TIME endpoints and the TIMETZ offset tie-break. A compact PostgreSQL 18.4 fixture supplies 780 scalar outcomes and 75 relational queries. Core/Execution comparison, equality/hash/index keys and transitivity pass. All 10 public tests pass, covering constant/prepared SQL, all three providers and serializable absent-update conflicts. All 10 provider upgrade/restore/fencing tests and strict affected-crate Clippy pass. All 65 focused tests pass. Merged in PR #137 as 20d5f75f after all sixteen Linux/macOS test slices passed.",
+      "status": "verified",
+      "open_issue": null
     },
     {
       "id": "types.nonfinite-float-persistence",
       "postgresql_reference": "PostgreSQL 18.4 numeric_comparison table fixture: NaN, Infinity and -Infinity remain non-NULL float8 values after INSERT; https://www.postgresql.org/docs/18/datatype-numeric.html",
       "uqa_test": "cargo test -p uqa-core --lib nonfinite; cargo test -p uqa-storage --lib nonfinite; cargo test -p uqa-engine --test integration numeric_comparisons",
-      "supported_version": "Core/common Storage preserve scalar and nested non-finite IEEE bits. SQLite format 47 and redb format 46 upgrades preserve history, identity and receipt state. Public scalar/array storage, NULL distinction, index lookup and reopen pass on all three providers; final CI is pending.",
-      "status": "partial",
-      "open_issue": "#138: final CI and review remain pending for the locally verified typed non-finite scalar/nested persistence and all-provider reopen behavior."
+      "supported_version": "Core/common Storage preserve scalar and nested non-finite IEEE bits. SQLite format 47 and redb format 46 upgrades preserve history, identity and receipt state. Public scalar/array storage, NULL distinction, index lookup and reopen pass on all three providers. Merged in PR #137 as 20d5f75f after all sixteen Linux/macOS test slices passed.",
+      "status": "verified",
+      "open_issue": null
     },
     {
       "id": "query.group-by-input-precedence",
       "postgresql_reference": "PostgreSQL 18.4 Docker: crates/uqa-sql/src/semantics/grouping_sets/pg18_names.json records 16 input-precedence, alias, ordinal, grouping-set and SQLSTATE cases; independently captured by tests/parity/pg18/capture_grouping_names.py.",
       "uqa_test": "cargo test -p uqa-sql --lib grouping; cargo test -p uqa-engine --test integration sql_grouping_sets; cargo test -p uqa-engine --test integration numeric_comparisons",
-      "supported_version": "SQL owner tests, all 16 PostgreSQL public grouping-name rows/errors, prepared grouping and stored-view column rename/reopen pass. Complete computed grouping-set keys remain aggregate dependencies, and physical pruning cannot invent source columns from implicit output aliases. Final CI is pending.",
-      "status": "partial",
-      "open_issue": "#139: final CI and review remain pending for the 16 independently verified GROUP BY binding cases, including grouping sets, prepared queries and stored-view rename/reopen behavior."
+      "supported_version": "SQL owner tests, all 16 PostgreSQL public grouping-name rows/errors, prepared grouping and stored-view column rename/reopen pass. Complete computed grouping-set keys remain aggregate dependencies, and physical pruning cannot invent source columns from implicit output aliases. Merged in PR #137 as 20d5f75f after all sixteen Linux/macOS test slices passed.",
+      "status": "verified",
+      "open_issue": null
     },
     {
       "id": "query.decimal-grouping-expression-identity",
@@ -985,25 +986,33 @@
       "id": "types.jsonb-numeric-order",
       "postgresql_reference": "PostgreSQL 18.4 Docker JSONB comparisons; https://www.postgresql.org/docs/18/datatype-json.html#JSON-INDEXING",
       "uqa_test": "cargo test -p uqa-core --lib jsonb; cargo test -p uqa-execution --lib serializable::index_key::tests::jsonb; cargo test -p uqa-engine --test integration -- jsonb_comparisons sessions::serializable_observations::jsonb; cargo test -p uqa-joins --lib row_join::tests::jsonb",
-      "supported_version": "Core comparison and ordered keys place zero between negative and positive magnitudes. Join hashing uses semantic JSONB equality. A compact PostgreSQL 18.4 fixture records 2,352 scalar outcomes and 88 relational queries. All 31 focused owner/public/provider tests and the combined 38-test comparison follow-up pass, including transitivity, hash/index agreement, serializable ranges and all-provider reopen. Final CI and consolidated PR #137 review remain pending.",
-      "status": "partial",
-      "open_issue": "#122: final CI and review of the locally verified JSONB ordering, join hashes and persisted-index correction in consolidated PR #137."
+      "supported_version": "Core comparison and ordered keys place zero between negative and positive magnitudes. Join hashing uses semantic JSONB equality. A compact PostgreSQL 18.4 fixture records 2,352 scalar outcomes and 88 relational queries. All 31 focused owner/public/provider tests and the combined 38-test comparison follow-up pass, including transitivity, hash/index agreement, serializable ranges and all-provider reopen. Merged in PR #137 as 20d5f75f after all sixteen Linux/macOS test slices passed.",
+      "status": "verified",
+      "open_issue": null
     },
     {
       "id": "aggregates.mode-equality-and-ties",
       "postgresql_reference": "PostgreSQL 18.4 Docker: crates/uqa-execution/src/aggregation/tests/pg18_mode.json records 58 ASC/DESC mode outcomes captured by tests/parity/pg18/capture_mode.py; https://github.com/postgres/postgres/blob/REL_18_STABLE/src/backend/utils/adt/orderedsetaggs.c",
       "uqa_test": "cargo test -p uqa-execution --lib aggregation::tests::mode; cargo test -p uqa-engine --test integration ordered_mode",
-      "supported_version": "Execution groups consecutive sorted values using Core equality and preserves the first group on frequency ties. All 28 owner aggregate tests and 3 public mode tests pass. The 58 PostgreSQL outcomes cover original/reversed inputs, memory/spill merge, ordinary/prepared SQL, NULL/empty inputs, signed zero, NaN, numeric scale, intervals, TIME/TIMETZ, JSONB, bpchar and arrays. Final CI and consolidated PR #137 review remain pending.",
-      "status": "partial",
-      "open_issue": "#145: final CI and review of the locally verified mode equality and tie correction in consolidated PR #137."
+      "supported_version": "Execution groups consecutive sorted values using Core equality and preserves the first group on frequency ties. All 28 owner aggregate tests and 3 public mode tests pass. The 58 PostgreSQL outcomes cover original/reversed inputs, memory/spill merge, ordinary/prepared SQL, NULL/empty inputs, signed zero, NaN, numeric scale, intervals, TIME/TIMETZ, JSONB, bpchar and arrays. Merged in PR #137 as 20d5f75f after all sixteen Linux/macOS test slices passed.",
+      "status": "verified",
+      "open_issue": null
     },
     {
       "id": "types.legacy-vector-coherence",
       "postgresql_reference": "crates/uqa-core/src/types/tests/pg18_legacy_vectors.json; independently captured PostgreSQL 18.4 Docker comparisons, array metadata, domain inputs, relational rows and SQLSTATEs",
       "uqa_test": "cargo test -p uqa-core --lib legacy_vector; cargo test -p uqa-sql --lib legacy_vector; cargo test -p uqa-execution --lib legacy_vector; cargo test -p uqa-engine --lib legacy_vectors; cargo test -p uqa-engine --test integration sql_legacy_vectors",
-      "supported_version": "Uncommitted implementation: dedicated Core scalar carriers, fixed zero-based empty metadata, atomic outer-array elements, SQL base/domain conversion, declared index keys and initial typed row/index restoration. The compact oracle records 864 comparison outcomes plus query/error/update cases. Public/provider runtime validation is pending.",
+      "supported_version": "PR #147 retains typed Core carriers, domain cast sources, array type identities and bounds. Fallible comparisons reach sort, DISTINCT, aggregates, indexes and mutation overlays. Initial restoration preserves row/index identities and rolls back failed conversion; SQLite/redb fence incompatible readers. The PostgreSQL 18.4 fixture supplies 864 scalar outcomes and query/error/update cases. The preceding index implementation passed all 65 focused tests, including 22 public cases and six restoration cases across native SQLite, SQLite Key/Value and redb. The 42 index/overlay regressions, all 989 SQL unit tests, 53 aggregate/relational tests and five provider-format upgrades also pass in Linux Docker.",
       "status": "partial",
-      "open_issue": "#123: complete focused runtime verification, stored-expression/retained-history audit, provider migration and strict lint before committing the follow-up."
+      "open_issue": "#123: final UPDATE input-retention runtime checks, strict lint, PR #147 CI and review. The independent preexisting assignment-target indirection bug is tracked separately by #148 and dml.assignment-subscripts."
+    },
+    {
+      "id": "dml.assignment-subscripts",
+      "postgresql_reference": "PostgreSQL 18.4 Docker: UPDATE integer[] element assignment preserves other elements; an array RHS raises 42804 with a subscripted-assignment message and HINT. Assignment through oidvector/int2vector subscripts raises 42846 for the corresponding ordinary-array-to-vector cast. Reproduction SQL and diagnostics: https://github.com/cognica-io/uqa-engine/issues/148.",
+      "uqa_test": "crates/uqa-sql/src/compiler/dml.rs; crates/uqa-sql/src/compiler/tree/insert.rs; crates/uqa-sql/src/binding/preparation/commands.rs",
+      "supported_version": "Unfixed: UPDATE target indirection is discarded. A valid scalar element assignment is rejected as a whole-column type mismatch; an invalid array RHS can silently replace the whole column. Catalog-vector assignment diagnostics also differ. The compiler paths predate PR #147.",
+      "status": "partial",
+      "open_issue": "#148: preserve assignment target indirection, bind PostgreSQL element/slice and domain semantics, implement bounded mutation in Execution, and verify errors and atomicity across applicable DML paths. Highest priority after #123 because of silent whole-column writes."
     }
   ]
 }

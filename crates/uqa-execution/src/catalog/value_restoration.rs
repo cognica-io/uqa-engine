@@ -72,15 +72,14 @@ pub fn normalize_legacy_vectors(
         affected.insert(name);
     }
     for index in &indexes {
-        if affected.contains(&canonical_table_name(&index.table_name)?)
-            && super::index::index_definition(index)?.unique
-        {
+        if affected.contains(&canonical_table_name(&index.table_name)?) {
             control.check()?;
             let declaration = uqa_sql::catalog::index::stored::declaration(index)?;
-            crate::schema::indexes::validate_unique_index(
+            crate::schema::indexes::validate_index_keys(
                 &session.index_build_context(),
                 &declaration,
                 &index.relation.name,
+                &super::index::index_definition(index)?.key_types,
             )
             .map_err(|error| StorageBackendError::backend("restored index validation", error))?;
         }

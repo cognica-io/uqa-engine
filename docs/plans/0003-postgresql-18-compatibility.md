@@ -39,22 +39,23 @@ VIRTUAL generated columns permit built-in immutable functions but reject user-de
 | 4 | [#121](https://github.com/cognica-io/uqa-engine/issues/121), TIME/TIMETZ | Merged in PR #137; all 65 focused owner/public/provider tests, strict Clippy and final Linux/macOS CI passed. |
 | 5 | [#122](https://github.com/cognica-io/uqa-engine/issues/122), JSONB numeric order | Core comparison and order-key corrections are implemented with 2,352 PostgreSQL outcomes and 88 relational queries. All 31 focused owner/public/provider tests and 38 combined comparison follow-up tests pass; merged in PR #137 after final Linux/macOS CI passed. |
 | 6 | [#145](https://github.com/cognica-io/uqa-engine/issues/145), ordered-set mode | Count Core-equal values together and retain the first sorted group on frequency ties; 58 independent PostgreSQL outcomes cover ordinary/prepared SQL and owner memory/spill execution. All 28 aggregate-owner tests and 3 public mode tests pass; merged in PR #137 after final Linux/macOS CI passed. |
-| 7 | [#123](https://github.com/cognica-io/uqa-engine/issues/123), legacy-vector domains | In progress on the private follow-up branch: Core typed carriers, SQL conversion and array semantics, Execution index keys and atomic restoration, and SQLite/redb fences. The PostgreSQL 18.4 fixture now records 864 comparison outcomes plus query/error/update evidence; current public/provider runtime verification is pending. |
-| 8 | [#140](https://github.com/cognica-io/uqa-engine/issues/140), decimal grouping expression identity | Match an identical decimal/typed expression without merging different PostgreSQL analyzed representations. Reproduced and queued separately from the current comparison correction. |
-| 9 | [#129](https://github.com/cognica-io/uqa-engine/issues/129), committed notification recovery | Recover committed publication after sender loss without duplicate delivery or replay of evaluated effects. |
-| 10 | [#124](https://github.com/cognica-io/uqa-engine/issues/124), direct SQLite index snapshots | Preserve the captured read view through later replacement/deletion and nested retained lifetimes. |
-| 11 | [#130](https://github.com/cognica-io/uqa-engine/issues/130), ALTER TABLE column visibility | Add a unique text column with its default atomically while preserving the existing row. |
-| 12 | [#117](https://github.com/cognica-io/uqa-engine/issues/117), JSON extraction | Match declared operand resolution, NULL/error timing, stored syntax and reopen behavior. |
-| 13 | [#118](https://github.com/cognica-io/uqa-engine/issues/118), NULLIF | Select the equality operator, operand casts and resulting left-input type before evaluation. |
-| 14 | [#131](https://github.com/cognica-io/uqa-engine/issues/131), lock timeout | Implement setting scope, units, lock wait deadlines, cleanup and PostgreSQL SQLSTATEs. |
-| 15 | [#135](https://github.com/cognica-io/uqa-engine/issues/135), range elements | Resolve range/multirange element containment through declared operand types in both directions. |
-| 16 | [#133](https://github.com/cognica-io/uqa-engine/issues/133), empty ranges | Match empty range/multirange containment without type or NULL exemptions. |
-| 17 | [#134](https://github.com/cognica-io/uqa-engine/issues/134), factorial | Preserve exact numeric results, PostgreSQL bounds/errors and cancellation. |
-| 18 | [#128](https://github.com/cognica-io/uqa-engine/issues/128), current schema | Return SQL NULL for an empty effective path and respect temporary namespace allocation. |
-| 19 | [#127](https://github.com/cognica-io/uqa-engine/issues/127), AGE regclass | Resolve label identities consistently across catalogs, casts, names and search paths. |
-| 20 | [#119](https://github.com/cognica-io/uqa-engine/issues/119), catalog expressions | Complete remaining typed expression/Datum codecs and constraint projections after their operand semantics are corrected. |
-| 21 | [#132](https://github.com/cognica-io/uqa-engine/issues/132), debug WASM parser | Resolve cold Node stack failure without warm-up retries or larger runtime stacks. |
-| 22 | [#125](https://github.com/cognica-io/uqa-engine/issues/125), macOS test startup | Diagnose the pre-harness loader wait and establish reliable startup without conflating it with query performance. |
+| 7 | [#123](https://github.com/cognica-io/uqa-engine/issues/123), legacy-vector domains | Implemented in [PR #147](https://github.com/cognica-io/uqa-engine/pull/147): typed carriers, domain-preserving casts, compatible-array results, fallible aggregate and index comparisons, atomic restoration and SQLite/redb fences. The preceding index implementation passed 65 focused owner/public/provider tests and 42 index regressions; all 989 SQL unit tests, 53 aggregate/relational tests and five provider-format upgrades also pass. Final UPDATE input-retention tests, strict lint, CI and review remain. |
+| 8 | [#148](https://github.com/cognica-io/uqa-engine/issues/148), assignment subscripts | Preserve element/slice targets through compilation and execution; reject invalid RHS types with PostgreSQL diagnostics and preserve the original row. Reproduced silent whole-column replacement makes this the next correction after #123. |
+| 9 | [#140](https://github.com/cognica-io/uqa-engine/issues/140), decimal grouping expression identity | Match an identical decimal/typed expression without merging different PostgreSQL analyzed representations. Reproduced and queued separately from the current comparison correction. |
+| 10 | [#129](https://github.com/cognica-io/uqa-engine/issues/129), committed notification recovery | Recover committed publication after sender loss without duplicate delivery or replay of evaluated effects. |
+| 11 | [#124](https://github.com/cognica-io/uqa-engine/issues/124), direct SQLite index snapshots | Preserve the captured read view through later replacement/deletion and nested retained lifetimes. |
+| 12 | [#130](https://github.com/cognica-io/uqa-engine/issues/130), ALTER TABLE column visibility | Add a unique text column with its default atomically while preserving the existing row. |
+| 13 | [#117](https://github.com/cognica-io/uqa-engine/issues/117), JSON extraction | Match declared operand resolution, NULL/error timing, stored syntax and reopen behavior. |
+| 14 | [#118](https://github.com/cognica-io/uqa-engine/issues/118), NULLIF | Select the equality operator, operand casts and resulting left-input type before evaluation. |
+| 15 | [#131](https://github.com/cognica-io/uqa-engine/issues/131), lock timeout | Implement setting scope, units, lock wait deadlines, cleanup and PostgreSQL SQLSTATEs. |
+| 16 | [#135](https://github.com/cognica-io/uqa-engine/issues/135), range elements | Resolve range/multirange element containment through declared operand types in both directions. |
+| 17 | [#133](https://github.com/cognica-io/uqa-engine/issues/133), empty ranges | Match empty range/multirange containment without type or NULL exemptions. |
+| 18 | [#134](https://github.com/cognica-io/uqa-engine/issues/134), factorial | Preserve exact numeric results, PostgreSQL bounds/errors and cancellation. |
+| 19 | [#128](https://github.com/cognica-io/uqa-engine/issues/128), current schema | Return SQL NULL for an empty effective path and respect temporary namespace allocation. |
+| 20 | [#127](https://github.com/cognica-io/uqa-engine/issues/127), AGE regclass | Resolve label identities consistently across catalogs, casts, names and search paths. |
+| 21 | [#119](https://github.com/cognica-io/uqa-engine/issues/119), catalog expressions | Complete remaining typed expression/Datum codecs and constraint projections after their operand semantics are corrected. |
+| 22 | [#132](https://github.com/cognica-io/uqa-engine/issues/132), debug WASM parser | Resolve cold Node stack failure without warm-up retries or larger runtime stacks. |
+| 23 | [#125](https://github.com/cognica-io/uqa-engine/issues/125), macOS test startup | Diagnose the pre-harness loader wait and establish reliable startup without conflating it with query performance. |
 
 Existing non-SQL CI failures are tracked independently: [#141](https://github.com/cognica-io/uqa-engine/issues/141) for native Nori indexing allocation ceilings and [#142](https://github.com/cognica-io/uqa-engine/issues/142) for 48 retained redb bytes after a completed Nori transaction. Main `7ab04890` and PR #137 `b7e57006` report identical counters; their existing CI logs establish the baseline without new timing runs. These failures remain open and do not change the comparison-correctness order above.
 
@@ -64,11 +65,13 @@ Comparison acceptance uses PostgreSQL 18 Docker output as the external SQL oracl
 
 The `fix/pg18-legacy-vector-values` follow-up addresses issue #123 after PR #137. Core owns the typed scalar carrier, comparison, keys, admitted copying and decoding; SQL owns casts, declared domains, array shape and text/JSON behavior; Execution owns index-domain keys and restoration scheduling. Engine supplies its existing initial transaction and retained state adapters. No new crate dependency or capability exception is required.
 
-The independently captured PostgreSQL 18.4 fixture covers both vector kinds, 864 comparison outcomes, empty and nested shapes, base/domain inputs, grouping, joins, uniqueness errors, updates, UNNEST/ANY/ALL and JSON key errors. PostgreSQL MIN/MAX use the array aggregate ordering for catalog vectors, including the OID-vector case where scalar ordering differs. The array-function oracle also retains shifted bounds, dimensionless results and exact `42804` output errors; small-integer vector equality includes bounds, while OID-vector scalar equality ignores them. Public acceptance checks ordinary and prepared SQL before indexes, after index creation and after reopening native SQLite, SQLite Key/Value and redb. Owner tests check equality/key order, budget release, spill and provider codecs. Docker on ARM64 Linux passed all 250 Core and 986 SQL unit tests before the latest sort/hash propagation changes. The PostgreSQL fixture additionally covers nested comparison short-circuiting and text-output SQLSTATE/messages. Current public/provider runtime acceptance, sort/hash follow-up and final strict lint remain pending; native macOS execution stalled before the harness and supplies no runtime evidence.
+The independently captured PostgreSQL 18.4 fixture covers both vector kinds, 864 comparison outcomes, base/domain inputs, array-type OIDs, grouping, joins, ordered/DISTINCT aggregates, indexes, updates, UNNEST/ANY/ALL and JSON/text errors. Its index cases include single dimensionless OID vectors, unchanged-key UPDATE, composite prefixes, NULL keys, partial command overlays and second-key comparison failures. Compatible-array functions return ordinary arrays while anyarray functions retain vector identity; MIN/MAX use array aggregate ordering. The preceding index implementation passed all 65 focused tests, including 22 public cases exercising ordinary/prepared SQL, index creation and reopen, and six restoration success/rollback cases across native SQLite, SQLite Key/Value and redb. Docker also passed all 989 SQL unit tests, 36 aggregate tests, 17 relational tests, 42 index/overlay regressions, five SQLite/redb predecessor-format tests and the retained-redb format/identity guard. Native macOS test executables stalled before the harness (#125), so runtime evidence comes from Linux Docker.
 
-Initial SQL restoration must preserve document IDs, tuple metadata and catalog index identities while converting predecessor List/Array carriers under their declared column type. It validates unique keys before publishing rebuilt indexes and the carrier marker, invalidates stale statistics, and rolls back row/index/statistic writes on failure. SQL domain constraints must not run a second time. Provider main formats advance to SQLite 48 and redb 47 while native mapping 9 and catalog 49 remain unchanged; retained record reads and commits validate the main format before physical access. The provider format fence is separate from the later initial SQL transaction.
+Initial SQL restoration must preserve document IDs, tuple metadata and catalog index identities while converting predecessor List/Array carriers under their declared column type. It validates SQL key comparisons and uniqueness before publishing rebuilt indexes and the carrier marker, invalidates stale statistics, and rolls back row/index/statistic writes on failure. SQL domain constraints must not run a second time. Provider main formats advance to SQLite 48 and redb 47 while native mapping 9 and catalog 49 remain unchanged; retained record reads and commits validate the main format before physical access. The provider format fence is separate from the later initial SQL transaction.
 
-Remaining review gates are the new owner/public/provider tests, stored-expression and retained-history audit, manifest/manual evidence synchronization, strict lint and ownership/dependency checks, then logical commits and push. No performance measurements or repeated full-suite timing runs are part of this correction.
+Provider format tests preserve receipt ownership, original history and identity allocations; retained record readers reject incompatible formats before access. SQL-produced vector literals retain zero-based, shifted or dimensionless metadata through the shared renderer. Type/cast, aggregate and index corrections are separated into logical commits. The final UPDATE review added exact retained-value identity and table-wide expression, predicate and included-column dependency checks; 18 additional PostgreSQL error cases cover signed zero, numeric scale, interval fields and changes in other indexes. Final runtime verification, strict lint, PR CI and review remain; no performance measurements or repeated full-suite timing runs are part of this correction.
+
+The stored-expression audit independently reproduced the existing assignment-target compiler bug in #148: UPDATE drops array subscripts, rejects valid scalar element assignments and can silently replace a whole array with an invalid array RHS. Its compiler paths are unchanged from main. PostgreSQL also rejects vector subscript assignment with an ordinary-array-to-vector cast error; UQA currently emits the wrong whole-column error. This is required follow-up implementation work immediately after #123, recorded under `dml.assignment-subscripts`, and is not covered by the carrier-correction acceptance above.
 
 ## Current implementation status and open PostgreSQL 18 bugs
 
@@ -184,14 +187,15 @@ The following compact ledger is the readable projection of the machine-readable 
 | `ddl.schema-drop-cascade` | `M3` | `partial` |
 | `ddl.stored-relation-routine-dependencies` | `M3` | `partial` |
 | `ddl.domain-drop-cascade` | `M3` | `partial` |
-| `types.numeric-comparison-coherence` | `M4` | `partial` |
-| `types.time-timetz-key-coherence` | `M4` | `partial` |
-| `types.nonfinite-float-persistence` | `M4` | `partial` |
-| `query.group-by-input-precedence` | `M4` | `partial` |
+| `types.numeric-comparison-coherence` | `M4` | `verified` |
+| `types.time-timetz-key-coherence` | `M4` | `verified` |
+| `types.nonfinite-float-persistence` | `M4` | `verified` |
+| `query.group-by-input-precedence` | `M4` | `verified` |
 | `query.decimal-grouping-expression-identity` | `M4` | `partial` |
-| `types.jsonb-numeric-order` | `M4` | `partial` |
-| `aggregates.mode-equality-and-ties` | `M4` | `partial` |
+| `types.jsonb-numeric-order` | `M4` | `verified` |
+| `aggregates.mode-equality-and-ties` | `M4` | `verified` |
 | `types.legacy-vector-coherence` | `M4` | `partial` |
+| `dml.assignment-subscripts` | `M4` | `partial` |
 
 <!-- pg18-manifest-status:end -->
 

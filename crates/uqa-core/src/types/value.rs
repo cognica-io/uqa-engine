@@ -14,6 +14,7 @@ use super::{
 pub(super) mod comparison_control;
 mod copying;
 mod decoding;
+mod identity;
 mod nonfinite;
 mod retention;
 pub use decoding::JsonValueDecoder;

@@ -78,6 +78,15 @@ impl MutationRead for Engine {
     }
 }
 impl MutationIndexRead for Engine {
+    fn index_definitions(
+        &self,
+    ) -> Result<
+        std::sync::Arc<uqa_execution::catalog::index::physical::PhysicalIndexDefinitions>,
+        SQLError,
+    > {
+        self.physical_index_definitions()
+            .map_err(|error| uqa_sql::catalog::errors::storage_error("index definitions", &error))
+    }
     fn find_conflict(
         &self,
         table: &str,

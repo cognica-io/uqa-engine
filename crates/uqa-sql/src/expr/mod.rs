@@ -66,8 +66,8 @@ pub use binary::{
     eval_binary_values, eval_binary_values_with_control, eval_binary_values_with_integer_width,
     eval_binary_values_with_integer_width_with_control, eval_comparison_truth,
     eval_comparison_truth_with_control, integer_width_for_literal, integer_width_for_type, truthy,
-    validate_legacy_vector_comparison, values_equal_nullable_with_control,
-    values_equal_with_control, IntegerWidth,
+    type_comparison_can_fail, validate_legacy_vector_comparison, value_comparison_can_fail,
+    values_equal_nullable_with_control, values_equal_with_control, IntegerWidth,
 };
 pub(crate) use binary::{division_by_zero, out_of_range};
 pub use casting::{

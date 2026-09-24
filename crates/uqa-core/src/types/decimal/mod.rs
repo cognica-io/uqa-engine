@@ -27,7 +27,7 @@ const MAX_FRACTIONAL_DIGITS: u32 = 16_383;
 const MAX_DISPLAY_SCALE: u32 = 1_000;
 const MAX_RESULT_SCALE: u32 = 2_000;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum DecimalRepr {
     Finite { coefficient: BigInt, scale: u32 },
     NegativeInfinity,
@@ -50,6 +50,10 @@ impl DecimalValue {
 
     fn repr(&self) -> &DecimalRepr {
         self.repr.as_ref()
+    }
+
+    pub(super) fn has_same_representation(&self, other: &Self) -> bool {
+        self.repr() == other.repr()
     }
 
     pub fn is_zero(&self) -> bool {

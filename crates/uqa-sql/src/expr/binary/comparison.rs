@@ -227,6 +227,33 @@ pub fn validate_legacy_vector_comparison(vector: &uqa_core::LegacyVectorValue) -
     Ok(())
 }
 
+/// Declared SQL keys whose runtime values may require a fallible comparison operator.
+pub fn type_comparison_can_fail(ty: &crate::ast::ColumnType) -> bool {
+    use crate::ast::ColumnType;
+    match ty {
+        ColumnType::OidVector | ColumnType::Record => true,
+        ColumnType::Array(element) | ColumnType::Domain { base: element, .. } => {
+            type_comparison_can_fail(element)
+        }
+        _ => false,
+    }
+}
+
+/// Whether an opaque value key can suppress a SQL operator failure. A single such input remains legal until an operator compares it.
+pub fn value_comparison_can_fail(value: &Value) -> bool {
+    match value {
+        Value::LegacyVector(vector) => {
+            vector.kind() == uqa_core::LegacyVectorKind::Oid && !vector.has_vector_layout()
+        }
+        Value::Array(array) => array.elements().iter().any(value_comparison_can_fail),
+        Value::Row(values) | Value::List(values) => values.iter().any(value_comparison_can_fail),
+        Value::Record(fields) => fields
+            .iter()
+            .any(|(_, value)| value_comparison_can_fail(value)),
+        _ => false,
+    }
+}
+
 fn equal_sql_values(left: &Value, right: &Value, control: &ProductionControl<'_>) -> Result<bool> {
     control.check()?;
     match (left, right) {

@@ -49,6 +49,8 @@ Serial declarations allocate generated integer identities. Sequence functions `n
 
 Casting an ordinary array to either vector type fails with `42846`, including a NULL array. Comparing a vector directly with an ordinary array fails with `42883`. Invalid integer input reports `22P02`; out-of-range elements report `22003`. Converting a dimensionless vector to text reports `42804` with `array is not a valid int2vector` or `array is not a valid oidvector`; array introspection and JSON conversion can still consume that value.
 
+Ordered and DISTINCT aggregates, sorting, and unique or nonunique B-tree keys propagate vector comparison errors. An index can retain one dimensionless `oidvector` without comparing it; a later key comparison fails with `42804`. Composite keys compare earlier fields first. UPDATE retains index entries only when all indexed inputs keep their stored representations, including expression, predicate and included-column dependencies. SQL equality alone does not establish unchanged storage: signed zero, numeric scale and interval fields can require new index comparisons even when the values compare equal.
+
 ```sql execute
 SELECT '1 2'::int2vector AS items,
        array_dims(''::oidvector) AS empty_bounds,

@@ -149,24 +149,24 @@ fn legacy_vector_queries_match_pg18_before_and_after_indexes_and_reopen(
 }
 
 #[rstest::rstest]
-fn legacy_vector_unique_keys_match_pg18_in_both_cast_orders(
+fn legacy_vector_index_errors_match_pg18(
     #[values(0, 1, 2)] provider: usize,
     #[values("int2vector", "oidvector")] ty: &str,
 ) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("unique.db");
     let engine = open(provider, &path);
-    for case in oracle(ty)["unique"].as_array().unwrap() {
+    for case in oracle(ty)["index_errors"].as_array().unwrap() {
         execute(&engine, "BEGIN");
         for sql in case["setup"].as_array().unwrap() {
             execute(&engine, sql.as_str().unwrap());
         }
         let sql = case["sql"].as_str().unwrap();
-        assert_eq!(
-            engine.sql(sql, &[]).unwrap_err().sqlstate(),
-            case["sqlstate"].as_str(),
-            "{sql}"
-        );
+        let error = engine.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), case["sqlstate"].as_str(), "{sql}");
+        if let Some(message) = case["message"].as_str() {
+            assert_eq!(error.to_string(), message, "{sql}");
+        }
         execute(&engine, "ROLLBACK");
     }
 }

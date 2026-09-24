@@ -172,8 +172,10 @@ impl EnforcedKeyExecution for EnforcedKey {
                     continue;
                 }
                 if let Some(document) = context.reads.get_document(table, *id)? {
-                    if self.values(context, table, &document)?.as_deref() == Some(values) {
-                        return Ok(Some(*id));
+                    if let Some(actual) = self.values(context, table, &document)? {
+                        if key_values_equal(&actual, values)? {
+                            return Ok(Some(*id));
+                        }
                     }
                 }
             }
@@ -225,12 +227,29 @@ impl EnforcedKeyExecution for EnforcedKey {
             let Some(document) = context.reads.get_document(table, id)? else {
                 continue;
             };
-            if self.values(context, table, &document)?.as_deref() == Some(values) {
-                return Ok(Some(id));
+            if let Some(actual) = self.values(context, table, &document)? {
+                if key_values_equal(&actual, values)? {
+                    return Ok(Some(id));
+                }
             }
         }
         Ok(None)
     }
+}
+
+pub(crate) fn key_values_equal(left: &[Value], right: &[Value]) -> Result<bool, SQLError> {
+    for (left, right) in left.iter().zip(right) {
+        if !uqa_sql::expr::compare_typed_values_with_control(
+            left,
+            right,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )?
+        .is_eq()
+        {
+            return Ok(false);
+        }
+    }
+    Ok(left.len() == right.len())
 }
 
 fn local_physical_key(

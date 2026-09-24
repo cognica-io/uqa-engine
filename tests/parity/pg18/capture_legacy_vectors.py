@@ -58,7 +58,7 @@ def main() -> None:
             case["rows"] = rows(case["sql"], group["setup"])
         for case in group["rejected"]:
             rejection(case, [])
-        for case in group["unique"]:
+        for case in group["index_errors"]:
             rejection(case, case["setup"])
         setup = list(group["setup"])
         for update in group["updates"]:
@@ -71,7 +71,7 @@ def main() -> None:
         lines.append("    {")
         for key in ("type", "array_type", "values"):
             lines.append(f"      {json.dumps(key)}: {json.dumps(group[key])},")
-        fields = ("comparisons", "setup", "queries", "rejected", "unique", "updates")
+        fields = ("comparisons", "setup", "queries", "rejected", "index_errors", "updates")
         for field_index, key in enumerate(fields):
             values = group[key]
             lines.append(f"      {json.dumps(key)}: [")

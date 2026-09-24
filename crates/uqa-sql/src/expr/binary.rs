@@ -16,7 +16,8 @@ mod production_tests;
 
 pub use comparison::{
     compare_nullable_with_control, compare_typed_values_with_control, compare_with_control,
-    eval_comparison_truth, eval_comparison_truth_with_control, validate_legacy_vector_comparison,
+    eval_comparison_truth, eval_comparison_truth_with_control, type_comparison_can_fail,
+    validate_legacy_vector_comparison, value_comparison_can_fail,
     values_equal_nullable_with_control, values_equal_with_control,
 };
 pub(super) use comparison::{eval_comparison_op, values_equal, values_equal_nullable};

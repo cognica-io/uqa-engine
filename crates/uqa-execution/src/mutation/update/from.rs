@@ -444,11 +444,12 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
                 .destination
                 .as_ref()
                 .map_or_else(|| prepared.table.clone(), |(table, _)| table.clone());
-            crate::mutation::constraints::validate_key_constraints(
+            crate::mutation::constraints::validate_key_constraints_with_previous(
                 context.mutation.preparation.referential.constraints,
                 &rewritten_storage_table,
                 &prepared.new_document,
                 (rewritten_storage_table == prepared.table).then_some(prepared.doc_id),
+                (rewritten_storage_table == prepared.table).then_some(&prepared.old_document),
             )?;
             validate_view_checks(ViewCheckContext {
                 services: context.mutation.preparation.referential.assignment,

@@ -10,6 +10,8 @@ use std::collections::BTreeMap;
 use uqa_core::{DocId, Payload, PostingEntry, PostingList, Predicate, Value};
 use uqa_storage::BTreeIndex;
 
+mod comparison;
+
 /// Per-column index: non-null scalar keys in a B-tree plus the doc ids
 /// whose field is missing or SQL NULL.
 #[derive(Clone)]
@@ -21,6 +23,7 @@ pub struct ColumnValueIndex {
     /// Set when any indexed key is temporal; disables acceleration
     /// because string-vs-temporal comparisons need parsing.
     has_temporal: bool,
+    has_fallible_comparison: bool,
 }
 
 fn value_is_temporal(value: &Value) -> bool {
@@ -57,12 +60,14 @@ impl ColumnValueIndex {
         let mut stored = BTreeMap::new();
         let mut nulls = Vec::new();
         let mut has_temporal = false;
+        let mut has_fallible_comparison = false;
         for (doc_id, value) in values {
             stored.insert(doc_id, value.clone());
             match value {
                 Value::Null => nulls.push(doc_id),
                 value => {
                     has_temporal |= value_is_temporal(&value);
+                    has_fallible_comparison |= uqa_sql::expr::value_comparison_can_fail(&value);
                     index.insert(doc_id, value);
                 }
             }
@@ -74,6 +79,7 @@ impl ColumnValueIndex {
             values: stored,
             nulls,
             has_temporal,
+            has_fallible_comparison,
         }
     }
 
@@ -87,6 +93,7 @@ impl ColumnValueIndex {
             }
             value => {
                 self.has_temporal |= value_is_temporal(value);
+                self.has_fallible_comparison |= uqa_sql::expr::value_comparison_can_fail(value);
                 self.index.insert(doc_id, value.clone());
             }
         }
@@ -110,6 +117,7 @@ impl ColumnValueIndex {
         self.values.clear();
         self.nulls.clear();
         self.has_temporal = false;
+        self.has_fallible_comparison = false;
     }
 
     /// Resolve `predicate` to a posting list, or `None` when this
@@ -146,6 +154,16 @@ impl ColumnValueIndex {
         predicate: &Predicate,
         observe: impl FnOnce() -> Result<(), uqa_sql::SQLError>,
     ) -> Result<Option<PostingList>, uqa_sql::SQLError> {
+        if comparison::needs_sql_comparison(predicate, self.has_fallible_comparison) {
+            observe()?;
+            let mut ids = Vec::new();
+            for (&id, value) in &self.values {
+                if comparison::matches(value, predicate)? {
+                    ids.push(id);
+                }
+            }
+            return Ok(Some(posting_list_from_sorted_ids(ids.into_iter())));
+        }
         if !self.supports(predicate) {
             return Ok(None);
         }
@@ -155,6 +173,7 @@ impl ColumnValueIndex {
 
     pub fn supports(&self, predicate: &Predicate) -> bool {
         predicate_targets_are_index_safe(predicate)
+            && !comparison::needs_sql_comparison(predicate, self.has_fallible_comparison)
             && !matches!(predicate, Predicate::NotEquals(_))
             && (matches!(predicate, Predicate::IsNull | Predicate::IsNotNull) || !self.has_temporal)
     }
