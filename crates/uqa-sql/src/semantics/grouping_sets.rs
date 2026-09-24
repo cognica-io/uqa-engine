@@ -273,10 +273,18 @@ fn normalize_expression(
         },
         ScalarExpr::Cast { expr, ty } => {
             let source_type = expression_type(engine, &expr, schema, params)?;
-            let target_type = ColumnType::from_sql_name(&ty)?;
+            let target_type = crate::type_resolution::resolve_declared_column_type(
+                engine,
+                &ColumnType::Named(ty),
+            )?;
             let expression = normalize_expression(engine, *expr, schema, params)?;
             if source_type.as_ref() == Some(&target_type) {
                 expression
+            } else if input_requires_catalog(&target_type) {
+                ScalarExpr::Cast {
+                    expr: Box::new(expression),
+                    ty: target_type.sql_name(),
+                }
             } else if let ScalarExpr::Literal(value @ Value::Str(_)) = &expression {
                 let input_type = if matches!(
                     target_type.without_temporal_modifiers(),
@@ -366,6 +374,23 @@ fn normalize_expression(
         | ScalarExpr::ScalarSubquery(_)
         | ScalarExpr::Exists { .. }) => expression,
     })
+}
+
+fn input_requires_catalog(ty: &ColumnType) -> bool {
+    match ty {
+        ColumnType::Named(_)
+        | ColumnType::Domain { .. }
+        | ColumnType::Regproc
+        | ColumnType::Regprocedure
+        | ColumnType::Regclass
+        | ColumnType::Regnamespace
+        | ColumnType::Regrole
+        | ColumnType::Regtype
+        | ColumnType::Record
+        | ColumnType::AnyArray => true,
+        ColumnType::Array(element) => input_requires_catalog(element),
+        _ => false,
+    }
 }
 
 fn normalize_items(

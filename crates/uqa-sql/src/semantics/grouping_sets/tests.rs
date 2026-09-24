@@ -11,6 +11,28 @@ use crate::routines::RoutineResolution;
 struct Catalog;
 
 impl FunctionTypeResolver for Catalog {
+    fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
+        if let Some(element) = name.strip_suffix("[]") {
+            return self
+                .resolve_type_name(element)
+                .map(|element| element.map(|element| ColumnType::Array(Box::new(element))));
+        }
+        let name = name.replace('"', "");
+        Ok(matches!(
+            name.as_str(),
+            "grouping_literal_numeric" | "public.grouping_literal_numeric"
+        )
+        .then(|| ColumnType::Domain {
+            schema: "public".into(),
+            name: "grouping_literal_numeric".into(),
+            oid: 50_001,
+            base: Box::new(ColumnType::Numeric {
+                precision: None,
+                scale: None,
+            }),
+        }))
+    }
+
     fn resolve_function_type(
         &self,
         _name: &str,
@@ -174,4 +196,36 @@ fn grouping_names_inside_expressions_are_never_output_aliases() {
     assert!(prepare_grouping_sets(&Catalog, &original, &input(), &[])
         .unwrap()
         .is_none());
+}
+
+#[test]
+fn grouping_identity_keeps_catalog_casts_for_the_catalog_resolver() {
+    for ty in [
+        "regclass",
+        "regnamespace",
+        "regrole",
+        "regtype",
+        "regproc",
+        "regprocedure",
+        "grouping_literal_numeric",
+        "grouping_literal_numeric[]",
+        "regtype[]",
+    ] {
+        let input = ScalarExpr::Literal(Value::Str("catalog-dependent input".into()));
+        let expression = ScalarExpr::Cast {
+            expr: Box::new(input.clone()),
+            ty: ty.into(),
+        };
+        let normalized = normalize_expression(
+            &Catalog,
+            expression.clone(),
+            &RowSchema::with_types(Vec::new(), Vec::new()),
+            &[],
+        )
+        .unwrap();
+        let ScalarExpr::Cast { expr, .. } = normalized else {
+            panic!("{ty}: catalog input was evaluated during grouping analysis");
+        };
+        assert_eq!(*expr, input, "{ty}");
+    }
 }

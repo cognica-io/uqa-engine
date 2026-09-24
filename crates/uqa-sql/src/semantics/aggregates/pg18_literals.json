@@ -3,7 +3,8 @@
   "image": "sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636",
   "setup": [
     "CREATE TABLE grouping_literal_probe(n integer)",
-    "INSERT INTO grouping_literal_probe VALUES (10),(20),(10)"
+    "INSERT INTO grouping_literal_probe VALUES (10),(20),(10)",
+    "CREATE DOMAIN grouping_literal_numeric AS numeric CHECK (VALUE > 0)"
   ],
   "cases": [
     {
@@ -625,6 +626,136 @@
         [
           "21.0",
           "1"
+        ]
+      ]
+    },
+    {
+      "name": "domain_string_input",
+      "sql": "SELECT n + '1.0'::grouping_literal_numeric AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + '1.0'::grouping_literal_numeric ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11.0",
+          "2"
+        ],
+        [
+          "21.0",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "qualified_domain_string_input",
+      "sql": "SELECT n + '1.0'::public.grouping_literal_numeric AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + '1.0'::public.grouping_literal_numeric ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11.0",
+          "2"
+        ],
+        [
+          "21.0",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "domain_array_string_input",
+      "sql": "SELECT n + ('{1.0}'::grouping_literal_numeric[])[1] AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + ('{1.0}'::grouping_literal_numeric[])[1] ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11.0",
+          "2"
+        ],
+        [
+          "21.0",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "regclass_string_input",
+      "sql": "SELECT n + ('pg_class'::regclass)::oid::integer AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + ('pg_class'::regclass)::oid::integer ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "1269",
+          "2"
+        ],
+        [
+          "1279",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "regnamespace_string_input",
+      "sql": "SELECT n + ('pg_catalog'::regnamespace)::oid::integer AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + ('pg_catalog'::regnamespace)::oid::integer ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "21",
+          "2"
+        ],
+        [
+          "31",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "regtype_string_input",
+      "sql": "SELECT n + ('integer'::regtype)::oid::integer AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY n + ('integer'::regtype)::oid::integer ORDER BY shifted",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "33",
+          "2"
+        ],
+        [
+          "43",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "domain_string_grouping_sets",
+      "sql": "SELECT n + '1.0'::grouping_literal_numeric AS shifted, count(*) AS tally FROM grouping_literal_probe AS t GROUP BY GROUPING SETS ((n + '1.0'::grouping_literal_numeric), ()) ORDER BY shifted NULLS LAST",
+      "columns": [
+        "shifted",
+        "tally"
+      ],
+      "rows": [
+        [
+          "11.0",
+          "2"
+        ],
+        [
+          "21.0",
+          "1"
+        ],
+        [
+          null,
+          "3"
         ]
       ]
     }
