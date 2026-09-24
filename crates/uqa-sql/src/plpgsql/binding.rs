@@ -264,13 +264,29 @@ pub(super) fn bind_projections(
 }
 
 pub(super) fn bind_assignments(
-    items: &[(String, Expr)],
+    items: &[(crate::ast::AssignmentTarget, Expr)],
     r: &mut dyn VariableResolver,
-) -> Result<Vec<(String, Expr)>> {
+) -> Result<Vec<(crate::ast::AssignmentTarget, Expr)>> {
     items
         .iter()
-        .map(|(name, e)| Ok((name.clone(), bind_expr(e, r)?)))
+        .map(|(target, expression)| {
+            Ok((
+                bind_assignment_target(target, r)?,
+                bind_expr(expression, r)?,
+            ))
+        })
         .collect()
+}
+
+fn bind_assignment_target(
+    target: &crate::ast::AssignmentTarget,
+    resolver: &mut dyn VariableResolver,
+) -> Result<crate::ast::AssignmentTarget> {
+    let mut target = target.clone();
+    for expression in target.expressions_mut() {
+        *expression = bind_expr(expression, resolver)?;
+    }
+    Ok(target)
 }
 
 pub(super) fn bind_ctes(items: &[CTE], r: &mut dyn VariableResolver) -> Result<Vec<CTE>> {
@@ -464,6 +480,11 @@ pub fn bind_statement(stmt: &Statement, r: &mut dyn VariableResolver) -> Result<
         Statement::Select(body) => Statement::Select(Box::new(bind_select(body, r)?)),
         Statement::Insert(insert) => {
             let mut out = insert.clone();
+            out.columns = insert
+                .columns
+                .iter()
+                .map(|target| bind_assignment_target(target, r))
+                .collect::<Result<_>>()?;
             out.with = bind_ctes(&insert.with, r)?;
             out.rows = bind_rows(&insert.rows, r)?;
             out.select_source = match insert.select_source.as_ref() {
@@ -621,7 +642,10 @@ pub(super) fn bind_merge_when(when: &MergeWhen, r: &mut dyn VariableResolver) ->
             values,
         } => MergeWhen::InsertNotMatched {
             condition: bind_opt_expr(condition.as_ref(), r)?,
-            columns: columns.clone(),
+            columns: columns
+                .iter()
+                .map(|target| bind_assignment_target(target, r))
+                .collect::<Result<_>>()?,
             values: bind_exprs(values, r)?,
         },
         MergeWhen::NothingMatched { condition } => MergeWhen::NothingMatched {

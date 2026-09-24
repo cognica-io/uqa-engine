@@ -326,8 +326,23 @@ pub struct ExpressionPlan {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssignmentPlan {
-    pub column: String,
+    #[serde(rename = "column")]
+    pub target: crate::ast::AssignmentTarget<ScalarExpr>,
     pub value: ScalarExpr,
+}
+
+impl AssignmentPlan {
+    pub fn expressions(&self) -> impl Iterator<Item = &ScalarExpr> {
+        self.target
+            .expressions()
+            .chain(std::iter::once(&self.value))
+    }
+
+    pub fn expressions_mut(&mut self) -> impl Iterator<Item = &mut ScalarExpr> {
+        self.target
+            .expressions_mut()
+            .chain(std::iter::once(&mut self.value))
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -371,7 +386,7 @@ pub struct InsertPlan {
     pub target_privilege_subject: Option<RoleReference>,
     pub target_qualifier: String,
     pub include_descendants: bool,
-    pub columns: Vec<String>,
+    pub columns: Vec<crate::ast::AssignmentTarget<ScalarExpr>>,
     pub ctes: Vec<CtePlan>,
     pub rows: Vec<Vec<ScalarExpr>>,
     pub source: Option<Box<QueryPlan>>,
@@ -490,7 +505,7 @@ pub enum MergeWhenPlan {
     },
     InsertNotMatched {
         condition: Option<ScalarExpr>,
-        columns: Vec<String>,
+        columns: Vec<crate::ast::AssignmentTarget<ScalarExpr>>,
         values: Vec<ScalarExpr>,
     },
     NothingMatched {

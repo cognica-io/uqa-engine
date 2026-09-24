@@ -73,7 +73,12 @@ where
         if let Some(source) = insert.select_source.as_deref_mut() {
             self.bind_select(source, &visible)?;
         }
-        for expression in insert.rows.iter_mut().flatten() {
+        for expression in insert
+            .columns
+            .iter_mut()
+            .flat_map(crate::ast::AssignmentTarget::expressions_mut)
+            .chain(insert.rows.iter_mut().flatten())
+        {
             self.bind_expr(expression, &visible)?;
         }
         if let Some(conflict) = &mut insert.on_conflict {
@@ -88,7 +93,9 @@ where
                 r#where,
             } = &mut conflict.action
             {
-                for (_, expression) in assignments {
+                for expression in assignments.iter_mut().flat_map(|(target, value)| {
+                    target.expressions_mut().chain(std::iter::once(value))
+                }) {
                     self.bind_expr(expression, &visible)?;
                 }
                 if let Some(expression) = r#where {
@@ -112,7 +119,11 @@ where
         if let Some(source) = &mut update.from {
             self.bind_from(source, &visible)?;
         }
-        for (_, expression) in &mut update.assignments {
+        for expression in update
+            .assignments
+            .iter_mut()
+            .flat_map(|(target, value)| target.expressions_mut().chain(std::iter::once(value)))
+        {
             self.bind_expr(expression, &visible)?;
         }
         if let Some(expression) = &mut update.r#where {

@@ -122,3 +122,21 @@ pub fn generated_column_kind(
         .find(|definition| definition.name == column)
         .and_then(|definition| definition.generated.map(|generated| generated.kind)))
 }
+
+/// Validate partial targets without rejecting independent writes into the same column.
+pub fn validate_mutation_targets<'a, E: 'a>(
+    catalog: &dyn AssignmentColumnCatalog,
+    table: &str,
+    targets: impl IntoIterator<Item = &'a crate::ast::AssignmentTarget<E>>,
+    action: &str,
+    insert: bool,
+) -> Result<(), SQLError> {
+    let targets = targets.into_iter().collect::<Vec<_>>();
+    super::targets::validate_repeated_targets(targets.iter().copied(), insert)?;
+    let mut seen = BTreeSet::new();
+    let names = targets
+        .iter()
+        .map(|target| target.column.as_str())
+        .filter(|name| seen.insert(*name));
+    validate_mutation_columns(catalog, table, names, action)
+}

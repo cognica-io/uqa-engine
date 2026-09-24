@@ -113,7 +113,7 @@ pub fn copy_from(
             target_relation_bound: false,
             target_qualifier: qualifier.clone(),
             include_descendants: true,
-            columns,
+            columns: columns.into_iter().map(Into::into).collect(),
             with: Vec::new(),
             rows: insert_rows,
             select_source: None,

@@ -363,11 +363,16 @@ impl<'a> StoredColumnBinder<'a> {
                     .output
                     .iter()
                     .take(width)
-                    .map(|column| column.current_name.clone())
+                    .map(|column| column.current_name.clone().into())
                     .collect();
             }
         }
-        self.bind_target_names(&mut insert.columns, &target);
+        for assignment in &mut insert.columns {
+            self.bind_target_name(&mut assignment.column, &target);
+            for expression in assignment.expressions_mut() {
+                self.bind_expr(expression, outer, &context)?;
+            }
+        }
         let mut conflict_scope = target.clone();
         conflict_scope.insert_qualifier("excluded", &target.output);
         let mut target_scopes = vec![conflict_scope];
@@ -386,7 +391,10 @@ impl<'a> StoredColumnBinder<'a> {
             } = &mut conflict.action
             {
                 for (column, expression) in assignments {
-                    self.bind_target_name(column, &target);
+                    self.bind_target_name(&mut column.column, &target);
+                    for expression in column.expressions_mut() {
+                        self.bind_expr(expression, &target_scopes, &context)?;
+                    }
                     self.bind_expr(expression, &target_scopes, &context)?;
                 }
                 if let Some(expression) = r#where {
@@ -428,7 +436,10 @@ impl<'a> StoredColumnBinder<'a> {
         let (local, scopes) =
             self.bind_dml_source(update.from.as_mut(), &target, outer, &context)?;
         for (column, expression) in &mut update.assignments {
-            self.bind_target_name(column, &target);
+            self.bind_target_name(&mut column.column, &target);
+            for expression in column.expressions_mut() {
+                self.bind_expr(expression, &scopes, &context)?;
+            }
             self.bind_expr(expression, &scopes, &context)?;
         }
         if let Some(expression) = &mut update.r#where {

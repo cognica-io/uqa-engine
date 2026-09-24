@@ -45,7 +45,7 @@ pub fn ensure_update_target_privileges<'a>(
     for assignment in &statement.assignments {
         catalog.ensure_column_privilege_for(
             &statement.table,
-            &assignment.column,
+            &assignment.target.column,
             &privilege_subject,
             TableAclPrivilege::Update,
         )?;
@@ -53,7 +53,7 @@ pub fn ensure_update_target_privileges<'a>(
     let expressions = statement
         .assignments
         .iter()
-        .map(|assignment| &assignment.value)
+        .flat_map(crate::plan::AssignmentPlan::expressions)
         .chain(statement.predicate.iter())
         .chain(
             statement
@@ -108,7 +108,10 @@ pub fn ensure_insert_target_privileges(
                 None => columns,
             }
         } else {
-            stmt.columns.clone()
+            stmt.columns
+                .iter()
+                .map(|target| target.column.clone())
+                .collect()
         };
         for column in insert_columns {
             catalog.ensure_column_privilege_for(
@@ -147,7 +150,11 @@ pub fn ensure_insert_target_privileges(
         ..
     }) = stmt.on_conflict.as_ref()
     {
-        privilege_expressions.extend(assignments.iter().map(|assignment| &assignment.value));
+        privilege_expressions.extend(
+            assignments
+                .iter()
+                .flat_map(crate::plan::AssignmentPlan::expressions),
+        );
         privilege_expressions.extend(predicate.iter().map(Box::as_ref));
     }
     catalog.ensure_target_select(TargetSelectPrivilegeRequest {

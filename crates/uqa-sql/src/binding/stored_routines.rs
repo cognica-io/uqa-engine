@@ -233,13 +233,22 @@ fn merge_statement_routine_inputs(plan: &MergePlan) -> CommandRoutineInputs {
                 expressions.extend(
                     assignments
                         .iter()
-                        .map(|assignment| assignment.value.clone()),
+                        .flat_map(crate::plan::AssignmentPlan::expressions)
+                        .cloned(),
                 );
             }
             crate::plan::MergeWhenPlan::InsertNotMatched {
-                condition, values, ..
+                condition,
+                columns,
+                values,
             } => {
                 expressions.extend(condition.iter().cloned());
+                expressions.extend(
+                    columns
+                        .iter()
+                        .flat_map(crate::ast::AssignmentTarget::expressions)
+                        .cloned(),
+                );
                 expressions.extend(values.iter().cloned());
             }
             crate::plan::MergeWhenPlan::DeleteMatched { condition }
@@ -269,7 +278,13 @@ fn insert_statement_routine_inputs(
     context: &CatalogRoutineContext<'_, '_>,
     plan: &InsertPlan,
 ) -> Result<CommandRoutineInputs, SQLError> {
-    let mut expressions = plan.rows.iter().flatten().cloned().collect::<Vec<_>>();
+    let mut expressions = plan
+        .columns
+        .iter()
+        .flat_map(crate::ast::AssignmentTarget::expressions)
+        .chain(plan.rows.iter().flatten())
+        .cloned()
+        .collect::<Vec<_>>();
     if let Some(conflict) = &plan.on_conflict {
         expressions.extend(conflict.expressions.iter().cloned());
         expressions.extend(conflict.predicate.iter().map(Box::as_ref).cloned());
@@ -281,7 +296,8 @@ fn insert_statement_routine_inputs(
             expressions.extend(
                 assignments
                     .iter()
-                    .map(|assignment| assignment.value.clone()),
+                    .flat_map(crate::plan::AssignmentPlan::expressions)
+                    .cloned(),
             );
             expressions.extend(predicate.iter().map(Box::as_ref).cloned());
         }
@@ -317,7 +333,8 @@ fn update_statement_routine_inputs(
     let mut expressions = plan
         .assignments
         .iter()
-        .map(|assignment| assignment.value.clone())
+        .flat_map(crate::plan::AssignmentPlan::expressions)
+        .cloned()
         .collect::<Vec<_>>();
     expressions.extend(plan.predicate.iter().cloned());
     expressions.extend(

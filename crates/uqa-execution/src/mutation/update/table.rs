@@ -55,13 +55,12 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
         )?;
     }
     if stmt.view_rule_update_plans.is_empty() {
-        uqa_sql::assignment::columns::validate_mutation_columns(
+        uqa_sql::assignment::columns::validate_mutation_targets(
             context.mutation.preparation.referential.assignment.columns,
             &stmt.table,
-            stmt.assignments
-                .iter()
-                .map(|assignment| assignment.column.as_str()),
+            stmt.assignments.iter().map(|assignment| &assignment.target),
             "UPDATE",
+            false,
         )?;
     }
     let privilege_expressions =
@@ -72,7 +71,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
     let assigned_columns = stmt
         .assignments
         .iter()
-        .map(|assignment| assignment.column.clone())
+        .map(|assignment| assignment.target.column.clone())
         .collect::<Vec<_>>();
     let update_rules = context
         .mutation
@@ -174,7 +173,9 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                     validate_dml_expression_qualifiers(predicate, &allowed)?;
                 }
                 for assignment in &stmt.assignments {
-                    validate_dml_expression_qualifiers(&assignment.value, &allowed)?;
+                    for expression in assignment.expressions() {
+                        validate_dml_expression_qualifiers(expression, &allowed)?;
+                    }
                 }
             }
 
@@ -443,7 +444,11 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                                 &snapshot_ctes,
                                 MutationAssignmentTarget {
                                     table: &stmt.table,
-                                    column: &assignment.column,
+                                    target: &assignment.target,
+                                    current: doc.get(&assignment.target.column),
+                                    final_column_write: !stmt.assignments[position + 1..]
+                                        .iter()
+                                        .any(|next| next.target.column == assignment.target.column),
                                     action: "UPDATE",
                                 },
                                 &assignment.value,
@@ -456,15 +461,15 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                                 &snapshot_ctes,
                                 stmt,
                                 position,
-                                &assignment.value,
+                                doc.get(&assignment.target.column),
                                 Some(&target_row),
                                 params,
                             )?
                         };
                         if let Some(value) = value {
-                            doc.insert(assignment.column.clone(), value);
+                            doc.insert(assignment.target.column.clone(), value);
                         } else {
-                            doc.remove(&assignment.column);
+                            doc.remove(&assignment.target.column);
                         }
                     }
                 }

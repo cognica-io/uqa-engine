@@ -5,8 +5,8 @@
 //
 
 use super::{
-    build_join_spill_with_ctes, build_returning_value_row, coerce_view_value, dml_join_rows,
-    eval_mutation_expr, finish_view_dml, materialize_view_rows, required_view_delete_columns,
+    build_join_spill_with_ctes, build_returning_value_row, dml_join_rows, eval_mutation_expr,
+    finish_view_dml, materialize_view_rows, required_view_delete_columns,
     required_view_update_columns, resolve_view_target, target_columns, target_row,
     validate_dml_expression_qualifiers, validate_returning_alias_relations, view_document,
     view_qualification_references_target, with_mutation_snapshot, BTreeSet, CteScope, DeletePlan,
@@ -31,7 +31,7 @@ struct PendingViewUpdate {
     new: Vec<Value>,
     source_context: Option<OwnedPhysicalRow>,
     evaluation_row: OwnedPhysicalRow,
-    evaluated_assignments: BTreeSet<String>,
+    evaluated_assignments: BTreeSet<usize>,
 }
 
 fn evaluate_view_update_assignments<S: Clone + Send + Sync + 'static>(
@@ -43,32 +43,33 @@ fn evaluate_view_update_assignments<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     scope: &CteScope<S>,
 ) -> Result<(), SQLError> {
-    for assignment in &stmt.assignments {
-        if pending.evaluated_assignments.contains(&assignment.column)
-            || required.is_some_and(|required| !required.contains(&assignment.column))
+    for (assignment_index, assignment) in stmt.assignments.iter().enumerate() {
+        if pending.evaluated_assignments.contains(&assignment_index)
+            || required.is_some_and(|required| !required.contains(&assignment.target.column))
         {
             continue;
         }
         let position = target
             .columns
             .iter()
-            .position(|column| column == &assignment.column)
-            .ok_or_else(|| SQLError::UnknownColumn(assignment.column.clone()))?;
-        let value = if matches!(assignment.value, ScalarExpr::Default) {
-            Value::Null
-        } else {
-            eval_mutation_expr(
-                services.expressions,
-                scope,
-                &assignment.value,
-                Some(&pending.evaluation_row),
-                params,
-            )?
-        };
-        pending.new[position] = coerce_view_value(services.assignment, target, position, value)?;
-        pending
-            .evaluated_assignments
-            .insert(assignment.column.clone());
+            .position(|column| column == &assignment.target.column)
+            .ok_or_else(|| SQLError::UnknownColumn(assignment.target.column.clone()))?;
+        pending.new[position] = crate::mutation::assignment::eval_typed_assignment(
+            *services,
+            scope,
+            crate::mutation::assignment::TypedAssignmentTarget {
+                target: &assignment.target,
+                ty: target.types[position].as_ref(),
+                current: Some(&pending.new[position]),
+                final_column_write: !stmt.assignments[assignment_index + 1..]
+                    .iter()
+                    .any(|next| next.target.column == assignment.target.column),
+            },
+            &assignment.value,
+            Some(&pending.evaluation_row),
+            params,
+        )?;
+        pending.evaluated_assignments.insert(assignment_index);
     }
     Ok(())
 }
@@ -179,16 +180,26 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
     let assigned_columns = stmt
         .assignments
         .iter()
-        .map(|assignment| assignment.column.clone())
+        .map(|assignment| assignment.target.column.clone())
         .collect::<Vec<_>>();
-    let _ = target_columns(&target, &assigned_columns, "UPDATE")?;
+    let _ = target_columns(
+        &target,
+        &stmt
+            .assignments
+            .iter()
+            .map(|assignment| assignment.target.clone())
+            .collect::<Vec<_>>(),
+        "UPDATE",
+    )?;
     if stmt.source.is_none() {
         let allowed = BTreeSet::from([stmt.target_qualifier.clone()]);
         if let Some(predicate) = stmt.predicate.as_ref() {
             validate_dml_expression_qualifiers(predicate, &allowed)?;
         }
         for assignment in &stmt.assignments {
-            validate_dml_expression_qualifiers(&assignment.value, &allowed)?;
+            for expression in assignment.expressions() {
+                validate_dml_expression_qualifiers(expression, &allowed)?;
+            }
         }
     }
     let original_query_survives =

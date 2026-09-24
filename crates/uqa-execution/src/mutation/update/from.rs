@@ -50,7 +50,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
     let assigned_columns = stmt
         .assignments
         .iter()
-        .map(|assignment| assignment.column.clone())
+        .map(|assignment| assignment.target.column.clone())
         .collect::<Vec<_>>();
     let update_rules = context
         .mutation
@@ -257,7 +257,11 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
                         &snapshot_ctes,
                         MutationAssignmentTarget {
                             table: &target,
-                            column: &assignment.column,
+                            target: &assignment.target,
+                            current: doc.get(&assignment.target.column),
+                            final_column_write: !stmt.assignments[position + 1..]
+                                .iter()
+                                .any(|next| next.target.column == assignment.target.column),
                             action: "UPDATE FROM",
                         },
                         &assignment.value,
@@ -270,15 +274,15 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
                         &snapshot_ctes,
                         stmt,
                         position,
-                        &assignment.value,
+                        doc.get(&assignment.target.column),
                         Some(&joined),
                         params,
                     )?
                 };
                 if let Some(value) = value {
-                    doc.insert(assignment.column.clone(), value);
+                    doc.insert(assignment.target.column.clone(), value);
                 } else {
-                    doc.remove(&assignment.column);
+                    doc.remove(&assignment.target.column);
                 }
             }
         }

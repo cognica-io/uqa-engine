@@ -7,12 +7,11 @@
 //! INSERT execution for views with `INSTEAD OF` triggers.
 
 use super::{
-    build_returning_value_row, coerce_view_value, eval_mutation_expr, finish_view_dml,
-    resolve_view_target, run_suppressed_view_insert_rules, target_columns,
-    validate_returning_alias_relations, values_from_result, view_document, with_mutation_snapshot,
-    BTreeSet, CteScope, DmlReturningShape, InsertPlan, MutationStatementContext,
-    ReturningValueProjectionRow, SQLError, SQLParam, SQLResult, ScalarExpr, SourceOutputPruning,
-    Value,
+    build_returning_value_row, eval_mutation_expr, finish_view_dml, resolve_view_target,
+    run_suppressed_view_insert_rules, target_columns, validate_returning_alias_relations,
+    values_from_result, view_document, with_mutation_snapshot, BTreeSet, CteScope,
+    DmlReturningShape, InsertPlan, MutationStatementContext, ReturningValueProjectionRow, SQLError,
+    SQLParam, SQLResult, ScalarExpr, SourceOutputPruning, Value,
 };
 
 #[expect(
@@ -42,8 +41,8 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
             target
                 .columns
                 .iter()
-                .position(|candidate| candidate == column)
-                .ok_or_else(|| SQLError::UnknownColumn(column.clone()))
+                .position(|candidate| candidate == &column.column)
+                .ok_or_else(|| SQLError::UnknownColumn(column.column.clone()))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let original_query_survives =
@@ -139,7 +138,9 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                             .iter()
                             .enumerate()
                             .filter_map(|(position, column)| {
-                                required_columns.contains(column).then_some(position)
+                                required_columns
+                                    .contains(&column.column)
+                                    .then_some(position)
                             })
                             .collect::<BTreeSet<_>>();
                         prune_source_outputs(&mut source, &required_positions, columns.len());
@@ -194,17 +195,23 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
                 let mut new = vec![Value::Null; target.columns.len()];
                 for (input_position, target_position) in positions.iter().copied().enumerate() {
                     if let Some(value) = input.get(input_position) {
-                        new[target_position] = coerce_view_value(
-                            context
-                                .mutation
-                                .preparation
-                                .referential
-                                .assignment
-                                .assignment,
-                            &target,
-                            target_position,
-                            value.clone(),
-                        )?;
+                        new[target_position] =
+                            crate::mutation::assignment::coerce_typed_assignment(
+                                read_context.mutation.preparation.referential.assignment,
+                                &ctes,
+                                crate::mutation::assignment::TypedAssignmentTarget {
+                                    target: &columns[input_position],
+                                    ty: target.types[target_position].as_ref(),
+                                    current: Some(&new[target_position]),
+                                    final_column_write: !columns[input_position + 1..]
+                                        .iter()
+                                        .any(|next| next.column == columns[input_position].column),
+                                },
+                                value.clone(),
+                                None,
+                                None,
+                                params,
+                            )?;
                     }
                 }
                 proposed_rows.push(new);

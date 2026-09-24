@@ -84,7 +84,7 @@ pub struct InsertSelectConsumerState<S: Clone + 'static> {
     pub id_column: String,
     pub accepts_supplied_identity: bool,
     pub conflict_update_columns: Vec<String>,
-    pub columns: Option<Vec<String>>,
+    pub columns: Option<Vec<uqa_sql::ast::AssignmentTarget<crate::ScalarExpr>>>,
     pub result_width: Option<usize>,
     pub prepared_schema: crate::RowSchema,
     pub prepared_buffer: Option<crate::SpillBuffer>,
@@ -189,18 +189,19 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
                 .column_names(&state.stmt.table)
                 .map_err(|error| dml_storage_error("INSERT SELECT", error))?;
             if target_columns.is_empty() {
-                source_columns.to_vec()
+                source_columns.iter().cloned().map(Into::into).collect()
             } else {
-                target_columns
+                target_columns.into_iter().map(Into::into).collect()
             }
         } else {
             state.stmt.columns.clone()
         };
-        uqa_sql::assignment::columns::validate_mutation_columns(
+        uqa_sql::assignment::columns::validate_mutation_targets(
             services.rows.referential.assignment.columns,
             &state.stmt.table,
-            columns.iter().map(String::as_str),
+            columns.iter(),
             "INSERT SELECT",
+            true,
         )?;
         if result_width > columns.len() || (!implicit_columns && result_width != columns.len()) {
             return Err(SQLError::TypeMismatch(format!(
@@ -263,29 +264,37 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             if uqa_sql::assignment::columns::generated_column_kind(
                 services.rows.referential.assignment.columns,
                 &stmt.table,
-                column,
+                &column.column,
             )?
             .is_some()
             {
                 return Err(SQLError::TypeMismatch(format!(
-                    "column `{column}` is a generated column; only DEFAULT may be assigned"
+                    "column `{}` is a generated column; only DEFAULT may be assigned",
+                    column.column
                 )));
             }
             let value = source_row
                 .value_at(index)
                 .cloned()
                 .unwrap_or(uqa_core::Value::Null);
-            document.insert(
-                column.clone(),
-                uqa_sql::assignment::columns::coerce_to_column_type_from(
-                    services.rows.referential.assignment.assignment,
-                    services.rows.referential.assignment.columns,
-                    &stmt.table,
-                    column,
-                    value,
-                    source_schema.column_types()[index].as_ref(),
-                )?,
-            );
+            let value = crate::mutation::assignment::coerce_mutation_assignment(
+                services.rows.referential.assignment,
+                snapshot_scope,
+                crate::mutation::assignment::MutationAssignmentTarget {
+                    table: &stmt.table,
+                    target: column,
+                    current: document.get(&column.column),
+                    final_column_write: !columns[index + 1..]
+                        .iter()
+                        .any(|next| next.column == column.column),
+                    action: "INSERT SELECT",
+                },
+                value,
+                source_schema.column_types()[index].as_ref(),
+                None,
+                params,
+            )?;
+            document.insert(column.column.clone(), value);
         }
         apply_missing_column_defaults(
             services.rows.referential.assignment,

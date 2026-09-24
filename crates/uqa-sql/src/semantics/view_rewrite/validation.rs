@@ -41,29 +41,37 @@ pub(super) fn duplicate_assignment(column: &str) -> SQLError {
 
 fn validate_view_target_columns<'a>(
     layer: &AutomaticViewLayer,
-    columns: impl IntoIterator<Item = &'a str>,
+    targets: impl IntoIterator<Item = &'a crate::ast::AssignmentTarget<ScalarExpr>>,
     duplicate: fn(&str) -> SQLError,
 ) -> Result<(), SQLError> {
-    let mut seen = BTreeSet::new();
-    for column in columns {
-        if layer_column(layer, column).is_none() {
-            return Err(unknown_view_column(layer, column));
+    let mut seen = std::collections::BTreeMap::new();
+    for target in targets {
+        if layer_column(layer, &target.column).is_none() {
+            return Err(unknown_view_column(layer, &target.column));
         }
-        if !seen.insert(column) {
-            return Err(duplicate(column));
+        let whole = target.is_whole_column();
+        if seen
+            .insert(&target.column, whole)
+            .is_some_and(|previous| previous || whole)
+        {
+            return Err(duplicate(&target.column));
         }
     }
     Ok(())
 }
 
 pub(super) fn validate_mapped_columns(
-    columns: &[String],
+    targets: &[crate::ast::AssignmentTarget<ScalarExpr>],
     duplicate: fn(&str) -> SQLError,
 ) -> Result<(), SQLError> {
-    let mut seen = BTreeSet::new();
-    for column in columns {
-        if !seen.insert(column) {
-            return Err(duplicate(column));
+    let mut seen = std::collections::BTreeMap::new();
+    for target in targets {
+        let whole = target.is_whole_column();
+        if seen
+            .insert(&target.column, whole)
+            .is_some_and(|previous| previous || whole)
+        {
+            return Err(duplicate(&target.column));
         }
     }
     Ok(())
@@ -73,11 +81,7 @@ pub(super) fn validate_insert_targets(
     layer: &AutomaticViewLayer,
     plan: &InsertPlan,
 ) -> Result<(), SQLError> {
-    validate_view_target_columns(
-        layer,
-        plan.columns.iter().map(String::as_str),
-        duplicate_insert_column,
-    )?;
+    validate_view_target_columns(layer, plan.columns.iter(), duplicate_insert_column)?;
     let Some(conflict) = &plan.on_conflict else {
         return Ok(());
     };
@@ -89,9 +93,7 @@ pub(super) fn validate_insert_targets(
     if let ConflictActionPlan::Update { assignments, .. } = &conflict.action {
         validate_view_target_columns(
             layer,
-            assignments
-                .iter()
-                .map(|assignment| assignment.column.as_str()),
+            assignments.iter().map(|assignment| &assignment.target),
             duplicate_assignment,
         )?;
     }
@@ -104,9 +106,7 @@ pub(super) fn validate_update_targets(
 ) -> Result<(), SQLError> {
     validate_view_target_columns(
         layer,
-        plan.assignments
-            .iter()
-            .map(|assignment| assignment.column.as_str()),
+        plan.assignments.iter().map(|assignment| &assignment.target),
         duplicate_assignment,
     )
 }
@@ -262,7 +262,9 @@ pub(super) fn validate_public_update_contract(
         include_excluded: false,
     };
     for assignment in &plan.assignments {
-        validate_public_view_expression(&assignment.value, &columns, ordinary_scope)?;
+        for expression in assignment.expressions() {
+            validate_public_view_expression(expression, &columns, ordinary_scope)?;
+        }
     }
     if let Some(predicate) = plan.predicate.as_ref() {
         validate_public_view_expression(predicate, &columns, ordinary_scope)?;
@@ -340,7 +342,9 @@ pub(super) fn validate_public_insert_contract(
             include_excluded: true,
         };
         for assignment in assignments {
-            validate_public_view_expression(&assignment.value, &columns, scope)?;
+            for expression in assignment.expressions() {
+                validate_public_view_expression(expression, &columns, scope)?;
+            }
         }
         if let Some(predicate) = predicate {
             validate_public_view_expression(predicate, &columns, scope)?;
@@ -385,7 +389,9 @@ pub fn validate_public_merge_contract(
                     validate_public_view_expression(condition, &columns, matched_scope)?;
                 }
                 for assignment in assignments {
-                    validate_public_view_expression(&assignment.value, &columns, matched_scope)?;
+                    for expression in assignment.expressions() {
+                        validate_public_view_expression(expression, &columns, matched_scope)?;
+                    }
                 }
             }
             MergeWhenPlan::DeleteMatched { condition }
@@ -438,18 +444,12 @@ pub(super) fn validate_merge_targets(
             | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
                 validate_view_target_columns(
                     layer,
-                    assignments
-                        .iter()
-                        .map(|assignment| assignment.column.as_str()),
+                    assignments.iter().map(|assignment| &assignment.target),
                     duplicate_assignment,
                 )?;
             }
             MergeWhenPlan::InsertNotMatched { columns, .. } if !columns.is_empty() => {
-                validate_view_target_columns(
-                    layer,
-                    columns.iter().map(String::as_str),
-                    duplicate_insert_column,
-                )?;
+                validate_view_target_columns(layer, columns.iter(), duplicate_insert_column)?;
             }
             _ => {}
         }
@@ -465,15 +465,17 @@ pub fn validate_public_merge_targets(
         match clause {
             MergeWhenPlan::UpdateMatched { assignments, .. }
             | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
-                let columns = assignments
-                    .iter()
-                    .map(|assignment| assignment.column.as_str())
-                    .collect::<Vec<_>>();
-                validate_public_view_targets(services, &plan.target, columns.iter().copied())?;
-                validate_mapped_columns(
-                    &columns
+                validate_public_view_targets(
+                    services,
+                    &plan.target,
+                    assignments
                         .iter()
-                        .map(|column| (*column).to_string())
+                        .map(|assignment| assignment.target.column.as_str()),
+                )?;
+                validate_mapped_columns(
+                    &assignments
+                        .iter()
+                        .map(|assignment| assignment.target.clone())
                         .collect::<Vec<_>>(),
                     duplicate_assignment,
                 )?;
@@ -482,7 +484,7 @@ pub fn validate_public_merge_targets(
                 validate_public_view_targets(
                     services,
                     &plan.target,
-                    columns.iter().map(String::as_str),
+                    columns.iter().map(|target| target.column.as_str()),
                 )?;
                 validate_mapped_columns(columns, duplicate_insert_column)?;
             }

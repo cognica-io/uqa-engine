@@ -76,6 +76,8 @@ mod arithmetic_and_casts;
 mod array_containment;
 #[path = "pg18_semantics/array_transforms.rs"]
 mod array_transforms;
+#[path = "pg18_semantics/assignment_subscripts.rs"]
+mod assignment_subscripts;
 #[path = "pg18_semantics/checksums.rs"]
 mod checksums;
 #[path = "pg18_semantics/comparisons_and_arrays.rs"]

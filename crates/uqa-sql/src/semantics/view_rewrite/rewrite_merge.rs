@@ -205,20 +205,22 @@ pub fn rewrite_merge_to_base(
                         )?;
                     }
                     for assignment in assignments.iter_mut() {
-                        rewrite_target_expression(
-                            services,
-                            &mut assignment.value,
-                            &layer,
-                            matched_scope,
-                            &mut plan.subqueries,
-                        )?;
-                        assignment.column =
-                            writable_column(&layer, &assignment.column, "MERGE INTO")?;
+                        for expression in assignment.expressions_mut() {
+                            rewrite_target_expression(
+                                services,
+                                expression,
+                                &layer,
+                                matched_scope,
+                                &mut plan.subqueries,
+                            )?;
+                        }
+                        assignment.target.column =
+                            writable_column(&layer, &assignment.target.column, "MERGE INTO")?;
                     }
                     validate_mapped_columns(
                         &assignments
                             .iter()
-                            .map(|assignment| assignment.column.clone())
+                            .map(|assignment| assignment.target.clone())
                             .collect::<Vec<_>>(),
                         duplicate_assignment,
                     )?;
@@ -249,20 +251,22 @@ pub fn rewrite_merge_to_base(
                         )?;
                     }
                     for assignment in assignments.iter_mut() {
-                        rewrite_target_expression(
-                            services,
-                            &mut assignment.value,
-                            &layer,
-                            target_only_scope,
-                            &mut plan.subqueries,
-                        )?;
-                        assignment.column =
-                            writable_column(&layer, &assignment.column, "MERGE INTO")?;
+                        for expression in assignment.expressions_mut() {
+                            rewrite_target_expression(
+                                services,
+                                expression,
+                                &layer,
+                                target_only_scope,
+                                &mut plan.subqueries,
+                            )?;
+                        }
+                        assignment.target.column =
+                            writable_column(&layer, &assignment.target.column, "MERGE INTO")?;
                     }
                     validate_mapped_columns(
                         &assignments
                             .iter()
-                            .map(|assignment| assignment.column.clone())
+                            .map(|assignment| assignment.target.clone())
                             .collect::<Vec<_>>(),
                         duplicate_assignment,
                     )?;
@@ -287,16 +291,19 @@ pub fn rewrite_merge_to_base(
                             .columns
                             .iter()
                             .take(values.len())
-                            .map(|column| column.name.clone())
+                            .map(|column| column.name.clone().into())
                             .collect::<Vec<_>>()
                     } else {
                         columns.clone()
                     };
                     *columns = supplied_columns
-                        .iter()
-                        .map(|column| writable_column(&layer, column, "MERGE INTO"))
+                        .into_iter()
+                        .map(|mut target| {
+                            target.column = writable_column(&layer, &target.column, "MERGE INTO")?;
+                            Ok(target)
+                        })
                         .collect::<Result<Vec<_>, SQLError>>()?;
-                    validate_mapped_columns(columns, duplicate_insert_column)?;
+                    validate_mapped_columns(&columns, duplicate_insert_column)?;
                 }
                 MergeWhenPlan::NothingNotMatched { .. } => {}
             }

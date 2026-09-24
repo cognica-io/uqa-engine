@@ -6,6 +6,7 @@
 
 //! MERGE source, predicate, and WHEN-clause lowering.
 
+use super::dml::compile_assignment_target;
 use super::{
     compile_expr, compile_from_node, compile_returning_clause, range_var_name, Expr, NodeEnum,
     Result, SQLError,
@@ -86,7 +87,7 @@ pub(super) fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crat
                         "MERGE UPDATE is not valid for WHEN NOT MATCHED BY TARGET".into(),
                     ));
                 }
-                let mut assignments: Vec<(String, Expr)> = Vec::new();
+                let mut assignments = Vec::new();
                 for tgt in &w.target_list {
                     let Some(NodeEnum::ResTarget(rt)) = tgt.node.as_ref() else {
                         return Err(SQLError::Internal(
@@ -97,7 +98,7 @@ pub(super) fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crat
                         .val
                         .as_ref()
                         .ok_or_else(|| SQLError::Internal("MERGE UPDATE without value".into()))?;
-                    assignments.push((rt.name.clone(), compile_expr(val)?));
+                    assignments.push((compile_assignment_target(rt)?, compile_expr(val)?));
                 }
                 when_clauses.push(match match_kind {
                     MergeMatchKind::MergeWhenMatched => MergeWhen::UpdateMatched {
@@ -137,14 +138,14 @@ pub(super) fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crat
                         "MERGE INSERT is only valid for WHEN NOT MATCHED BY TARGET".into(),
                     ));
                 }
-                let mut columns: Vec<String> = Vec::with_capacity(w.target_list.len());
+                let mut columns = Vec::with_capacity(w.target_list.len());
                 for tgt in &w.target_list {
                     let Some(NodeEnum::ResTarget(rt)) = tgt.node.as_ref() else {
                         return Err(SQLError::Internal(
                             "MERGE INSERT contains a malformed target column".into(),
                         ));
                     };
-                    columns.push(rt.name.clone());
+                    columns.push(compile_assignment_target(rt)?);
                 }
                 let values: Vec<Expr> = w
                     .values

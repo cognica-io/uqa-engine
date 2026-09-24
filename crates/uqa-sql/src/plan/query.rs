@@ -76,15 +76,29 @@ pub(super) fn lower_ctes(ctes: &[CTE], aggregates: &dyn AggregateClassifier) -> 
 }
 
 pub(super) fn lower_assignments(
-    assignments: Vec<(String, Expr)>,
+    assignments: Vec<(crate::ast::AssignmentTarget, Expr)>,
     aggregates: &dyn AggregateClassifier,
     subqueries: &mut Vec<QueryPlan>,
 ) -> Vec<AssignmentPlan> {
     assignments
         .into_iter()
-        .map(|(column, expression)| AssignmentPlan {
-            column,
+        .map(|(target, expression)| AssignmentPlan {
+            target: target
+                .map(|expression| lower_scalar_expression(expression, aggregates, subqueries)),
             value: lower_scalar_expression(expression, aggregates, subqueries),
+        })
+        .collect()
+}
+
+pub(super) fn lower_targets(
+    targets: Vec<crate::ast::AssignmentTarget>,
+    aggregates: &dyn AggregateClassifier,
+    subqueries: &mut Vec<QueryPlan>,
+) -> Vec<crate::ast::AssignmentTarget<ScalarExpr>> {
+    targets
+        .into_iter()
+        .map(|target| {
+            target.map(|expression| lower_scalar_expression(expression, aggregates, subqueries))
         })
         .collect()
 }
@@ -140,7 +154,7 @@ pub(super) fn lower_merge_when(
                 .collect();
             MergeWhenPlan::InsertNotMatched {
                 condition,
-                columns,
+                columns: lower_targets(columns, aggregates, subqueries),
                 values,
             }
         }

@@ -27,7 +27,11 @@ pub(super) fn action_target_qualifier_referenced(
                 let _ = super::bind_from(source, &mut detector, &scope, &context);
                 let _ = super::collect_visible_scope(source, &context, &mut scope);
             }
-            for (_, expression) in &update.assignments {
+            for expression in update
+                .assignments
+                .iter()
+                .flat_map(|(target, value)| target.expressions().chain(std::iter::once(value)))
+            {
                 let _ =
                     super::bind_rule_expr_with_scope(expression, &mut detector, &scope, &context);
             }

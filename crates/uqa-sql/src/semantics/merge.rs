@@ -109,7 +109,7 @@ pub fn validate_merge_action_scopes(
                 condition.as_ref(),
                 assignments
                     .iter()
-                    .map(|assignment| &assignment.value)
+                    .flat_map(crate::plan::AssignmentPlan::expressions)
                     .collect(),
                 &matched_schema,
             ),
@@ -124,7 +124,7 @@ pub fn validate_merge_action_scopes(
                 condition.as_ref(),
                 assignments
                     .iter()
-                    .map(|assignment| &assignment.value)
+                    .flat_map(crate::plan::AssignmentPlan::expressions)
                     .collect(),
                 target_schema,
             ),
@@ -133,8 +133,18 @@ pub fn validate_merge_action_scopes(
                 (condition.as_ref(), Vec::new(), target_schema)
             }
             MergeWhenPlan::InsertNotMatched {
-                condition, values, ..
-            } => (condition.as_ref(), values.iter().collect(), source_schema),
+                condition,
+                columns,
+                values,
+            } => (
+                condition.as_ref(),
+                columns
+                    .iter()
+                    .flat_map(crate::ast::AssignmentTarget::expressions)
+                    .chain(values)
+                    .collect(),
+                source_schema,
+            ),
             MergeWhenPlan::NothingNotMatched { condition } => {
                 (condition.as_ref(), Vec::new(), source_schema)
             }
@@ -265,7 +275,7 @@ pub fn ensure_merge_mutation_privileges(
                             .cloned()
                             .collect::<Vec<_>>()
                     } else {
-                        columns.clone()
+                        columns.iter().map(|target| target.column.clone()).collect()
                     };
                     column_privileges.extend(columns.into_iter().map(|column| {
                         (
@@ -280,7 +290,7 @@ pub fn ensure_merge_mutation_privileges(
                 column_privileges.extend(assignments.iter().map(|assignment| {
                     (
                         crate::catalog::security::table::TableAclPrivilege::Update,
-                        assignment.column.clone(),
+                        assignment.target.column.clone(),
                     )
                 }));
             }
@@ -383,25 +393,25 @@ pub fn validate_merge_target_columns(
     catalog: &dyn crate::assignment::columns::AssignmentColumnCatalog,
     stmt: &MergePlan,
 ) -> Result<(), SQLError> {
-    use crate::assignment::columns::validate_mutation_columns;
+    use crate::assignment::columns::validate_mutation_targets;
     for clause in &stmt.when_clauses {
         match clause {
             MergeWhenPlan::UpdateMatched { assignments, .. }
             | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
-                validate_mutation_columns(
+                validate_mutation_targets(
                     catalog,
                     &stmt.target,
-                    assignments
-                        .iter()
-                        .map(|assignment| assignment.column.as_str()),
+                    assignments.iter().map(|assignment| &assignment.target),
                     "MERGE UPDATE",
+                    false,
                 )?;
             }
-            MergeWhenPlan::InsertNotMatched { columns, .. } => validate_mutation_columns(
+            MergeWhenPlan::InsertNotMatched { columns, .. } => validate_mutation_targets(
                 catalog,
                 &stmt.target,
-                columns.iter().map(String::as_str),
+                columns.iter(),
                 "MERGE INSERT",
+                true,
             )?,
             _ => {}
         }

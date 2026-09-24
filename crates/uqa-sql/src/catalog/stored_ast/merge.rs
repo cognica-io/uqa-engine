@@ -53,17 +53,25 @@ where
                     if let Some(condition) = condition {
                         self.bind_expr(condition, &ctes)?;
                     }
-                    for (_, expression) in assignments {
+                    for expression in assignments.iter_mut().flat_map(|(target, value)| {
+                        target.expressions_mut().chain(std::iter::once(value))
+                    }) {
                         self.bind_expr(expression, &ctes)?;
                     }
                 }
                 crate::ast::MergeWhen::InsertNotMatched {
-                    condition, values, ..
+                    condition,
+                    columns,
+                    values,
                 } => {
                     if let Some(condition) = condition {
                         self.bind_expr(condition, &ctes)?;
                     }
-                    for expression in values {
+                    for expression in columns
+                        .iter_mut()
+                        .flat_map(crate::ast::AssignmentTarget::expressions_mut)
+                        .chain(values)
+                    {
                         self.bind_expr(expression, &ctes)?;
                     }
                 }

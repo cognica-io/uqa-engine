@@ -7,8 +7,8 @@
 //! Rendering for data-modifying statement trees.
 
 use super::{
-    assignments_sql, expr_sql, from_sql, ident, ident_list, only_relation, render_returning,
-    render_target_alias, rows_sql, select_sql, with_sql,
+    assignment_targets_sql, assignments_sql, expr_sql, from_sql, ident, only_relation,
+    render_returning, render_target_alias, rows_sql, select_sql, with_sql,
 };
 use crate::ast::{DeleteStmt, InsertStmt, MergeStmt, MergeWhen, OnConflictAction, UpdateStmt};
 
@@ -22,7 +22,7 @@ pub(super) fn insert_sql(statement: &InsertStmt) -> String {
     render_target_alias(&mut rendered, &statement.table, &statement.target_qualifier);
     if !statement.columns.is_empty() {
         rendered.push_str(" (");
-        rendered.push_str(&ident_list(&statement.columns));
+        rendered.push_str(&assignment_targets_sql(&statement.columns));
         rendered.push(')');
     }
     if statement.rows.as_slice() == [Vec::new()] {
@@ -184,7 +184,7 @@ pub(super) fn merge_sql(statement: &MergeStmt) -> String {
                 rendered.push_str("INSERT");
                 if !columns.is_empty() {
                     rendered.push_str(" (");
-                    rendered.push_str(&ident_list(columns));
+                    rendered.push_str(&assignment_targets_sql(columns));
                     rendered.push(')');
                 }
                 if values.is_empty() {

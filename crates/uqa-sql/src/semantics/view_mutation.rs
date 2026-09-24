@@ -84,10 +84,14 @@ pub fn required_view_update_columns(
     columns.extend(
         stmt.assignments
             .iter()
-            .map(|assignment| assignment.column.clone()),
+            .map(|assignment| assignment.target.column.clone()),
     );
-    for assignment in &stmt.assignments {
-        if !collect_view_expression_columns(&assignment.value, &mut columns) {
+    for expression in stmt
+        .assignments
+        .iter()
+        .flat_map(crate::plan::AssignmentPlan::expressions)
+    {
+        if !collect_view_expression_columns(expression, &mut columns) {
             return Ok(None);
         }
     }
@@ -122,26 +126,20 @@ pub fn required_view_delete_columns(
 
 pub fn target_columns(
     target: &ViewMutationTarget,
-    explicit: &[String],
+    explicit: &[crate::ast::AssignmentTarget<ScalarExpr>],
     operation: &str,
-) -> Result<Vec<String>, SQLError> {
+) -> Result<Vec<crate::ast::AssignmentTarget<ScalarExpr>>, SQLError> {
     let columns = if explicit.is_empty() {
-        target.columns.clone()
+        target.columns.iter().cloned().map(Into::into).collect()
     } else {
         explicit.to_vec()
     };
-    let mut seen = BTreeSet::new();
+    crate::assignment::targets::validate_repeated_targets(&columns, operation == "INSERT")?;
     for column in &columns {
-        if !seen.insert(column) {
-            return Err(SQLError::Routine {
-                sqlstate: "42701".into(),
-                message: format!("column \"{column}\" specified more than once"),
-            });
-        }
-        if !target.columns.contains(column) {
+        if !target.columns.contains(&column.column) {
             return Err(SQLError::UnknownColumn(format!(
-                "{}.{column}",
-                target.canonical_name
+                "{}.{}",
+                target.canonical_name, column.column
             )));
         }
     }
@@ -202,7 +200,7 @@ pub fn validate_view_merge_targets(
             | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
                 let columns = assignments
                     .iter()
-                    .map(|assignment| assignment.column.clone())
+                    .map(|assignment| assignment.target.clone())
                     .collect::<Vec<_>>();
                 let _ = target_columns(target, &columns, "UPDATE")?;
             }

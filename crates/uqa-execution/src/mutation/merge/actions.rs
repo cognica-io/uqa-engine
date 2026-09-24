@@ -18,7 +18,7 @@ use crate::mutation::{
 use crate::query::CteScope;
 use std::collections::BTreeSet;
 use uqa_sql::{
-    assignment::columns::validate_mutation_columns,
+    assignment::columns::validate_mutation_targets,
     plan::{MergePlan, MergeWhenPlan},
     SQLError, SQLParam,
 };
@@ -103,13 +103,17 @@ pub(super) fn select_merge_action<S: Clone + 'static>(
                     .cloned()
                     .ok_or_else(|| missing_document_error("MERGE update", target_table, doc_id))?;
                 let mut new_document = old_document.clone();
-                for assignment in assignments {
+                for (position, assignment) in assignments.iter().enumerate() {
                     let value = eval_mutation_assignment(
                         services,
                         ctes,
                         MutationAssignmentTarget {
                             table: target_table,
-                            column: &assignment.column,
+                            target: &assignment.target,
+                            current: new_document.get(&assignment.target.column),
+                            final_column_write: !assignments[position + 1..]
+                                .iter()
+                                .any(|next| next.target.column == assignment.target.column),
                             action: "MERGE UPDATE",
                         },
                         &assignment.value,
@@ -117,9 +121,9 @@ pub(super) fn select_merge_action<S: Clone + 'static>(
                         params,
                     )?;
                     if let Some(value) = value {
-                        new_document.insert(assignment.column.clone(), value);
+                        new_document.insert(assignment.target.column.clone(), value);
                     } else {
-                        new_document.remove(&assignment.column);
+                        new_document.remove(&assignment.target.column);
                     }
                 }
                 Ok(SelectedMergeAction::Update {
@@ -128,7 +132,7 @@ pub(super) fn select_merge_action<S: Clone + 'static>(
                     new_document,
                     updated_columns: assignments
                         .iter()
-                        .map(|assignment| assignment.column.clone())
+                        .map(|assignment| assignment.target.column.clone())
                         .collect(),
                 })
             }
@@ -148,6 +152,9 @@ pub(super) fn select_merge_action<S: Clone + 'static>(
                         .relations
                         .column_names(target_table)
                         .map_err(|error| dml_storage_error("MERGE INSERT", error))?
+                        .into_iter()
+                        .map(Into::into)
+                        .collect()
                 } else {
                     columns.clone()
                 };
@@ -160,11 +167,12 @@ pub(super) fn select_merge_action<S: Clone + 'static>(
                         target_columns.len()
                     )));
                 }
-                validate_mutation_columns(
+                validate_mutation_targets(
                     services.columns,
                     target_table,
-                    target_columns.iter().map(String::as_str),
+                    target_columns.iter(),
                     "MERGE INSERT",
+                    true,
                 )?;
                 let mut document = Document::new();
                 for (index, column) in target_columns.iter().take(values.len()).enumerate() {
@@ -173,7 +181,11 @@ pub(super) fn select_merge_action<S: Clone + 'static>(
                         ctes,
                         MutationAssignmentTarget {
                             table: target_table,
-                            column,
+                            target: column,
+                            current: document.get(&column.column),
+                            final_column_write: !target_columns[index + 1..]
+                                .iter()
+                                .any(|next| next.column == column.column),
                             action: "MERGE INSERT",
                         },
                         &values[index],
@@ -181,7 +193,7 @@ pub(super) fn select_merge_action<S: Clone + 'static>(
                         params,
                     )?;
                     if let Some(value) = value {
-                        document.insert(column.clone(), value);
+                        document.insert(column.column.clone(), value);
                     }
                 }
                 apply_missing_column_defaults(services, target_table, &mut document, params)?;

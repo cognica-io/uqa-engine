@@ -103,6 +103,34 @@ def cases() -> list[dict]:
             "CREATE TABLE assignment_target(id integer PRIMARY KEY,value assignment_items)",
             "INSERT INTO assignment_target VALUES(1,ARRAY[1,2,3])",
         ])
+    add("bound_reads_original_row", "UPDATE assignment_target SET value[1]=3,value[value[1]]=9")
+    add("repeated_same_element", "UPDATE assignment_target SET value[1]=7,value[1]=9")
+    add("decimal_index_rounding", "UPDATE assignment_target SET value[1.6]=9")
+    add("bound_scalar_subquery", "UPDATE assignment_target SET value[(SELECT 2)]=9")
+    add("update_from_bounds", "UPDATE assignment_target AS t SET value[s.i]=s.n FROM (VALUES (2,9)) AS s(i,n)")
+    add("mixed_slice_and_index", "UPDATE assignment_target SET value[1:2][2]=ARRAY[8,9,10,11]", [
+        setup[0], "INSERT INTO assignment_target VALUES (1,ARRAY[[1,2],[3,4]])",
+    ])
+    add("insert_ignores_whole_column_default", "INSERT INTO assignment_target(id,value[3]) VALUES(2,9)", [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[] DEFAULT ARRAY[1,2,3])",
+    ])
+    add("partial_default_rejected", "UPDATE assignment_target SET value[1]=DEFAULT WHERE false")
+    add("null_slice_null_bound", "UPDATE assignment_target SET value[NULL:2]=NULL")
+    add("domain_repeated_elements", "UPDATE assignment_target SET value[1]=3,value[2]=4", [
+        "CREATE DOMAIN assignment_items AS integer[] CHECK(value[1]<value[2])",
+        "CREATE TABLE assignment_target(id integer PRIMARY KEY,value assignment_items)",
+        "INSERT INTO assignment_target VALUES(1,ARRAY[1,2])",
+    ])
+    add("domain_null_slice_insert", "INSERT INTO assignment_target(id,value[1:2]) VALUES(1,NULL)", [
+        "CREATE DOMAIN assignment_items AS integer[] NOT NULL",
+        "CREATE TABLE assignment_target(id integer PRIMARY KEY,value assignment_items)",
+    ])
+    add("automatic_view_repeated_elements", "UPDATE assignment_view SET value[1]=value[2],value[2]=value[1]", setup + [
+        "CREATE VIEW assignment_view AS SELECT id,value FROM assignment_target",
+    ])
+    add("automatic_view_insert", "INSERT INTO assignment_view(id,value[1],value[3]) VALUES(2,7,9)", setup + [
+        "CREATE VIEW assignment_view AS SELECT id,value FROM assignment_target",
+    ])
     return output
 
 

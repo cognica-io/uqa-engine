@@ -10,6 +10,7 @@ use super::{
     compile_expr, compile_returning_clause, compile_select, compile_with_clause, range_var_name,
     Expr, InsertStmt, NodeEnum, Result, SQLError,
 };
+use crate::compiler::dml::compile_assignment_target;
 
 pub(in crate::compiler) fn compile_insert(
     stmt: &pg_query::protobuf::InsertStmt,
@@ -30,7 +31,9 @@ pub(in crate::compiler) fn compile_insert(
         .cols
         .iter()
         .map(|column| match column.node.as_ref() {
-            Some(NodeEnum::ResTarget(target)) if !target.name.is_empty() => Ok(target.name.clone()),
+            Some(NodeEnum::ResTarget(target)) if !target.name.is_empty() => {
+                compile_assignment_target(target)
+            }
             other => Err(SQLError::Internal(format!(
                 "INSERT column target is malformed: {other:?}"
             ))),
@@ -135,7 +138,7 @@ pub(in crate::compiler) fn compile_on_conflict(
     let action = match clause.action() {
         PgAction::OnconflictNothing => OnConflictAction::Nothing,
         PgAction::OnconflictUpdate => {
-            let mut assignments: Vec<(String, Expr)> = Vec::new();
+            let mut assignments = Vec::new();
             for tgt in &clause.target_list {
                 let inner = tgt.node.as_ref().ok_or_else(|| {
                     SQLError::Internal("ON CONFLICT UPDATE contains an empty assignment".into())
@@ -149,7 +152,7 @@ pub(in crate::compiler) fn compile_on_conflict(
                     SQLError::Internal("ON CONFLICT UPDATE assignment has no value".into())
                 })?;
                 let expr = compile_expr(val)?;
-                assignments.push((rt.name.clone(), expr));
+                assignments.push((compile_assignment_target(rt)?, expr));
             }
             let where_clause = clause
                 .where_clause
