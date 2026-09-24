@@ -106,8 +106,8 @@ pub fn lock_document_key_dependencies(
         } else {
             values.as_slice()
         };
-        let key =
-            crate::canonical_row_key(lock_values).map_err(crate::physical::physical_exec_error)?;
+        let keys = crate::distinct::canonical_row_lock_keys(lock_values)
+            .map_err(crate::physical::physical_exec_error)?;
         let mut digest = Sha256::new();
         digest.update(b"uqa-key-lock-v2");
         update_key_lock_digest(&mut digest, canonical_table.as_bytes())?;
@@ -124,9 +124,12 @@ pub fn lock_document_key_dependencies(
         };
         digest.update([u8::from(constraint.index_catalog.is_some())]);
         update_key_lock_digest(&mut digest, &identity)?;
-        update_key_lock_digest(&mut digest, &key)?;
-        let digest: [u8; 32] = digest.finalize().into();
-        lock_keys.insert(digest);
+        for key in keys {
+            let mut digest = digest.clone();
+            update_key_lock_digest(&mut digest, &key)?;
+            let digest: [u8; 32] = digest.finalize().into();
+            lock_keys.insert(digest);
+        }
     }
 
     let has_reservations = !lock_keys.is_empty();

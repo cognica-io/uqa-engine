@@ -1,0 +1,10 @@
+[profile.ci]
+# Every failure remains visible; a stuck test must not occupy a runner for six hours.
+retries = 0
+fail-fast = false
+slow-timeout = { period = "30s", terminate-after = 10, grace-period = "10s" }
+
+[profile.ci.junit]
+path = "junit.xml"
+store-success-output = false
+store-failure-output = true

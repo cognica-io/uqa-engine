@@ -14,6 +14,7 @@ use super::{
 pub(super) mod comparison_control;
 mod copying;
 mod decoding;
+mod nonfinite;
 mod retention;
 pub use decoding::JsonValueDecoder;
 mod tagged;
@@ -112,7 +113,7 @@ impl Serialize for Value {
             Self::Void => TaggedUnit { kind: "void" }.serialize(serializer),
             Self::Bool(value) => serializer.serialize_bool(*value),
             Self::Int(value) => serializer.serialize_i64(*value),
-            Self::Float(value) => serializer.serialize_f64(*value),
+            Self::Float(value) => nonfinite::serialize(*value, serializer),
             Self::Str(value) => serializer.serialize_str(value),
             Self::FixedChar(value) => TaggedText {
                 kind: "fixed_char",
@@ -342,10 +343,7 @@ fn compare_integer_float(integer: i64, float: f64) -> std::cmp::Ordering {
 }
 
 fn compare_float_decimal(float: f64, decimal: &DecimalValue) -> std::cmp::Ordering {
-    if let Some(float_decimal) = DecimalValue::from_f64_lossy(float) {
-        return float_decimal.cmp(decimal);
-    }
-    float.total_cmp(&0.0)
+    DecimalValue::from_f64_exact(float).cmp(decimal)
 }
 
 fn compare_postgres_container_values(left: &[Value], right: &[Value]) -> std::cmp::Ordering {
@@ -416,10 +414,7 @@ impl Ord for Value {
             (Value::Int(a), Value::Int(b)) => a.cmp(b),
             (Value::Float(a), Value::Float(b)) => compare_floats(*a, *b),
             (Value::Decimal(a), Value::Decimal(b)) => a.cmp(b),
-            // Numeric cross-type compare: Int / Float / Bool all coerce
-            // to f64 so SQL `WHERE price > 15` (Float vs Int literal)
-            // and `WHERE flag > 0` line up with PostgreSQL semantics
-            // instead of falling through to the discriminant order.
+            // Internal numeric keys compare exact represented values. SQL operator selection owns any required operand coercions.
             (Value::Int(a), Value::Float(b)) => compare_integer_float(*a, *b),
             (Value::Float(a), Value::Int(b)) => compare_integer_float(*b, *a).reverse(),
             (Value::Int(a), Value::Decimal(b)) => DecimalValue::from_i64(*a).cmp(b),

@@ -8,7 +8,10 @@
 
 use std::{cmp::Ordering, ops::Bound};
 
-use uqa_core::{memory::BudgetedVec, DecimalValue, Predicate, Value};
+use uqa_core::{
+    memory::{BudgetedVec, ProductionControl},
+    DecimalValue, Predicate, Value,
+};
 use uqa_sql::{ast::ColumnType, SQLError};
 use uqa_storage::{read_control::StorageReadControl, StorageBackendError};
 
@@ -299,11 +302,19 @@ impl ScalarIndexDomain {
         let key = match (self, value) {
             (Self::Decimal, Value::Decimal(value)) => self.decimal_key(value, control)?,
             (Self::Decimal, Value::Int(_) | Value::Bool(_) | Value::Float(_)) => {
-                let _conversion = control.memory().reserve(2048).map_err(resource_error)?;
+                let production = ProductionControl::new(
+                    control.memory(),
+                    control.cancellation(),
+                    control.cancellation(),
+                );
                 let value = match value {
-                    Value::Int(value) => DecimalValue::from_i64(*value),
-                    Value::Bool(value) => DecimalValue::from_bool(*value),
-                    Value::Float(value) => DecimalValue::from_f64_lossy(*value).ok_or_else(|| SQLError::Internal("numeric index predicate cannot be converted into its comparison domain".into()))?,
+                    Value::Int(value) => DecimalValue::from_i64_with_control(*value, &production)?,
+                    Value::Bool(value) => {
+                        DecimalValue::from_i64_with_control(i64::from(*value), &production)?
+                    }
+                    Value::Float(value) => {
+                        DecimalValue::from_f64_exact_with_control(*value, &production)?
+                    }
                     _ => unreachable!(),
                 };
                 self.decimal_key(&value, control)?

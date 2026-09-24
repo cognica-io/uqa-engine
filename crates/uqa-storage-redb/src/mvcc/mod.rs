@@ -74,7 +74,7 @@ impl RedbRecordStore {
                 .map(|value| codec::decode_u64(value.value()))
                 .transpose()?;
             if let Some(format) = initialized {
-                if !matches!(format, 1..=43) {
+                if !matches!(format, 1..=46) {
                     return Err(VersionError::InvalidEncoding("unknown record format"));
                 }
                 if present != if format < 5 { 15 } else { 31 } {
@@ -102,8 +102,10 @@ impl RedbRecordStore {
                             DEFAULT_RECEIPT_RETENTION_LIMIT.to_be_bytes().as_slice(),
                         )
                         .map_err(redb_error)?;
+                }
+                if format < 46 {
                     metadata
-                        .insert("format", 43_u64.to_be_bytes().as_slice())
+                        .insert("format", 46_u64.to_be_bytes().as_slice())
                         .map_err(redb_error)?;
                 }
                 codec::receipt_limit(&metadata)?;
@@ -422,7 +424,7 @@ fn initialize_record_metadata(
         .insert("database", bytes.as_slice())
         .map_err(redb_error)?;
     metadata
-        .insert("format", 43_u64.to_be_bytes().as_slice())
+        .insert("format", 46_u64.to_be_bytes().as_slice())
         .map_err(redb_error)?;
     metadata
         .insert("allocated", 0_u64.to_be_bytes().as_slice())

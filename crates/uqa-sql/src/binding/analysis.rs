@@ -67,16 +67,20 @@ impl SchemaScope {
             .iter()
             .chain(block.grouping_sets.iter().flatten())
         {
-            self.validate_alias_reference(
+            let expression = crate::semantics::grouping_sets::resolve_grouping_expression(
                 engine,
                 expression,
-                AliasReferenceScope {
-                    primary: source,
-                    fallback: output,
-                    nested: source,
-                    subqueries: &block.subqueries,
-                    params,
-                },
+                &block.projections,
+                source,
+                params,
+            )?;
+            self.validate_expression_references(
+                engine,
+                &expression,
+                source,
+                None,
+                &block.subqueries,
+                params,
             )?;
         }
         if let Some(having) = block.having.as_ref() {

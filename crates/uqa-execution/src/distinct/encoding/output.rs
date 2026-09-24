@@ -16,6 +16,14 @@ pub(super) trait KeyOutput {
         None
     }
 
+    fn legacy_numeric_reservation(&self) -> bool {
+        false
+    }
+
+    fn legacy_temporal_reservation(&self) -> bool {
+        false
+    }
+
     fn check(&self) -> ExecResult<()> {
         if let Some(control) = self.control() {
             control.check().map_err(resource_error)?;
@@ -105,10 +113,6 @@ impl NumberText {
 
     pub(super) fn as_bytes(&self) -> &[u8] {
         &self.bytes[..self.len]
-    }
-
-    pub(super) fn as_str(&self) -> &str {
-        std::str::from_utf8(self.as_bytes()).expect("numeric Display writes UTF-8")
     }
 }
 

@@ -32,6 +32,17 @@ pub fn commit_sql_function_drop(
             .iter()
             .map(|(table, column, _)| (table.clone(), column.clone())),
     );
+    let tables = columns
+        .iter()
+        .map(|(table, _)| table.as_str())
+        .chain(
+            dependents
+                .defaults
+                .iter()
+                .map(|(table, _, _)| table.as_str()),
+        )
+        .chain(dependents.checks.iter().map(|(table, _, _)| table.as_str()));
+    crate::row_locks::binding::prepare_dependent_relation_writes(context.locks, tables)?;
     let rewritten = super::prepare_routine_column_alias_drop(context, columns, &bindings)?;
     domain_dependencies::drop_domain_routine_checks(&context.domains, &bindings)?;
     drop_routine_object_dependents(context, &dependents)?;

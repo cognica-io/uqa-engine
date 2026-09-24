@@ -16,9 +16,13 @@ pub fn run_optimised(
     where_expr: Option<&ScalarExpr>,
     params: &[SQLParam],
 ) -> Result<Option<Vec<ScoredEntry>>, SQLError> {
-    engine
-        .retrieval_query_context()
-        .optimized(table, where_expr, params)
+    uqa_execution::query::block::where_filter::execute_typed_retrieval(
+        &engine.source_execution_context(),
+        table,
+        where_expr,
+        params,
+        &crate::capabilities::query_scope::new_for_current_routine(engine),
+    )
 }
 
 /// Optimise and execute an already-lowered tree through the same

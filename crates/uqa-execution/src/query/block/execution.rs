@@ -177,10 +177,13 @@ pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 
                 ensure_select_privileges_for_query_block(stmt, from, ctes)?;
                 return run_single_table_select_output(
                     context,
-                    SingleRelation {
-                        reference_name: name,
-                        relation_name: local_table,
-                        qualifier,
+                    super::BoundSingleRelation {
+                        relation: SingleRelation {
+                            reference_name: name,
+                            relation_name: local_table,
+                            qualifier,
+                        },
+                        schema: &reference_schema,
                     },
                     block,
                     stmt,

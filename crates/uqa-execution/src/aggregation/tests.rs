@@ -7,6 +7,34 @@
 use super::*;
 use uqa_core::ArrayValue;
 
+mod mode;
+
+#[test]
+fn numeric_extrema_preserve_total_order_and_nan_regardless_of_input_order() {
+    for (small, large) in [
+        (Value::Float(0.0), Value::Float(f64::NAN)),
+        (Value::Float(f64::NEG_INFINITY), Value::Float(f64::INFINITY)),
+        (
+            Value::Decimal(DecimalValue::parse("0.1").unwrap()),
+            Value::Float(0.1),
+        ),
+        (
+            Value::Int(9_223_372_036_854_774_783),
+            Value::Float(9_223_372_036_854_774_784_i64 as f64),
+        ),
+    ] {
+        for values in [[&small, &large], [&large, &small]] {
+            for (name, expected) in [("min", &small), ("max", &large)] {
+                let mut accumulator = AggregateAccumulator::builtin(name);
+                for value in values {
+                    accumulator.observe(value).unwrap();
+                }
+                assert_eq!(aggregate_value(name, &accumulator).unwrap(), *expected);
+            }
+        }
+    }
+}
+
 #[test]
 fn aggregate_spill_record_reader_rejects_oversized_and_truncated_records() {
     let mut oversized = std::io::Cursor::new(b"12345\n".to_vec());

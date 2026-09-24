@@ -105,7 +105,11 @@ fn hash_value<H: Hasher>(value: &Value, state: &mut H) {
         }
         Value::JsonB(value) => {
             9_u8.hash(state);
-            value.hash(state);
+            if let Some(key) = uqa_core::jsonb_equality_key(value) {
+                key.hash(state);
+            } else {
+                value.hash(state);
+            }
         }
         Value::Array(array) => {
             12_u8.hash(state);
@@ -161,24 +165,7 @@ fn hash_decimal_numeric<H: Hasher>(value: &DecimalValue, state: &mut H) {
 }
 
 fn hash_float_numeric<H: Hasher>(value: f64, state: &mut H) {
-    if value.is_nan() {
-        7_u8.hash(state);
-    } else if value == f64::INFINITY {
-        8_u8.hash(state);
-    } else if value == f64::NEG_INFINITY {
-        9_u8.hash(state);
-    } else if let Some(decimal) = DecimalValue::from_f64_lossy(value) {
-        hash_decimal_numeric(&decimal, state);
-    } else {
-        // A finite float outside PostgreSQL's NUMERIC domain only compares
-        // equal to the same f64 value. Normalize signed zero for completeness.
-        10_u8.hash(state);
-        if value == 0.0 {
-            0.0_f64.to_bits().hash(state);
-        } else {
-            value.to_bits().hash(state);
-        }
-    }
+    hash_decimal_numeric(&DecimalValue::from_f64_exact(value), state);
 }
 
 fn hash_temporal<H: Hasher>(value: &TemporalValue, state: &mut H) {
@@ -824,6 +811,54 @@ mod tests {
     }
 
     #[test]
+    fn hash_join_keys_preserve_exact_numeric_equivalence_in_nested_keys() {
+        for value in [
+            0.1,
+            -0.1,
+            9_223_372_036_854_774_784_i64 as f64,
+            f64::from_bits(1),
+            f64::MAX,
+            -0.0,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ] {
+            let float = Value::Float(value);
+            let decimal = Value::Decimal(DecimalValue::from_f64_exact(value));
+            let left = vec![row([("k", float.clone())])];
+            let right = vec![row([("k", decimal.clone())])];
+            let joined = hash_inner_join(
+                &left,
+                &right,
+                |row| row.get("k").map(JoinKey::new),
+                |row| row.get("k").map(JoinKey::new),
+            );
+            assert_eq!(joined, sort_merge_inner_join(&left, &right, "k", "k"));
+            assert_eq!(joined.len(), 1);
+            for (left, right) in [
+                (JoinKey::new(&float), JoinKey::new(&decimal)),
+                (
+                    JoinKey::composite(&[&float]),
+                    JoinKey::composite(&[&decimal]),
+                ),
+                (
+                    JoinKey::new(&Value::Array(
+                        uqa_core::ArrayValue::try_new(vec![float.clone()]).unwrap(),
+                    )),
+                    JoinKey::new(&Value::Array(
+                        uqa_core::ArrayValue::try_new(vec![decimal.clone()]).unwrap(),
+                    )),
+                ),
+            ] {
+                assert_eq!(left, right);
+                let mut index = HashMap::new();
+                index.insert(left, true);
+                assert_eq!(index.get(&right), Some(&true));
+            }
+        }
+    }
+
+    #[test]
     fn index_inner_uses_prebuilt_hash() {
         let l = vec![row([("id", Value::Int(7))])];
         let mut idx: HashMap<JoinKey, Vec<ResultRow>> = HashMap::new();
@@ -837,5 +872,67 @@ mod tests {
         let out = index_inner_join(&l, &idx, |row| row.get("id").map(JoinKey::new));
         assert_eq!(out.len(), 1);
         assert_eq!(out[0]["name"], Value::Str("x".into()));
+    }
+
+    #[test]
+    fn jsonb_join_hashes_match_postgresql_semantic_equality() {
+        let oracle: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../uqa-core/src/types/tests/pg18_jsonb.json"
+        )))
+        .unwrap();
+        let values: Vec<_> = oracle["values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|text| Value::JsonB(text.as_str().unwrap().into()))
+            .collect();
+        let mut expected = std::collections::BTreeSet::new();
+        for pair in oracle["comparisons"].as_array().unwrap() {
+            let left = pair[0].as_u64().unwrap() as usize;
+            let right = pair[1].as_u64().unwrap() as usize;
+            let equal = pair[2].as_bool().unwrap();
+            let mut index = HashMap::new();
+            index.insert(JoinKey::new(&values[left]), true);
+            assert_eq!(
+                index.contains_key(&JoinKey::new(&values[right])),
+                equal,
+                "{}, {}",
+                oracle["values"][left],
+                oracle["values"][right]
+            );
+            if equal {
+                expected.insert((left as i64, right as i64));
+            }
+        }
+        let rows = |id, key| {
+            values
+                .iter()
+                .enumerate()
+                .map(|(i, value)| row([(id, Value::Int(i as i64)), (key, value.clone())]))
+                .collect::<Vec<_>>()
+        };
+        let left = rows("left_id", "left_key");
+        let right = rows("right_id", "right_key");
+        let joined = hash_inner_join(
+            &left,
+            &right,
+            |row| row.get("left_key").map(JoinKey::new),
+            |row| row.get("right_key").map(JoinKey::new),
+        );
+        let actual: std::collections::BTreeSet<_> = joined
+            .iter()
+            .map(|row| {
+                let Value::Int(left) = row["left_id"] else {
+                    panic!("left identity");
+                };
+                let Value::Int(right) = row["right_id"] else {
+                    panic!("right identity");
+                };
+                (left, right)
+            })
+            .collect();
+        assert_eq!(joined.len(), expected.len());
+        assert_eq!(actual, expected);
     }
 }

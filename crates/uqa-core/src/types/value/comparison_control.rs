@@ -102,10 +102,7 @@ fn compare_float_decimal(
     decimal: &DecimalValue,
     control: &ProductionControl<'_>,
 ) -> Result<Ordering, ValueRetentionError> {
-    match DecimalValue::from_f64_lossy_with_control(float, control)? {
-        Some(float) => float.cmp_with_control(decimal, control),
-        None => Ok(float.total_cmp(&0.0)),
-    }
+    DecimalValue::from_f64_exact_with_control(float, control)?.cmp_with_control(decimal, control)
 }
 
 pub(crate) fn compare_bytes(

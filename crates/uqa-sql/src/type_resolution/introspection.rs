@@ -14,6 +14,7 @@ use uqa_core::{
     memory::{MemoryReservation, Produced, ProductionControl},
     Value,
 };
+mod comparison;
 mod helpers;
 
 /// Bind polymorphic type-introspection calls and common-type coercions while the input schema still carries declared SQL types.
@@ -148,9 +149,15 @@ impl Binder<'_, '_> {
                         )
                     }))?
                     .flatten();
+                let comparison = self
+                    .semantic(self.numeric_comparison_types(op, &lhs, &rhs))?
+                    .flatten();
                 self.in_place(&mut lhs)?;
                 self.in_place(&mut rhs)?;
-                if let Some(ty) = result
+                if let Some(types) = comparison {
+                    self.common_cast(&mut lhs, &types[0])?;
+                    self.common_cast(&mut rhs, &types[1])?;
+                } else if let Some(ty) = result
                     .as_deref()
                     .filter(|ty| matches!(ty, ColumnType::Real | ColumnType::DoublePrecision))
                 {

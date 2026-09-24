@@ -33,7 +33,7 @@ use uqa_sql::semantics::sets::{
     rewrite::{prepare_aggregate_output_projection, prepare_group_set_projection},
     validation::{expression_may_return_set, projections_may_return_set},
 };
-use uqa_sql::semantics::{grouping_sets::prepare_distinct_grouping_sets, projection_columns};
+use uqa_sql::semantics::{grouping_sets::prepare_grouping_sets, projection_columns};
 use uqa_sql::{SQLError, SQLParam, ScalarExpr};
 
 #[expect(
@@ -107,12 +107,12 @@ pub fn build_relational_operator<'a, S: Clone + 'static>(
     }
     let evaluator = context.evaluator(params, ctes);
     operator = attach_relational_filter(context, operator, predicate, params, ctes, &evaluator)?;
-    let distinct_group_statement = if matches!(statement.compute, ComputePlan::Aggregate) {
-        prepare_distinct_grouping_sets(context.catalog, statement, operator.row_schema(), params)?
+    let bound_group_statement = if matches!(statement.compute, ComputePlan::Aggregate) {
+        prepare_grouping_sets(context.catalog, statement, operator.row_schema(), params)?
     } else {
         None
     };
-    let statement = distinct_group_statement.as_ref().unwrap_or(statement);
+    let statement = bound_group_statement.as_ref().unwrap_or(statement);
     let mut group_statement = None;
     if matches!(statement.compute, ComputePlan::Aggregate) {
         if let Some(plan) = prepare_group_set_projection(

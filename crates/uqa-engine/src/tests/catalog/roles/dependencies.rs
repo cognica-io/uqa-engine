@@ -89,206 +89,207 @@ fn allowed_as(engine: &Engine, target: &Target, role: &str) -> bool {
     }
 }
 
-#[test]
-fn acl_waits_keep_the_original_recipient_after_rename_and_name_reuse() {
-    for provider in 0..3 {
-        for isolation in ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] {
-            for target in TARGETS {
-                let (directory, first, second) = sessions(provider);
-                sql(&first, "CREATE ROLE dependent");
-                if !target.setup.is_empty() {
-                    sql(&first, target.setup);
-                }
-                let original = first.durable.roles.read()["dependent"].identity();
-                let lock = role_lock(&first);
-                sql(&first, "BEGIN");
-                first
-                    .acquire_shared_catalog(lock, RelationLockMode::AccessExclusive)
-                    .unwrap()
-                    .retain();
-                sql(
-                    &second,
-                    &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT 1"),
-                );
-                let (second, result) = after_wait(
-                    &first,
-                    second,
-                    target.grant,
-                    lock,
-                    "ALTER ROLE dependent RENAME TO renamed; CREATE ROLE dependent; COMMIT",
-                );
-                result.unwrap();
-                sql(&second, "COMMIT");
-                assert!(
-                    allowed_as(&first, target, "renamed"),
-                    "{provider}/{isolation}/{}",
-                    target.grant
-                );
-                assert!(
-                    !allowed(&first, target),
-                    "{provider}/{isolation}/{}",
-                    target.grant
-                );
-                assert_eq!(first.durable.roles.read()["renamed"].identity(), original);
-                drop(second);
-                drop(first);
-                let restored = reopen(provider, &directory.path().join("table-locks.db"));
-                assert!(allowed_as(&restored, target, "renamed"));
-                assert!(!allowed(&restored, target));
-            }
+#[rstest::rstest]
+#[case::native_sqlite(0)]
+#[case::sqlite_key_value(1)]
+#[case::redb(2)]
+fn acl_waits_keep_the_original_recipient_after_rename_and_name_reuse(
+    #[case] provider: usize,
+    #[values("READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE")] isolation: &str,
+    #[values(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)] target_index: usize,
+) {
+    let target = &TARGETS[target_index];
+    let (directory, first, second) = sessions(provider);
+    sql(&first, "CREATE ROLE dependent");
+    if !target.setup.is_empty() {
+        sql(&first, target.setup);
+    }
+    let original = first.durable.roles.read()["dependent"].identity();
+    let lock = role_lock(&first);
+    sql(&first, "BEGIN");
+    first
+        .acquire_shared_catalog(lock, RelationLockMode::AccessExclusive)
+        .unwrap()
+        .retain();
+    sql(
+        &second,
+        &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT 1"),
+    );
+    let (second, result) = after_wait(
+        &first,
+        second,
+        target.grant,
+        lock,
+        "ALTER ROLE dependent RENAME TO renamed; CREATE ROLE dependent; COMMIT",
+    );
+    result.unwrap();
+    sql(&second, "COMMIT");
+    assert!(
+        allowed_as(&first, target, "renamed"),
+        "{provider}/{isolation}/{}",
+        target.grant
+    );
+    assert!(
+        !allowed(&first, target),
+        "{provider}/{isolation}/{}",
+        target.grant
+    );
+    assert_eq!(first.durable.roles.read()["renamed"].identity(), original);
+    drop(second);
+    drop(first);
+    let restored = reopen(provider, &directory.path().join("table-locks.db"));
+    assert!(allowed_as(&restored, target, "renamed"));
+    assert!(!allowed(&restored, target));
+}
+
+#[rstest::rstest]
+#[case::native_sqlite(0)]
+#[case::sqlite_key_value(1)]
+#[case::redb(2)]
+fn role_drop_waits_for_added_acl_dependencies(
+    #[case] provider: usize,
+    #[values("READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE")] isolation: &str,
+    #[values(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)] target_index: usize,
+    #[values("COMMIT", "ROLLBACK", "ROLLBACK TO before_grant; COMMIT")] finish: &str,
+) {
+    let target = &TARGETS[target_index];
+    let (directory, first, second) = sessions(provider);
+    sql(&first, "CREATE ROLE dependent");
+    if !target.setup.is_empty() {
+        sql(&first, target.setup);
+    }
+    let lock = role_lock(&first);
+    sql(&first, "BEGIN; SAVEPOINT before_grant");
+    sql(&first, target.grant);
+    sql(
+        &second,
+        &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT 1"),
+    );
+    let (second, result) = after_wait(&first, second, "DROP ROLE dependent", lock, finish);
+    if finish == "COMMIT" {
+        assert_eq!(result.unwrap_err().sqlstate(), Some("2BP01"));
+        sql(&second, "ROLLBACK");
+        assert!(
+            allowed(&first, target),
+            "provider {provider}, {isolation}, {}, {finish}",
+            target.grant
+        );
+    } else {
+        result.unwrap();
+        sql(&second, "COMMIT");
+    }
+    assert_eq!(role_exists(&first), finish == "COMMIT");
+    drop(second);
+    drop(first);
+    let restored = reopen(provider, &directory.path().join("table-locks.db"));
+    assert_eq!(role_exists(&restored), finish == "COMMIT");
+}
+
+#[rstest::rstest]
+#[case::native_sqlite(0)]
+#[case::sqlite_key_value(1)]
+#[case::redb(2)]
+fn acl_grants_wait_for_role_drop_and_never_rebind_a_recreated_name(
+    #[case] provider: usize,
+    #[values("READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE")] isolation: &str,
+    #[values(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)] target_index: usize,
+    #[values("COMMIT", "ROLLBACK", "ROLLBACK TO before_drop; COMMIT", "RECREATE")] finish: &str,
+) {
+    let target = &TARGETS[target_index];
+    let (directory, first, second) = sessions(provider);
+    sql(&first, "CREATE ROLE dependent");
+    if !target.setup.is_empty() {
+        sql(&first, target.setup);
+    }
+    let lock = role_lock(&first);
+    let original = first.durable.roles.read()["dependent"].object_id;
+    sql(&first, "BEGIN; SAVEPOINT before_drop; DROP ROLE dependent");
+    if finish == "RECREATE" {
+        sql(&first, "CREATE ROLE dependent");
+        assert_ne!(first.durable.roles.read()["dependent"].object_id, original);
+    }
+    sql(
+        &second,
+        &format!("BEGIN ISOLATION LEVEL {isolation}; INSERT INTO t VALUES (2)"),
+    );
+    let (second, result) = after_wait(
+        &first,
+        second,
+        target.grant,
+        lock,
+        if finish == "RECREATE" {
+            "COMMIT"
+        } else {
+            finish
+        },
+    );
+    let granted = finish != "COMMIT" && finish != "RECREATE";
+    if granted {
+        result.unwrap();
+        sql(&second, "COMMIT");
+        assert!(
+            allowed(&first, target),
+            "provider {provider}, {isolation}, {}, {finish}",
+            target.grant
+        );
+    } else {
+        assert_eq!(result.unwrap_err().sqlstate(), Some("42704"));
+        sql(&second, "ROLLBACK");
+        if finish == "RECREATE" {
+            assert!(!allowed(&first, target));
         }
+    }
+    assert_eq!(
+        sql(&first, "SELECT v FROM t").rows.len(),
+        if granted { 2 } else { 1 }
+    );
+    drop(second);
+    drop(first);
+    let restored = reopen(provider, &directory.path().join("table-locks.db"));
+    assert_eq!(role_exists(&restored), finish != "COMMIT");
+    if finish != "COMMIT" {
+        assert_eq!(allowed(&restored, target), granted);
     }
 }
 
-#[test]
-fn role_drop_waits_for_added_acl_dependencies() {
-    for provider in 0..3 {
-        for isolation in ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] {
-            for target in TARGETS {
-                for finish in ["COMMIT", "ROLLBACK", "ROLLBACK TO before_grant; COMMIT"] {
-                    let (directory, first, second) = sessions(provider);
-                    sql(&first, "CREATE ROLE dependent");
-                    if !target.setup.is_empty() {
-                        sql(&first, target.setup);
-                    }
-                    let lock = role_lock(&first);
-                    sql(&first, "BEGIN; SAVEPOINT before_grant");
-                    sql(&first, target.grant);
-                    sql(
-                        &second,
-                        &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT 1"),
-                    );
-                    let (second, result) =
-                        after_wait(&first, second, "DROP ROLE dependent", lock, finish);
-                    if finish == "COMMIT" {
-                        assert_eq!(result.unwrap_err().sqlstate(), Some("2BP01"));
-                        sql(&second, "ROLLBACK");
-                        assert!(
-                            allowed(&first, target),
-                            "provider {provider}, {isolation}, {}, {finish}",
-                            target.grant
-                        );
-                    } else {
-                        result.unwrap();
-                        sql(&second, "COMMIT");
-                    }
-                    assert_eq!(role_exists(&first), finish == "COMMIT");
-                    drop(second);
-                    drop(first);
-                    let restored = reopen(provider, &directory.path().join("table-locks.db"));
-                    assert_eq!(role_exists(&restored), finish == "COMMIT");
-                }
-            }
-        }
+#[rstest::rstest]
+#[case::native_sqlite(0)]
+#[case::sqlite_key_value(1)]
+#[case::redb(2)]
+fn unchanged_acl_roles_and_revoke_do_not_acquire_new_dependency_locks(
+    #[case] provider: usize,
+    #[values(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)] target_index: usize,
+) {
+    let target = &TARGETS[target_index];
+    let (_directory, first, second) = sessions(provider);
+    sql(&first, "CREATE ROLE dependent");
+    if !target.setup.is_empty() {
+        sql(&first, target.setup);
     }
-}
-
-#[test]
-fn acl_grants_wait_for_role_drop_and_never_rebind_a_recreated_name() {
-    for provider in 0..3 {
-        for isolation in ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] {
-            for target in TARGETS {
-                for finish in [
-                    "COMMIT",
-                    "ROLLBACK",
-                    "ROLLBACK TO before_drop; COMMIT",
-                    "RECREATE",
-                ] {
-                    let (directory, first, second) = sessions(provider);
-                    sql(&first, "CREATE ROLE dependent");
-                    if !target.setup.is_empty() {
-                        sql(&first, target.setup);
-                    }
-                    let lock = role_lock(&first);
-                    let original = first.durable.roles.read()["dependent"].object_id;
-                    sql(&first, "BEGIN; SAVEPOINT before_drop; DROP ROLE dependent");
-                    if finish == "RECREATE" {
-                        sql(&first, "CREATE ROLE dependent");
-                        assert_ne!(first.durable.roles.read()["dependent"].object_id, original);
-                    }
-                    sql(
-                        &second,
-                        &format!("BEGIN ISOLATION LEVEL {isolation}; INSERT INTO t VALUES (2)"),
-                    );
-                    let (second, result) = after_wait(
-                        &first,
-                        second,
-                        target.grant,
-                        lock,
-                        if finish == "RECREATE" {
-                            "COMMIT"
-                        } else {
-                            finish
-                        },
-                    );
-                    let granted = finish != "COMMIT" && finish != "RECREATE";
-                    if granted {
-                        result.unwrap();
-                        sql(&second, "COMMIT");
-                        assert!(
-                            allowed(&first, target),
-                            "provider {provider}, {isolation}, {}, {finish}",
-                            target.grant
-                        );
-                    } else {
-                        assert_eq!(result.unwrap_err().sqlstate(), Some("42704"));
-                        sql(&second, "ROLLBACK");
-                        if finish == "RECREATE" {
-                            assert!(!allowed(&first, target));
-                        }
-                    }
-                    assert_eq!(
-                        sql(&first, "SELECT v FROM t").rows.len(),
-                        if granted { 2 } else { 1 }
-                    );
-                    drop(second);
-                    drop(first);
-                    let restored = reopen(provider, &directory.path().join("table-locks.db"));
-                    assert_eq!(role_exists(&restored), finish != "COMMIT");
-                    if finish != "COMMIT" {
-                        assert_eq!(allowed(&restored, target), granted);
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[test]
-fn unchanged_acl_roles_and_revoke_do_not_acquire_new_dependency_locks() {
-    for provider in 0..3 {
-        for target in TARGETS {
-            let (_directory, first, second) = sessions(provider);
-            sql(&first, "CREATE ROLE dependent");
-            if !target.setup.is_empty() {
-                sql(&first, target.setup);
-            }
-            sql(&first, target.grant);
-            let revoke = target
-                .grant
-                .replacen("GRANT ", "REVOKE ", 1)
-                .replace(" TO dependent", " FROM dependent")
-                .replace(" WITH GRANT OPTION", "");
-            let key = first.row_locks.shared_catalog_key(role_lock(&first));
-            for statement in [target.grant, revoke.as_str()] {
-                sql(&first, "BEGIN");
-                sql(&first, statement);
-                assert!(
-                    first
-                        .row_locks
-                        .try_acquire_relation(
-                            second.session_id,
-                            key,
-                            RelationLockMode::AccessExclusive,
-                            0,
-                            &second.runtime.cancellation,
-                        )
-                        .unwrap(),
-                    "unexpected dependency lock for {statement}"
-                );
-                first.row_locks.release_session(second.session_id);
-                sql(&first, "ROLLBACK");
-            }
-        }
+    sql(&first, target.grant);
+    let revoke = target
+        .grant
+        .replacen("GRANT ", "REVOKE ", 1)
+        .replace(" TO dependent", " FROM dependent")
+        .replace(" WITH GRANT OPTION", "");
+    let key = first.row_locks.shared_catalog_key(role_lock(&first));
+    for statement in [target.grant, revoke.as_str()] {
+        sql(&first, "BEGIN");
+        sql(&first, statement);
+        assert!(
+            first
+                .row_locks
+                .try_acquire_relation(
+                    second.session_id,
+                    key,
+                    RelationLockMode::AccessExclusive,
+                    0,
+                    &second.runtime.cancellation,
+                )
+                .unwrap(),
+            "unexpected dependency lock for {statement}"
+        );
+        first.row_locks.release_session(second.session_id);
+        sql(&first, "ROLLBACK");
     }
 }

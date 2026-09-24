@@ -27,6 +27,21 @@ fn tables(seed: &Session, populated: bool) {
 fn jsonb_empty_ranges_and_null_reads_observe_only_matching_writes() {
     for (predicate, matching, outside) in [
         (
+            Predicate::LessThan(Value::JsonB("0.1".into())),
+            "'0'::jsonb",
+            "'0.2'::jsonb",
+        ),
+        (
+            Predicate::GreaterThan(Value::JsonB("-0.01".into())),
+            "'0'::jsonb",
+            "'-0.1'::jsonb",
+        ),
+        (
+            Predicate::LessThan(Value::JsonB("[0.1]".into())),
+            "'[0]'::jsonb",
+            "'[0.2]'::jsonb",
+        ),
+        (
             Predicate::Between {
                 low: Value::JsonB("[1]".into()),
                 high: Value::JsonB("[3]".into()),

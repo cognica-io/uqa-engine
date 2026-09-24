@@ -101,6 +101,8 @@ pub(super) fn fold_literal_expression(
     }
     let schema = RowSchema::default();
     let ty = scalar_type(&expression, &schema, &[])?;
+    // Keep operator-selected casts before evaluation can replace the expression with a literal, including PostgreSQL unknown string inputs.
+    let expression = uqa_sql::bind_type_introspection(expression, &schema, &[]);
     let value = evaluate(&expression)?;
     let literal = ScalarExpr::Literal(value.clone());
     if !matches!(expression, ScalarExpr::Cast { .. }) && scalar_type(&literal, &schema, &[])? == ty
@@ -117,3 +119,6 @@ pub(super) fn fold_literal_expression(
         None => literal,
     })
 }
+
+#[cfg(test)]
+mod tests;

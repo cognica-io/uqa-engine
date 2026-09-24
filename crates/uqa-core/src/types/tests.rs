@@ -9,6 +9,7 @@ use super::*;
 
 mod array_elements;
 mod jsonb_keys;
+mod numeric_keys;
 mod temporal_keys;
 
 #[test]
@@ -356,14 +357,19 @@ fn temporal_ordering_is_overflow_safe_and_consistent_with_equality() {
         micros: 60 * MICROS_PER_SECOND,
         offset_minutes: 1,
     };
-    assert_eq!(utc.cmp(&same_utc), std::cmp::Ordering::Equal);
-    assert_eq!(utc, same_utc);
+    assert_eq!(utc.cmp(&same_utc), std::cmp::Ordering::Greater);
+    assert_ne!(utc, same_utc);
 
     let deserialized_extreme = TemporalValue::TimeTz {
         micros: i64::MIN,
         offset_minutes: i32::MAX,
     };
     let _ordering = deserialized_extreme.cmp(&utc);
+    let opposite_extreme = TemporalValue::TimeTz {
+        micros: i64::MAX,
+        offset_minutes: i32::MIN,
+    };
+    assert!(deserialized_extreme < utc && utc < opposite_extreme);
 }
 
 #[test]

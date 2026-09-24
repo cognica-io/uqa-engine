@@ -42,6 +42,7 @@ fs2 = { workspace = true }
 rusqlite = { version = "0.39", default-features = false, features = ["bundled", "blob", "cache", "functions"] }
 
 [dev-dependencies]
+rstest = { workspace = true }
 allocation-counter = "=0.8.1"
 uqa-scoring = { workspace = true }
 criterion = { workspace = true }

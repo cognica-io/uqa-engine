@@ -38,6 +38,43 @@ fn empty(control: &StorageReadControl) -> PreparedRecordCommit {
 }
 
 #[test]
+fn value_format_upgrade_preserves_receipt_capacity_acknowledgement_and_live_ownership() {
+    for predecessor in [44, 45, 46] {
+        let connection = ManagedConnection::open_in_memory().unwrap();
+        let control = control();
+        let store = SQLiteRecordStore::new(&connection).unwrap();
+        store.set_receipt_retention_limit(7, &control).unwrap();
+        let owner = store.allocate_managed_transaction(&control).unwrap();
+        let id = store.allocate_transaction(&control).unwrap();
+        let receipt = store.commit(id, &empty(&control), &control).unwrap();
+        store
+            .acknowledge_transaction(ReceiptAcknowledgement::Committed(receipt), &control)
+            .unwrap();
+        downgrade_record_format(&store, predecessor);
+        let upgraded = SQLiteRecordStore::new(&connection).unwrap();
+        assert_eq!(
+            upgraded
+                .with(|sqlite| Ok(codec::header(sqlite, upgraded.identity)?.receipt_limit))
+                .unwrap(),
+            7
+        );
+        assert_eq!(
+            upgraded.commit_status(id, &control).unwrap(),
+            CommitStatus::Committed(receipt)
+        );
+        assert_eq!(upgraded.reclaim_transaction_receipts(&control).unwrap(), 1);
+        assert_eq!(
+            upgraded
+                .commit_status(owner.transaction(), &control)
+                .unwrap(),
+            CommitStatus::Pending
+        );
+        drop(owner);
+        assert_eq!(upgraded.reclaim_transaction_receipts(&control).unwrap(), 1);
+    }
+}
+
+#[test]
 fn manual_receipts_require_exact_acknowledgement_and_keep_the_durable_limit() {
     for mode in 0..5 {
         for native in [false, true] {

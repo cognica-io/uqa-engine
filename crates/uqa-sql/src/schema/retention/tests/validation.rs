@@ -43,14 +43,43 @@ impl crate::expr::EngineHook for Catalog {
 }
 
 impl SchemaExpressionCatalog for Catalog {
-    fn registered_runtime_function_volatility(&self, _: &str) -> Option<FunctionVolatility> {
-        None
+    fn registered_runtime_function_volatility(&self, name: &str) -> Option<FunctionVolatility> {
+        (name == "generated_twice").then_some(FunctionVolatility::Immutable)
     }
     fn schema_expression_columns(
         &self,
         _: &str,
     ) -> std::result::Result<Option<Vec<ColumnDef>>, SQLError> {
         unreachable!("subqueries are rejected before resolving catalog columns")
+    }
+}
+
+#[test]
+fn virtual_generated_calls_preserve_postgresql_error_fields() {
+    for expression in ["generated_twice(v)", "coalesce(generated_twice(v), 0)"] {
+        for kind in ["", " VIRTUAL"] {
+            let mut source = columns(&format!(
+                "CREATE TABLE t(v integer, g integer GENERATED ALWAYS AS ({expression}){kind})"
+            ));
+            let error = crate::schema::generated::prepare_generated_columns(
+                &Catalog,
+                "t",
+                &mut source,
+                &[],
+                &[],
+            )
+            .unwrap_err();
+            assert_eq!(error.sqlstate(), Some("0A000"));
+            assert_eq!(
+                error.to_string(),
+                "generation expression uses user-defined function"
+            );
+            let SQLError::Diagnostic { detail, hint, .. } = error else {
+                panic!("the PostgreSQL detail must remain separate from the primary message");
+            };
+            assert_eq!(detail.as_deref(), Some("Virtual generated columns that make use of user-defined functions are not yet supported."));
+            assert_eq!(hint, None);
+        }
     }
 }
 

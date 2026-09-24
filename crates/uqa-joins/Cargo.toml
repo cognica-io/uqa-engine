@@ -20,6 +20,9 @@ uqa-analysis = { workspace = true }
 uqa-graph = { workspace = true }
 uqa-sql = { workspace = true }
 
+[dev-dependencies]
+serde_json = { workspace = true }
+
 [[test]]
 name = "integration"
 path = "tests/integration.rs"

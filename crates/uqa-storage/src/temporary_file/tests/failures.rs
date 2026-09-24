@@ -16,13 +16,16 @@ fn contents<const BYTES: usize>(file: &BlockTemporaryFile<BYTES>) -> Vec<u8> {
 
 fn rejected_writes<const BYTES: usize>() {
     for append in [false, true] {
+        let populated = if append { 5 } else { BYTES };
         for failed_after in [
             0,
             NONCE_BYTES / 2,
-            NONCE_BYTES + BYTES / 2,
-            NONCE_BYTES + BYTES,
-            NONCE_BYTES + BYTES + TAG_BYTES - 1,
-            NONCE_BYTES + BYTES + TAG_BYTES,
+            NONCE_BYTES,
+            NONCE_BYTES + LENGTH_BYTES - 1,
+            NONCE_BYTES + LENGTH_BYTES + TAG_BYTES / 2,
+            SLOT_HEADER_BYTES + populated / 2,
+            SLOT_HEADER_BYTES + populated - 1,
+            SLOT_HEADER_BYTES + populated,
         ] {
             let mut file = BlockTemporaryFile::<BYTES>::new().unwrap();
             let mut expected = vec![b'a'; BYTES * 2 + 3];
@@ -63,10 +66,10 @@ fn failed_new_blocks_and_sparse_growth_remove_unpublished_tails() {
         let position = if sparse { 8 * 3 + 2 } else { 8 };
         file.seek(SeekFrom::Start(position)).unwrap();
         // Sparse growth completes one new block before the next partial write fails.
-        file.owner.lock().faults.fail_after_bytes = Some(if sparse { 49 + 30 } else { 30 });
+        file.owner.lock().faults.fail_after_bytes = Some(if sparse { 51 + 30 } else { 30 });
         assert!(file.write_all(b"new").is_err());
         assert_eq!(file.metadata().unwrap().len(), 8);
-        assert_eq!(std::fs::metadata(file.path()).unwrap().len(), 97);
+        assert_eq!(std::fs::metadata(file.path()).unwrap().len(), 101);
         assert_eq!(contents(&file), b"retained");
         file.write_all(b"new").unwrap();
         let mut expected = b"retained".to_vec();
@@ -89,7 +92,7 @@ fn failed_truncation_preserves_bytes_and_growth_never_reveals_the_truncated_tail
     file.set_len(11).unwrap();
     assert_eq!(file.owner.lock().faults.written_bytes, written);
     assert_eq!(contents(&file), &original[..11]);
-    file.owner.lock().faults.fail_after_bytes = Some(49 + 30);
+    file.owner.lock().faults.fail_after_bytes = Some(51 + 30);
     assert!(file.set_len(original.len() as u64).is_err());
     assert_eq!(file.metadata().unwrap().len(), 11);
     assert_eq!(contents(&file), &original[..11]);
@@ -123,12 +126,15 @@ fn two_file_append_rollback_keeps_old_rows_after_data_or_offset_failure() {
         let mut retained = data.reopen().unwrap();
         if data_fails {
             // The first partial data block succeeds before the next block's ciphertext fails.
-            data.owner.lock().faults.fail_after_bytes = Some(57 + 30);
+            data.owner.lock().faults.fail_after_bytes = Some(59 + 30);
         } else {
             offsets.owner.lock().faults.fail_after_bytes = Some(30);
         }
         let append = data
-            .write_all(b"new-row-crosses-several-authenticated-blocks")
+            .write_all_vectored(&mut [
+                IoSlice::new(b"new-row-"),
+                IoSlice::new(b"crosses-several-authenticated-blocks"),
+            ])
             .and_then(|()| offsets.write_all(&old_data.to_le_bytes()));
         assert!(append.is_err());
         data.set_len(old_data).unwrap();

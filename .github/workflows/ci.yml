@@ -11,6 +11,9 @@ on:
       - rust-toolchain.toml
       - ".cargo/**"
       - .github/workflows/ci.yml
+      - .github/workflows/workspace-tests.yml
+      - ".github/actions/setup-nextest/**"
+      - .config/nextest.toml
   workflow_dispatch:
     inputs:
       run_rust:
@@ -65,43 +68,9 @@ jobs:
   test-linux:
     name: test Linux
     if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
-    runs-on: ubuntu-24.04
-    env:
-      RUSTFLAGS: "-D warnings -C linker-features=-lld"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Free Linux runner disk
-        run: bash .github/scripts/free-linux-runner-disk.sh
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-bin: false
-          cache-targets: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Validate manual SQL examples
-        run: cargo test -p uqa-engine --test integration --locked queries::manual_sql_examples::manual_sql_examples_compile_or_execute -- --exact
-      - name: Test workspace
-        run: cargo test --workspace --exclude uqa-fdw --locked -- --skip manual_sql_examples::manual_sql_examples_compile_or_execute
-      - name: Test morphology bundle tools and embedded models
-        run: cargo test -p uqa-analysis -p uqa-nori-data -p uqa-kuromoji-data --features uqa-analysis/nori-tools,uqa-analysis/kuromoji-tools --locked
-      - name: Verify independent analyzer features
-        run: |
-          cargo test -p uqa-analysis --features kuromoji-tools --no-default-features --locked
-          cargo test -p uqa-storage -p uqa-storage-sqlite -p uqa-storage-redb -p uqa-scoring -p uqa-operators --features uqa-analysis/kuromoji --locked japanese_
-          cargo test -p uqa-engine --features kuromoji --test integration --locked kuromoji_
-          cargo test -p uqa-engine --no-default-features --test integration --locked kuromoji_
-          cargo test -p uqa-cli --features kuromoji --test integration --locked builtin_
-          python3 scripts/check-analyzer-feature-isolation.py
-      - name: Verify the standalone CLI without morphology dictionaries
-        run: |
-          cargo test -p uqa-cli --locked --no-default-features --test integration
-          cargo tree --locked -p uqa-cli --no-default-features --edges normal > target/cli-without-morphology.txt
-          if grep -Eq 'uqa-(nori|kuromoji)-data' target/cli-without-morphology.txt; then
-            echo "Morphology dictionary present in the feature-disabled CLI" >&2
-            exit 1
-          fi
+    uses: ./.github/workflows/workspace-tests.yml
+    with:
+      os: ubuntu-24.04
 
   test-fdw-linux:
     name: test FDW Linux
@@ -124,20 +93,9 @@ jobs:
   test-macos:
     name: test macOS
     if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-bin: false
-          cache-targets: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo test --workspace --locked
-      - name: Test morphology bundle tools and embedded models
-        run: cargo test -p uqa-analysis -p uqa-nori-data -p uqa-kuromoji-data --features uqa-analysis/nori-tools,uqa-analysis/kuromoji-tools --locked
+    uses: ./.github/workflows/workspace-tests.yml
+    with:
+      os: macos-14
 
   clippy:
     name: clippy ${{ matrix.label }}

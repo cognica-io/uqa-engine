@@ -58,6 +58,11 @@ pub struct SingleRelation<'a> {
     pub qualifier: &'a str,
 }
 
+pub struct BoundSingleRelation<'a> {
+    pub relation: SingleRelation<'a>,
+    pub schema: &'a crate::RowSchema,
+}
+
 pub use execution::execute_query_block_output;
 
 fn run_select_without_from_output<'a, S: Clone + 'static>(

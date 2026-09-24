@@ -98,3 +98,65 @@ fn jsonb_index_parsing_uses_original_allowance_and_typed_errors() {
     assert!(key.budget().shares_allowance(control.memory()));
     assert_eq!(control.memory().used(), key.capacity());
 }
+
+#[test]
+fn jsonb_index_ranges_and_hash_keys_match_postgresql() {
+    use crate::distinct::{canonical_row_key, canonical_row_key_budgeted, hash_canonical_row};
+    let reference: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../uqa-core/src/types/tests/pg18_jsonb.json"
+    )))
+    .unwrap();
+    let values: Vec<_> = reference["values"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|text| Value::JsonB(text.as_str().unwrap().into()))
+        .collect();
+    let control = StorageReadControl::with_limit(64 * 1024);
+    let hasher = std::collections::hash_map::RandomState::new();
+    for pair in reference["comparisons"].as_array().unwrap() {
+        let left = &values[pair[0].as_u64().unwrap() as usize];
+        let right = &values[pair[1].as_u64().unwrap() as usize];
+        let equal = pair[2] == true;
+        let expected = if equal {
+            std::cmp::Ordering::Equal
+        } else if pair[3] == true {
+            std::cmp::Ordering::Less
+        } else {
+            std::cmp::Ordering::Greater
+        };
+        let domain = ScalarIndexDomain::JsonBinary;
+        assert_eq!(
+            domain
+                .encode(left, &control)
+                .unwrap()
+                .as_ref()
+                .cmp(domain.encode(right, &control).unwrap().as_ref()),
+            expected
+        );
+        assert_eq!(
+            observed(domain, &Predicate::LessThan(right.clone()), left),
+            pair[3] == true
+        );
+        assert_eq!(
+            observed(domain, &Predicate::GreaterThan(right.clone()), left),
+            pair[4] == true
+        );
+        let key = canonical_row_key(std::slice::from_ref(left)).unwrap();
+        assert_eq!(
+            key == canonical_row_key(std::slice::from_ref(right)).unwrap(),
+            equal
+        );
+        let budgeted = canonical_row_key_budgeted(std::iter::once(Some(left)), &control).unwrap();
+        assert_eq!(&*budgeted, key);
+        drop(budgeted);
+        if equal {
+            assert_eq!(
+                hash_canonical_row(&hasher, std::iter::once(Some(left))).unwrap(),
+                hash_canonical_row(&hasher, std::iter::once(Some(right))).unwrap()
+            );
+        }
+        assert_eq!(control.memory().used(), 0);
+    }
+}

@@ -98,10 +98,11 @@ fn group_by_distinct_is_preserved_for_post_binding_deduplication() {
         panic!("not SELECT");
     };
     assert_eq!(alias.grouping_sets.len(), 2);
-    assert_eq!(
+    assert!(matches!(alias.grouping_sets[0].as_slice(), [Expr::Column(name)] if name == "shifted"));
+    assert_ne!(
         serde_json::to_value(&alias.grouping_sets[0]).unwrap(),
         serde_json::to_value(&alias.grouping_sets[1]).unwrap(),
-        "alias resolution precedes type-aware grouping-set deduplication"
+        "named references must wait until the input schema is known"
     );
 
     let Statement::Select(explicit_rows) = first(

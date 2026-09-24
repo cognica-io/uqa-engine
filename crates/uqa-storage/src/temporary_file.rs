@@ -18,14 +18,16 @@ use parking_lot::Mutex;
 
 const BLOCK_BYTES: usize = 16 * 1024;
 const NONCE_BYTES: usize = 24;
+const LENGTH_BYTES: usize = 2;
 const TAG_BYTES: usize = 16;
+const SLOT_HEADER_BYTES: usize = NONCE_BYTES + LENGTH_BYTES + TAG_BYTES;
 #[cfg(test)]
-const RECORD_BYTES: usize = 1 + 2 * (NONCE_BYTES + BLOCK_BYTES + TAG_BYTES);
+const RECORD_BYTES: usize = 1 + 2 * (SLOT_HEADER_BYTES + BLOCK_BYTES);
 
 /// Ordinary spill files use 16 KiB logical blocks.
 pub type TemporaryFile = BlockTemporaryFile<BLOCK_BYTES>;
 
-/// A private temporary byte file with a compile-time logical block width of 1 through 16,384 bytes. Each physical block reserves two authenticated ciphertext slots and a one-byte active selector: `1 + 2 * (24 + BYTES + 16)` bytes. An incomplete replacement never overwrites the active slot. Only ciphertext, nonces, authentication tags and selectors reach disk; each file has a fresh random key which exists solely in this owner. Reopened handles share the owner but have independent logical positions. The last handle removes the file. Abrupt process death may leave an encrypted file whose key was never persisted; this is not a durable recovery or anti-replay format.
+/// A private temporary byte file with a compile-time logical block width of 1 through 16,384 bytes. Each physical block reserves two authenticated ciphertext slots and a one-byte active selector: `1 + 2 * (24 + 2 + 16 + BYTES)` bytes. Only the populated prefix is encrypted; its two-byte length and block position are authenticated. An incomplete replacement never overwrites the active slot. Only ciphertext and its public framing reach disk; each file has a fresh random key which exists solely in this owner. Reopened handles share the owner but have independent logical positions. The last handle removes the file. Abrupt process death may leave an encrypted file whose key was never persisted; this is not a durable recovery or anti-replay format.
 pub struct BlockTemporaryFile<const BYTES: usize> {
     owner: Arc<Mutex<Owner<BYTES>>>,
     path: Arc<PathBuf>,
@@ -100,6 +102,25 @@ impl<const BYTES: usize> BlockTemporaryFile<BYTES> {
         self
     }
 
+    /// Write the complete concatenation of the slices, sharing one authenticated block publication across adjacent fields. Like `Write::write_all`, an error can leave a written prefix; record owners retain responsibility for rolling back incomplete records.
+    pub fn write_all_vectored(&mut self, mut input: &mut [IoSlice<'_>]) -> io::Result<()> {
+        IoSlice::advance_slices(&mut input, 0);
+        while !input.is_empty() {
+            match self.write_vectored(input) {
+                Ok(0) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::WriteZero,
+                        "incomplete temporary file write",
+                    ));
+                }
+                Ok(written) => IoSlice::advance_slices(&mut input, written),
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+
     pub fn reopen(&self) -> io::Result<Self> {
         self.owner.lock().validate_length()?;
         Ok(Self {
@@ -130,13 +151,20 @@ impl<const BYTES: usize> BlockTemporaryFile<BYTES> {
 
 fn record_offset<const BYTES: usize>(block: u64) -> io::Result<u64> {
     block
-        .checked_mul((1 + 2 * (NONCE_BYTES + BYTES + TAG_BYTES)) as u64)
+        .checked_mul((1 + 2 * (SLOT_HEADER_BYTES + BYTES)) as u64)
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "temporary file offset overflow",
             )
         })
+}
+
+fn block_aad(block: u64, length: u16) -> [u8; 8 + LENGTH_BYTES] {
+    let mut aad = [0; 8 + LENGTH_BYTES];
+    aad[..8].copy_from_slice(&block.to_le_bytes());
+    aad[8..].copy_from_slice(&length.to_le_bytes());
+    aad
 }
 
 impl<const BYTES: usize> Owner<BYTES> {
@@ -176,15 +204,26 @@ impl<const BYTES: usize> Owner<BYTES> {
             let file = self.file.as_file_mut();
             file.seek(SeekFrom::Start(slot_offset::<BYTES>(block, active)?))?;
             let mut nonce = [0_u8; NONCE_BYTES];
+            let mut length = [0_u8; LENGTH_BYTES];
             let mut tag = [0_u8; TAG_BYTES];
             file.read_exact(&mut nonce)?;
-            file.read_exact(&mut plaintext)?;
+            file.read_exact(&mut length)?;
+            let length = u16::from_le_bytes(length);
+            let populated = usize::from(length);
+            let required = (self.length - block * BYTES as u64).min(BYTES as u64) as usize;
+            if populated > BYTES || populated < required {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "invalid authenticated temporary block length",
+                ));
+            }
             file.read_exact(&mut tag)?;
+            file.read_exact(&mut plaintext[..populated])?;
             self.cipher
                 .decrypt_in_place_detached(
                     XNonce::from_slice(&nonce),
-                    &block.to_le_bytes(),
-                    &mut plaintext,
+                    &block_aad(block, length),
+                    &mut plaintext[..populated],
                     (&tag).into(),
                 )
                 .map_err(|_| {
@@ -197,7 +236,12 @@ impl<const BYTES: usize> Owner<BYTES> {
         Ok(plaintext)
     }
 
-    fn write_block(&mut self, block: u64, ciphertext: &mut [u8; BYTES]) -> io::Result<()> {
+    fn write_block(
+        &mut self,
+        block: u64,
+        ciphertext: &mut [u8; BYTES],
+        populated: usize,
+    ) -> io::Result<()> {
         let existing = block < self.length.div_ceil(BYTES as u64);
         let next = if existing {
             self.active_slot(block)? ^ 1
@@ -206,17 +250,23 @@ impl<const BYTES: usize> Owner<BYTES> {
         };
         let mut nonce = [0_u8; NONCE_BYTES];
         getrandom::fill(&mut nonce).map_err(|error| io::Error::other(error.to_string()))?;
+        let length = u16::try_from(populated).expect("temporary blocks are at most 16 KiB");
         let tag = self
             .cipher
-            .encrypt_in_place_detached(XNonce::from_slice(&nonce), &block.to_le_bytes(), ciphertext)
+            .encrypt_in_place_detached(
+                XNonce::from_slice(&nonce),
+                &block_aad(block, length),
+                &mut ciphertext[..populated],
+            )
             .map_err(|_| io::Error::other("temporary file encryption failed"))?;
         // The complete replacement reaches the inactive slot before its one-byte publication marker. Failed short writes leave the authoritative slot unchanged, including the prefix retained by append rollback.
         self.file
             .as_file_mut()
             .seek(SeekFrom::Start(slot_offset::<BYTES>(block, next)?))?;
         self.write_physical(&nonce)?;
-        self.write_physical(ciphertext)?;
+        self.write_physical(&length.to_le_bytes())?;
         self.write_physical(&tag)?;
+        self.write_physical(&ciphertext[..populated])?;
         if !existing {
             self.truncate_physical(record_offset::<BYTES>(block + 1)?)?;
         }
@@ -259,7 +309,7 @@ impl<const BYTES: usize> Owner<BYTES> {
                 let mut bytes = self.read_block(block)?;
                 let count = (length - self.length).min((BYTES - offset) as u64) as usize;
                 bytes[offset..offset + count].fill(0);
-                self.write_block(block, &mut bytes)?;
+                self.write_block(block, &mut bytes, offset + count)?;
                 self.length += count as u64;
             }
             Ok(())
@@ -274,7 +324,7 @@ impl<const BYTES: usize> Owner<BYTES> {
 
 fn slot_offset<const BYTES: usize>(block: u64, slot: u8) -> io::Result<u64> {
     record_offset::<BYTES>(block)?
-        .checked_add(1 + u64::from(slot) * (NONCE_BYTES + BYTES + TAG_BYTES) as u64)
+        .checked_add(1 + u64::from(slot) * (SLOT_HEADER_BYTES + BYTES) as u64)
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -343,7 +393,9 @@ impl<const BYTES: usize> Write for BlockTemporaryFile<BYTES> {
                 "temporary file length overflow",
             )
         })?;
-        if let Err(error) = owner.write_block(block, &mut bytes) {
+        let populated =
+            (owner.length.max(next_position) - block * BYTES as u64).min(BYTES as u64) as usize;
+        if let Err(error) = owner.write_block(block, &mut bytes, populated) {
             owner.rollback_length(original, &error)?;
             return Err(error);
         }

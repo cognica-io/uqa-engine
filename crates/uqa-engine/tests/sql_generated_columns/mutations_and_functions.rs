@@ -106,18 +106,27 @@ fn immutable_user_functions_are_stored_only_generation_expressions() {
         .unwrap();
     assert_eq!(int(&result.rows[0], "derived"), 12);
 
-    let error = engine
-        .sql(
-            "CREATE TABLE virtual_with_function (
-                 source INTEGER,
-                 derived INTEGER GENERATED ALWAYS AS (generated_twice(source))
-             )",
-            &[],
-        )
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("user-defined function"), "{error}");
-    assert!(!engine.has_table("virtual_with_function").unwrap());
+    engine
+        .sql("CREATE TABLE generated_virtual_original(source integer, derived integer GENERATED ALWAYS AS (source+1)); INSERT INTO generated_virtual_original(source) VALUES(6)", &[])
+        .unwrap();
+    for sql in [
+        "CREATE TABLE virtual_with_function(source integer, derived integer GENERATED ALWAYS AS (generated_twice(source)))",
+        "CREATE TABLE virtual_with_function(source integer, derived integer GENERATED ALWAYS AS (generated_twice(source)) VIRTUAL)",
+        "ALTER TABLE generated_with_function ADD COLUMN forbidden integer GENERATED ALWAYS AS (generated_twice(source)) VIRTUAL",
+        "ALTER TABLE generated_virtual_original ALTER COLUMN derived SET EXPRESSION AS (generated_twice(source))",
+    ] {
+        let error = engine.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("0A000"), "{sql}: {error}");
+        assert_eq!(error.to_string(), "generation expression uses user-defined function");
+        let uqa_sql::SQLError::Diagnostic { detail, hint, .. } = error else {
+            panic!("the PostgreSQL detail must remain separate from the primary message");
+        };
+        assert_eq!(detail.as_deref(), Some("Virtual generated columns that make use of user-defined functions are not yet supported."));
+        assert_eq!(hint, None);
+        assert!(!engine.has_table("virtual_with_function").unwrap());
+        assert_eq!(engine.sql("SELECT * FROM generated_with_function", &[]).unwrap().rows[0].len(), 2);
+        assert_eq!(int(&engine.sql("SELECT derived FROM generated_virtual_original", &[]).unwrap().rows[0], "derived"), 7);
+    }
 }
 
 #[test]

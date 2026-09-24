@@ -23,6 +23,7 @@ use crate::{
     SharedExpressionEvaluator,
 };
 
+pub(crate) use encoding::canonical_row_lock_keys;
 use encoding::encode_key_borrowed;
 pub use encoding::{
     canonical_row_key, canonical_row_key_budgeted, hash_canonical_row, try_pack_compact_text_pair,

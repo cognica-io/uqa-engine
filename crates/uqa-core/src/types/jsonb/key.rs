@@ -154,7 +154,11 @@ fn number(
     output: &mut BudgetedVec<u8>,
     control: &ProductionControl<'_>,
 ) -> Result<(), JsonbKeyError> {
-    output.push(u8::from(!value.negative))?;
+    if value.is_zero() {
+        output.push(1)?;
+        return Ok(());
+    }
+    output.push(if value.negative { 0 } else { 2 })?;
     let mask = if value.negative { 255 } else { 0 };
     let mut rank = ((value.integer_digits() as u128) ^ (1_u128 << 127)).to_be_bytes();
     for byte in &mut rank {

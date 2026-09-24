@@ -11,7 +11,7 @@ use tempfile::NamedTempFile;
 use uqa_core::{DecimalValue, TemporalValue, Value};
 use uqa_sql::ResultRow;
 
-use super::encoding::MICROS_PER_DAY;
+const MICROS_PER_DAY: i64 = 86_400_000_000;
 use super::*;
 use crate::physical::run_to_rows;
 use crate::scan::TableScan;
@@ -124,7 +124,7 @@ fn binary_keys_cover_every_value_variant_without_structural_collisions() {
         Value::Bytes(vec![b'a', 0, b'b']),
         Value::Temporal(TemporalValue::Date { days: 1 }),
         Value::Temporal(TemporalValue::Time {
-            micros: MICROS_PER_DAY as i64 + 7,
+            micros: MICROS_PER_DAY + 7,
         }),
         Value::Temporal(TemporalValue::Time { micros: 7 }),
         Value::Temporal(TemporalValue::TimeTz {
@@ -162,9 +162,9 @@ fn binary_keys_cover_every_value_variant_without_structural_collisions() {
     let (_, output) = run_to_rows(&mut distinct).unwrap();
 
     // true/int/float/decimal share one numeric key; NaN payloads share one;
-    // normalized time/time-tz/interval pairs and nested numeric values do
-    // likewise. The string and byte representations stay distinct.
-    assert_eq!(output.len(), 15);
+    // equal intervals and nested numeric values do likewise. TIME endpoints and
+    // TIMETZ offsets remain distinct, as do string and byte representations.
+    assert_eq!(output.len(), 17);
     assert_eq!(output[1], value_row(Value::Bool(true)));
     assert!(matches!(output[2].get("v"), Some(Value::Float(v)) if v.is_nan()));
     assert_eq!(output[5], value_row(Value::Str("a\0b".into())));

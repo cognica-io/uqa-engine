@@ -190,10 +190,12 @@ fn validate_generation_expression(
                     .is_some()
                     || engine.lookup_visible_sql_functions(name)?.is_some())
             {
-                return Err(SQLError::TypeMismatch(
-                    "generation expression uses user-defined function; virtual generated columns cannot use user-defined functions"
-                        .into(),
-                ));
+                return Err(SQLError::Diagnostic {
+                    sqlstate: "0A000".into(),
+                    message: "generation expression uses user-defined function".into(),
+                    detail: Some("Virtual generated columns that make use of user-defined functions are not yet supported.".into()),
+                    hint: None,
+                });
             }
             for argument in args {
                 validate_generation_expression(engine, qualifier, columns, argument, kind)?;

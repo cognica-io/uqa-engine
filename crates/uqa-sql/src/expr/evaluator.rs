@@ -151,7 +151,7 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             };
             for (cond, result) in when {
                 let matched = match &base_value {
-                    Some(bv) => values_equal(bv, &eval(cond, ctx)?),
+                    Some(bv) => values_equal(bv, &eval(cond, ctx)?)?,
                     None => truthy(&eval(cond, ctx)?),
                 };
                 if matched {
@@ -242,7 +242,7 @@ pub fn eval(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             let mut saw_null = matches!(v, Value::Null);
             for item in list {
                 let candidate = eval(item, ctx)?;
-                match values_equal_nullable(&v, &candidate) {
+                match values_equal_nullable(&v, &candidate)? {
                     Some(true) => return Ok(Value::Bool(!*negated)),
                     Some(false) => {}
                     None => saw_null = true,

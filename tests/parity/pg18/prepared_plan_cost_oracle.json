@@ -10,7 +10,7 @@
       "sql": "CREATE TEMP TABLE prepared_plan_cost (bucket integer)"
     },
     {
-      "sql": "INSERT INTO prepared_plan_cost SELECT CASE WHEN n = 10000 THEN 2 ELSE 1 END FROM generate_series(1,10000) AS g(n)"
+      "sql": "INSERT INTO prepared_plan_cost SELECT CASE WHEN n = 1000 THEN 2 ELSE 1 END FROM generate_series(1,1000) AS g(n)"
     },
     {
       "sql": "CREATE INDEX prepared_plan_cost_bucket_idx ON prepared_plan_cost (bucket)"

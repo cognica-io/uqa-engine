@@ -110,7 +110,10 @@ impl IndexedSpill {
                 })?;
 
         let write_result = (|| -> std::io::Result<()> {
-            write_indexed_record(self.data.as_file_mut(), length.to_le_bytes(), &payload)?;
+            self.data.as_file_mut().write_all_vectored(&mut [
+                IoSlice::new(&length.to_le_bytes()),
+                IoSlice::new(&payload),
+            ])?;
             self.data.as_file_mut().flush()?;
             self.offsets
                 .as_file_mut()
@@ -242,27 +245,4 @@ fn read_indexed_offset(file: &mut OffsetFile, position: u64) -> ExecResult<u64> 
     file.read_exact(&mut encoded)
         .map_err(|error| spill_error(format!("failed to read indexed spill offset: {error}")))?;
     Ok(u64::from_le_bytes(encoded))
-}
-
-fn write_indexed_record(
-    file: &mut NamedTempFile,
-    length: [u8; 8],
-    payload: &[u8],
-) -> std::io::Result<()> {
-    let mut buffers = [IoSlice::new(&length), IoSlice::new(payload)];
-    let mut remaining = &mut buffers[..];
-    while !remaining.is_empty() {
-        match file.write_vectored(remaining) {
-            Ok(0) => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::WriteZero,
-                    "incomplete indexed spill record",
-                ))
-            }
-            Ok(written) => IoSlice::advance_slices(&mut remaining, written),
-            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(error) => return Err(error),
-        }
-    }
-    Ok(())
 }

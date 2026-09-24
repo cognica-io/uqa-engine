@@ -177,7 +177,7 @@ fn tiny_work_mem_spills_window_input_sort_and_random_access_partition() {
 }
 
 #[test]
-fn tiny_work_mem_streams_set_children_and_distinct_before_final_rows() {
+fn tiny_work_mem_streams_union_children_before_final_rows() {
     let engine = Engine::new();
     engine.sql("SET work_mem TO '1B'", &[]).unwrap();
 
@@ -193,7 +193,12 @@ fn tiny_work_mem_streams_set_children_and_distinct_before_final_rows() {
     assert_eq!(union.rows.len(), 3_072);
     assert_eq!(union.rows[0].get("value"), Some(&Value::Int(1)));
     assert_eq!(union.rows[3_071].get("value"), Some(&Value::Int(3_072)));
+}
 
+#[test]
+fn tiny_work_mem_streams_intersect_children_before_final_rows() {
+    let engine = Engine::new();
+    engine.sql("SET work_mem TO '1B'", &[]).unwrap();
     let intersect = engine
         .sql(
             "SELECT generate_series(1, 2048) AS value
@@ -203,7 +208,12 @@ fn tiny_work_mem_streams_set_children_and_distinct_before_final_rows() {
         )
         .unwrap();
     assert_eq!(intersect.rows.len(), 1_024);
+}
 
+#[test]
+fn tiny_work_mem_streams_distinct_before_final_rows() {
+    let engine = Engine::new();
+    engine.sql("SET work_mem TO '1B'", &[]).unwrap();
     let distinct_limit = engine
         .sql(
             "SELECT DISTINCT generate_series(1, 2048) AS value

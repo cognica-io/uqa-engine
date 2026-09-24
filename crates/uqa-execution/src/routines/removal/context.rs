@@ -123,6 +123,7 @@ pub trait RoutineDropNotices {
     fn routine_drop_notice(&self, level: &str, message: &str);
 }
 pub struct RoutineRemovalContext<'a> {
+    pub locks: &'a dyn crate::row_locks::binding::RelationDefinitionSession,
     pub names: &'a dyn RoutineNameCatalog,
     pub registry: &'a dyn RoutineRegistryState,
     pub publication: &'a dyn RoutineRegistryPublication,

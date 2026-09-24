@@ -14,6 +14,9 @@
 use uqa_core::{ArrayValue, DecimalValue, TemporalValue, Value};
 use uqa_engine::Engine;
 
+#[path = "pg18_semantics/jsonb_comparisons.rs"]
+mod jsonb_comparisons;
+
 fn engine() -> Engine {
     Engine::new()
 }
@@ -85,10 +88,14 @@ mod gamma_functions;
 mod json_strip_nulls;
 #[path = "pg18_semantics/md5_overloads.rs"]
 mod md5_overloads;
+#[path = "pg18_semantics/numeric_comparisons.rs"]
+mod numeric_comparisons;
 #[path = "pg18_semantics/numeric_exactness.rs"]
 mod numeric_exactness;
 #[path = "pg18_semantics/numeric_power_statistics.rs"]
 mod numeric_power_statistics;
+#[path = "pg18_semantics/ordered_mode.rs"]
+mod ordered_mode;
 #[path = "pg18_semantics/pattern_escape.rs"]
 mod pattern_escape;
 #[path = "pg18_semantics/pg18_additions.rs"]
@@ -105,6 +112,8 @@ mod string_binary_lengths;
 mod strings_and_bytea;
 #[path = "pg18_semantics/temporal.rs"]
 mod temporal;
+#[path = "pg18_semantics/temporal_comparisons.rs"]
+mod temporal_comparisons;
 #[path = "pg18_semantics/three_valued_logic.rs"]
 mod three_valued_logic;
 #[path = "pg18_semantics/to_reg_lookups.rs"]

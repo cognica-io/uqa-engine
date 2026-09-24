@@ -9,6 +9,56 @@ The [official upstream regression harness](upstream/README.md) separately import
 - `sqlstate-mismatch`: both engines reject, but with different SQLSTATE codes.
 - `value-mismatch`: both answer, values differ after normalization (boolean display and numerically equivalent float formatting are normalized; JSON and JSONB output text is compared exactly).
 
+## Numeric comparison reference
+
+The compact [`pg18.json`](../../../crates/uqa-sql/src/expr/binary/comparison/pg18.json) records 44 operand pairs across six comparison operators, plus typed-column filters, grouping, joins and unique constraints. Expectations come from PostgreSQL 18.4, including SQLSTATEs and result types, and retain the Docker image identity. Core's internal exact numeric ordering is checked separately from SQL's operator-selected casts; Planner tests check constant folding, Execution tests exercise SQL binding and both scalar evaluators, and Engine tests exercise public SQL without starting Docker. Engine tests compare scans, indexes and reopened native SQLite, SQLite Key/Value and redb databases.
+
+```sh
+python3 tests/parity/pg18/capture_numeric_comparisons.py --container uqa-pg18 --output target/numeric-comparisons.reference.json
+```
+
+The collector reads only the checked-in operand and statement inputs, obtains every expected result from PostgreSQL, and rolls back its temporary relational setup. Compare the resulting small fixture with the committed reference before accepting any changed expectation.
+
+## Temporal comparison reference
+
+The compact [`pg18_temporal.json`](../../../crates/uqa-core/src/types/tests/pg18_temporal.json) records 780 TIME/TIMETZ scalar outcomes, 75 relational queries and unique-constraint outcomes from PostgreSQL 18.4. It includes day endpoints, UTC-adjusted times crossing midnight, offset ties and equivalent textual spellings. Core checks the independent results, transitivity and ordered containers; Execution checks equality, controlled keys, hashes and serializable index ordering; public Engine tests cover constant/prepared comparisons, scans, indexes, grouping, joins, uniqueness and provider reopen. The oracle expectations are never derived from UQA's comparator.
+
+```sh
+python3 tests/parity/pg18/capture_temporal_comparisons.py --container uqa-pg18 --output target/temporal-comparisons.reference.json
+```
+
+The collector reads only fixture inputs, records the PostgreSQL version and Docker image identity, and rolls back each temporary setup. Keep the compact reference in Git and generated diagnostics under ignored output directories.
+
+## JSONB comparison reference
+
+The compact [`pg18_jsonb.json`](../../../crates/uqa-core/src/types/tests/pg18_jsonb.json) records 2,352 scalar comparison outcomes, 88 relational queries and uniqueness errors from PostgreSQL 18.4. Cases include signed zero, equivalent scale/exponent spellings, positive and negative fractions, large exponents and nested arrays/objects. Core checks the independent outcomes, transitivity and ordered containers; Execution checks ordered ranges, controlled keys and equality/hash consistency. Public Engine tests cover ordinary and prepared SQL, scan/index/group/join/unique paths, serializable ranges and reopen on all three providers.
+
+```sh
+python3 tests/parity/pg18/capture_jsonb_comparisons.py --container uqa-pg18 --output target/jsonb-comparisons.reference.json
+```
+
+The collector reads only fixture inputs, obtains all expectations from PostgreSQL and rolls back temporary setup. It records the exact reference version and Docker image; generated diagnostics stay outside Git.
+
+## Ordered-set mode reference
+
+The compact [`pg18_mode.json`](../../../crates/uqa-execution/src/aggregation/tests/pg18_mode.json) records 58 ascending/descending outcomes from PostgreSQL 18.4. Each expected result identifies the first input belonging to the returned value's SQL equality class, or NULL for empty/all-NULL input. Cases include ties, signed zero, NaN, decimal precision, equivalent intervals, TIME/TIMETZ, JSONB, bpchar and arrays. Execution tests consume those expectations with original and reversed inputs in memory and encrypted spill, including merged runs; public tests use ordinary and prepared SQL.
+
+```sh
+python3 tests/parity/pg18/capture_mode.py --container uqa-pg18 --output target/mode.reference.json
+```
+
+The collector records the PostgreSQL version and Docker image and uses read-only queries. Expected winners come only from PostgreSQL, independently of UQA's comparator and mode implementation.
+
+## Grouping name reference
+
+The compact [`pg18_names.json`](../../../crates/uqa-sql/src/semantics/grouping_sets/pg18_names.json) records PostgreSQL 18.4 input-column precedence, output-alias fallback, ordinals, grouping sets and ambiguity/context errors. SQL owner tests verify schema-aware resolution, and Engine tests consume the external results and verify prepared statements and stored views across column renaming and reopen.
+
+```sh
+python3 tests/parity/pg18/capture_grouping_names.py --container uqa-pg18 --output target/grouping-names.reference.json
+```
+
+This collector also rolls back each temporary setup and derives expectations only from PostgreSQL.
+
 ## Concurrent writer reference
 
 The compact [`concurrent_writes.expected.json`](concurrent_writes.expected.json) records three PostgreSQL 18.4 schedules in which B writes and commits an independent row while A still owns an uncommitted write. A subsequently commits, rolls back, or rolls back to a savepoint and commits. [`capture_concurrent_writes.py`](capture_concurrent_writes.py) retains both connections, waits for B's actual commit completion before sending A's termination step, and records the source hash and Docker image identity. Its random test schema is removed when the sessions close. These are reference expectations; current UQA provider acceptance remains pending in the [concurrent transaction plan](../../../docs/plans/0008-concurrent-storage-transactions.md).
@@ -416,9 +466,9 @@ cargo test -p uqa-engine --test integration sql_prepared
 `rule_input_planning_oracle.expected.json` contains 66 PostgreSQL 18.4 cases for suppressed commands, unused NEW inputs, rule RETURNING diagnostics, and command tags from same-kind versus different-kind INSTEAD actions, ALSO actions, multiple actions, UPDATE FROM, and automatic views. The engine target runs this fixture on memory and SQLite, and the server target runs it over TCP; a separate wire assertion verifies primary-message and hint fields.
 
 
-`prepared_plan_selection_oracle.expected.json` contains 84 PostgreSQL 18.4 cases for automatic and forced custom/generic selection, plan-use counters, argument errors, planning errors, and invalidation. `prepared_plan_cost_oracle.expected.json` contains 60 cases over a 10,000-row indexed relation with a 9,999:1 distribution: rare keys retain custom plans while common keys switch to generic plans. `prepared_plan_settings_oracle.expected.json` contains 53 cases for enum metadata, exact invalid-value errors, SET DEFAULT completion, and local/session changes across savepoints, commit, rollback, and RESET ALL. `prepared_plan_types_oracle.expected.json` contains 25 cases for scalar and array types, domain identity, typed NULLs, constraint diagnostics, and smallint overflow in both plan modes. The existing engine integration target and server TCP target run these fixtures; selection and skewed-data fixtures also run against SQLite.
+`prepared_plan_selection_oracle.expected.json` contains 84 PostgreSQL 18.4 cases for automatic and forced custom/generic selection, plan-use counters, argument errors, planning errors, and invalidation. `prepared_plan_cost_oracle.expected.json` contains 60 cases over a 1,000-row indexed relation with a 999:1 distribution: rare keys retain custom plans while common keys switch to generic plans. `prepared_plan_settings_oracle.expected.json` contains 53 cases for enum metadata, exact invalid-value errors, SET DEFAULT completion, and local/session changes across savepoints, commit, rollback, and RESET ALL. `prepared_plan_types_oracle.expected.json` contains 25 cases for scalar and array types, domain identity, typed NULLs, constraint diagnostics, and smallint overflow in both plan modes. The existing engine integration target and server TCP target run these fixtures; selection and skewed-data fixtures also run against SQLite. The skewed-data transcript was recaptured from PostgreSQL 18.4 after reducing its setup from 10,000 to 1,000 rows: all 60 cases retain the same custom/generic plan counters, mode transitions, SQLSTATEs and result types, while the common-key row count changes from 9,999 to 999. Each TCP transcript has its own test; the 20-second socket read deadline is unchanged.
 
 ```sh
 cargo test -p uqa-engine prepared
-cargo test -p uqa-pg-server --test integration prepared_plan_selection
+cargo test -p uqa-pg-server --test integration prepared_plan_
 ```

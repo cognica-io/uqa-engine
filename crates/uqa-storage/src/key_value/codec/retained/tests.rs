@@ -80,6 +80,42 @@ fn current_records_preserve_user_fields_metadata_and_sequence_envelopes() {
 }
 
 #[test]
+fn document_records_retain_nonfinite_float_bits_and_tuple_metadata() {
+    for bits in [
+        0x7ff0_0000_0000_0000,
+        0xfff0_0000_0000_0000,
+        0xfff8_0000_0000_0001,
+    ] {
+        let value = Value::Float(f64::from_bits(bits));
+        let source = StoredDocument::with_metadata(
+            [
+                ("scalar".into(), value.clone()),
+                ("nested".into(), Value::Row(vec![value])),
+            ]
+            .into(),
+            DocumentMetadata::with_tuple_xmin(37),
+        );
+        let bytes = encode_stored_document_value(&source).unwrap();
+        let ordinary = decode_stored_document_value(&bytes).unwrap();
+        let retained = parity(&bytes).unwrap();
+        for fields in [ordinary.fields(), retained.fields()] {
+            let Value::Float(scalar) = fields["scalar"] else {
+                panic!("lost float carrier")
+            };
+            assert_eq!(scalar.to_bits(), bits);
+            let Value::Row(row) = &fields["nested"] else {
+                panic!("lost row carrier")
+            };
+            let Value::Float(nested) = row[0] else {
+                panic!("lost nested float carrier")
+            };
+            assert_eq!(nested.to_bits(), bits);
+        }
+        assert_eq!(retained.metadata().tuple_xmin(), Some(37));
+    }
+}
+
+#[test]
 fn previous_formats_preserve_array_rules_and_migrate_only_storage_metadata() {
     let body = r#"{"bytes":[1,2],"empty":[],"list":[1,300],"nested":[[3,4]],"xmin":51,"\u0000uqa.system.xmin":9,"\u0000uqa.user.xmin":true}"#;
     let legacy = parity(body.as_bytes()).unwrap();

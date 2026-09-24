@@ -95,6 +95,17 @@ impl Session {
 }
 
 fn fixtures() -> (tempfile::TempDir, Vec<Session>) {
+    let (directory, sessions) = empty_fixtures();
+    for session in &sessions {
+        session.sql("CREATE TABLE left_t (id INTEGER PRIMARY KEY, v INTEGER)");
+        session.sql("CREATE TABLE right_t (id INTEGER PRIMARY KEY, v INTEGER)");
+        session.sql("INSERT INTO left_t VALUES (1, 1)");
+        session.sql("INSERT INTO right_t VALUES (1, 1)");
+    }
+    (directory, sessions)
+}
+
+fn empty_fixtures() -> (tempfile::TempDir, Vec<Session>) {
     let directory = tempfile::tempdir().unwrap();
     let providers: Vec<Box<dyn PersistentStorageProvider>> = vec![
         Box::new(SQLiteStorageProvider::new(
@@ -105,14 +116,7 @@ fn fixtures() -> (tempfile::TempDir, Vec<Session>) {
     ];
     let sessions = providers
         .into_iter()
-        .map(|provider| {
-            let session = Session::new(provider.open_session().unwrap());
-            session.sql("CREATE TABLE left_t (id INTEGER PRIMARY KEY, v INTEGER)");
-            session.sql("CREATE TABLE right_t (id INTEGER PRIMARY KEY, v INTEGER)");
-            session.sql("INSERT INTO left_t VALUES (1, 1)");
-            session.sql("INSERT INTO right_t VALUES (1, 1)");
-            session
-        })
+        .map(|provider| Session::new(provider.open_session().unwrap()))
         .collect();
     (directory, sessions)
 }

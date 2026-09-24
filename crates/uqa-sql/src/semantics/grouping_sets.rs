@@ -14,18 +14,27 @@ use uqa_core::Value;
 
 use crate::{plan::QueryBlockPlan, FunctionTypeResolver, SQLError, SQLParam};
 
-/// `GROUP BY DISTINCT` operates on expanded grouping sets after parse analysis. At this point the input schema is known, so equivalent qualified and unqualified columns can share one identity and exact no-op casts can be removed without conflating expressions that `PostgreSQL` resolves to different operator inputs.
-pub fn prepare_distinct_grouping_sets(
-    engine: &dyn FunctionTypeResolver,
+mod names;
+pub use names::{bind_grouping_names, resolve_grouping_expression};
+#[cfg(test)]
+mod tests;
+
+/// Resolve grouping names against the input before expanding output aliases and deduplicating `GROUP BY DISTINCT` sets. Equivalent qualified and unqualified columns share one identity without conflating expressions that `PostgreSQL` resolves to different operator inputs.
+pub fn prepare_grouping_sets(
+    engine: &dyn crate::routines::RoutineResolution,
     statement: &QueryBlockPlan,
     schema: &RowSchema,
     params: &[SQLParam],
 ) -> Result<Option<QueryBlockPlan>, SQLError> {
-    if !statement.group_distinct {
+    if statement.group_by.is_empty() && statement.grouping_sets.is_empty() {
         return Ok(None);
     }
 
     let mut prepared = statement.clone();
+    let changed = bind_grouping_names(engine, &mut prepared, schema, params)?;
+    if !prepared.group_distinct {
+        return Ok(changed.then_some(prepared));
+    }
     prepared.group_distinct = false;
     let mut seen = HashSet::with_capacity(prepared.grouping_sets.len());
     let mut distinct = Vec::with_capacity(prepared.grouping_sets.len());

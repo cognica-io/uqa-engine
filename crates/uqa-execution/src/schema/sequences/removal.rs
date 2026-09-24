@@ -26,6 +26,7 @@ pub trait SequenceRemovalInputs {
     fn sequence_removal_context(&self) -> SequenceRemovalContext<'_>;
 }
 pub struct SequenceRemovalContext<'a> {
+    pub locks: &'a dyn crate::row_locks::binding::RelationDefinitionSession,
     pub names: &'a dyn SequenceOwnerNames,
     pub publication: &'a dyn SequenceRemovalPublication,
     pub privileges: SequencePrivilegeInquiry<'a>,
@@ -174,6 +175,10 @@ impl SequenceRemovalContext<'_> {
         }
         cascade_schema.sort();
         cascade_schema.dedup();
+        crate::row_locks::binding::prepare_dependent_relation_writes(
+            self.locks,
+            cascade_schema.iter().map(SequenceSchemaDependent::table),
+        )?;
         let columns = cascade_schema
             .iter()
             .filter_map(|dependent| {

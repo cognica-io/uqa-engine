@@ -1,0 +1,28 @@
+name: Set up cargo-nextest
+description: Install the checksum-pinned nextest binary without compiling it
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        version=0.9.146
+        case "${RUNNER_OS}" in
+          Linux)
+            platform=x86_64-unknown-linux-gnu
+            checksum=682c21b777c333e96fd532e114d3a5a894e0729ab88d94c0a9f20f8419695428
+            ;;
+          macOS)
+            platform=universal-apple-darwin
+            checksum=39785160b3c2f6ed9a765049cf4fa79f3b39aa02eb7598a5a0e2a1a0b9ffb9a8
+            ;;
+          *) echo "Unsupported nextest runner: ${RUNNER_OS}" >&2; exit 1 ;;
+        esac
+        directory="$(mktemp -d "${RUNNER_TEMP}/nextest.XXXXXX")"
+        archive="cargo-nextest-${version}-${platform}.tar.gz"
+        curl --fail --location --retry 2 \
+          "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-${version}/${archive}" \
+          --output "${directory}/${archive}"
+        (cd "$directory" && echo "${checksum}  ${archive}" | shasum -a 256 --check)
+        tar -xzf "${directory}/${archive}" -C "$directory" cargo-nextest
+        echo "$directory" >> "$GITHUB_PATH"

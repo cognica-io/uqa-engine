@@ -4,6 +4,14 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+#![cfg_attr(
+    test,
+    expect(
+        clippy::large_stack_arrays,
+        reason = "libtest generates more than 2,048 test descriptors in the required single unit-test harness"
+    )
+)]
+
 //! Top-level engine: a per-table [`DocumentStore`] + [`InvertedIndex`]
 //! pair, document mutation entry points, and a minimal `search` API for
 //! text-only round trips. Backed either by in-memory stores

@@ -12,6 +12,7 @@ use crate::{
     ValueRetentionError,
 };
 
+mod keys;
 mod production;
 
 pub(super) const MICROS_PER_SECOND: i64 = 1_000_000;
@@ -143,34 +144,22 @@ impl TemporalValue {
             .expect("ordinary temporal text")
     }
 
-    /// Append a key whose lexicographic order follows the native temporal comparator. The caller controls output allocation and errors; no intermediate key is allocated.
-    pub fn write_comparison_key<E>(
-        &self,
-        mut write: impl FnMut(&[u8]) -> Result<(), E>,
-    ) -> Result<(), E> {
-        let (kind, rank) = self.sort_key();
-        write(&[kind])?;
-        write(&((rank as u128) ^ (1_u128 << 127)).to_be_bytes())
-    }
-
-    fn sort_key(&self) -> (u8, i128) {
+    fn sort_key(&self) -> (u8, i128, i64) {
         match self {
-            Self::Date { days } => (0, i128::from(*days)),
-            Self::Time { micros } => (
-                1,
-                i128::from(*micros).rem_euclid(i128::from(MICROS_PER_DAY)),
-            ),
+            Self::Date { days } => (0, i128::from(*days), 0),
+            Self::Time { micros } => (1, i128::from(*micros), 0),
             Self::TimeTz {
                 micros,
                 offset_minutes,
             } => (
                 2,
-                (i128::from(*micros)
-                    - i128::from(*offset_minutes) * 60 * i128::from(MICROS_PER_SECOND))
-                .rem_euclid(i128::from(MICROS_PER_DAY)),
+                i128::from(*micros)
+                    - i128::from(*offset_minutes) * 60 * i128::from(MICROS_PER_SECOND),
+                // PostgreSQL compares seconds west of UTC after adjusted time; our carrier stores minutes east. Widen before negation for arbitrary deserialized carriers.
+                -i64::from(*offset_minutes),
             ),
-            Self::Timestamp { micros } => (3, i128::from(*micros)),
-            Self::TimestampTz { micros } => (4, i128::from(*micros)),
+            Self::Timestamp { micros } => (3, i128::from(*micros), 0),
+            Self::TimestampTz { micros } => (4, i128::from(*micros), 0),
             // PostgreSQL's interval_cmp flattens to microseconds with
             // 30-day months for ordering purposes.
             Self::Interval {
@@ -181,6 +170,7 @@ impl TemporalValue {
                 5,
                 (i128::from(*months) * 30 + i128::from(*days)) * i128::from(MICROS_PER_DAY)
                     + i128::from(*micros),
+                0,
             ),
         }
     }

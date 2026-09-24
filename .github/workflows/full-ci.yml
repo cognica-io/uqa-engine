@@ -133,43 +133,31 @@ jobs:
           cache-targets: ${{ runner.os != 'Linux' }}
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
-  test:
-    name: cargo test
-    runs-on: ${{ matrix.os }}
-    env:
-      # The Ubuntu runner hit an lld bus-error while linking a test binary, so
-      # use the system linker there while keeping warnings-as-errors.
-      RUSTFLAGS: ${{ matrix.os == 'ubuntu-24.04' && '-D warnings -C linker-features=-lld' || '-D warnings' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-14]
+  test-linux:
+    uses: ./.github/workflows/workspace-tests.yml
+    with:
+      os: ubuntu-24.04
+
+  test-macos:
+    uses: ./.github/workflows/workspace-tests.yml
+    with:
+      os: macos-14
+
+  test-fdw-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - name: Free Linux runner disk
-        if: runner.os == 'Linux'
         run: bash .github/scripts/free-linux-runner-disk.sh
       - uses: Swatinem/rust-cache@v2
-        if: runner.os != 'Linux'
         with:
           cache-bin: false
           cache-targets: true
-      - name: Test uqa-fdw on Linux
-        if: runner.os == 'Linux'
-        run: cargo test -p uqa-fdw --locked
-      - name: Clear FDW test artifacts on Linux
-        if: runner.os == 'Linux'
-        run: cargo clean
-      - name: Validate manual SQL examples on Linux
-        if: runner.os == 'Linux'
-        run: cargo test -p uqa-engine --test integration --locked queries::manual_sql_examples::manual_sql_examples_compile_or_execute -- --exact
-      - name: Test workspace on Linux
-        if: runner.os == 'Linux'
-        run: cargo test --workspace --exclude uqa-fdw --locked -- --skip manual_sql_examples::manual_sql_examples_compile_or_execute
-      - name: Test workspace on macOS
-        if: runner.os != 'Linux'
-        run: cargo test --workspace --locked
+      - run: cargo test -p uqa-fdw --locked
 
   example-build:
     name: cargo build --examples

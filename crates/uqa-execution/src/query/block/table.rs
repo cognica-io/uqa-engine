@@ -11,8 +11,8 @@ use super::{
     execute_query_block_operator_output, expand_from_star_columns,
     expr_contains_jsonpath_fts_match, expr_is_jsonpath_fts_match, facet_projection_fields,
     flatten_and_filter_parts, post_retrieval_score_top_k, projection_columns,
-    score_limited_text_filter, score_order_top_k, AccessPathPlan, CteScope, FacetExecution,
-    QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError, SQLParam, ScalarExpr,
+    score_limited_text_filter, score_order_top_k, AccessPathPlan, BoundSingleRelation, CteScope,
+    FacetExecution, QueryBlockPlan, QueryOutput, QueryOutputMode, SQLError, SQLParam, ScalarExpr,
     ScoredDocumentSource, ScoredInput, SingleRelation, SourceContext, SourceProjection,
     TABLE_OID_COLUMN,
 };
@@ -23,18 +23,22 @@ use super::{
 )]
 pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'a, S>,
-    relation: SingleRelation<'_>,
+    bound_relation: BoundSingleRelation<'_>,
     block: &'a QueryBlockPlan,
     stmt: &'a QueryBlockPlan,
     params: &'a [SQLParam],
     ctes: &'a CteScope<S>,
     output_mode: QueryOutputMode<'a>,
 ) -> Result<QueryOutput, SQLError> {
-    let SingleRelation {
-        reference_name,
-        relation_name: table,
-        qualifier,
-    } = relation;
+    let BoundSingleRelation {
+        relation:
+            SingleRelation {
+                reference_name,
+                relation_name: table,
+                qualifier,
+            },
+        schema,
+    } = bound_relation;
     let catalog = ctes.catalog_read_view()?;
     let resolution = ctes.relation_name_resolution()?;
     let table_snapshot = catalog
@@ -44,6 +48,12 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
         .columns
         .iter()
         .any(|column| column.name == super::SCORE_COLUMN);
+    let predicate = stmt.r#where.as_ref().map(|predicate| {
+        context
+            .relational
+            .evaluator(params, ctes)
+            .bind_type_introspection(predicate.clone(), schema)
+    });
     let score_top_k = if !has_stored_score_column
         && matches!(
             block.access,
@@ -83,7 +93,7 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
                 retrieval.function(table, reference_name, name, args, params, Some(top_k))
             }))
         } else {
-            retrieval.prepare_accelerated(table, reference_name, stmt.r#where.as_ref(), params)?
+            retrieval.prepare_accelerated(table, reference_name, predicate.as_ref(), params)?
         };
     let score_bearing_filter = stmt
         .r#where
@@ -173,7 +183,16 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
     )?;
     let source_schema: Vec<String> = source_projection
         .and_then(SourceProjection::explicit_columns)
-        .map_or_else(|| table_columns, |columns| columns.into_iter().collect());
+        .map_or_else(
+            || table_columns,
+            |columns| {
+                // Pruning can request an unresolved output name. Only input names from binding may become physical columns, or an implicit GROUP BY alias would incorrectly appear to be a source column.
+                columns
+                    .into_iter()
+                    .filter(|column| schema.has_unqualified_column(column))
+                    .collect()
+            },
+        );
 
     if let Some(facet_fields) = facet_projection_fields(&stmt.projections)? {
         let execution = FacetExecution {

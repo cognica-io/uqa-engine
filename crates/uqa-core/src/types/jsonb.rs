@@ -110,6 +110,12 @@ impl JsonNumber {
     }
 
     fn cmp_magnitude(&self, other: &Self) -> Ordering {
+        match (self.is_zero(), other.is_zero()) {
+            (true, true) => return Ordering::Equal,
+            (true, false) => return Ordering::Less,
+            (false, true) => return Ordering::Greater,
+            (false, false) => {}
+        }
         let ordering = self.integer_digits().cmp(&other.integer_digits());
         if ordering != Ordering::Equal {
             return ordering;
@@ -125,6 +131,10 @@ impl JsonNumber {
             })
             .find(|ordering| *ordering != Ordering::Equal)
             .unwrap_or(Ordering::Equal)
+    }
+
+    fn is_zero(&self) -> bool {
+        self.digits.as_slice() == b"0"
     }
 
     fn integer_digits(&self) -> i128 {

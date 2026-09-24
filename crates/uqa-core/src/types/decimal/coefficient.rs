@@ -92,16 +92,24 @@ pub(super) fn power_of_ten(
     power: u32,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<BigInt>> {
+    power_of_small(10, power, control)
+}
+
+pub(super) fn power_of_small(
+    base: u8,
+    power: u32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<BigInt>> {
     run(
         control,
         || {
             let bits = usize::try_from(power)
                 .map_err(|_| MemoryError::SizeOverflow)?
-                .checked_mul(4)
+                .checked_mul((u8::BITS - base.leading_zeros()) as usize)
                 .and_then(|bits| bits.checked_add(1))
                 .ok_or(MemoryError::SizeOverflow)?;
             let limbs = bits.div_ceil(usize::BITS as usize).max(1);
-            // pow_impl keeps the native base and accumulator while one multiply runs. Counting the initial small base as a third retained coefficient also covers the initial clone and replacement overlap. Every intermediate exponent is bounded by the requested exponent; four bits per decimal digit bounds its limb shape.
+            // pow_impl keeps the native base and accumulator while one multiply runs. Counting the initial small base as a third retained coefficient also covers the initial clone and replacement overlap. Every intermediate exponent is bounded by the requested exponent; the base's bit width bounds each exponent step.
             workspace::sum(&[
                 workspace::retained(limbs)?,
                 workspace::retained(limbs)?,
@@ -109,7 +117,7 @@ pub(super) fn power_of_ten(
                 workspace::multiplication(limbs, limbs)?,
             ])
         },
-        || BigInt::from(10_u8).pow(power),
+        || BigInt::from(base).pow(power),
     )
 }
 

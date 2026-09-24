@@ -133,7 +133,7 @@ zeroize = "1.8"
 
 # Dev / test
 proptest = "1.5"
-rstest = "0.23"
+rstest = { version = "0.23", default-features = false }
 criterion = { version = "0.5", default-features = false }
 
 [workspace.lints.rust]
@@ -157,6 +157,10 @@ module_name_repetitions = "allow"
 # Float equality is fine in hot loops where we deliberately compare
 # computed scores; tests use explicit epsilon comparisons.
 float_cmp = "allow"
+
+# Optimize the dependency's memory-hard key derivation in tests while retaining the full encryption parameters and ordinary workspace debug/overflow checks.
+[profile.test.package.argon2]
+opt-level = 3
 
 [profile.release]
 lto = "thin"

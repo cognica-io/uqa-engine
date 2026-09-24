@@ -340,6 +340,12 @@ impl SchemaScope {
                     &block.projections,
                     &source_schema,
                 )?;
+                crate::semantics::grouping_sets::bind_grouping_names(
+                    routines,
+                    block,
+                    &source_schema,
+                    params,
+                )?;
                 for expression in &mut block.group_by {
                     self.bind_scalar_routines_for_storage(
                         routines,

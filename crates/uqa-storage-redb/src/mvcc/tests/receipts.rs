@@ -37,6 +37,48 @@ fn count(store: &RedbRecordStore) -> u64 {
 }
 
 #[test]
+fn value_format_upgrade_preserves_receipt_capacity_acknowledgement_and_live_ownership() {
+    for predecessor in [43_u64, 44, 45] {
+        let store = memory();
+        let control = StorageReadControl::with_limit(1 << 20);
+        store.set_receipt_retention_limit(7, &control).unwrap();
+        let owner = store.allocate_managed_transaction(&control).unwrap();
+        let id = store.allocate_transaction(&control).unwrap();
+        let receipt = store.commit(id, &empty(&control), &control).unwrap();
+        store
+            .acknowledge_transaction(ReceiptAcknowledgement::Committed(receipt), &control)
+            .unwrap();
+        let transaction = physical_writer(&store.database).unwrap();
+        transaction
+            .open_table(METADATA)
+            .unwrap()
+            .insert("format", predecessor.to_be_bytes().as_slice())
+            .unwrap();
+        transaction.commit().unwrap();
+        let upgraded = RedbRecordStore::new(Arc::clone(&store.database)).unwrap();
+        let read = upgraded.database.begin_read().unwrap();
+        assert_eq!(
+            codec::receipt_limit(&read.open_table(METADATA).unwrap()).unwrap(),
+            7
+        );
+        drop(read);
+        assert_eq!(
+            upgraded.commit_status(id, &control).unwrap(),
+            CommitStatus::Committed(receipt)
+        );
+        assert_eq!(upgraded.reclaim_transaction_receipts(&control).unwrap(), 1);
+        assert_eq!(
+            upgraded
+                .commit_status(owner.transaction(), &control)
+                .unwrap(),
+            CommitStatus::Pending
+        );
+        drop(owner);
+        assert_eq!(upgraded.reclaim_transaction_receipts(&control).unwrap(), 1);
+    }
+}
+
+#[test]
 fn manual_receipts_require_exact_acknowledgement_and_never_expire_by_owner_absence() {
     let store = memory();
     let control = StorageReadControl::with_limit(1 << 20);

@@ -8,6 +8,20 @@ use super::*;
 use uqa_core::{memory::MemoryBudget, ArrayValue, CancellationToken, DecimalValue, TemporalValue};
 
 #[test]
+fn numeric_comparison_coercion_errors_propagate_from_ordinary_equality() {
+    let huge = Value::Decimal(DecimalValue::parse("1e400").unwrap());
+    let float = Value::Float(f64::INFINITY);
+    assert_eq!(
+        values_equal(&huge, &float).unwrap_err().sqlstate(),
+        Some("22003")
+    );
+    assert_eq!(
+        values_equal_nullable(&float, &huge).unwrap_err().sqlstate(),
+        Some("22003")
+    );
+}
+
+#[test]
 fn scalar_comparisons_preserve_sql_coercion_and_release_scratch() {
     let budget = MemoryBudget::new(64 * 1024);
     let cancellation = CancellationToken::new();

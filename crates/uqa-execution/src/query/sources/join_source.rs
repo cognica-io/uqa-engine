@@ -177,6 +177,10 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 .or_else(|| on.clone());
 
             let evaluator = context.relational.evaluator(params, ctes);
+            let effective_on = effective_on.map(|predicate| {
+                let schema = crate::RowSchema::join(&left_schema, &right_schema, []);
+                evaluator.bind_type_introspection(predicate, &schema)
+            });
             let hash_plan = if matches!(kind, JoinKind::Cross) {
                 None
             } else {

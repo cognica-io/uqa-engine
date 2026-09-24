@@ -88,14 +88,30 @@ fn constant_and_rule_planning_match_postgresql_over_tcp() {
 
 #[test]
 fn prepared_plan_selection_matches_postgresql_over_tcp() {
-    for fixture in [
-        include_str!("../../../../tests/parity/pg18/prepared_plan_selection_oracle.expected.json"),
-        include_str!("../../../../tests/parity/pg18/prepared_plan_cost_oracle.expected.json"),
-        include_str!("../../../../tests/parity/pg18/prepared_plan_settings_oracle.expected.json"),
-        include_str!("../../../../tests/parity/pg18/prepared_plan_types_oracle.expected.json"),
-    ] {
-        compare_reference(fixture);
-    }
+    compare_reference(include_str!(
+        "../../../../tests/parity/pg18/prepared_plan_selection_oracle.expected.json"
+    ));
+}
+
+#[test]
+fn prepared_plan_cost_matches_postgresql_over_tcp() {
+    compare_reference(include_str!(
+        "../../../../tests/parity/pg18/prepared_plan_cost_oracle.expected.json"
+    ));
+}
+
+#[test]
+fn prepared_plan_settings_match_postgresql_over_tcp() {
+    compare_reference(include_str!(
+        "../../../../tests/parity/pg18/prepared_plan_settings_oracle.expected.json"
+    ));
+}
+
+#[test]
+fn prepared_plan_types_match_postgresql_over_tcp() {
+    compare_reference(include_str!(
+        "../../../../tests/parity/pg18/prepared_plan_types_oracle.expected.json"
+    ));
 }
 
 #[test]
@@ -123,6 +139,26 @@ fn rule_returning_error_preserves_primary_message_and_hint_fields() {
         error.get(&b'H').unwrap(),
         "You need an unconditional ON INSERT DO INSTEAD rule with a RETURNING clause."
     );
+}
+
+#[test]
+fn virtual_generated_function_error_preserves_postgresql_diagnostic_fields() {
+    let fixture = Fixture::new();
+    fixture.engine.sql("CREATE FUNCTION generated_twice(value integer) RETURNS integer LANGUAGE SQL IMMUTABLE RETURN value*2", &[]).unwrap();
+    let mut client = fixture.connect();
+    for kind in ["", " VIRTUAL"] {
+        let response = client.query(&format!("CREATE TABLE wire_generated(source integer, derived integer GENERATED ALWAYS AS (generated_twice(source)){kind})"));
+        let error = fields(&response.iter().find(|message| message.0 == b'E').unwrap().1);
+        assert_eq!(error[&b'C'], "0A000");
+        assert_eq!(
+            error[&b'M'],
+            "generation expression uses user-defined function"
+        );
+        assert_eq!(error[&b'D'], "Virtual generated columns that make use of user-defined functions are not yet supported.");
+        assert!(!error.contains_key(&b'H'));
+        assert_eq!(response.last().unwrap(), &(b'Z', vec![b'I']));
+        assert!(!fixture.engine.has_table("wire_generated").unwrap());
+    }
 }
 
 #[test]

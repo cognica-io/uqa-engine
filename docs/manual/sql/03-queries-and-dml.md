@@ -229,6 +229,8 @@ GROUP BY CUBE(region, product)
 ORDER BY region, product;
 ```
 
+An unqualified `GROUP BY` name first resolves to an input column, then to an output name if no input column matches. Output aliases are available as whole grouping items, not inside larger expressions. Repeated output names must resolve to the same analyzed expression; otherwise the name is ambiguous. These rules also apply to grouping sets and stored views.
+
 `GROUP BY DISTINCT` removes duplicate grouping sets after expanding `GROUPING SETS`, `ROLLUP`, and `CUBE`; `GROUP BY ALL` retains their multiplicity. Grouping-set identity is computed after resolving aliases, column references, and no-op casts, ignores key order and repeated keys, and keeps expressions with different analyzed types or operators distinct.
 
 ```sql execute

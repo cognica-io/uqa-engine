@@ -46,6 +46,8 @@ Serial declarations allocate generated integer identities. Sequence functions `n
 
 The `+`, `-`, `*`, and `/` operators use single precision when both operands are `REAL`. Mixing `REAL` with an integer, `NUMERIC`, or `DOUBLE PRECISION` selects double precision. `SUM(real)` rounds at each single-precision addition, while `AVG(real)` returns double precision. Aggregate `ORDER BY` controls the addition order. Grouped, window, and spilled aggregate state retain the selected width.
 
+Numeric comparisons apply the operand conversions selected by PostgreSQL's operator signatures. For example, `1.0 > 0` is true, and `9007199254740993::bigint = 9007199254740992::double precision` is also true because the integer is rounded to double precision for that comparison. Comparing the same integer against `9007199254740992::numeric` is false. Internal ordered and hash keys compare the represented values exactly after SQL coercion; they do not replace a binary float with its shortest display text.
+
 Invalid floating text reports `22P02`; overflow or underflow outside the representable range reports `22003`. Representable subnormal values, signed zero, NaN, and infinity are retained. Division by zero reports `22012`, except that a NaN numerator remains NaN. Vector inputs still reject non-finite values.
 
 ```sql execute
@@ -58,7 +60,7 @@ The result is `16777216`, `16777216`, and `16777217`, respectively. The [compati
 
 ## Exact decimal
 
-`NUMERIC` and `DECIMAL` enforce declared precision and scale. The declaration parser accepts PostgreSQL-shaped precision from 1 through 1000 and scale from -1000 through 1000, while actual values must also fit the engine decimal carrier, which has substantially lower finite precision. Use representative boundary tests when a schema requests more than 28 significant digits.
+`NUMERIC` and `DECIMAL` enforce declared precision and scale. Declarations accept precision from 1 through 1000 and scale from -1000 through 1000. Unconstrained finite values support up to 131,072 digits before the decimal point and 16,383 fractional digits. Decimal storage and comparisons preserve their exact base-10 value, including values beyond binary floating-point precision.
 
 ```sql
 CREATE TABLE invoices (
@@ -80,6 +82,8 @@ Use exact decimal for financial values. Do not substitute floating point where e
 Temporal types support comparisons, extraction, truncation, construction, formatting, parsing, age calculation, and current-time functions. The default session timezone is `UTC`, and `SET timezone` changes session behavior where timezone conversion applies.
 
 `TIME(p)`, `TIMESTAMP(p)`, and their timezone variants retain a fractional-second precision from 0 through 6 in column declarations, casts, function-source column definitions, array elements, result metadata, and persistent catalogs. Values are rounded when a cast or assignment applies the declaration. Rounding at the end of a day can produce `24:00:00`, which remains distinct from `00:00:00` as a time value. `pg_attribute.atttypmod` and `information_schema.columns.datetime_precision` expose the declared modifier after reopen.
+
+`TIME` compares the stored time without wrapping the day, so `24:00:00` sorts after `00:00:00`. `TIMETZ` first compares UTC-adjusted time without day wrapping, then the original timezone offset in PostgreSQL's seconds-west order. Consequently, `12:00:00+00` sorts after and is unequal to `13:00:00+01`, even though their UTC-adjusted times match. DISTINCT, grouping, uniqueness and ordered indexes use the same equality and order. Time arithmetic retains its separate day-wrapping behavior.
 
 `INTERVAL` supports the fields `YEAR`, `MONTH`, `DAY`, `HOUR`, `MINUTE`, and `SECOND`, plus `YEAR TO MONTH`, `DAY TO HOUR`, `DAY TO MINUTE`, `DAY TO SECOND`, `HOUR TO MINUTE`, `HOUR TO SECOND`, and `MINUTE TO SECOND`. The least significant field determines truncation: for example, `INTERVAL HOUR TO MINUTE` preserves years, months, days, hours, and minutes while discarding seconds. `INTERVAL(p)` and ranges ending in `SECOND(p)` round fractional seconds. `information_schema.columns.interval_type` exposes an explicit field restriction, including its precision when present.
 
@@ -131,7 +135,7 @@ SELECT jsonb_extract_path_text(payload, 'kind') AS kind
 FROM records;
 ```
 
-Object key order and formatting are not an application contract for JSONB. Use JSON text only when original textual representation matters.
+Object key order and formatting are not an application contract for JSONB. Use JSON text only when original textual representation matters. JSONB numeric comparisons use numeric magnitude, so zero precedes positive fractions and follows negative values regardless of scale or exponent spelling. The same rule applies to numeric members of arrays and objects. Equality, grouping, uniqueness and ordered index lookups agree on these numeric values.
 
 ## BYTEA
 
