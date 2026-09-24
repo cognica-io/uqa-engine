@@ -25,6 +25,7 @@ impl Fixture {
     fn new(rows: u64) -> Self {
         let store: Arc<dyn KeyValueStore> = Arc::new(MemoryKeyValueStore::new());
         let catalog = KeyValueCatalog::new(store.clone());
+        catalog.save_schema("public").unwrap();
         let backend = KeyValueStorageBackend::new(store.clone());
         let uqa_sql::Statement::CreateTable(table) =
             uqa_sql::compile("CREATE TABLE legacy_items(k int2vector, untouched integer[])")

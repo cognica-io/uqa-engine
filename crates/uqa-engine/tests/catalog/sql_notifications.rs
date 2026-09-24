@@ -625,7 +625,7 @@ fn notification_function_catalog_rows_match_postgresql_18() {
         assert_eq!(row.get("prorettype"), Some(&Value::Int(expected.2)));
         assert_eq!(
             row.get("proargtypes"),
-            Some(&Value::List(
+            Some(&crate::legacy_vectors::oidvector(
                 expected.3.into_iter().map(Value::Int).collect()
             ))
         );
