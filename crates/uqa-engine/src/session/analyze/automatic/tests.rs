@@ -11,15 +11,8 @@ use super::*;
 fn sessions() -> (tempfile::TempDir, Engine, Engine) {
     let directory = tempfile::tempdir().unwrap();
     let writer = Engine::open(&directory.path().join("statistics.db")).unwrap();
-    writer
-        .sql(
-            "CREATE TABLE t (id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1)",
-            &[],
-        )
-        .unwrap();
     let worker = writer.new_session().unwrap();
-    // These deterministic tests drive the worker phases themselves; release
-    // their automatic-client registrations without altering database state.
+    // These tests drive maintenance themselves; stop every automatic client before creating data that a background worker could analyze first.
     worker.release_automatic_statistics_client();
     writer.release_automatic_statistics_client();
     worker
@@ -30,6 +23,12 @@ fn sessions() -> (tempfile::TempDir, Engine, Engine) {
         .session
         .statistics_worker
         .store(true, Ordering::Release);
+    writer
+        .sql(
+            "CREATE TABLE t (id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1)",
+            &[],
+        )
+        .unwrap();
     (directory, writer, worker)
 }
 
@@ -50,18 +49,18 @@ fn automatic_statistics_yield_to_a_serialized_writer_before_ddl_upgrade() {
         .session
         .statistics_worker
         .store(true, Ordering::Release);
-    writer
-        .sql(
-            "CREATE TABLE t (id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1)",
-            &[],
-        )
-        .unwrap();
     let worker = writer.new_session().unwrap();
     worker.release_automatic_statistics_client();
     worker
         .session
         .statistics_worker
         .store(true, Ordering::Release);
+    writer
+        .sql(
+            "CREATE TABLE t (id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1)",
+            &[],
+        )
+        .unwrap();
     assert!(!writer.versioned_backend_transactions());
     assert!(!worker.versioned_backend_transactions());
     writer.sql("BEGIN; INSERT INTO t VALUES (2)", &[]).unwrap();
@@ -125,12 +124,6 @@ fn compressed_statistics_publication_can_finish_during_an_uncommitted_row_write(
         uqa_storage_sqlite::SQLiteCompressionOptions::default(),
     )
     .unwrap();
-    writer
-        .sql(
-            "CREATE TABLE t (id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1)",
-            &[],
-        )
-        .unwrap();
     let worker = writer.new_session().unwrap();
     for engine in [&writer, &worker] {
         engine.release_automatic_statistics_client();
@@ -139,6 +132,12 @@ fn compressed_statistics_publication_can_finish_during_an_uncommitted_row_write(
             .statistics_worker
             .store(true, Ordering::Release);
     }
+    writer
+        .sql(
+            "CREATE TABLE t (id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1)",
+            &[],
+        )
+        .unwrap();
     let backend = worker.storage.backend.as_ref().unwrap();
     backend.begin_read_transaction().unwrap();
     worker.refresh_pinned_transaction_snapshot().unwrap();

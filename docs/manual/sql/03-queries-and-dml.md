@@ -231,6 +231,17 @@ ORDER BY region, product;
 
 An unqualified `GROUP BY` name first resolves to an input column, then to an output name if no input column matches. Output aliases are available as whole grouping items, not inside larger expressions. Repeated output names must resolve to the same analyzed expression; otherwise the name is ambiguous. These rules also apply to grouping sets and stored views.
 
+Grouping expressions preserve their analyzed types and literal representations. Repeating `n + 1.0` selects the same group key, while `n + 1.00` remains a different expression even though the numeric values compare equal. No-op casts and unknown-literal input conversions use the same analyzed identity; numeric precision/scale coercions and distinct parameter slots remain significant. An ungrouped input column reports SQLSTATE `42803` during analysis, including empty input and PREPARE.
+
+```sql execute
+SELECT n + 1.0 AS shifted, count(*) AS tally
+FROM (VALUES (10), (20), (10)) AS t(n)
+GROUP BY n + 1.0
+ORDER BY shifted;
+```
+
+HAVING reads the complete computed group value. A grouping-set key omitted from the selected set is NULL as a whole expression, even when that set includes one of the key's input columns; aggregate arguments still evaluate against the original input rows. Ordering by an output position preserves independent columns when output labels repeat.
+
 `GROUP BY DISTINCT` removes duplicate grouping sets after expanding `GROUPING SETS`, `ROLLUP`, and `CUBE`; `GROUP BY ALL` retains their multiplicity. Grouping-set identity is computed after resolving aliases, column references, and no-op casts, ignores key order and repeated keys, and keeps expressions with different analyzed types or operators distinct.
 
 ```sql execute

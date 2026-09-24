@@ -7,10 +7,11 @@
 //! Projection and HAVING evaluation for one finalized aggregate group.
 
 use super::{
-    aggregate_slot_index, aggregate_value_with_args, compile_having_aggregate_slots,
-    compile_projection_aggregate_slots, contains_aggregate, eval_scalar, expr_references_columns,
-    exprs_match, group_context_row, AggregateAccumulator, PlanSubqueryArena, QueryBlockPlan,
-    QueryExpressionContext, SQLError, SQLParam, ScalarEvalContext, ScalarExpr, SpillBuffer, Value,
+    aggregate_slot_index, aggregate_value_with_args, compile_group_slots,
+    compile_having_aggregate_slots, compile_projection_aggregate_slots, contains_aggregate,
+    eval_scalar, expr_references_columns, exprs_match, group_context_row, AggregateAccumulator,
+    PlanSubqueryArena, QueryBlockPlan, QueryExpressionContext, SQLError, SQLParam,
+    ScalarEvalContext, ScalarExpr, SpillBuffer, Value,
 };
 use crate::{Batch, OwnedPhysicalRow, PhysicalRow, RowSchema};
 use uqa_sql::expr::RowLookup;
@@ -87,6 +88,12 @@ impl AggregateOutputPlan {
                     slot_relation,
                     &mut aggregate_cursor,
                 )?;
+                let expression = compile_group_slots(
+                    &expression,
+                    &statement.group_by,
+                    slot_relation,
+                    finalizers.len(),
+                )?;
                 if aggregate_cursor != first_aggregate {
                     let uses_group_row = references_external_row(&expression, slot_relation);
                     return Ok(AggregateProjectionPlan::Evaluate(AggregateExpressionPlan {
@@ -144,6 +151,12 @@ impl AggregateOutputPlan {
                     &having,
                     slot_relation,
                     aggregate_targets,
+                )?;
+                let expression = compile_group_slots(
+                    &expression,
+                    &statement.group_by,
+                    slot_relation,
+                    finalizers.len(),
                 )?;
                 let uses_group_row = references_external_row(&expression, slot_relation);
                 Ok::<_, SQLError>(AggregateExpressionPlan {
@@ -204,6 +217,7 @@ pub(super) fn finish_group(
                     .map(|row| &*row);
                 let lookup = AggregateOutputLookup {
                     aggregate_values: &aggregate_values,
+                    group_values,
                     slot_relation: output_plan.slot_relation,
                     row,
                 };
@@ -242,6 +256,7 @@ pub(super) fn finish_group(
         });
         let lookup = AggregateOutputLookup {
             aggregate_values: &aggregate_values,
+            group_values,
             slot_relation: output_plan.slot_relation,
             row: having_row.as_ref(),
         };
@@ -260,6 +275,7 @@ pub(super) fn finish_group(
 
 struct AggregateOutputLookup<'a> {
     aggregate_values: &'a [Value],
+    group_values: &'a [Value],
     slot_relation: uqa_sql::ast::InternalRelationId,
     row: Option<&'a OwnedPhysicalRow>,
 }
@@ -285,7 +301,13 @@ impl RowLookup for AggregateOutputLookup<'_> {
 
     fn internal_column(&self, column: uqa_sql::ast::InternalColumnRef) -> Option<&Value> {
         aggregate_slot_index(column, self.slot_relation)
-            .and_then(|index| self.aggregate_values.get(index))
+            .and_then(|index| {
+                self.aggregate_values.get(index).or_else(|| {
+                    index
+                        .checked_sub(self.aggregate_values.len())
+                        .and_then(|index| self.group_values.get(index))
+                })
+            })
             .or_else(|| self.row.and_then(|row| row.internal_column(column)))
     }
 

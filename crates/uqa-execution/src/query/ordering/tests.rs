@@ -8,6 +8,28 @@ use super::{order_projection, resolve_order_expression};
 use uqa_sql::{plan::ProjectionPlan, ScalarExpr};
 
 #[test]
+fn output_ordinals_preserve_independent_positions_with_duplicate_labels() {
+    let output = super::identity_order_columns(&["same".into(), "same".into()]);
+    for position in [1, 2] {
+        let expression = resolve_order_expression(
+            &ScalarExpr::Literal(uqa_core::Value::Int(position)),
+            &output,
+        )
+        .unwrap();
+        assert_eq!(
+            expression,
+            ScalarExpr::Position(usize::try_from(position - 1).unwrap())
+        );
+    }
+    assert_eq!(
+        resolve_order_expression(&ScalarExpr::Column("same".into()), &output)
+            .unwrap_err()
+            .sqlstate(),
+        Some("42702")
+    );
+}
+
+#[test]
 fn position_bound_order_by_reuses_qualified_primary_key_ordering() {
     let schema = crate::RowSchema::with_qualified_types(
         "lineitem",

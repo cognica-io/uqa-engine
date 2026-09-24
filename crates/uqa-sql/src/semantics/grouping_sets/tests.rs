@@ -11,6 +11,28 @@ use crate::routines::RoutineResolution;
 struct Catalog;
 
 impl FunctionTypeResolver for Catalog {
+    fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
+        if let Some(element) = name.strip_suffix("[]") {
+            return self
+                .resolve_type_name(element)
+                .map(|element| element.map(|element| ColumnType::Array(Box::new(element))));
+        }
+        let name = name.replace('"', "");
+        Ok(matches!(
+            name.as_str(),
+            "grouping_literal_numeric" | "public.grouping_literal_numeric"
+        )
+        .then(|| ColumnType::Domain {
+            schema: "public".into(),
+            name: "grouping_literal_numeric".into(),
+            oid: 50_001,
+            base: Box::new(ColumnType::Numeric {
+                precision: None,
+                scale: None,
+            }),
+        }))
+    }
+
     fn resolve_function_type(
         &self,
         _name: &str,
@@ -47,6 +69,36 @@ fn input() -> RowSchema {
         vec!["id".into(), "n".into()],
         vec![Some(ColumnType::Integer); 2],
     )
+}
+
+#[test]
+fn grouped_literal_validation_matches_postgresql_before_evaluation() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../aggregates/pg18_literals.json")).unwrap();
+    let schema = RowSchema::with_identities(
+        vec!["n".into()],
+        vec![crate::ColumnIdentity::qualified("t", "n")],
+        vec![Some(ColumnType::Integer)],
+    );
+    let mut differences = Vec::new();
+    for case in fixture["cases"].as_array().unwrap() {
+        let sql = case["sql"].as_str().unwrap();
+        if sql.starts_with("PREPARE ") {
+            continue;
+        }
+        let result = validate_grouped_expressions(&Catalog, &block(sql), &schema, &[]);
+        match (case["sqlstate"].as_str(), result) {
+            (None, Ok(())) => {}
+            (Some(expected), Err(error))
+                if error.sqlstate() == Some(expected)
+                    && error.to_string() == case["message"].as_str().unwrap() => {}
+            (expected, actual) => differences.push(format!(
+                "{}: expected {expected:?}, got {actual:?}",
+                case["name"]
+            )),
+        }
+    }
+    assert!(differences.is_empty(), "{}", differences.join("\n"));
 }
 
 #[test]
@@ -144,4 +196,36 @@ fn grouping_names_inside_expressions_are_never_output_aliases() {
     assert!(prepare_grouping_sets(&Catalog, &original, &input(), &[])
         .unwrap()
         .is_none());
+}
+
+#[test]
+fn grouping_identity_keeps_catalog_casts_for_the_catalog_resolver() {
+    for ty in [
+        "regclass",
+        "regnamespace",
+        "regrole",
+        "regtype",
+        "regproc",
+        "regprocedure",
+        "grouping_literal_numeric",
+        "grouping_literal_numeric[]",
+        "regtype[]",
+    ] {
+        let input = ScalarExpr::Literal(Value::Str("catalog-dependent input".into()));
+        let expression = ScalarExpr::Cast {
+            expr: Box::new(input.clone()),
+            ty: ty.into(),
+        };
+        let normalized = normalize_expression(
+            &Catalog,
+            expression.clone(),
+            &RowSchema::with_types(Vec::new(), Vec::new()),
+            &[],
+        )
+        .unwrap();
+        let ScalarExpr::Cast { expr, .. } = normalized else {
+            panic!("{ty}: catalog input was evaluated during grouping analysis");
+        };
+        assert_eq!(*expr, input, "{ty}");
+    }
 }

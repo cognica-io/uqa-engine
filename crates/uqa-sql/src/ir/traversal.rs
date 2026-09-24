@@ -11,31 +11,45 @@ use super::{ScalarExpr, ScalarFrameBound};
 impl ScalarExpr {
     /// Visit this expression and every nested scalar expression in pre-order.
     pub fn visit(&self, visitor: &mut impl FnMut(&Self)) {
-        visitor(self);
+        self.try_visit(&mut |expression| {
+            visitor(expression);
+            Ok::<_, std::convert::Infallible>(true)
+        })
+        .unwrap_or_else(|never| match never {});
+    }
+
+    /// Visit in pre-order, skipping a subtree when the visitor returns false and stopping immediately on its first error.
+    pub fn try_visit<E>(
+        &self,
+        visitor: &mut impl FnMut(&Self) -> Result<bool, E>,
+    ) -> Result<(), E> {
+        if !visitor(self)? {
+            return Ok(());
+        }
         match self {
             Self::And(parts) | Self::Or(parts) | Self::Array(parts) | Self::Row(parts) => {
                 for part in parts {
-                    part.visit(visitor);
+                    part.try_visit(visitor)?;
                 }
             }
             Self::Not(inner)
             | Self::UnaryMinus(inner)
             | Self::Cast { expr: inner, .. }
             | Self::IsNull { expr: inner, .. }
-            | Self::InSubquery { expr: inner, .. } => inner.visit(visitor),
+            | Self::InSubquery { expr: inner, .. } => inner.try_visit(visitor)?,
             Self::Binary { lhs, rhs, .. } => {
-                lhs.visit(visitor);
-                rhs.visit(visitor);
+                lhs.try_visit(visitor)?;
+                rhs.try_visit(visitor)?;
             }
             Self::Between { expr, low, high } => {
-                expr.visit(visitor);
-                low.visit(visitor);
-                high.visit(visitor);
+                expr.try_visit(visitor)?;
+                low.try_visit(visitor)?;
+                high.try_visit(visitor)?;
             }
             Self::InList { expr, list, .. } => {
-                expr.visit(visitor);
+                expr.try_visit(visitor)?;
                 for part in list {
-                    part.visit(visitor);
+                    part.try_visit(visitor)?;
                 }
             }
             Self::Func {
@@ -45,30 +59,32 @@ impl ScalarExpr {
                 ..
             } => {
                 for argument in args {
-                    argument.visit(visitor);
+                    argument.try_visit(visitor)?;
                 }
                 for order in order_by {
-                    order.expr.visit(visitor);
+                    order.expr.try_visit(visitor)?;
                 }
                 if let Some(filter) = filter {
-                    filter.visit(visitor);
+                    filter.try_visit(visitor)?;
                 }
             }
             Self::WindowCall { args, spec, .. } => {
                 for argument in args {
-                    argument.visit(visitor);
+                    argument.try_visit(visitor)?;
                 }
                 for partition in &spec.partition_by {
-                    partition.visit(visitor);
+                    partition.try_visit(visitor)?;
                 }
                 for order in &spec.order_by {
-                    order.expr.visit(visitor);
+                    order.expr.try_visit(visitor)?;
                 }
                 if let Some(frame) = &spec.frame {
                     for bound in [&frame.start, &frame.end] {
                         match bound {
                             ScalarFrameBound::Preceding(expression)
-                            | ScalarFrameBound::Following(expression) => expression.visit(visitor),
+                            | ScalarFrameBound::Following(expression) => {
+                                expression.try_visit(visitor)?;
+                            }
                             ScalarFrameBound::UnboundedPreceding
                             | ScalarFrameBound::UnboundedFollowing
                             | ScalarFrameBound::CurrentRow => {}
@@ -82,14 +98,14 @@ impl ScalarExpr {
                 else_branch,
             } => {
                 if let Some(base) = base {
-                    base.visit(visitor);
+                    base.try_visit(visitor)?;
                 }
                 for (condition, result) in when {
-                    condition.visit(visitor);
-                    result.visit(visitor);
+                    condition.try_visit(visitor)?;
+                    result.try_visit(visitor)?;
                 }
                 if let Some(else_branch) = else_branch {
-                    else_branch.visit(visitor);
+                    else_branch.try_visit(visitor)?;
                 }
             }
             Self::Default
@@ -105,6 +121,7 @@ impl ScalarExpr {
             | Self::ScalarSubquery(_)
             | Self::Exists { .. } => {}
         }
+        Ok(())
     }
 
     /// Collect every column needed to evaluate this expression. Returns `false` when evaluation needs row shape or a relational child that a projected field scan cannot provide.
@@ -494,6 +511,27 @@ mod tests {
         expression.visit(&mut |part| visited.push(part.clone()));
         assert_eq!(visited.len(), 3);
         assert_eq!(visited[0], expression);
+    }
+
+    #[test]
+    fn fallible_visits_skip_selected_subtrees_and_stop_before_later_siblings() {
+        let expression = ScalarExpr::Row(vec![
+            ScalarExpr::Array(vec![ScalarExpr::Column("hidden".into())]),
+            ScalarExpr::Column("reject".into()),
+            ScalarExpr::Column("unvisited".into()),
+        ]);
+        let mut visited = Vec::new();
+        let result = expression.try_visit(&mut |part| {
+            visited.push(part.clone());
+            match part {
+                ScalarExpr::Array(_) => Ok(false),
+                ScalarExpr::Column(name) if name == "reject" => Err("grouping"),
+                _ => Ok(true),
+            }
+        });
+        assert_eq!(result, Err("grouping"));
+        assert_eq!(visited.len(), 3);
+        assert!(matches!(&visited[2], ScalarExpr::Column(name) if name == "reject"));
     }
 
     #[test]

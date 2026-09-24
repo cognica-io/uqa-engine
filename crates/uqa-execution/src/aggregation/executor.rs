@@ -42,7 +42,7 @@ impl<'a> PhysicalAggregateExecutor<'a> {
     ) -> Result<Self, SQLError> {
         let runtime = context;
         let context = runtime.as_ref();
-        let statements = grouping_set_statements(statement);
+        let statements = grouping_set_statements(context, statement)?;
         let set_budget = (work_mem_bytes / statements.len().max(1)).max(1);
         let sets = statements
             .into_iter()
@@ -213,7 +213,10 @@ impl AggregateExecutor for PhysicalAggregateExecutor<'_> {
     }
 }
 
-fn grouping_set_statements(statement: &QueryBlockPlan) -> Vec<(QueryBlockPlan, bool)> {
+fn grouping_set_statements(
+    context: &dyn QueryExpressionContext,
+    statement: &QueryBlockPlan,
+) -> Result<Vec<(QueryBlockPlan, bool)>, SQLError> {
     let sets = if statement.grouping_sets.is_empty() {
         vec![(statement.clone(), false)]
     } else {
@@ -221,14 +224,13 @@ fn grouping_set_statements(statement: &QueryBlockPlan) -> Vec<(QueryBlockPlan, b
             .grouping_sets
             .iter()
             .map(|group_by| {
-                let mut active = statement.clone();
-                active.group_by.clone_from(group_by);
-                active.grouping_sets.clear();
-                (active, true)
+                uqa_sql::semantics::aggregates::select_grouping_set(context, statement, group_by)
+                    .map(|active| (active, true))
             })
-            .collect()
+            .collect::<Result<Vec<_>, _>>()?
     };
-    sets.into_iter()
+    Ok(sets
+        .into_iter()
         .map(|(mut statement, relaxed)| {
             statement.order_by.clear();
             statement.limit = None;
@@ -236,7 +238,7 @@ fn grouping_set_statements(statement: &QueryBlockPlan) -> Vec<(QueryBlockPlan, b
             statement.offset = None;
             (statement, relaxed)
         })
-        .collect()
+        .collect())
 }
 
 fn copy_output(source: &mut SpillBuffer, destination: &mut SpillBuffer) -> ExecResult<()> {

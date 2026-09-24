@@ -101,7 +101,8 @@ pub fn order_projection(
 pub fn identity_order_columns(columns: &[String]) -> Vec<OutputColumnMapping> {
     columns
         .iter()
-        .map(|column| (column.clone(), ScalarExpr::Column(column.clone())))
+        .enumerate()
+        .map(|(position, column)| (column.clone(), ScalarExpr::Position(position)))
         .collect()
 }
 
