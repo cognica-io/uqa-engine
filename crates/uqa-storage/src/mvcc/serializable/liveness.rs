@@ -57,9 +57,16 @@ struct LocalEntry {
 }
 
 struct LocalLeaseOwner<T> {
-    _registry: Arc<LocalSerializableLeases>,
+    registry: Arc<LocalSerializableLeases>,
     _retained: T,
     _memory: MemoryReservation,
+}
+
+impl<T> Drop for LocalLeaseOwner<T> {
+    fn drop(&mut self) {
+        // This private list lock never enters SSI/provider admission or closes physical owners. Participant construction occurs outside it, so failed publication can release its lease here too.
+        self.registry.reclaim();
+    }
 }
 
 /// Liveness for an exclusively owned database or one browser/in-memory owner. File-backed multiprocess providers must use native leases instead. The entries and their capacity share the owner's allowance; live handles retain the registry through their lease payload.
@@ -86,6 +93,18 @@ impl LocalSerializableLeases {
         control: &StorageReadControl,
     ) -> VersionResult<SerializableParticipant> {
         control.check()?;
+        let memory = control
+            .memory()
+            .reserve(std::mem::size_of::<LocalLeaseOwner<T>>())?;
+        let participant = SerializableParticipant::retain(
+            id,
+            Box::new(LocalLeaseOwner {
+                registry: Arc::clone(self),
+                _retained: retained,
+                _memory: memory,
+            }),
+            control,
+        )?;
         let mut entries = self.0.lock();
         prune(&mut entries);
         if entries.is_empty() {
@@ -98,18 +117,6 @@ impl LocalSerializableLeases {
                 "duplicate serializable participant lease",
             ))?;
         entries.reserve(1)?;
-        let memory = control
-            .memory()
-            .reserve(std::mem::size_of::<LocalLeaseOwner<T>>())?;
-        let participant = SerializableParticipant::retain(
-            id,
-            Box::new(LocalLeaseOwner {
-                _registry: Arc::clone(self),
-                _retained: retained,
-                _memory: memory,
-            }),
-            control,
-        )?;
         entries.push(LocalEntry {
             id,
             lease: Arc::downgrade(&participant.0),

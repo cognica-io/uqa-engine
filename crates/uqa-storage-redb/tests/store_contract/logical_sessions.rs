@@ -159,3 +159,44 @@ fn legacy_bytes_migrate_once_and_the_old_typed_table_can_no_longer_open() {
         1
     );
 }
+
+#[test]
+fn completed_sessions_release_private_ownership_after_the_final_reader() {
+    for rollback in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("private-ownership.redb");
+        {
+            let storage = RedbStorage::open(&path).unwrap();
+            let store = storage.store();
+            let control = store.retention_control();
+            store.begin_transaction().unwrap();
+            store.put(b"owned", b"value").unwrap();
+            let reader = store.record_snapshot().unwrap();
+            if rollback {
+                store.rollback_transaction().unwrap();
+            } else {
+                store.commit_transaction().unwrap();
+            }
+            assert!(
+                control.memory().used() > 0,
+                "the captured private row is still owned"
+            );
+            drop(reader);
+            assert_eq!(
+                control.memory().used(),
+                0,
+                "final reader must release all private owners"
+            );
+            assert_eq!(
+                store.get(b"owned").unwrap().as_deref(),
+                (!rollback).then_some(b"value".as_slice())
+            );
+            assert_eq!(control.memory().used(), 0);
+        }
+        let reopened = RedbStorage::open(&path).unwrap();
+        assert_eq!(
+            reopened.store().get(b"owned").unwrap().as_deref(),
+            (!rollback).then_some(b"value".as_slice())
+        );
+    }
+}
