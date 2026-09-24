@@ -8,15 +8,12 @@
 //! `--key-file`, the `UQA_KEY` environment variable, format detection
 //! for compressed containers, and the non-interactive failure modes.
 
+use super::binary_path;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
 use uqa_engine::{Engine, SQLiteCompressionOptions};
-
-fn binary_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_usql"))
-}
 
 fn run_usql_env(args: &[&str], input: &str, history_dir: &Path, envs: &[(&str, &str)]) -> Output {
     let history = history_dir.join("hist");

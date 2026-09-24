@@ -384,69 +384,73 @@ fn failed_record_format_upgrade_restores_the_old_schema_and_allows_repair() {
     }
 }
 
-#[test]
-fn closed_record_format_files_upgrade_in_every_sqlite_mode() {
-    closed_record_formats_upgrade(1..=45);
+#[rstest::rstest]
+fn closed_record_format_files_upgrade_in_every_sqlite_mode(
+    #[values(0, 1, 2, 3)] mode: usize,
+    #[values(
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
+        26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45
+    )]
+    format: i64,
+) {
+    closed_record_formats_upgrade(mode, format);
 }
 
-#[test]
-fn latest_record_format_files_upgrade_in_every_sqlite_mode() {
-    closed_record_formats_upgrade(46..=46);
+#[rstest::rstest]
+fn latest_record_format_files_upgrade_in_every_sqlite_mode(#[values(0, 1, 2, 3)] mode: usize) {
+    closed_record_formats_upgrade(mode, 46);
 }
 
-fn closed_record_formats_upgrade(formats: std::ops::RangeInclusive<i64>) {
+fn closed_record_formats_upgrade(mode: usize, format: i64) {
     let control = control();
-    for (mode, format) in (0..4).flat_map(|mode| formats.clone().map(move |format| (mode, format)))
-    {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("record-upgrade.db");
-        let open = || {
-            match mode {
-                0 => ManagedConnection::open(&path),
-                1 => ManagedConnection::open_encrypted(&path, "record upgrade key"),
-                2 => ManagedConnection::open_compressed(
-                    &path,
-                    crate::SQLiteCompressionOptions::default(),
-                ),
-                _ => ManagedConnection::open_compressed_encrypted(
-                    &path,
-                    "record upgrade key",
-                    crate::SQLiteCompressionOptions::default(),
-                ),
-            }
-            .unwrap()
-        };
-        let (identity, receipt) = {
-            let connection = open();
-            let store = SQLiteRecordStore::for_key_value(&connection, &control).unwrap();
-            let transaction = store.allocate_transaction(&control).unwrap();
-            let receipt = store
-                .commit(
-                    transaction,
-                    &prepared(b"retained", b"original bytes", &control),
-                    &control,
-                )
-                .unwrap();
-            downgrade_record_format(&store, format);
-            (store.database_id(), receipt)
-        };
-        for _ in 0..2 {
-            let connection = open();
-            let store = SQLiteRecordStore::for_key_value(&connection, &control).unwrap();
-            assert_eq!(store.database_id(), identity);
-            assert_eq!(
-                store.commit_status(receipt.transaction, &control).unwrap(),
-                CommitStatus::Committed(receipt)
-            );
-            let value = store
-                .snapshot(&control)
-                .unwrap()
-                .get(b"retained", &control)
-                .unwrap()
-                .unwrap();
-            assert_eq!(&***value.value().unwrap(), b"original bytes");
-            assert_eq!(value.sequence(), receipt.sequence);
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("record-upgrade.db");
+    let open = || {
+        match mode {
+            0 => ManagedConnection::open(&path),
+            1 => ManagedConnection::open_encrypted(&path, "record upgrade key"),
+            2 => ManagedConnection::open_compressed(
+                &path,
+                crate::SQLiteCompressionOptions::default(),
+            ),
+            _ => ManagedConnection::open_compressed_encrypted(
+                &path,
+                "record upgrade key",
+                crate::SQLiteCompressionOptions::default(),
+            ),
         }
+        .unwrap()
+    };
+    let (identity, receipt) = {
+        let connection = open();
+        let store = SQLiteRecordStore::for_key_value(&connection, &control).unwrap();
+        let transaction = store.allocate_transaction(&control).unwrap();
+        let receipt = store
+            .commit(
+                transaction,
+                &prepared(b"retained", b"original bytes", &control),
+                &control,
+            )
+            .unwrap();
+        downgrade_record_format(&store, format);
+        (store.database_id(), receipt)
+    };
+    for _ in 0..2 {
+        let connection = open();
+        let store = SQLiteRecordStore::for_key_value(&connection, &control).unwrap();
+        assert_eq!(store.database_id(), identity);
+        assert_eq!(
+            store.commit_status(receipt.transaction, &control).unwrap(),
+            CommitStatus::Committed(receipt)
+        );
+        let value = store
+            .snapshot(&control)
+            .unwrap()
+            .get(b"retained", &control)
+            .unwrap()
+            .unwrap();
+        assert_eq!(&***value.value().unwrap(), b"original bytes");
+        assert_eq!(value.sequence(), receipt.sequence);
     }
 }
 

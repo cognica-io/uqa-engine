@@ -76,7 +76,7 @@ fn wait_for_relation_key(
         && !finished()
         && Instant::now() < deadline
     {
-        thread::yield_now();
+        thread::sleep(Duration::from_millis(1));
     }
     first.row_locks.waiting_for_relation(session, key)
 }
@@ -198,7 +198,7 @@ pub(super) fn after_tuple_wait_with_release(
         && !task.is_finished()
         && Instant::now() < deadline
     {
-        thread::yield_now();
+        thread::sleep(Duration::from_millis(1));
     }
     let waited = holder.row_locks.waiting_for_row(session, key);
     let released = release();
@@ -243,7 +243,9 @@ pub(super) fn after_shared_wait_with_release(
     let statement = statement.to_string();
     let (send, done) = mpsc::channel();
     let task = thread::spawn(move || {
+        eprintln!("shared-catalog worker executing: {statement}");
         let result = worker.sql(&statement, &[]);
+        eprintln!("shared-catalog worker completed: {statement}");
         let _ = send.send(result);
         worker
     });
@@ -252,10 +254,12 @@ pub(super) fn after_shared_wait_with_release(
         && !task.is_finished()
         && Instant::now() < deadline
     {
-        thread::yield_now();
+        thread::sleep(Duration::from_millis(1));
     }
     let waited = holder.row_locks.waiting_for_relation(session, key);
+    eprintln!("shared-catalog wait observed={waited}; releasing {target:?}");
     let released = release();
+    eprintln!("shared-catalog holder release completed for {target:?}");
     if released.is_err() {
         cancel.cancel();
     }

@@ -1,0 +1,128 @@
+name: Workspace tests
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: ${{ inputs.os == 'ubuntu-24.04' && '-D warnings -C linker-features=-lld' || '-D warnings' }}
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  build:
+    name: Build test archive and check documentation
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Free Linux runner disk
+        if: runner.os == 'Linux'
+        run: bash .github/scripts/free-linux-runner-disk.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: ./.github/actions/setup-nextest
+      - name: Build workspace tests once
+        shell: bash
+        run: |
+          args=(--workspace --locked)
+          if [[ "$RUNNER_OS" == Linux ]]; then args+=(--exclude uqa-fdw); fi
+          cargo nextest archive "${args[@]}" --archive-file "$RUNNER_TEMP/uqa-tests.tar.zst"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workspace-tests-${{ inputs.os }}
+          path: ${{ runner.temp }}/uqa-tests.tar.zst
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - name: Test documentation examples
+        shell: bash
+        run: |
+          args=(--workspace --locked --doc)
+          if [[ "$RUNNER_OS" == Linux ]]; then args+=(--exclude uqa-fdw); fi
+          cargo test "${args[@]}"
+
+  features:
+    name: Verify analyzer feature configurations
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Free Linux runner disk
+        if: runner.os == 'Linux'
+        run: bash .github/scripts/free-linux-runner-disk.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-targets: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Test morphology bundle tools and embedded models
+        run: cargo test -p uqa-analysis -p uqa-nori-data -p uqa-kuromoji-data --features uqa-analysis/nori-tools,uqa-analysis/kuromoji-tools --locked
+      - name: Verify independent analyzer features
+        if: runner.os == 'Linux'
+        run: |
+          cargo test -p uqa-analysis --features kuromoji-tools --no-default-features --locked
+          cargo test -p uqa-storage -p uqa-storage-sqlite -p uqa-storage-redb -p uqa-scoring -p uqa-operators --features uqa-analysis/kuromoji --locked japanese_
+          cargo test -p uqa-engine --features kuromoji --test integration --locked kuromoji_
+          cargo test -p uqa-engine --no-default-features --test integration --locked kuromoji_
+          cargo test -p uqa-cli --features kuromoji --test integration --locked builtin_
+          python3 scripts/check-analyzer-feature-isolation.py
+      - name: Verify the standalone CLI without morphology dictionaries
+        if: runner.os == 'Linux'
+        run: |
+          cargo test -p uqa-cli --locked --no-default-features --test integration
+          cargo tree --locked -p uqa-cli --no-default-features --edges normal > target/cli-without-morphology.txt
+          if grep -Eq 'uqa-(nori|kuromoji)-data' target/cli-without-morphology.txt; then
+            echo "Morphology dictionary present in the feature-disabled CLI" >&2
+            exit 1
+          fi
+
+  test:
+    name: Test shard ${{ matrix.shard }}/8
+    needs: build
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nextest
+      - uses: actions/download-artifact@v4
+        with:
+          name: workspace-tests-${{ inputs.os }}
+          path: ${{ runner.temp }}
+      - name: Run prebuilt workspace tests
+        run: >-
+          cargo nextest run --profile ci
+          --archive-file "$RUNNER_TEMP/uqa-tests.tar.zst"
+          --extract-to "$GITHUB_WORKSPACE"
+          --workspace-remap "$GITHUB_WORKSPACE"
+          --partition slice:${{ matrix.shard }}/8
+      - name: Retain individual test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-results-${{ inputs.os }}-${{ matrix.shard }}
+          path: target/nextest/ci/junit.xml
+          retention-days: 7
+          if-no-files-found: error

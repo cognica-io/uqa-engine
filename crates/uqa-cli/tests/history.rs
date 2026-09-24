@@ -7,16 +7,9 @@
 //! Drives the compiled `usql` binary via piped stdin and confirms the
 //! `$UQA_HISTORY` file picks up executed statements.
 
+use super::binary_path;
 use std::io::Write;
-use std::path::PathBuf;
 use std::process::{Command, Stdio};
-
-fn binary_path() -> PathBuf {
-    // Cargo gives integration tests the path to the test binary
-    // through `CARGO_BIN_EXE_<name>`; for binary crates the entry is
-    // generated automatically.
-    PathBuf::from(env!("CARGO_BIN_EXE_usql"))
-}
 
 #[test]
 fn usql_persists_history_to_uqa_history_env_var() {

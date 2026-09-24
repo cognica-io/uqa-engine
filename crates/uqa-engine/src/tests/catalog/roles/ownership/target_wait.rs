@@ -63,7 +63,7 @@ fn role_binding_order_matches_relation_and_routine_target_waits() {
                     && !worker.is_finished()
                     && Instant::now() < deadline
                 {
-                    thread::yield_now();
+                    thread::sleep(Duration::from_millis(1));
                 }
                 let waited = first.row_locks.waiting_for_relation(session, key);
                 let replaced = third.sql("DROP ROLE dependent; CREATE ROLE dependent", &[]);

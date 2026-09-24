@@ -151,153 +151,159 @@ impl Target {
     }
 }
 
-#[test]
-fn creation_waits_retain_owners_through_rename_and_name_reuse() {
-    for provider in 0..3 {
-        for isolation in ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] {
-            for target in TARGETS {
-                let (directory, first, second) = sessions(provider);
-                let lock = setup(&first);
-                let original = first.durable.roles.read()["dependent"].identity();
-                sql(&first, "BEGIN");
-                first
-                    .acquire_shared_catalog(lock, RelationLockMode::AccessExclusive)
-                    .unwrap()
-                    .retain();
-                sql(
-                    &second,
-                    &format!("SET ROLE dependent; BEGIN ISOLATION LEVEL {isolation}; SELECT 1"),
-                );
-                let (second, result) = after_wait(
-                    &first,
-                    second,
-                    target.create,
-                    lock,
-                    "ALTER ROLE dependent RENAME TO renamed; CREATE ROLE dependent; COMMIT",
-                );
-                result.unwrap();
-                sql(&second, "COMMIT; RESET ROLE");
-                target.assert_created_as(&second, true, "renamed");
-                if target.create.contains("serial") {
-                    assert_eq!(
-                        sql(
-                            &second,
-                            "SELECT relowner FROM pg_class WHERE relname='created_id_seq'"
-                        )
-                        .rows[0]["relowner"],
-                        Value::Int(original.oid)
-                    );
-                }
-                drop(second);
-                drop(first);
-                target.assert_created_as(
-                    &reopen(provider, &directory.path().join("table-locks.db")),
-                    !target.temporary,
-                    "renamed",
-                );
-            }
-        }
+#[rstest::rstest]
+#[case::native_sqlite(0)]
+#[case::sqlite_key_value(1)]
+#[case::redb(2)]
+fn creation_waits_retain_owners_through_rename_and_name_reuse(
+    #[case] provider: usize,
+    #[values("READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE")] isolation: &str,
+    #[values(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)] target_index: usize,
+) {
+    let target = &TARGETS[target_index];
+    let (directory, first, second) = sessions(provider);
+    let lock = setup(&first);
+    let original = first.durable.roles.read()["dependent"].identity();
+    sql(&first, "BEGIN");
+    first
+        .acquire_shared_catalog(lock, RelationLockMode::AccessExclusive)
+        .unwrap()
+        .retain();
+    sql(
+        &second,
+        &format!("SET ROLE dependent; BEGIN ISOLATION LEVEL {isolation}; SELECT 1"),
+    );
+    let (second, result) = after_wait(
+        &first,
+        second,
+        target.create,
+        lock,
+        "ALTER ROLE dependent RENAME TO renamed; CREATE ROLE dependent; COMMIT",
+    );
+    result.unwrap();
+    sql(&second, "COMMIT; RESET ROLE");
+    target.assert_created_as(&second, true, "renamed");
+    if target.create.contains("serial") {
+        assert_eq!(
+            sql(
+                &second,
+                "SELECT relowner FROM pg_class WHERE relname='created_id_seq'"
+            )
+            .rows[0]["relowner"],
+            Value::Int(original.oid)
+        );
     }
+    drop(second);
+    drop(first);
+    target.assert_created_as(
+        &reopen(provider, &directory.path().join("table-locks.db")),
+        !target.temporary,
+        "renamed",
+    );
 }
 
-#[test]
-fn role_deletion_waits_for_creation_and_observes_commit_or_undo() {
-    for provider in 0..3 {
-        for isolation in ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] {
-            for target in TARGETS {
-                for finish in ["COMMIT", "ROLLBACK", "ROLLBACK TO undo; COMMIT"] {
-                    let (directory, first, second) = sessions(provider);
-                    let lock = setup(&first);
-                    sql(&first, &format!("SET ROLE dependent; BEGIN ISOLATION LEVEL {isolation}; INSERT INTO t VALUES (2); SAVEPOINT undo; {}", target.create));
-                    sql(
-                        &second,
-                        &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT 1"),
-                    );
-                    let (second, result) =
-                        after_wait(&first, second, "DROP ROLE dependent", lock, finish);
-                    let created = finish == "COMMIT";
-                    if created {
-                        assert_eq!(
-                            result.unwrap_err().sqlstate(),
-                            Some("2BP01"),
-                            "{} {provider} {isolation}",
-                            target.create
-                        );
-                        sql(&second, "ROLLBACK");
-                    } else {
-                        result.unwrap();
-                        sql(&second, "COMMIT");
-                    }
-                    sql(&first, "RESET ROLE");
-                    target.assert_created(&first, created);
-                    assert_eq!(
-                        sql(&first, "SELECT v FROM t").rows.len(),
-                        if finish == "ROLLBACK" { 1 } else { 2 }
-                    );
-                    drop(second);
-                    drop(first);
-                    target.assert_created(
-                        &reopen(provider, &directory.path().join("table-locks.db")),
-                        created && !target.temporary,
-                    );
-                }
-            }
-        }
+#[rstest::rstest]
+#[case::native_sqlite(0)]
+#[case::sqlite_key_value(1)]
+#[case::redb(2)]
+fn role_deletion_waits_for_creation_and_observes_commit_or_undo(
+    #[case] provider: usize,
+    #[values("READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE")] isolation: &str,
+    #[values(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)] target_index: usize,
+    #[values("COMMIT", "ROLLBACK", "ROLLBACK TO undo; COMMIT")] finish: &str,
+) {
+    let target = &TARGETS[target_index];
+    let (directory, first, second) = sessions(provider);
+    let lock = setup(&first);
+    sql(&first, &format!("SET ROLE dependent; BEGIN ISOLATION LEVEL {isolation}; INSERT INTO t VALUES (2); SAVEPOINT undo; {}", target.create));
+    sql(
+        &second,
+        &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT 1"),
+    );
+    let (second, result) = after_wait(&first, second, "DROP ROLE dependent", lock, finish);
+    let created = finish == "COMMIT";
+    if created {
+        assert_eq!(
+            result.unwrap_err().sqlstate(),
+            Some("2BP01"),
+            "{} {provider} {isolation}",
+            target.create
+        );
+        sql(&second, "ROLLBACK");
+    } else {
+        result.unwrap();
+        sql(&second, "COMMIT");
     }
+    sql(&first, "RESET ROLE");
+    target.assert_created(&first, created);
+    assert_eq!(
+        sql(&first, "SELECT v FROM t").rows.len(),
+        if finish == "ROLLBACK" { 1 } else { 2 }
+    );
+    drop(second);
+    drop(first);
+    target.assert_created(
+        &reopen(provider, &directory.path().join("table-locks.db")),
+        created && !target.temporary,
+    );
 }
 
-#[test]
-fn creation_waits_for_role_deletion_without_adopting_a_recreated_name() {
-    for provider in 0..3 {
-        for isolation in ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] {
-            for target in TARGETS {
-                for finish in ["COMMIT", "ROLLBACK", "ROLLBACK TO undo; COMMIT", "RECREATE"] {
-                    let (directory, first, second) = sessions(provider);
-                    let lock = setup(&first);
-                    sql(&second, &format!("SET ROLE dependent; BEGIN ISOLATION LEVEL {isolation}; INSERT INTO t VALUES (2)"));
-                    sql(&first, "BEGIN; SAVEPOINT undo; DROP ROLE dependent");
-                    if finish == "RECREATE" {
-                        sql(&first, "CREATE ROLE dependent");
-                    }
-                    let (second, result) = after_wait(
-                        &first,
-                        second,
-                        target.create,
-                        lock,
-                        if finish == "RECREATE" {
-                            "COMMIT"
-                        } else {
-                            finish
-                        },
-                    );
-                    let created = !matches!(finish, "COMMIT" | "RECREATE");
-                    if created {
-                        result.unwrap();
-                        sql(&second, "COMMIT; RESET ROLE");
-                    } else {
-                        assert_eq!(
-                            result.unwrap_err().sqlstate(),
-                            Some("42704"),
-                            "{} {provider} {isolation}",
-                            target.create
-                        );
-                        sql(&second, "ROLLBACK; RESET ROLE");
-                    }
-                    target.assert_created(&second, created);
-                    assert_eq!(
-                        sql(&first, "SELECT v FROM t").rows.len(),
-                        if created { 2 } else { 1 }
-                    );
-                    drop(second);
-                    drop(first);
-                    target.assert_created(
-                        &reopen(provider, &directory.path().join("table-locks.db")),
-                        created && !target.temporary,
-                    );
-                }
-            }
-        }
+#[rstest::rstest]
+#[case::native_sqlite(0)]
+#[case::sqlite_key_value(1)]
+#[case::redb(2)]
+fn creation_waits_for_role_deletion_without_adopting_a_recreated_name(
+    #[case] provider: usize,
+    #[values("READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE")] isolation: &str,
+    #[values(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)] target_index: usize,
+    #[values("COMMIT", "ROLLBACK", "ROLLBACK TO undo; COMMIT", "RECREATE")] finish: &str,
+) {
+    let target = &TARGETS[target_index];
+    let (directory, first, second) = sessions(provider);
+    let lock = setup(&first);
+    sql(
+        &second,
+        &format!("SET ROLE dependent; BEGIN ISOLATION LEVEL {isolation}; INSERT INTO t VALUES (2)"),
+    );
+    sql(&first, "BEGIN; SAVEPOINT undo; DROP ROLE dependent");
+    if finish == "RECREATE" {
+        sql(&first, "CREATE ROLE dependent");
     }
+    let (second, result) = after_wait(
+        &first,
+        second,
+        target.create,
+        lock,
+        if finish == "RECREATE" {
+            "COMMIT"
+        } else {
+            finish
+        },
+    );
+    let created = !matches!(finish, "COMMIT" | "RECREATE");
+    if created {
+        result.unwrap();
+        sql(&second, "COMMIT; RESET ROLE");
+    } else {
+        assert_eq!(
+            result.unwrap_err().sqlstate(),
+            Some("42704"),
+            "{} {provider} {isolation}",
+            target.create
+        );
+        sql(&second, "ROLLBACK; RESET ROLE");
+    }
+    target.assert_created(&second, created);
+    assert_eq!(
+        sql(&first, "SELECT v FROM t").rows.len(),
+        if created { 2 } else { 1 }
+    );
+    drop(second);
+    drop(first);
+    target.assert_created(
+        &reopen(provider, &directory.path().join("table-locks.db")),
+        created && !target.temporary,
+    );
 }
 
 #[test]

@@ -6,13 +6,10 @@
 
 //! CLI behavior coverage for the `usql` binary.
 
+use super::binary_path;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Output, Stdio};
-
-fn binary_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_usql"))
-}
 
 fn run_usql(args: &[&str], input: &str, history_dir: &Path) -> Output {
     let history = history_dir.join("hist");

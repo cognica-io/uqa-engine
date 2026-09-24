@@ -2,6 +2,12 @@
 
 UQA Engine uses layered verification because algebra, SQL compatibility, storage atomicity, retrieval exactness, graph semantics, bindings, and performance have different oracles. A green unit test in one layer does not replace end-to-end evidence in another.
 
+## Workspace CI execution
+
+Pre-merge and full CI build the workspace test archive once per platform and run eight disjoint nextest slices from that archive. The archive retains the ordinary unit and single integration binaries; it does not add test targets. All ordinary tests, including manual SQL examples, remain in the partitioned run. Documentation tests, analyzer feature configurations and the Linux FDW target retain their separate checks. Catalog-concurrency and provider-format matrices use named parameter cases so failures identify the provider, isolation, operation and completion choice without serializing the entire matrix inside one test.
+
+The `ci` profile emits a slow-test notice after 30 seconds and fails a test after five minutes, with no retry or timeout waiver. Each shard retains a JUnit artifact; generated results remain outside version control. These execution limits detect stalls and do not establish a performance acceptance bound. Local correctness checks can use `cargo nextest run --profile ci` with the same focused selection as `cargo test`; controlled-host requirements still apply to performance claims.
+
 ## Verification layers
 
 ```mermaid

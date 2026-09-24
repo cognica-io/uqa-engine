@@ -38,6 +38,9 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
             "      - rust-toolchain.toml\n"
             '      - ".cargo/**"\n'
             "      - .github/workflows/ci.yml\n"
+            "      - .github/workflows/workspace-tests.yml\n"
+            '      - ".github/actions/setup-nextest/**"\n'
+            "      - .config/nextest.toml\n"
         )
         push_trigger = self.workflow.split("on:\n", 1)[1].split(
             "  workflow_dispatch:\n", 1
@@ -84,6 +87,25 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         self.assertIn("--output target/kuromoji-reference-model --verify-only", job)
         self.assertIn("tests/parity/kuromoji/run_tokenizer_reference.py --platform linux/amd64 --offline", job)
         self.assertNotIn("--write", job)
+
+    def test_workspace_shards_reuse_builds_and_preserve_other_test_surfaces(self) -> None:
+        workspace = (ROOT / ".github/workflows/workspace-tests.yml").read_text(encoding="utf-8")
+        self.assertIn("cargo nextest archive", workspace)
+        self.assertIn("--partition slice:${{ matrix.shard }}/8", workspace)
+        self.assertIn("shard: [1, 2, 3, 4, 5, 6, 7, 8]", workspace)
+        shard = workspace.split("  test:\n", 1)[1]
+        self.assertIn("needs: build", shard)
+        self.assertIn("--archive-file", shard)
+        self.assertNotIn("cargo test", shard)
+        self.assertIn("--workspace --locked --doc", workspace)
+        self.assertIn("Verify independent analyzer features", workspace)
+        self.assertNotIn("--skip", workspace)
+        self.assertIn("if: always()", shard)
+        profile = (ROOT / ".config/nextest.toml").read_text(encoding="utf-8")
+        self.assertIn("retries = 0", profile)
+        self.assertIn("terminate-after = 10", profile)
+        self.assertNotIn('on-timeout = "pass"', profile)
+
 
     def test_temporary_tag_caches_are_restore_only(self) -> None:
         cache_step = (
@@ -294,6 +316,9 @@ class PremergeCITest(unittest.TestCase):
                 "false",
             ),
             (".github/workflows/ci.yml", ("ci.yml",), "true"),
+            (".github/workflows/workspace-tests.yml", ("ci.yml",), "true"),
+            (".github/actions/setup-nextest/action.yml", ("ci.yml",), "true"),
+            (".config/nextest.toml", ("ci.yml",), "true"),
             (".github/workflows/nori-sql-benchmarks.yml", ("ci.yml",), "true"),
             (".github/workflows/nori-cancellation-benchmarks.yml", ("ci.yml",), "true"),
         )

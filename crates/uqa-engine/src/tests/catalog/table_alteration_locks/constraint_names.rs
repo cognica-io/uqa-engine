@@ -39,60 +39,59 @@ fn check_rename_waits_for_an_uncommitted_owned_index_constraint_name() {
     }
 }
 
-#[test]
-fn constraint_names_coordinate_addition_and_renaming_in_both_orders() {
-    for provider in 0..3 {
-        for release in ["COMMIT", "ROLLBACK", "ROLLBACK TO undo; COMMIT"] {
-            for operation in [
-                "ALTER TABLE t RENAME CONSTRAINT positive TO shared",
-                "ALTER TABLE t RENAME CONSTRAINT required TO shared",
-                "ALTER TABLE t RENAME CONSTRAINT reference TO shared",
-                "ALTER TABLE t ADD CONSTRAINT shared CHECK(w<100)",
-                "ALTER TABLE t ADD CONSTRAINT shared NOT NULL u",
-                "ALTER TABLE t ADD CONSTRAINT shared FOREIGN KEY(f) REFERENCES parent(v)",
-                "CREATE CONSTRAINT TRIGGER shared AFTER INSERT ON t DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fire()",
-                "ALTER TABLE t RENAME CONSTRAINT event TO shared",
-            ] {
-                for reverse in [false, true] {
-                    let (_directory, first, second) = sessions(provider);
-                    sql(&first, "DROP TABLE t; CREATE TABLE parent(v int PRIMARY KEY); CREATE TABLE t(v int CONSTRAINT one UNIQUE,w int CONSTRAINT positive CHECK(w>0),n int CONSTRAINT required NOT NULL,f int CONSTRAINT reference REFERENCES parent(v),u int)");
-                    sql(&first, "CREATE FUNCTION fire() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$; CREATE CONSTRAINT TRIGGER event AFTER INSERT ON t DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fire()");
-                    let object_id = first.storage.tables.read()
-                        [&RelationIdentity::new("public", "t")]
-                        .object_id();
-                    let rename = "ALTER INDEX one RENAME TO shared";
-                    let (holder, waiter) = if reverse {
-                        (operation, rename)
-                    } else {
-                        (rename, operation)
-                    };
-                    sql(&first, &format!("BEGIN; SAVEPOINT undo; {holder}"));
-                    let (_second, result) = after_shared_wait(
-                        &first,
-                        second,
-                        waiter,
-                        SharedCatalogLock::MemberName {
-                            class_id: 2606,
-                            owner_class_id: 1259,
-                            owner_object_id: object_id,
-                            name: "shared",
-                        },
-                        release,
-                    );
-                    if release == "COMMIT" {
-                        assert_eq!(
-                            result.unwrap_err().sqlstate(),
-                            Some("23505"),
-                            "{provider}/{holder}/{waiter}"
-                        );
-                    } else {
-                        result.unwrap_or_else(|error| {
-                            panic!("{provider}/{holder}/{waiter}: {error}")
-                        });
-                    }
-                }
-            }
-        }
+const NAME_OPERATIONS: &[&str] = &[
+    "ALTER TABLE t RENAME CONSTRAINT positive TO shared",
+    "ALTER TABLE t RENAME CONSTRAINT required TO shared",
+    "ALTER TABLE t RENAME CONSTRAINT reference TO shared",
+    "ALTER TABLE t ADD CONSTRAINT shared CHECK(w<100)",
+    "ALTER TABLE t ADD CONSTRAINT shared NOT NULL u",
+    "ALTER TABLE t ADD CONSTRAINT shared FOREIGN KEY(f) REFERENCES parent(v)",
+    "CREATE CONSTRAINT TRIGGER shared AFTER INSERT ON t DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fire()",
+    "ALTER TABLE t RENAME CONSTRAINT event TO shared",
+];
+
+#[rstest::rstest]
+#[case::native_sqlite(0)]
+#[case::sqlite_key_value(1)]
+#[case::redb(2)]
+fn constraint_names_coordinate_addition_and_renaming_in_both_orders(
+    #[case] provider: usize,
+    #[values("COMMIT", "ROLLBACK", "ROLLBACK TO undo; COMMIT")] release: &str,
+    #[values(0, 1, 2, 3, 4, 5, 6, 7)] operation_index: usize,
+    #[values(false, true)] reverse: bool,
+) {
+    let operation = NAME_OPERATIONS[operation_index];
+    let (_directory, first, second) = sessions(provider);
+    sql(&first, "DROP TABLE t; CREATE TABLE parent(v int PRIMARY KEY); CREATE TABLE t(v int CONSTRAINT one UNIQUE,w int CONSTRAINT positive CHECK(w>0),n int CONSTRAINT required NOT NULL,f int CONSTRAINT reference REFERENCES parent(v),u int)");
+    sql(&first, "CREATE FUNCTION fire() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$; CREATE CONSTRAINT TRIGGER event AFTER INSERT ON t DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fire()");
+    let object_id = first.storage.tables.read()[&RelationIdentity::new("public", "t")].object_id();
+    let rename = "ALTER INDEX one RENAME TO shared";
+    let (holder, waiter) = if reverse {
+        (operation, rename)
+    } else {
+        (rename, operation)
+    };
+    sql(&first, &format!("BEGIN; SAVEPOINT undo; {holder}"));
+    let (_second, result) = after_shared_wait(
+        &first,
+        second,
+        waiter,
+        SharedCatalogLock::MemberName {
+            class_id: 2606,
+            owner_class_id: 1259,
+            owner_object_id: object_id,
+            name: "shared",
+        },
+        release,
+    );
+    if release == "COMMIT" {
+        assert_eq!(
+            result.unwrap_err().sqlstate(),
+            Some("23505"),
+            "{provider}/{holder}/{waiter}"
+        );
+    } else {
+        result.unwrap_or_else(|error| panic!("{provider}/{holder}/{waiter}: {error}"));
     }
 }
 
