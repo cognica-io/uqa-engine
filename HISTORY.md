@@ -36,6 +36,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve decimal and typed literal identity in grouped expressions, including numeric scale, type modifiers and parameter slots. Validate ungrouped inputs before constant folding or empty-input execution, bind equivalent casts to the same group value, preserve computed HAVING keys and missing grouping-set NULLs, and retain positional ordering with duplicate output labels. Ordinary/prepared queries and stored-view rename/reopen use the same SQL analysis.
 - Remove duplicate memory-index position buffers and reverse-term nodes, share document metadata and field counters with their existing owners, and move staged posting nodes during batch publication. Preserve complete token graphs, atomic mutation, retained snapshots and exact memory admission while restoring the existing Nori allocation contract.
 - Release local MVCC participant and receipt registry capacity when the final owner drops, including failed lease admission and redb commit/rollback with retained readers. Completed transactions no longer retain an empty 48-byte lease buffer, and local payloads share the participant allocation.
 - Reuse the Key/Value reader's analysis scratch allowance, preserve it through token projection, and move staged term keys after borrowed reverse-vocabulary encoding. Keep document metadata, postings and counters atomic without duplicate term buffers.
