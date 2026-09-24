@@ -55,7 +55,7 @@ fn interrupted_predecessor_restores_upgrade_without_losing_the_original_intent()
         for native in [false, true] {
             for (coordinator_published, predecessor) in [false, true]
                 .into_iter()
-                .flat_map(|published| [43, 44].map(|format| (published, format)))
+                .flat_map(|published| [43, 44, 45].map(|format| (published, format)))
             {
                 let directory = tempfile::tempdir().unwrap();
                 let path = directory.path().join("old-pending-restore.db");
@@ -71,7 +71,7 @@ fn interrupted_predecessor_restores_upgrade_without_losing_the_original_intent()
                             .publish_restored(backup.request, &control)
                             .unwrap();
                     }
-                    if predecessor == 44 {
+                    if predecessor >= 44 {
                         store.set_receipt_retention_limit(123, &control).unwrap();
                     }
                     crate::mvcc::tests::downgrade_record_format(&store, predecessor);
@@ -111,10 +111,10 @@ fn interrupted_predecessor_restores_upgrade_without_losing_the_original_intent()
                             [],
                             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                         )?;
-                        assert_eq!(format, 45);
+                        assert_eq!(format, 46);
                         assert_eq!(
                             limit,
-                            if predecessor == 44 {
+                            if predecessor >= 44 {
                                 123
                             } else {
                                 i64::try_from(uqa_storage::mvcc::DEFAULT_RECEIPT_RETENTION_LIMIT)
