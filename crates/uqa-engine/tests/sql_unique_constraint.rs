@@ -456,18 +456,21 @@ fn typed_dml_rejects_unknown_and_duplicate_target_columns() {
         );
     }
 
-    for sql in [
-        "INSERT INTO typed_rows (id, id) VALUES (2, 3)",
-        "UPDATE typed_rows SET payload = 'one', payload = 'two' WHERE id = 1",
+    for (sql, sqlstate, message) in [
+        (
+            "INSERT INTO typed_rows (id, id) VALUES (2, 3)",
+            "42701",
+            "column \"id\" specified more than once",
+        ),
+        (
+            "UPDATE typed_rows SET payload = 'one', payload = 'two' WHERE id = 1",
+            "42601",
+            "multiple assignments to same column \"payload\"",
+        ),
     ] {
         let error = eng.sql(sql, &[]).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .to_ascii_lowercase()
-                .contains("more than once"),
-            "unexpected error for {sql}: {error}"
-        );
+        assert_eq!(error.sqlstate(), Some(sqlstate), "{sql}: {error}");
+        assert_eq!(error.to_string(), message, "{sql}");
     }
 
     let row = eng
