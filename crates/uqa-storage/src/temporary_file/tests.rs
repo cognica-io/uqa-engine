@@ -117,7 +117,7 @@ fn modified_truncated_and_transplanted_blocks_are_rejected() {
         file.write_all(&vec![b'a'; BLOCK_BYTES * 2]).unwrap();
         let mut bytes = std::fs::read(file.path()).unwrap();
         match damage {
-            0 => bytes[1 + NONCE_BYTES + 3] ^= 1,
+            0 => bytes[1 + SLOT_HEADER_BYTES + 3] ^= 1,
             1 => {
                 bytes.pop();
             }
@@ -150,9 +150,9 @@ fn offset_sized_blocks_append_one_record_without_redecrypting_earlier_offsets() 
         file.write_all(&value.to_le_bytes()).unwrap();
     }
     assert_eq!(file.owner.lock().faults.read_blocks, 0);
-    // Each append writes exactly nonce + eight ciphertext bytes + tag + selector. The inactive slot is reserved, and no prior offset block is rewritten.
-    assert_eq!(file.owner.lock().faults.written_bytes, OFFSETS * 49);
-    assert_eq!(std::fs::metadata(file.path()).unwrap().len(), OFFSETS * 97);
+    // Each append writes one complete eight-byte slot and its selector. The inactive slot is reserved, and no prior offset block is rewritten.
+    assert_eq!(file.owner.lock().faults.written_bytes, OFFSETS * 51);
+    assert_eq!(std::fs::metadata(file.path()).unwrap().len(), OFFSETS * 101);
     let mut reader = file.reopen().unwrap();
     for value in 0..OFFSETS {
         let mut bytes = [0; 8];
@@ -175,7 +175,7 @@ fn vectored_records_share_one_block_publication_and_preserve_slice_order() {
     );
     assert_eq!(
         file.owner.lock().faults.written_bytes,
-        (NONCE_BYTES + BLOCK_BYTES + TAG_BYTES + 1) as u64
+        (SLOT_HEADER_BYTES + 13 + 1) as u64
     );
     let mut bytes = Vec::new();
     file.reopen().unwrap().read_to_end(&mut bytes).unwrap();
@@ -212,7 +212,7 @@ fn complete_vectored_records_skip_empty_slices_and_publish_each_block_once() {
     .unwrap();
     assert_eq!(
         file.owner.lock().faults.written_bytes - written,
-        3 * (NONCE_BYTES + 8 + TAG_BYTES + 1) as u64
+        (3 * (SLOT_HEADER_BYTES + 1) + 8 + 8 + 3) as u64
     );
     let mut bytes = Vec::new();
     file.reopen().unwrap().read_to_end(&mut bytes).unwrap();
@@ -223,6 +223,36 @@ fn complete_vectored_records_skip_empty_slices_and_publish_each_block_once() {
         .unwrap();
     assert_eq!(file.owner.lock().faults.written_bytes, written);
     assert_eq!(file.stream_position().unwrap(), bytes.len() as u64);
+}
+
+#[test]
+fn short_blocks_authenticate_their_populated_length_without_encrypting_padding() {
+    let mut file = TemporaryFile::new().unwrap();
+    file.write_all(b"small record").unwrap();
+    let written = file.owner.lock().faults.written_bytes;
+    assert_eq!(written, (SLOT_HEADER_BYTES + 12 + 1) as u64);
+    assert_eq!(
+        std::fs::metadata(file.path()).unwrap().len(),
+        RECORD_BYTES as u64
+    );
+    let original = std::fs::read(file.path()).unwrap();
+    for length in [0_u16, 11, 13, BLOCK_BYTES as u16 + 1] {
+        let mut damaged = original.clone();
+        damaged[1 + NONCE_BYTES..1 + NONCE_BYTES + LENGTH_BYTES]
+            .copy_from_slice(&length.to_le_bytes());
+        std::fs::write(file.path(), damaged).unwrap();
+        assert!(file.reopen().unwrap().read_exact(&mut [0]).is_err());
+    }
+    std::fs::write(file.path(), original).unwrap();
+    file.set_len(5).unwrap();
+    file.set_len(9).unwrap();
+    let mut restored = Vec::new();
+    file.reopen().unwrap().read_to_end(&mut restored).unwrap();
+    assert_eq!(restored, b"small\0\0\0\0");
+    assert_eq!(
+        file.owner.lock().faults.written_bytes - written,
+        (SLOT_HEADER_BYTES + 9 + 1) as u64
+    );
 }
 
 #[test]
