@@ -127,8 +127,10 @@ pub fn plpgsql_catalog(
 ) -> Result<uqa_sql::plpgsql::PlpgsqlCatalog, SQLError> {
     let catalog = context.catalog_read_view();
     let resolution = context.session_execution_view().relation_name_resolution();
+    // Routine restoration already owns the catalog boundary. Resolve the search path against the same captured definitions; refreshing here can reenter the registry lock and mix namespace generations.
     let search_path = context
-        .current_schema_names(true)
+        .namespaces
+        .current_schema_names_with_catalog(&catalog, true)
         .map_err(|error| SQLError::Internal(error.to_string()))?;
     plpgsql::plpgsql_catalog(&catalog, &resolution, search_path)
 }

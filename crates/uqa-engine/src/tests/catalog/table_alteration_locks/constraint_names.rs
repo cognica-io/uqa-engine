@@ -16,6 +16,55 @@ use uqa_execution::row_locks::shared_objects::SharedCatalogLock;
 mod automatic;
 
 #[test]
+fn routine_parser_retains_loaded_namespaces_during_catalog_restore() {
+    use std::sync::{atomic::Ordering, mpsc, Arc};
+    use std::time::Duration;
+    use uqa_sql::routines::compilation::RoutineParserCatalog;
+
+    for provider in 0..3 {
+        let (_directory, first, second) = sessions(provider);
+        drop(second);
+        sql(
+            &first,
+            "CREATE SCHEMA parser_scope; SET search_path TO parser_scope, public",
+        );
+        first.synchronize_catalog_registries().unwrap();
+        // Rollback restoration clears revision tracking before rebuilding routines. A sibling can publish an epoch after that restore chose its target generation.
+        *first.epochs.storage_cache_revisions.lock() = None;
+        let epoch = first
+            .epochs
+            .catalog_registry
+            .published
+            .fetch_add(1, Ordering::AcqRel)
+            + 1;
+        let first = Arc::new(first);
+        let restoring = first.epochs.catalog_registry.refresh.lock();
+        let worker = Arc::clone(&first);
+        let (send, receive) = mpsc::channel();
+        let task = std::thread::spawn(move || {
+            send.send(worker.plpgsql_catalog()).unwrap();
+        });
+        let result = receive.recv_timeout(Duration::from_secs(5));
+        // Also release a regressed reader before reporting failure, so the assertion never leaves a stalled test worker behind.
+        first
+            .epochs
+            .catalog_registry
+            .seen
+            .store(epoch, Ordering::Release);
+        drop(restoring);
+        task.join().unwrap();
+        let catalog = result
+            .expect("routine parsing must not wait for the catalog restore it belongs to")
+            .unwrap();
+        assert!(catalog.search_path.contains(&"parser_scope".to_string()));
+        assert!(catalog
+            .namespaces
+            .iter()
+            .any(|(name, _)| name == "parser_scope"));
+    }
+}
+
+#[test]
 fn check_rename_waits_for_an_uncommitted_owned_index_constraint_name() {
     for provider in 0..3 {
         let (_directory, first, second) = sessions(provider);
