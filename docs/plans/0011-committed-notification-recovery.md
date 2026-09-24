@@ -1,6 +1,6 @@
 # Committed notification publication recovery
 
-Status: Active; atomic publication, Engine completion and focused Linux Docker acceptance pass. Main integration and full CI remain pending behind PR #152.
+Status: Active; atomic publication, Engine completion and focused Linux Docker acceptance pass. Latest PR #152 product changes are integrated; final Rust and binding CI are running. PR #152 remains the sole open PR awaiting its separate merge authorization.
 
 Issue: [#129](https://github.com/cognica-io/uqa-engine/issues/129). Initial source: merged main `b2a94f3c`. Work branch: `fix/committed-notification-recovery`. PR #151 has merged; no additional PR opens while the next correction, PR #152, is active.
 
@@ -92,4 +92,4 @@ Main SQLite record format 48, redb record format 47, native mapping 9 and catalo
 
 An earlier process selection observed SQLite extended error 266 while the compressed-encrypted child opened its main file, before notification preparation. The unchanged VFS later passed the complete selection; this is not a fix. [Issue #153](https://github.com/cognica-io/uqa-engine/issues/153) retains the observed failure and candidate container-read race for immediate independent correction. The process test remains enabled. Compact local evidence: `/private/tmp/uqa-notification-encrypted-admission-tests.log`, `/private/tmp/uqa-notification-owner-final-tests.log`, `/private/tmp/uqa-notification-encrypted-admission-clippy.log`; the earlier VFS failure is `/private/tmp/uqa-notification-completion-tests.log`. These reports remain outside Git.
 
-Remaining: integrate with merged main after PR #152, run final Rust/Linux/macOS and binding CI against that product tree, address actual review findings and record exact source-scoped results before merge.
+Integrated source `2b4f9eb581ab82f25b4d8ce2247cf3631b2125e7` includes PR #152 head `48f77e48` and the complete notification correction. Final runs are [Rust/Linux/macOS](https://github.com/cognica-io/uqa-engine/actions/runs/36065094602), [JavaScript/WASM](https://github.com/cognica-io/uqa-engine/actions/runs/36065099610) and [Python](https://github.com/cognica-io/uqa-engine/actions/runs/36065104094); all are in progress. This includes the already merged #151 code without treating #152 as merged. Once #152 merges, align branch history to its actual squash commit and verify product-tree equivalence before reusing this evidence. Remaining: final CI outcomes, actual review findings and protected merge.
