@@ -146,8 +146,8 @@ pub(super) fn downgrade_record_format(store: &SQLiteRecordStore, format: i64) {
     store.with(|connection| {
         let _permit = schema::WritePermit::acquire(connection)?;
         let definition: String = connection.query_row("SELECT sql FROM sqlite_schema WHERE name = '_uqa_mvcc_metadata'", [], |row| row.get(0))?;
-        assert!(definition.contains("CHECK(format = 44)"));
-        let definition = if format < 43 { definition.split(", restore_target BLOB").next().unwrap().to_owned() + ")" } else { definition.split(", receipt_limit INTEGER").next().unwrap().to_owned() + ")" };
+        assert!(definition.contains("CHECK(format = 45)"));
+        let definition = if format < 43 { definition.split(", restore_target BLOB").next().unwrap().to_owned() + ")" } else if format < 44 { definition.split(", receipt_limit INTEGER").next().unwrap().to_owned() + ")" } else { definition };
         if format < 29 {
             assert_eq!(connection.query_row("SELECT count(*) FROM _uqa_mvcc_runs", [], |row| row.get::<_, i64>(0))?, 0);
             connection.execute_batch("DROP TABLE _uqa_mvcc_runs")?;
@@ -160,13 +160,15 @@ pub(super) fn downgrade_record_format(store: &SQLiteRecordStore, format: i64) {
             connection.execute_batch("DROP TABLE _uqa_mvcc_identifiers")?;
         }
         connection.execute_batch("ALTER TABLE _uqa_mvcc_metadata RENAME TO saved_metadata")?;
-        connection.execute_batch(&definition.replace("CHECK(format = 44)", &format!("CHECK(format = {format})")))?;
-        let restore = if format < 43 { "" } else { ", restore_target" };
+        connection.execute_batch(&definition.replace("CHECK(format = 45)", &format!("CHECK(format = {format})")))?;
+        let restore = if format < 43 { "" } else if format < 44 { ", restore_target" } else { ", restore_target, receipt_limit" };
         connection.execute_batch(&format!("INSERT INTO _uqa_mvcc_metadata SELECT singleton, {format}, database_id, allocated, sequence, mapping{restore} FROM saved_metadata; DROP TABLE saved_metadata;"))?;
+        if format < 44 {
         connection.execute_batch("ALTER TABLE _uqa_mvcc_transactions RENAME TO saved_transactions")?;
         connection.execute_batch(schema::PREVIOUS_TRANSACTIONS)?;
         connection.execute_batch("INSERT INTO _uqa_mvcc_transactions SELECT allocation, CASE status WHEN 3 THEN 1 WHEN 4 THEN 2 ELSE status END, sequence, fingerprint FROM saved_transactions; DROP TABLE saved_transactions;")?;
         for action in ["INSERT", "UPDATE", "DELETE"] { connection.execute_batch(&schema::trigger("_uqa_mvcc_transactions", action).1)?; }
+        }
         for action in ["INSERT", "UPDATE", "DELETE"] { connection.execute_batch(&schema::trigger("_uqa_mvcc_metadata", action).1)?; }
         Ok(())
     }).unwrap();
@@ -252,7 +254,7 @@ fn reject_predecessor_access(
 #[test]
 fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
     let control = control();
-    for (mode, format) in (0..3).flat_map(|mode| (1..=43).map(move |format| (mode, format))) {
+    for (mode, format) in (0..3).flat_map(|mode| (1..=44).map(move |format| (mode, format))) {
         let connection = ManagedConnection::open_in_memory().unwrap();
         if mode == 2 {
             crate::Catalog::open(connection.clone()).unwrap();
@@ -337,7 +339,7 @@ fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
                 assert_eq!(
                     connection.query_row("SELECT format FROM _uqa_mvcc_metadata", [], |row| row
                         .get::<_, i64>(0))?,
-                    44
+                    45
                 );
                 Ok(())
             })
@@ -348,7 +350,7 @@ fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
 
 #[test]
 fn failed_record_format_upgrade_restores_the_old_schema_and_allows_repair() {
-    for format in 1..=43 {
+    for format in 1..=44 {
         let connection = ManagedConnection::open_in_memory().unwrap();
         let store = SQLiteRecordStore::new(&connection).unwrap();
         downgrade_record_format(&store, format);
@@ -385,7 +387,7 @@ fn failed_record_format_upgrade_restores_the_old_schema_and_allows_repair() {
 #[test]
 fn closed_record_format_files_upgrade_in_every_sqlite_mode() {
     let control = control();
-    for (mode, format) in (0..4).flat_map(|mode| (1..=43).map(move |format| (mode, format))) {
+    for (mode, format) in (0..4).flat_map(|mode| (1..=44).map(move |format| (mode, format))) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("record-upgrade.db");
         let open = || {

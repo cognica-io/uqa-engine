@@ -76,6 +76,13 @@ fn convert(
     }
     match tag.as_str() {
         "void" if map.len() == 1 => return Ok(Value::Void),
+        "float_bits" if map.len() == 2 => {
+            if let Some(Value::Str(hex)) = map.get("hex") {
+                if let Some(value) = super::nonfinite::decode(hex) {
+                    return Ok(Value::Float(value));
+                }
+            }
+        }
         "decimal" => {
             if let Some(Value::Str(text)) = map.get("value") {
                 if let Some(value) = workspace.decimal(text)? {

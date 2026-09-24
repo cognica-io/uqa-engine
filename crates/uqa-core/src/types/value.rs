@@ -14,6 +14,7 @@ use super::{
 pub(super) mod comparison_control;
 mod copying;
 mod decoding;
+mod nonfinite;
 mod retention;
 pub use decoding::JsonValueDecoder;
 mod tagged;
@@ -112,7 +113,7 @@ impl Serialize for Value {
             Self::Void => TaggedUnit { kind: "void" }.serialize(serializer),
             Self::Bool(value) => serializer.serialize_bool(*value),
             Self::Int(value) => serializer.serialize_i64(*value),
-            Self::Float(value) => serializer.serialize_f64(*value),
+            Self::Float(value) => nonfinite::serialize(*value, serializer),
             Self::Str(value) => serializer.serialize_str(value),
             Self::FixedChar(value) => TaggedText {
                 kind: "fixed_char",

@@ -53,7 +53,10 @@ fn restored_receipt_capacity_survives_retry_and_live_managed_owners_exclude_rest
 fn interrupted_predecessor_restores_upgrade_without_losing_the_original_intent() {
     for mode in 0..4 {
         for native in [false, true] {
-            for coordinator_published in [false, true] {
+            for (coordinator_published, predecessor) in [false, true]
+                .into_iter()
+                .flat_map(|published| [43, 44].map(|format| (published, format)))
+            {
                 let directory = tempfile::tempdir().unwrap();
                 let path = directory.path().join("old-pending-restore.db");
                 let backup = seed(&path, mode, native);
@@ -68,7 +71,10 @@ fn interrupted_predecessor_restores_upgrade_without_losing_the_original_intent()
                             .publish_restored(backup.request, &control)
                             .unwrap();
                     }
-                    crate::mvcc::tests::downgrade_record_format(&store, 43);
+                    if predecessor == 44 {
+                        store.set_receipt_retention_limit(123, &control).unwrap();
+                    }
+                    crate::mvcc::tests::downgrade_record_format(&store, predecessor);
                     store
                         .with(|sqlite| {
                             let _permit = schema::WritePermit::acquire(sqlite)?;
@@ -105,11 +111,15 @@ fn interrupted_predecessor_restores_upgrade_without_losing_the_original_intent()
                             [],
                             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                         )?;
-                        assert_eq!(format, 44);
+                        assert_eq!(format, 45);
                         assert_eq!(
                             limit,
-                            i64::try_from(uqa_storage::mvcc::DEFAULT_RECEIPT_RETENTION_LIMIT)
-                                .unwrap()
+                            if predecessor == 44 {
+                                123
+                            } else {
+                                i64::try_from(uqa_storage::mvcc::DEFAULT_RECEIPT_RETENTION_LIMIT)
+                                    .unwrap()
+                            }
                         );
                         assert_eq!(pending, None);
                         Ok(())

@@ -70,6 +70,14 @@ fn typed_blob_round_trips_every_persisted_variant() {
             ArrayValue::with_lower_bounds(vec![Value::Int(1), Value::Int(2)], vec![-2]).unwrap(),
         ),
         Value::Array(ArrayValue::with_lower_bounds(Vec::new(), Vec::new()).unwrap()),
+        Value::Array(
+            ArrayValue::try_new(vec![
+                Value::Float(f64::NAN),
+                Value::Float(f64::INFINITY),
+                Value::Float(f64::NEG_INFINITY),
+            ])
+            .unwrap(),
+        ),
     ];
     for value in &scalars {
         parity(&encoded(value.clone()));
