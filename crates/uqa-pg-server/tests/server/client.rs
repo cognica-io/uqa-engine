@@ -114,30 +114,39 @@ impl Client {
     }
 
     pub fn receive(&mut self) -> Message {
+        self.try_receive().expect("receive PostgreSQL message")
+    }
+
+    fn try_receive(&mut self) -> std::io::Result<Message> {
         let mut header = [0; 5];
-        self.socket.read_exact(&mut header).unwrap();
+        self.socket.read_exact(&mut header)?;
         let length = i32::from_be_bytes(header[1..].try_into().unwrap());
         assert!((4..16 * 1024 * 1024).contains(&length));
         let mut body = vec![0; length as usize - 4];
-        self.socket.read_exact(&mut body).unwrap();
-        (header[0], body)
+        self.socket.read_exact(&mut body)?;
+        Ok((header[0], body))
     }
 
     pub fn query(&mut self, sql: &str) -> Vec<Message> {
         let mut query = sql.as_bytes().to_vec();
         query.push(0);
         self.send(b'Q', &query);
-        self.finish_query()
+        self.try_finish_query()
+            .unwrap_or_else(|error| panic!("receive response to {sql:?}: {error}"))
     }
 
     pub fn finish_query(&mut self) -> Vec<Message> {
+        self.try_finish_query().expect("finish PostgreSQL query")
+    }
+
+    fn try_finish_query(&mut self) -> std::io::Result<Vec<Message>> {
         let mut messages = Vec::new();
         loop {
-            let message = self.receive();
+            let message = self.try_receive()?;
             let done = message.0 == b'Z';
             messages.push(message);
             if done {
-                return messages;
+                return Ok(messages);
             }
         }
     }
