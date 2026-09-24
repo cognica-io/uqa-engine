@@ -15,6 +15,13 @@
           "value": "{1,9,3}",
           "dimensions": "[1:3]"
         }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{1,9,3}",
+          "dimensions": "[1:3]"
+        }
       ]
     },
     {
@@ -25,6 +32,13 @@
       ],
       "sql": "UPDATE assignment_target SET value[2]=NULL WHERE id=1 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
       "rows": [
+        {
+          "id": 1,
+          "value": "{1,NULL,3}",
+          "dimensions": "[1:3]"
+        }
+      ],
+      "stored": [
         {
           "id": 1,
           "value": "{1,NULL,3}",
@@ -45,6 +59,13 @@
           "value": "[-1:3]={9,NULL,1,2,3}",
           "dimensions": "[-1:3]"
         }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "[-1:3]={9,NULL,1,2,3}",
+          "dimensions": "[-1:3]"
+        }
       ]
     },
     {
@@ -55,6 +76,13 @@
       ],
       "sql": "UPDATE assignment_target SET value[5]=9 WHERE id=1 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
       "rows": [
+        {
+          "id": 1,
+          "value": "{1,2,3,NULL,9}",
+          "dimensions": "[1:5]"
+        }
+      ],
+      "stored": [
         {
           "id": 1,
           "value": "{1,2,3,NULL,9}",
@@ -75,6 +103,13 @@
           "value": "{1,8,9}",
           "dimensions": "[1:3]"
         }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{1,8,9}",
+          "dimensions": "[1:3]"
+        }
       ]
     },
     {
@@ -85,6 +120,13 @@
       ],
       "sql": "UPDATE assignment_target SET value[:2]=ARRAY[8,9] WHERE id=1 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
       "rows": [
+        {
+          "id": 1,
+          "value": "{8,9,3}",
+          "dimensions": "[1:3]"
+        }
+      ],
+      "stored": [
         {
           "id": 1,
           "value": "{8,9,3}",
@@ -105,6 +147,13 @@
           "value": "{1,8,9}",
           "dimensions": "[1:3]"
         }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{1,8,9}",
+          "dimensions": "[1:3]"
+        }
       ]
     },
     {
@@ -115,6 +164,13 @@
       ],
       "sql": "UPDATE assignment_target SET value[2:3]=NULL WHERE id=1 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
       "rows": [
+        {
+          "id": 1,
+          "value": "{1,2,3}",
+          "dimensions": "[1:3]"
+        }
+      ],
+      "stored": [
         {
           "id": 1,
           "value": "{1,2,3}",
@@ -197,6 +253,13 @@
           "value": "[2:2]={9}",
           "dimensions": "[2:2]"
         }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "[2:2]={9}",
+          "dimensions": "[2:2]"
+        }
       ]
     },
     {
@@ -212,6 +275,13 @@
           "value": "[2:2]={9}",
           "dimensions": "[2:2]"
         }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "[2:2]={9}",
+          "dimensions": "[2:2]"
+        }
       ]
     },
     {
@@ -221,7 +291,14 @@
         "INSERT INTO assignment_target VALUES (1, ARRAY[1,2,3])"
       ],
       "sql": "UPDATE assignment_target SET value[NULL]=9 WHERE false RETURNING id, value::text AS value, array_dims(value) AS dimensions",
-      "rows": []
+      "rows": [],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{1,2,3}",
+          "dimensions": "[1:3]"
+        }
+      ]
     },
     {
       "name": "repeated_element_targets",
@@ -231,6 +308,13 @@
       ],
       "sql": "UPDATE assignment_target SET value[1]=value[2],value[2]=value[1] RETURNING id, value::text AS value, array_dims(value) AS dimensions",
       "rows": [
+        {
+          "id": 1,
+          "value": "{2,1,3}",
+          "dimensions": "[1:3]"
+        }
+      ],
+      "stored": [
         {
           "id": 1,
           "value": "{2,1,3}",
@@ -263,6 +347,13 @@
           "value": "{{1,2},{9,4}}",
           "dimensions": "[1:2][1:2]"
         }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{{1,2},{9,4}}",
+          "dimensions": "[1:2][1:2]"
+        }
       ]
     },
     {
@@ -273,6 +364,13 @@
       ],
       "sql": "UPDATE assignment_target SET value[1:2][2:2]=ARRAY[[8],[9]] RETURNING id, value::text AS value, array_dims(value) AS dimensions",
       "rows": [
+        {
+          "id": 1,
+          "value": "{{1,8},{3,9}}",
+          "dimensions": "[1:2][1:2]"
+        }
+      ],
+      "stored": [
         {
           "id": 1,
           "value": "{{1,8},{3,9}}",
@@ -293,6 +391,13 @@
           "value": "{{1,8},{3,9}}",
           "dimensions": "[1:2][1:2]"
         }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{{1,8},{3,9}}",
+          "dimensions": "[1:2][1:2]"
+        }
       ]
     },
     {
@@ -303,6 +408,13 @@
       ],
       "sql": "UPDATE assignment_target SET value[2:2]=ARRAY[8,9,10] RETURNING id, value::text AS value, array_dims(value) AS dimensions",
       "rows": [
+        {
+          "id": 1,
+          "value": "{{1,2},{8,9}}",
+          "dimensions": "[1:2][1:2]"
+        }
+      ],
+      "stored": [
         {
           "id": 1,
           "value": "{{1,2},{8,9}}",
@@ -347,6 +459,13 @@
           "value": "[0:1][-1:0]={{1,2},{3,9}}",
           "dimensions": "[0:1][-1:0]"
         }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "[0:1][-1:0]={{1,2},{3,9}}",
+          "dimensions": "[0:1][-1:0]"
+        }
       ]
     },
     {
@@ -357,6 +476,13 @@
       ],
       "sql": "UPDATE assignment_target SET value[5:6]=ARRAY[8,9] RETURNING id, value::text AS value, array_dims(value) AS dimensions",
       "rows": [
+        {
+          "id": 1,
+          "value": "{1,2,3,NULL,8,9}",
+          "dimensions": "[1:6]"
+        }
+      ],
+      "stored": [
         {
           "id": 1,
           "value": "{1,2,3,NULL,8,9}",
@@ -385,6 +511,13 @@
       ],
       "sql": "UPDATE assignment_target SET value[3:2]=ARRAY[1] RETURNING id, value::text AS value, array_dims(value) AS dimensions",
       "rows": [
+        {
+          "id": 1,
+          "value": "{}",
+          "dimensions": null
+        }
+      ],
+      "stored": [
         {
           "id": 1,
           "value": "{}",
@@ -453,6 +586,18 @@
           "value": "[3:3]={9}",
           "dimensions": "[3:3]"
         }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{1,2,3}",
+          "dimensions": "[1:3]"
+        },
+        {
+          "id": 2,
+          "value": "[3:3]={9}",
+          "dimensions": "[3:3]"
+        }
       ]
     },
     {
@@ -463,6 +608,18 @@
       ],
       "sql": "INSERT INTO assignment_target(id,value[1],value[3]) VALUES(2,7,9) RETURNING id, value::text AS value, array_dims(value) AS dimensions",
       "rows": [
+        {
+          "id": 2,
+          "value": "{7,NULL,9}",
+          "dimensions": "[1:3]"
+        }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{1,2,3}",
+          "dimensions": "[1:3]"
+        },
         {
           "id": 2,
           "value": "{7,NULL,9}",
@@ -495,6 +652,18 @@
           "value": "[3:3]={9}",
           "dimensions": "[3:3]"
         }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{1,2,3}",
+          "dimensions": "[1:3]"
+        },
+        {
+          "id": 2,
+          "value": "[3:3]={9}",
+          "dimensions": "[3:3]"
+        }
       ]
     },
     {
@@ -505,6 +674,13 @@
       ],
       "sql": "INSERT INTO assignment_target VALUES(1,ARRAY[7,8]) ON CONFLICT(id) DO UPDATE SET value[2]=excluded.value[1] RETURNING id, value::text AS value, array_dims(value) AS dimensions",
       "rows": [
+        {
+          "id": 1,
+          "value": "{1,7,3}",
+          "dimensions": "[1:3]"
+        }
+      ],
+      "stored": [
         {
           "id": 1,
           "value": "{1,7,3}",
@@ -525,6 +701,13 @@
           "value": "{1,9,3}",
           "dimensions": "[1:3]"
         }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{1,9,3}",
+          "dimensions": "[1:3]"
+        }
       ]
     },
     {
@@ -535,6 +718,18 @@
       ],
       "sql": "MERGE INTO assignment_target AS t USING (VALUES(2,9)) AS s(id,n) ON t.id=s.id WHEN NOT MATCHED THEN INSERT(id,value[2]) VALUES(s.id,s.n) RETURNING t.id, value::text AS value, array_dims(value) AS dimensions",
       "rows": [
+        {
+          "id": 2,
+          "value": "[2:2]={9}",
+          "dimensions": "[2:2]"
+        }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{1,2,3}",
+          "dimensions": "[1:3]"
+        },
         {
           "id": 2,
           "value": "[2:2]={9}",
@@ -580,6 +775,13 @@
           "value": "{1,9,3}",
           "dimensions": "[1:3]"
         }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{1,9,3}",
+          "dimensions": "[1:3]"
+        }
       ]
     },
     {
@@ -608,6 +810,13 @@
           "value": "{9,2,3}",
           "dimensions": "[1:3]"
         }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{9,2,3}",
+          "dimensions": "[1:3]"
+        }
       ]
     },
     {
@@ -618,6 +827,13 @@
       ],
       "sql": "UPDATE assignment_target SET value[1]=7,value[1]=9 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
       "rows": [
+        {
+          "id": 1,
+          "value": "{9,2,3}",
+          "dimensions": "[1:3]"
+        }
+      ],
+      "stored": [
         {
           "id": 1,
           "value": "{9,2,3}",
@@ -638,6 +854,13 @@
           "value": "{1,9,3}",
           "dimensions": "[1:3]"
         }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{1,9,3}",
+          "dimensions": "[1:3]"
+        }
       ]
     },
     {
@@ -648,6 +871,13 @@
       ],
       "sql": "UPDATE assignment_target SET value[(SELECT 2)]=9 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
       "rows": [
+        {
+          "id": 1,
+          "value": "{1,9,3}",
+          "dimensions": "[1:3]"
+        }
+      ],
+      "stored": [
         {
           "id": 1,
           "value": "{1,9,3}",
@@ -668,6 +898,13 @@
           "value": "{1,9,3}",
           "dimensions": "[1:3]"
         }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{1,9,3}",
+          "dimensions": "[1:3]"
+        }
       ]
     },
     {
@@ -683,6 +920,13 @@
           "value": "{{8,9},{10,11}}",
           "dimensions": "[1:2][1:2]"
         }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{{8,9},{10,11}}",
+          "dimensions": "[1:2][1:2]"
+        }
       ]
     },
     {
@@ -692,6 +936,13 @@
       ],
       "sql": "INSERT INTO assignment_target(id,value[3]) VALUES(2,9) RETURNING id, value::text AS value, array_dims(value) AS dimensions",
       "rows": [
+        {
+          "id": 2,
+          "value": "[3:3]={9}",
+          "dimensions": "[3:3]"
+        }
+      ],
+      "stored": [
         {
           "id": 2,
           "value": "[3:3]={9}",
@@ -737,6 +988,13 @@
           "value": "{3,4}",
           "dimensions": "[1:2]"
         }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{3,4}",
+          "dimensions": "[1:2]"
+        }
       ]
     },
     {
@@ -747,6 +1005,13 @@
       ],
       "sql": "INSERT INTO assignment_target(id,value[1:2]) VALUES(1,NULL) RETURNING id, value::text AS value, array_dims(value) AS dimensions",
       "rows": [
+        {
+          "id": 1,
+          "value": "{}",
+          "dimensions": null
+        }
+      ],
+      "stored": [
         {
           "id": 1,
           "value": "{}",
@@ -768,6 +1033,13 @@
           "value": "{2,1,3}",
           "dimensions": "[1:3]"
         }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{2,1,3}",
+          "dimensions": "[1:3]"
+        }
       ]
     },
     {
@@ -784,7 +1056,412 @@
           "value": "{7,NULL,9}",
           "dimensions": "[1:3]"
         }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{1,2,3}",
+          "dimensions": "[1:3]"
+        },
+        {
+          "id": 2,
+          "value": "{7,NULL,9}",
+          "dimensions": "[1:3]"
+        }
       ]
+    },
+    {
+      "name": "stored_function_element",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1, ARRAY[1,2,3])",
+        "CREATE FUNCTION assignment_patch(target_slot integer, replacement integer) RETURNS TABLE(id integer,value text,dimensions text) LANGUAGE SQL BEGIN ATOMIC UPDATE assignment_target SET value[target_slot]=replacement RETURNING id,value::text,array_dims(value); END"
+      ],
+      "sql": "SELECT * FROM assignment_patch(2,9)",
+      "stored_sql": "SELECT id, value::text AS value, array_dims(value) AS dimensions FROM assignment_target ORDER BY id",
+      "reopen_before": true,
+      "rows": [
+        {
+          "id": 1,
+          "value": "{1,9,3}",
+          "dimensions": "[1:3]"
+        }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{1,9,3}",
+          "dimensions": "[1:3]"
+        }
+      ]
+    },
+    {
+      "name": "stored_function_target_rename",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1, ARRAY[1,2,3])",
+        "CREATE FUNCTION assignment_patch(target_slot integer, replacement integer) RETURNS TABLE(id integer,value text,dimensions text) LANGUAGE SQL BEGIN ATOMIC UPDATE assignment_target SET value[target_slot]=replacement RETURNING id,value::text,array_dims(value); END",
+        "ALTER TABLE assignment_target RENAME COLUMN value TO payload",
+        "ALTER TABLE assignment_target ADD COLUMN value integer[] DEFAULT ARRAY[90,91,92]"
+      ],
+      "sql": "SELECT * FROM assignment_patch(2,9)",
+      "stored_sql": "SELECT id, payload::text AS value, array_dims(payload) AS dimensions FROM assignment_target ORDER BY id",
+      "reopen_before": true,
+      "rows": [
+        {
+          "id": 1,
+          "value": "{1,9,3}",
+          "dimensions": "[1:3]"
+        }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{1,9,3}",
+          "dimensions": "[1:3]"
+        }
+      ]
+    },
+    {
+      "name": "stored_function_bound_rename",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1, ARRAY[1,2,3])",
+        "ALTER TABLE assignment_target ADD COLUMN slot integer DEFAULT 2",
+        "CREATE FUNCTION assignment_patch(replacement integer) RETURNS TABLE(id integer,value text,dimensions text) LANGUAGE SQL BEGIN ATOMIC UPDATE assignment_target SET value[slot]=replacement RETURNING id,value::text,array_dims(value); END",
+        "ALTER TABLE assignment_target RENAME COLUMN slot TO retained_slot",
+        "ALTER TABLE assignment_target ADD COLUMN slot integer DEFAULT 3"
+      ],
+      "sql": "SELECT * FROM assignment_patch(9)",
+      "stored_sql": "SELECT id, value::text AS value, array_dims(value) AS dimensions FROM assignment_target ORDER BY id",
+      "reopen_before": true,
+      "rows": [
+        {
+          "id": 1,
+          "value": "{1,9,3}",
+          "dimensions": "[1:3]"
+        }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{1,9,3}",
+          "dimensions": "[1:3]"
+        }
+      ]
+    },
+    {
+      "name": "stored_function_bound_routine_rename",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1, ARRAY[1,2,3])",
+        "CREATE FUNCTION assignment_position() RETURNS integer LANGUAGE SQL IMMUTABLE RETURN 2",
+        "CREATE FUNCTION assignment_patch(replacement integer) RETURNS TABLE(id integer,value text,dimensions text) LANGUAGE SQL BEGIN ATOMIC UPDATE assignment_target SET value[assignment_position()]=replacement RETURNING id,value::text,array_dims(value); END",
+        "ALTER FUNCTION assignment_position() RENAME TO retained_position",
+        "CREATE FUNCTION assignment_position() RETURNS integer LANGUAGE SQL IMMUTABLE RETURN 3"
+      ],
+      "sql": "SELECT * FROM assignment_patch(9)",
+      "stored_sql": "SELECT id, value::text AS value, array_dims(value) AS dimensions FROM assignment_target ORDER BY id",
+      "reopen_before": true,
+      "rows": [
+        {
+          "id": 1,
+          "value": "{1,9,3}",
+          "dimensions": "[1:3]"
+        }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{1,9,3}",
+          "dimensions": "[1:3]"
+        }
+      ]
+    },
+    {
+      "name": "stored_rule_element",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1, ARRAY[1,2,3])",
+        "CREATE TABLE assignment_command(id integer,slot integer,replacement integer)",
+        "CREATE RULE assignment_rule AS ON INSERT TO assignment_command DO ALSO UPDATE assignment_target SET value[new.slot]=new.replacement WHERE assignment_target.id=new.id"
+      ],
+      "sql": "INSERT INTO assignment_command VALUES(1,2,9) RETURNING id,replacement::text AS value,NULL::text AS dimensions",
+      "stored_sql": "SELECT id, value::text AS value, array_dims(value) AS dimensions FROM assignment_target ORDER BY id",
+      "reopen_before": true,
+      "rows": [
+        {
+          "id": 1,
+          "value": "9",
+          "dimensions": null
+        }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{1,9,3}",
+          "dimensions": "[1:3]"
+        }
+      ]
+    },
+    {
+      "name": "stored_rule_target_rename",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1, ARRAY[1,2,3])",
+        "CREATE TABLE assignment_command(id integer,slot integer,replacement integer)",
+        "CREATE RULE assignment_rule AS ON INSERT TO assignment_command DO ALSO UPDATE assignment_target SET value[new.slot]=new.replacement WHERE assignment_target.id=new.id",
+        "ALTER TABLE assignment_target RENAME COLUMN value TO payload",
+        "ALTER TABLE assignment_target ADD COLUMN value integer[] DEFAULT ARRAY[90,91,92]"
+      ],
+      "sql": "INSERT INTO assignment_command VALUES(1,2,9) RETURNING id,replacement::text AS value,NULL::text AS dimensions",
+      "stored_sql": "SELECT id, payload::text AS value, array_dims(payload) AS dimensions FROM assignment_target ORDER BY id",
+      "reopen_before": true,
+      "rows": [
+        {
+          "id": 1,
+          "value": "9",
+          "dimensions": null
+        }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{1,9,3}",
+          "dimensions": "[1:3]"
+        }
+      ]
+    },
+    {
+      "name": "generated_value_after_partial_assignment",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1, ARRAY[1,2,3])",
+        "ALTER TABLE assignment_target ADD COLUMN total integer GENERATED ALWAYS AS (value[1]+value[2]) STORED"
+      ],
+      "sql": "UPDATE assignment_target SET value[1]=7,value[2]=9 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "stored_sql": "SELECT id, value::text AS value, array_dims(value) AS dimensions,total FROM assignment_target ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "value": "{7,9,3}",
+          "dimensions": "[1:3]"
+        }
+      ],
+      "stored": [
+        {
+          "id": 1,
+          "value": "{7,9,3}",
+          "dimensions": "[1:3]",
+          "total": 16
+        }
+      ]
+    },
+    {
+      "name": "domain_multiple_rows_atomic",
+      "setup": [
+        "CREATE DOMAIN assignment_items AS integer[] CHECK(value[2]<10)",
+        "CREATE TABLE assignment_target(id integer PRIMARY KEY,value assignment_items)",
+        "INSERT INTO assignment_target VALUES(1,ARRAY[1,2,3]),(2,ARRAY[4,5,6])"
+      ],
+      "sql": "UPDATE assignment_target SET value[2]=value[2]+7 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "savepoint": true,
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain assignment_items violates check constraint \"assignment_items_check\""
+      }
+    },
+    {
+      "name": "unique_multiple_rows_atomic",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1, ARRAY[1,2,3])",
+        "INSERT INTO assignment_target VALUES(2,ARRAY[4,5,6])",
+        "CREATE UNIQUE INDEX assignment_element_key ON assignment_target((value[2]))"
+      ],
+      "sql": "UPDATE assignment_target SET value[2]=9 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "savepoint": true,
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"assignment_element_key\"",
+        "detail": "Key ((value[2]))=(9) already exists."
+      }
+    },
+    {
+      "name": "trigger_assignment_failure",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1, ARRAY[1,2,3])",
+        "CREATE FUNCTION assignment_reject() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'assignment rejected'; END $$",
+        "CREATE TRIGGER assignment_reject AFTER UPDATE ON assignment_target FOR EACH ROW EXECUTE FUNCTION assignment_reject()"
+      ],
+      "sql": "UPDATE assignment_target SET value[2]=9 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "savepoint": true,
+      "error": {
+        "sqlstate": "P0001",
+        "message": "assignment rejected"
+      }
+    },
+    {
+      "name": "unique_expression_column_privileges",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1, ARRAY[1,2,3])",
+        "INSERT INTO assignment_target VALUES(2,ARRAY[4,5,6])",
+        "CREATE UNIQUE INDEX assignment_element_key ON assignment_target((value[2]))",
+        "CREATE ROLE assignment_writer",
+        "GRANT UPDATE(value),SELECT(id,value) ON assignment_target TO assignment_writer"
+      ],
+      "sql": "UPDATE assignment_target SET value[2]=9 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "role": "assignment_writer",
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"assignment_element_key\""
+      }
+    },
+    {
+      "name": "unique_expression_table_privilege",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1, ARRAY[1,2,3])",
+        "INSERT INTO assignment_target VALUES(2,ARRAY[4,5,6])",
+        "CREATE UNIQUE INDEX assignment_element_key ON assignment_target((value[2]))",
+        "CREATE ROLE assignment_writer",
+        "GRANT UPDATE(value),SELECT(id,value) ON assignment_target TO assignment_writer",
+        "GRANT SELECT ON assignment_target TO assignment_writer"
+      ],
+      "sql": "UPDATE assignment_target SET value[2]=9 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "role": "assignment_writer",
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"assignment_element_key\"",
+        "detail": "Key ((value[2]))=(9) already exists."
+      }
+    },
+    {
+      "name": "unique_column_privileges",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1, ARRAY[1,2,3])",
+        "INSERT INTO assignment_target VALUES(2,ARRAY[1,5,3])",
+        "CREATE UNIQUE INDEX assignment_array_key ON assignment_target(value)",
+        "CREATE ROLE assignment_writer",
+        "GRANT UPDATE(value),SELECT(id,value) ON assignment_target TO assignment_writer"
+      ],
+      "sql": "UPDATE assignment_target SET value[2]=9 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "role": "assignment_writer",
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"assignment_array_key\"",
+        "detail": "Key (value)=({1,9,3}) already exists."
+      }
+    },
+    {
+      "name": "unique_real_output",
+      "setup": [
+        "CREATE TABLE assignment_target(id integer PRIMARY KEY,value real[])",
+        "INSERT INTO assignment_target VALUES(1,ARRAY[1.2,2.3]),(2,ARRAY[3.4,4.5])",
+        "CREATE UNIQUE INDEX assignment_real_key ON assignment_target((value[1]))"
+      ],
+      "sql": "UPDATE assignment_target SET value[1]=1.1 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"assignment_real_key\"",
+        "detail": "Key ((value[1]))=(1.1) already exists."
+      }
+    },
+    {
+      "name": "unique_fixed_char_output",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1, ARRAY[1,2,3])",
+        "INSERT INTO assignment_target VALUES(2,ARRAY[4,5,6])",
+        "ALTER TABLE assignment_target ADD COLUMN label character(3) DEFAULT 'xy'",
+        "CREATE UNIQUE INDEX assignment_composite_key ON assignment_target((value[2]),label) INCLUDE(id)"
+      ],
+      "sql": "UPDATE assignment_target SET value[2]=9 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"assignment_composite_key\"",
+        "detail": "Key ((value[2]), label)=(9, xy ) already exists."
+      }
+    },
+    {
+      "name": "unique_regclass_output",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1, ARRAY[1,2,3])",
+        "INSERT INTO assignment_target VALUES(2,ARRAY[4,5,6])",
+        "ALTER TABLE assignment_target ADD COLUMN label regclass DEFAULT 42::oid::regclass",
+        "CREATE UNIQUE INDEX assignment_composite_key ON assignment_target((value[2]),label) INCLUDE(id)"
+      ],
+      "sql": "UPDATE assignment_target SET value[2]=9 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"assignment_composite_key\"",
+        "detail": "Key ((value[2]), label)=(9, 42) already exists."
+      }
+    },
+    {
+      "name": "unique_int2vector_output",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1, ARRAY[1,2,3])",
+        "INSERT INTO assignment_target VALUES(2,ARRAY[4,5,6])",
+        "ALTER TABLE assignment_target ADD COLUMN label int2vector DEFAULT '1 2'",
+        "CREATE UNIQUE INDEX assignment_composite_key ON assignment_target((value[2]),label) INCLUDE(id)"
+      ],
+      "sql": "UPDATE assignment_target SET value[2]=9 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"assignment_composite_key\"",
+        "detail": "Key ((value[2]), label)=(9, [0:1]={1,2}) already exists."
+      }
+    },
+    {
+      "name": "unique_oidvector_output",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1, ARRAY[1,2,3])",
+        "INSERT INTO assignment_target VALUES(2,ARRAY[4,5,6])",
+        "ALTER TABLE assignment_target ADD COLUMN label oidvector DEFAULT '1 2'",
+        "CREATE UNIQUE INDEX assignment_composite_key ON assignment_target((value[2]),label) INCLUDE(id)"
+      ],
+      "sql": "UPDATE assignment_target SET value[2]=9 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"assignment_composite_key\"",
+        "detail": "Key ((value[2]), label)=(9, 1 2) already exists."
+      }
+    },
+    {
+      "name": "unique_boolean_output",
+      "setup": [
+        "CREATE TABLE assignment_target(id integer PRIMARY KEY,value boolean[])",
+        "INSERT INTO assignment_target VALUES(1,ARRAY[true,false]),(2,ARRAY[false,true])",
+        "CREATE UNIQUE INDEX assignment_bool_key ON assignment_target((value[1]))"
+      ],
+      "sql": "UPDATE assignment_target SET value[1]=true RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"assignment_bool_key\"",
+        "detail": "Key ((value[1]))=(t) already exists."
+      }
+    },
+    {
+      "name": "unique_null_output",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1, ARRAY[1,2,3])",
+        "INSERT INTO assignment_target VALUES(2,ARRAY[4,5,6])",
+        "CREATE UNIQUE INDEX assignment_null_key ON assignment_target((value[2])) NULLS NOT DISTINCT"
+      ],
+      "sql": "UPDATE assignment_target SET value[2]=NULL RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"assignment_null_key\"",
+        "detail": "Key ((value[2]))=(null) already exists."
+      }
     }
   ]
 }

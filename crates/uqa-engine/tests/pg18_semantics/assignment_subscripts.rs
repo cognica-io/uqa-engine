@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Provider, preparation and atomicity acceptance against independently captured PostgreSQL rows and diagnostics.
+//! Provider, preparation and atomicity acceptance against independently captured `PostgreSQL` rows and diagnostics.
 
 use std::{path::Path, sync::Arc};
 use uqa_core::Value;
@@ -108,6 +108,26 @@ const STORED: &str = "SELECT id, value::text AS value, array_dims(value) AS dime
 #[case::domain_null_slice_insert("domain_null_slice_insert")]
 #[case::automatic_view_repeated_elements("automatic_view_repeated_elements")]
 #[case::automatic_view_insert("automatic_view_insert")]
+#[case::stored_function_element("stored_function_element")]
+#[case::stored_function_target_rename("stored_function_target_rename")]
+#[case::stored_function_bound_rename("stored_function_bound_rename")]
+#[case::stored_function_bound_routine_rename("stored_function_bound_routine_rename")]
+#[case::stored_rule_element("stored_rule_element")]
+#[case::stored_rule_target_rename("stored_rule_target_rename")]
+#[case::generated_value_after_partial_assignment("generated_value_after_partial_assignment")]
+#[case::domain_multiple_rows_atomic("domain_multiple_rows_atomic")]
+#[case::unique_multiple_rows_atomic("unique_multiple_rows_atomic")]
+#[case::trigger_assignment_failure("trigger_assignment_failure")]
+#[case::unique_expression_column_privileges("unique_expression_column_privileges")]
+#[case::unique_expression_table_privilege("unique_expression_table_privilege")]
+#[case::unique_column_privileges("unique_column_privileges")]
+#[case::unique_real_output("unique_real_output")]
+#[case::unique_fixed_char_output("unique_fixed_char_output")]
+#[case::unique_regclass_output("unique_regclass_output")]
+#[case::unique_int2vector_output("unique_int2vector_output")]
+#[case::unique_oidvector_output("unique_oidvector_output")]
+#[case::unique_boolean_output("unique_boolean_output")]
+#[case::unique_null_output("unique_null_output")]
 fn assignment_subscripts_match_pg18(
     #[case] name: &str,
     #[values(0, 1, 2)] provider: usize,
@@ -132,7 +152,21 @@ fn assignment_subscripts_match_pg18(
             .sql(sql, &[])
             .unwrap_or_else(|error| panic!("{name}: {sql}: {error}"));
     }
-    let before = rows(engine.sql(STORED, &[]).unwrap());
+    let engine = if case["reopen_before"] == true {
+        drop(engine);
+        open(provider, &path)
+    } else {
+        engine
+    };
+    let stored_sql = case["stored_sql"].as_str().unwrap_or(STORED);
+    let before = rows(engine.sql(stored_sql, &[]).unwrap());
+    if let Some(role) = case["role"].as_str() {
+        engine.sql(&format!("SET ROLE {role}"), &[]).unwrap();
+    }
+    let savepoint = case["savepoint"].as_bool().unwrap_or(false);
+    if savepoint {
+        engine.sql("BEGIN; SAVEPOINT assignment_undo", &[]).unwrap();
+    }
     let sql = case["sql"].as_str().unwrap();
     let result = if prepared {
         engine
@@ -141,6 +175,21 @@ fn assignment_subscripts_match_pg18(
     } else {
         engine.sql(sql, &[])
     };
+    if savepoint {
+        engine
+            .sql(
+                if result.is_err() {
+                    "ROLLBACK TO assignment_undo; COMMIT"
+                } else {
+                    "COMMIT"
+                },
+                &[],
+            )
+            .unwrap();
+    }
+    if case["role"].is_string() {
+        engine.sql("RESET ROLE", &[]).unwrap();
+    }
     if let Some(expected) = case.get("error") {
         let error = result.unwrap_err();
         assert_eq!(
@@ -170,7 +219,7 @@ fn assignment_subscripts_match_pg18(
             "{name}"
         );
         assert_eq!(
-            rows(engine.sql(STORED, &[]).unwrap()),
+            rows(engine.sql(stored_sql, &[]).unwrap()),
             before,
             "failed {name} changed the row"
         );
@@ -181,11 +230,17 @@ fn assignment_subscripts_match_pg18(
             "{name}"
         );
     }
-    let stored = rows(engine.sql(STORED, &[]).unwrap());
+    let stored = rows(engine.sql(stored_sql, &[]).unwrap());
+    if let Some(expected) = case.get("stored") {
+        assert_eq!(
+            &stored, expected,
+            "{name} stored a different row than PostgreSQL"
+        );
+    }
     drop(engine);
     let reopened = open(provider, &path);
     assert_eq!(
-        rows(reopened.sql(STORED, &[]).unwrap()),
+        rows(reopened.sql(stored_sql, &[]).unwrap()),
         stored,
         "{name} lost its dimensions on reopen"
     );

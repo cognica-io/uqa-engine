@@ -55,18 +55,8 @@ fn format_array(
         element = inner;
     }
     let (values, prefix) = match value {
-        Value::Array(array) => {
-            let mut prefix = String::new();
-            if !array.elements().is_empty() && array.lower_bounds().iter().any(|lower| *lower != 1)
-            {
-                for (lower, length) in array.lower_bounds().iter().zip(array.dimensions()) {
-                    let upper = i64::from(*lower) + *length as i64 - 1;
-                    write!(prefix, "[{lower}:{upper}]").expect("writing to String cannot fail");
-                }
-                prefix.push('=');
-            }
-            (array.elements(), prefix)
-        }
+        Value::Array(array) => array_parts(array),
+        Value::LegacyVector(vector) => array_parts(vector.as_array()),
         Value::List(values) => (values.as_slice(), String::new()),
         _ => return Err(SQLError::Internal("invalid array result carrier".into())),
     };
@@ -91,4 +81,16 @@ fn format_array(
         });
     }
     Ok(format!("{prefix}{{{}}}", fields.join(",")))
+}
+
+fn array_parts(array: &uqa_core::ArrayValue) -> (&[Value], String) {
+    let mut prefix = String::new();
+    if !array.elements().is_empty() && array.lower_bounds().iter().any(|lower| *lower != 1) {
+        for (lower, length) in array.lower_bounds().iter().zip(array.dimensions()) {
+            let upper = i64::from(*lower) + *length as i64 - 1;
+            write!(prefix, "[{lower}:{upper}]").expect("writing to String cannot fail");
+        }
+        prefix.push('=');
+    }
+    (array.elements(), prefix)
 }

@@ -1008,11 +1008,11 @@
     },
     {
       "id": "dml.assignment-subscripts",
-      "postgresql_reference": "PostgreSQL 18.4 Docker: UPDATE integer[] element assignment preserves other elements; an array RHS raises 42804 with a subscripted-assignment message and HINT. Assignment through oidvector/int2vector subscripts raises 42846 for the corresponding ordinary-array-to-vector cast. Reproduction SQL and diagnostics: https://github.com/cognica-io/uqa-engine/issues/148.",
-      "uqa_test": "crates/uqa-sql/src/compiler/dml.rs; crates/uqa-sql/src/compiler/tree/insert.rs; crates/uqa-sql/src/binding/preparation/commands.rs",
-      "supported_version": "Unfixed: UPDATE target indirection is discarded. A valid scalar element assignment is rejected as a whole-column type mismatch; an invalid array RHS can silently replace the whole column. Catalog-vector assignment diagnostics also differ. The compiler paths predate PR #147.",
-      "status": "partial",
-      "open_issue": "#148: preserve assignment target indirection, bind PostgreSQL element/slice and domain semantics, implement bounded mutation in Execution, and verify errors and atomicity across applicable DML paths. Highest priority after #123 because of silent whole-column writes."
+      "postgresql_reference": "PostgreSQL 18.4 Docker: tests/parity/pg18/capture_assignment_subscripts.py captures 76 direct-statement cases in assignment_subscripts.expected.json, including rows, bounds, SQLSTATE, primary message, DETAIL and HINT. Stored index rendering has 22 independently captured pg_get_indexdef comparisons. See issue #148.",
+      "uqa_test": "crates/uqa-core/src/types/array/assignment/tests.rs; crates/uqa-sql/src/assignment/targets.rs; crates/uqa-execution/src/mutation/assignment/subscripts.rs; crates/uqa-execution/src/catalog/projection/view_definition/subscripts.rs; crates/uqa-engine/tests/pg18_semantics/assignment_subscripts.rs",
+      "supported_version": "Unreleased: preserve ordered array element/slice targets through binding, INSERT VALUES/SELECT, UPDATE, ON CONFLICT, MERGE and automatic views. Bounds and RHS use the original row; partial writes compose before array-domain checks. Stored SQL functions/rules retain targets and dependencies after rename, old-name reuse and reopen. Generated columns, unique indexes and rejecting domain/trigger histories preserve atomicity. Unique-key DETAIL preserves structural expressions, type output and SELECT authorization. Linux Docker passes all 456 oracle/provider/preparation combinations, 255 Core and 998 SQL unit tests across affected changes, all 809 current Execution tests (two pre-existing ignored), the manual SQL harness and strict Clippy. Full-workspace CI/PR review for #148 remains pending; PR #149 completes first.",
+      "status": "verified",
+      "open_issue": null
     }
   ]
 }

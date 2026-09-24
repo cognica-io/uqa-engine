@@ -48,6 +48,12 @@ Initial Engine restoration converts predecessor List/Array values only where dec
 
 SQLite main format 48 and redb main format 47 install the reader/writer fence before SQL catalog restoration. This physical format fence remains if subsequent SQL normalization fails; the failed SQL transaction preserves the predecessor row and index values. Existing raw record histories, receipts and identifier reservations keep their original identities and commit boundaries. Restore a pre-upgrade backup to use a predecessor binary.
 
+## Unreleased array assignment targets
+
+SQL AST and command IR assignment targets now use `AssignmentTarget<E>` with a `column` and ordered `indirection` steps. `AssignmentStep<E>` retains field access, element indices and optional slice bounds. Rust consumers of INSERT columns, UPDATE assignments, ON CONFLICT and MERGE targets must preserve this structure when rewriting or visiting expressions; construct an ordinary target with `AssignmentTarget::from(column)`. Bound and right-hand expressions retain separate evaluation roles. Ordinary whole-column targets keep their predecessor string serialization; a partial target uses an explicit structured encoding. Stored functions and rules retain these targets and dependencies through renames and reopen.
+
+Array element/slice writes now update only their designated positions. Earlier binaries could discard target syntax and either reject a valid element value or replace the entire column with an invalid array RHS. Those earlier writes cannot be reconstructed from the resulting array. Current preparation rejects incorrect RHS types and catalog-vector subscript assignments with PostgreSQL SQLSTATEs and diagnostics before mutation.
+
 ## Unreleased stored index registry
 
 Key structure remains in each table declaration, while the name of a PRIMARY KEY or UNIQUE constraint is stored only in its owned index row. Stored `TableConstraintSet` key names are absent; execution restores them by the immutable constraint and table identities. Initial conversion removes the redundant names in the same transaction as the registry format marker. This permits renames of different owned indexes and document writes to commit independently without replacing a shared table declaration. Direct storage consumers must use the execution constraint-name decoder when interpreting structural table metadata.

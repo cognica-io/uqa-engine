@@ -99,7 +99,12 @@ pub fn index_key_definition(
             let sql = super::super::view_definition::stored_expression_definition(
                 catalog, resolution, expression, pretty,
             )?;
-            if matches!(expression.as_ref(), uqa_sql::ast::Expr::Func { .. }) {
+            if matches!(expression.as_ref(), uqa_sql::ast::Expr::Func { binding, .. }
+                if !binding.as_ref().is_some_and(|binding| matches!(binding.dispatch,
+                    Some(uqa_sql::ast::FunctionDispatch::ArraySubscripts
+                        | uqa_sql::ast::FunctionDispatch::ArraySlices
+                        | uqa_sql::ast::FunctionDispatch::NumericOperator(_)))))
+            {
                 Ok(sql)
             } else {
                 Ok(format!("({sql})"))

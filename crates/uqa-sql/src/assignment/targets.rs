@@ -125,7 +125,7 @@ pub fn assignment_value_type<E>(
     }
 }
 
-/// Type errors retain PostgreSQL's separate primary message and rewrite hint.
+/// Type errors retain `PostgreSQL`'s separate primary message and rewrite hint.
 pub fn validate_assignment_source<E>(
     target: &AssignmentTarget<E>,
     required: &ColumnType,

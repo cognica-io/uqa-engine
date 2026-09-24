@@ -111,6 +111,7 @@ mod view_definition;
 pub use view_definition::pg_get_viewdef_value;
 pub use view_definition::{rename_view_column_query, view_query_references_column};
 mod helpers;
+pub(crate) use helpers::index_definitions::index_key_definition;
 pub use uqa_sql::catalog::result_type::{postgres_result_type, SQLTypeMetadata};
 mod information_schema;
 mod partitioning;

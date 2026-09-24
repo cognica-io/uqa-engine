@@ -7,6 +7,7 @@
 //! Physical CHECK, key, and foreign-key enforcement with transaction-scoped locking.
 pub mod context;
 mod deferred;
+mod diagnostics;
 pub mod index_keys;
 mod keys;
 pub mod period;

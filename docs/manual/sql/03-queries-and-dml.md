@@ -329,6 +329,20 @@ RETURNING job_id, state;
 
 Insert accepts `VALUES`, `DEFAULT VALUES`, or a query source. `DEFAULT VALUES` contributes exactly one input row and applies every column default, including serial and identity generation, before constraints and `RETURNING`; defaults, generated values, indexes, and referential actions are updated in the same mutation boundary.
 
+Array element and slice targets are accepted in INSERT, UPDATE, ON CONFLICT DO UPDATE and MERGE, including writes through automatically updatable views. An element target such as `values[2]` takes an element value; a slice target such as `values[2:4]` takes an array. Multiple dimensions and omitted slice bounds preserve PostgreSQL array bounds. Extending a one-dimensional array fills gaps with NULLs; multidimensional assignment must stay within the existing dimensions.
+
+Bounds and right-hand expressions read the original row. Repeated partial targets compose in statement order, and an array domain checks the completed column value. Partial INSERT targets start from a NULL array instead of the whole-column default. Assigning a NULL slice to a NULL array produces an empty array; assigning a NULL element stores a NULL element. Whole-column and partial assignments to the same column in one statement are rejected.
+
+```sql execute
+CREATE TABLE manual_array_targets (id integer PRIMARY KEY, readings integer[] DEFAULT ARRAY[100, 200]);
+INSERT INTO manual_array_targets (id, readings[2]) VALUES (1, 20);
+UPDATE manual_array_targets SET readings[1] = 10, readings[3:4] = ARRAY[30, 40] WHERE id = 1;
+SELECT readings, array_dims(readings) FROM manual_array_targets;
+DROP TABLE manual_array_targets;
+```
+
+Generated values, unique indexes, domain constraints and triggers receive the completed row in the same mutation boundary. A failing statement preserves its previous rows and indexes, including when rolled back to a savepoint. Unique-key violation DETAIL uses PostgreSQL's key syntax and type output; expression keys require table SELECT permission, while plain key columns may be disclosed with SELECT permission on every key column.
+
 ## UPDATE
 
 ```sql

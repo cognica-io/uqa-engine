@@ -66,4 +66,16 @@ pub struct ConstraintContext<'a> {
     pub namespace: &'a dyn MutationNamespace,
     pub referrers: &'a dyn ReferentialCatalog,
     pub partitions: PartitionContext<'a>,
+    pub diagnostics: &'a dyn ConstraintDiagnosticSource,
+}
+
+/// Capture catalog output and authority only after a key conflict has been found.
+pub trait ConstraintDiagnosticSource {
+    fn diagnostic_context(&self) -> ConstraintDiagnosticContext<'_>;
+}
+
+#[derive(Clone, Copy)]
+pub struct ConstraintDiagnosticContext<'a> {
+    pub catalog: crate::catalog::context::CatalogContext<'a>,
+    pub authorization: crate::catalog::security::table_authorization::TableAuthorizationContext<'a>,
 }

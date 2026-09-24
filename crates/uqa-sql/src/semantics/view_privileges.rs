@@ -65,21 +65,25 @@ fn validate_columns(
     Ok(())
 }
 
-pub fn ensure_insert(
-    services: &dyn ViewPrivilegeCatalog,
-    statement: &InsertPlan,
-) -> Result<RoleReference, SQLError> {
-    let (view, available) = view_target(services, &statement.table)?;
+fn validate_insert_columns(statement: &InsertPlan, available: &[String]) -> Result<(), SQLError> {
     crate::assignment::targets::validate_repeated_targets(&statement.columns, true)?;
     validate_columns(
         &statement.table,
-        &available,
+        available,
         &statement
             .columns
             .iter()
             .map(|target| target.column.clone())
             .collect::<Vec<_>>(),
-    )?;
+    )
+}
+
+pub fn ensure_insert(
+    services: &dyn ViewPrivilegeCatalog,
+    statement: &InsertPlan,
+) -> Result<RoleReference, SQLError> {
+    let (view, available) = view_target(services, &statement.table)?;
+    validate_insert_columns(statement, &available)?;
     let subject = privilege_subject(services, statement.target_privilege_subject.as_ref());
     let default_values = statement.source.is_none()
         && statement.columns.is_empty()

@@ -212,9 +212,11 @@ pub fn validate_key_constraints_with_previous(
             continue;
         }
         let name = constraint.name.as_deref().unwrap_or("<unnamed>");
-        return Err(SQLError::Routine {
+        return Err(SQLError::Diagnostic {
             sqlstate: "23505".into(),
             message: format!("duplicate key value violates unique constraint \"{name}\""),
+            detail: super::diagnostics::unique_key_detail(context, table, &constraint, &values)?,
+            hint: None,
         });
     }
     if !retain_entries {

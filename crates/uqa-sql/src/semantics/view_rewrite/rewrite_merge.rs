@@ -303,7 +303,7 @@ pub fn rewrite_merge_to_base(
                             Ok(target)
                         })
                         .collect::<Result<Vec<_>, SQLError>>()?;
-                    validate_mapped_columns(&columns, duplicate_insert_column)?;
+                    validate_mapped_columns(columns, duplicate_insert_column)?;
                 }
                 MergeWhenPlan::NothingNotMatched { .. } => {}
             }

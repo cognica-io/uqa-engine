@@ -25,6 +25,7 @@ use uqa_core::RelationIdentity;
 mod expressions;
 mod query;
 mod rename;
+mod subscripts;
 pub use rename::{rename_view_column_query, view_query_references_column};
 mod sources;
 
