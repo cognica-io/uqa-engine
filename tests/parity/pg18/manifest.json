@@ -949,8 +949,8 @@
     {
       "id": "types.time-timetz-key-coherence",
       "postgresql_reference": "PostgreSQL 18.4 Docker TIME/TIMETZ comparisons; PostgreSQL REL_18_STABLE date.c time_cmp and timetz_cmp_internal",
-      "uqa_test": "cargo test -p uqa-core --lib temporal; cargo test -p uqa-execution --lib temporal; cargo test -p uqa-engine --test integration temporal",
-      "supported_version": "Core comparison and equality keys retain TIME endpoints and the TIMETZ offset tie-break. A compact PostgreSQL 18.4 fixture supplies 780 scalar outcomes and 75 relational queries. Core/Execution comparison, equality/hash/index keys and transitivity pass. All 10 public tests pass, covering constant/prepared SQL, all three providers and serializable absent-update conflicts. Provider-upgrade checks and final CI remain pending.",
+      "uqa_test": "cargo test -p uqa-core -p uqa-execution --lib -- temporal distinct::; cargo test -p uqa-engine --test integration -- temporal_comparisons sql_temporal_types sessions::serializable_observations::temporal",
+      "supported_version": "Core comparison and equality keys retain TIME endpoints and the TIMETZ offset tie-break. A compact PostgreSQL 18.4 fixture supplies 780 scalar outcomes and 75 relational queries. Core/Execution comparison, equality/hash/index keys and transitivity pass. All 10 public tests pass, covering constant/prepared SQL, all three providers and serializable absent-update conflicts. All 10 provider upgrade/restore/fencing tests and strict affected-crate Clippy pass. Final CI and PR #143 review remain pending.",
       "status": "partial",
       "open_issue": "#121: replace incorrect expected equality with PostgreSQL results, preserve TIME 24:00, compare unwrapped adjusted TIMETZ times with the timezone tie-break, and verify equality, ordering, hash/grouping, containers and persistent index/reopen behavior."
     },
