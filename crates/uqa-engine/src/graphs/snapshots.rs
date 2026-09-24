@@ -162,7 +162,8 @@ impl Engine {
         let Some(backend) = &self.storage.backend else {
             return Ok(graphs);
         };
-        if self.query_catalog_snapshot.is_some()
+        if graphs.is_empty()
+            || self.query_catalog_snapshot.is_some()
             || (!catalog_required && required.is_some_and(BTreeSet::is_empty))
         {
             return Ok(graphs);
@@ -211,10 +212,14 @@ impl Engine {
         getrandom::fill(&mut key).map_err(|error| {
             SQLError::Internal(format!("generate retained graph snapshot key: {error}"))
         })?;
-        let mut encoded_key = String::with_capacity(64);
-        for byte in key {
+        // This key already has 256 bits of random entropy. SQLCipher's raw-key form preserves it without running a password KDF for every temporary snapshot.
+        let mut encoded_key = String::with_capacity(67);
+        encoded_key.push_str("x'");
+        for byte in &key {
             write!(&mut encoded_key, "{byte:02x}").map_err(snapshot_error)?;
         }
+        encoded_key.push('\'');
+        key.fill(0);
         let connection = uqa_storage_sqlite::ManagedConnection::open_encrypted(
             &directory.path().join("snapshot.db"),
             &encoded_key,

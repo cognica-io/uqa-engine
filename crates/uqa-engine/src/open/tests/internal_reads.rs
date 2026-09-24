@@ -23,6 +23,59 @@ fn persistent_engine(provider: usize, path: &std::path::Path) -> Engine {
 }
 
 #[test]
+fn empty_graph_snapshots_share_the_absent_catalog_and_retain_its_visibility() {
+    for provider in 0..3 {
+        let directory = tempfile::tempdir().unwrap();
+        let root = persistent_engine(provider, &directory.path().join("empty-graphs.db"));
+        root.sql("BEGIN; CREATE TABLE t(v integer)", &[]).unwrap();
+        let original = root.visible_graph_handles();
+        let retained = root.freeze_graph_read_handles(None, true).unwrap();
+        assert!(
+            Arc::ptr_eq(&original, &retained),
+            "an empty graph view must not create another storage owner"
+        );
+        root.create_graph("later").unwrap();
+        assert!(retained.is_empty());
+        assert!(!root
+            .freeze_graph_read_handles(None, true)
+            .unwrap()
+            .is_empty());
+        root.rollback().unwrap();
+        assert!(root.visible_graph_handles().is_empty());
+    }
+}
+
+#[test]
+fn detached_graph_snapshots_keep_private_data_after_source_rollback_and_close() {
+    use uqa_graph::GraphStore;
+
+    for provider in 0..3 {
+        let directory = tempfile::tempdir().unwrap();
+        let root = persistent_engine(provider, &directory.path().join("detached-graphs.db"));
+        root.begin().unwrap();
+        root.create_graph("private_graph").unwrap();
+        let vertex = uqa_core::Vertex {
+            vertex_id: 1,
+            label: "retained".into(),
+            properties: [("payload".into(), Value::Str("private graph payload".into()))].into(),
+        };
+        root.graph_with_mut("private_graph", |store| {
+            store.add_vertex(vertex.clone(), "private_graph")
+        })
+        .unwrap()
+        .unwrap();
+        let retained = root.freeze_graph_read_handles(None, true).unwrap();
+        root.rollback().unwrap();
+        assert!(!root.has_graph("private_graph").unwrap());
+        drop(root);
+        assert_eq!(
+            retained["private_graph"].get_vertex(1).unwrap(),
+            Some(vertex)
+        );
+    }
+}
+
+#[test]
 fn internal_read_sessions_and_fixed_snapshots_do_not_register_maintenance_clients() {
     for provider in 0..3 {
         let directory = tempfile::tempdir().unwrap();
