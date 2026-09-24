@@ -144,6 +144,23 @@ impl EnforcedKeyExecution for EnforcedKey {
         values: &[Value],
         ignored: Option<DocId>,
     ) -> Result<Option<DocId>, SQLError> {
+        if ignored.is_some() && values.iter().any(uqa_sql::expr::value_comparison_can_fail) {
+            // A probe would compare the excluded row with its own key before applying its identity filter. Only other visible rows participate in this uniqueness check; rewrite validation separately compares any retained old index entry.
+            for id in context.reads.live_table_doc_ids(table)? {
+                if Some(id) == ignored {
+                    continue;
+                }
+                let Some(document) = context.reads.get_document(table, id)? else {
+                    continue;
+                };
+                if let Some(actual) = self.values(context, table, &document)? {
+                    if key_values_equal(&actual, values)? {
+                        return Ok(Some(id));
+                    }
+                }
+            }
+            return Ok(None);
+        }
         if self.keys.iter().any(|key| key.column().is_none()) {
             let key = local_physical_key(self, context, table)?;
             let indexed = context

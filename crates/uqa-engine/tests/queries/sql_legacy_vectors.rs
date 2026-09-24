@@ -170,3 +170,85 @@ fn legacy_vector_index_errors_match_pg18(
         execute(&engine, "ROLLBACK");
     }
 }
+
+#[rstest::rstest]
+fn legacy_vector_conflict_update_retains_unchanged_index_inputs(
+    #[values(0, 1, 2)] provider: usize,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = open(provider, &directory.path().join("conflict.db"));
+    execute(
+        &engine,
+        "CREATE TABLE vectors(id integer PRIMARY KEY,v oidvector,untouched integer)",
+    );
+    execute(
+        &engine,
+        "INSERT INTO vectors VALUES(1,trim_array('1'::oidvector,1),0)",
+    );
+    execute(&engine, "CREATE INDEX vector_key ON vectors(v)");
+    let result = execute(&engine, "INSERT INTO vectors VALUES(1,'1',7) ON CONFLICT(id) DO UPDATE SET untouched=excluded.untouched RETURNING id,array_ndims(v),untouched");
+    assert_eq!(rows(&result), serde_json::json!([[1, null, 7]]));
+    let error = engine
+        .sql(
+            "INSERT INTO vectors VALUES(1,'1',8) ON CONFLICT(id) DO UPDATE SET id=2",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42804"));
+    assert_eq!(error.to_string(), "array is not a valid oidvector");
+    assert_eq!(
+        rows(&execute(
+            &engine,
+            "SELECT id,array_ndims(v),untouched FROM vectors"
+        )),
+        serde_json::json!([[1, null, 7]])
+    );
+}
+
+#[rstest::rstest]
+#[case(false, "v")]
+#[case(true, "tenant,v")]
+#[case(true, "tenant,(v::oidvector)")]
+fn legacy_vector_partition_validation_excludes_the_existing_row_identity(
+    #[values(0, 1, 2)] provider: usize,
+    #[case] unique: bool,
+    #[case] keys: &str,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = open(provider, &directory.path().join("partition.db"));
+    execute(
+        &engine,
+        "CREATE TABLE vectors(tenant integer,v oidvector) PARTITION BY RANGE(tenant)",
+    );
+    execute(
+        &engine,
+        &format!(
+            "CREATE {} INDEX vector_key ON vectors({keys})",
+            if unique { "UNIQUE" } else { "" }
+        ),
+    );
+    execute(
+        &engine,
+        "CREATE TABLE candidate(tenant integer,v oidvector)",
+    );
+    execute(
+        &engine,
+        "INSERT INTO candidate VALUES(1,trim_array('1'::oidvector,1))",
+    );
+    execute(
+        &engine,
+        "ALTER TABLE vectors ATTACH PARTITION candidate FOR VALUES FROM(0) TO(10)",
+    );
+    assert_eq!(
+        rows(&execute(
+            &engine,
+            "SELECT tenant,array_ndims(v) FROM vectors"
+        )),
+        serde_json::json!([[1, null]])
+    );
+    let error = engine
+        .sql("INSERT INTO candidate VALUES(1,'1')", &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42804"));
+    assert_eq!(error.to_string(), "array is not a valid oidvector");
+}

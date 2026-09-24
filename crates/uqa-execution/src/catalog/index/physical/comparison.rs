@@ -19,6 +19,7 @@ impl PhysicalIndexDefinitions {
         context: ConstraintContext<'_>,
         table: &str,
         document: &Document,
+        ignored_doc_id: Option<DocId>,
     ) -> Result<(), SQLError> {
         for ((_, physical_key), index) in &self.indexes {
             if index.table != table
@@ -52,7 +53,14 @@ impl PhysicalIndexDefinitions {
                 };
                 (ValueIndexKey::Column(first.clone()), probe)
             };
-            let mut candidates: BTreeSet<DocId> =
+            // Schema validation compares an existing row only with other rows. An index probe would compare the row with its own entry before that identity could be excluded.
+            let mut candidates: BTreeSet<DocId> = if ignored_doc_id.is_some() {
+                context
+                    .reads
+                    .live_table_doc_ids(table)?
+                    .into_iter()
+                    .collect()
+            } else {
                 match context.indexes.value_index_scan_key(table, &key, &probe)? {
                     Some(list) => list.entries().iter().map(|entry| entry.doc_id).collect(),
                     None => context
@@ -60,11 +68,15 @@ impl PhysicalIndexDefinitions {
                         .live_table_doc_ids(table)?
                         .into_iter()
                         .collect(),
-                };
+                }
+            };
             if let Some(changes) = context.reads.command_overlay_changed_ids(table)? {
                 candidates.extend(changes);
             }
             for id in candidates {
+                if ignored_doc_id == Some(id) {
+                    continue;
+                }
                 let Some(stored) = context.reads.get_document(table, id)? else {
                     continue;
                 };

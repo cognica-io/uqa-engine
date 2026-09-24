@@ -167,17 +167,8 @@ pub fn validate_key_constraints(
     document: &Document,
     ignored_doc_id: Option<DocId>,
 ) -> Result<(), SQLError> {
-    let previous = ignored_doc_id
-        .map(|id| context.reads.get_document(table, id))
-        .transpose()?
-        .flatten();
-    validate_key_constraints_with_previous(
-        context,
-        table,
-        document,
-        ignored_doc_id,
-        previous.as_ref(),
-    )
+    // Ignoring the row's own identity also applies to schema validation; it does not establish that existing index entries can be retained. Only a rewrite with an explicit previous image may skip unchanged inputs.
+    validate_key_constraints_with_previous(context, table, document, ignored_doc_id, None)
 }
 
 pub fn validate_key_constraints_with_previous(
@@ -227,7 +218,16 @@ pub fn validate_key_constraints_with_previous(
         });
     }
     if !retain_entries {
-        indexes.validate_key_comparisons(context, table, document)?;
+        indexes.validate_key_comparisons(
+            context,
+            table,
+            document,
+            if previous.is_some() {
+                None
+            } else {
+                ignored_doc_id
+            },
+        )?;
     }
     Ok(())
 }
