@@ -720,9 +720,9 @@
       "id": "ddl.generated-columns",
       "postgresql_reference": "PostgreSQL 18 CREATE TABLE and ALTER TABLE generated columns",
       "uqa_test": "cargo test -p uqa-engine --test integration catalog::sql_generated_columns::",
-      "supported_version": "PostgreSQL 18 core generated-column semantics",
+      "supported_version": "PostgreSQL 18 core generated-column semantics, including virtual user-function SQLSTATE, primary message and separate DETAIL through CREATE, ALTER and PostgreSQL TCP responses",
       "status": "partial",
-      "open_issue": "PR #137 corrects virtual user-function SQLSTATE, primary message and separate DETAIL; SQL-owner checks and PostgreSQL 18 CREATE/ALTER probes pass, while public API and TCP acceptance remain pending. The complete PostgreSQL built-in function and operator overload matrix, privileges, inheritance and partition propagation, dump/restore, and complete upstream regression coverage remain."
+      "open_issue": "The complete PostgreSQL built-in function and operator overload matrix, privileges, inheritance and partition propagation, dump/restore, and complete upstream regression coverage remain."
     },
     {
       "id": "ddl.temporal-constraints",

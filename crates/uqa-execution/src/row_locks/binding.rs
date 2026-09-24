@@ -51,6 +51,21 @@ pub fn acquire_relation<'a>(
     })
 }
 
+/// Retain dependent definition locks before staging a cascade. A statistics writer may finish during a wait, so advance storage only after all locks are held without replacing partially prepared catalog definitions.
+pub fn prepare_dependent_relation_writes<'names>(
+    session: &dyn RelationDefinitionSession,
+    names: impl Iterator<Item = &'names str>,
+) -> Result<(), SQLError> {
+    let names = names.collect::<std::collections::BTreeSet<_>>();
+    if names.is_empty() {
+        return Ok(());
+    }
+    for name in names {
+        acquire_relation(session, name, RelationLockMode::AccessExclusive, false)?.retain();
+    }
+    session.prepare_definition_write()
+}
+
 /// A wait can change both the name's identity and the same object's definition or privileges. Resolve and validate again before retaining the provisional lock; a changed identity releases that acquisition before retrying.
 pub fn bind_relation<T>(
     session: &dyn RelationLockSession,

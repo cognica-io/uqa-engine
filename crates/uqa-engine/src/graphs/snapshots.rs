@@ -24,6 +24,38 @@ fn snapshot_error(error: impl std::error::Error + Send + Sync + 'static) -> SQLE
     )
 }
 
+fn new_detached_graph_storage() -> Result<(Arc<dyn CatalogFacade>, PersistentGraphStore), SQLError>
+{
+    let directory = tempfile::Builder::new()
+        .prefix("uqa-graph-snapshot-")
+        .tempdir()
+        .map_err(snapshot_error)?;
+    let mut key = [0u8; 32];
+    getrandom::fill(&mut key).map_err(|error| {
+        SQLError::Internal(format!("generate retained graph snapshot key: {error}"))
+    })?;
+    // This key already has 256 bits of random entropy. SQLCipher's raw-key form preserves it without running a password KDF for every temporary snapshot.
+    let mut encoded_key = String::with_capacity(67);
+    encoded_key.push_str("x'");
+    for byte in &key {
+        write!(&mut encoded_key, "{byte:02x}").map_err(snapshot_error)?;
+    }
+    encoded_key.push('\'');
+    key.fill(0);
+    let connection = uqa_storage_sqlite::ManagedConnection::open_encrypted(
+        &directory.path().join("snapshot.db"),
+        &encoded_key,
+    )
+    .map_err(snapshot_error)?;
+    let catalog: Arc<dyn CatalogFacade> =
+        Arc::new(uqa_storage_sqlite::Catalog::open(connection.clone()).map_err(snapshot_error)?);
+    let backend: Arc<dyn PersistentStorageBackend> =
+        Arc::new(uqa_storage_sqlite::SQLiteStorageBackend::new(connection));
+    let snapshot = PersistentGraphStore::from_catalog(Arc::clone(&catalog), backend)
+        .retain_resource(Arc::new(directory));
+    Ok((catalog, snapshot))
+}
+
 impl Engine {
     pub(super) fn with_implicit_graph_transaction<R>(
         &self,
@@ -204,34 +236,7 @@ impl Engine {
         graphs: &GraphHandles,
         required: Option<&BTreeSet<String>>,
     ) -> Result<PersistentGraphStore, SQLError> {
-        let directory = tempfile::Builder::new()
-            .prefix("uqa-graph-snapshot-")
-            .tempdir()
-            .map_err(snapshot_error)?;
-        let mut key = [0u8; 32];
-        getrandom::fill(&mut key).map_err(|error| {
-            SQLError::Internal(format!("generate retained graph snapshot key: {error}"))
-        })?;
-        // This key already has 256 bits of random entropy. SQLCipher's raw-key form preserves it without running a password KDF for every temporary snapshot.
-        let mut encoded_key = String::with_capacity(67);
-        encoded_key.push_str("x'");
-        for byte in &key {
-            write!(&mut encoded_key, "{byte:02x}").map_err(snapshot_error)?;
-        }
-        encoded_key.push('\'');
-        key.fill(0);
-        let connection = uqa_storage_sqlite::ManagedConnection::open_encrypted(
-            &directory.path().join("snapshot.db"),
-            &encoded_key,
-        )
-        .map_err(snapshot_error)?;
-        let catalog: Arc<dyn CatalogFacade> = Arc::new(
-            uqa_storage_sqlite::Catalog::open(connection.clone()).map_err(snapshot_error)?,
-        );
-        let backend: Arc<dyn PersistentStorageBackend> =
-            Arc::new(uqa_storage_sqlite::SQLiteStorageBackend::new(connection));
-        let mut snapshot = PersistentGraphStore::from_catalog(Arc::clone(&catalog), backend)
-            .retain_resource(Arc::new(directory));
+        let (catalog, mut snapshot) = new_detached_graph_storage()?;
         snapshot
             .transaction(|target| {
                 for (name, source) in graphs {

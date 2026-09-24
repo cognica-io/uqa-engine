@@ -67,11 +67,11 @@ fn indexed_spill_reads_large_partitions_without_an_offset_vector() {
 
 #[test]
 fn indexed_offsets_use_independent_eight_byte_authenticated_blocks() {
+    const OFFSET_RECORD_BYTES: usize = 1 + 2 * (24 + 2 + 16 + 8);
     let mut spill = IndexedSpill::new(indexed_id_schema()).unwrap();
     spill.push(&indexed_id_row(1)).unwrap();
     let first_offset = std::fs::read(spill.offsets.path()).unwrap();
     // One selector plus two nonce/length/tag/eight-byte-ciphertext slots. Appending an offset never rewrites its predecessor's ciphertext or selector.
-    const OFFSET_RECORD_BYTES: usize = 1 + 2 * (24 + 2 + 16 + 8);
     assert_eq!(first_offset.len(), OFFSET_RECORD_BYTES);
     for value in 2..=17 {
         spill.push(&indexed_id_row(value)).unwrap();
