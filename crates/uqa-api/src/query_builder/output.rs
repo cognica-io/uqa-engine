@@ -136,6 +136,7 @@ pub(super) fn infer_arrow_type(column_index: usize, column: &str, result: &SQLRe
             | Value::Bytes(_)
             | Value::Temporal(_)
             | Value::Array(_)
+            | Value::LegacyVector(_)
             | Value::List(_)
             | Value::Row(_)
             | Value::Record(_)
@@ -199,9 +200,11 @@ fn build_arrow_array(
                 .map(|row_index| {
                     result
                         .value_at(row_index, column_index)
-                        .and_then(value_to_arrow_string)
+                        .map(value_to_arrow_string)
+                        .transpose()
+                        .map(Option::flatten)
                 })
-                .collect::<Vec<_>>(),
+                .collect::<Result<Vec<_>, _>>()?,
         )),
     };
     Ok(array)
@@ -292,6 +295,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::Bytes(_) => "bytes",
         Value::Temporal(_) => "temporal",
         Value::Array(_) => "array",
+        Value::LegacyVector(vector) => vector.kind().type_name(),
         Value::List(_) => "list",
         Value::Row(_) => "row",
         Value::Record(_) => "record",
@@ -299,8 +303,8 @@ fn value_kind(value: &Value) -> &'static str {
     }
 }
 
-fn value_to_arrow_string(value: &Value) -> Option<String> {
-    match value {
+fn value_to_arrow_string(value: &Value) -> Result<Option<String>, ArrowError> {
+    Ok(match value {
         Value::Null => None,
         Value::Void => Some(String::new()),
         Value::Bool(v) => Some(v.to_string()),
@@ -310,9 +314,20 @@ fn value_to_arrow_string(value: &Value) -> Option<String> {
         Value::Str(v) | Value::FixedChar(v) | Value::Json(v) | Value::JsonB(v) => Some(v.clone()),
         Value::Bytes(v) => Some(format!("{v:?}")),
         Value::Temporal(v) => Some(v.to_sql_string()),
-        Value::Array(v) => Some(uqa_sql::expr::array_value_to_string(v)),
         Value::List(v) => Some(format!("{v:?}")),
-        Value::Row(_) | Value::Record(_) => Some(uqa_sql::expr::value_to_string(value)),
+        Value::Array(_) | Value::Row(_) | Value::Record(_) | Value::LegacyVector(_) => {
+            let text = uqa_sql::expr::value_to_string_with_control(
+                value,
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )
+            .map_err(|error| {
+                ArrowError::CastError(format!("{}: {error}", error.sqlstate().unwrap_or("XX000")))
+            })?;
+            Some(
+                text.into_uncontrolled()
+                    .expect("ordinary Arrow text output"),
+            )
+        }
         Value::Map(v) => Some(format!("{v:?}")),
-    }
+    })
 }

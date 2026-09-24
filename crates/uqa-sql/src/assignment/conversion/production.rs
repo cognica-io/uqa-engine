@@ -139,10 +139,16 @@ pub fn convert_value_to_column_type_with_control(
                 "cannot cast {other:?} to regrole"
             ))),
         },
-        ColumnType::Int2Vector => array_value(value, &ColumnType::SmallInteger, control),
-        ColumnType::OidVector => array_value(value, &ColumnType::Oid, control),
+        ColumnType::Int2Vector | ColumnType::OidVector => {
+            let name = column_type_name(ty);
+            if matches!(&*value, Value::LegacyVector(vector) if vector.kind().type_name() == name) {
+                Ok(value)
+            } else {
+                cast_value_from_with_control(&value, name, None, control)
+            }
+        }
         ColumnType::AnyArray => {
-            if matches!(&*value, Value::Array(_)) {
+            if value.array_view().is_some() {
                 Ok(value)
             } else {
                 Err(SQLError::TypeMismatch(format!(
@@ -318,6 +324,12 @@ fn array_value(
                 unreachable!();
             };
             control.finish(array, memory)?
+        }
+        Value::LegacyVector(_) => {
+            let (Value::LegacyVector(vector), memory) = value.into_parts() else {
+                unreachable!();
+            };
+            control.finish(vector.into_array(), memory)?
         }
         Value::List(_) => {
             let (Value::List(elements), memory) = value.into_parts() else {

@@ -10,7 +10,7 @@ use std::{cmp::Ordering, ops::Bound};
 
 use uqa_core::{
     memory::{BudgetedVec, ProductionControl},
-    DecimalValue, Predicate, Value,
+    DecimalValue, LegacyVectorKind, Predicate, Value,
 };
 use uqa_sql::{ast::ColumnType, SQLError};
 use uqa_storage::{read_control::StorageReadControl, StorageBackendError};
@@ -37,6 +37,7 @@ pub enum ScalarIndexDomain {
     JsonText,
     Temporal(TemporalIndexDomain),
     JsonBinary,
+    LegacyVector(LegacyVectorKind),
 }
 
 pub struct IndexKeyRange {
@@ -82,6 +83,8 @@ impl ScalarIndexDomain {
             ColumnType::Bytea => Self::Bytes,
             ColumnType::Json => Self::JsonText,
             ColumnType::JsonB => Self::JsonBinary,
+            ColumnType::Int2Vector => Self::LegacyVector(LegacyVectorKind::SmallInteger),
+            ColumnType::OidVector => Self::LegacyVector(LegacyVectorKind::Oid),
             _ => return TemporalIndexDomain::from_column_type(ty).map(Self::Temporal),
         })
     }
@@ -98,6 +101,7 @@ impl ScalarIndexDomain {
             Self::JsonText => 7,
             Self::Temporal(_) => 8,
             Self::JsonBinary => 9,
+            Self::LegacyVector(_) => 12,
         }
     }
 
@@ -136,6 +140,14 @@ impl ScalarIndexDomain {
                             "JSONB index value has no native comparison representation".into(),
                         ),
                     })?;
+                Ok(key)
+            }
+            (Self::LegacyVector(kind), Value::LegacyVector(vector)) if kind == vector.kind() => {
+                let mut key = self.start_key(control)?;
+                vector.write_comparison_key(|part| {
+                    check(control)?;
+                    extend(&mut key, part)
+                })?;
                 Ok(key)
             }
             _ => Err(SQLError::Internal(
@@ -299,6 +311,24 @@ impl ScalarIndexDomain {
         inclusive: bool,
         control: &StorageReadControl,
     ) -> Result<Bound<IndexKey>, SQLError> {
+        if let Self::LegacyVector(kind) = self {
+            if !matches!(value, Value::LegacyVector(vector) if kind == vector.kind()) {
+                let ordering = match value {
+                    Value::LegacyVector(vector) => kind.cmp(&vector.kind()),
+                    _ => Ordering::Greater,
+                };
+                let key = if ordering.is_gt() {
+                    self.start_key(control)?
+                } else {
+                    self.end_key(control)?
+                };
+                return Ok(if lower {
+                    Bound::Included(key)
+                } else {
+                    Bound::Excluded(key)
+                });
+            }
+        }
         let key = match (self, value) {
             (Self::Decimal, Value::Decimal(value)) => self.decimal_key(value, control)?,
             (Self::Decimal, Value::Int(_) | Value::Bool(_) | Value::Float(_)) => {
@@ -324,6 +354,7 @@ impl ScalarIndexDomain {
             | (Self::Bytes, Value::Bytes(_))
             | (Self::JsonText, Value::Json(_))
             | (Self::JsonBinary, Value::JsonB(_))
+            | (Self::LegacyVector(_), Value::LegacyVector(_))
             | (Self::Temporal(_), Value::Temporal(_)) => self.encode(value, control)?,
             _ => {
                 let sample = match self {

@@ -138,7 +138,7 @@ pub fn aggregate_value_with_args(
                         "JSON object aggregate key must not be NULL".into(),
                     ));
                 }
-                let key = serde_json::Value::String(aggregate_json_key(&pair[0])).to_string();
+                let key = serde_json::Value::String(aggregate_json_key(&pair[0])?).to_string();
                 fields.push((key, value_to_json_text(&pair[1])));
             }
             if fields.is_empty() {
@@ -233,8 +233,9 @@ pub fn percentile_fraction(args: &[ScalarExpr]) -> Result<f64, SQLError> {
     Ok(fraction)
 }
 
-pub fn aggregate_json_key(value: &Value) -> String {
-    match value {
+pub fn aggregate_json_key(value: &Value) -> Result<String, SQLError> {
+    uqa_sql::expr::validate_json_object_key_type(value)?;
+    Ok(match value {
         Value::Null | Value::Void => String::new(),
         Value::Bool(b) => b.to_string(),
         Value::Int(i) => i.to_string(),
@@ -245,12 +246,12 @@ pub fn aggregate_json_key(value: &Value) -> String {
         Value::Bytes(bytes) => String::from_utf8_lossy(bytes).into_owned(),
         Value::Temporal(t) => t.to_sql_string(),
         Value::Json(text) | Value::JsonB(text) => text.clone(),
-        Value::Array(_) => uqa_sql::expr::value_to_string(value),
+        Value::Array(_) | Value::LegacyVector(_) => uqa_sql::expr::value_to_string(value)?,
         Value::List(_) | Value::Row(_) | Value::Record(_) | Value::Map(_) => {
             serde_json::to_string(&core_value_to_json(value))
                 .unwrap_or_else(|_| format!("{value:?}"))
         }
-    }
+    })
 }
 
 fn statistical_variance(

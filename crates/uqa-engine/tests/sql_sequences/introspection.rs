@@ -446,7 +446,7 @@ fn sequence_introspection_builtin_catalog_rows_match_postgresql_18() {
     assert_eq!(result.rows[0]["prorettype"], Value::Int(2249));
     assert_eq!(
         result.rows[0]["proargtypes"],
-        Value::List(vec![Value::Int(26)])
+        crate::legacy_vectors::oidvector(vec![Value::Int(26)])
     );
     assert_eq!(result.rows[0]["proisstrict"], Value::Bool(true));
     assert_eq!(result.rows[0]["provolatile"], Value::Str("s".into()));
@@ -483,7 +483,7 @@ fn sequence_introspection_builtin_catalog_rows_match_postgresql_18() {
     assert_eq!(result.rows[2]["prorettype"], Value::Int(2249));
     assert_eq!(
         result.rows[2]["proargtypes"],
-        Value::List(vec![Value::Int(2205)])
+        crate::legacy_vectors::oidvector(vec![Value::Int(2205)])
     );
     let Value::Array(argument_modes) = &result.rows[2]["proargmodes"] else {
         panic!("pg_get_sequence_data proargmodes must be char[]");

@@ -39,8 +39,8 @@ fn shape_validation_preserves_empty_dimensions_and_rejects_mixed_or_ragged_value
     ];
     for (values, expected) in cases {
         let memory = MemoryBudget::new(1 << 20);
-        assert_eq!(unbounded(&values), expected);
-        let dimensions = budgeted(&values, &memory, &CancellationToken::new()).unwrap();
+        assert_eq!(unbounded(&values, false), expected);
+        let dimensions = budgeted(&values, false, &memory, &CancellationToken::new()).unwrap();
         assert_eq!(dimensions.as_deref(), expected.as_ref());
         if let Some(dimensions) = dimensions {
             assert_eq!(
@@ -64,13 +64,13 @@ fn shape_failures_keep_existing_results_and_release_partial_workspace() {
         nested = Value::List(vec![nested]);
     }
     assert!(matches!(
-        budgeted(std::slice::from_ref(&nested), &memory, &cancellation),
+        budgeted(std::slice::from_ref(&nested), false, &memory, &cancellation),
         Err(ValueRetentionError::Memory(MemoryError::Limit { .. }))
     ));
     assert_eq!(memory.used(), previous.bytes());
     cancellation.cancel();
     assert!(matches!(
-        budgeted(std::slice::from_ref(&nested), &memory, &cancellation),
+        budgeted(std::slice::from_ref(&nested), false, &memory, &cancellation),
         Err(ValueRetentionError::Cancelled(_))
     ));
     assert_eq!(memory.used(), previous.bytes());
@@ -88,6 +88,7 @@ fn deep_shape_validation_uses_charged_iterators_instead_of_recursive_calls() {
     let memory = MemoryBudget::new(1 << 20);
     let dimensions = budgeted(
         std::slice::from_ref(&nested),
+        false,
         &memory,
         &CancellationToken::new(),
     )

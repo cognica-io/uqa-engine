@@ -130,7 +130,7 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
         assert_eq!(row(oid)["prorettype"], Value::Int(25));
         assert_eq!(
             row(oid)["proargtypes"],
-            Value::List(vec![Value::Int(argument_type)])
+            crate::legacy_vectors::oidvector(vec![Value::Int(argument_type)])
         );
         assert_eq!(row(oid)["proisstrict"], Value::Bool(true));
         assert_eq!(row(oid)["provolatile"], Value::Str("i".into()));
@@ -141,7 +141,7 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
     assert_eq!(row(6342)["prorettype"], Value::Int(1184));
     assert_eq!(
         row(6342)["proargtypes"],
-        Value::List(vec![Value::Int(2950)])
+        crate::legacy_vectors::oidvector(vec![Value::Int(2950)])
     );
     assert_eq!(row(6342)["proisstrict"], Value::Bool(true));
     assert_eq!(row(6342)["provolatile"], Value::Str("i".into()));
@@ -156,7 +156,7 @@ fn postgresql_18_builtin_function_catalog_preserves_overloads_and_metadata() {
     );
     assert_eq!(
         row(6389)["proargtypes"],
-        Value::List(vec![Value::Int(2277), Value::Int(16)])
+        crate::legacy_vectors::oidvector(vec![Value::Int(2277), Value::Int(16)])
     );
     assert_eq!(row(6390)["pronargs"], Value::Int(3));
     assert_eq!(row(6429)["provolatile"], Value::Str("v".into()));
@@ -220,7 +220,7 @@ fn assert_pg18_fixed_routine_metadata(routines: &SQLResult) {
         assert_eq!(row(oid)["prorettype"], Value::Int(return_type));
         assert_eq!(
             row(oid)["proargtypes"],
-            Value::List(argument_types.into_iter().map(Value::Int).collect())
+            crate::legacy_vectors::oidvector(argument_types.into_iter().map(Value::Int).collect())
         );
         assert_eq!(row(oid)["proallargtypes"], Value::Null);
         assert_eq!(row(oid)["proargmodes"], Value::Null);
@@ -295,7 +295,7 @@ fn assert_json_strip_routines(engine: &Engine, routines: &SQLResult) {
         assert_eq!(row(oid)["prorettype"], Value::Int(target_type));
         assert_eq!(
             row(oid)["proargtypes"],
-            Value::List(vec![Value::Int(target_type), Value::Int(16)])
+            crate::legacy_vectors::oidvector(vec![Value::Int(target_type), Value::Int(16)])
         );
         assert_eq!(row(oid)["proallargtypes"], Value::Null);
         assert_eq!(row(oid)["proargmodes"], Value::Null);
@@ -366,7 +366,10 @@ fn assert_gamma_routines(engine: &Engine, routines: &SQLResult) {
         assert_eq!(row(oid)["pronargs"], Value::Int(1));
         assert_eq!(row(oid)["pronargdefaults"], Value::Int(0));
         assert_eq!(row(oid)["prorettype"], Value::Int(701));
-        assert_eq!(row(oid)["proargtypes"], Value::List(vec![Value::Int(701)]));
+        assert_eq!(
+            row(oid)["proargtypes"],
+            crate::legacy_vectors::oidvector(vec![Value::Int(701)])
+        );
         assert_eq!(row(oid)["proallargtypes"], Value::Null);
         assert_eq!(row(oid)["proargmodes"], Value::Null);
         assert_eq!(row(oid)["proargnames"], Value::Null);
@@ -445,7 +448,7 @@ fn assert_string_binary_length_routines(engine: &Engine, routines: &SQLResult) {
         assert_eq!(row(oid)["prorettype"], Value::Int(23));
         assert_eq!(
             row(oid)["proargtypes"],
-            Value::List(vec![Value::Int(argument_type)])
+            crate::legacy_vectors::oidvector(vec![Value::Int(argument_type)])
         );
         assert_eq!(row(oid)["pronargs"], Value::Int(1));
         assert_eq!(row(oid)["pronargdefaults"], Value::Int(0));
@@ -499,7 +502,7 @@ fn assert_md5_routines(engine: &Engine, routines: &SQLResult) {
         assert_eq!(row(oid)["prorettype"], Value::Int(25));
         assert_eq!(
             row(oid)["proargtypes"],
-            Value::List(vec![Value::Int(argument_type)])
+            crate::legacy_vectors::oidvector(vec![Value::Int(argument_type)])
         );
         assert_eq!(row(oid)["pronargs"], Value::Int(1));
         assert_eq!(row(oid)["pronargdefaults"], Value::Int(0));
@@ -543,7 +546,10 @@ fn assert_checksum_routines(engine: &Engine, routines: &SQLResult) {
         assert_eq!(row(oid)["prolang"], Value::Int(12));
         assert_eq!(row(oid)["prokind"], Value::Str("f".into()));
         assert_eq!(row(oid)["prorettype"], Value::Int(20));
-        assert_eq!(row(oid)["proargtypes"], Value::List(vec![Value::Int(17)]));
+        assert_eq!(
+            row(oid)["proargtypes"],
+            crate::legacy_vectors::oidvector(vec![Value::Int(17)])
+        );
         assert_eq!(row(oid)["pronargs"], Value::Int(1));
         assert_eq!(row(oid)["pronargdefaults"], Value::Int(0));
         assert_eq!(row(oid)["proargnames"], Value::Null);
@@ -597,7 +603,7 @@ fn assert_reverse_routines(engine: &Engine, routines: &SQLResult) {
         assert_eq!(row(oid)["prorettype"], Value::Int(argument_type));
         assert_eq!(
             row(oid)["proargtypes"],
-            Value::List(vec![Value::Int(argument_type)])
+            crate::legacy_vectors::oidvector(vec![Value::Int(argument_type)])
         );
         assert_eq!(row(oid)["pronargs"], Value::Int(1));
         assert_eq!(row(oid)["pronargdefaults"], Value::Int(0));
@@ -685,7 +691,7 @@ fn assert_array_transform_routines(engine: &Engine) {
         assert_eq!(row["prorettype"], Value::Int(2277));
         assert_eq!(
             row["proargtypes"],
-            Value::List(argument_types.into_iter().map(Value::Int).collect())
+            crate::legacy_vectors::oidvector(argument_types.into_iter().map(Value::Int).collect())
         );
         assert_eq!(row["proargnames"], argument_names);
         assert_eq!(row["proisstrict"], Value::Bool(true));
@@ -730,7 +736,10 @@ fn assert_random_range_pg_proc(engine: &Engine) {
         assert_eq!(row["prorettype"], Value::Int(argument_type));
         assert_eq!(
             row["proargtypes"],
-            Value::List(vec![Value::Int(argument_type), Value::Int(argument_type)])
+            crate::legacy_vectors::oidvector(vec![
+                Value::Int(argument_type),
+                Value::Int(argument_type)
+            ])
         );
         assert_eq!(
             row["proargnames"],

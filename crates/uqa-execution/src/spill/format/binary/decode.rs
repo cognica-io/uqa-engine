@@ -430,6 +430,33 @@ impl<'a> BinaryReader<'a> {
                     .ok_or_else(|| spill_error("invalid array dimensions in spill file"))
             }
             16 => Ok(Value::Void),
+            17 => {
+                let kind = match self.read_u8("legacy vector kind")? {
+                    0 => uqa_core::LegacyVectorKind::SmallInteger,
+                    1 => uqa_core::LegacyVectorKind::Oid,
+                    _ => return Err(spill_error("invalid legacy vector kind")),
+                };
+                let bound_count = self.read_count("legacy vector dimensions", 4)?;
+                if bound_count > 1 {
+                    return Err(spill_error("invalid legacy vector dimensions"));
+                }
+                let mut bounds = Vec::with_capacity(bound_count);
+                for _ in 0..bound_count {
+                    bounds.push(self.read_i32("legacy vector lower bound")?);
+                }
+                let count = self.read_count("legacy vector length", 1)?;
+                let mut values = Vec::new();
+                values.try_reserve_exact(count).map_err(|error| {
+                    spill_error(format!("cannot allocate legacy vector: {error}"))
+                })?;
+                for _ in 0..count {
+                    values.push(self.read_value(depth + 1)?);
+                }
+                ArrayValue::with_lower_bounds(values, bounds)
+                    .and_then(|array| uqa_core::LegacyVectorValue::try_from_array(kind, array))
+                    .map(Value::LegacyVector)
+                    .ok_or_else(|| spill_error("invalid legacy vector elements"))
+            }
             tag => Err(spill_error(format!("invalid spill value tag {tag}"))),
         }
     }

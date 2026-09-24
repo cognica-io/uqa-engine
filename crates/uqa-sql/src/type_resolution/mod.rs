@@ -45,6 +45,7 @@ pub use scalar_input::{
 };
 mod string_binary;
 
+pub(crate) use cast_compatibility::cast_catalog_entry_with_control;
 pub use cast_compatibility::{
     assignment_type_compatible, cast_catalog_entry, explicit_type_compatible, CastCatalogEntry,
     CastMethod,

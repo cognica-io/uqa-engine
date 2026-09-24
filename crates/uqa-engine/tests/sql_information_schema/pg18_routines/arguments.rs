@@ -21,20 +21,29 @@ fn assert_plain_and_array_user_routine_catalog(result: &SQLResult) {
     let plain = user_routine_catalog_row(result, "cat_plain");
     assert_eq!(plain["pronargs"], Value::Int(1));
     assert_eq!(plain["prorettype"], Value::Int(23));
-    assert_eq!(plain["proargtypes"], Value::List(vec![Value::Int(23)]));
+    assert_eq!(
+        plain["proargtypes"],
+        crate::legacy_vectors::oidvector(vec![Value::Int(23)])
+    );
     assert_eq!(plain["proallargtypes"], Value::Null);
     assert_eq!(plain["proargmodes"], Value::Null);
     assert_eq!(plain["proargnames"], Value::Null);
 
     let arrays = user_routine_catalog_row(result, "cat_arrays");
     assert_eq!(arrays["prorettype"], Value::Int(1009));
-    assert_eq!(arrays["proargtypes"], Value::List(vec![Value::Int(1007)]));
+    assert_eq!(
+        arrays["proargtypes"],
+        crate::legacy_vectors::oidvector(vec![Value::Int(1007)])
+    );
 }
 
 fn assert_output_user_routine_catalog(result: &SQLResult) {
     let out = user_routine_catalog_row(result, "cat_out");
     assert_eq!(out["prorettype"], Value::Int(2249));
-    assert_eq!(out["proargtypes"], Value::List(vec![Value::Int(23)]));
+    assert_eq!(
+        out["proargtypes"],
+        crate::legacy_vectors::oidvector(vec![Value::Int(23)])
+    );
     assert_eq!(
         out["proallargtypes"],
         array(vec![Value::Int(23), Value::Int(23), Value::Int(25)])
@@ -90,7 +99,10 @@ fn assert_procedure_user_routine_catalog(result: &SQLResult) {
     assert_eq!(procedure["pronargs"], Value::Int(1));
     assert_eq!(procedure["pronargdefaults"], Value::Int(1));
     assert_eq!(procedure["prorettype"], Value::Int(2249));
-    assert_eq!(procedure["proargtypes"], Value::List(vec![Value::Int(23)]));
+    assert_eq!(
+        procedure["proargtypes"],
+        crate::legacy_vectors::oidvector(vec![Value::Int(23)])
+    );
     assert_eq!(
         procedure["proallargtypes"],
         array(vec![Value::Int(25), Value::Int(23)])
@@ -114,7 +126,7 @@ fn assert_variadic_user_routine_catalog(result: &SQLResult) {
     assert_eq!(variadic["prorettype"], Value::Int(20));
     assert_eq!(
         variadic["proargtypes"],
-        Value::List(vec![Value::Int(23), Value::Int(1007)])
+        crate::legacy_vectors::oidvector(vec![Value::Int(23), Value::Int(1007)])
     );
     assert_eq!(
         variadic["proallargtypes"],
@@ -151,7 +163,7 @@ fn assert_polymorphic_variadic_user_routine_catalog(result: &SQLResult) {
         assert_eq!(polymorphic["prorettype"], Value::Int(element_oid));
         assert_eq!(
             polymorphic["proargtypes"],
-            Value::List(vec![Value::Int(array_oid)])
+            crate::legacy_vectors::oidvector(vec![Value::Int(array_oid)])
         );
         assert_eq!(
             polymorphic["proallargtypes"],
@@ -174,7 +186,7 @@ fn assert_legacy_vector_variadic_user_routine_catalog(result: &SQLResult) {
         assert_eq!(variadic["prorettype"], Value::Int(vector_oid));
         assert_eq!(
             variadic["proargtypes"],
-            Value::List(vec![Value::Int(vector_oid)])
+            crate::legacy_vectors::oidvector(vec![Value::Int(vector_oid)])
         );
         assert_eq!(
             variadic["proallargtypes"],

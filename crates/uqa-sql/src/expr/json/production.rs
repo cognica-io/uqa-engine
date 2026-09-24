@@ -177,6 +177,22 @@ fn from_value(value: &Value, core_carrier: bool, control: &ProductionControl<'_>
             None => Node::String(control.copy_text(text)?),
         },
         Value::Array(array) => array_node(array.elements(), core_carrier, control)?,
+        Value::LegacyVector(vector) => {
+            if !core_carrier && vector.kind() == uqa_core::LegacyVectorKind::Oid {
+                let mut nodes = Values::new(control);
+                for value in vector.elements() {
+                    nodes.push(
+                        Node::String(super::super::conversion::value_to_string_with_control(
+                            value, control,
+                        )?),
+                        control,
+                    )?;
+                }
+                Node::Array(nodes)
+            } else {
+                array_node(vector.elements(), core_carrier, control)?
+            }
+        }
         Value::List(values) => array_node(values, core_carrier, control)?,
         Value::Row(values) => {
             let mut fields = Values::new(control);

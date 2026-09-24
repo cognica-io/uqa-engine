@@ -105,15 +105,15 @@ fn postgresql_18_sequence_routine_identities_match_catalog() {
     }
     assert_eq!(
         sequence_routines.rows[0]["proargtypes"],
-        Value::List(vec![Value::Int(2205)])
+        crate::legacy_vectors::oidvector(vec![Value::Int(2205)])
     );
     assert_eq!(
         sequence_routines.rows[2]["proargtypes"],
-        Value::List(vec![Value::Int(2205), Value::Int(20)])
+        crate::legacy_vectors::oidvector(vec![Value::Int(2205), Value::Int(20)])
     );
     assert_eq!(
         sequence_routines.rows[3]["proargtypes"],
-        Value::List(vec![Value::Int(2205), Value::Int(20), Value::Int(16)])
+        crate::legacy_vectors::oidvector(vec![Value::Int(2205), Value::Int(20), Value::Int(16)])
     );
     assert_eq!(
         sequence_routines.rows[4]["proname"],
@@ -121,7 +121,7 @@ fn postgresql_18_sequence_routine_identities_match_catalog() {
     );
     assert_eq!(
         sequence_routines.rows[4]["proargtypes"],
-        Value::List(Vec::new())
+        crate::legacy_vectors::oidvector(Vec::new())
     );
     assert_eq!(
         sequence_routines.rows[4]["prosrc"],

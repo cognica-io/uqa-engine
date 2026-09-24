@@ -116,6 +116,11 @@ pub fn quote_literal(value: &Value) -> Result<String, ArrowFlightPrepareError> {
                     .join(", ")
             )
         }
+        Value::LegacyVector(_) => {
+            return Err(ArrowFlightPrepareError::UnsupportedLiteral(
+                "PostgreSQL legacy vectors have no portable Flight SQL literal".into(),
+            ));
+        }
         Value::List(items) => {
             // Used inside an IN list; emit a comma-separated literal
             // tuple. Outer caller decides whether to wrap in `(...)`.
@@ -397,6 +402,16 @@ mod tests {
     fn unsupported_literals_and_malformed_in_predicates_fail() {
         assert!(quote_literal(&Value::Map(BTreeMap::new())).is_err());
         assert!(quote_literal(&Value::Float(f64::NAN)).is_err());
+        for kind in [
+            uqa_core::LegacyVectorKind::SmallInteger,
+            uqa_core::LegacyVectorKind::Oid,
+        ] {
+            let vector = uqa_core::LegacyVectorValue::try_new(kind, vec![Value::Int(1)]).unwrap();
+            assert!(matches!(
+                quote_literal(&Value::LegacyVector(vector)),
+                Err(ArrowFlightPrepareError::UnsupportedLiteral(_))
+            ));
+        }
         let predicate = FDWPredicate {
             column: "id".into(),
             operator: PredicateOp::In,

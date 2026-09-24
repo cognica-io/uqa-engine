@@ -102,6 +102,7 @@ pub(super) fn value_generation_type(value: &Value) -> GenerationType {
         Value::Bytes(_) => GenerationType::Bytea,
         Value::Json(_) => GenerationType::Json,
         Value::JsonB(_) => GenerationType::JsonB,
+        Value::LegacyVector(_) => GenerationType::Array(Box::new(GenerationType::Integer)),
         Value::Temporal(uqa_core::TemporalValue::Date { .. }) => GenerationType::Date,
         Value::Temporal(uqa_core::TemporalValue::Time { .. }) => GenerationType::Time,
         Value::Temporal(uqa_core::TemporalValue::TimeTz { .. }) => GenerationType::TimeTz,

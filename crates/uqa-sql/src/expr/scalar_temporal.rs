@@ -55,7 +55,7 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
                 if args.iter().any(|arg| matches!(arg, Value::Null)) {
                     return Ok(Value::Null);
                 }
-                let fmt = value_to_string(&args[1]);
+                let fmt = value_to_string(&args[1])?;
                 match &args[0] {
                     value @ (Value::Int(_) | Value::Float(_) | Value::Decimal(_)) => {
                         format_pg_number(value, &fmt).map(Value::Str)
@@ -74,8 +74,8 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
                 if args.len() != 2 {
                     return Err(SQLError::TypeMismatch("to_date takes 2 args".into()));
                 }
-                let s = value_to_string(&args[0]);
-                let fmt = pg_to_chrono_fmt(&value_to_string(&args[1]));
+                let s = value_to_string(&args[0])?;
+                let fmt = pg_to_chrono_fmt(&value_to_string(&args[1])?);
                 let date = chrono::NaiveDate::parse_from_str(&s, &fmt)
                     .map_err(|e| SQLError::TypeMismatch(format!("to_date: {e}")))?;
                 let epoch = chrono::DateTime::<chrono::Utc>::UNIX_EPOCH.date_naive();
@@ -88,8 +88,8 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
                 if args.len() != 2 {
                     return Err(SQLError::TypeMismatch("to_number takes 2 args".into()));
                 }
-                let s = value_to_string(&args[0]);
-                if value_to_string(&args[1]).trim().eq_ignore_ascii_case("RN") {
+                let s = value_to_string(&args[0])?;
+                if value_to_string(&args[1])?.trim().eq_ignore_ascii_case("RN") {
                     return parse_roman_numeral(&s)
                         .map(DecimalValue::from_i64)
                         .map(Value::Decimal)

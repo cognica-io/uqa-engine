@@ -47,8 +47,8 @@ fn numeric_operators_match_postgresql_types_values_and_errors() {
         } else {
             let actual = result.unwrap_or_else(|error| panic!("{}: {error}", case.expression));
             assert_eq!(selected_type, case.r#type, "{}", case.expression);
-            let actual =
-                (!matches!(actual, Value::Null)).then(|| crate::expr::value_to_string(&actual));
+            let actual = (!matches!(actual, Value::Null))
+                .then(|| crate::expr::value_to_string(&actual).unwrap());
             assert_eq!(actual, case.value, "{}", case.expression);
         }
     }

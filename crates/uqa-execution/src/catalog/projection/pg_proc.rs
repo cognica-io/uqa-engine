@@ -13,7 +13,7 @@ use super::helpers::oids::{
     current_user_oid, namespace_oid, schema_oid, split_schema_name, stable_object_oid, stable_oid,
 };
 use super::helpers::rows::{
-    bool_value, catalog_array, catalog_usize, int_value, list_int, row, str_value,
+    bool_value, catalog_array, catalog_oidvector, catalog_usize, int_value, row, str_value,
 };
 use super::helpers::type_metadata::{routine_type_oid, routine_variadic_element_oid};
 use crate::catalog::CatalogReadView;
@@ -73,7 +73,18 @@ pub fn build_pg_proc(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLErr
                     )?),
                 ),
                 ("prorettype", int_value(routine.return_type)),
-                ("proargtypes", list_int(routine.argument_types)),
+                (
+                    "proargtypes",
+                    catalog_oidvector(
+                        routine
+                            .argument_types
+                            .iter()
+                            .copied()
+                            .map(Value::Int)
+                            .collect(),
+                        "pg_proc.proargtypes",
+                    )?,
+                ),
                 (
                     "proallargtypes",
                     routine
@@ -125,8 +136,8 @@ pub fn build_pg_proc(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLErr
             ]))
         })
         .collect::<Result<Vec<_>, SQLError>>()?;
-    rows.extend(registered_names().into_iter().map(|name| {
-        row([
+    for name in registered_names() {
+        rows.push(row([
             ("oid", int_value(stable_oid("proc", name))),
             ("proname", str_value(name)),
             ("pronamespace", int_value(schema_oid("pg_catalog"))),
@@ -146,7 +157,10 @@ pub fn build_pg_proc(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLErr
             ("pronargs", int_value(0)),
             ("pronargdefaults", int_value(0)),
             ("prorettype", int_value(25)),
-            ("proargtypes", Value::List(Vec::new())),
+            (
+                "proargtypes",
+                catalog_oidvector(Vec::new(), "pg_proc.proargtypes")?,
+            ),
             ("proallargtypes", Value::Null),
             ("proargmodes", Value::Null),
             ("proargnames", Value::Null),
@@ -157,8 +171,8 @@ pub fn build_pg_proc(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLErr
             ("prosqlbody", Value::Null),
             ("proconfig", Value::Null),
             ("proacl", Value::Null),
-        ])
-    }));
+        ]));
+    }
     for function in catalog.all_sql_functions() {
         let def = &function.def;
         let (routine_schema, routine_name) = split_schema_name(&def.name)?;
@@ -316,7 +330,10 @@ pub fn build_pg_proc(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLErr
                 int_value(catalog_usize(defaults, "pg_proc default argument count")?),
             ),
             ("prorettype", int_value(return_type_oid)),
-            ("proargtypes", Value::List(argument_type_oids)),
+            (
+                "proargtypes",
+                catalog_oidvector(argument_type_oids, "pg_proc.proargtypes")?,
+            ),
             ("proallargtypes", all_argument_type_oids),
             ("proargmodes", arg_modes),
             ("proargnames", arg_names),

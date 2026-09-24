@@ -14,6 +14,8 @@ use uqa_sql::expr::RowLookup as _;
 use super::*;
 use crate::ColumnIdentity;
 
+mod legacy_vectors;
+
 fn dummy_batch(start: usize, n: usize) -> Batch {
     let schema = RowSchema::new(vec!["x".into()]);
     let rows = (start..start + n)

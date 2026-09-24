@@ -173,6 +173,10 @@ impl<A: Array<Item = u8>> KeyOutput for SmallVec<A> {
 struct HasherOutput<'a, H: Hasher>(&'a mut H);
 
 impl<H: Hasher> KeyOutput for HasherOutput<'_, H> {
+    fn invokes_sql_hash_operator(&self) -> bool {
+        true
+    }
+
     fn push_byte(&mut self, value: u8) -> ExecResult<()> {
         self.0.write_u8(value);
         Ok(())
@@ -233,6 +237,13 @@ fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
                     if !array.elements().is_empty() {
                         stack.push(Children::Values(array.elements().iter()))?;
                     }
+                }
+                Value::LegacyVector(vector) => {
+                    if output.invokes_sql_hash_operator() {
+                        uqa_sql::expr::validate_legacy_vector_comparison(vector)?;
+                    }
+                    output.push_byte(14)?;
+                    vector.write_comparison_key(|bytes| output.extend_bytes(bytes))?;
                 }
                 Value::List(values) | Value::Row(values) => {
                     output.push_byte(if matches!(value, Value::List(_)) {

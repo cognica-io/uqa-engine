@@ -10,6 +10,32 @@ use rustyline::completion::Candidate as _;
 use rustyline::history::MemHistory;
 
 #[test]
+fn legacy_vector_expanded_output_reports_invalid_layout() {
+    let mut session = Session {
+        engine: Engine::new(),
+        db_path: None,
+        db_key: None,
+        location: ":memory:".into(),
+        history: Vec::new(),
+        history_path: None,
+        show_timing: false,
+        expanded: true,
+        copy_text: false,
+        output_path: None,
+    };
+    for ty in ["int2vector", "oidvector"] {
+        let error = session
+            .run_statement_with_history(
+                &format!("SELECT trim_array('1 2'::{ty},2)"),
+                &mut Vec::new(),
+                false,
+            )
+            .unwrap_err();
+        assert_eq!(error, format!("42804: array is not a valid {ty}"));
+    }
+}
+
+#[test]
 fn completion_reads_uqa_function_registry() {
     let helper = UsqlHelper::new(Vec::new(), Vec::new(), Vec::new());
     let history = MemHistory::new();

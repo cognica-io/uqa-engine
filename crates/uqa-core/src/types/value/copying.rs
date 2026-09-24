@@ -10,7 +10,8 @@ use std::collections::BTreeMap;
 
 use crate::{
     memory::{Budgeted, BudgetedString, BudgetedVec, MemoryBudget, MemoryReservation},
-    ArrayValue, CancellationToken, QueryCancelled, Value, ValueRetentionError,
+    ArrayValue, CancellationToken, LegacyVectorKind, LegacyVectorValue, QueryCancelled, Value,
+    ValueRetentionError,
 };
 
 impl Value {
@@ -93,7 +94,7 @@ enum Input<'a> {
 enum Sequence<'a> {
     List,
     Row,
-    Array(&'a ArrayValue),
+    Array(&'a ArrayValue, Option<LegacyVectorKind>),
 }
 
 enum Output<'a> {
@@ -130,7 +131,18 @@ impl<'a> Frame<'a> {
                 output.reserve(array.elements().len())?;
                 (
                     Input::Values(array.elements().iter()),
-                    Output::Values(output, Sequence::Array(array)),
+                    Output::Values(output, Sequence::Array(array, None)),
+                )
+            }
+            Value::LegacyVector(vector) => {
+                let mut output = BudgetedVec::new(copier.budget);
+                output.reserve(vector.elements().len())?;
+                (
+                    Input::Values(vector.elements().iter()),
+                    Output::Values(
+                        output,
+                        Sequence::Array(vector.as_array(), Some(vector.kind())),
+                    ),
                 )
             }
             Value::Record(fields) => {
@@ -202,7 +214,7 @@ impl<'a> Frame<'a> {
                 match kind {
                     Sequence::List => Value::List(values),
                     Sequence::Row => Value::Row(values),
-                    Sequence::Array(source) => {
+                    Sequence::Array(source, legacy_kind) => {
                         let dimensions = copier.slice(source.dimensions())?;
                         let lower_bounds = copier.slice(source.lower_bounds())?;
                         self.memory.grow(ArrayValue::decoded_header_bytes())?;
@@ -211,11 +223,13 @@ impl<'a> Frame<'a> {
                         self.memory.absorb(dimensions_memory);
                         self.memory.absorb(lower_memory);
                         (copier.check)()?;
-                        Value::Array(ArrayValue::from_copied_parts(
-                            values,
-                            dimensions,
-                            lower_bounds,
-                        ))
+                        let array = ArrayValue::from_copied_parts(values, dimensions, lower_bounds);
+                        match legacy_kind {
+                            Some(kind) => Value::LegacyVector(
+                                LegacyVectorValue::from_validated_array(kind, array),
+                            ),
+                            None => Value::Array(array),
+                        }
                     }
                 }
             }
@@ -293,7 +307,12 @@ impl Copier<'_> {
                 memory.grow(value.retained_bytes())?;
                 Value::Decimal(value.clone())
             }
-            Value::Array(_) | Value::List(_) | Value::Row(_) | Value::Record(_) | Value::Map(_) => {
+            Value::Array(_)
+            | Value::LegacyVector(_)
+            | Value::List(_)
+            | Value::Row(_)
+            | Value::Record(_)
+            | Value::Map(_) => {
                 unreachable!("container has a copy frame")
             }
         };

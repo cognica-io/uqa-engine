@@ -76,10 +76,18 @@ pub fn cast_value_from_with_control(
     if let Some(element_type) = ty.strip_suffix("[]") {
         let source_element_type = source_ty
             .and_then(|source| source.trim().strip_suffix("[]"))
-            .map(str::trim);
+            .map(str::trim)
+            .or(match v {
+                Value::LegacyVector(vector) => Some(match vector.kind() {
+                    uqa_core::LegacyVectorKind::SmallInteger => "smallint",
+                    uqa_core::LegacyVectorKind::Oid => "oid",
+                }),
+                _ => None,
+            });
         let parsed;
         let array = match v {
             Value::Array(array) => array,
+            Value::LegacyVector(vector) => vector.as_array(),
             Value::Str(text) => {
                 parsed = array::parse_pg_array_literal_with_control(text, control)?;
                 &parsed
@@ -96,10 +104,14 @@ pub fn cast_value_from_with_control(
             source_element_type,
             control,
         )?;
+        let normalize_empty = array.elements().is_empty()
+            && !array::binary_compatible_elements(source_element_type, element_type, control)?;
         let mut bounds = ProductionVec::new(*control);
         bounds.reserve(array.lower_bounds().len())?;
-        for lower in array.lower_bounds() {
-            bounds.push_copy(*lower)?;
+        if !normalize_empty {
+            for lower in array.lower_bounds() {
+                bounds.push_copy(*lower)?;
+            }
         }
         let array =
             ArrayValue::with_lower_bounds_with_control(elements, bounds.finish()?, control)?
@@ -123,7 +135,7 @@ pub fn cast_value_from_with_control(
         }
         "smallint" | "int2" | "pg_catalog.int2" => cast_integer(v, "smallint", control),
         "integer" | "int" | "int4" | "serial" | "serial4" | "pg_catalog.int4" => {
-            cast_integer(v, "integer", control)
+            binary_oid::cast_integer_from(v, source_ty, control)
         }
         "bigint" | "int8" | "bigserial" | "serial8" | "pg_catalog.int8" => {
             cast_integer(v, "bigint", control)
@@ -501,6 +513,7 @@ fn canonical_cast_source_with_control(
         Value::Json(_) => "json",
         Value::JsonB(_) => "jsonb",
         Value::Array(_) => "anyarray",
+        Value::LegacyVector(vector) => vector.kind().type_name(),
         Value::List(_) => "anyarray",
         Value::Row(_) | Value::Record(_) => "record",
         Value::Map(_) => "jsonb",

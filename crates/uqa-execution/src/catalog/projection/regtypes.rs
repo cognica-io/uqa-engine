@@ -426,10 +426,11 @@ fn catalog_int(row: &ResultRow, column: &str) -> Option<i64> {
 }
 
 fn catalog_int_list(row: &ResultRow, column: &str) -> Option<Vec<i64>> {
-    let Some(Value::List(values)) = row.get(column) else {
+    let Some(Value::LegacyVector(vector)) = row.get(column) else {
         return None;
     };
-    values
+    vector
+        .elements()
         .iter()
         .map(|value| match value {
             Value::Int(value) => Some(*value),

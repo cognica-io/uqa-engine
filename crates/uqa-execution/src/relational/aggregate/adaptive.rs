@@ -338,6 +338,7 @@ fn value_retained_bytes(value: &Value) -> usize {
             value.capacity()
         }
         Value::Bytes(value) => value.capacity(),
+        Value::LegacyVector(vector) => vector.retained_bytes(),
         Value::Array(array) => array
             .retained_header_bytes()
             .saturating_add(

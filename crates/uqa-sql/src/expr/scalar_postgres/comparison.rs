@@ -52,7 +52,7 @@ fn any_all(args: &[Value], is_any: bool, control: &ProductionControl<'_>) -> Res
             )))
         }
     };
-    let Value::Array(array) = &args[1] else {
+    let Some(array) = args[1].array_view() else {
         if matches!(args[1], Value::Null) {
             return Ok(Value::Null);
         }

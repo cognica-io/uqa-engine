@@ -28,6 +28,7 @@ pub(super) enum StoredValue {
     Json(String),
     JsonB(String),
     Array(uqa_core::ArrayValue),
+    LegacyVector(uqa_core::LegacyVectorValue),
     List(Vec<StoredValue>),
     Row(Vec<StoredValue>),
     Record(Vec<(String, StoredValue)>),
@@ -50,6 +51,7 @@ impl StoredValue {
             Value::Json(value) => Self::Json(value),
             Value::JsonB(value) => Self::JsonB(value),
             Value::Array(value) => Self::Array(value),
+            Value::LegacyVector(value) => Self::LegacyVector(value),
             Value::List(values) => Self::List(values.into_iter().map(Self::from_value).collect()),
             Value::Row(values) => Self::Row(values.into_iter().map(Self::from_value).collect()),
             Value::Record(fields) => Self::Record(
@@ -82,6 +84,7 @@ impl StoredValue {
             Self::Json(value) => Value::Json(value),
             Self::JsonB(value) => Value::JsonB(value),
             Self::Array(value) => Value::Array(value),
+            Self::LegacyVector(value) => Value::LegacyVector(value),
             Self::List(values) => Value::List(values.into_iter().map(Self::into_value).collect()),
             Self::Row(values) => Value::Row(values.into_iter().map(Self::into_value).collect()),
             Self::Record(fields) => Value::Record(
@@ -117,7 +120,11 @@ pub(super) fn value_requires_typed_encoding(value: &Value) -> bool {
             .iter()
             .any(|(_, value)| value_requires_typed_encoding(value)),
         Value::Map(values) => values.values().any(value_requires_typed_encoding),
-        Value::Array(_) | Value::Bytes(_) | Value::Json(_) | Value::JsonB(_) => true,
+        Value::Array(_)
+        | Value::LegacyVector(_)
+        | Value::Bytes(_)
+        | Value::Json(_)
+        | Value::JsonB(_) => true,
         _ => false,
     }
 }

@@ -42,9 +42,18 @@ fn partition_catalogs_bounds_and_deparsers_match_postgresql_18() {
     let row = &partitioned.rows[0];
     assert_eq!(row["partstrat"], Value::Str("r".into()));
     assert_eq!(row["partnatts"], Value::Int(1));
-    assert_eq!(row["partattrs"], Value::List(vec![Value::Int(1)]));
-    assert_eq!(row["partclass"], Value::List(vec![Value::Int(1_978)]));
-    assert_eq!(row["partcollation"], Value::List(vec![Value::Int(0)]));
+    assert_eq!(
+        row["partattrs"],
+        crate::legacy_vectors::int2vector(vec![Value::Int(1)])
+    );
+    assert_eq!(
+        row["partclass"],
+        crate::legacy_vectors::oidvector(vec![Value::Int(1_978)])
+    );
+    assert_eq!(
+        row["partcollation"],
+        crate::legacy_vectors::oidvector(vec![Value::Int(0)])
+    );
     assert_eq!(row["partexprs"], Value::Null);
     assert_eq!(row["keydef"], Value::Str("RANGE (id)".into()));
     assert_eq!(
@@ -148,11 +157,11 @@ fn assert_partition_catalog_routines(engine: &Engine) {
     assert_eq!(routines.rows[0]["proparallel"], Value::Str("s".into()));
     assert_eq!(
         routines.rows[0]["proargtypes"],
-        Value::List(vec![Value::Int(194), Value::Int(26)])
+        crate::legacy_vectors::oidvector(vec![Value::Int(194), Value::Int(26)])
     );
     assert_eq!(
         routines.rows[1]["proargtypes"],
-        Value::List(vec![Value::Int(194), Value::Int(26), Value::Int(16)])
+        crate::legacy_vectors::oidvector(vec![Value::Int(194), Value::Int(26), Value::Int(16)])
     );
     assert_eq!(
         routines.rows[2]["prosrc"],

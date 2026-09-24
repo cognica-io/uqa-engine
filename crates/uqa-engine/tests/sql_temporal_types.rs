@@ -26,7 +26,8 @@ fn interval_fields_and_precision_preserve_values_and_metadata_after_reopen() {
         .enumerate()
         {
             assert_eq!(
-                uqa_sql::expr::value_to_string(result.rows[0].get(&result.columns[index]).unwrap()),
+                uqa_sql::expr::value_to_string(result.rows[0].get(&result.columns[index]).unwrap())
+                    .unwrap(),
                 expected
             );
         }
@@ -88,7 +89,7 @@ fn temporal_precision_preserves_rounding_and_catalog_metadata_after_reopen() {
         .enumerate()
         {
             let value = result.rows[0].get(&result.columns[position]).unwrap();
-            assert_eq!(uqa_sql::expr::value_to_string(value), expected);
+            assert_eq!(uqa_sql::expr::value_to_string(value).unwrap(), expected);
             let ty = result.column_types[position].as_ref().unwrap();
             assert_eq!(postgres_result_type(ty).type_modifier, 3);
         }

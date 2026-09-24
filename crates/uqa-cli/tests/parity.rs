@@ -68,6 +68,30 @@ fn command_string_executes_without_repl_banner() {
 }
 
 #[test]
+fn legacy_vector_output_errors_reach_the_cli_exit_status() {
+    let dir = tempfile::tempdir().unwrap();
+    for ty in ["int2vector", "oidvector"] {
+        let sql = format!("SELECT trim_array('1 2'::{ty},2)");
+        for mode in [None, Some("--copy-text")] {
+            let mut args = Vec::new();
+            args.extend(mode);
+            args.extend(["-c", &sql]);
+            let output = run_usql(&args, "", dir.path());
+            assert!(
+                !output.status.success(),
+                "{ty} {mode:?}: {}",
+                stdout(&output)
+            );
+            assert!(
+                stdout(&output).contains(&format!("42804: array is not a valid {ty}")),
+                "{}",
+                stdout(&output)
+            );
+        }
+    }
+}
+
+#[test]
 fn builtin_nori_follows_the_cli_feature_configuration() {
     verify_builtin("nori", "한국 경제", 0, "한국", cfg!(feature = "nori"));
 }

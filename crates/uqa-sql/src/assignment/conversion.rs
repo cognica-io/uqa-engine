@@ -10,6 +10,10 @@ use super::AssignmentContext;
 use crate::{ColumnType, SQLError};
 use uqa_core::{ArrayValue, DecimalValue, TemporalValue, Value};
 
+mod carrier;
+pub(super) use carrier::normalize_existing;
+pub use carrier::{contains_legacy_vectors, normalize_legacy_vector_carrier_with_control};
+
 pub fn coerce_assignment_value(
     context: &dyn AssignmentContext,
     value: Value,
@@ -17,7 +21,7 @@ pub fn coerce_assignment_value(
     source: Option<&ColumnType>,
 ) -> Result<Value, SQLError> {
     if source.is_some_and(|source| same_domain_identity(source, target)) {
-        return Ok(value);
+        return normalize_existing(value, target);
     }
     let value = if target.is_character_string() {
         source

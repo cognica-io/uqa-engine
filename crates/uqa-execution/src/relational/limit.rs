@@ -159,10 +159,8 @@ impl<'a> Limit<'a> {
             .boundary
             .as_ref()
             .ok_or_else(|| ExecError::Other("LIMIT tie boundary is absent".into()))?;
-        Ok(
-            compare_sort_key_values(&with_ties.keys, boundary, &values)
-                == std::cmp::Ordering::Equal,
-        )
+        Ok(compare_sort_key_values(&with_ties.keys, boundary, &values)?
+            == std::cmp::Ordering::Equal)
     }
 
     fn directional_batch(&self, row: PhysicalRow) -> Batch {
@@ -410,7 +408,7 @@ impl PhysicalOperator for Limit<'_> {
                                 "WITH TIES boundary was not captured".to_string(),
                             )
                         })?;
-                        if compare_sort_key_values(&with_ties.keys, boundary, &values)
+                        if compare_sort_key_values(&with_ties.keys, boundary, &values)?
                             != std::cmp::Ordering::Equal
                         {
                             with_ties.finished = true;

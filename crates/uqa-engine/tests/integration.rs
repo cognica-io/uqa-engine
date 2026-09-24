@@ -9,6 +9,8 @@
 
 //! Single integration-test executable for every engine test domain.
 
+#[path = "support/legacy_vectors.rs"]
+mod legacy_vectors;
 #[path = "support/native_storage.rs"]
 mod native_storage;
 

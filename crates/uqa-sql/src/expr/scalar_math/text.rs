@@ -184,19 +184,19 @@ pub(super) fn eval(
 
 pub(super) fn ordinary_format(args: &[Value]) -> Result<Value> {
     use crate::expr::{coerce_i64, value_to_string};
-    fn format_argument_to_string(value: &Value) -> String {
-        match value {
+    fn format_argument_to_string(value: &Value) -> Result<String> {
+        Ok(match value {
             Value::Bool(true) => "t".into(),
             Value::Bool(false) => "f".into(),
-            other => value_to_string(other),
-        }
+            other => value_to_string(other)?,
+        })
     }
     if args.is_empty() {
         return Err(SQLError::TypeMismatch(
             "format needs a format string".into(),
         ));
     }
-    let fmt = value_to_string(&args[0]);
+    let fmt = value_to_string(&args[0])?;
     let mut out = String::with_capacity(fmt.len());
     let mut iter = fmt.chars().peekable();
     let mut idx = 1usize;
@@ -206,7 +206,7 @@ pub(super) fn ordinary_format(args: &[Value]) -> Result<Value> {
                 Some('s') | Some('I') | Some('L') => {
                     out.push_str(&format_argument_to_string(
                         args.get(idx).unwrap_or(&Value::Null),
-                    ));
+                    )?);
                     idx += 1;
                 }
                 Some('d') => {

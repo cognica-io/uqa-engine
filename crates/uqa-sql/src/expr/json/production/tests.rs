@@ -23,6 +23,44 @@ fn reference(value: &Value, jsonb: bool) -> Result<Value> {
 }
 
 #[test]
+fn legacy_vectors_preserve_postgresql_json_element_categories_and_array_shape() {
+    use uqa_core::{LegacyVectorKind, LegacyVectorValue};
+
+    // PostgreSQL 18.4 to_json() emits int2vector elements as numbers and oidvector elements as strings, including vectors nested as atomic SQL array elements.
+    let memory = MemoryBudget::new(4096);
+    let cancellation = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &cancellation, &cancellation);
+    for (kind, expected) in [
+        (LegacyVectorKind::SmallInteger, serde_json::json!([1, 2])),
+        (LegacyVectorKind::Oid, serde_json::json!(["1", "2"])),
+    ] {
+        let vector = Value::LegacyVector(
+            LegacyVectorValue::try_new(kind, vec![Value::Int(1), Value::Int(2)]).unwrap(),
+        );
+        let empty = Value::LegacyVector(LegacyVectorValue::try_new(kind, Vec::new()).unwrap());
+        for (value, expected) in [
+            (vector.clone(), expected.clone()),
+            (empty.clone(), serde_json::json!([])),
+            (
+                Value::Array(ArrayValue::try_new(vec![vector, empty]).unwrap()),
+                serde_json::json!([expected, []]),
+            ),
+        ] {
+            assert_eq!(
+                super::super::value_to_json_text(&value),
+                expected.to_string()
+            );
+            assert_eq!(super::super::value_to_json(&value), expected);
+            let output = format_value_as_json_with_control(&value, &control).unwrap();
+            assert_eq!(&**output, expected.to_string());
+            assert_eq!(memory.used(), output.reserved_bytes());
+            drop(output);
+            assert_eq!(memory.used(), 0);
+        }
+    }
+}
+
+#[test]
 fn admitted_json_preserves_lexical_casts_and_jsonb_canonical_number_and_key_rules() {
     let memory = MemoryBudget::new(1024 * 1024);
     let original = CancellationToken::new();

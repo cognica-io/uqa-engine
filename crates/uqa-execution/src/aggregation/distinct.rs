@@ -196,6 +196,10 @@ pub fn value_lt(a: &Value, b: &Value) -> bool {
         (Value::FixedChar(x), Value::FixedChar(y)) => x.trim_end() < y.trim_end(),
         (Value::Bytes(x), Value::Bytes(y)) => x < y,
         (Value::Temporal(x), Value::Temporal(y)) => x < y,
+        // PostgreSQL MIN/MAX bind array_smaller/array_larger for catalog vectors; OID-vector scalar operators use a different order.
+        (Value::LegacyVector(left), Value::LegacyVector(right)) => {
+            left.compare_as_array(right).is_lt()
+        }
         (Value::Array(_), Value::Array(_))
         | (Value::List(_), Value::List(_))
         | (Value::Row(_), Value::Row(_))

@@ -8,6 +8,61 @@ use super::*;
 use uqa_core::{memory::MemoryBudget, ArrayValue, CancellationToken, DecimalValue, TemporalValue};
 
 #[test]
+fn legacy_vector_errors_follow_array_shape_null_and_element_short_circuit() {
+    use uqa_core::{LegacyVectorKind, LegacyVectorValue};
+    let invalid = Value::LegacyVector(
+        LegacyVectorValue::try_from_array(
+            LegacyVectorKind::Oid,
+            ArrayValue::try_new(Vec::new()).unwrap(),
+        )
+        .unwrap(),
+    );
+    let valid = |n| {
+        Value::LegacyVector(
+            LegacyVectorValue::try_new(LegacyVectorKind::Oid, vec![Value::Int(n)]).unwrap(),
+        )
+    };
+    let array = |values| Value::Array(ArrayValue::try_new(values).unwrap());
+    let left = array(vec![invalid.clone()]);
+    let larger = array(vec![invalid.clone(), valid(2)]);
+    let budget = MemoryBudget::new(4096);
+    let cancel = CancellationToken::new();
+    for control in [
+        ProductionControl::uncontrolled(),
+        ProductionControl::new(&budget, &cancel, &cancel),
+    ] {
+        assert!(!values_equal_with_control(&left, &larger, &control).unwrap());
+        assert_eq!(
+            compare_with_control(&left, &larger, &control)
+                .unwrap_err()
+                .sqlstate(),
+            Some("42804")
+        );
+        assert_eq!(
+            values_equal_with_control(&left, &left, &control)
+                .unwrap_err()
+                .sqlstate(),
+            Some("42804")
+        );
+        assert!(!values_equal_with_control(&array(vec![Value::Null]), &left, &control).unwrap());
+        let first = array(vec![valid(1), invalid.clone()]);
+        let second = array(vec![valid(2), invalid.clone()]);
+        assert!(!values_equal_with_control(&first, &second, &control).unwrap());
+        assert!(compare_with_control(&first, &second, &control)
+            .unwrap()
+            .is_lt());
+        let record = Value::Record(vec![("v".into(), invalid.clone())]);
+        assert_eq!(
+            values_equal_with_control(&record, &record, &control)
+                .unwrap_err()
+                .sqlstate(),
+            Some("42804")
+        );
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
 fn numeric_comparison_coercion_errors_propagate_from_ordinary_equality() {
     let huge = Value::Decimal(DecimalValue::parse("1e400").unwrap());
     let float = Value::Float(f64::INFINITY);

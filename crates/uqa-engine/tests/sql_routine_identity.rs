@@ -745,10 +745,12 @@ fn schema_and_typed_overloads_are_distinct_and_survive_reopen() {
             .rows
             .iter()
             .map(|row| match &row["proargtypes"] {
-                Value::List(values) => match values.as_slice() {
-                    [Value::Int(oid)] => *oid,
-                    other => panic!("unexpected proargtypes: {other:?}"),
-                },
+                Value::LegacyVector(vector) if vector.kind() == uqa_core::LegacyVectorKind::Oid => {
+                    match vector.elements() {
+                        [Value::Int(oid)] => *oid,
+                        other => panic!("unexpected proargtypes: {other:?}"),
+                    }
+                }
                 other => panic!("unexpected proargtypes value: {other:?}"),
             })
             .collect::<Vec<_>>();

@@ -76,7 +76,7 @@ fn eval_array_subscripts(
     if args.iter().any(|argument| matches!(argument, Value::Null)) {
         return inline(Value::Null, control);
     }
-    let Value::Array(array) = &args[0] else {
+    let Some(array) = args[0].array_view() else {
         return Err(SQLError::TypeMismatch(format!(
             "cannot subscript {:?}",
             args[0]
@@ -91,7 +91,7 @@ fn eval_array_slices(args: &[Value], control: &ProductionControl<'_>) -> Result<
             "array slicing requires lower/upper bound pairs".into(),
         ));
     }
-    let Value::Array(array) = &args[0] else {
+    let Some(array) = args[0].array_view() else {
         if matches!(args[0], Value::Null) {
             return inline(Value::Null, control);
         }
@@ -109,6 +109,9 @@ fn eval_subscript(args: &[Value], control: &ProductionControl<'_>) -> Result<Pro
     }
     match (&args[0], &args[1]) {
         (Value::Null, _) | (_, Value::Null) => inline(Value::Null, control),
+        (Value::LegacyVector(vector), index) => {
+            array_subscripts(vector.as_array(), std::slice::from_ref(index), control)
+        }
         (Value::Array(array), index) => {
             let index = to_i64_with_control(index, control)?;
             let Some(lower) = array.lower_bound(0).map(i64::from) else {

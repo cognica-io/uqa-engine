@@ -549,15 +549,20 @@ impl Session {
             })
         };
         let result = notice_result.and_then(|()| match outcome {
-            Ok(result) => self.write_query_output(out, |writer| {
-                if self.copy_text {
-                    print_result_copy_text_with_engine(&result, &self.engine, writer);
-                } else if self.expanded {
-                    print_result_expanded_with_engine(&result, &self.engine, writer);
-                } else {
-                    print_result_with_engine(&result, &self.engine, writer);
-                }
-            }),
+            Ok(result) => {
+                let mut formatted = Ok(());
+                self.write_query_output(out, |writer| {
+                    formatted = if self.copy_text {
+                        print_result_copy_text_with_engine(&result, &self.engine, writer)
+                    } else if self.expanded {
+                        print_result_expanded_with_engine(&result, &self.engine, writer)
+                    } else {
+                        print_result_with_engine(&result, &self.engine, writer)
+                    };
+                })?;
+                formatted
+                    .map_err(|error| format!("{}: {error}", error.sqlstate().unwrap_or("XX000")))
+            }
             Err(err) => Err(format!("{}: {err}", err.sqlstate().unwrap_or("XX000"))),
         });
         let timing_result = if self.show_timing {

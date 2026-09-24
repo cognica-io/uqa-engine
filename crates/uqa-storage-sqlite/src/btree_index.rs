@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use uqa_core::{ArrayValue, DecimalValue, DocId, TemporalValue, Value};
+use uqa_core::{ArrayValue, DecimalValue, DocId, LegacyVectorValue, TemporalValue, Value};
 
 use super::{ManagedConnection, Result, SQLiteError};
 use crate::value_index_key::SQLiteValueIndexKey;
@@ -58,6 +58,7 @@ enum StoredValue {
     Json(String),
     JsonB(String),
     Array(ArrayValue),
+    LegacyVector(LegacyVectorValue),
     List(Vec<StoredValue>),
     Row(Vec<StoredValue>),
     Record(Vec<(String, StoredValue)>),
@@ -80,6 +81,7 @@ impl From<&Value> for StoredValue {
             Value::Json(value) => Self::Json(value.clone()),
             Value::JsonB(value) => Self::JsonB(value.clone()),
             Value::Array(value) => Self::Array(value.clone()),
+            Value::LegacyVector(value) => Self::LegacyVector(value.clone()),
             Value::List(values) => Self::List(values.iter().map(Self::from).collect()),
             Value::Row(values) => Self::Row(values.iter().map(Self::from).collect()),
             Value::Record(fields) => Self::Record(
@@ -114,6 +116,7 @@ impl StoredValue {
             Self::Json(value) => Value::Json(value),
             Self::JsonB(value) => Value::JsonB(value),
             Self::Array(value) => Value::Array(value),
+            Self::LegacyVector(value) => Value::LegacyVector(value),
             Self::List(values) => Value::List(values.into_iter().map(Self::into_value).collect()),
             Self::Row(values) => Value::Row(values.into_iter().map(Self::into_value).collect()),
             Self::Record(fields) => Value::Record(
@@ -608,6 +611,17 @@ mod tests {
             Value::Json("{\"b\":2,\"a\":1}".into()),
             Value::JsonB("{\"a\": 1, \"b\": 2}".into()),
             Value::List(vec![Value::Int(1), Value::Int(2)]),
+            Value::LegacyVector(
+                LegacyVectorValue::try_new(uqa_core::LegacyVectorKind::SmallInteger, vec![])
+                    .unwrap(),
+            ),
+            Value::LegacyVector(
+                LegacyVectorValue::try_new(
+                    uqa_core::LegacyVectorKind::Oid,
+                    vec![Value::Int(0), Value::Int(4_294_967_295)],
+                )
+                .unwrap(),
+            ),
             Value::Map(BTreeMap::from([("k".into(), Value::Str("v".into()))])),
         ];
         for value in values {

@@ -40,6 +40,7 @@ pub(super) fn typeof_value(v: &Value) -> String {
         Value::Json(_) => "json".into(),
         Value::JsonB(_) => "jsonb".into(),
         Value::Array(_) => "array".into(),
+        Value::LegacyVector(vector) => vector.kind().type_name().into(),
         Value::List(_) => "array".into(),
         Value::Row(_) | Value::Record(_) => "record".into(),
         Value::Map(_) => "jsonb".into(),

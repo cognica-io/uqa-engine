@@ -24,7 +24,8 @@ pub(super) fn render_value(value: &Value) -> Result<String, SQLError> {
         Value::JsonB(text) => format!("{}::jsonb", quote_str(text)),
         Value::Bytes(bytes) => format!("decode('{}', 'hex')", hex_encode(bytes)?),
         Value::Temporal(t) => quote_str(&t.to_sql_string()),
-        Value::Array(array) => quote_str(&uqa_sql::expr::array_value_to_string(array)),
+        Value::Array(_) => quote_str(&uqa_sql::expr::value_to_string(value)?),
+        Value::LegacyVector(vector) => uqa_sql::render::legacy_vector_expression(vector)?,
         Value::List(items) => {
             let inner: Vec<String> = items.iter().map(render_value).collect::<Result<_, _>>()?;
             format!("ARRAY[{}]", inner.join(", "))

@@ -39,6 +39,7 @@ mod graph;
 mod graph_phi;
 mod index_stats;
 mod jsonb;
+mod legacy_vector;
 mod occurrence;
 mod posting;
 mod temporal;
@@ -56,6 +57,7 @@ pub use jsonb::{
     jsonb_equality_key, jsonb_equality_key_with_control, write_jsonb_comparison_key,
     write_jsonb_equality_key, JsonbKeyError,
 };
+pub use legacy_vector::{LegacyVectorKind, LegacyVectorValue};
 pub use occurrence::{TokenOccurrence, TokenOccurrenceError, TokenOffsets};
 pub use posting::{GeneralizedPayload, GeneralizedPostingEntry, Payload, PostingEntry};
 pub use temporal::TemporalValue;

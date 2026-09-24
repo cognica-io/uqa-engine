@@ -326,7 +326,10 @@ fn pg_trigger_row(
                 "pg_trigger argument count",
             )?),
         ),
-        ("tgattr", Value::List(attributes)),
+        (
+            "tgattr",
+            super::helpers::rows::catalog_int2vector(attributes, "pg_trigger.tgattr")?,
+        ),
         ("tgargs", Value::Bytes(arguments)),
         (
             "tgqual",

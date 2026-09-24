@@ -399,6 +399,7 @@ fn foreach_array_value(
 ) -> Result<ArrayValue, SQLError> {
     match value {
         Value::Array(array) => Ok(array),
+        Value::LegacyVector(vector) => Ok(vector.into_array()),
         Value::List(elements)
             if declared_type
                 .is_some_and(|ty| matches!(ty, ColumnType::Int2Vector | ColumnType::OidVector)) =>

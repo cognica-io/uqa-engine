@@ -97,7 +97,7 @@ pub fn values_equal_nullable_with_control(
                 Some(true)
             }
         }
-        _ => Some(compare_sql_values(a, b, control)?.is_eq()),
+        _ => Some(equal_sql_values(a, b, control)?),
     };
     Ok(equal)
 }
@@ -131,6 +131,7 @@ pub fn compare_nullable_with_control(
         | (Value::Temporal(_), Value::Temporal(_))
         | (Value::Bool(_), Value::Bool(_))
         | (Value::Array(_), Value::Array(_))
+        | (Value::LegacyVector(_), Value::LegacyVector(_))
         | (Value::List(_), Value::List(_))
         | (Value::Record(_), Value::Record(_)) => Ok(Some(compare_sql_values(a, b, control)?)),
         (Value::FixedChar(x), Value::Str(y)) | (Value::Str(x), Value::FixedChar(y)) => {
@@ -166,7 +167,7 @@ fn compare_sql_values(
     right: &Value,
     control: &ProductionControl<'_>,
 ) -> Result<Ordering> {
-    // PostgreSQL's primitive mixed float/integer and float/numeric comparison signatures select float8 inputs. Real values are already rounded in their f64 carrier. Internal Core keys keep their separate exact total order.
+    // Primitive mixed float/integer and float/numeric operators select float8 inputs. Physical keys and already-bound container elements keep their exact carrier order.
     if matches!(
         (left, right),
         (Value::Float(_), Value::Int(_) | Value::Decimal(_))
@@ -178,7 +179,104 @@ fn compare_sql_values(
             super::super::cast_value_from_with_control(right, "double precision", None, control)?;
         return Ok(left.cmp(&right));
     }
+    compare_typed_values_with_control(left, right, control)
+}
+
+/// Compare already-bound values, preserving type operator failures and total container NULL semantics. Callers supply top-level NULL placement and must apply operator-selected casts first.
+pub fn compare_typed_values_with_control(
+    left: &Value,
+    right: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<Ordering> {
+    control.check()?;
+    match (left, right) {
+        (Value::Null, Value::Null) => return Ok(Ordering::Equal),
+        (Value::Null, _) => return Ok(Ordering::Greater),
+        (_, Value::Null) => return Ok(Ordering::Less),
+        (Value::Array(left), Value::Array(right)) => {
+            return left.cmp_by_with_control(right, control, compare_typed_values_with_control);
+        }
+        (Value::Record(left), Value::Record(right)) => {
+            return compare_sequence(
+                left.iter().map(|(_, v)| v),
+                right.iter().map(|(_, v)| v),
+                control,
+            );
+        }
+        (Value::Row(left), Value::Row(right)) | (Value::List(left), Value::List(right)) => {
+            return compare_sequence(left.iter(), right.iter(), control);
+        }
+        _ => {}
+    }
+    for value in [left, right] {
+        if let Value::LegacyVector(vector) = value {
+            validate_legacy_vector_comparison(vector)?;
+        }
+    }
     left.cmp_with_control(right, control).map_err(Into::into)
+}
+
+/// Validate the layout required by the `oidvector` scalar equality, ordering and hashing operators. Array operators on `int2vector` permit dimensionless arrays.
+pub fn validate_legacy_vector_comparison(vector: &uqa_core::LegacyVectorValue) -> Result<()> {
+    if vector.kind() == uqa_core::LegacyVectorKind::Oid && !vector.has_vector_layout() {
+        return Err(SQLError::Routine {
+            sqlstate: "42804".into(),
+            message: "array is not a valid oidvector".into(),
+        });
+    }
+    Ok(())
+}
+
+fn equal_sql_values(left: &Value, right: &Value, control: &ProductionControl<'_>) -> Result<bool> {
+    control.check()?;
+    match (left, right) {
+        (Value::Array(left), Value::Array(right)) => {
+            left.eq_by_with_control(right, control, equal_sql_values)
+        }
+        (Value::Record(left), Value::Record(right)) => equal_sequence(
+            left.iter().map(|(_, v)| v),
+            right.iter().map(|(_, v)| v),
+            control,
+        ),
+        (Value::Row(left), Value::Row(right)) | (Value::List(left), Value::List(right)) => {
+            equal_sequence(left.iter(), right.iter(), control)
+        }
+        _ => Ok(compare_sql_values(left, right, control)?.is_eq()),
+    }
+}
+
+fn equal_sequence<'a>(
+    mut left: impl Iterator<Item = &'a Value>,
+    mut right: impl Iterator<Item = &'a Value>,
+    control: &ProductionControl<'_>,
+) -> Result<bool> {
+    loop {
+        control.check()?;
+        match (left.next(), right.next()) {
+            (Some(left), Some(right)) if equal_sql_values(left, right, control)? => {}
+            (None, None) => return Ok(true),
+            _ => return Ok(false),
+        }
+    }
+}
+
+fn compare_sequence<'a>(
+    mut left: impl Iterator<Item = &'a Value>,
+    mut right: impl Iterator<Item = &'a Value>,
+    control: &ProductionControl<'_>,
+) -> Result<Ordering> {
+    loop {
+        control.check()?;
+        let ordering = match (left.next(), right.next()) {
+            (Some(left), Some(right)) => compare_typed_values_with_control(left, right, control)?,
+            (Some(_), None) => Ordering::Greater,
+            (None, Some(_)) => Ordering::Less,
+            (None, None) => return Ok(Ordering::Equal),
+        };
+        if !ordering.is_eq() {
+            return Ok(ordering);
+        }
+    }
 }
 
 fn compare_fixed_text(

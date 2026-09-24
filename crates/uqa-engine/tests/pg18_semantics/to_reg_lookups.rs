@@ -905,7 +905,10 @@ fn pg18_to_reg_lookups_catalog_rows_match_postgresql_18() {
         assert_eq!(row["oid"], Value::Int(oid));
         assert_eq!(row["proname"], Value::Str(name.into()));
         assert_eq!(row["prorettype"], Value::Int(return_type));
-        assert_eq!(row["proargtypes"], Value::List(vec![Value::Int(25)]));
+        assert_eq!(
+            row["proargtypes"],
+            crate::legacy_vectors::oidvector(vec![Value::Int(25)])
+        );
         assert_eq!(row["proisstrict"], Value::Bool(true));
         assert_eq!(row["provolatile"], Value::Str("s".into()));
         assert_eq!(row["proparallel"], Value::Str("s".into()));

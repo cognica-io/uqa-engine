@@ -603,6 +603,7 @@ fn value_to_json(value: Value) -> Result<JSON, String> {
         }
         Value::Bytes(value) => Ok(json!({ "$bytes": BASE64.encode(value) })),
         Value::Temporal(value) => Ok(json!(value.to_sql_string())),
+        Value::LegacyVector(vector) => value_to_json(Value::Array(vector.into_array())),
         Value::Array(array) => array
             .into_elements()
             .into_iter()

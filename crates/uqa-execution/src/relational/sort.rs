@@ -112,14 +112,18 @@ impl<'a> Sort<'a> {
 /// Compare two pre-computed sort-key vectors under `keys` semantics:
 /// per-key direction plus `PostgreSQL` NULLS placement (default NULLS
 /// LAST for ascending, NULLS FIRST for descending).
-pub fn compare_sort_key_values(keys: &[SortKey], av: &[Value], bv: &[Value]) -> std::cmp::Ordering {
+pub fn compare_sort_key_values(
+    keys: &[SortKey],
+    av: &[Value],
+    bv: &[Value],
+) -> ExecResult<std::cmp::Ordering> {
     compare_sort_key_values_by(keys, |index| (&av[index], &bv[index]))
 }
 
 pub(crate) fn compare_sort_key_values_by<'a>(
     keys: &[SortKey],
     mut values: impl FnMut(usize) -> (&'a Value, &'a Value),
-) -> std::cmp::Ordering {
+) -> ExecResult<std::cmp::Ordering> {
     use std::cmp::Ordering;
     for (i, k) in keys.iter().enumerate() {
         let (a, b) = values(i);
@@ -141,17 +145,21 @@ pub(crate) fn compare_sort_key_values_by<'a>(
                 Ordering::Less
             };
             if null_cmp != Ordering::Equal {
-                return null_cmp;
+                return Ok(null_cmp);
             }
             continue;
         }
-        let ord = compare_values(a, b);
+        let ord = uqa_sql::expr::compare_typed_values_with_control(
+            a,
+            b,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )?;
         let ord = if k.descending { ord.reverse() } else { ord };
         if ord != Ordering::Equal {
-            return ord;
+            return Ok(ord);
         }
     }
-    Ordering::Equal
+    Ok(Ordering::Equal)
 }
 
 pub(super) fn compare_values(a: &Value, b: &Value) -> std::cmp::Ordering {

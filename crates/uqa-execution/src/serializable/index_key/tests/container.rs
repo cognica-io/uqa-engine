@@ -97,26 +97,49 @@ fn float_array_cuts_canonicalize_signed_zero_and_preserve_nested_nan_order() {
 }
 
 #[test]
-fn legacy_vector_domains_observe_both_native_container_representations() {
-    let values = vec![
-        Value::Null,
-        array(vec![]),
-        Value::List(vec![]),
-        array(vec![Value::Int(1)]),
-        Value::List(vec![Value::Int(1)]),
-        array(vec![Value::Int(1), Value::Int(2)]),
-        Value::List(vec![Value::Int(1), Value::Int(2)]),
-        array(vec![Value::Null]),
-        Value::List(vec![Value::Null]),
-    ];
-    let mut targets = values.clone();
-    targets.extend([
-        array(vec![Value::Int(1), Value::Float(1.5)]),
-        Value::List(vec![Value::Int(1), Value::Float(1.5)]),
-        Value::Int(1),
-        Value::Row(vec![]),
-    ]);
-    verify(IndexDomain::LegacyVector, &values, &targets);
+fn legacy_vector_domains_preserve_kind_order_and_atomic_array_elements() {
+    use uqa_core::{LegacyVectorKind, LegacyVectorValue};
+    for kind in [LegacyVectorKind::SmallInteger, LegacyVectorKind::Oid] {
+        let mut values = vec![Value::Null];
+        values.extend(
+            [vec![], vec![2], vec![1, 9], vec![1, 2, 0], vec![1, 2]]
+                .into_iter()
+                .map(|values| {
+                    Value::LegacyVector(
+                        LegacyVectorValue::try_new(
+                            kind,
+                            values.into_iter().map(Value::Int).collect(),
+                        )
+                        .unwrap(),
+                    )
+                }),
+        );
+        let mut targets = values.clone();
+        targets.extend([
+            array(vec![Value::Int(1)]),
+            Value::List(vec![Value::Int(1)]),
+            Value::Int(1),
+            Value::Row(vec![]),
+            Value::LegacyVector(
+                LegacyVectorValue::try_new(
+                    if kind == LegacyVectorKind::SmallInteger {
+                        LegacyVectorKind::Oid
+                    } else {
+                        LegacyVectorKind::SmallInteger
+                    },
+                    vec![Value::Int(1), Value::Int(2)],
+                )
+                .unwrap(),
+            ),
+        ]);
+        let domain = ScalarIndexDomain::LegacyVector(kind);
+        verify(IndexDomain::Scalar(domain), &values, &targets);
+        let arrays: Vec<_> = values
+            .iter()
+            .map(|value| array(vec![value.clone()]))
+            .collect();
+        verify(IndexDomain::Array(domain), &arrays, &arrays);
+    }
 }
 
 #[test]
@@ -246,8 +269,18 @@ fn vector_and_tensor_keys_preserve_list_boundaries_and_native_leaf_comparison() 
 #[test]
 fn declared_container_domains_and_resource_errors_keep_original_control() {
     for (ty, domain) in [
-        (ColumnType::Int2Vector, IndexDomain::LegacyVector),
-        (ColumnType::OidVector, IndexDomain::LegacyVector),
+        (
+            ColumnType::Int2Vector,
+            IndexDomain::Scalar(ScalarIndexDomain::LegacyVector(
+                uqa_core::LegacyVectorKind::SmallInteger,
+            )),
+        ),
+        (
+            ColumnType::OidVector,
+            IndexDomain::Scalar(ScalarIndexDomain::LegacyVector(
+                uqa_core::LegacyVectorKind::Oid,
+            )),
+        ),
         (
             ColumnType::Array(Box::new(ColumnType::Array(Box::new(ColumnType::Integer)))),
             IndexDomain::Array(ScalarIndexDomain::Integer),

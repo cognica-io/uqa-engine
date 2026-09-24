@@ -45,7 +45,7 @@ fn convert_domain_value(
         .as_ref()
         == Some(ty)
     {
-        return Ok(Some(value.clone()));
+        return super::conversion::normalize_existing(value.clone(), ty).map(Some);
     }
     let mut chain = vec![domain.clone()];
     let mut base = domain.definition.base.clone();

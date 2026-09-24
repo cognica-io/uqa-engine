@@ -66,6 +66,18 @@ impl Value {
                 control,
             )?,
             (Self::Array(left), Self::Array(right)) => compare_arrays(left, right, control)?,
+            (Self::LegacyVector(left), Self::LegacyVector(right)) => {
+                let prefix = left.compare_prefix(right);
+                if prefix.is_eq() {
+                    if left.kind() == crate::LegacyVectorKind::SmallInteger {
+                        compare_arrays(left.as_array(), right.as_array(), control)?
+                    } else {
+                        compare_sequence(left.elements().iter(), right.elements().iter(), control)?
+                    }
+                } else {
+                    prefix
+                }
+            }
             (Self::Map(left), Self::Map(right)) => {
                 let mut left = left.iter();
                 let mut right = right.iter();
@@ -174,25 +186,7 @@ fn compare_arrays(
     right: &ArrayValue,
     control: &ProductionControl<'_>,
 ) -> Result<Ordering, ValueRetentionError> {
-    let mut left_values = left.elements_with_control(control)?;
-    let mut right_values = right.elements_with_control(control)?;
-    loop {
-        let ordering = match (left_values.next_element()?, right_values.next_element()?) {
-            (Some(left), Some(right)) => compare_element(left, right, control)?,
-            (Some(_), None) => Ordering::Greater,
-            (None, Some(_)) => Ordering::Less,
-            (None, None) => break,
-        };
-        if !ordering.is_eq() {
-            return Ok(ordering);
-        }
-    }
-    Ok(left
-        .dimensions()
-        .len()
-        .cmp(&right.dimensions().len())
-        .then_with(|| left.dimensions().cmp(right.dimensions()))
-        .then_with(|| left.lower_bounds().cmp(right.lower_bounds())))
+    left.cmp_by_with_control(right, control, Value::cmp_with_control)
 }
 
 #[cfg(test)]

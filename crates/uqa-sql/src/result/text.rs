@@ -26,7 +26,7 @@ pub fn format_postgres_text(
         return Ok(text);
     }
     if matches!(ty, ColumnType::Int2Vector | ColumnType::OidVector) {
-        return vector_value_to_string(value)
+        return vector_value_to_string(value)?
             .ok_or_else(|| SQLError::Internal("invalid catalog vector result carrier".into()));
     }
     if let ColumnType::Array(element) = ty {
@@ -39,7 +39,7 @@ pub fn format_postgres_text(
             crate::expr::format_real(*value as f32)
         }
         Value::Float(value) => uqa_core::format_float_pg(*value),
-        _ => value_to_string(value),
+        _ => value_to_string(value)?,
     })
 }
 
@@ -57,7 +57,8 @@ fn format_array(
     let (values, prefix) = match value {
         Value::Array(array) => {
             let mut prefix = String::new();
-            if array.lower_bounds().iter().any(|lower| *lower != 1) {
+            if !array.elements().is_empty() && array.lower_bounds().iter().any(|lower| *lower != 1)
+            {
                 for (lower, length) in array.lower_bounds().iter().zip(array.dimensions()) {
                     let upper = i64::from(*lower) + *length as i64 - 1;
                     write!(prefix, "[{lower}:{upper}]").expect("writing to String cannot fail");

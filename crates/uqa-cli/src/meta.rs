@@ -352,16 +352,22 @@ impl Session {
         let rows = stats
             .into_iter()
             .map(|(col, s)| {
-                result_row(vec![
+                Ok(result_row(vec![
                     ("column", Value::Str(col)),
                     ("distinct", u64_count_value(s.distinct_count)),
                     ("nulls", u64_count_value(s.null_count)),
-                    ("min", optional_value_to_display_value(s.min_value.as_ref())),
-                    ("max", optional_value_to_display_value(s.max_value.as_ref())),
+                    (
+                        "min",
+                        optional_value_to_display_value(s.min_value.as_ref())?,
+                    ),
+                    (
+                        "max",
+                        optional_value_to_display_value(s.max_value.as_ref())?,
+                    ),
                     ("selectivity", Value::Float(s.equality_selectivity())),
-                ])
+                ]))
             })
-            .collect();
+            .collect::<Result<Vec<_>, String>>()?;
         print_result(
             &SQLResult::from_rows(
                 vec![

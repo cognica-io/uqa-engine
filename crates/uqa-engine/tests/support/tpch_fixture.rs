@@ -242,9 +242,12 @@ fn canonical_value(value: &Value) -> String {
             }
             encoded
         }
-        Value::Array(_) | Value::List(_) | Value::Row(_) | Value::Record(_) | Value::Map(_) => {
-            serde_json::to_string(value).expect("serialize canonical TPC-H value")
-        }
+        Value::Array(_)
+        | Value::LegacyVector(_)
+        | Value::List(_)
+        | Value::Row(_)
+        | Value::Record(_)
+        | Value::Map(_) => serde_json::to_string(value).expect("serialize canonical TPC-H value"),
     }
 }
 

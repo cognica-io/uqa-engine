@@ -366,6 +366,11 @@ fn uqa_value_to_duck_value(value: &Value) -> Result<::duckdb::types::Value, FDWE
                 .map(uqa_value_to_duck_value)
                 .collect::<Result<Vec<_>, _>>()?,
         ),
+        Value::LegacyVector(_) => {
+            return Err(FDWError::UnsupportedValue(
+                "DuckDB cannot preserve PostgreSQL legacy vector types and lower bounds".into(),
+            ));
+        }
         Value::Row(_) | Value::Record(_) | Value::Map(_) => {
             return Err(FDWError::UnsupportedValue(
                 "composite and map literals cannot be bound to DuckDB parameters".into(),
@@ -631,6 +636,16 @@ mod tests {
 
     #[test]
     fn malformed_predicates_and_out_of_range_values_fail() {
+        for kind in [
+            uqa_core::LegacyVectorKind::SmallInteger,
+            uqa_core::LegacyVectorKind::Oid,
+        ] {
+            let vector = uqa_core::LegacyVectorValue::try_new(kind, vec![Value::Int(1)]).unwrap();
+            assert!(matches!(
+                uqa_value_to_duck_value(&Value::LegacyVector(vector)),
+                Err(FDWError::UnsupportedValue(_))
+            ));
+        }
         let predicate = FDWPredicate {
             column: "id".into(),
             operator: PredicateOp::In,

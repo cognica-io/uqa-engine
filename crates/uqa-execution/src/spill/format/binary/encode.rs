@@ -209,6 +209,19 @@ fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<
             add_size(total, value.sql_string_len(), "decimal value")
         }
         Value::Json(value) | Value::JsonB(value) => add_string_size(total, value, "JSON value"),
+        Value::LegacyVector(vector) => {
+            add_size(total, 1, "legacy vector kind")?;
+            add_size(
+                total,
+                8 + 4 * vector.as_array().lower_bounds().len(),
+                "legacy vector bounds",
+            )?;
+            add_size(total, 8, "legacy vector length")?;
+            for value in vector.elements() {
+                add_value_size(total, value, depth + 1)?;
+            }
+            Ok(())
+        }
         Value::Array(array) => {
             add_size(total, 8, "array lower-bound count")?;
             add_size(
@@ -432,6 +445,7 @@ fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecRes
     match value {
         Value::Null => write_tag(writer, 0),
         Value::Void => write_tag(writer, 16),
+        Value::LegacyVector(vector) => encode_legacy_vector(writer, vector, depth),
         Value::Bool(value) => {
             write_tag(writer, 1)?;
             writer
@@ -521,6 +535,30 @@ fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecRes
             Ok(())
         }
     }
+}
+
+fn encode_legacy_vector(
+    writer: &mut impl Write,
+    vector: &uqa_core::LegacyVectorValue,
+    depth: usize,
+) -> ExecResult<()> {
+    write_tag(writer, 17)?;
+    write_tag(
+        writer,
+        match vector.kind() {
+            uqa_core::LegacyVectorKind::SmallInteger => 0,
+            uqa_core::LegacyVectorKind::Oid => 1,
+        },
+    )?;
+    write_u64(writer, vector.as_array().lower_bounds().len())?;
+    for bound in vector.as_array().lower_bounds() {
+        write_raw(writer, &bound.to_le_bytes(), "legacy vector lower bound")?;
+    }
+    write_u64(writer, vector.elements().len())?;
+    for value in vector.elements() {
+        encode_value(writer, value, depth + 1)?;
+    }
+    Ok(())
 }
 
 fn encode_temporal(writer: &mut impl Write, value: &TemporalValue) -> ExecResult<()> {

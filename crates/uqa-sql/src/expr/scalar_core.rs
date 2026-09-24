@@ -8,7 +8,7 @@
 
 use crate::{
     error::{Result, SQLError},
-    expr::{compare_with_control, value_to_string, values_equal_with_control},
+    expr::{compare_with_control, values_equal_with_control},
 };
 use uqa_core::{
     memory::{Produced, ProductionControl},
@@ -128,7 +128,7 @@ fn concat(name: &str, args: &[Value]) -> Result<Value> {
         let mut output = String::new();
         for value in args {
             if !matches!(value, Value::Null) {
-                output.push_str(&value_to_string(value));
+                output.push_str(&super::value_to_string(value)?);
             }
         }
         return Ok(Value::Str(output));
@@ -139,12 +139,12 @@ fn concat(name: &str, args: &[Value]) -> Result<Value> {
     if matches!(separator, Value::Null) {
         return Ok(Value::Null);
     }
-    let separator = value_to_string(separator);
+    let separator = super::value_to_string(separator)?;
     let parts: Vec<String> = args[1..]
         .iter()
         .filter(|value| !matches!(value, Value::Null))
-        .map(value_to_string)
-        .collect();
+        .map(super::value_to_string)
+        .collect::<Result<_>>()?;
     Ok(Value::Str(parts.join(&separator)))
 }
 

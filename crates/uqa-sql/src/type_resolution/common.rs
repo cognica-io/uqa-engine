@@ -253,6 +253,10 @@ pub(crate) fn value_type_with_control(
         }),
         Value::Json(_) => Some(ColumnType::Json),
         Value::JsonB(_) => Some(ColumnType::JsonB),
+        Value::LegacyVector(vector) => Some(match vector.kind() {
+            uqa_core::LegacyVectorKind::SmallInteger => ColumnType::Int2Vector,
+            uqa_core::LegacyVectorKind::Oid => ColumnType::OidVector,
+        }),
         Value::Array(array) => {
             let mut element = None;
             if !merge_array_element_types(array.elements(), &mut element, control)? {

@@ -32,15 +32,28 @@ pub struct CastCatalogEntry {
 /// Return the same cast identity used by static coercion compatibility.
 #[must_use]
 pub fn cast_catalog_entry(source: &ColumnType, target: &ColumnType) -> Option<CastCatalogEntry> {
-    let (context, method, oid, arguments) =
-        catalog::entry(&cast_catalog_name(source), &cast_catalog_name(target))?;
+    cast_catalog_entry_with_control(source, target, &ProductionControl::uncontrolled())
+        .expect("ordinary cast catalog lookup")
+}
+
+pub(crate) fn cast_catalog_entry_with_control(
+    source: &ColumnType,
+    target: &ColumnType,
+    control: &ProductionControl<'_>,
+) -> Result<Option<CastCatalogEntry>, SQLError> {
+    let Some((context, method, oid, arguments)) = catalog::entry(
+        &cast_catalog_name_with_control(source, control)?,
+        &cast_catalog_name_with_control(target, control)?,
+    ) else {
+        return Ok(None);
+    };
     let method = match method {
         b'b' => CastMethod::Binary,
         b'f' => CastMethod::Function { oid, arguments },
         b'i' => CastMethod::InputOutput,
         _ => unreachable!("invalid static cast method"),
     };
-    Some(CastCatalogEntry { context, method })
+    Ok(Some(CastCatalogEntry { context, method }))
 }
 
 /// Whether an explicit SQL cast has a `PostgreSQL` coercion path, independently of its value. NULL input does not make an otherwise missing cast valid.
@@ -85,13 +98,6 @@ pub(super) fn explicit_type_compatible_with_control(
         }
     }
     Ok(is_string_io_type(&source) || is_string_io_type(&target))
-}
-
-fn cast_catalog_name(ty: &ColumnType) -> String {
-    cast_catalog_name_with_control(ty, &ProductionControl::uncontrolled())
-        .expect("ordinary cast catalog name has no resource failure")
-        .into_uncontrolled()
-        .expect("ordinary cast catalog name has no reservation")
 }
 
 fn cast_catalog_name_with_control(

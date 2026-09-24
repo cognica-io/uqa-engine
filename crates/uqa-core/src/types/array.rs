@@ -8,6 +8,7 @@
 
 use super::Value;
 
+mod comparison;
 mod elements;
 mod production;
 mod shape;
@@ -34,6 +35,7 @@ impl ArrayValue {
             .ok()
     }
 
+    /// Explicit bounds preserve a one-dimensional empty array, including the zero-based empty legacy-vector shape.
     pub fn with_lower_bounds(elements: Vec<Value>, lower_bounds: Vec<i32>) -> Option<Self> {
         let control = crate::memory::ProductionControl::uncontrolled();
         Self::with_lower_bounds_with_control(
@@ -47,16 +49,17 @@ impl ArrayValue {
     }
 
     /// Validate borrowed input before a tagged decoder transfers its values. Rejected tags must preserve the complete original map.
-    pub(super) fn decoded_shape(elements: &[Value]) -> Option<Vec<usize>> {
-        normalized_shape(elements)
+    pub(super) fn decoded_shape(elements: &[Value], bound_count: usize) -> Option<Vec<usize>> {
+        shape::unbounded(elements, bound_count == 1)
     }
 
     pub(super) fn decoded_shape_budgeted(
         elements: &[Value],
+        bound_count: usize,
         memory: &crate::memory::MemoryBudget,
         cancellation: &crate::CancellationToken,
     ) -> Result<Option<crate::memory::Budgeted<Vec<usize>>>, super::ValueRetentionError> {
-        shape::budgeted(elements, memory, cancellation)
+        shape::budgeted(elements, bound_count == 1, memory, cancellation)
     }
 
     /// Reserve this exact boxed layout before consuming validated decoded buffers.
@@ -120,7 +123,7 @@ impl ArrayValue {
     pub fn upper_bound(&self, dimension: usize) -> Option<i64> {
         let lower = i64::from(self.lower_bound(dimension)?);
         let length = i64::try_from(*self.storage.dimensions.get(dimension)?).ok()?;
-        (length > 0).then(|| lower + length - 1)
+        lower.checked_add(length)?.checked_sub(1)
     }
 
     pub fn with_elements(&self, elements: Vec<Value>) -> Option<Self> {
@@ -156,10 +159,6 @@ fn normalize_nested_arrays(elements: &mut [Value]) {
         &crate::memory::ProductionControl::uncontrolled(),
     )
     .expect("ordinary array normalization");
-}
-
-fn normalized_shape(elements: &[Value]) -> Option<Vec<usize>> {
-    shape::unbounded(elements)
 }
 
 impl serde::Serialize for ArrayValue {

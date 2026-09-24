@@ -22,7 +22,6 @@ pub enum IndexDomain {
     Scalar(ScalarIndexDomain),
     Array(ScalarIndexDomain),
     List(ScalarIndexDomain),
-    LegacyVector,
     Tensor,
 }
 
@@ -40,11 +39,9 @@ impl IndexDomain {
                 let leaf = match Self::from_column_type(element)? {
                     Self::Scalar(leaf) | Self::Array(leaf) | Self::List(leaf) => leaf,
                     Self::Tensor => ScalarIndexDomain::Float,
-                    Self::LegacyVector => ScalarIndexDomain::Integer,
                 };
                 Some(Self::Array(leaf))
             }
-            ColumnType::Int2Vector | ColumnType::OidVector => Some(Self::LegacyVector),
             ColumnType::Vector(_) => Some(Self::List(ScalarIndexDomain::Float)),
             ColumnType::Tensor(_) => Some(Self::Tensor),
             _ => ScalarIndexDomain::from_column_type(ty).map(Self::Scalar),
@@ -58,9 +55,6 @@ impl IndexDomain {
         }
         if matches!(value, Value::Null) {
             return bytes(control, &[0]);
-        }
-        if self == Self::LegacyVector {
-            return self.container_variant(value).encode(value, control);
         }
         let mut key = self.start_key(control)?;
         match (self, value) {
@@ -159,7 +153,7 @@ impl IndexDomain {
     fn start_key(self, control: &StorageReadControl) -> Result<IndexKey, SQLError> {
         match self {
             Self::Scalar(domain) => domain.start_key(control),
-            Self::Array(_) | Self::LegacyVector => bytes(control, &[1, 10]),
+            Self::Array(_) => bytes(control, &[1, 10]),
             Self::List(_) | Self::Tensor => bytes(control, &[1, 11]),
         }
     }
@@ -168,7 +162,7 @@ impl IndexDomain {
         match self {
             Self::Scalar(domain) => domain.end_key(control),
             Self::Array(_) => bytes(control, &[1, 11]),
-            Self::List(_) | Self::Tensor | Self::LegacyVector => bytes(control, &[1, 12]),
+            Self::List(_) | Self::Tensor => bytes(control, &[1, 12]),
         }
     }
 
@@ -179,9 +173,8 @@ impl IndexDomain {
         inclusive: bool,
         control: &StorageReadControl,
     ) -> Result<Bound<IndexKey>, SQLError> {
-        let domain = self.container_variant(value);
-        let mut key = domain.start_key(control)?;
-        let exact = domain.append_bound(value, &mut key, control)?;
+        let mut key = self.start_key(control)?;
+        let exact = self.append_bound(value, &mut key, control)?;
         Ok(if (exact && inclusive) || (!exact && lower) {
             Bound::Included(key)
         } else {
@@ -232,7 +225,9 @@ impl IndexDomain {
                 // Other native value kinds lie wholly before or after this container domain.
                 let after = match value {
                     Value::List(_) => matches!(self, Self::Array(_)),
-                    Value::Row(_) | Value::Record(_) | Value::Map(_) => true,
+                    Value::LegacyVector(_) | Value::Row(_) | Value::Record(_) | Value::Map(_) => {
+                        true
+                    }
                     _ => false,
                 };
                 if after {
@@ -241,19 +236,6 @@ impl IndexDomain {
                 }
                 Ok(false)
             }
-        }
-    }
-
-    // Legacy-vector inputs retain both native Array and List carriers; key order follows the existing index for either representation.
-    fn container_variant(self, value: &Value) -> Self {
-        if self != Self::LegacyVector {
-            return self;
-        }
-        match value {
-            Value::List(_) | Value::Row(_) | Value::Record(_) | Value::Map(_) => {
-                Self::List(ScalarIndexDomain::Integer)
-            }
-            _ => Self::Array(ScalarIndexDomain::Integer),
         }
     }
 

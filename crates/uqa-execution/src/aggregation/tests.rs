@@ -7,6 +7,7 @@
 use super::*;
 use uqa_core::ArrayValue;
 
+mod legacy_vectors;
 mod mode;
 
 #[test]
