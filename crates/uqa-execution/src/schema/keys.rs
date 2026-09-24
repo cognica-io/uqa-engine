@@ -67,6 +67,15 @@ pub fn validate_added_key_constraint(
     constraint: &uqa_sql::ast::TableKeyConstraint,
 ) -> Result<(), SQLError> {
     validate_added_key_declaration(context, table, constraint)?;
+    validate_key_constraint_data(context, table, constraint)
+}
+
+/// Validate physical values independently of whether the declaration has already been published in the current transaction.
+pub(super) fn validate_key_constraint_data(
+    context: &KeyValidationContext<'_>,
+    table: &str,
+    constraint: &uqa_sql::ast::TableKeyConstraint,
+) -> Result<(), SQLError> {
     let mut seen = std::collections::BTreeSet::<Vec<Value>>::new();
     for doc_id in context.constraints.reads.live_table_doc_ids(table)? {
         let Some(document) = context.constraints.reads.get_document(table, doc_id)? else {
@@ -106,18 +115,23 @@ pub fn validate_added_key_constraint(
             }
             continue;
         }
-        if !seen.insert(values) {
-            return Err(SQLError::Routine {
+        if seen.contains(&values) {
+            let name = constraint.name.as_deref().ok_or_else(|| {
+                SQLError::Internal("key validation requires its reserved index name".into())
+            })?;
+            return Err(SQLError::Diagnostic {
                 sqlstate: "23505".into(),
-                message: format!(
-                    "{} constraint would be violated by duplicate values on table `{table}`",
-                    match constraint.kind {
-                        uqa_sql::ast::TableKeyConstraintKind::PrimaryKey => "PRIMARY KEY",
-                        uqa_sql::ast::TableKeyConstraintKind::Unique => "UNIQUE",
-                    }
-                ),
+                message: format!("could not create unique index \"{name}\""),
+                detail: crate::mutation::constraints::duplicate_index_key_detail(
+                    context.constraints,
+                    table,
+                    &constraint.clone().into(),
+                    &values,
+                )?,
+                hint: None,
             });
         }
+        seen.insert(values);
     }
     Ok(())
 }

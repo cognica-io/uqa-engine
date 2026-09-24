@@ -70,6 +70,12 @@ fn unique_text_addition_preserves_default_and_enforcement_on_reopen(
         .sql("INSERT INTO left_t (id, v) VALUES (2, 2)", &[])
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("23505"), "{error}");
+    assert!(matches!(
+        error,
+        uqa_sql::SQLError::Diagnostic { message, detail: Some(detail), .. }
+            if message == "duplicate key value violates unique constraint \"left_t_k_key\""
+                && detail == "Key (k)=(key1) already exists."
+    ));
     engine
         .sql("INSERT INTO left_t VALUES (2, 2, 'key2')", &[])
         .unwrap();
@@ -99,6 +105,12 @@ fn failed_unique_text_addition_restores_schema_and_rows(#[values(0, 1, 2, 3)] pr
         )
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("23505"), "{error}");
+    assert!(matches!(
+        error,
+        uqa_sql::SQLError::Diagnostic { message, detail: Some(detail), .. }
+            if message == "could not create unique index \"left_t_k_key\""
+                && detail == "Key (k)=(key1) is duplicated."
+    ));
     assert_original_columns(&engine);
     assert_eq!(
         engine.sql("SELECT * FROM left_t", &[]).unwrap().rows.len(),

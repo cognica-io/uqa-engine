@@ -17,6 +17,26 @@ pub(super) fn unique_key_detail(
     key: &EnforcedKey,
     values: &[Value],
 ) -> Result<Option<String>, SQLError> {
+    Ok(index_key_detail(context, table, key, values)?
+        .map(|detail| format!("{detail} already exists.")))
+}
+
+pub(crate) fn duplicate_index_key_detail(
+    context: ConstraintContext<'_>,
+    table: &str,
+    key: &EnforcedKey,
+    values: &[Value],
+) -> Result<Option<String>, SQLError> {
+    Ok(index_key_detail(context, table, key, values)?
+        .map(|detail| format!("{detail} is duplicated.")))
+}
+
+fn index_key_detail(
+    context: ConstraintContext<'_>,
+    table: &str,
+    key: &EnforcedKey,
+    values: &[Value],
+) -> Result<Option<String>, SQLError> {
     let diagnostics = context.diagnostics.diagnostic_context();
     if !diagnostics
         .authorization
@@ -72,7 +92,7 @@ pub(super) fn unique_key_detail(
         })
         .collect::<Result<Vec<_>, SQLError>>()?
         .join(", ");
-    Ok(Some(format!("Key ({names})=({values}) already exists.")))
+    Ok(Some(format!("Key ({names})=({values})")))
 }
 
 struct OutputNames<'a>(CatalogContext<'a>);

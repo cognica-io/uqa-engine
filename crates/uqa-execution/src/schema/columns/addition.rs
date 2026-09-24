@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Execute ADD COLUMN in declaration, physical-field, schema, and existing-row order.
+//! Publish the declared column before its physical fields and validate backfilled keys atomically.
 use super::{backfill::ColumnBackfillContext, generated::GeneratedRewriteContext};
 use crate::schema::publication::SchemaWriteTransaction;
 use uqa_core::Value;
@@ -92,18 +92,8 @@ pub fn add_column<S: Clone + 'static>(
         }
     }
     let generated_kind = column.generated.as_ref().map(|generated| generated.kind);
-    match column.ty {
-        ColumnType::Vector(dim) | ColumnType::Tensor(dim) => {
-            context
-                .state
-                .create_vector_field(table, col_name.clone(), dim)
-                .map_err(|err| ddl_storage_error("ALTER TABLE vector field", err))?;
-        }
-        ColumnType::Text if generated_kind != Some(GeneratedColumnKind::Virtual) => {
-            context.state.add_text_field(table, col_name.clone())?;
-        }
-        _ => {}
-    }
+    let column_type = column.ty.clone();
+    let adds_keys = column.primary_key || column.unique || !key_constraints.is_empty();
     // Preserve NOT NULL validation while filling existing rows through the stored default and generated-column paths.
     let column_not_null = column.not_null;
     context
@@ -118,7 +108,37 @@ pub fn add_column<S: Clone + 'static>(
             )
         }))
         .map_err(|e| ddl_storage_error("ALTER TABLE ADD COLUMN", e))?;
+    // Constraint name reservations can refresh the catalog. Physical field metadata must already have a declared column whenever that happens.
+    match column_type {
+        ColumnType::Vector(dim) | ColumnType::Tensor(dim) => {
+            context
+                .state
+                .create_vector_field(table, col_name.clone(), dim)
+                .map_err(|err| ddl_storage_error("ALTER TABLE vector field", err))?;
+        }
+        ColumnType::Text if generated_kind != Some(GeneratedColumnKind::Virtual) => {
+            context.state.add_text_field(table, col_name.clone())?;
+        }
+        _ => {}
+    }
     initialize_column_rows(context, table, &col_name, generated_kind, column_not_null)?;
+    if adds_keys {
+        for constraint in context
+            .generated
+            .keys
+            .catalog
+            .try_key_constraints(table)
+            .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN keys", error))?
+        {
+            if constraint.columns.contains(&col_name) {
+                super::super::keys::validate_key_constraint_data(
+                    &context.generated.keys,
+                    table,
+                    &constraint,
+                )?;
+            }
+        }
+    }
     context
         .state
         .persist_schema(table)
