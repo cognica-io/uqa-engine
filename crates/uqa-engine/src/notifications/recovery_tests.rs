@@ -12,6 +12,21 @@ use uqa_core::Value;
 
 mod process;
 
+#[test]
+fn cancelled_serialized_notification_commit_clears_its_transaction_frame() {
+    let directory = tempfile::tempdir().unwrap();
+    let sender = open(3, &directory.path().join("cancelled-notification.db"));
+    sender
+        .sql("BEGIN READ ONLY; NOTIFY cancelled_event", &[])
+        .unwrap();
+    sender.runtime.cancellation.cancel();
+    let error = sender.commit().unwrap_err();
+    assert_eq!(error.sqlstate(), Some("57014"), "{error}");
+    assert!(sender.session.transactions.lock().is_empty());
+    sender.runtime.cancellation.reset();
+    assert_eq!(sender.sql("SELECT 1", &[]).unwrap().rows.len(), 1);
+}
+
 const KEY: &str = "notification-recovery-fixture-key";
 
 fn open(provider: usize, path: &Path) -> Engine {

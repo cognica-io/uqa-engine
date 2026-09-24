@@ -538,7 +538,15 @@ impl Engine {
         }
         // SQL read-only validation precedes this auxiliary writer reservation. No user statement is rerun, and the original session's detached SQL snapshot remains retained until completion.
         self.restart_unwritten_backend_reader(stack)?;
-        self.acquire_backend_writer_lock(0)?;
+        if let Err(error) = self.acquire_backend_writer_lock(0) {
+            return Err(match self.rollback_transaction_frame(stack) {
+                Ok(()) => error,
+                Err(rollback) => Self::rollback_cleanup_error(
+                    &rollback,
+                    format!("{error}; notification writer rollback also failed: {rollback}"),
+                ),
+            });
+        }
         self.replace_unwritten_backend_transaction(stack, false, "reserve notification publication")
     }
 
