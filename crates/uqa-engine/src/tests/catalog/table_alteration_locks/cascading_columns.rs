@@ -17,7 +17,7 @@ fn fixture(engine: &Engine, kind: &str) -> &'static str {
         ),
         "function" | "schema" => (
             "CREATE SCHEMA dependency; CREATE FUNCTION dependency.source(v integer) RETURNS integer IMMUTABLE LANGUAGE SQL RETURN v+1",
-            "a integer GENERATED ALWAYS AS (dependency.source(1)) STORED, b integer GENERATED ALWAYS AS (dependency.source(2)) VIRTUAL, x integer, d integer DEFAULT dependency.source(3) CHECK (dependency.source(4)>0)",
+            "a integer GENERATED ALWAYS AS (dependency.source(1)) STORED, b integer GENERATED ALWAYS AS (dependency.source(2)) STORED, x integer, d integer DEFAULT dependency.source(3) CHECK (dependency.source(4)>0)",
             if kind == "schema" {
                 "DROP SCHEMA dependency CASCADE"
             } else {
