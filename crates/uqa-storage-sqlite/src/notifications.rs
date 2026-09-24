@@ -42,9 +42,14 @@ pub struct NotificationRegistryTransaction {
     connection: SQLiteConnectionLease,
     finished: bool,
     poisoned: bool,
+    pending_acknowledgement: Option<[u8; 32]>,
 }
 
 impl NotificationRegistryTransaction {
+    pub const fn pending_acknowledgement(&self) -> Option<[u8; 32]> {
+        self.pending_acknowledgement
+    }
+
     pub fn allocate_backend_process_id(&self) -> Result<i32, StorageBackendError> {
         let next = self
             .connection
@@ -319,6 +324,7 @@ fn open_registry_transaction(
         connection,
         finished: false,
         poisoned: false,
+        pending_acknowledgement: None,
     };
     schema::validate_writer(&transaction.connection).map_err(StorageBackendError::Other)?;
     Ok(transaction)

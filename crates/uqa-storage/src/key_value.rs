@@ -264,6 +264,11 @@ pub trait KeyValueBatch {
 
 /// Ordered byte-key storage used by Key/Value catalog and index backends.
 pub trait KeyValueStore: Send + Sync {
+    /// Credential for database-owned auxiliary files. Wrappers over an encrypted store must forward it; `None` permits unencrypted auxiliary storage.
+    fn auxiliary_encryption_key(&self) -> Option<crate::StorageEncryptionKey> {
+        None
+    }
+
     /// Shared session allowance, including resources retained by readers after their producer finishes. Versioned wrappers must forward this capability.
     fn retention_control(&self) -> Option<crate::read_control::StorageReadControl> {
         None

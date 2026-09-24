@@ -22,6 +22,20 @@ pub trait NotificationPublicationStore: Send + Sync {
         publication: &NotificationPublication,
     ) -> crate::StorageBackendResult<()>;
 
+    /// Replace a previous slot only when the registry has already committed that exact acknowledgement. Serialized physical writers may need to carry this cleanup in their own atomic data transaction; the default requires autonomous cleanup first.
+    fn stage_notification_publication_after(
+        &self,
+        publication: &NotificationPublication,
+        acknowledged: Option<[u8; 32]>,
+    ) -> crate::StorageBackendResult<()> {
+        if acknowledged.is_some() {
+            return Err(crate::StorageBackendError::Other(
+                "notification publication requires autonomous acknowledgement cleanup".into(),
+            ));
+        }
+        self.stage_notification_publication(publication)
+    }
+
     fn visit_notification_publication(
         &self,
         control: &crate::read_control::StorageReadControl,
@@ -36,6 +50,16 @@ pub trait NotificationPublicationStore: Send + Sync {
         fingerprint: [u8; 32],
         control: &crate::read_control::StorageReadControl,
     ) -> crate::StorageBackendResult<()>;
+
+    /// Return false when an existing physical writer prevents autonomous cleanup. The registry acknowledgement remains authoritative, and a later publisher may replace only that acknowledged fingerprint.
+    fn try_acknowledge_notification_publication(
+        &self,
+        fingerprint: [u8; 32],
+        control: &crate::read_control::StorageReadControl,
+    ) -> crate::StorageBackendResult<bool> {
+        self.acknowledge_notification_publication(fingerprint, control)?;
+        Ok(true)
+    }
 }
 
 pub const MAX_NOTIFICATION_CHANNEL_BYTES: usize = 64;

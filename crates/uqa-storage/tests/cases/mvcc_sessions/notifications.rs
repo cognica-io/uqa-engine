@@ -331,3 +331,51 @@ fn lost_acknowledgement_reply_does_not_republish_or_clear_a_later_intent() {
         Some(vec![("events".into(), "later".into())])
     );
 }
+
+#[test]
+fn acknowledged_publications_reuse_one_head_and_release_unpinned_history() {
+    let persistence = Persistence::new();
+    let store = persistence.session(1 << 20);
+    let control = StorageReadControl::with_limit(1 << 20);
+    let first = publication("retained", 0);
+    store.begin_read_transaction().unwrap();
+    store.stage_notification_publication(&first).unwrap();
+    store.commit_transaction().unwrap();
+    let pinned = persistence.store.snapshot().unwrap();
+    let layout = persistence.notification_record_layout();
+    let key = layout.key(&control).unwrap();
+    let mut previous = first.fingerprint();
+    for sequence in 1..=32 {
+        store
+            .acknowledge_notification_publication(previous, &control)
+            .unwrap();
+        let next = publication("later", sequence);
+        store.begin_read_transaction().unwrap();
+        store.stage_notification_publication(&next).unwrap();
+        store.commit_transaction().unwrap();
+        previous = next.fingerprint();
+    }
+    store
+        .acknowledge_notification_publication(previous, &control)
+        .unwrap();
+    assert_eq!(pending(&store), None);
+    let original = pinned.get(&key).unwrap();
+    let retained = layout
+        .decode(&key, original.value().unwrap(), &control)
+        .unwrap();
+    assert_eq!(retained.fingerprint(), first.fingerprint());
+    assert_eq!(store.reclaim_versions().unwrap(), 0);
+    {
+        let current = persistence.store.snapshot().unwrap();
+        let heads = current.scan(b"", None, 64, &control).unwrap();
+        assert_eq!(
+            heads.len(),
+            1,
+            "acknowledgements must not create per-publication heads"
+        );
+        assert!(heads[0].version.value().is_none());
+    }
+    drop(pinned);
+    assert!(store.reclaim_versions().unwrap() > 0);
+    assert_eq!(store.reclaim_versions().unwrap(), 0);
+}

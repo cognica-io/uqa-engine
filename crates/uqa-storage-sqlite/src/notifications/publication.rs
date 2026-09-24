@@ -48,6 +48,7 @@ impl NotificationRegistry {
         store: &dyn NotificationPublicationStore,
         control: &StorageReadControl,
     ) -> StorageBackendResult<NotificationRegistryTransaction> {
+        let mut acknowledged = None;
         loop {
             control.check()?;
             let mut transaction = self.begin()?;
@@ -62,8 +63,14 @@ impl NotificationRegistry {
             let Some(fingerprint) = recovered else {
                 return Ok(transaction);
             };
+            if acknowledged == Some(fingerprint) {
+                transaction.pending_acknowledgement = acknowledged;
+                return Ok(transaction);
+            }
             transaction.commit()?;
-            store.acknowledge_notification_publication(fingerprint, control)?;
+            if !store.try_acknowledge_notification_publication(fingerprint, control)? {
+                acknowledged = Some(fingerprint);
+            }
         }
     }
 }

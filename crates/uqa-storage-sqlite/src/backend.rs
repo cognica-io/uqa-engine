@@ -131,9 +131,7 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
     fn notification_publications(
         &self,
     ) -> Option<&dyn uqa_storage::notifications::NotificationPublicationStore> {
-        self.conn
-            .is_native_record_session()
-            .then_some(&self.conn as &dyn uqa_storage::notifications::NotificationPublicationStore)
+        Some(&self.conn)
     }
 
     fn serializable_session(&self) -> Option<&dyn uqa_storage::mvcc::SerializableSession> {

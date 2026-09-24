@@ -11,6 +11,7 @@ use rusqlite::Connection;
 use super::schema::{initialize_registry, open_registry};
 use super::*;
 mod publication;
+mod serialized;
 
 #[test]
 fn registry_initialization_serializes_concurrent_first_open() {
