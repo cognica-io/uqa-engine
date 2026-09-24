@@ -25,6 +25,12 @@ impl FunctionTypeResolver for Catalog {
 
 impl RoutineResolution for Catalog {}
 
+impl crate::plan::AggregateClassifier for Catalog {
+    fn is_registered_aggregate(&self, _name: &str) -> bool {
+        false
+    }
+}
+
 fn block(sql: &str) -> QueryBlockPlan {
     let UnifiedPlan::Query(query) = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
     else {
@@ -72,6 +78,25 @@ fn grouping_aliases_resolve_before_distinct_sets_and_storage() {
     assert!(bind_grouping_names(&Catalog, &mut stored, &input(), &[]).unwrap());
     assert!(!bind_grouping_names(&Catalog, &mut stored, &input(), &[]).unwrap());
     assert_eq!(stored.grouping_sets[0], stored.grouping_sets[1]);
+}
+
+#[test]
+fn grouping_set_computed_keys_remain_whole_aggregate_dependencies() {
+    let original = block("SELECT n + 1 AS shifted, count(*) FROM t GROUP BY DISTINCT GROUPING SETS ((shifted), (n + 1), ())");
+    let prepared = prepare_grouping_sets(&Catalog, &original, &input(), &[])
+        .unwrap()
+        .unwrap();
+    let output = crate::semantics::sets::rewrite::prepare_aggregate_output_projection(
+        &Catalog,
+        &prepared,
+        &[],
+    );
+    assert_eq!(
+        output.statement.projections[0].expr,
+        original.projections[0].expr
+    );
+    assert!(matches!(output.projections[0].1, ScalarExpr::Position(0)));
+    assert_eq!(output.statement.grouping_sets.len(), 2);
 }
 
 #[test]

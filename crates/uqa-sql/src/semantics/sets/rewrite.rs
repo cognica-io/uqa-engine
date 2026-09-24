@@ -581,7 +581,7 @@ fn capture_aggregate_dependency(
 )]
 fn rewrite_aggregate_dependencies(
     engine: &dyn SetFunctionCatalog,
-    group_by: &[ScalarExpr],
+    group_by: &[&ScalarExpr],
     expression: &ScalarExpr,
     dependencies: &mut Vec<ProjectionPlan>,
 ) -> ScalarExpr {
@@ -819,7 +819,7 @@ fn rewrite_aggregate_dependencies(
 
 fn rewrite_aggregate_frame_bound(
     engine: &dyn SetFunctionCatalog,
-    group_by: &[ScalarExpr],
+    group_by: &[&ScalarExpr],
     bound: &mut ScalarFrameBound,
     dependencies: &mut Vec<ProjectionPlan>,
 ) {
@@ -840,6 +840,12 @@ pub fn prepare_aggregate_output_projection(
     internal_targets: &[(usize, crate::ast::InternalColumnRef)],
 ) -> AggregateOutputProjectionPlan {
     let labels = projection_columns(&statement.projections);
+    // A grouping-set expression remains one aggregate dependency. Splitting it into its input columns would replace those ungrouped inputs with NULL before evaluating the final projection.
+    let group_by = statement
+        .group_by
+        .iter()
+        .chain(statement.grouping_sets.iter().flatten())
+        .collect::<Vec<_>>();
     let mut dependencies = Vec::new();
     let projections = statement
         .projections
@@ -858,7 +864,7 @@ pub fn prepare_aggregate_output_projection(
                 target,
                 rewrite_aggregate_dependencies(
                     engine,
-                    &statement.group_by,
+                    &group_by,
                     &projection.expr,
                     &mut dependencies,
                 ),

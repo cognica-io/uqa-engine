@@ -183,7 +183,16 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
     )?;
     let source_schema: Vec<String> = source_projection
         .and_then(SourceProjection::explicit_columns)
-        .map_or_else(|| table_columns, |columns| columns.into_iter().collect());
+        .map_or_else(
+            || table_columns,
+            |columns| {
+                // Pruning can request an unresolved output name. Only input names from binding may become physical columns, or an implicit GROUP BY alias would incorrectly appear to be a source column.
+                columns
+                    .into_iter()
+                    .filter(|column| schema.has_unqualified_column(column))
+                    .collect()
+            },
+        );
 
     if let Some(facet_fields) = facet_projection_fields(&stmt.projections)? {
         let execution = FacetExecution {

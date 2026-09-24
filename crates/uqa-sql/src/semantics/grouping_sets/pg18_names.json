@@ -19,6 +19,8 @@
     {"sql": "SELECT min(a.id) AS first_id, count(*) AS n FROM grouping_alias_probe a JOIN grouping_alias_probe b ON a.id = b.id GROUP BY n", "sqlstate": "42702"},
     {"sql": "SELECT count(*) AS tally FROM grouping_alias_probe GROUP BY tally", "sqlstate": "42803"},
     {"sql": "SELECT row_number() OVER () AS rank FROM grouping_alias_probe GROUP BY rank", "sqlstate": "42P20"},
-    {"sql": "SELECT n + 1 AS shifted FROM grouping_alias_probe GROUP BY shifted + 1", "sqlstate": "42703"}
+    {"sql": "SELECT n + 1 AS shifted FROM grouping_alias_probe GROUP BY shifted + 1", "sqlstate": "42703"},
+    {"sql": "SELECT n + 1 AS shifted, count(*) AS tally FROM grouping_alias_probe GROUP BY GROUPING SETS ((shifted),(n + 1)) ORDER BY shifted,tally", "rows": [[11, 2], [11, 2], [21, 1], [21, 1]]},
+    {"sql": "SELECT n + 1 AS shifted, count(*) AS tally FROM grouping_alias_probe GROUP BY ROLLUP(n + 1) ORDER BY shifted NULLS LAST", "rows": [[11, 2], [21, 1], [null, 3]]}
   ]
 }

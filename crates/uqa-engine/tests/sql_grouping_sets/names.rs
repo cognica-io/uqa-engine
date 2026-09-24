@@ -33,7 +33,7 @@ fn integer_rows(engine: &Engine, sql: &str) -> Vec<Vec<i64>> {
                 .iter()
                 .map(|column| {
                     let Value::Int(value) = row[column] else {
-                        panic!("integer expected: {row:?}")
+                        panic!("integer expected: {row:?}: {sql}")
                     };
                     value
                 })
@@ -46,22 +46,36 @@ fn integer_rows(engine: &Engine, sql: &str) -> Vec<Vec<i64>> {
 fn grouping_names_match_postgresql_rows_and_errors() {
     let engine = Engine::new();
     populate(&engine);
+    let mut differences = Vec::new();
     for case in fixture()["cases"].as_array().unwrap() {
         let sql = case["sql"].as_str().unwrap();
-        if let Some(state) = case["sqlstate"].as_str() {
-            assert_eq!(
-                engine.sql(sql, &[]).unwrap_err().sqlstate(),
-                Some(state),
-                "{sql}"
-            );
-        } else {
-            assert_eq!(
-                serde_json::to_value(integer_rows(&engine, sql)).unwrap(),
-                case["rows"],
-                "{sql}"
-            );
+        match (case["sqlstate"].as_str(), engine.sql(sql, &[])) {
+            (Some(state), Err(error)) if error.sqlstate() == Some(state) => {}
+            (expected, Err(error)) => differences.push(format!(
+                "{sql}: expected {}, got {error:?}",
+                expected.unwrap_or("rows")
+            )),
+            (Some(state), Ok(_)) => differences.push(format!("{sql}: expected {state}, got rows")),
+            (None, Ok(result)) => {
+                let rows = result
+                    .rows
+                    .iter()
+                    .map(|row| {
+                        result
+                            .columns
+                            .iter()
+                            .map(|column| row[column].clone())
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>();
+                let actual = serde_json::to_value(rows).unwrap();
+                if actual != case["rows"] {
+                    differences.push(format!("{sql}: expected {}, got {actual}", case["rows"]));
+                }
+            }
         }
     }
+    assert!(differences.is_empty(), "{}", differences.join("\n"));
 }
 
 #[test]
