@@ -46,6 +46,8 @@ Serial declarations allocate generated integer identities. Sequence functions `n
 
 The `+`, `-`, `*`, and `/` operators use single precision when both operands are `REAL`. Mixing `REAL` with an integer, `NUMERIC`, or `DOUBLE PRECISION` selects double precision. `SUM(real)` rounds at each single-precision addition, while `AVG(real)` returns double precision. Aggregate `ORDER BY` controls the addition order. Grouped, window, and spilled aggregate state retain the selected width.
 
+Numeric comparisons apply the operand conversions selected by PostgreSQL's operator signatures. For example, `1.0 > 0` is true, and `9007199254740993::bigint = 9007199254740992::double precision` is also true because the integer is rounded to double precision for that comparison. Comparing the same integer against `9007199254740992::numeric` is false. Internal ordered and hash keys compare the represented values exactly after SQL coercion; they do not replace a binary float with its shortest display text.
+
 Invalid floating text reports `22P02`; overflow or underflow outside the representable range reports `22003`. Representable subnormal values, signed zero, NaN, and infinity are retained. Division by zero reports `22012`, except that a NaN numerator remains NaN. Vector inputs still reject non-finite values.
 
 ```sql execute
@@ -58,7 +60,7 @@ The result is `16777216`, `16777216`, and `16777217`, respectively. The [compati
 
 ## Exact decimal
 
-`NUMERIC` and `DECIMAL` enforce declared precision and scale. The declaration parser accepts PostgreSQL-shaped precision from 1 through 1000 and scale from -1000 through 1000, while actual values must also fit the engine decimal carrier, which has substantially lower finite precision. Use representative boundary tests when a schema requests more than 28 significant digits.
+`NUMERIC` and `DECIMAL` enforce declared precision and scale. Declarations accept precision from 1 through 1000 and scale from -1000 through 1000. Unconstrained finite values support up to 131,072 digits before the decimal point and 16,383 fractional digits. Decimal storage and comparisons preserve their exact base-10 value, including values beyond binary floating-point precision.
 
 ```sql
 CREATE TABLE invoices (

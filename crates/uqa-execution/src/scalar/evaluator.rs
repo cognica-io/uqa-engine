@@ -549,4 +549,6 @@ mod function;
 use function::evaluate_function;
 
 #[cfg(test)]
+mod comparison_tests;
+#[cfg(test)]
 mod production_tests;

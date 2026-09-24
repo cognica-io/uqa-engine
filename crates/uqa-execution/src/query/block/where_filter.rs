@@ -225,6 +225,58 @@ pub fn execute_mixed_where<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     ctes: &CteScope<S>,
 ) -> Result<Vec<ScoredEntry>, SQLError> {
+    let filter = bind_table_filter(context, table, qualifier, filter, params, ctes)?;
+    execute_bound_mixed_where(
+        context,
+        table,
+        signal_table,
+        qualifier,
+        &filter,
+        params,
+        ctes,
+    )
+}
+
+/// Execute a relation-local retrieval predicate with the same declared SQL operand coercions as ordinary row filters. Its columns have already been bound to this physical relation by source construction.
+pub fn execute_typed_retrieval<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    table: &str,
+    filter: Option<&ScalarExpr>,
+    params: &[SQLParam],
+    ctes: &CteScope<S>,
+) -> Result<Option<Vec<ScoredEntry>>, SQLError> {
+    let Some(filter) = filter else {
+        return Ok(None);
+    };
+    let mut filter = filter.clone();
+    // Retrieval IR already uses physical field names. Preserve that relation-local binding for the scalar portion too, including aliases over inherited tables.
+    uqa_sql::plan::rewrite_scalar_expression(&mut filter, &mut |expression| {
+        if let ScalarExpr::QualifiedColumn { column, .. } = expression {
+            *expression = ScalarExpr::Column(std::mem::take(column));
+        }
+    });
+    let filter = bind_table_filter(context, table, table, &filter, params, ctes)?;
+    if let Some(rows) = context
+        .relation_retrieval
+        .optimized(table, Some(&filter), params)?
+    {
+        return Ok(Some(rows));
+    }
+    if !uqa_sql::semantics::contains_retrieval(&filter) {
+        return Ok(None);
+    }
+    execute_bound_mixed_where(context, table, table, table, &filter, params, ctes).map(Some)
+}
+
+fn execute_bound_mixed_where<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    table: &str,
+    signal_table: &str,
+    qualifier: &str,
+    filter: &ScalarExpr,
+    params: &[SQLParam],
+    ctes: &CteScope<S>,
+) -> Result<Vec<ScoredEntry>, SQLError> {
     let mut rows = execute_mixed_where_expr(
         context,
         table,
@@ -251,6 +303,8 @@ pub fn collect_where_doc_ids<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     ctes: &CteScope<S>,
 ) -> Result<Vec<DocId>, SQLError> {
+    let filter = bind_table_filter(context, table, qualifier, filter, params, ctes)?;
+    let filter = &filter;
     let references_tableoid = expression_references_tableoid(filter);
     let optimized = if references_tableoid {
         None
@@ -276,6 +330,35 @@ pub fn collect_where_doc_ids<S: Clone + Send + Sync + 'static>(
         }
     };
     Ok(scored.into_iter().map(|entry| entry.doc_id).collect())
+}
+
+fn bind_table_filter<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    table: &str,
+    qualifier: &str,
+    filter: &ScalarExpr,
+    params: &[SQLParam],
+    ctes: &CteScope<S>,
+) -> Result<ScalarExpr, SQLError> {
+    let columns = context
+        .documents
+        .column_definitions(table)
+        .map_err(|error| {
+            SQLError::Internal(format!("read comparison schema for `{table}`: {error}"))
+        })?
+        .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    let schema = crate::RowSchema::with_qualified_types(
+        qualifier,
+        columns.iter().map(|column| column.name.clone()).collect(),
+        columns
+            .iter()
+            .map(|column| Some(column.ty.clone()))
+            .collect(),
+    );
+    Ok(context
+        .relational
+        .evaluator(params, ctes)
+        .bind_type_introspection(filter.clone(), &schema))
 }
 
 fn expression_references_tableoid(expression: &ScalarExpr) -> bool {

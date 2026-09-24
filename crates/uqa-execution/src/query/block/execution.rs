@@ -182,6 +182,7 @@ pub fn run_query_block_with_prepared_exists_output<'a, S: Clone + Send + Sync + 
                         relation_name: local_table,
                         qualifier,
                     },
+                    &reference_schema,
                     block,
                     stmt,
                     params,

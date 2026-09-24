@@ -85,6 +85,8 @@ mod gamma_functions;
 mod json_strip_nulls;
 #[path = "pg18_semantics/md5_overloads.rs"]
 mod md5_overloads;
+#[path = "pg18_semantics/numeric_comparisons.rs"]
+mod numeric_comparisons;
 #[path = "pg18_semantics/numeric_exactness.rs"]
 mod numeric_exactness;
 #[path = "pg18_semantics/numeric_power_statistics.rs"]

@@ -47,8 +47,8 @@ pub fn eval_comparison_truth_with_control(
 }
 
 /// Two-valued equality treats SQL UNKNOWN as no match for CASE, NULLIF and membership probes.
-pub(in crate::expr) fn values_equal(a: &Value, b: &Value) -> bool {
-    values_equal_nullable(a, b) == Some(true)
+pub(in crate::expr) fn values_equal(a: &Value, b: &Value) -> Result<bool> {
+    Ok(values_equal_nullable(a, b)? == Some(true))
 }
 
 pub fn values_equal_with_control(
@@ -59,9 +59,8 @@ pub fn values_equal_with_control(
     Ok(values_equal_nullable_with_control(a, b, control)? == Some(true))
 }
 
-pub(in crate::expr) fn values_equal_nullable(a: &Value, b: &Value) -> Option<bool> {
+pub(in crate::expr) fn values_equal_nullable(a: &Value, b: &Value) -> Result<Option<bool>> {
     values_equal_nullable_with_control(a, b, &ProductionControl::uncontrolled())
-        .expect("uncontrolled equality has no resource failure")
 }
 
 pub fn values_equal_nullable_with_control(
@@ -98,7 +97,7 @@ pub fn values_equal_nullable_with_control(
                 Some(true)
             }
         }
-        _ => Some(a.cmp_with_control(b, control)?.is_eq()),
+        _ => Some(compare_sql_values(a, b, control)?.is_eq()),
     };
     Ok(equal)
 }
@@ -133,7 +132,7 @@ pub fn compare_nullable_with_control(
         | (Value::Bool(_), Value::Bool(_))
         | (Value::Array(_), Value::Array(_))
         | (Value::List(_), Value::List(_))
-        | (Value::Record(_), Value::Record(_)) => Ok(Some(a.cmp_with_control(b, control)?)),
+        | (Value::Record(_), Value::Record(_)) => Ok(Some(compare_sql_values(a, b, control)?)),
         (Value::FixedChar(x), Value::Str(y)) | (Value::Str(x), Value::FixedChar(y)) => {
             Ok(Some(compare_fixed_text(x, y, control)?))
         }
@@ -160,6 +159,26 @@ pub fn compare_nullable_with_control(
             "cannot compare {lhs:?} with {rhs:?}"
         ))),
     }
+}
+
+fn compare_sql_values(
+    left: &Value,
+    right: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<Ordering> {
+    // PostgreSQL's primitive mixed float/integer and float/numeric comparison signatures select float8 inputs. Real values are already rounded in their f64 carrier. Internal Core keys keep their separate exact total order.
+    if matches!(
+        (left, right),
+        (Value::Float(_), Value::Int(_) | Value::Decimal(_))
+            | (Value::Int(_) | Value::Decimal(_), Value::Float(_))
+    ) {
+        let left =
+            super::super::cast_value_from_with_control(left, "double precision", None, control)?;
+        let right =
+            super::super::cast_value_from_with_control(right, "double precision", None, control)?;
+        return Ok(left.cmp(&right));
+    }
+    left.cmp_with_control(right, control).map_err(Into::into)
 }
 
 fn compare_fixed_text(

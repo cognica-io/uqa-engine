@@ -152,7 +152,7 @@ impl Binder<'_, '_> {
         Ok(common)
     }
 
-    fn common_context(
+    pub(super) fn common_context(
         &self,
         expression: &ScalarExpr,
     ) -> Result<Option<Produced<ColumnType>>, SQLError> {

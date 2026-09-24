@@ -24,6 +24,7 @@ use super::{
 pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'a, S>,
     relation: SingleRelation<'_>,
+    schema: &crate::RowSchema,
     block: &'a QueryBlockPlan,
     stmt: &'a QueryBlockPlan,
     params: &'a [SQLParam],
@@ -44,6 +45,12 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
         .columns
         .iter()
         .any(|column| column.name == super::SCORE_COLUMN);
+    let predicate = stmt.r#where.as_ref().map(|predicate| {
+        context
+            .relational
+            .evaluator(params, ctes)
+            .bind_type_introspection(predicate.clone(), schema)
+    });
     let score_top_k = if !has_stored_score_column
         && matches!(
             block.access,
@@ -83,7 +90,7 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
                 retrieval.function(table, reference_name, name, args, params, Some(top_k))
             }))
         } else {
-            retrieval.prepare_accelerated(table, reference_name, stmt.r#where.as_ref(), params)?
+            retrieval.prepare_accelerated(table, reference_name, predicate.as_ref(), params)?
         };
     let score_bearing_filter = stmt
         .r#where

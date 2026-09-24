@@ -9,6 +9,16 @@ The [official upstream regression harness](upstream/README.md) separately import
 - `sqlstate-mismatch`: both engines reject, but with different SQLSTATE codes.
 - `value-mismatch`: both answer, values differ after normalization (boolean display and numerically equivalent float formatting are normalized; JSON and JSONB output text is compared exactly).
 
+## Numeric comparison reference
+
+The compact [`pg18.json`](../../../crates/uqa-sql/src/expr/binary/comparison/pg18.json) records 44 operand pairs across six comparison operators, plus typed-column filters, grouping, joins and unique constraints. Expectations come from PostgreSQL 18.4, including SQLSTATEs and result types, and retain the Docker image identity. Core's internal exact numeric ordering is checked separately from SQL's operator-selected casts; Execution tests exercise SQL binding and both scalar evaluators against the reference, and Engine tests exercise public SQL without starting Docker. Engine tests compare scans, indexes and reopened native SQLite, SQLite Key/Value and redb databases.
+
+```sh
+python3 tests/parity/pg18/capture_numeric_comparisons.py --container uqa-pg18 --output target/numeric-comparisons.reference.json
+```
+
+The collector reads only the checked-in operand and statement inputs, obtains every expected result from PostgreSQL, and rolls back its temporary relational setup. Compare the resulting small fixture with the committed reference before accepting any changed expectation.
+
 ## Concurrent writer reference
 
 The compact [`concurrent_writes.expected.json`](concurrent_writes.expected.json) records three PostgreSQL 18.4 schedules in which B writes and commits an independent row while A still owns an uncommitted write. A subsequently commits, rolls back, or rolls back to a savepoint and commits. [`capture_concurrent_writes.py`](capture_concurrent_writes.py) retains both connections, waits for B's actual commit completion before sending A's termination step, and records the source hash and Docker image identity. Its random test schema is removed when the sessions close. These are reference expectations; current UQA provider acceptance remains pending in the [concurrent transaction plan](../../../docs/plans/0008-concurrent-storage-transactions.md).

@@ -395,16 +395,17 @@ fn integer_projection_rejects_float_saturation_boundaries() {
 }
 
 #[test]
-fn numeric_comparison_preserves_large_integer_and_nan_ordering() {
+fn numeric_comparison_uses_postgresql_float_promotion_and_nan_ordering() {
+    // PostgreSQL 18.4 selects float8 equality, rounding this bigint before comparison.
     let rounded = Value::Float(9_007_199_254_740_992.0);
     let next_integer = Value::Int(9_007_199_254_740_993);
     assert_eq!(
         eval_comparison_op(BinaryOp::Equal, &rounded, &next_integer).unwrap(),
-        Value::Bool(false)
+        Value::Bool(true)
     );
     assert_eq!(
         eval_comparison_op(BinaryOp::Less, &rounded, &next_integer).unwrap(),
-        Value::Bool(true)
+        Value::Bool(false)
     );
 
     let nan = Value::Float(f64::NAN);
