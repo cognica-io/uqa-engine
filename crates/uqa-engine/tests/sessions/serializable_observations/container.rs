@@ -116,7 +116,7 @@ fn empty_container_index_ranges_observe_only_matching_future_keys(
     ];
     let (ty, predicate, matching, outside) = &cases[case_index];
     let value = if conflict { matching } else { outside };
-    let (_directory, sessions) = fixtures();
+    let (_directory, sessions) = empty_fixtures();
     for seed in sessions {
         tables(&seed, ty, None);
         let a = seed.sibling();
@@ -131,9 +131,13 @@ fn empty_container_index_ranges_observe_only_matching_future_keys(
     }
 }
 
-#[test]
-fn container_index_reads_retain_cold_and_cached_keys_through_delete_and_patch() {
-    for (ty, original, replacement, predicate) in [
+#[rstest::rstest]
+fn container_index_reads_retain_cold_and_cached_keys_through_delete_and_patch(
+    #[values(0, 1, 2)] case_index: usize,
+    #[values(false, true)] cached: bool,
+    #[values(false, true)] patch: bool,
+) {
+    let cases = [
         (
             "INTEGER[]",
             "ARRAY[1,2]",
@@ -155,41 +159,37 @@ fn container_index_reads_retain_cold_and_cached_keys_through_delete_and_patch() 
                 Value::Float(2.0),
             ])]),
         ),
-    ] {
-        let predicate = Predicate::Equals(predicate);
-        for cached in [false, true] {
-            for patch in [false, true] {
-                let (_directory, sessions) = fixtures();
-                for seed in sessions {
-                    tables(&seed, ty, Some(original));
-                    let a = seed.sibling();
-                    let b = seed.sibling();
-                    if cached {
-                        assert_eq!(index_only(&a, "left_items", &predicate), 1);
-                        assert_eq!(index_only(&b, "right_items", &predicate), 1);
-                    }
-                    a.begin();
-                    b.begin();
-                    assert_eq!(index_only(&a, "left_items", &predicate), 1);
-                    assert_eq!(index_only(&b, "right_items", &predicate), 1);
-                    for (session, table) in [(&a, "right_items"), (&b, "left_items")] {
-                        session.sql(&if patch {
-                            format!("UPDATE {table} SET k = {replacement} WHERE id = 1")
-                        } else {
-                            format!("DELETE FROM {table} WHERE id = 1")
-                        });
-                    }
-                    assert_cycle(&a, &b);
-                }
-            }
+    ];
+    let (ty, original, replacement, predicate) = &cases[case_index];
+    let predicate = Predicate::Equals(predicate.clone());
+    let (_directory, sessions) = empty_fixtures();
+    for seed in sessions {
+        tables(&seed, ty, Some(original));
+        let a = seed.sibling();
+        let b = seed.sibling();
+        if cached {
+            assert_eq!(index_only(&a, "left_items", &predicate), 1);
+            assert_eq!(index_only(&b, "right_items", &predicate), 1);
         }
+        a.begin();
+        b.begin();
+        assert_eq!(index_only(&a, "left_items", &predicate), 1);
+        assert_eq!(index_only(&b, "right_items", &predicate), 1);
+        for (session, table) in [(&a, "right_items"), (&b, "left_items")] {
+            session.sql(&if patch {
+                format!("UPDATE {table} SET k = {replacement} WHERE id = 1")
+            } else {
+                format!("DELETE FROM {table} WHERE id = 1")
+            });
+        }
+        assert_cycle(&a, &b);
     }
 }
 
 #[test]
 fn absent_array_unique_updates_observe_element_equality_and_lower_bounds() {
     for (value, conflict) in [("ARRAY[1,2]", true), ("'[0:1]={1,2}'::integer[]", false)] {
-        let (_directory, sessions) = fixtures();
+        let (_directory, sessions) = empty_fixtures();
         for seed in sessions {
             seed.sql("CREATE DOMAIN item_array AS INTEGER[]");
             tables(&seed, "item_array", None);
