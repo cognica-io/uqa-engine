@@ -126,6 +126,26 @@ fn rule_returning_error_preserves_primary_message_and_hint_fields() {
 }
 
 #[test]
+fn virtual_generated_function_error_preserves_postgresql_diagnostic_fields() {
+    let fixture = Fixture::new();
+    fixture.engine.sql("CREATE FUNCTION generated_twice(value integer) RETURNS integer LANGUAGE SQL IMMUTABLE RETURN value*2", &[]).unwrap();
+    let mut client = fixture.connect();
+    for kind in ["", " VIRTUAL"] {
+        let response = client.query(&format!("CREATE TABLE wire_generated(source integer, derived integer GENERATED ALWAYS AS (generated_twice(source)){kind})"));
+        let error = fields(&response.iter().find(|message| message.0 == b'E').unwrap().1);
+        assert_eq!(error[&b'C'], "0A000");
+        assert_eq!(
+            error[&b'M'],
+            "generation expression uses user-defined function"
+        );
+        assert_eq!(error[&b'D'], "Virtual generated columns that make use of user-defined functions are not yet supported.");
+        assert!(!error.contains_key(&b'H'));
+        assert_eq!(response.last().unwrap(), &(b'Z', vec![b'I']));
+        assert!(!fixture.engine.has_table("wire_generated").unwrap());
+    }
+}
+
+#[test]
 fn empty_descriptors_differ_from_command_only_results() {
     let fixture = Fixture::new();
     let mut client = fixture.connect();

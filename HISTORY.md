@@ -36,6 +36,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Match PostgreSQL's `0A000`, primary message and separate DETAIL when a virtual generated column calls a user-defined function, including CREATE and ALTER paths; preserve the fields through the PostgreSQL protocol.
 - Compile restored routines against the already captured catalog and namespace view, preventing recursive catalog refresh from waiting on its own registry lock during rollback.
 - Retain empty graph snapshots without constructing a temporary database. Necessary detached graph snapshots use fresh 256-bit SQLCipher raw keys without repeating password derivation.
 - Retain exclusive relation locks while routine and sequence cascades remove dependent columns, defaults and checks, preventing concurrent statistics publication from invalidating their private removals. Advance the storage write view after dependent lock waits.

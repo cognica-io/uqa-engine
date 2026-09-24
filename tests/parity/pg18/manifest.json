@@ -722,7 +722,7 @@
       "uqa_test": "cargo test -p uqa-engine --test integration catalog::sql_generated_columns::",
       "supported_version": "PostgreSQL 18 core generated-column semantics",
       "status": "partial",
-      "open_issue": "The complete PostgreSQL built-in function and operator overload matrix, privileges, inheritance and partition propagation, dump/restore, and complete upstream regression coverage remain."
+      "open_issue": "PR #137 corrects virtual user-function SQLSTATE, primary message and separate DETAIL; SQL-owner checks and PostgreSQL 18 CREATE/ALTER probes pass, while public API and TCP acceptance remain pending. The complete PostgreSQL built-in function and operator overload matrix, privileges, inheritance and partition propagation, dump/restore, and complete upstream regression coverage remain."
     },
     {
       "id": "ddl.temporal-constraints",
