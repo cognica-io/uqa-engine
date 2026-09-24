@@ -281,6 +281,166 @@
       ]
     },
     {
+      "name": "multidimensional_flat_slice_source",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1,ARRAY[[1,2],[3,4]])"
+      ],
+      "sql": "UPDATE assignment_target SET value[1:2][2:2]=ARRAY[8,9,10] RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "rows": [
+        {
+          "id": 1,
+          "value": "{{1,8},{3,9}}",
+          "dimensions": "[1:2][1:2]"
+        }
+      ]
+    },
+    {
+      "name": "multidimensional_omitted_dimension",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1,ARRAY[[1,2],[3,4]])"
+      ],
+      "sql": "UPDATE assignment_target SET value[2:2]=ARRAY[8,9,10] RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "rows": [
+        {
+          "id": 1,
+          "value": "{{1,2},{8,9}}",
+          "dimensions": "[1:2][1:2]"
+        }
+      ]
+    },
+    {
+      "name": "multidimensional_extension",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1,ARRAY[[1,2],[3,4]])"
+      ],
+      "sql": "UPDATE assignment_target SET value[3][1]=9 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "error": {
+        "sqlstate": "2202E",
+        "message": "array subscript out of range"
+      }
+    },
+    {
+      "name": "wrong_subscript_count",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1,ARRAY[[1,2],[3,4]])"
+      ],
+      "sql": "UPDATE assignment_target SET value[1]=9 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "error": {
+        "sqlstate": "2202E",
+        "message": "wrong number of array subscripts"
+      }
+    },
+    {
+      "name": "shifted_multidimensional_element",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1,'[0:1][-1:0]={{1,2},{3,4}}')"
+      ],
+      "sql": "UPDATE assignment_target SET value[1][0]=9 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "rows": [
+        {
+          "id": 1,
+          "value": "[0:1][-1:0]={{1,2},{3,9}}",
+          "dimensions": "[0:1][-1:0]"
+        }
+      ]
+    },
+    {
+      "name": "slice_extends_with_gap",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1, ARRAY[1,2,3])"
+      ],
+      "sql": "UPDATE assignment_target SET value[5:6]=ARRAY[8,9] RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "rows": [
+        {
+          "id": 1,
+          "value": "{1,2,3,NULL,8,9}",
+          "dimensions": "[1:6]"
+        }
+      ]
+    },
+    {
+      "name": "empty_slice_missing_bound",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1,'{}'::integer[])"
+      ],
+      "sql": "UPDATE assignment_target SET value[:2]=ARRAY[8,9] RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "error": {
+        "sqlstate": "2202E",
+        "message": "array slice subscript must provide both boundaries",
+        "detail": "When assigning to a slice of an empty array value, slice boundaries must be fully specified."
+      }
+    },
+    {
+      "name": "empty_zero_width_slice",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1,'{}'::integer[])"
+      ],
+      "sql": "UPDATE assignment_target SET value[3:2]=ARRAY[1] RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "rows": [
+        {
+          "id": 1,
+          "value": "{}",
+          "dimensions": null
+        }
+      ]
+    },
+    {
+      "name": "empty_negative_width_slice",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1,'{}'::integer[])"
+      ],
+      "sql": "UPDATE assignment_target SET value[3:1]=ARRAY[1] RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "error": {
+        "sqlstate": "54000",
+        "message": "array size exceeds the maximum allowed (134217727)"
+      }
+    },
+    {
+      "name": "empty_lower_bound_limit",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1,'{}'::integer[])"
+      ],
+      "sql": "UPDATE assignment_target SET value[2147483647]=9 RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "error": {
+        "sqlstate": "54000",
+        "message": "array lower bound is too large: 2147483647"
+      }
+    },
+    {
+      "name": "empty_source_error_precedence",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1,'{}'::integer[])"
+      ],
+      "sql": "UPDATE assignment_target SET value[2147483647:2147483647]='{}'::integer[] RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "error": {
+        "sqlstate": "2202E",
+        "message": "source array too small"
+      }
+    },
+    {
+      "name": "nonempty_bounds_error_precedence",
+      "setup": [
+        "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",
+        "INSERT INTO assignment_target VALUES (1,'[2147483646:2147483646]={1}')"
+      ],
+      "sql": "UPDATE assignment_target SET value[2147483647:2147483647]='{}'::integer[] RETURNING id, value::text AS value, array_dims(value) AS dimensions",
+      "error": {
+        "sqlstate": "54000",
+        "message": "array lower bound is too large: 2147483646"
+      }
+    },
+    {
       "name": "insert_element",
       "setup": [
         "CREATE TABLE assignment_target (id integer PRIMARY KEY, value integer[])",

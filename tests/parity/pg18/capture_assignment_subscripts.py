@@ -59,6 +59,32 @@ def cases() -> list[dict]:
     add("multidimensional_slice", "UPDATE assignment_target SET value[1:2][2:2]=ARRAY[[8],[9]]", [
         setup[0], "INSERT INTO assignment_target VALUES (1,ARRAY[[1,2],[3,4]])",
     ])
+    for name, target, value in [
+        ("multidimensional_flat_slice_source", "value[1:2][2:2]", "ARRAY[8,9,10]"),
+        ("multidimensional_omitted_dimension", "value[2:2]", "ARRAY[8,9,10]"),
+        ("multidimensional_extension", "value[3][1]", "9"),
+        ("wrong_subscript_count", "value[1]", "9"),
+    ]:
+        add(name, f"UPDATE assignment_target SET {target}={value}", [
+            setup[0], "INSERT INTO assignment_target VALUES (1,ARRAY[[1,2],[3,4]])",
+        ])
+    add("shifted_multidimensional_element", "UPDATE assignment_target SET value[1][0]=9", [
+        setup[0], "INSERT INTO assignment_target VALUES (1,'[0:1][-1:0]={{1,2},{3,4}}')",
+    ])
+    add("slice_extends_with_gap", "UPDATE assignment_target SET value[5:6]=ARRAY[8,9]")
+    for name, target, value in [
+        ("empty_slice_missing_bound", "value[:2]", "ARRAY[8,9]"),
+        ("empty_zero_width_slice", "value[3:2]", "ARRAY[1]"),
+        ("empty_negative_width_slice", "value[3:1]", "ARRAY[1]"),
+        ("empty_lower_bound_limit", "value[2147483647]", "9"),
+        ("empty_source_error_precedence", "value[2147483647:2147483647]", "'{}'::integer[]"),
+    ]:
+        add(name, f"UPDATE assignment_target SET {target}={value}", [
+            setup[0], "INSERT INTO assignment_target VALUES (1,'{}'::integer[])",
+        ])
+    add("nonempty_bounds_error_precedence", "UPDATE assignment_target SET value[2147483647:2147483647]='{}'::integer[]", [
+        setup[0], "INSERT INTO assignment_target VALUES (1,'[2147483646:2147483646]={1}')",
+    ])
     add("insert_element", "INSERT INTO assignment_target(id,value[3]) VALUES(2,9)")
     add("insert_repeated_elements", "INSERT INTO assignment_target(id,value[1],value[3]) VALUES(2,7,9)")
     add("insert_whole_and_element", "INSERT INTO assignment_target(id,value,value[2]) VALUES(2,ARRAY[7],9)")

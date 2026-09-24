@@ -8,10 +8,12 @@
 
 use super::Value;
 
+mod assignment;
 mod comparison;
 mod elements;
 mod production;
 mod shape;
+pub use assignment::ArrayAssignmentError;
 pub use elements::{ArrayTraversalError, BudgetedArrayElements, ControlledArrayElements};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
