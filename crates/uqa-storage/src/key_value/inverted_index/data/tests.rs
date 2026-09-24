@@ -14,12 +14,13 @@ use crate::read_control::{KeyValueReadVisitor, StorageReadControl, ValueReadVisi
 
 struct CountedRead<'a> {
     inner: &'a dyn KeyValueRead,
+    control: &'a StorageReadControl,
     reads: Cell<usize>,
 }
 
 impl KeyValueRead for CountedRead<'_> {
     fn control(&self) -> &StorageReadControl {
-        self.inner.control()
+        self.control
     }
     fn revision(&self, prefixes: &[&[u8]]) -> StorageBackendResult<KeyValueReadRevision> {
         self.inner.revision(prefixes)
@@ -54,9 +55,11 @@ impl KeyValueRead for CountedRead<'_> {
 fn revision_reads_depend_on_fields_instead_of_document_count() {
     let store = MemoryKeyValueStore::new();
     let bindings = AnalyzerBindings::new(uqa_analysis::whitespace_analyzer());
+    let control = StorageReadControl::with_limit(1 << 20);
     crate::key_value::index_view::read_view(&store, |inner| {
         let counted = CountedRead {
             inner,
+            control: &control,
             reads: Cell::new(0),
         };
         let view = OccurrenceRead {
@@ -99,7 +102,19 @@ fn revision_reads_depend_on_fields_instead_of_document_count() {
                 assert!(single > 0);
             }
             assert_eq!(counted.reads.get(), single * fields.len());
+            assert!(control.memory().peak() > 0);
+            assert_eq!(control.memory().used(), 0);
         }
+        let held = control.memory().reserve(control.memory().limit()).unwrap();
+        assert!(matches!(
+            view.stage_documents(
+                vec![(1, BTreeMap::from([("body".into(), "alpha beta".into())]))],
+                false
+            ),
+            Err(crate::StorageBackendError::Memory(_))
+        ));
+        assert_eq!(control.memory().used(), held.bytes());
+        drop(held);
         Ok(())
     })
     .unwrap();

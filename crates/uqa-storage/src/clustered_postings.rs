@@ -499,6 +499,7 @@ pub use occurrences::{
     encode_occurrence_cluster_controlled, OccurrencePosting,
 };
 use scores::{decode_score_block_into, encode_scores, parse_score_blob};
+pub(crate) use term_keys::encode_term_key_refs;
 pub use term_keys::{decode_term_keys, encode_term_keys};
 
 #[cfg(test)]

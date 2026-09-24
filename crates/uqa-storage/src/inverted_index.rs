@@ -24,6 +24,7 @@ use crate::block_max_index::BlockMaxScorer;
 use crate::clustered_postings::{MaterializedPostingCursor, PostingCursor, PostingScore};
 
 mod analysis;
+pub(crate) use analysis::analyze_index_field_with_scratch;
 mod batch;
 mod bindings;
 mod changes;
