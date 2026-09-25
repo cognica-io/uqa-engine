@@ -6,7 +6,7 @@
 
 //! Charged block buffers prevent tiny membership/edge records from repeatedly rewriting or decrypting one cipher block.
 
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use uqa_core::memory::BudgetedVec;
 
@@ -90,6 +90,7 @@ pub(super) struct RunReader<'a> {
     buffer: BudgetedVec<u8>,
     position: usize,
     length: usize,
+    block_start: u64,
     control: &'a StorageReadControl,
 }
 
@@ -98,16 +99,55 @@ impl<'a> RunReader<'a> {
         file: &'a mut File,
         control: &'a StorageReadControl,
     ) -> StorageBackendResult<Self> {
+        Self::at(file, 0, control)
+    }
+
+    pub(super) fn at(
+        file: &'a mut File,
+        offset: u64,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<Self> {
         control.check()?;
         let mut buffer = BudgetedVec::new(control.memory());
         buffer.extend_from_slice(&[0; BLOCK])?;
-        Ok(Self {
+        let mut reader = Self {
             file,
             buffer,
             position: 0,
             length: 0,
+            block_start: 0,
             control,
-        })
+        };
+        reader.seek_to(offset)?;
+        Ok(reader)
+    }
+
+    pub(super) fn seek_to(&mut self, offset: u64) -> StorageBackendResult<()> {
+        self.control.check()?;
+        if self.length != 0
+            && offset >= self.block_start
+            && offset - self.block_start <= self.length as u64
+        {
+            self.position = (offset - self.block_start) as usize;
+            return Ok(());
+        }
+        let prefix = (offset % BLOCK as u64) as usize;
+        self.block_start = offset - prefix as u64;
+        self.file
+            .seek(SeekFrom::Start(self.block_start))
+            .map_err(io_error)?;
+        self.position = prefix;
+        self.length = 0;
+        if prefix != 0 {
+            self.length = self.file.read(&mut self.buffer).map_err(io_error)?;
+            if self.length < prefix {
+                return Err(io_error(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "DiskANN run starts beyond its logical end",
+                )));
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn record<const N: usize>(&mut self) -> StorageBackendResult<[u8; N]> {
@@ -117,6 +157,7 @@ impl<'a> RunReader<'a> {
         while copied < N {
             if self.position == self.length {
                 self.control.check()?;
+                self.block_start += self.length as u64;
                 self.length = self.file.read(&mut self.buffer).map_err(io_error)?;
                 self.position = 0;
                 if self.length == 0 {
