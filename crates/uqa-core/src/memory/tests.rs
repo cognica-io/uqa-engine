@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod children;
+
 #[test]
 fn concurrent_owners_share_one_limit_and_release_their_leases() {
     let budget = MemoryBudget::new(64);
