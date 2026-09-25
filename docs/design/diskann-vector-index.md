@@ -1,6 +1,6 @@
 # Native DiskANN vector index
 
-Status: Design proposal, based on main commit `ae51060754813b716bea1cd5438214dfde9c9830`, inspected on 2026-09-25. DiskANN is not currently implemented or accepted by SQL DDL. API names, SQL, layouts, and defaults below are proposed contracts. This document specifies a direct Rust implementation and its integration; it contains algorithm definitions and validation criteria, not mathematical proofs or performance claims.
+Status: Implementation in progress, tracked in the [implementation plan](../plans/0014-diskann-vector-index.md). The original design baseline is main `ae51060754813b716bea1cd5438214dfde9c9830`, inspected on 2026-09-25. Configuration, numerical primitives and physical formats/readers are internal foundations; the complete DiskANN runtime and SQL access method are not enabled. Later API and SQL examples remain proposed contracts. This document specifies a direct Rust implementation and its integration; it contains algorithm definitions and validation criteria, not mathematical proofs or performance claims.
 
 Primary reference: Subramanya et al., [DiskANN: Fast Accurate Billion-point Nearest Neighbor Search on a Single Node, NeurIPS 2019](https://proceedings.neurips.cc/paper_files/paper/2019/file/09853c7fb1d3f8ee67a61b6bf4a7f8e6-Paper.pdf), especially Algorithms 1-3 and Section 3. The paper combines a Vamana graph with memory-resident product-quantized vectors, disk-resident full vectors and adjacency, batched frontier reads, and caching. Its overlapping build partitions are combined into a graph rather than independently searched at query time. The paper evaluates Euclidean distance; UQA's public vector score is cosine similarity. Its reported hardware results are not UQA acceptance thresholds.
 
@@ -280,20 +280,9 @@ Every page's shape is recomputed from its expected layout and address. Packed pa
 
 The implemented [generation metadata format](diskann-generation-format.md) specifies manifests, codebooks, independently addressed code/side batches and canonical-input fingerprints. Its codecs validate representation and generation identity; sealing, complete-stream verification and MVCC visibility remain reader/build/publication responsibilities.
 
-```rust
-// Proposed Storage-owned interface, not an existing public API.
-pub trait DiskANNPageReader: Send + Sync {
-    fn capabilities(&self) -> DiskANNReadCapabilities;
+The implemented [controlled reader contract](diskann-page-readers.md) separates `DiskANNPageSource`, which supplies bounded encoded records and page completions, from `DiskANNReader`, which owns resident state, validates complete requests and returns `DiskANNPageLease` values. The controlled memory source is available; persistent adapters remain a separate implementation unit.
 
-    fn read_pages(
-        &self,
-        pages: &[DiskANNPageId],
-        control: &StorageReadControl,
-    ) -> StorageBackendResult<BudgetedVec<DiskANNPage>>;
-}
-```
-
-The reader is already bound to the immutable generation and its database affinity; callers cannot request arbitrary namespaces or change snapshots. Returned pages carry IDs and owned reservations. The caller checks completeness and duplicates, and drops the whole failed batch. No provider page guard or transaction-coordinator guard is held while processing candidates, waiting for another read, or returning control to a caller.
+The source is bound to one immutable generation and its retained physical owner; callers cannot request arbitrary namespaces or change snapshots. Returned pages carry IDs and owned reservations. The reader checks completeness and duplicates, and drops the whole failed request. Persistent adapters must also enforce their existing database affinity. No provider page guard or transaction-coordinator guard is held while processing candidates, waiting for another read, or returning control to a caller.
 
 Batching and concurrent reads are separate capabilities. The default provider can issue a bounded batch sequentially. Native providers may use read workers for immutable published pages with the same generation lease and database/encryption identity. This does not let canonical-vector or change reads bypass their logical snapshot. redb workers use the supported shared owner; SQLite workers must not open an unrelated unencrypted connection. Browser adapters report their real concurrency, often one. Search records requested beam width and effective I/O parallelism separately.
 
@@ -484,9 +473,9 @@ Full reports, raw traces, reference binaries, and temporary databases stay in ig
 
 ## Implementation units
 
-The [implementation plan](../plans/0014-diskann-vector-index.md) expands these contracts into ordered, owner-scoped work units with prerequisites, exit evidence, and a progress ledger. Implementation has not started.
+The [implementation plan](../plans/0014-diskann-vector-index.md) expands these contracts into ordered, owner-scoped work units with prerequisites, exit evidence, and a progress ledger. Its source-scoped evidence distinguishes implemented foundations from pending runtime delivery.
 
-This proposal does not start implementation, create a release, or change public support claims. Subsequent work should be split by the owning contracts below, with logical commits and small reviewed PRs rather than a long unmerged stack. Internal prerequisites do not expose `USING diskann` until the required storage and public behavior work together.
+Implementation is split by the owning contracts below, with logical commits and small reviewed PRs. Internal prerequisites do not expose `USING diskann` until the required storage and public behavior work together.
 
 | Unit | Owners and deliverable | Completion evidence |
 | --- | --- | --- |
