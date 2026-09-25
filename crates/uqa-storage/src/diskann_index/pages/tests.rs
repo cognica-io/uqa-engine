@@ -18,6 +18,7 @@ use crate::mvcc::{DatabaseId, StorageTransactionId};
 use crate::vector_index::DiskANNIndexParams;
 
 mod faults;
+mod nodes;
 mod resources;
 
 fn generation() -> DiskANNGeneration {

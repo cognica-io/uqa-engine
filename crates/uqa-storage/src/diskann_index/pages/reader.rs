@@ -25,6 +25,8 @@ use crate::{
     read_control::StorageReadControl, vector_index::DiskANNIndexParams, StorageBackendResult,
 };
 
+mod nodes;
+
 enum PageBytes {
     Owned(BudgetedVec<u8>),
     Cached(SharedPage),
