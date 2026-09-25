@@ -64,3 +64,6 @@ mod document_atomicity;
 
 #[path = "catalog_atomicity/direct_schema_index_atomicity.rs"]
 mod direct_schema_index_atomicity;
+
+#[path = "catalog_atomicity/added_columns.rs"]
+mod added_columns;

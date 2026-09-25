@@ -1,0 +1,12 @@
+added|1|1|key1
+duplicate-insert|23505|duplicate key value violates unique constraint "left_t_k_key"|Key (k)=(key1) already exists.
+stored|1|key1
+stored|2|key2
+failed-add|23505|could not create unique index "left_t_k_key"|Key (k)=(key1) is duplicated.
+columns-after-failure|id,v
+nulls-after-failure|2
+columns-after-rollback|id,v
+after-rollback|replacement
+failed-constraint|23505|could not create unique index "labels_tenant_slug_key"|Key (tenant, slug)=(a, one) is duplicated.
+failed-unnamed-constraint|23505|could not create unique index "labels_tenant_slug_key"|Key (tenant, slug)=(a, one) is duplicated.
+keys-after-constraint-failure|labels_pkey

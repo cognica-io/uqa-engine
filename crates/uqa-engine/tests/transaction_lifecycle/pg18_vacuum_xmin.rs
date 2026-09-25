@@ -114,11 +114,16 @@ fn pg18_vacuum_runs_outside_transactions_and_preserves_error_precedence() {
         &[],
     )
     .unwrap();
+    // Automatic maintenance may already have analyzed both columns. Seed complete inherited statistics before checking scoped VACUUM updates.
+    eng.sql("ANALYZE vacuum_parent", &[]).unwrap();
+    let before_only = eng.column_stats("vacuum_parent").unwrap();
+    assert_eq!(before_only["a"].row_count, 2);
+    assert_eq!(before_only["b"].row_count, 2);
     eng.sql("VACUUM (ANALYZE) ONLY vacuum_parent (a)", &[])
         .unwrap();
     let parent_only = eng.column_stats("vacuum_parent").unwrap();
     assert_eq!(parent_only["a"].row_count, 0);
-    assert!(!parent_only.contains_key("b"));
+    assert_eq!(parent_only["b"].row_count, 2);
     eng.sql("VACUUM (ANALYZE) vacuum_parent (b)", &[]).unwrap();
     let descendants = eng.column_stats("vacuum_parent").unwrap();
     assert_eq!(descendants["a"].row_count, 0);
