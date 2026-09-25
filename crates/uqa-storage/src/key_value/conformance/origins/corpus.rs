@@ -10,7 +10,7 @@ use super::{expect, expect_eq};
 use crate::diskann_index::{
     build::{DiskANNBuildInput, DiskANNTemporaryBudget},
     format::DiskANNGeneration,
-    DiskANNCanonicalRead,
+    DiskANNCanonicalRead, DiskANNCanonicalScorer,
 };
 use crate::key_value::{KeyValueDiskANNCanonical, KeyValueVectorIndex, RetainedDiskANNCanonical};
 use crate::read_control::StorageReadControl;
@@ -196,6 +196,7 @@ fn verify_failures(
 pub(super) fn verify_reopen(store: &Arc<dyn KeyValueStore>) -> StorageBackendResult<()> {
     let control = StorageReadControl::with_limit(1 << 20);
     let fixed = index(store)?.retain(&control)?;
+    verify_scores(&fixed)?;
     let query = StorageReadControl::with_limit(8192);
     let mut after = None;
     for expected in [0, 7, u64::MAX] {
@@ -225,5 +226,60 @@ pub(super) fn verify_reopen(store: &Arc<dyn KeyValueStore>) -> StorageBackendRes
         &query.memory().used(),
         &0,
         "whole-corpus workspace released",
+    )
+}
+
+fn verify_scores(fixed: &RetainedDiskANNCanonical) -> StorageBackendResult<()> {
+    let query = StorageReadControl::with_limit(8192);
+    let scorer = DiskANNCanonicalScorer::new(fixed, &[1.0, 0.0], &query)?;
+    let origin = fixed.origin(0, &query)?.expect("fixture origin");
+    let score = scorer
+        .score_candidate(0, 1, origin)?
+        .expect("fixture tensor");
+    expect_eq(
+        &score.raw_cosine().to_bits(),
+        &0x3f19_999a,
+        "candidate reranks complete tensor",
+    )?;
+    expect_eq(
+        &score.vector_count(),
+        &2,
+        "scored tensor includes every ordinal",
+    )?;
+    expect(
+        scorer.score_candidate(0, 2, origin).is_err(),
+        "matching origin with impossible ordinal rejects",
+    )?;
+    let all = scorer.search_exact_knn(usize::MAX)?;
+    expect_eq(
+        &all.doc_ids().collect::<Vec<_>>(),
+        &vec![0, u64::MAX],
+        "canonical exact corpus identities",
+    )?;
+    expect_eq(
+        &all.iter()
+            .map(|entry| entry.payload.score)
+            .collect::<Vec<_>>(),
+        &vec![f64::from(f32::from_bits(0x3f19_999a)), 0.0],
+        "canonical exact raw scores",
+    )?;
+    expect_eq(
+        &scorer.search_exact_knn(1)?.doc_ids().collect::<Vec<_>>(),
+        &vec![0],
+        "canonical document top-k",
+    )?;
+    expect_eq(
+        &scorer.search_threshold(0.5)?.doc_ids().collect::<Vec<_>>(),
+        &vec![0],
+        "canonical exact threshold",
+    )?;
+    expect(
+        scorer.score_document(7)?.is_none(),
+        "empty replacement has no retrieval score",
+    )?;
+    expect_eq(
+        &query.memory().used(),
+        &0,
+        "canonical score workspace released",
     )
 }

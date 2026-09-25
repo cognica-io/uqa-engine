@@ -19,6 +19,7 @@ use crate::{StorageBackendError, StorageBackendResult};
 
 mod collection;
 mod config;
+mod cosine;
 mod memory_snapshot;
 pub mod query;
 pub(crate) mod retained;
@@ -30,6 +31,8 @@ pub use config::{
     DiskANNAlpha, DiskANNIndexParams, HNSWIndexParams, IVFIndexParams, VectorIndexOpenMode,
     VectorIndexSpec,
 };
+pub use cosine::cosine_similarity;
+pub(crate) use cosine::cosine_similarity_controlled;
 pub use retained::{RetainedVectorIndex, RetainedVectorIndexBuilder};
 
 #[cfg(test)]
@@ -82,7 +85,7 @@ fn checked_vector_count(counts: impl IntoIterator<Item = usize>) -> StorageBacke
     })
 }
 
-fn validate_threshold(threshold: f32) -> StorageBackendResult<()> {
+pub(crate) fn validate_threshold(threshold: f32) -> StorageBackendResult<()> {
     if threshold.is_finite() {
         Ok(())
     } else {
@@ -140,30 +143,6 @@ pub(crate) fn cosine_similarity_with_norms(a: &[f32], b: &[f32], norm_a: f32, no
         dot += x * y;
     }
     dot / (norm_a * norm_b)
-}
-
-/// Cosine similarity between two equal-length vectors. Returns `0.0` when
-/// either vector has zero norm or the dimensions differ.
-///
-/// Arithmetic stays in `f32` end-to-end so the result is bit-equal to
-/// the reference `NumPy` implementation (`np.dot(q, v) / (||q|| * ||v||)`
-/// over `float32` arrays).
-pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    if a.len() != b.len() || a.is_empty() {
-        return 0.0;
-    }
-    let mut dot = 0.0f32;
-    let mut norm_a = 0.0f32;
-    let mut norm_b = 0.0f32;
-    for (x, y) in a.iter().zip(b.iter()) {
-        dot += x * y;
-        norm_a += x * x;
-        norm_b += y * y;
-    }
-    if norm_a == 0.0 || norm_b == 0.0 {
-        return 0.0;
-    }
-    dot / (norm_a.sqrt() * norm_b.sqrt())
 }
 
 pub trait VectorIndex: Send + Sync {

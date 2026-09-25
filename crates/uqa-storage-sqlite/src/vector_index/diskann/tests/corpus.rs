@@ -8,6 +8,7 @@ use super::*;
 use uqa_storage::diskann_index::{
     build::{DiskANNBuildInput, DiskANNTemporaryBudget},
     format::DiskANNGeneration,
+    DiskANNCanonicalScorer,
 };
 use uqa_storage::VectorIndex;
 
@@ -110,6 +111,38 @@ fn assert_corpus(
     assert_eq!(temporary.used(), 0);
     assert_eq!(query.memory().used(), 0);
     assert!(std::fs::read_dir(directory).unwrap().next().is_none());
+    let scorer = DiskANNCanonicalScorer::new(retained, &[1.0, 0.0], &query).unwrap();
+    let score = scorer.score_candidate(0, 1, low).unwrap().unwrap();
+    assert_eq!(score.raw_cosine().to_bits(), 0x3f19_999a);
+    assert_eq!(score.vector_count(), 2);
+    assert!(scorer.score_candidate(0, 0, high).unwrap().is_none());
+    assert!(scorer.score_candidate(0, 2, low).is_err());
+    let all = scorer.search_exact_knn(usize::MAX).unwrap();
+    assert_eq!(all.doc_ids().collect::<Vec<_>>(), [0, i64::MAX as DocId]);
+    assert_eq!(
+        all.iter()
+            .map(|entry| entry.payload.score)
+            .collect::<Vec<_>>(),
+        [f64::from(f32::from_bits(0x3f19_999a)), 0.0]
+    );
+    assert_eq!(
+        scorer
+            .search_exact_knn(1)
+            .unwrap()
+            .doc_ids()
+            .collect::<Vec<_>>(),
+        [0]
+    );
+    assert_eq!(
+        scorer
+            .search_threshold(0.5)
+            .unwrap()
+            .doc_ids()
+            .collect::<Vec<_>>(),
+        [0]
+    );
+    assert!(scorer.score_document(7).unwrap().is_none());
+    assert_eq!(query.memory().used(), 0);
 }
 
 #[test]

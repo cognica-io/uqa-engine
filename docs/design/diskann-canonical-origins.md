@@ -1,6 +1,6 @@
 # DiskANN canonical origins
 
-Status: Common MVCC and Key/Value origins merged in PR #170; native SQLite canonical sources merged in PR #171. Ordered corpus reads and retained-source build capture are implemented for review; changed-vector coverage, query scoring and public DiskANN routing remain pending in the [implementation plan](../plans/0014-diskann-vector-index.md).
+Status: Common MVCC and Key/Value origins merged in PR #170; native SQLite canonical sources merged in PR #171; ordered corpus reads and retained-source build capture merged in PR #172. [Canonical document scoring](diskann-canonical-scoring.md) is implemented for review. Changed-vector coverage, paged query integration and public DiskANN routing remain pending in the [implementation plan](../plans/0014-diskann-vector-index.md).
 
 ## Ownership and identity
 
@@ -51,6 +51,8 @@ Streaming reads fetch one size-bounded value at a time and reuse one charged dec
 Whole-corpus visits perform each bounded cursor read before opening the next document, avoiding provider reentry from borrowed callbacks. They require strictly increasing document identities and validate every complete tensor; an empty origin emits no coordinates, while an unstamped document rejects the visit. Errors discard partial results. `DiskANNBuildInput::capture_source` passes this fixed source directly into the existing encrypted capture, preserving actual mutation origins and coordinate bits in document/ordinal order. An absent source stays absent, and a captured private undo branch remains fixed after rollback and source closure.
 
 This corpus stream supplies build input and the future exact-threshold/numeric-edge query path. Its build fingerprint remains an integrity fingerprint, not a visibility token, membership oracle or publication authorization. Base-versus-change coverage must still come from Storage's actual retained visibility boundary; corpus enumeration is not a per-query substitute for the required exact changed-vector stream.
+
+`check_control` validates the source's original controls and the invoking control without opening a value read. The canonical scorer uses it during coordinate chunks and before zero-k/empty work, so avoiding I/O cannot bypass retained cancellation. Complete document scoring and exact query selection belong to the separate [scoring contract](diskann-canonical-scoring.md).
 
 ## Carrier boundary and validation
 

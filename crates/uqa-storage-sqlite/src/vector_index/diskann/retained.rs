@@ -314,6 +314,10 @@ impl RetainedSQLiteDiskANNCanonical {
 }
 
 impl DiskANNCanonicalRead for RetainedSQLiteDiskANNCanonical {
+    fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
+        self.check(control)
+    }
+
     fn dimensions(&self) -> u32 {
         self.dimensions
     }
