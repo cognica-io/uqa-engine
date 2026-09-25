@@ -14,16 +14,16 @@ pub use retained::{DiskANNCanonicalVectorVisitor, RetainedDiskANNCanonical};
 use std::sync::Arc;
 
 use super::KeyValueVectorIndex;
-use crate::diskann_index::format::DiskANNVectorVersion;
+use crate::diskann_index::format::{
+    DiskANNCanonicalOrigin as Record, DiskANNVectorVersion, CANONICAL_ORIGIN_BYTES as BYTES,
+};
 use crate::key_value::{codec, KeyValueRead};
-use crate::mvcc::{DatabaseId, StorageTransactionId, VersionError};
+use crate::mvcc::VersionError;
 use crate::read_control::StorageReadControl;
 use crate::{KeyValueStore, StorageBackendResult};
 use uqa_core::DocId;
 
 const ROOT: &[u8] = b"\0uqa-diskann-canonical-v1\0";
-const MAGIC: &[u8; 8] = b"UQAVORG1";
-const BYTES: usize = 56;
 
 /// Canonical tensor mutation owner for the Key/Value layout. Public `DiskANN` catalog routing remains unavailable until publication and recovery are integrated.
 pub struct KeyValueDiskANNCanonical {
@@ -72,11 +72,7 @@ impl KeyValueDiskANNCanonical {
             .with_versioned_mutation(&mut |origin, _, batch| {
                 control.check()?;
                 let current = DiskANNVectorVersion::new(origin.transaction(), origin.revision())?;
-                let record = Record {
-                    version: current,
-                    dimensions: self.index.dimensions,
-                    count,
-                };
+                let record = Record::new(current, self.index.dimensions, count)?;
                 self.index.stage_replace(batch, document, vectors)?;
                 batch.put(&key, &record.encode())?;
                 control.check()?;
@@ -149,51 +145,6 @@ pub(super) fn key(table: &str, field: &str, document: DocId) -> StorageBackendRe
     let mut key = prefix(table, field)?;
     key.extend_from_slice(&document.to_be_bytes());
     Ok(key)
-}
-
-#[derive(Clone, Copy)]
-struct Record {
-    version: DiskANNVectorVersion,
-    dimensions: u32,
-    count: u64,
-}
-
-impl Record {
-    fn encode(self) -> [u8; BYTES] {
-        let mut bytes = [0; BYTES];
-        bytes[..8].copy_from_slice(MAGIC);
-        bytes[8..24].copy_from_slice(&self.version.writer().database().as_bytes());
-        bytes[24..32].copy_from_slice(&self.version.writer().allocation().to_le_bytes());
-        bytes[32..40].copy_from_slice(&self.version.revision().to_le_bytes());
-        bytes[40..44].copy_from_slice(&self.dimensions.to_le_bytes());
-        bytes[48..56].copy_from_slice(&self.count.to_le_bytes());
-        bytes
-    }
-
-    fn decode(bytes: &[u8], dimensions: u32) -> StorageBackendResult<Self> {
-        if bytes.len() != BYTES || &bytes[..8] != MAGIC || bytes[44..48] != [0; 4] {
-            return Err(invalid("invalid canonical origin envelope"));
-        }
-        let read = |offset: usize| -> [u8; 8] {
-            bytes[offset..offset + 8]
-                .try_into()
-                .expect("validated width")
-        };
-        if bytes[40..44] != dimensions.to_le_bytes() {
-            return Err(invalid("canonical origin dimension mismatch"));
-        }
-        let database = DatabaseId::from_bytes(bytes[8..24].try_into().expect("validated width"));
-        let writer = StorageTransactionId::new(database, u64::from_le_bytes(read(24)))
-            .map_err(VersionError::into_storage_error)?;
-        let version = DiskANNVectorVersion::new(writer, u64::from_le_bytes(read(32)))?;
-        let count = u64::from_le_bytes(read(48));
-        codec::validate_vector_ordinal_count(count)?;
-        Ok(Self {
-            version,
-            dimensions,
-            count,
-        })
-    }
 }
 
 fn invalid(message: &'static str) -> crate::StorageBackendError {

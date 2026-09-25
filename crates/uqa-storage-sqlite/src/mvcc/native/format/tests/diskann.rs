@@ -115,6 +115,9 @@ fn native_diskann_reopen_rejects_missing_tables_guards_and_changed_layouts() {
         "DROP TABLE _uqa_mvcc_native_diskann_records",
         "DROP TRIGGER _uqa_mvcc_native_capture_57_UPDATE",
         "ALTER TABLE _uqa_mvcc_native_diskann_records ADD COLUMN unexpected BLOB",
+        "DROP TABLE _uqa_mvcc_native_vector_origins",
+        "DROP TRIGGER _uqa_mvcc_native_capture_58_UPDATE",
+        "ALTER TABLE _uqa_mvcc_native_vector_origins ADD COLUMN unexpected BLOB",
     ] {
         let connection = ManagedConnection::open_in_memory().unwrap();
         let control = StorageReadControl::with_limit(1 << 22);
@@ -153,4 +156,57 @@ fn native_diskann_reopen_rejects_missing_tables_guards_and_changed_layouts() {
         });
         assert_eq!(after, schema, "{fault}");
     }
+}
+
+#[test]
+fn native_canonical_origin_upgrade_from_ten_is_atomic_and_preserves_existing_history() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let control = StorageReadControl::with_limit(1 << 22);
+    let records = SQLiteRecordStore::for_native(&connection, &control).unwrap();
+    let data = records.native_namespace().unwrap();
+    let pending = records.allocate_transaction(&control).unwrap();
+    with(&connection, |sqlite| {
+        let _permit = schema::WritePermit::acquire(sqlite)?;
+        let transaction = schema::begin(sqlite)?;
+        crate::mvcc::native::tests::diskann::remove_empty_origins(&transaction)?;
+        transaction.execute_batch("DROP TABLE _uqa_mvcc_native_format")?;
+        transaction.execute_batch(FORMAT_TEN)?;
+        transaction.execute(
+            "INSERT INTO _uqa_mvcc_native_format VALUES (1,10,49,?1)",
+            [data.as_bytes().as_slice()],
+        )?;
+        for action in ["INSERT", "UPDATE", "DELETE"] {
+            transaction.execute_batch(&schema::trigger(TABLES[0].0, action).1)?;
+        }
+        transaction.commit()?;
+        validate_format(sqlite, 10)?;
+        Ok(())
+    });
+    let before = preserved(&connection);
+    with(&connection, |sqlite| {
+        let _permit = schema::WritePermit::acquire(sqlite)?;
+        let transaction = schema::begin(sqlite)?;
+        let mapping = initialize_in(&transaction, &control)?;
+        assert_eq!(mapping.namespace.0, data);
+        assert!(check_mapping_version(&transaction, 10).is_err());
+        drop(transaction);
+        validate_format(sqlite, 10)?;
+        assert!(sqlite
+            .prepare("SELECT * FROM _uqa_mvcc_native_vector_origins")
+            .is_err());
+        Ok(())
+    });
+    assert_eq!(preserved(&connection), before);
+    let upgraded = SQLiteRecordStore::for_native(&connection, &control).unwrap();
+    assert_eq!(upgraded.native_namespace(), Some(data));
+    assert_eq!(
+        upgraded.commit_status(pending, &control).unwrap(),
+        uqa_storage::mvcc::CommitStatus::Pending
+    );
+    assert_eq!(preserved(&connection), before);
+    with(&connection, |sqlite| {
+        validate_format(sqlite, 11)?;
+        assert!(check_mapping_version(sqlite, 10).is_err());
+        Ok(())
+    });
 }

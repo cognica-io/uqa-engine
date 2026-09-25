@@ -44,13 +44,13 @@ fn native_layout_inventory_covers_every_current_catalog_table_and_primary_key() 
                 .query_map([], |row| row.get::<_, String>(0))?
                 .collect::<Result<BTreeSet<_>, _>>()?;
             let expected: BTreeSet<_> = NativeRecordFamily::all()
-                .filter(|family| !family.is_standalone_graph() && !matches!(family, NativeRecordFamily::TableOwners | NativeRecordFamily::GraphLookups | NativeRecordFamily::OccurrenceSkips | NativeRecordFamily::OccurrenceBlockMax | NativeRecordFamily::OccurrenceGuards | NativeRecordFamily::VectorGuards | NativeRecordFamily::DiskANNRecords))
+                .filter(|family| !family.is_standalone_graph() && !matches!(family, NativeRecordFamily::TableOwners | NativeRecordFamily::GraphLookups | NativeRecordFamily::OccurrenceSkips | NativeRecordFamily::OccurrenceBlockMax | NativeRecordFamily::OccurrenceGuards | NativeRecordFamily::VectorGuards | NativeRecordFamily::DiskANNRecords | NativeRecordFamily::VectorOrigins))
                 .map(|family| family.layout().table.to_owned())
                 .collect();
             assert_eq!(actual, expected);
             for family in NativeRecordFamily::all() {
                 assert_eq!(NativeRecordFamily::from_id(family.id()), Some(family));
-                if family.is_standalone_graph() || matches!(family, NativeRecordFamily::TableOwners | NativeRecordFamily::GraphLookups | NativeRecordFamily::OccurrenceSkips | NativeRecordFamily::OccurrenceBlockMax | NativeRecordFamily::OccurrenceGuards | NativeRecordFamily::VectorGuards | NativeRecordFamily::DiskANNRecords) { continue; }
+                if family.is_standalone_graph() || matches!(family, NativeRecordFamily::TableOwners | NativeRecordFamily::GraphLookups | NativeRecordFamily::OccurrenceSkips | NativeRecordFamily::OccurrenceBlockMax | NativeRecordFamily::OccurrenceGuards | NativeRecordFamily::VectorGuards | NativeRecordFamily::DiskANNRecords | NativeRecordFamily::VectorOrigins) { continue; }
                 let layout = family.layout();
                 let mut statement = connection.prepare(&format!("PRAGMA table_info({})", layout.table))?;
                 let columns = statement.query_map([], |row| {

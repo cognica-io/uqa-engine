@@ -60,6 +60,32 @@ pub struct VersionedKeyValueStore {
 }
 
 impl VersionedKeyValueStore {
+    /// Evaluate one provider mutation against the same fixed native record view as its batch. The callback must not reenter this session or complete its batch. Common MVCC owns autocommit, failed-evaluation cleanup and receipt retry; callbacks are never replayed.
+    pub fn with_versioned_record_mutation<T>(
+        &self,
+        operation: impl FnOnce(
+            super::StorageMutationOrigin,
+            MergedRecordSnapshot,
+            &mut dyn KeyValueBatch,
+        ) -> StorageBackendResult<T>,
+    ) -> StorageBackendResult<T> {
+        self.control.check()?;
+        self.write(|transaction| {
+            let origin = transaction.mutation_origin(&*self.persistence, &self.write_control())?;
+            let view = transaction.view()?;
+            let mut batch = batch::Batch::new(
+                self,
+                transaction
+                    .serializable_context()
+                    .map(SerializableReadContext::id),
+            );
+            let result = operation(origin, view, &mut batch)?;
+            self.control.check()?;
+            batch.apply(transaction)?;
+            Ok(result)
+        })
+    }
+
     /// Reclaim committed history without changing an active transaction or its retained readers. The persistence owner supplies atomic snapshot admission and physical deletion.
     pub fn reclaim_versions(&self) -> StorageBackendResult<u64> {
         self.persistence
@@ -446,24 +472,16 @@ impl KeyValueStore for VersionedKeyValueStore {
         &self,
         operation: &mut crate::key_value::KeyValueVersionedMutation<'_>,
     ) -> StorageBackendResult<()> {
-        self.control.check()?;
-        self.write(|transaction| {
-            let origin = transaction.mutation_origin(&*self.persistence, &self.write_control())?;
-            let view = transaction.view()?;
-            let read = read::RecordRead {
-                view: &view,
-                database: self.persistence.database_id(),
-                control: &self.control,
-            };
-            let mut batch = batch::Batch::new(
-                self,
-                transaction
-                    .serializable_context()
-                    .map(SerializableReadContext::id),
-            );
-            operation(origin, &read, &mut batch)?;
-            self.control.check()?;
-            batch.apply(transaction)
+        self.with_versioned_record_mutation(|origin, view, batch| {
+            operation(
+                origin,
+                &read::RecordRead {
+                    view: &view,
+                    database: self.persistence.database_id(),
+                    control: &self.control,
+                },
+                batch,
+            )
         })
     }
 

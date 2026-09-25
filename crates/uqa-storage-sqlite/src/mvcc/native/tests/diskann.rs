@@ -12,6 +12,7 @@ use crate::SQLiteRecordStore;
 pub(in crate::mvcc::native) fn remove_empty_table(
     sqlite: &rusqlite::Connection,
 ) -> crate::Result<()> {
+    remove_empty_origins(sqlite)?;
     assert_eq!(
         sqlite.query_row(
             "SELECT count(*) FROM _uqa_mvcc_native_diskann_records",
@@ -21,6 +22,21 @@ pub(in crate::mvcc::native) fn remove_empty_table(
         0
     );
     sqlite.execute_batch("DROP TABLE _uqa_mvcc_native_diskann_records")?;
+    Ok(())
+}
+
+pub(in crate::mvcc::native) fn remove_empty_origins(
+    sqlite: &rusqlite::Connection,
+) -> crate::Result<()> {
+    assert_eq!(
+        sqlite.query_row(
+            "SELECT count(*) FROM _uqa_mvcc_native_vector_origins",
+            [],
+            |row| row.get::<_, i64>(0)
+        )?,
+        0
+    );
+    sqlite.execute_batch("DROP TABLE _uqa_mvcc_native_vector_origins")?;
     Ok(())
 }
 

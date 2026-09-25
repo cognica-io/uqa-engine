@@ -150,7 +150,7 @@ fn native_path_lookup_upgrade_preserves_sources_and_old_selectors_in_every_file_
             }
             assert_eq!(
                 dump(&connection, "SELECT format FROM _uqa_mvcc_native_format"),
-                vec![vec![rusqlite::types::Value::Integer(10)]]
+                vec![vec![rusqlite::types::Value::Integer(11)]]
             );
             assert_eq!(
                 SQLiteRecordStore::for_native(&connection, &control)

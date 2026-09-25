@@ -19,11 +19,13 @@ use uqa_storage::StorageBackendResult;
 
 mod brute_force;
 mod codec;
+mod diskann;
 mod hnsw;
 mod ivf;
 mod native;
 
 pub use brute_force::SQLiteVectorIndex;
+pub use diskann::{RetainedSQLiteDiskANNCanonical, SQLiteDiskANNCanonical};
 pub(crate) use hnsw::NativeHNSWRecords;
 pub use hnsw::SQLiteHNSWIndex;
 pub(crate) use ivf::NativeIVFRecords;

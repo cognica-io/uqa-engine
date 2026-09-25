@@ -24,6 +24,27 @@ pub(crate) fn binary_pair_limit(key_bytes: usize, value_bytes: usize) -> Version
         .saturating_add(value_bytes.min(u32::MAX as usize)))
 }
 
+/// Exact native envelope bound for table/field text, a document ID, an optional ordinal, and one canonical BLOB. Reject impossible field lengths before fetching a value.
+pub(crate) fn vector_row_limit(
+    table: usize,
+    field: usize,
+    payload: usize,
+    ordinal: bool,
+) -> VersionResult<usize> {
+    for bytes in [table, field, payload] {
+        u32::try_from(bytes)
+            .map_err(|_| invalid("native canonical field exceeds record length"))?;
+    }
+    let envelope = PREFIX.len() + 2 + 3 * (1 + 4) + (1 + 8) * if ordinal { 2 } else { 1 };
+    [table, field, payload]
+        .into_iter()
+        .try_fold(envelope, |total, bytes| {
+            total
+                .checked_add(bytes)
+                .ok_or_else(|| invalid("native canonical row length overflow"))
+        })
+}
+
 pub fn encode_row(
     values: &[ValueRef<'_>],
     control: &StorageReadControl,

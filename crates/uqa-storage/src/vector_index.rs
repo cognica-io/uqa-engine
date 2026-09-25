@@ -39,7 +39,8 @@ pub fn validate_vector_values(dimensions: u32, vector: &[f32]) -> StorageBackend
     validate_vector_values_controlled(dimensions, vector, None)
 }
 
-pub(crate) fn validate_vector_values_controlled(
+/// Validate canonical dimensions and finite coordinates with periodic cancellation checks.
+pub fn validate_vector_values_controlled(
     dimensions: u32,
     vector: &[f32],
     control: Option<&crate::read_control::StorageReadControl>,

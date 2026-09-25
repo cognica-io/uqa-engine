@@ -6,7 +6,7 @@
 
 //! Native row operations share one logical session, including the read boundary of each evaluated mutation.
 
-use uqa_storage::mvcc::{VersionError, VersionedSessionOptions};
+use uqa_storage::mvcc::{StorageMutationOrigin, VersionError, VersionedSessionOptions};
 use uqa_storage::read_control::StorageReadControl;
 use uqa_storage::KeyValueBatch;
 
@@ -164,6 +164,40 @@ impl ManagedConnection {
             logical.commit_transaction()?;
         }
         Ok(Some(result))
+    }
+
+    /// Evaluate native records through the common origin scope. Its supplied snapshot avoids reentering the session and preserves common autocommit, abort-only cleanup and exact receipt retry.
+    pub(crate) fn with_native_versioned_write<R>(
+        &self,
+        operation: impl FnOnce(
+            StorageMutationOrigin,
+            &NativeSnapshot,
+            &mut dyn KeyValueBatch,
+        ) -> Result<R>,
+    ) -> Result<R> {
+        self.surface_cleanup_failure()?;
+        let _gate = self.session.gate.write();
+        let logical = self
+            .session
+            .logical
+            .get()
+            .ok_or(SQLiteError::LogicalSessionRequired)?;
+        let database = logical.native.ok_or(SQLiteError::SessionMappingMismatch)?;
+        let control = logical.retention_control();
+        Ok(
+            logical.with_versioned_record_mutation(|origin, view, batch| {
+                operation(
+                    origin,
+                    &NativeSnapshot {
+                        view,
+                        control,
+                        database,
+                    },
+                    batch,
+                )
+                .map_err(Into::into)
+            })?,
+        )
     }
 }
 
