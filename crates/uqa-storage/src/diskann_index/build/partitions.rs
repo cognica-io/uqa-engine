@@ -74,6 +74,23 @@ impl DiskANNPartitionRuns {
         &self.summary
     }
 
+    pub(super) fn into_source(
+        self,
+        input: &DiskANNBuildInput,
+    ) -> StorageBackendResult<(TemporaryRun, DiskANNPartitionSummary)> {
+        input.control.check()?;
+        if self.nodes != input.node_count()
+            || self.summary.coverage != input.coverage
+            || !self.control.shares_context(&input.control)
+            || !self.edges.uses_allowance(&input.temporary)
+        {
+            return Err(invalid(
+                "partition source, coverage or build allowance differs",
+            ));
+        }
+        Ok((self.edges, self.summary))
+    }
+
     pub fn visit_edges(
         &self,
         visitor: &mut dyn FnMut(u64, u64) -> StorageBackendResult<()>,

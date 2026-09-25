@@ -60,6 +60,10 @@ impl DiskANNTemporaryBudget {
     pub fn peak(&self) -> u64 {
         self.0.lock().peak
     }
+
+    pub(super) fn shares_allowance(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
 }
 
 struct Reservation {
@@ -104,6 +108,10 @@ pub(super) struct TemporaryRun {
 }
 
 impl TemporaryRun {
+    pub(super) fn uses_allowance(&self, budget: &DiskANNTemporaryBudget) -> bool {
+        self.reservation.budget.shares_allowance(budget)
+    }
+
     pub(super) fn new(
         directory: &Path,
         budget: &DiskANNTemporaryBudget,

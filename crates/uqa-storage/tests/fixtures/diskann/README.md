@@ -58,6 +58,12 @@ The coverage count is 5 and its SHA-256 is `7e20a0b4972bf9be57997a63789ddd7b79c7
 
 These expectations cover assignment and capacity mechanics, while the existing independent PQ/Vamana fixtures remain their numerical/graph oracles. A separate literal two-point partition case checks both directed edges after mapping local graph IDs to original global IDs. The larger resource case supplies 1,024 vectors with 32 dimensions (131,072 raw bytes) under a 65,536-byte controlled build limit, then verifies complete global source membership and bounded local leaves through encrypted runs. Final global degree and ANN recall are later merge/search obligations.
 
+## Global adjacency merge
+
+`merge.json` and `generate_merge.py` preserve rational global-pruning expectations fixed before the Rust implementation. Six unit vectors include two equal values with distinct identities and two ordinals from one document. Explicit unsorted/repeated candidate edges also omit source 3. With degree 3, alpha `6/5` and a reserved global successor, final neighborhoods are `[1,2,3]`, `[2,3,4]`, `[0,3,4]`, `[4]`, `[1,2,5]` and `[0]`. Python's exact fractions derive every source distance and squared-alpha domination condition without invoking Rust. Four sort capacities must preserve these neighborhoods and the same construction digest.
+
+Owner checks complete capture, partitioning and global merge for 1,024 32-dimensional vectors (131,072 raw bytes) under a 65,536-byte controlled allowance using encrypted files. Every dense row retains sorted unique neighbors, bounded degree and its global successor. A separate two-way pass over 700 24-byte records and 350 one-record range pairs performs exactly ten input block decryptions: five blocks for each retained cursor. This is an algorithmic I/O count, not elapsed-time or device-performance evidence. Complete physical generation and held-out query recall acceptance remain separate work.
+
 ## Held-out recall inputs
 
 The independent generator fixes 4,096 corpus vectors and 128 held-out queries, each with 32 coordinates, around 32 integer centers. SplitMix64 has explicit wrapping 64-bit operations; seeds 42, 43 and 24301 select centers, corpus perturbations and query perturbations. Components are exactly representable as `f32`. The fixture stores SHA-256 digests of row-major little-endian `f32` bytes, not a machine report or the expanded corpus. The generator rejects an exact corpus/query overlap.

@@ -11,6 +11,9 @@ use crate::read_control::StorageReadControl;
 use crate::vector_index::DiskANNAlpha;
 use crate::StorageBackendResult;
 
+mod selection;
+pub(in crate::diskann_index) use selection::Selection;
+
 pub(super) fn select(
     points: &[VamanaPoint<'_>],
     source: u64,
@@ -46,30 +49,19 @@ pub(super) fn select(
     }
     drop(ids);
     pool.sort_unstable_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
-    let mut selected = BudgetedVec::new(control.memory());
-    selected.reserve(degree.min(pool.len()))?;
-    // In source-distance order, skipping candidates dominated by an already selected neighbor matches removing them after each selection.
+    let mut selected = Selection::new(alpha, degree.min(pool.len()), control)?;
     for &(candidate, distance) in &*pool {
         control.check()?;
-        if selected.len() == degree {
+        if selected.is_full() {
             break;
         }
-        let mut removed = false;
-        for &neighbor in &*selected {
-            let between = points[neighbor as usize]
+        selected.consider(candidate, distance, control, |_, neighbor| {
+            points[neighbor as usize]
                 .vector
-                .squared_distance(points[candidate as usize].vector, control)?
-                .get();
-            if alpha.squared() * between <= distance {
-                removed = true;
-                break;
-            }
-        }
-        if !removed {
-            selected.push(candidate)?;
-        }
+                .squared_distance(points[candidate as usize].vector, control)
+        })?;
     }
-    Ok(selected)
+    Ok(selected.finish())
 }
 
 pub(super) fn position(points: &[VamanaPoint<'_>], node: u64) -> StorageBackendResult<usize> {

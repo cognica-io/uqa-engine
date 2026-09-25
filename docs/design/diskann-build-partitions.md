@@ -1,6 +1,6 @@
 # DiskANN overlapping partition construction
 
-Storage's `DiskANNBuildInput::build_partitions` builds admitted Vamana graphs one at a time and returns encrypted global edge candidates. It extends the [canonical input owner](diskann-build-input.md) without reopening a provider snapshot or collecting the full corpus. The output is an unpruned union of overlapping local graphs; global ordering/pruning, successor connectivity, page/code construction and generation sealing remain separate work.
+Storage's `DiskANNBuildInput::build_partitions` builds admitted Vamana graphs one at a time and returns encrypted global edge candidates. It extends the [canonical input owner](diskann-build-input.md) without reopening a provider snapshot or collecting the full corpus. The output is an unpruned union of overlapping local graphs; the [global merge owner](diskann-build-merge.md) orders/prunes candidates and reserves successor connectivity. Page/code construction and generation sealing remain separate work.
 
 ## Deterministic partitioning
 
@@ -26,7 +26,7 @@ Invalid settings, source corruption, failed admission, cancellation or I/O failu
 
 This owner stays at the [physical vector-identity boundary](diskann-vector-index.md#typed-carrier-boundaries). Overlapping memberships and repeated edges are construction candidates, not decorated postings or duplicate score contributions. No document projection, payload collision merge, probability conversion or ranked truncation occurs here; those query boundaries retain their distinct contracts.
 
-`DiskANNPartitionRuns::visit_edges` streams `(global_source, global_neighbor)` pairs in deterministic leaf/source/neighborhood order. Each local graph retains its degree, range, uniqueness and connectivity contracts. Overlap can repeat global edges or exceed the final degree bound; the later merge must sort, deduplicate, prune with full navigation vectors and reserve the global successor cycle. Local cycles do not establish that final contract.
+`DiskANNPartitionRuns::visit_edges` streams `(global_source, global_neighbor)` pairs in deterministic leaf/source/neighborhood order. Each local graph retains its degree, range, uniqueness and connectivity contracts. Overlap can repeat global edges or exceed the final degree bound; the global merge sorts, deduplicates, prunes with full navigation vectors and reserves the global successor cycle. Local cycles alone do not establish that final contract.
 
 `DiskANNPartitionSummary` retains source coverage, all effective index/partition settings, work-order revision, leaf/membership/edge counts, maximum leaf size/depth and an ordered assignment digest. The digest binds settings and coverage, split decisions and membership streams, and the ordered leaf identity lists. The final generation stores compact effective settings and ordered digests as build provenance; canonical node pages supply durable global-to-logical identities. Complete temporary membership maps are not resident manifest data. The current summary is typed construction metadata; the later sealing owner must encode and validate it in the physical generation format.
 
