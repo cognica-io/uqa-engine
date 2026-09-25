@@ -6,6 +6,7 @@
 
 //! Actual publication identities, undo branches and bounded canonical views on disposable providers.
 
+mod catalog;
 mod lifecycle;
 pub use lifecycle::verify_mutation_origins;
 
@@ -103,6 +104,7 @@ pub fn verify_diskann_canonical_origins(
     let final_origin = index.replace(1, &[vec![9.0, -0.0]], &control)?;
     concurrent(store, &control)?;
     bounded(store, &control)?;
+    catalog::verify(store, &control)?;
     let tiny = StorageReadControl::with_limit(1);
     expect(
         fresh
