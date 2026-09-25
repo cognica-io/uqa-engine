@@ -20,7 +20,7 @@ Canonical cosine retains the established sequential `f32` dot and squared-norm r
 
 `score_candidate` compares the physical candidate's origin with the current retained document origin. A stale or absent origin is masked. A matching origin must contain the requested ordinal; an impossible ordinal, including an ordinal in an empty replacement, is corruption and fails. An admitted candidate then receives the complete canonical tensor score. Provider changes to the returned origin, ordinal order or dimensions fail; the first callback error survives even if a provider suppresses it. A successful candidate score does not validate a graph's generation affinity, base coverage or the completeness of an ANN result.
 
-`visit_scores` emits each vector-bearing document once in ascending document order. It validates cursor progress and requires every enumerated document to have an origin. Failed reads, decoding, cancellation or consumer callbacks invalidate all partial output. `check_control` on the retained source also covers zero-k and empty queries that perform no physical reads.
+`visit_scores` emits each vector-bearing document once in ascending document order. It validates cursor progress and requires every enumerated document to have an origin. If a read, decoding, cancellation or consumer callback fails, its caller must discard every result already produced by that callback; the visitor cannot undo caller-owned effects. The exact-search methods own and drop their partial result buffers on failure. `check_control` on the retained source also covers zero-k and empty queries that perform no physical reads.
 
 ## Exact selection and memory
 

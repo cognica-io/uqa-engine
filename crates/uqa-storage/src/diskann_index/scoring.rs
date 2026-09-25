@@ -107,7 +107,7 @@ impl<'a> DiskANNCanonicalScorer<'a> {
         Ok(Some(score))
     }
 
-    /// Stream one score per vector-bearing document in ascending document order. Any error invalidates all partial consumer output.
+    /// Stream one score per vector-bearing document in ascending document order. On any error, the caller must discard all output already produced by its callback.
     pub fn visit_scores(
         &self,
         visit: &mut dyn FnMut(DiskANNDocumentScore) -> StorageBackendResult<()>,
