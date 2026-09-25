@@ -44,27 +44,13 @@ impl NavigationInput {
         raw: &[f32],
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
-        validate_vector_values_controlled(dimensions, raw, Some(control))?;
-        if dimensions == 0 {
-            return Err(StorageBackendError::Other(
-                "DiskANN dimensions must be positive".into(),
-            ));
-        }
-        let mut canonical_squared_norm = 0.0_f32;
-        let mut squared_norm = 0.0_f64;
-        for (offset, &value) in raw.iter().enumerate() {
-            checkpoint(offset, control)?;
-            canonical_squared_norm += value * value;
-            let value = f64::from(value);
-            squared_norm += value * value;
-        }
-        if canonical_squared_norm == 0.0 {
+        let (canonical_norm, norm) = norms(dimensions, raw, control)?;
+        if canonical_norm == 0.0 {
             return Ok(Self::Exact(ExactVectorReason::ZeroNorm));
         }
-        if !canonical_squared_norm.is_finite() {
+        if !canonical_norm.is_finite() {
             return Ok(Self::Exact(ExactVectorReason::NonFiniteNorm));
         }
-        let norm = squared_norm.sqrt();
         let mut coordinates = BudgetedVec::new(control.memory());
         coordinates.reserve(raw.len())?;
         for (offset, &value) in raw.iter().enumerate() {
@@ -74,6 +60,28 @@ impl NavigationInput {
         control.check()?;
         Ok(Self::Navigable(NavigationVector { coordinates }))
     }
+}
+
+pub(super) fn norms(
+    dimensions: u32,
+    raw: &[f32],
+    control: &StorageReadControl,
+) -> StorageBackendResult<(f32, f64)> {
+    validate_vector_values_controlled(dimensions, raw, Some(control))?;
+    if dimensions == 0 {
+        return Err(StorageBackendError::Other(
+            "DiskANN dimensions must be positive".into(),
+        ));
+    }
+    let mut canonical_squared_norm = 0.0_f32;
+    let mut squared_norm = 0.0_f64;
+    for (offset, &value) in raw.iter().enumerate() {
+        checkpoint(offset, control)?;
+        canonical_squared_norm += value * value;
+        let value = f64::from(value);
+        squared_norm += value * value;
+    }
+    Ok((canonical_squared_norm.sqrt(), squared_norm.sqrt()))
 }
 
 impl NavigationVector {
