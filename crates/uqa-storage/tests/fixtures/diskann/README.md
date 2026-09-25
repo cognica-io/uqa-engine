@@ -38,6 +38,20 @@ Three 3-dimensional nodes carry the raw bits for `[-0.0, 3.0, 4.0]`, exact norm 
 
 The graph digest comes from one independently encoded page whose eight nodes follow a simple directed cycle; this is a byte-format input, not a Vamana construction result. Code/side stream digests exclude batch boundaries. Tests compare exact codebook header bytes and record/stream digests, verify unchanged codebook bits and PQ lookup results after restoration, reject malformed inner metadata after recomputing both envelope and manifest checksums, and check allocation/cancellation/lifetime boundaries. Format checks do not establish MVCC coverage, provider persistence, reader completeness or ANN recall.
 
+## Canonical build capture
+
+`generate_capture.py` reproduces the five-record coverage digest independently with Python's `struct` and `hashlib`. The expectation was fixed before implementing the Rust capture. Generation data identity is database `01` repeated 16 times, table 2, index 3, generation 4, dimensions 2; every vector's origin is writer database `09` repeated 16 times, allocation 7, revision 3. The Storage capture tests retain these literal original bits, logical identities and expected classifications. No Rust output supplies the oracle.
+
+| Canonical identity | Raw `f32` bits | Expected captured identity |
+| --- | --- | --- |
+| `(10, 0)` | `40400000 40800000` | Navigation node 0 |
+| `(10, 1)` | `80000000 00000000` | Side record 0, zero norm |
+| `(20, 0)` | `7f7fffff 7f7fffff` | Side record 1, nonfinite canonical norm |
+| `(21, 0)` | `bf800000 00000000` | Navigation node 1 |
+| `(21, 1)` | `00800000 00000000` | Side record 2, underflowed zero norm |
+
+The coverage count is 5 and its SHA-256 is `7e20a0b4972bf9be57997a63789ddd7b79c73f6e5f248748eb9f256a211dd2f1`. The corresponding two navigable inputs pass through the existing PQ trainer; comparison with direct training checks stream selection and replay, while the independent PQ algorithm oracle remains `training.json`. A separate 256-vector, 16-dimensional capture supplies 16,384 raw bytes under a 4,096-byte controlled memory limit and trains a four-sample reservoir from actual encrypted temporary files. This establishes input streaming, not complete partitioned graph construction.
+
 ## Held-out recall inputs
 
 The independent generator fixes 4,096 corpus vectors and 128 held-out queries, each with 32 coordinates, around 32 integer centers. SplitMix64 has explicit wrapping 64-bit operations; seeds 42, 43 and 24301 select centers, corpus perturbations and query perturbations. Components are exactly representable as `f32`. The fixture stores SHA-256 digests of row-major little-endian `f32` bytes, not a machine report or the expanded corpus. The generator rejects an exact corpus/query overlap.

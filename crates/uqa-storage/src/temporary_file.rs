@@ -57,6 +57,17 @@ impl TemporaryFileMetadata {
 }
 
 impl<const BYTES: usize> BlockTemporaryFile<BYTES> {
+    /// Ciphertext file length for a logical length, including both slots and complete block framing. This excludes filesystem allocation metadata.
+    pub fn physical_len_for(logical_length: u64) -> io::Result<u64> {
+        if BYTES == 0 || BYTES > BLOCK_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid temporary file block width",
+            ));
+        }
+        record_offset::<BYTES>(logical_length.div_ceil(BYTES as u64))
+    }
+
     pub fn new() -> io::Result<Self> {
         Self::from_file(tempfile::NamedTempFile::new()?)
     }
@@ -66,12 +77,7 @@ impl<const BYTES: usize> BlockTemporaryFile<BYTES> {
     }
 
     fn from_file(file: tempfile::NamedTempFile) -> io::Result<Self> {
-        if BYTES == 0 || BYTES > BLOCK_BYTES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid temporary file block width",
-            ));
-        }
+        Self::physical_len_for(0)?;
         let mut key = [0_u8; 32];
         getrandom::fill(&mut key).map_err(|error| io::Error::other(error.to_string()))?;
         let cipher = XChaCha20Poly1305::new((&key).into());
@@ -92,6 +98,11 @@ impl<const BYTES: usize> BlockTemporaryFile<BYTES> {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_write_after(&self, bytes: usize) {
+        self.owner.lock().faults.fail_after_bytes = Some(bytes);
     }
 
     pub fn as_file(&self) -> &Self {
