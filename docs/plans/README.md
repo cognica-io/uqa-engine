@@ -17,6 +17,7 @@ Files in this directory record staged implementation work. A living plan must de
 | [`0011-committed-notification-recovery.md`](0011-committed-notification-recovery.md) | Complete | Preserve the atomic publication, recovery, retained completion and final platform acceptance recorded in PR #154. |
 | [`0012-compressed-container-read-consistency.md`](0012-compressed-container-read-consistency.md) | Complete | Preserve authenticated file/map ownership and deterministic compaction regressions verified in PR #154. |
 | [`0013-added-column-publication.md`](0013-added-column-publication.md) | Complete | Preserve atomic declared-column and physical-field publication, backfilled key validation and final provider/platform acceptance recorded in PR #156. |
+| [`0014-diskann-vector-index.md`](0014-diskann-vector-index.md) | Planned | Update with each native DiskANN implementation unit, preserving owner boundaries, dependency order, paged resource limits, provider/MVCC coverage, and source-scoped acceptance evidence. |
 
 The PostgreSQL 18 plan contains a compact ledger generated from `tests/parity/pg18/manifest.json`. `python3 tests/parity/pg18/run_diff.py --validate-manifest` rejects any manifest change whose plan ledger was not updated in the same change, so the readable plan and machine-readable accounting cannot silently diverge again.
 

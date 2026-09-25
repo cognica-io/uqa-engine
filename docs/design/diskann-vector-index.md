@@ -34,6 +34,7 @@ Relevant crate manifests, features, and [dependency policy](../../scripts/worksp
 | `uqa-sql` | Access-method recognition, option parsing, target validation, catalog descriptors, dependency identities, and SQL diagnostics |
 | `uqa-execution` | DDL/build scheduling, read/write observations, model calibration dependencies, maintenance coordination, and restore/lifecycle validation |
 | `uqa-planner`, `uqa-operators` | Preserve KNN/threshold/filter/fusion semantics; expose physical cost/properties and EXPLAIN without implementing graph search |
+| `uqa-scoring`, `uqa-fusion` | Existing distance-to-probability transforms, model provenance and calibration metrics; typed prior-free evidence and single-prior fusion |
 | `uqa-engine` | Existing state/session/transaction/provider adapters and retained handles; no graph, PQ, layout, or rebuild algorithm |
 | Rust/Python/Node.js/WASM APIs | Expose the same SQL and provider capabilities; verify actual artifacts and persistence |
 
@@ -299,7 +300,45 @@ Keep ordinary query syntax unchanged. Planner selects the field's actual physica
 
 EXPLAIN identifies `diskann`, graph/PQ generation, navigation metric, public score domain, initial/adaptive search capacity, requested/effective beam settings, base and outstanding-change counts, exact side paths, cache limits, and residual relational filters. Execution counters include expanded nodes, discovered/visited nodes, logical pages, physical reads where the provider can report them, bytes, cache hits, I/O rounds, tensor rerank reads, exact changed vectors, and candidate/document counts. Unknown physical I/O counts remain unknown; logical reads are not relabeled SSD operations.
 
-PQ estimates are never probabilities. Existing vector calibration and query-pool evidence conversion consume the final raw cosine scores and retain their corpus/model provenance. A corpus or physical generation change follows existing calibration/cache dependency rules; a cache cannot present evidence calibrated for incompatible input semantics. Hybrid retrieval still applies its existing single-prior policy and support interpretation.
+PQ estimates are never probabilities. Probability conversion consumes the final canonical raw cosine scores after base/change visibility, exact side-stream merging, and document-level tensor reranking. It does not recompute cosine using a different arithmetic helper or use PQ distance, normalized navigation distance, or the internal visited frontier as the calibration input.
+
+### Score-to-probability contract
+
+DiskANN returns the same raw score domain as the existing vector indexes. The consuming retrieval operation selects the existing conversion contract; merely installing DiskANN does not change `knn_match` into a probability-returning operation.
+
+| Consumer | Conversion and interpretation |
+| --- | --- |
+| Ordinary KNN and vector-threshold search | Preserve the canonical raw cosine score, including the document's maximum tensor score. |
+| Direct low-level `CosineProbabilityOperator` | Preserve its explicit uncalibrated mapping $(1+s)/2$; this range conversion alone does not establish relevance probabilities. |
+| `calibrated_vector_match` and automatic hybrid KNN evidence | Reuse the query-local pool transform on the final requested document pool; this is an unsupervised estimate, not held-out calibration. |
+| `calibrated_vector_search_with_model` | Apply the supplied persisted `VectorCalibrationModel` after compatibility validation, without fitting parameters from the current query. Saving a model does not automatically select it for SQL's pool-based path. |
+
+For canonical cosine score $s$, the existing [Scoring transform](../../crates/uqa-scoring/src/calibration.rs) uses cosine distance $d=1-s$ and Gaussian relevant/background distance models with means $\mu_R,\mu_G$ and shared standard deviation $\sigma_d>0$:
+
+$$
+\ell_v(d)=\log\frac{f_R(d)}{f_G(d)}
+=\frac{(d-\mu_G)^2-(d-\mu_R)^2}{2\sigma_d^2},
+\qquad
+p_v=\operatorname{sigmoid}\!\left(\operatorname{logit}(\pi_v)+\ell_v(d)\right).
+$$
+
+The [pool implementation](../../crates/uqa-operators/src/fusion_wrappers.rs) estimates the two means from the selected distance pool's head/tail and a shared spread using its configured split. Preserve that implementation's validation, numerical bounds, and degenerate behavior: an empty pool remains empty; an uninformative pool yields the configured prior, subject to the existing probability bounds. Use the final document pool of the requested candidate count, before outer LIMIT or residual relational filters, rather than all expanded nodes or all visited tensor elements. Internal adaptive expansion does not redefine `candidate_k`.
+
+For a reusable model, fit and validate the transform separately on data representative of the intended retrieval surface. Raw score equality alone does not justify reusing an HNSW/IVF calibrator for DiskANN: candidate selection can change the observed distance and relevance distributions. Preserve the [model contract](../../crates/uqa-scoring/src/vector_calibration.rs) for corpus/index/embedding identity and version, index kind, dimensions, candidate K, model version, and fit sample count. A model trained for another index kind or target must fail compatibility validation; do not silently relabel it or fall back to a freshly fitted query-pool transform.
+
+The current fixed-model API compares the model with a caller-supplied target and checks actual table/field, index kind, and dimensions; corpus/index version strings are caller-controlled. That is not automatic verification of the current DiskANN generation. The DiskANN integration must obtain a bounded, trustworthy runtime identity from the selected corpus/change view and immutable index generation/configuration through Storage metadata and Execution validation. Bind existing version fields to a documented fingerprint covering the graph/PQ generation, algorithm revisions, and candidate-selection settings such as search list and beam width. Include private mutations in compatibility decisions; matching an old committed corpus label cannot authorize a changed private view. Where the actual target cannot be verified, reject fixed-model reuse. Embedding-model identity remains an explicit caller contract for externally supplied vectors. This adds no per-document global writer permit or full-corpus scan.
+
+Rebuilds, corpus changes, or changed candidate-selection settings invalidate incompatible fixed-model/cache targets and require an explicitly fitted and validated matching model. They do not trigger model training inside a query or graph rebuild. Cache eviction and physical read completion order must not alter scores or calibration. For a fixed transform, identical canonical scores produce identical probabilities; query-pool probabilities can legitimately differ between indexes when their selected pools differ.
+
+Hybrid fusion retains signed prior-free evidence. Remove a signal-local prior before combining signals, then apply one corpus prior using the existing typed Scoring/Fusion boundary:
+
+$$
+P(R\mid q,x)=\operatorname{sigmoid}\!\left(\operatorname{logit}(\pi)+\ell_{\mathrm{text}}+\ell_v\right).
+$$
+
+The automatic vector pool uses a neutral prior for this conversion. Preserve existing probability bounds and prior-conflict diagnostics. Exact log-odds composition under the conditional-independence contract does not make the unsupervised pool estimate an empirically calibrated posterior. Numerical transforms and model validation belong in Scoring, pool construction in Operators, runtime metadata checks/routing in Execution with Engine adapters, and evidence combination in Fusion. Storage returns raw scores and metadata; it must not depend on Scoring, which already depends on Storage.
+
+Acceptance separates four questions: exact raw scores, ANN recall, correct probability/evidence conversion, and empirical calibration quality. Add fixed-transform probability fixtures, empty/constant-pool behavior, candidate-K and search-setting drift, stale-model rejection after writes/rebuilds, persistent model/generation identity, and single-prior hybrid regressions. Use held-out labels for Brier score, log loss, expected calibration error, and reliability bins when claiming calibrated probabilities; record the fitted retrieval target and split. A recall improvement or a value in $[0,1]$ alone does not close that gate.
 
 ## Rust and language-binding examples
 
@@ -393,6 +432,8 @@ Performance measurements require a controlled host and an independently establis
 Full reports, raw traces, reference binaries, and temporary databases stay in ignored output directories or CI artifacts. Commit only fixtures, expected results, limits, and compact source/artifact references. Independent code review, deterministic correctness, and resource tests continue without waiting for noisy performance measurements.
 
 ## Implementation units
+
+The [implementation plan](../plans/0014-diskann-vector-index.md) expands these contracts into ordered, owner-scoped work units with prerequisites, exit evidence, and a progress ledger. Implementation has not started.
 
 This proposal does not start implementation, create a release, or change public support claims. Subsequent work should be split by the owning contracts below, with logical commits and small reviewed PRs rather than a long unmerged stack. Internal prerequisites do not expose `USING diskann` until the required storage and public behavior work together.
 
