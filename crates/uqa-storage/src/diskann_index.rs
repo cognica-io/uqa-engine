@@ -11,8 +11,10 @@ mod metric;
 pub mod pages;
 mod pq;
 mod random;
+mod vamana;
 
 pub use metric::{ExactVectorReason, NavigationInput, NavigationVector, SquaredNavigationDistance};
 pub use pq::{
     PQCodebook, PQDistance, PQLookupTable, PQTrainer, PQTrainingOptions, PQTrainingSummary,
 };
+pub use vamana::{VamanaGraph, VamanaPoint};
