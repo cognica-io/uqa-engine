@@ -12,7 +12,9 @@ mod lifecycle;
 pub use lifecycle::verify_mutation_origins;
 
 use super::{expect, expect_eq};
-use crate::diskann_index::{format::DiskANNVectorVersion, DiskANNCanonicalRead};
+use crate::diskann_index::{
+    format::DiskANNVectorVersion, DiskANNCanonicalRead, DiskANNCanonicalScorer,
+};
 use crate::key_value::{KeyValueDiskANNCanonical, KeyValueVectorIndex, RetainedDiskANNCanonical};
 use crate::read_control::StorageReadControl;
 use crate::{KeyValueStore, StorageBackendResult, VectorIndex};
@@ -226,6 +228,18 @@ fn bounded(
         &count,
         &128,
         "complete tensor streams through corpus boundary",
+    )?;
+    let scorer = DiskANNCanonicalScorer::new(&source, &[1.0; 32], &query)?;
+    let document = scorer.score_document(1)?.expect("wide fixture tensor");
+    expect_eq(
+        &document.vector_count(),
+        &128,
+        "score consumes every bounded tensor ordinal",
+    )?;
+    expect_eq(
+        &scorer.search_exact_knn(1)?.doc_ids().collect::<Vec<_>>(),
+        &vec![1],
+        "bounded tensor exact query",
     )?;
     expect_eq(
         &query.memory().used(),

@@ -188,6 +188,12 @@ impl RetainedDiskANNCanonical {
 }
 
 impl DiskANNCanonicalRead for RetainedDiskANNCanonical {
+    fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
+        self.read.control().check()?;
+        self.control.check()?;
+        control.check()
+    }
+
     fn dimensions(&self) -> u32 {
         self.dimensions
     }

@@ -16,6 +16,9 @@ pub type DiskANNCanonicalCorpusVisitor<'a> =
 
 /// One fixed committed/private canonical source. Implementations retain their original visibility and controls; callbacks must not reenter the source.
 pub trait DiskANNCanonicalRead {
+    /// Check the retained source's original controls and the invoking control, including queries that need no provider reads.
+    fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()>;
+
     /// The canonical width, shared by every ordinal on this source.
     fn dimensions(&self) -> u32;
 
@@ -47,7 +50,7 @@ pub trait DiskANNCanonicalRead {
         control: &StorageReadControl,
         visit: &mut DiskANNCanonicalCorpusVisitor<'_>,
     ) -> StorageBackendResult<()> {
-        control.check()?;
+        self.check_control(control)?;
         let mut after = None;
         while let Some(document) = self.next_document_after(after, control)? {
             control.check()?;
@@ -68,6 +71,6 @@ pub trait DiskANNCanonicalRead {
             }
             after = Some(document);
         }
-        control.check()
+        self.check_control(control)
     }
 }

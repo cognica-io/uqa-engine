@@ -13,6 +13,7 @@ mod metric;
 pub mod pages;
 mod pq;
 mod random;
+mod scoring;
 pub mod search;
 mod vamana;
 
@@ -21,6 +22,7 @@ pub use metric::{ExactVectorReason, NavigationInput, NavigationVector, SquaredNa
 pub use pq::{
     PQCodebook, PQDistance, PQLookupTable, PQTrainer, PQTrainingOptions, PQTrainingSummary,
 };
+pub use scoring::{DiskANNCanonicalScorer, DiskANNDocumentScore};
 pub use vamana::{VamanaGraph, VamanaPoint};
 
 /// Borrow one canonical tensor ordinal on a fixed source. A failed visit invalidates the caller's partial result.
