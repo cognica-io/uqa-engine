@@ -359,7 +359,7 @@ Creation namespace selection and index-target visibility run in SQL and native e
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local gates, test conventions, crate boundaries, pull request guidelines, and the current contributor-licensing requirement.
 
-AI-assisted contributions follow [AI_POLICY.md](AI_POLICY.md), including semantic preservation, algebraic proofs for feature additions, and maintainer judgment on code and design.
+AI-assisted contributions follow [AI_POLICY.md](https://github.com/cognica-io/uqa-engine/blob/main/AI_POLICY.md), including semantic preservation, algebraic proofs for feature additions, and maintainer judgment on code and design.
 
 ## License
 

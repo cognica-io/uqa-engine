@@ -359,6 +359,8 @@ Creation namespace selection and index-target visibility run in SQL and native e
 
 See [CONTRIBUTING.md](https://github.com/cognica-io/uqa-engine/blob/v0.3.8/CONTRIBUTING.md) for local gates, test conventions, crate boundaries, pull request guidelines, and the current contributor-licensing requirement.
 
+AI-assisted contributions follow [AI_POLICY.md](https://github.com/cognica-io/uqa-engine/blob/main/AI_POLICY.md), including semantic preservation, algebraic proofs for feature additions, and maintainer judgment on code and design.
+
 ## License
 
 UQA Engine is open-source software licensed under AGPL-3.0-only. See [LICENSE](https://github.com/cognica-io/uqa-engine/blob/v0.3.8/LICENSE).
