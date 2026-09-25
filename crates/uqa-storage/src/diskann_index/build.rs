@@ -13,7 +13,10 @@ use uqa_core::{memory::BudgetedVec, DocId};
 use super::format::{
     DiskANNBuildCoverage, DiskANNCoverageBuilder, DiskANNGeneration, DiskANNVectorVersion,
 };
-use super::{ExactVectorReason, NavigationInput, PQCodebook, PQTrainer, PQTrainingOptions};
+use super::{
+    DiskANNCanonicalCorpusVisitor, DiskANNCanonicalRead, ExactVectorReason, NavigationInput,
+    PQCodebook, PQTrainer, PQTrainingOptions,
+};
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 
 mod generation;
@@ -32,8 +35,7 @@ pub use temporary::{DiskANNTemporaryBudget, DiskANNTemporaryError};
 
 use records::Records;
 
-pub type DiskANNBuildVisitor<'a> =
-    dyn FnMut(DocId, u32, DiskANNVectorVersion, &[f32]) -> StorageBackendResult<()> + 'a;
+pub type DiskANNBuildVisitor<'a> = DiskANNCanonicalCorpusVisitor<'a>;
 
 /// One captured canonical vector. Its original bits and version are independent of navigation, payloads and scores; its raw buffer retains the build allowance.
 #[derive(Debug)]
@@ -74,6 +76,24 @@ pub struct DiskANNBuildInput {
 }
 
 impl DiskANNBuildInput {
+    /// Capture a retained provider source without fabricating mutation origins or collecting its corpus. The resulting fingerprint is still not a visibility token or publication authority.
+    pub fn capture_source(
+        generation: DiskANNGeneration,
+        source: &dyn DiskANNCanonicalRead,
+        directory: &Path,
+        temporary: &DiskANNTemporaryBudget,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        Self::capture(
+            generation,
+            source.dimensions(),
+            directory,
+            temporary,
+            control,
+            |visit| source.visit_all(control, visit),
+        )
+    }
+
     /// Enumerate every selected canonical ordinal once in document order. Any source or consumer failure discards the entire capture, including failures the source suppresses; temporary data is never a staged or published generation.
     pub fn capture(
         generation: DiskANNGeneration,

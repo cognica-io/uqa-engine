@@ -7,11 +7,12 @@
 //! Actual publication identities, undo branches and bounded canonical views on disposable providers.
 
 mod catalog;
+mod corpus;
 mod lifecycle;
 pub use lifecycle::verify_mutation_origins;
 
 use super::{expect, expect_eq};
-use crate::diskann_index::format::DiskANNVectorVersion;
+use crate::diskann_index::{format::DiskANNVectorVersion, DiskANNCanonicalRead};
 use crate::key_value::{KeyValueDiskANNCanonical, KeyValueVectorIndex, RetainedDiskANNCanonical};
 use crate::read_control::StorageReadControl;
 use crate::{KeyValueStore, StorageBackendResult, VectorIndex};
@@ -105,6 +106,7 @@ pub fn verify_diskann_canonical_origins(
     concurrent(store, &control)?;
     bounded(store, &control)?;
     catalog::verify(store, &control)?;
+    corpus::verify(store)?;
     let tiny = StorageReadControl::with_limit(1);
     expect(
         fresh
@@ -140,7 +142,8 @@ pub fn verify_diskann_canonical_reopen(
         &Some(expected),
         "canonical origin survives cold reopen",
     )?;
-    values(&source, 1, &[vec![9.0, -0.0]], &control)
+    values(&source, 1, &[vec![9.0, -0.0]], &control)?;
+    corpus::verify_reopen(store)
 }
 
 fn concurrent(
@@ -208,6 +211,22 @@ fn bounded(
     let source = index.retain(control)?;
     let query = StorageReadControl::with_limit(8192);
     values(&source, 1, &vectors, &query)?;
+    let mut count = 0;
+    source.visit_all(&query, &mut |doc, ordinal, _, raw| {
+        expect_eq(
+            &(doc, ordinal),
+            &(1, count),
+            "bounded corpus ordinal identity",
+        )?;
+        expect(raw == [1.0; 32], "bounded corpus raw coordinates")?;
+        count += 1;
+        Ok(())
+    })?;
+    expect_eq(
+        &count,
+        &128,
+        "complete tensor streams through corpus boundary",
+    )?;
     expect_eq(
         &query.memory().used(),
         &0,

@@ -7,7 +7,7 @@
 //! Document-scoped canonical reads retain origins and all tensor ordinals on one boundary.
 
 use super::{invalid, Record, BYTES};
-use crate::diskann_index::format::DiskANNVectorVersion;
+use crate::diskann_index::{format::DiskANNVectorVersion, DiskANNCanonicalRead};
 use crate::key_value::KeyValueRead;
 use crate::read_control::StorageReadControl;
 use crate::StorageBackendResult;
@@ -147,6 +147,83 @@ impl RetainedDiskANNCanonical {
         self.control.check()?;
         control.check()?;
         Ok(selected)
+    }
+
+    fn next_key_document(
+        &self,
+        prefix: &[u8],
+        ordinals: bool,
+        after: Option<DocId>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DocId>> {
+        let after_key = after
+            .map(|document| {
+                let mut suffix = [u8::MAX; 16];
+                suffix[..8].copy_from_slice(&document.to_be_bytes());
+                append(prefix, &suffix[..if ordinals { 16 } else { 8 }], control)
+            })
+            .transpose()?;
+        let mut selected = None;
+        self.read
+            .visit_keys_after(prefix, after_key.as_deref(), 1, control, &mut |key| {
+                self.control.check()?;
+                control.check()?;
+                let suffix = key
+                    .strip_prefix(prefix)
+                    .filter(|suffix| suffix.len() == if ordinals { 16 } else { 8 })
+                    .ok_or_else(|| invalid("invalid canonical corpus key"))?;
+                let document = u64::from_be_bytes(suffix[..8].try_into().expect("fixed width"));
+                if after.is_some_and(|after| document <= after)
+                    || (ordinals
+                        && u64::from_be_bytes(suffix[8..].try_into().expect("fixed width"))
+                            > u64::from(u32::MAX))
+                {
+                    return Err(invalid("invalid canonical corpus identity"));
+                }
+                selected = Some(document);
+                Ok(())
+            })?;
+        Ok(selected)
+    }
+}
+
+impl DiskANNCanonicalRead for RetainedDiskANNCanonical {
+    fn dimensions(&self) -> u32 {
+        self.dimensions
+    }
+
+    fn next_document_after(
+        &self,
+        after: Option<DocId>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DocId>> {
+        self.control.check()?;
+        control.check()?;
+        if after == Some(DocId::MAX) {
+            return Ok(None);
+        }
+        let origin = self.next_key_document(&self.origins, false, after, control)?;
+        let vector = self.next_key_document(&self.vectors, true, after, control)?;
+        self.control.check()?;
+        control.check()?;
+        Ok(origin.into_iter().chain(vector).min())
+    }
+
+    fn origin(
+        &self,
+        document: DocId,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DiskANNVectorVersion>> {
+        self.origin(document, control)
+    }
+
+    fn visit_document(
+        &self,
+        document: DocId,
+        control: &StorageReadControl,
+        visit: &mut DiskANNCanonicalVectorVisitor<'_>,
+    ) -> StorageBackendResult<Option<DiskANNVectorVersion>> {
+        self.visit_document(document, control, visit)
     }
 }
 

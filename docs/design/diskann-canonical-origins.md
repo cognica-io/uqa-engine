@@ -1,6 +1,6 @@
 # DiskANN canonical origins
 
-Status: Common MVCC and Key/Value origins merged in PR #170. Native SQLite canonical sources are implemented and under review; changed-vector coverage, query scoring and public DiskANN routing remain pending in the [implementation plan](../plans/0014-diskann-vector-index.md).
+Status: Common MVCC and Key/Value origins merged in PR #170; native SQLite canonical sources merged in PR #171. Ordered corpus reads and retained-source build capture are implemented for review; changed-vector coverage, query scoring and public DiskANN routing remain pending in the [implementation plan](../plans/0014-diskann-vector-index.md).
 
 ## Ownership and identity
 
@@ -45,6 +45,12 @@ Native reads capture one `NativeSnapshot`, its original control, table incarnati
 `RetainedDiskANNCanonical` pins one committed/private view of both canonical and origin prefixes without reading the full field. Document reads validate the origin envelope, dimension and complete contiguous ordinal key set. Missing origins for populated documents, missing/extra ordinals, malformed widths, nonfinite coordinates and unsupported provider capabilities fail closed. A document with neither values nor an origin is absent; a zero-count origin represents an explicit empty replacement.
 
 Streaming reads fetch one size-bounded value at a time and reuse one charged decoded-vector buffer. All keys, decoded values and provider buffers use the query allowance, while the fixed source retains its original cancellation and ownership boundary. An error invalidates the caller's partial output. The source can survive mutation, savepoint rollback and closure of its creating handle. `RetainedSQLiteDiskANNCanonical` supplies the same document-scoped observation contract directly from native vector/origin families.
+
+`DiskANNCanonicalRead` exposes both retained implementations through the same dimensions, origin, document-read and ordered document-cursor contract. The cursor selects the least live document from the union of canonical keys and origin keys using bounded key-only seeks. It includes empty replacements and populated unstamped documents, checks the original and invoking controls even at exhaustion, and skips the previous document's ordinals without collecting an ID directory. Key/Value supports the full unsigned document range; native SQLite preserves its signed nonnegative document range. Native tombstones do not become live documents.
+
+Whole-corpus visits perform each bounded cursor read before opening the next document, avoiding provider reentry from borrowed callbacks. They require strictly increasing document identities and validate every complete tensor; an empty origin emits no coordinates, while an unstamped document rejects the visit. Errors discard partial results. `DiskANNBuildInput::capture_source` passes this fixed source directly into the existing encrypted capture, preserving actual mutation origins and coordinate bits in document/ordinal order. An absent source stays absent, and a captured private undo branch remains fixed after rollback and source closure.
+
+This corpus stream supplies build input and the future exact-threshold/numeric-edge query path. Its build fingerprint remains an integrity fingerprint, not a visibility token, membership oracle or publication authorization. Base-versus-change coverage must still come from Storage's actual retained visibility boundary; corpus enumeration is not a per-query substitute for the required exact changed-vector stream.
 
 ## Carrier boundary and validation
 

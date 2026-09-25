@@ -7,8 +7,10 @@
 use super::*;
 use crate::{Catalog, SQLiteCompressionOptions, SQLiteRecordStore};
 use std::path::Path;
+use uqa_storage::diskann_index::DiskANNCanonicalRead;
 use uqa_storage::mvcc::{CommitStatus, VersionedPersistence, VersionedSessionOptions};
 
+mod corpus;
 mod lifecycle;
 mod validation;
 
@@ -219,6 +221,16 @@ fn native_diskann_canonical_streams_tensors_larger_than_query_allowance() {
     let retained = source.retain(&control).unwrap();
     let small = StorageReadControl::with_limit(8192);
     assert_tensor(&retained, 1, &tensor, &small);
+    let mut ordinals = 0;
+    retained
+        .visit_all(&small, &mut |doc, ordinal, _, raw| {
+            assert_eq!((doc, ordinal), (1, ordinals));
+            assert_eq!(raw, [1.0; 128]);
+            ordinals += 1;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(ordinals, 32);
     assert_eq!(small.memory().used(), 0);
     let empty = canonical(&connection, "docs", "wide", 16384);
     let version = empty.replace(1, &[], &control).unwrap();
