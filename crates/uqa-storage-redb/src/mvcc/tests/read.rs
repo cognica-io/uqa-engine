@@ -10,6 +10,13 @@ use super::*;
 use uqa_storage::mvcc::RecordWrite;
 
 #[test]
+fn bounded_value_reads_use_the_shared_redb_owner_and_retained_versions() {
+    let directory = tempfile::tempdir().unwrap();
+    let owner = crate::RedbStorage::open(directory.path().join("bounded.redb")).unwrap();
+    uqa_storage::key_value::conformance::verify_bounded_value_reads(&owner.store()).unwrap();
+}
+
+#[test]
 fn head_and_history_reads_preserve_missing_values_tombstones_and_order() {
     let database = Arc::new(
         Database::builder()

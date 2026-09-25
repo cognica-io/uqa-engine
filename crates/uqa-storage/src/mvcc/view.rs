@@ -108,6 +108,21 @@ pub trait CommittedRecordSnapshot: Send + Sync {
         Ok(())
     }
 
+    /// Check a live value's encoded size before provider materialization, without changing revision or tombstone visibility. The default rejects unsupported providers rather than materializing through `get`.
+    fn visit_value_bounded(
+        &self,
+        _key: &[u8],
+        _max_bytes: usize,
+        control: &StorageReadControl,
+        _visit: &mut RecordValueVisitor<'_>,
+    ) -> VersionResult<()> {
+        control.check()?;
+        Err(crate::StorageBackendError::Other(
+            "size-bounded committed record reads are not supported".into(),
+        )
+        .into())
+    }
+
     /// Visit ordered versions until the limit, exhaustion or a visitor returning `false`. Implementations with borrowed pages avoid charging their encoded payloads to the caller's decode allowance.
     fn visit_prefix(
         &self,
@@ -216,6 +231,16 @@ impl<T: CommittedRecordSnapshot> CommittedRecordSnapshot for RetainedSnapshot<T>
         visit: &mut RecordValueVisitor<'_>,
     ) -> VersionResult<()> {
         self.snapshot.visit_value(key, control, visit)
+    }
+    fn visit_value_bounded(
+        &self,
+        key: &[u8],
+        max_bytes: usize,
+        control: &StorageReadControl,
+        visit: &mut RecordValueVisitor<'_>,
+    ) -> VersionResult<()> {
+        self.snapshot
+            .visit_value_bounded(key, max_bytes, control, visit)
     }
     fn visit_prefix(
         &self,
@@ -353,6 +378,30 @@ impl MergedRecordSnapshot {
             return Ok(());
         }
         self.committed.visit_value(key, control, visit)
+    }
+
+    /// Preserve private replacement/tombstone precedence while enforcing the physical source's encoded-value cap.
+    pub fn visit_value_bounded(
+        &self,
+        key: &[u8],
+        max_bytes: usize,
+        control: &StorageReadControl,
+        visit: &mut RecordValueVisitor<'_>,
+    ) -> VersionResult<()> {
+        control.check()?;
+        if let Some(write) = self.private.get(key, control)? {
+            if let Some(value) = write.value() {
+                control.check_value_size(value.len(), max_bytes)?;
+            }
+            visit(Some(BorrowedRecord {
+                revision: write.expected(),
+                value: write.value(),
+            }))?;
+            control.check()?;
+            return Ok(());
+        }
+        self.committed
+            .visit_value_bounded(key, max_bytes, control, visit)
     }
 
     pub fn visit_prefix(

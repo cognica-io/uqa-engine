@@ -504,6 +504,22 @@ impl KeyValueStore for VersionedKeyValueStore {
             .map_err(VersionError::into_storage_error)
     }
 
+    fn visit_value_bounded(
+        &self,
+        key: &[u8],
+        max_bytes: usize,
+        control: &StorageReadControl,
+        visit: &mut ValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        self.view()
+            .map_err(VersionError::into_storage_error)?
+            .visit_value_bounded(key, max_bytes, control, &mut |record| {
+                visit(record.and_then(|record| record.value)).map_err(VersionError::from)
+            })
+            .map_err(VersionError::into_storage_error)
+    }
+
     fn visit_prefix_after(
         &self,
         prefix: &[u8],

@@ -15,6 +15,14 @@ mod receipts;
 mod reclamation;
 mod runs;
 
+#[test]
+fn bounded_value_reads_preserve_sqlite_record_limits_and_retained_versions() {
+    let directory = tempfile::tempdir().unwrap();
+    let store =
+        crate::key_value::SQLiteKeyValueStore::open(&directory.path().join("bounded.db")).unwrap();
+    uqa_storage::key_value::conformance::verify_bounded_value_reads(&store).unwrap();
+}
+
 fn control() -> StorageReadControl {
     StorageReadControl::with_limit(1 << 24)
 }

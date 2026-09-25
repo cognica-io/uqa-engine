@@ -198,6 +198,17 @@ impl KeyValueStore for SQLiteKeyValueStore {
             .with_records(|store| store.visit_value(key, control, visit))
     }
 
+    fn visit_value_bounded(
+        &self,
+        key: &[u8],
+        max_bytes: usize,
+        control: &StorageReadControl,
+        visit: &mut ValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.conn
+            .with_records(|store| store.visit_value_bounded(key, max_bytes, control, visit))
+    }
+
     fn visit_prefix_after(
         &self,
         prefix: &[u8],

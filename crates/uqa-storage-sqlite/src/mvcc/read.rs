@@ -95,6 +95,19 @@ impl CommittedRecordSnapshot for Snapshot {
         self.read(|connection| value(connection, key, self.sequence, control, visit))
     }
 
+    fn visit_value_bounded(
+        &self,
+        key: &[u8],
+        max_bytes: usize,
+        control: &StorageReadControl,
+        visit: &mut RecordValueVisitor<'_>,
+    ) -> VersionResult<()> {
+        control.cancellation().check()?;
+        self.read(|connection| {
+            value_bounded(connection, key, self.sequence, max_bytes, control, visit)
+        })
+    }
+
     fn metadata(
         &self,
         key: &[u8],
@@ -317,6 +330,17 @@ pub(super) fn value(
     control: &StorageReadControl,
     visit: &mut RecordValueVisitor<'_>,
 ) -> PhysicalResult<()> {
+    value_bounded(connection, key, boundary, usize::MAX, control, visit)
+}
+
+fn value_bounded(
+    connection: &Connection,
+    key: &[u8],
+    boundary: CommitSequence,
+    max_bytes: usize,
+    control: &StorageReadControl,
+    visit: &mut RecordValueVisitor<'_>,
+) -> PhysicalResult<()> {
     let _bindings = reserve_bindings(control, &[key])?;
     let info = info(connection, key, boundary)?;
     let Some(info) = info else {
@@ -325,6 +349,9 @@ pub(super) fn value(
         control.cancellation().check().map_err(VersionError::from)?;
         return Ok(());
     };
+    control
+        .check_value_size(info.length.unwrap_or(0), max_bytes)
+        .map_err(VersionError::from)?;
     if info.run {
         return runs::value(connection, key, boundary, control, visit);
     }

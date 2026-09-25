@@ -38,6 +38,8 @@ pub use vector_merging::{
 };
 mod vector_snapshots;
 pub use vector_snapshots::{verify_exact_snapshot_concurrency, verify_vector_snapshots};
+mod read_limits;
+pub use read_limits::verify_bounded_value_reads;
 mod occurrence_accelerators;
 mod occurrence_changes;
 mod occurrence_merging;

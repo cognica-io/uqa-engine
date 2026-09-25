@@ -268,6 +268,21 @@ impl CommittedRecordSnapshot for MemoryRecordSnapshot {
         Ok(Self::get(self, key))
     }
 
+    fn visit_value_bounded(
+        &self,
+        key: &[u8],
+        max_bytes: usize,
+        control: &StorageReadControl,
+        visit: &mut super::RecordValueVisitor<'_>,
+    ) -> VersionResult<()> {
+        self.visit_value(key, control, &mut |record| {
+            if let Some(value) = record.and_then(|record| record.value) {
+                control.check_value_size(value.len(), max_bytes)?;
+            }
+            visit(record)
+        })
+    }
+
     fn scan(
         &self,
         prefix: &[u8],

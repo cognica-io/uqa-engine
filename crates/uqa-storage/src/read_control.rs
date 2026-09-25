@@ -7,7 +7,7 @@
 //! Query-owned provider reads share allocation limits and cancellation with their consumers.
 
 use crate::StorageBackendResult;
-use uqa_core::memory::MemoryBudget;
+use uqa_core::memory::{MemoryBudget, MemoryError};
 pub use uqa_core::CancellationToken;
 
 pub type ValueReadVisitor<'a> = dyn FnMut(Option<&[u8]>) -> StorageBackendResult<()> + 'a;
@@ -44,6 +44,19 @@ impl StorageReadControl {
     }
     pub fn check(&self) -> StorageBackendResult<()> {
         self.cancellation.check()?;
+        Ok(())
+    }
+
+    /// Validate an encoded value's size before materializing it. Provider workspace and returned bytes still share this control's memory allowance.
+    pub fn check_value_size(&self, bytes: usize, maximum: usize) -> StorageBackendResult<()> {
+        self.check()?;
+        if bytes > maximum {
+            return Err(MemoryError::Limit {
+                required: bytes,
+                limit: maximum,
+            }
+            .into());
+        }
         Ok(())
     }
 }
