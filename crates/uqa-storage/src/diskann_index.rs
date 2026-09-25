@@ -8,6 +8,7 @@
 
 pub mod format;
 mod metric;
+pub mod pages;
 mod pq;
 mod random;
 

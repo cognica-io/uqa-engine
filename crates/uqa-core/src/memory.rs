@@ -45,6 +45,49 @@ struct Allowance {
     limit: usize,
     used: AtomicUsize,
     peak: AtomicUsize,
+    parent: Option<MemoryBudget>,
+}
+
+impl Allowance {
+    fn claim(&self, additional: usize) -> Result<(), MemoryError> {
+        let mut used = self.used.load(Ordering::Relaxed);
+        loop {
+            let required = used
+                .checked_add(additional)
+                .ok_or(MemoryError::SizeOverflow)?;
+            if required > self.limit {
+                return Err(MemoryError::Limit {
+                    required,
+                    limit: self.limit,
+                });
+            }
+            match self.used.compare_exchange_weak(
+                used,
+                required,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => {
+                    self.peak.fetch_max(required, Ordering::Relaxed);
+                    return Ok(());
+                }
+                Err(current) => used = current,
+            }
+        }
+    }
+}
+
+impl Drop for Allowance {
+    fn drop(&mut self) {
+        // Destroy an unshared parent chain iteratively, including deeply nested application budgets.
+        let mut parent = self.parent.take();
+        while let Some(budget) = parent {
+            match Arc::try_unwrap(budget.0) {
+                Ok(mut allowance) => parent = allowance.parent.take(),
+                Err(_) => break,
+            }
+        }
+    }
 }
 
 /// Clones share one allowance, including reservations retained by completed producers.
@@ -57,7 +100,23 @@ impl MemoryBudget {
             limit,
             used: AtomicUsize::new(0),
             peak: AtomicUsize::new(0),
+            parent: None,
         }))
+    }
+
+    /// Add a component limit without enlarging this allowance. Every descendant reservation also charges each ancestor until its final owner releases it.
+    pub fn child(&self, limit: usize) -> Self {
+        Self(Arc::new(Allowance {
+            limit,
+            used: AtomicUsize::new(0),
+            peak: AtomicUsize::new(0),
+            parent: Some(self.clone()),
+        }))
+    }
+
+    fn allowances(&self) -> impl Iterator<Item = &Allowance> {
+        std::iter::successors(Some(self), |budget| budget.0.parent.as_ref())
+            .map(|budget| &*budget.0)
     }
 
     pub fn limit(&self) -> usize {
@@ -126,32 +185,16 @@ impl MemoryReservation {
         if additional == 0 {
             return Ok(());
         }
-        let allowance = &self.budget.0;
-        let mut used = allowance.used.load(Ordering::Relaxed);
-        loop {
-            let required = used
-                .checked_add(additional)
-                .ok_or(MemoryError::SizeOverflow)?;
-            if required > allowance.limit {
-                return Err(MemoryError::Limit {
-                    required,
-                    limit: allowance.limit,
-                });
-            }
-            match allowance.used.compare_exchange_weak(
-                used,
-                required,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => {
-                    self.bytes += additional;
-                    allowance.peak.fetch_max(required, Ordering::Relaxed);
-                    return Ok(());
+        for (claimed, allowance) in self.budget.allowances().enumerate() {
+            if let Err(error) = allowance.claim(additional) {
+                for previous in self.budget.allowances().take(claimed) {
+                    previous.used.fetch_sub(additional, Ordering::Relaxed);
                 }
-                Err(current) => used = current,
+                return Err(error);
             }
         }
+        self.bytes += additional;
+        Ok(())
     }
 
     /// Transfer ownership without releasing and reacquiring the shared allowance.
@@ -169,7 +212,9 @@ impl MemoryReservation {
 
 impl Drop for MemoryReservation {
     fn drop(&mut self) {
-        self.budget.0.used.fetch_sub(self.bytes, Ordering::Relaxed);
+        for allowance in self.budget.allowances() {
+            allowance.used.fetch_sub(self.bytes, Ordering::Relaxed);
+        }
     }
 }
 
