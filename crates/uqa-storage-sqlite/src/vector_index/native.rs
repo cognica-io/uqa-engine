@@ -212,6 +212,12 @@ impl<'a> NativeVectorRead<'a> {
         };
         self.snapshot.delete_prefix(
             batch,
+            Family::VectorOrigins,
+            owner,
+            &[self.field(), ValueRef::Integer(doc_id)],
+        )?;
+        self.snapshot.delete_prefix(
+            batch,
             Family::Vectors,
             owner,
             &[self.field(), ValueRef::Integer(doc_id)],
@@ -237,6 +243,12 @@ impl<'a> NativeVectorRead<'a> {
         if let Some(owner) = self.owner {
             self.snapshot.delete_prefix(
                 batch,
+                Family::VectorOrigins,
+                owner,
+                &[self.field(), ValueRef::Integer(doc_id)],
+            )?;
+            self.snapshot.delete_prefix(
+                batch,
                 Family::Vectors,
                 owner,
                 &[self.field(), ValueRef::Integer(doc_id)],
@@ -247,6 +259,14 @@ impl<'a> NativeVectorRead<'a> {
 
     pub(super) fn clear_family(&self, batch: &mut dyn KeyValueBatch, family: Family) -> Result<()> {
         if let Some(owner) = self.owner {
+            if family == Family::Vectors {
+                self.snapshot.delete_prefix(
+                    batch,
+                    Family::VectorOrigins,
+                    owner,
+                    &[self.field()],
+                )?;
+            }
             self.snapshot
                 .delete_prefix(batch, family, owner, &[self.field()])?;
         }

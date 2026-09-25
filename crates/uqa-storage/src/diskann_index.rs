@@ -20,3 +20,7 @@ pub use pq::{
     PQCodebook, PQDistance, PQLookupTable, PQTrainer, PQTrainingOptions, PQTrainingSummary,
 };
 pub use vamana::{VamanaGraph, VamanaPoint};
+
+/// Borrow one canonical tensor ordinal on a fixed source. A failed visit invalidates the caller's partial result.
+pub type DiskANNCanonicalVectorVisitor<'a> =
+    dyn FnMut(u32, format::DiskANNVectorVersion, &[f32]) -> crate::StorageBackendResult<()> + 'a;

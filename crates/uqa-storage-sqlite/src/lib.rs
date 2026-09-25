@@ -34,7 +34,10 @@ pub use uqa_storage::catalog::{
     CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignTableRow,
     TableSchema, VectorFieldSchema,
 };
-pub use vector_index::{SQLiteHNSWIndex, SQLiteIVFIndex, SQLiteVectorIndex};
+pub use vector_index::{
+    RetainedSQLiteDiskANNCanonical, SQLiteDiskANNCanonical, SQLiteHNSWIndex, SQLiteIVFIndex,
+    SQLiteVectorIndex,
+};
 
 pub mod backend;
 pub mod block_max_index;

@@ -15,8 +15,7 @@ use std::sync::Arc;
 use uqa_core::memory::BudgetedVec;
 use uqa_core::DocId;
 
-pub type DiskANNCanonicalVectorVisitor<'a> =
-    dyn FnMut(u32, DiskANNVectorVersion, &[f32]) -> StorageBackendResult<()> + 'a;
+pub use crate::diskann_index::DiskANNCanonicalVectorVisitor;
 
 /// A fixed canonical view. Visitors borrow one decoded vector at a time and must not reenter the source from inside a callback. Any failure invalidates the caller's partial result.
 pub struct RetainedDiskANNCanonical {
@@ -51,7 +50,7 @@ impl RetainedDiskANNCanonical {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Option<DiskANNVectorVersion>> {
         self.record(document, control)
-            .map(|record| record.map(|record| record.version))
+            .map(|record| record.map(Record::version))
     }
 
     /// Stream the complete visible tensor, preserving raw coordinate bits. No navigation estimate, candidate deduplication or score conversion occurs here.
@@ -64,8 +63,8 @@ impl RetainedDiskANNCanonical {
         let Some(record) = self.record(document, control)? else {
             return Ok(None);
         };
-        if record.count == 0 {
-            return Ok(Some(record.version));
+        if record.count() == 0 {
+            return Ok(Some(record.version()));
         }
         let document_key = append(&self.vectors, &document.to_be_bytes(), control)?;
         let dimensions = usize::try_from(self.dimensions)
@@ -75,7 +74,7 @@ impl RetainedDiskANNCanonical {
             .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
         let mut vector = BudgetedVec::new(control.memory());
         vector.reserve(dimensions)?;
-        for ordinal in 0..record.count {
+        for ordinal in 0..record.count() {
             self.control.check()?;
             control.check()?;
             let key = append(&document_key, &ordinal.to_be_bytes(), control)?;
@@ -101,14 +100,14 @@ impl RetainedDiskANNCanonical {
                     visit(
                         u32::try_from(ordinal)
                             .map_err(|_| invalid("canonical ordinal overflow"))?,
-                        record.version,
+                        record.version(),
                         &vector,
                     )
                 })?;
         }
         self.control.check()?;
         control.check()?;
-        Ok(Some(record.version))
+        Ok(Some(record.version()))
     }
 
     fn record(
@@ -128,7 +127,7 @@ impl RetainedDiskANNCanonical {
                 Ok(())
             })?;
         let prefix = append(&self.vectors, &document.to_be_bytes(), control)?;
-        let expected = selected.map_or(0, |record| record.count);
+        let expected = selected.map_or(0, Record::count);
         let mut count = 0_u64;
         self.read
             .visit_keys_after(&prefix, None, usize::MAX, control, &mut |key| {
