@@ -105,6 +105,12 @@ impl<const BYTES: usize> BlockTemporaryFile<BYTES> {
         self.owner.lock().faults.fail_after_bytes = Some(bytes);
     }
 
+    #[cfg(test)]
+    pub(crate) fn block_io_counts(&self) -> (usize, u64) {
+        let owner = self.owner.lock();
+        (owner.faults.read_blocks, owner.faults.written_bytes)
+    }
+
     pub fn as_file(&self) -> &Self {
         self
     }

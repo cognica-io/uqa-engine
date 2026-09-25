@@ -11,11 +11,11 @@ use crate::mvcc::{DatabaseId, StorageTransactionId};
 
 mod failures;
 
-fn generation() -> DiskANNGeneration {
+pub(super) fn generation() -> DiskANNGeneration {
     DiskANNGeneration::new([1; 16], 2, 3, 4).unwrap()
 }
 
-fn version() -> DiskANNVectorVersion {
+pub(super) fn version() -> DiskANNVectorVersion {
     DiskANNVectorVersion::new(
         StorageTransactionId::new(DatabaseId::from_bytes([9; 16]), 7).unwrap(),
         3,

@@ -1,6 +1,6 @@
 # DiskANN canonical build input
 
-Storage's internal `diskann_index::build::DiskANNBuildInput` captures one caller-selected canonical stream and replays it for bounded PQ training. It is the input owner for the [bounded build](diskann-vector-index.md#building-beyond-ram); partition assignment, global graph merging and generation sealing remain separate work. It adds no SQL access method, snapshot-selection algorithm or publication permission.
+Storage's internal `diskann_index::build::DiskANNBuildInput` captures one caller-selected canonical stream and replays it for bounded PQ training and [overlapping partition construction](diskann-build-partitions.md). It is the input owner for the [bounded build](diskann-vector-index.md#building-beyond-ram); global graph merging and generation sealing remain separate work. It adds no SQL access method, snapshot-selection algorithm or publication permission.
 
 ## Input and identity
 
