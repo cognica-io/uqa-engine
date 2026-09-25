@@ -23,7 +23,9 @@ ORDER = [2, 4, 1, 3, 0]
 
 
 def distance(left, right):
-    return sum((a - b) ** 2 for a, b in zip(left, right, strict=True))
+    if len(left) != len(right):
+        raise ValueError('coordinate dimensions differ')
+    return sum((a - b) ** 2 for a, b in zip(left, right))
 
 
 def prune(points, source, candidates, alpha, degree):
