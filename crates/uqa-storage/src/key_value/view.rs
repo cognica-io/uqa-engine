@@ -84,6 +84,20 @@ pub trait KeyValueRead {
         ))
     }
 
+    /// Check a value's encoded size before provider materialization on this same committed/private view.
+    fn visit_value_bounded(
+        &self,
+        _key: &[u8],
+        _max_bytes: usize,
+        control: &StorageReadControl,
+        _visit: &mut ValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        Err(super::codec::other_error(
+            "size-bounded compound value reads are not supported",
+        ))
+    }
+
     /// Visit at most `limit` values in key order, strictly after `after`, without advancing this read boundary.
     fn visit_prefix_after(
         &self,

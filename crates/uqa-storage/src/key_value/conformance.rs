@@ -39,6 +39,7 @@ pub use vector_merging::{
 mod vector_snapshots;
 pub use vector_snapshots::{verify_exact_snapshot_concurrency, verify_vector_snapshots};
 mod read_limits;
+pub use super::diskann::conformance::{verify_diskann_generations, verify_diskann_reopen};
 pub use read_limits::verify_bounded_value_reads;
 mod occurrence_accelerators;
 mod occurrence_changes;
@@ -152,7 +153,7 @@ fn key(suffix: &[u8]) -> Vec<u8> {
     key
 }
 
-fn expect(condition: bool, contract: &str) -> StorageBackendResult<()> {
+pub(super) fn expect(condition: bool, contract: &str) -> StorageBackendResult<()> {
     if condition {
         Ok(())
     } else {
@@ -162,7 +163,7 @@ fn expect(condition: bool, contract: &str) -> StorageBackendResult<()> {
     }
 }
 
-fn expect_eq<T>(actual: &T, expected: &T, contract: &str) -> StorageBackendResult<()>
+pub(super) fn expect_eq<T>(actual: &T, expected: &T, contract: &str) -> StorageBackendResult<()>
 where
     T: PartialEq,
 {

@@ -10,6 +10,7 @@ use uqa_storage::mvcc::{CommitFailure, CommitSequence, CommitStatus, RecordWrite
 use super::*;
 
 mod admission;
+mod diskann;
 mod identifiers;
 mod receipts;
 mod reclamation;

@@ -29,6 +29,10 @@ use crate::{StorageBackendError, StorageBackendResult};
 
 mod catalog;
 pub use catalog::KeyValueCatalog;
+mod diskann;
+pub use diskann::{
+    DiskANNStageStatus, KeyValueDiskANNSource, KeyValueDiskANNStage, KeyValueDiskANNStore,
+};
 mod graph_commit;
 mod table_owners;
 pub use graph_commit::KeyValueGraphRecords;

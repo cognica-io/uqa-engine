@@ -101,6 +101,20 @@ impl KeyValueRead for RecordRead<'_> {
             .map_err(VersionError::into_storage_error)
     }
 
+    fn visit_value_bounded(
+        &self,
+        key: &[u8],
+        max_bytes: usize,
+        control: &StorageReadControl,
+        visit: &mut ValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.view
+            .visit_value_bounded(key, max_bytes, control, &mut |record| {
+                visit(record.and_then(|record| record.value)).map_err(Into::into)
+            })
+            .map_err(VersionError::into_storage_error)
+    }
+
     fn visit_prefix_after(
         &self,
         prefix: &[u8],
@@ -225,6 +239,16 @@ impl KeyValueRead for RetainedRecordRead {
         visit: &mut ValueReadVisitor<'_>,
     ) -> StorageBackendResult<()> {
         self.read().visit_value_budgeted(key, control, visit)
+    }
+    fn visit_value_bounded(
+        &self,
+        key: &[u8],
+        max_bytes: usize,
+        control: &StorageReadControl,
+        visit: &mut ValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.read()
+            .visit_value_bounded(key, max_bytes, control, visit)
     }
     fn visit_prefix_after(
         &self,
