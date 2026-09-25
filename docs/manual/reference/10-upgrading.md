@@ -2,7 +2,7 @@
 
 Version 0.4.0 delivers overlapping logical SQL writers on native SQLite, SQLite Key/Value and redb, with shared snapshot visibility, private changes, savepoints, conflict tracking and atomic index/catalog publication. It also corrects PostgreSQL comparison, catalog-vector, array-assignment and grouping behavior, restores Nori allocation limits, and fixes retained snapshots, added-column publication and committed notification recovery. See the [release history](../../../HISTORY.md#040---2026-09-25).
 
-This minor release changes low-level Rust APIs and upgrades persistent formats in one direction. Stop all owners and take a closed-file backup before the first upgraded open; update every process sharing the database together. The current boundaries are SQLite main record format 48, redb main record format 47, native SQLite mapping 9, catalog format 49, and notification registry schema 2. Earlier incompatible binaries cannot reopen or continue writing upgraded state; use the pre-upgrade backup to return to an earlier release. The sections below cover source changes, migration, retained commit outcomes and explicit backup restoration.
+This minor release changes low-level Rust APIs and upgrades persistent formats in one direction. Stop all owners and take a closed-file backup before the first upgraded open; update every process sharing the database together. The 0.4.0 boundaries are SQLite main record format 48, redb main record format 47, native SQLite mapping 9, catalog format 49, and notification registry schema 2. Earlier incompatible binaries cannot reopen or continue writing upgraded state; use the pre-upgrade backup to return to an earlier release. The sections below cover source changes, migration, retained commit outcomes and explicit backup restoration.
 
 Version 0.3.8 preserves JSONB types and PostgreSQL extraction semantics for `->`, `->>`, `#>` and `#>>`. See the [release history](../../../HISTORY.md#038---2026-09-20) and the JSON extraction guidance below.
 
@@ -13,6 +13,10 @@ Version 0.3.5 adds native Japanese Kuromoji analysis, completion and independent
 The 0.3.0 release added native Korean Nori analysis, durable analyzer revisions and token graphs, graph-aware phrases and highlighting, PostgreSQL domains and data-modifying CTEs, and prepared-plan improvements. It also moved concrete SQLite APIs into `uqa-storage-sqlite` and changed low-level Rust SQL and retrieval interfaces. The [release history](../../../HISTORY.md#030---2026-09-14) records the changes.
 
 The 0.2 series includes SQL object and privilege lifecycle changes, durable expression and unique indexes, expanded sequences and PL/pgSQL, native cross-process notifications, and a Node.js HTTP client that runs without native addons. These changes were introduced in [0.2.0](../../../HISTORY.md#020---2026-09-05); the [compatibility guide](../sql/09-compatibility.md) defines the verified PostgreSQL 18 surface and the behavior still being implemented.
+
+## Development native SQLite mapping
+
+Current development builds upgrade native SQLite mapping to format 10 for database-owned DiskANN binary generation records. Opening or binding an existing native database performs the atomic mapping upgrade even before any DiskANN generation is created. Formats 1–9 preserve their data, histories, receipts and identifiers; format 9 keeps its independently stored data namespace. Catalog format 49 and the common main record format remain unchanged. Older native binaries reject the new mapping, including already-open adapters on their next physical access. Use a closed pre-upgrade backup to return to 0.4.0. Public DiskANN index creation remains unavailable while the remaining implementation is in progress.
 
 ## 0.4.0 committed notification recovery
 

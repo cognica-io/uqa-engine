@@ -19,7 +19,7 @@ use super::{
 use crate::mvcc::{read, write, Error, PhysicalResult};
 
 // Parents precede their children; native document guards and graph invalidation triggers also run before evaluated index materializations are installed.
-const ORDER: [Family; 56] = [
+const ORDER: [Family; 57] = [
     Family::StandaloneGraphScopes,
     Family::StandaloneGraphMetadata,
     Family::StandaloneGraphCatalog,
@@ -50,6 +50,7 @@ const ORDER: [Family; 56] = [
     Family::NamedGraphs,
     Family::GraphMembership,
     Family::HNSWIndexes,
+    Family::DiskANNRecords,
     Family::HNSWNodes,
     Family::HNSWEdges,
     Family::IVFIndexes,

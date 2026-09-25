@@ -67,6 +67,7 @@ pub enum NativeRecordFamily {
     StandaloneGraphEdges = 54,
     StandaloneGraphMembership = 55,
     StandaloneGraphLookups = 56,
+    DiskANNRecords = 57,
 }
 
 impl NativeRecordFamily {
@@ -75,6 +76,9 @@ impl NativeRecordFamily {
     }
 
     pub fn from_id(id: u16) -> Option<Self> {
+        if id == Self::DiskANNRecords.id() {
+            return Some(Self::DiskANNRecords);
+        }
         usize::from(id)
             .checked_sub(1)
             .and_then(|index| {
@@ -88,6 +92,9 @@ impl NativeRecordFamily {
     }
 
     pub fn layout(self) -> &'static NativeRecordLayout {
+        if self == Self::DiskANNRecords {
+            return &super::diskann::LAYOUT;
+        }
         let index = usize::from(self.id()) - 1;
         if index < LAYOUTS.len() {
             &LAYOUTS[index]
@@ -97,11 +104,10 @@ impl NativeRecordFamily {
     }
 
     pub(crate) fn is_standalone_graph(self) -> bool {
-        self.id() >= Self::StandaloneGraphScopes.id()
+        (Self::StandaloneGraphScopes.id()..=Self::StandaloneGraphLookups.id()).contains(&self.id())
     }
 
     pub fn all() -> impl ExactSizeIterator<Item = Self> {
-        (1..=Self::StandaloneGraphLookups.id())
-            .map(|id| Self::from_id(id).expect("assigned native family"))
+        (1..=Self::DiskANNRecords.id()).map(|id| Self::from_id(id).expect("assigned native family"))
     }
 }

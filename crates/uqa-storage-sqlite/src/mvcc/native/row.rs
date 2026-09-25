@@ -15,6 +15,15 @@ use super::invalid;
 
 const PREFIX: &[u8] = b"UNR\x01";
 
+/// Upper bound for a two-BLOB row before fetching it. Saturation only caps an unrepresentable upper bound at the address-space limit; each field still has the codec's u32 length limit.
+pub(crate) fn binary_pair_limit(key_bytes: usize, value_bytes: usize) -> VersionResult<usize> {
+    u32::try_from(key_bytes).map_err(|_| invalid("native key exceeds the record format length"))?;
+    let envelope = PREFIX.len() + 2 + 2 * (1 + 4);
+    Ok(envelope
+        .saturating_add(key_bytes)
+        .saturating_add(value_bytes.min(u32::MAX as usize)))
+}
+
 pub fn encode_row(
     values: &[ValueRef<'_>],
     control: &StorageReadControl,

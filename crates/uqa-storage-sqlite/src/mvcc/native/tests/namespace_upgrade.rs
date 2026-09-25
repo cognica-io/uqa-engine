@@ -27,6 +27,7 @@ fn install_predecessor(connection: &ManagedConnection) {
     with(connection, |sqlite| {
         let _permit = schema::WritePermit::acquire(sqlite)?;
         let transaction = schema::begin(sqlite)?;
+        super::diskann::remove_empty_table(&transaction)?;
         transaction.execute_batch("DROP TABLE _uqa_mvcc_native_format")?;
         transaction.execute_batch(PREDECESSOR)?;
         transaction.execute("INSERT INTO _uqa_mvcc_native_format VALUES (1,8,49)", [])?;
@@ -39,7 +40,9 @@ fn install_predecessor(connection: &ManagedConnection) {
     });
 }
 
-fn preserved(connection: &ManagedConnection) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
+pub(in crate::mvcc::native) fn preserved(
+    connection: &ManagedConnection,
+) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
     with(connection, |sqlite| {
         [
             "_uqa_mvcc_metadata",
@@ -117,7 +120,7 @@ fn namespace_upgrade_preserves_record_history_receipts_and_watermarks() {
             aborted.allocation() + 1
         );
         with(&connection, |sqlite| {
-            assert_eq!(mapping_version(sqlite), 9);
+            assert_eq!(mapping_version(sqlite), 10);
             Ok(())
         });
     }
@@ -137,7 +140,7 @@ fn failed_namespace_upgrade_rolls_back_its_marker_and_guards() {
         let restored = initialize_in(&transaction, &control)?;
         assert_eq!(restored.identity, identity);
         assert_eq!(restored.namespace.0, identity);
-        assert_eq!(mapping_version(&transaction), 9);
+        assert_eq!(mapping_version(&transaction), 10);
         drop(transaction);
         assert_eq!(mapping_version(sqlite), 8);
         assert!(sqlite
