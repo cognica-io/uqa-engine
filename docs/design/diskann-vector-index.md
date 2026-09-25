@@ -154,7 +154,7 @@ The independent rational fixture predates this graph implementation and fixes bo
 
 ### Building beyond RAM
 
-The implemented [canonical input capture](diskann-build-input.md) reads one borrowed canonical stream into encrypted fixed-width navigation and numeric-side files. It preserves original bits/origins, assigns dense navigation IDs without a resident global directory, shares a physical temporary-byte allowance and replays the navigation file through the existing bounded PQ trainer. [Overlapping partition construction](diskann-build-partitions.md) reuses that input and numerical owner, bounds recursion/file owners, admits one Vamana graph at a time and emits global edge candidates. The [global merge owner](diskann-build-merge.md) externally orders full-distance candidates, shares Vamana's final pruning and reserves global successor connectivity. Streamed physical records, persistent construction provenance and complete generation sealing remain separate implementation work.
+The implemented [canonical input capture](diskann-build-input.md) reads one borrowed canonical stream into encrypted fixed-width navigation and numeric-side files. It preserves original bits/origins, assigns dense navigation IDs without a resident global directory, shares a physical temporary-byte allowance and replays the navigation file through the existing bounded PQ trainer. [Overlapping partition construction](diskann-build-partitions.md) reuses that input and numerical owner, bounds recursion/file owners, admits one Vamana graph at a time and emits global edge candidates. The [global merge owner](diskann-build-merge.md) externally orders full-distance candidates, shares Vamana's final pruning and reserves global successor connectivity. The [generation writer](diskann-generation-build.md) now streams physical records, persists construction provenance and verifies complete physical sealing; canonical publication remains separate work.
 
 The builder streams a bounded training sample and assigns points to overlapping coarse partitions. It builds one bounded partition at a time and externally merges adjacency runs. Partition membership, temporary vectors, adjacency runs, and validation state use the host's encrypted temporary-storage policy. No partition helper calls `load_all_from` on the full corpus.
 
@@ -214,7 +214,7 @@ search(snapshot, query, k, control):
     suppress base candidates replaced/deleted in the selected visibility view
     merge exact changed-vector and numeric-side-stream candidates
     rerank candidate documents from their visible canonical tensor elements
-    widen and resume if necessary for distinct-document completeness
+    continue through unexpanded physical IDs if needed for distinct-document completeness
     return top-k scores as a document-ID-sorted PostingList
 ```
 
@@ -222,7 +222,7 @@ The visited set is separate from the bounded frontier; its size can exceed the c
 
 Tensor identity is preserved through `(DocId, ordinal)` until document reduction. After selecting candidate documents, read all their visible ordinals under the same snapshot and compute each document's actual maximum using the canonical reduction contract. This extra work is explicit in cost and I/O metrics. It avoids returning the score of an arbitrary encountered tensor element. Deleted or superseded base vectors can remain navigation vertices, but cannot contribute stale output.
 
-Start with at least the requested number of document candidates and grow the search list when tensor duplication or masked nodes leave fewer than $k$ live documents. Retain valid visited work across growth. Return fewer than $k$ only when the visible corpus has fewer eligible vector-bearing documents; otherwise continue within the allowance or return a resource error. The declared connectivity route supports this completeness traversal. Approximate membership does not authorize silent truncation after an arbitrary I/O budget.
+The [physical traversal](diskann-paged-navigation.md) keeps a fixed best-list cutoff and freezes each beam before reads. When tensor duplication or masked nodes leave fewer than $k$ live documents after approximate exhaustion, explicitly continue through unexpanded generation IDs in ascending order while preserving prior work and the same canonical snapshot. This deterministic completion rule avoids losing candidates evicted from the bounded frontier; it does not assert exact nearest-neighbor membership. Return fewer than $k$ only when the visible corpus has fewer eligible vector-bearing documents; otherwise continue within the allowance or return a resource error. Approximate membership does not authorize silent truncation after an arbitrary I/O budget.
 
 An ordinary relational filter is not a graph-traversal filter. ACL/RLS and security-barrier handling use the existing Execution contract: graph navigation may use internal routing nodes only where allowed by that contract, final rows must be authorized, and EXPLAIN/telemetry must not leak unauthorized payloads. Predicate pushdown or tenant-separated graphs require a separately specified semantic and security contract. They cannot be inferred from the 2019 algorithm.
 
