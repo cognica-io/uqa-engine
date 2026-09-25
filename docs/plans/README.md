@@ -13,7 +13,7 @@ Files in this directory record staged implementation work. A living plan must de
 | [`0007-kuromoji-analyzer.md`](0007-kuromoji-analyzer.md) | Active | Update with each logical Kuromoji implementation unit that changes ownership, interfaces, reference inputs, completion status, verification evidence, or remaining acceptance gates. |
 | [`0008-concurrent-storage-transactions.md`](0008-concurrent-storage-transactions.md) | Active | Update with each concurrent-storage implementation unit that changes interfaces, ownership, provider coverage, migration, isolation or acceptance evidence; common records, private changes, snapshot reads and redb record persistence are implemented, while SQLite, legacy store routing and SQL integration remain pending. |
 | [`0009-nori-index-retention.md`](0009-nori-index-retention.md) | Complete | Preserve the unchanged allocation gates, fixed owner contracts and full CI evidence merged in PR #149. |
-| [`0010-sqlite-index-snapshots.md`](0010-sqlite-index-snapshots.md) | Active | Update the unbound SQLite index capture contract, controlled ownership and fixed-view acceptance for #124. |
+| [`0010-sqlite-index-snapshots.md`](0010-sqlite-index-snapshots.md) | Complete | Preserve fixed unbound SQLite snapshots, retained ownership and final platform acceptance recorded in PR #155. |
 | [`0011-committed-notification-recovery.md`](0011-committed-notification-recovery.md) | Complete | Preserve the atomic publication, recovery, retained completion and final platform acceptance recorded in PR #154. |
 | [`0012-compressed-container-read-consistency.md`](0012-compressed-container-read-consistency.md) | Complete | Preserve authenticated file/map ownership and deterministic compaction regressions verified in PR #154. |
 
