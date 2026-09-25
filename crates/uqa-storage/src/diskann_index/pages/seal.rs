@@ -14,7 +14,7 @@ use crate::diskann_index::format::{
 };
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 
-/// Complete physical streams, not a connectivity proof or MVCC publication permit.
+/// Complete physical streams, including the reserved cycle and adjacency fingerprint when build provenance is present. This grants no canonical-snapshot or MVCC publication authority.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DiskANNArtifactSeal {
     manifest: DiskANNManifest,
@@ -37,6 +37,8 @@ pub struct DiskANNArtifactSealer {
     graph: Sha256,
     codes: Sha256,
     side: Sha256,
+    adjacency: Sha256,
+    edges: u64,
     slot: BudgetedVec<u8>,
     failed: bool,
     control: StorageReadControl,
@@ -59,6 +61,13 @@ impl DiskANNArtifactSealer {
             graph: Sha256::new(),
             codes: Sha256::new(),
             side: Sha256::new(),
+            adjacency: crate::diskann_index::format::adjacency_hash(
+                manifest.input().coverage,
+                manifest.input().nodes,
+                (manifest.input().parameters.max_degree as u64)
+                    .min(manifest.input().nodes.saturating_sub(1)) as usize,
+            ),
+            edges: 0,
             slot: BudgetedVec::new(control.memory()),
             failed: false,
             control: control.clone(),
@@ -94,6 +103,13 @@ impl DiskANNArtifactSealer {
             .identity
             .ok_or_else(|| invalid("codebook must precede codes"))?;
         let batch = identity.decode_codes(first, bytes, &self.control)?;
+        if let Some(build) = self.manifest.build_provenance() {
+            let expected =
+                (self.manifest.input().nodes - first).min(build.code_batch_nodes() as u64);
+            if batch.node_count() != expected {
+                return Err(invalid("code batch differs from build provenance"));
+            }
+        }
         for part in batch.bytes().chunks(4096) {
             self.control.check()?;
             self.codes.update(part);
@@ -112,6 +128,12 @@ impl DiskANNArtifactSealer {
         let layout =
             DiskANNSideLayout::new(input.generation, input.dimensions, input.side_vectors)?;
         let batch = layout.decode(first, bytes, &self.control)?;
+        if let Some(build) = self.manifest.build_provenance() {
+            let expected = (input.side_vectors - first).min(build.side_batch_entries() as u64);
+            if batch.record_count() as u64 != expected {
+                return Err(invalid("side batch differs from build provenance"));
+            }
+        }
         for index in 0..batch.record_count() {
             self.control.check()?;
             let entry = batch.entry(index).expect("validated side entry");
@@ -178,6 +200,34 @@ impl DiskANNArtifactSealer {
             ));
         }
         self.last_node = Some(key);
+        if self.manifest.build_provenance().is_some() {
+            let input = self.manifest.input();
+            let degree =
+                (input.parameters.max_degree as u64).min(input.nodes.saturating_sub(1)) as usize;
+            if input.nodes > 1
+                && !node
+                    .neighbors()
+                    .contains(&((node.node_id() + 1) % input.nodes))
+            {
+                return Err(invalid("built graph is missing its global successor"));
+            }
+            self.edges = self
+                .edges
+                .checked_add(node.neighbors().len() as u64)
+                .ok_or_else(|| invalid("built graph edge overflow"))?;
+            self.adjacency
+                .update((node.neighbors().len() as u64).to_le_bytes());
+            for slot in 0..degree {
+                self.control.check()?;
+                self.adjacency.update(
+                    node.neighbors()
+                        .get(slot)
+                        .copied()
+                        .unwrap_or(0)
+                        .to_le_bytes(),
+                );
+            }
+        }
         Ok(())
     }
 
@@ -202,6 +252,15 @@ impl DiskANNArtifactSealer {
         ] {
             if <[u8; 32]>::from(hash.finalize()) != expected {
                 return Err(invalid("artifact stream digest differs from manifest"));
+            }
+        }
+        if let Some(build) = self.manifest.build_provenance() {
+            if self.edges != build.edges()
+                || <[u8; 32]>::from(self.adjacency.finalize()) != build.adjacency_digest()
+            {
+                return Err(invalid(
+                    "built graph differs from its construction provenance",
+                ));
             }
         }
         Ok(DiskANNArtifactSeal {

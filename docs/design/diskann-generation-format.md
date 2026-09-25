@@ -1,6 +1,6 @@
 # DiskANN generation metadata format
 
-This document specifies revision-1 metadata codecs in `uqa-storage::diskann_index::format`. The [DiskANN design](diskann-vector-index.md#node-and-page-encoding) defines node/page bytes, canonical scores and ownership; the [implementation plan](../plans/0014-diskann-vector-index.md) tracks runtime delivery. These codecs do not implement provider records, generation leases, publication, MVCC visibility or search. All fields below use little-endian integers and IEEE-754 bit patterns. Offset ranges exclude their end.
+This document specifies metadata codecs in `uqa-storage::diskann_index::format`: manifest envelopes 1 and 2, with codebook, code and side envelopes remaining at revision 1. The [DiskANN design](diskann-vector-index.md#node-and-page-encoding) defines node/page bytes, canonical scores and ownership; the [implementation plan](../plans/0014-diskann-vector-index.md) tracks runtime delivery. Codecs validate physical records; [generation construction](diskann-generation-build.md) and provider sealing consume them without granting SQL publication or MVCC visibility. All fields below use little-endian integers and IEEE-754 bit patterns. Offset ranges exclude their end.
 
 ## Record envelope
 
@@ -9,7 +9,7 @@ Manifests, codebooks, code batches and numeric side batches use the same 96-byte
 | Byte offsets | Contents |
 | --- | --- |
 | 0–8 | Magic: `UQADNMF\0`, `UQADNPQ\0`, `UQADNCD\0` or `UQADNSD\0` |
-| 8–12, 12–16 | Record revision 1 and header size 96 (`u32` each) |
+| 8–12, 12–16 | Record revision and header size 96 (`u32` each); manifests accept 1 or 2, other metadata accepts 1 |
 | 16–32 | Persistent data incarnation |
 | 32–40, 40–48, 48–56 | Table incarnation, index incarnation, generation (`u64` each) |
 | 56–64 | Exact body length (`u64`) |
@@ -28,7 +28,7 @@ The hash input is the byte string `UQA DiskANN canonical coverage\0\x01`, the 40
 
 ## Manifest
 
-The manifest body has exactly 288 bytes. Offsets in this and the following tables are relative to the body, after the common envelope.
+Manifest revision 1 has a 288-byte body and retains its original 384-byte encoding. Revision 2 appends 256 bytes of build provenance, making its body 544 bytes and complete record 640 bytes. The envelope revision and exact length must agree. Both use the same initial body below; node/page and index-format revisions remain 1. Offsets in this and the following tables are relative to the body, after the common envelope.
 
 | Body offsets | Contents |
 | --- | --- |
@@ -41,6 +41,28 @@ The manifest body has exactly 288 bytes. Offsets in this and the following table
 Navigation revision 1 means the existing normalized `f64` squared-Euclidean navigation; score revision 1 means canonical raw-vector `f32` cosine and existing tensor reduction. These are explicit discriminators, not restore-time defaults. The effective parameters pass the same `DiskANNIndexParams` validator as catalog configuration. Page constants and computed page count must match the node layout. Coverage's generation, dimensions and count must match the manifest, including checked addition of graph and side counts. A nonempty graph has an in-range entry; an empty graph stores `u64::MAX` and has no entry or codebook. Empty artifacts require SHA-256 of the empty byte string.
 
 The codebook digest covers its entire encoded record. The code-stream digest covers all raw code bytes in ascending node order. The side-stream digest covers all 48-byte entries in their canonical order. The graph digest covers the ordered 32-byte checksums of all graph pages. Thus code and side batch boundaries can change without changing their logical stream digests. The provider/seal owner must verify complete ordered streams, cross-batch boundaries and all artifact digests before publication; a manifest codec alone does not inspect those records. Open must also compare the stored parameters and dimensions with their owning catalog contract.
+
+### Build provenance
+
+Revision 2 requires `DiskANNBuildProvenance`. The following offsets are relative to its 256-byte suffix, starting at manifest body offset 288. The first 192 bytes contain 24 `u64` words; decoders reject values outside the owning options' narrower integer ranges.
+
+| Suffix offsets | Contents |
+| --- | --- |
+| 0–16 | Build work-order revision and partition work-order revision, both 1 |
+| 16–32 | Maximum partition points and maximum recursion depth |
+| 32–64 | Coarse PQ maximum samples, maximum iterations, requested centroids and seed |
+| 64–104 | Partition count, membership count, candidate-edge count, actual maximum depth and actual maximum leaf size |
+| 104–136 | Merge work-order revision 1, sort-buffer records, merge-pass count and final edge count |
+| 136–168 | Global PQ maximum samples, maximum iterations, requested centroids and seed |
+| 168–192 | Code-batch node capacity, side-batch entry capacity and entry sample count |
+| 192–224 | Partition assignment SHA-256 |
+| 224–256 | Global adjacency SHA-256 |
+
+Validation uses the original partition/PQ option validators, rejects unknown work revisions and impossible empty/singleton/count/depth/degree relationships, and derives the exact two-way pass count from candidate edges and sort capacity. Global PQ seed matches the index seed. Entry sample count is exactly `min(nodes, 256)`; its seeded Floyd rule, ascending summation and smallest-ID tie policy are shared with admitted Vamana construction. The restored codebook must report these same global PQ training options. Code/side capacities are positive and sealing checks actual batch boundaries against them, including the final short batch.
+
+The adjacency hash is SHA-256 over `UQA DiskANN adjacency\0\x01`, the canonical coverage digest, node count (`u64`), effective degree `min(max_degree, nodes - 1)` with saturating empty subtraction (`u64`), and every dense node's row. Each row contains neighbor count (`u64`) followed by effective-degree neighbor slots (`u64` each), with sorted unique neighbors and zero unused slots. Physical sealing recomputes this hash and the edge count from decoded pages. Every non-singleton node must include `(node + 1) mod nodes`; the reserved cycle establishes graph reachability without a resident visited bitmap.
+
+Assignment and adjacency fingerprints bind construction records; they do not certify snapshot completeness, rerun centroid selection or turn the physical seal into an MVCC publication permit. Revision-1 manifests have no provenance and retain their original physical validation. Writers select revision 2 only when provenance is present; readers continue accepting both exact encodings.
 
 ## Product quantization codebook
 

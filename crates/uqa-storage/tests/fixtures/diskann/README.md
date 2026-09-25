@@ -38,6 +38,10 @@ Three 3-dimensional nodes carry the raw bits for `[-0.0, 3.0, 4.0]`, exact norm 
 
 The graph digest comes from one independently encoded page whose eight nodes follow a simple directed cycle; this is a byte-format input, not a Vamana construction result. Code/side stream digests exclude batch boundaries. Tests compare exact codebook header bytes and record/stream digests, verify unchanged codebook bits and PQ lookup results after restoration, reject malformed inner metadata after recomputing both envelope and manifest checksums, and check allocation/cancellation/lifetime boundaries. Format checks do not establish MVCC coverage, provider persistence, reader completeness or ANN recall.
 
+## Build provenance bytes
+
+`provenance.json` and `generate_provenance.py` independently extend the declared metadata fixture with a 256-byte provenance suffix and manifest envelope revision 2. Python packs the 24 option/count words, two literal construction fingerprints and exact 640-byte record; it checks the envelope checksum and whole-record SHA-256. The repeated `55` and `66` fingerprint bytes are codec inputs, not a claim that a graph has those construction hashes. Rust compares exact bytes, retains the original revision-1 encoding, rejects unsupported/rechecksummed inconsistent fields and checks codebook training against provenance. Complete build/seal tests separately recompute adjacency from real pages.
+
 ## Canonical build capture
 
 `generate_capture.py` reproduces the five-record coverage digest independently with Python's `struct` and `hashlib`. The expectation was fixed before implementing the Rust capture. Generation data identity is database `01` repeated 16 times, table 2, index 3, generation 4, dimensions 2; every vector's origin is writer database `09` repeated 16 times, allocation 7, revision 3. The Storage capture tests retain these literal original bits, logical identities and expected classifications. No Rust output supplies the oracle.

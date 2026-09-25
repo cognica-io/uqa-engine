@@ -45,6 +45,18 @@ pub struct DiskANNMergedGraph {
 }
 
 impl DiskANNMergedGraph {
+    pub(super) fn check_input(&self, input: &DiskANNBuildInput) -> StorageBackendResult<()> {
+        input.control.check()?;
+        if self.nodes != input.node_count()
+            || self.summary.partitions.coverage != input.coverage
+            || !self.control.shares_context(&input.control)
+            || !self.run.uses_allowance(&input.temporary)
+        {
+            return Err(invalid("merged graph source or build allowance differs"));
+        }
+        Ok(())
+    }
+
     pub fn summary(&self) -> &DiskANNMergeSummary {
         &self.summary
     }
@@ -241,12 +253,7 @@ fn navigation(input: &DiskANNBuildInput, node: u64) -> StorageBackendResult<Navi
 }
 
 fn adjacency_hash(partitions: &DiskANNPartitionSummary, nodes: u64, degree: usize) -> Sha256 {
-    let mut hash = Sha256::new();
-    hash.update(b"UQA DiskANN adjacency\0\x01");
-    hash.update(partitions.coverage.digest());
-    hash.update(nodes.to_le_bytes());
-    hash.update((degree as u64).to_le_bytes());
-    hash
+    crate::diskann_index::format::adjacency_hash(partitions.coverage, nodes, degree)
 }
 
 fn write_word(value: u64, writer: &mut RunWriter, hash: &mut Sha256) -> StorageBackendResult<()> {

@@ -165,6 +165,9 @@ pub fn decode_codebook(
         || chunks != input.parameters.pq_bytes
         || summary.observed_vectors != input.nodes
         || summary.options.seed != input.parameters.seed
+        || manifest
+            .build_provenance()
+            .is_some_and(|build| build.training() != summary.options)
     {
         return Err(invalid(
             "codebook shape, corpus or seed differs from manifest",

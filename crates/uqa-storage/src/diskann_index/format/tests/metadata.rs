@@ -12,6 +12,7 @@ use crate::diskann_index::{
 use crate::vector_index::DiskANNIndexParams;
 
 mod corruption;
+mod provenance;
 mod resources;
 
 fn oracle() -> Value {

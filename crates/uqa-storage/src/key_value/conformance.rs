@@ -39,7 +39,10 @@ pub use vector_merging::{
 mod vector_snapshots;
 pub use vector_snapshots::{verify_exact_snapshot_concurrency, verify_vector_snapshots};
 mod read_limits;
-pub use super::diskann::conformance::{verify_diskann_generations, verify_diskann_reopen};
+pub use super::diskann::conformance::{
+    verify_diskann_built_generation, verify_diskann_built_reopen, verify_diskann_generations,
+    verify_diskann_reopen,
+};
 pub use read_limits::verify_bounded_value_reads;
 mod occurrence_accelerators;
 mod occurrence_changes;

@@ -22,6 +22,10 @@ pub struct DiskANNBuildCoverage {
 }
 
 impl DiskANNBuildCoverage {
+    pub fn generation(self) -> DiskANNGeneration {
+        self.generation
+    }
+
     pub fn vector_count(self) -> u64 {
         self.vectors
     }

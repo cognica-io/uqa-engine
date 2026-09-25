@@ -33,7 +33,7 @@ pub struct DiskANNPartitionOptions {
 impl DiskANNPartitionOptions {
     pub const WORK_ORDER_REVISION: u32 = 1;
 
-    fn validate(self) -> StorageBackendResult<Self> {
+    pub(in crate::diskann_index) fn validate(self) -> StorageBackendResult<Self> {
         self.coarse_training.validate()?;
         if self.max_partition_points < 2
             || self.max_depth > 32
