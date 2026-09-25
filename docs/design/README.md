@@ -10,6 +10,7 @@ The research-level foundation is developed separately in [A Typed Carrier Algebr
 | --- | --- | --- |
 | [System architecture](architecture.md) | Crate layers, carrier contracts, unified planning, physical execution, storage, retrieval, graph, ML, and extension boundaries | Contributors and integrators |
 | [Vector indexes](vector-indexes.md) | Brute-force, IVF, and HNSW selection, parameters, mutation, persistence, cache revisions, and search guarantees | Storage and retrieval contributors |
+| [Native DiskANN vector index](diskann-vector-index.md) | Proposal for a direct Rust Vamana/PQ implementation, paged search, bounded builds, provider storage, MVCC changes/rebuilds, and binding acceptance | Storage, retrieval, planner, and binding contributors |
 | [Engine state ownership](engine-state-ownership.md) | Session isolation, mutable state domains, lock ownership, epochs, transactions, and publication order | Engine and concurrency contributors |
 | [Compressed VFS security](compressed-vfs-security.md) | Authenticated format, threat boundary, rollback protection, trusted anchors, and deployment choice | Security reviewers and operators |
 | [Key/Value storage backends](kv-storage-backends.md) | Provider/session ownership, clustered posting layout and migration, redb transactions, compatibility limits, and third-party conformance | Storage contributors and integrators |
@@ -32,6 +33,7 @@ The research-level foundation is developed separately in [A Typed Carrier Algebr
 - To change a benchmark or make a performance claim, read [performance](performance.md) and preserve fixture, provenance, and ratio-gate comparability.
 - To change a compatibility or calibration contract, read [parity fixtures](parity.md) and version the affected manifest.
 - To change physical vector indexing, read [vector indexes](vector-indexes.md) and preserve its algorithm, transaction, and reopen invariants.
+- To implement DiskANN, read the [native DiskANN proposal](diskann-vector-index.md) for the paper baseline, direct implementation boundaries, paged storage, and acceptance criteria.
 - To implement or advertise Apple MLX execution, read the [MLX runtime support plan](../plans/0004-mlx-runtime-support.md) and preserve its no-silent-fallback, process-isolation, package, and actual-backend evidence gates.
 
 ## Plans versus design contracts

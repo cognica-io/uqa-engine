@@ -2,6 +2,8 @@
 
 This document defines the physical vector-index contract shared by the memory engine, SQLite storage, SQL DDL, catalog restore, and calibration checks. A vector field starts with exact brute-force search; `CREATE INDEX ... USING ivf` and `CREATE INDEX ... USING hnsw` install different algorithms and retain different catalog identities.
 
+The separate [native DiskANN proposal](diskann-vector-index.md) designs a direct Rust implementation with paged graph/vector storage, PQ, and MVCC integration. It is not implemented and does not change the supported access methods described here.
+
 ## Selection and SQL surface
 
 ```mermaid
