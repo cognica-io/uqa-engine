@@ -6,7 +6,11 @@
 
 //! Vector-index adapter over an ordered key/value store.
 
+mod origin;
 mod read;
+pub use origin::{
+    DiskANNCanonicalVectorVisitor, KeyValueDiskANNCanonical, RetainedDiskANNCanonical,
+};
 
 use crate::vector_index::RetainedVectorIndex;
 
@@ -66,6 +70,7 @@ impl KeyValueVectorIndex {
             self.validate_dimensions(vector)?;
         }
         validate_vector_ordinal_count(usize_to_u64(vectors.len(), "vector count")?)?;
+        batch.delete(&origin::key(&self.table, &self.field, doc_id)?)?;
         batch.delete_prefix(&vector_doc_prefix(&self.table, &self.field, doc_id)?)?;
         for (ordinal, vector) in vectors.iter().enumerate() {
             let ordinal = u32::try_from(ordinal)
@@ -79,6 +84,7 @@ impl KeyValueVectorIndex {
     }
 
     pub(super) fn stage_clear(&self, batch: &mut dyn KeyValueBatch) -> StorageBackendResult<()> {
+        batch.delete_prefix(&origin::prefix(&self.table, &self.field)?)?;
         batch.delete_prefix(&vector_field_prefix(&self.table, &self.field)?)
     }
 
@@ -135,7 +141,7 @@ impl VectorIndex for KeyValueVectorIndex {
 
     fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
         let mut batch = self.store.batch();
-        batch.delete_prefix(&vector_doc_prefix(&self.table, &self.field, doc_id)?)?;
+        self.stage_replace(batch.as_mut(), doc_id, &[])?;
         batch.commit()
     }
 

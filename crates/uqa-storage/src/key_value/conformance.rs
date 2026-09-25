@@ -26,6 +26,10 @@ mod graph_retry;
 pub use graph_retry::verify_graph_admission_retry;
 mod compound;
 pub use compound::{verify_compound_concurrency, verify_compound_mutations};
+mod origins;
+pub use origins::{
+    verify_diskann_canonical_origins, verify_diskann_canonical_reopen, verify_mutation_origins,
+};
 mod physical_vectors;
 pub use physical_vectors::{
     verify_hnsw_concurrency, verify_hnsw_reopen, verify_hnsw_undo, verify_ivf_concurrency,

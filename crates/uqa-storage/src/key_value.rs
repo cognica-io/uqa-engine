@@ -594,7 +594,10 @@ pub use inverted_index::{KeyValueInvertedIndex, OccurrenceStorage};
 pub use ivf_index::KeyValueIVFIndex;
 pub use memory_store::MemoryKeyValueStore;
 pub use storage_backend::KeyValueStorageBackend;
-pub use vector_index::KeyValueVectorIndex;
+pub use vector_index::{
+    DiskANNCanonicalVectorVisitor, KeyValueDiskANNCanonical, KeyValueVectorIndex,
+    RetainedDiskANNCanonical,
+};
 
 #[cfg(test)]
 mod tests;
