@@ -1,0 +1,60 @@
+{
+  "revision": 1,
+  "seed": 42,
+  "small": {
+    "count": 5,
+    "degree": 3,
+    "initial_neighbors": [
+      [
+        2,
+        3,
+        4
+      ],
+      [
+        0,
+        2,
+        3
+      ],
+      [
+        1,
+        3,
+        4
+      ],
+      [
+        0,
+        2,
+        4
+      ],
+      [
+        0,
+        1,
+        3
+      ]
+    ],
+    "visit_order": [
+      1,
+      3,
+      2,
+      0,
+      4
+    ],
+    "entry": 2,
+    "sample_count": 5,
+    "sample_u64le_sha256": "281b02b10f5f4997e5bf8c93343e6f2aa8bc81ffad6d6813c593181ebceda12a",
+    "centroid": [
+      "3/25",
+      "4/25"
+    ]
+  },
+  "capped": {
+    "count": 260,
+    "vectors": "four signed coordinate axes repeated in order",
+    "entry": 1,
+    "sample_count": 256,
+    "sample_u64le_sha256": "0706065e0b23166aa65564a544700c59a12d33c729ba9913883699affa4487bf",
+    "centroid": [
+      "-1/256",
+      "1/256"
+    ]
+  }
+}
