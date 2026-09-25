@@ -5,8 +5,7 @@ name: Release
 # distributions and all eight npm distributions are attached, this workflow
 # explicitly dispatches the idempotent trusted-publishing workflows. Each one
 # records successful registry publication in the GitHub release notes.
-# crates.io stays dry-run unless workflow_dispatch sets publish_crates_io.
-# A requested live publish fails loudly when CARGO_REGISTRY_TOKEN is absent.
+# Tag pushes also publish to crates.io, which requires CARGO_REGISTRY_TOKEN.
 on:
   push:
     tags:
@@ -19,11 +18,6 @@ on:
           workflow from that same tag ref so the jobs build the tagged commit.
         required: true
         type: string
-      publish_crates_io:
-        description: Publish public Rust crates to crates.io
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -73,21 +67,16 @@ jobs:
       - name: Package publishable crates
         run: bash scripts/package-publishable-crates.sh
 
-      - name: Publish or dry-run crates.io
+      - name: Publish crates to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-          PUBLISH_CRATES_IO: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_crates_io || false }}
         run: |
           set -euo pipefail
-          if [ "$PUBLISH_CRATES_IO" = "true" ]; then
-            if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
-              echo "::error::publish_crates_io=true requires CARGO_REGISTRY_TOKEN" >&2
-              exit 1
-            fi
-            bash scripts/publish-crates.sh --live --retry-rate-limits
-          else
-            bash scripts/publish-crates.sh
+          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+            echo "::error::Live crates.io publication requires CARGO_REGISTRY_TOKEN" >&2
+            exit 1
           fi
+          bash scripts/publish-crates.sh --live --retry-rate-limits
 
   release:
     name: publish release
@@ -185,7 +174,6 @@ jobs:
           TAG: ${{ needs.resolve.outputs.tag }}
           MISSING: ${{ steps.inventory.outputs.missing }}
           CRATES_IO_RESULT: ${{ needs.crates-io.result }}
-          PUBLISH_CRATES_IO: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_crates_io || false }}
         run: |
           set -euo pipefail
           python3 - "$TAG" <<'PY' > release-notes.md
@@ -205,16 +193,11 @@ jobs:
           print()
           print("Python wheels, a Python source distribution, the Node.js root npm package, `@cognica-io` native optional packages, standalone native addons, and the browser WASM package are attached to this release.")
           print()
-          crates_requested = os.environ.get("PUBLISH_CRATES_IO") == "true"
           crates_result = os.environ.get("CRATES_IO_RESULT", "unknown")
-          if crates_requested and crates_result == "success":
+          if crates_result == "success":
               print(f"crates.io status: Live publication of all public Rust workspace crates at version `{version}` completed by this workflow.")
-          elif crates_requested:
-              print(f"crates.io status: Live publication was requested, but the crates.io job finished with `{crates_result}`.")
-          elif crates_result == "success":
-              print("crates.io status: Package validation completed in dry-run mode; no live upload was requested.")
           else:
-              print(f"crates.io status: Dry-run package validation finished with `{crates_result}`.")
+              print(f"crates.io status: Live publication did not complete; the crates.io job finished with `{crates_result}`.")
           print()
           print(f"PyPI status: Pending publication of `uqa=={version}` by the dedicated trusted-publishing workflow.")
           print(f"npm status: Pending publication of `@cognica-io/uqa@{version}`, its native packages, and `@cognica-io/uqa-wasm@{version}` by the dedicated trusted-publishing workflow.")

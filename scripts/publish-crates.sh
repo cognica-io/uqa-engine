@@ -6,9 +6,9 @@
 #
 # Publish public Rust crates in dependency order. The default preflight checks
 # crates that do not depend on unpublished workspace packages. A live registry
-# upload requires an explicit --live flag and dry-runs every crate immediately
-# before uploading it. Pass --retry-rate-limits to wait for and retry crates.io
-# new-crate rate limits without repeating the successful dry run.
+# upload requires an explicit --live flag. Cargo verifies each package before
+# uploading it. Pass --retry-rate-limits to wait for and retry crates.io
+# new-crate rate limits.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -183,7 +183,6 @@ if (( live )); then
       fi
       publishing=1
     fi
-    cargo publish --dry-run -p "$crate" --locked "${cargo_args[@]+"${cargo_args[@]}"}"
     publish_live "$crate"
   done
 else
