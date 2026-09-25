@@ -99,6 +99,14 @@ Do not reuse HNSW's negative-dot navigation value as the distance in Vamana prun
 
 An exact side stream's scores are merged with graph and changed-vector candidates. For a nonzero query, a zero-score vector can outrank a negative cosine result. The empty index, all-side-stream index, one-vector index, empty tensor, and fewer-than-$k$ live documents are explicit states. None is a reason to hide a missing or corrupt graph behind brute force.
 
+### Typed carrier boundaries
+
+[A Typed Carrier Algebra for Unified Query Execution](../papers/A%20Typed%20Carrier%20Algebra%20for%20Unified%20Query%20Execution.md), Sections 3, 4.3-4.4, 6.4, and 8.2, supplies the semantic boundary. A generation-local vector identity, a document candidate, a decorated posting, and its ranked view have different observations. Navigation and PQ distances are physical selection values; neither is a decorated payload score, prior-free evidence, or posterior probability. Their Rust types have no implicit conversion to those carriers.
+
+The explicit path is generation-local `(DocId, ordinal)` candidates, snapshot/version validation, projection to distinct document candidates, complete canonical tensor scoring, decorated posting construction, and ranked document selection. Projection loses ordinal identity deliberately; reranking must fetch every visible ordinal of a selected document rather than mistake the best visited ordinal for its canonical tensor maximum. Base, exact-side, and changed-vector candidates share one visibility and document-scoring boundary, so a document encountered more than once is not combined with the additive `Payload` collision policy.
+
+The final posting obeys ascending `DocId` storage order; rank and top-$k$ use the existing score order and `DocId` tie key through the ranked-view contract. ANN candidate selection does not preserve the exact search's support, and therefore is not an equality-preserving replacement under the paper's contextual-rewrite theorem. Approximate recall, exact scores on selected documents, deterministic rank order, and probability calibration remain separate validation obligations. No support-only Boolean law authorizes deduplicating scored operands, merging threshold predicates, pushing relational filters into ANN, or truncating beneath a score-combining parent.
+
 ## Vamana graph construction
 
 The native graph builder retains visited construction candidates, performs pruning, inserts reverse candidates, and reapplies degree control. It uses a seeded initial graph and stable tie-breaking. Construction uses full navigation vectors rather than PQ estimates. The two construction passes use pruning factors 1 and the configured value. These core operations are checked against the paper and the pinned [reference graph implementation](https://github.com/microsoft/DiskANN/blob/78256bbab4685e1774e78d331e081a153be26823/src/index.cpp); later reference options are not implicitly enabled.

@@ -1,6 +1,6 @@
 # Native DiskANN implementation plan
 
-Status: Implementation in progress. The configuration/reference-fixture unit is implemented and locally verified at `d096c325` on `feature/diskann-configuration`; merge remains pending and the other eleven units remain pending. Implementation baseline: main `7faeabe3`, inspected on 2026-09-25. This document records execution order, ownership, tests, and completion evidence; configuration types do not add SQL support or establish runtime acceptance.
+Status: Implementation in progress. The configuration/reference-fixture unit merged in [PR #157](https://github.com/cognica-io/uqa-engine/pull/157) as `95f278f0`; its feature branch is removed. Navigation metrics and PQ are in progress on `feature/diskann-metric-pq`; the other ten units remain pending. Implementation baseline: main `7faeabe3`, inspected on 2026-09-25. This document records execution order, ownership, tests, and completion evidence; configuration types do not add SQL support or establish runtime acceptance.
 
 The [DiskANN design](../design/diskann-vector-index.md) defines the intended behavior and the pinned NeurIPS 2019 paper/reference inputs. Implement Vamana, product quantization, and paged beam search directly in Rust. Mathematical proofs are outside this requested plan. The [manual](../manual/README.md) remains authoritative for existing behavior; update the design when an implementation decision changes its proposed contract.
 
@@ -43,8 +43,8 @@ The order below is the default implementation sequence. Each unit can contain se
 
 | Unit | Prerequisites | Primary owners | Status and evidence |
 | --- | --- | --- | --- |
-| Configuration and independent fixtures | Existing design | Storage, SQL | `d096c325`: 1,536 Storage/SQL library tests, strict Clippy, fixture and dependency/ownership/harness checks pass. Source and consumer inventory below; merge pending. |
-| Navigation metric and PQ | Configuration and independent fixtures | Storage | Pending; none |
+| Configuration and independent fixtures | Existing design | Storage, SQL | Merged as `95f278f0` in PR #157 after review fixes through `535183ac`: 1,536 Storage/SQL library tests, strict Clippy, fixture and dependency/ownership/harness checks pass. Automatic formatting and CodeRabbit checks passed; the manually dispatched pre-merge CI was not run. |
+| Navigation metric and PQ | Configuration and independent fixtures | Storage | In progress; five numeric owner tests, strict Storage Clippy, dependency/ownership/harness and hygiene checks pass. PQ implementation and unit acceptance remain pending. |
 | Page format and controlled readers | Configuration and independent fixtures | Storage | Pending; none |
 | Provider records and generation leases | Page format and controlled readers | Storage Key/Value, SQLite, redb | Pending; none |
 | Vamana construction | Navigation metric and PQ | Storage | Pending; none |
