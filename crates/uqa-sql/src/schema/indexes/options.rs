@@ -6,6 +6,10 @@
 
 //! SQL vector-index option aliases, value parsing, and duplicate checks.
 use crate::SQLError;
+
+mod diskann;
+pub use diskann::{parse_diskann_index_options, DiskANNIndexOptions};
+
 #[derive(Default)]
 pub struct IVFIndexOptions {
     pub nlist: Option<usize>,

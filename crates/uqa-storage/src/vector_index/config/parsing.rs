@@ -48,7 +48,7 @@ pub(super) fn read_u64(
     })
 }
 
-fn find_parameter<'a>(
+pub(super) fn find_parameter<'a>(
     parameters: &'a BTreeMap<String, String>,
     keys: &[&str],
     index_kind: &str,
