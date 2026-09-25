@@ -18,7 +18,7 @@ impl SQLiteInvertedIndex {
         Self {
             conn,
             table: table.into(),
-            bindings: uqa_storage::inverted_index::AnalyzerBindings::new(analyzer).into(),
+            bindings: uqa_storage::inverted_index::AnalyzerBindings::new(analyzer),
             retention_control: uqa_storage::read_control::StorageReadControl::with_limit(
                 uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
             ),

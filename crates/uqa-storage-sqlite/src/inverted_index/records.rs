@@ -4,9 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Native row ownership and column projections preserve the existing `SQLite` occurrence format.
+//! Physical and versioned row projections preserve the existing `SQLite` occurrence format.
 
-use super::super::{decode_index_u64, encode_index_u64};
+use super::{decode_index_u64, encode_index_u64};
 use crate::mvcc::native::{NativeRecordFamily as Family, NativeRecordIdentity, NativeRecordOwner};
 use rusqlite::types::ValueRef;
 use uqa_core::memory::BudgetedVec;
@@ -252,24 +252,56 @@ pub(super) fn address_from_key(
     if identity.family() != expected {
         return Err(invalid("native occurrence family changed during scan"));
     }
-    let mut address = Address::table(table);
-    address.projection = Some(projection);
-    if projection != Projection::Format {
-        address.field =
-            Some(std::str::from_utf8(&field).map_err(|_| invalid("invalid occurrence field"))?);
-    }
-    if matches!(
+    let field = (projection != Projection::Format)
+        .then(|| std::str::from_utf8(&field).map_err(|_| invalid("invalid occurrence field")))
+        .transpose()?;
+    let term = matches!(
         expected,
         Family::OccurrenceClusters | Family::OccurrenceSkips | Family::OccurrenceBlockMax
-    ) {
-        address.term = Some(&term);
-        match expected {
-            Family::OccurrenceSkips => address.document = number,
-            Family::OccurrenceBlockMax => address.ordinal = number,
-            _ => address.cluster = number,
+    )
+    .then_some(term.as_ref());
+    encode_address(table, projection, field, term, number, control)
+}
+
+pub(super) fn address_from_row(
+    row: &[ValueRef<'_>],
+    table: &str,
+    projection: Projection,
+    control: &StorageReadControl,
+) -> StorageBackendResult<BudgetedVec<u8>> {
+    let text = |position: usize| {
+        row[position]
+            .as_str()
+            .map_err(|_| invalid("invalid occurrence field"))
+    };
+    let (field, term, number) = match projection {
+        Score | Positions | Skip | BlockMax => {
+            (Some(text(1)?), Some(blob(row[2])?), Some(integer(row[3])?))
         }
-    } else {
-        address.document = number;
+        Document | Metadata | Length => (Some(text(2)?), None, Some(integer(row[1])?)),
+        Field => (Some(text(1)?), None, None),
+        Format => (None, None, None),
+        _ => return Err(invalid("legacy occurrence rows have no current address")),
+    };
+    encode_address(table, projection, field, term, number, control)
+}
+
+fn encode_address(
+    table: &str,
+    projection: Projection,
+    field: Option<&str>,
+    term: Option<&[u8]>,
+    number: Option<u64>,
+    control: &StorageReadControl,
+) -> StorageBackendResult<BudgetedVec<u8>> {
+    let mut address = Address::table(table);
+    address.projection = Some(projection);
+    address.field = field;
+    address.term = term;
+    match projection {
+        Score | Positions => address.cluster = number,
+        BlockMax => address.ordinal = number,
+        _ => address.document = number,
     }
     address.encode(control)
 }

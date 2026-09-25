@@ -9,6 +9,7 @@ use crate::catalog::Catalog;
 use uqa_analysis::{standard_analyzer, Analyzer, Tokenizer};
 
 mod retention;
+mod snapshots;
 
 #[test]
 fn evaluated_text_changes_preserve_logical_terms_and_atomicity() {

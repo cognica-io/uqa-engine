@@ -10,7 +10,7 @@ mod commit;
 mod mutation;
 pub(crate) use commit::NativeOccurrenceRecords;
 mod read;
-mod records;
+use super::records;
 
 use std::sync::Arc;
 use uqa_storage::key_value::{
@@ -67,7 +67,7 @@ impl SQLiteInvertedIndex {
                     table: self.table.clone(),
                 }),
                 self.table.clone(),
-                (*self.bindings).clone(),
+                self.bindings.clone(),
             )
         })
     }
