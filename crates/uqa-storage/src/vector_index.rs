@@ -36,6 +36,17 @@ pub use retained::{RetainedVectorIndex, RetainedVectorIndexBuilder};
 mod physical_snapshots;
 
 pub fn validate_vector_values(dimensions: u32, vector: &[f32]) -> StorageBackendResult<()> {
+    validate_vector_values_controlled(dimensions, vector, None)
+}
+
+pub(crate) fn validate_vector_values_controlled(
+    dimensions: u32,
+    vector: &[f32],
+    control: Option<&crate::read_control::StorageReadControl>,
+) -> StorageBackendResult<()> {
+    if let Some(control) = control {
+        control.check()?;
+    }
     let dimensions = usize::try_from(dimensions).map_err(|_| {
         StorageBackendError::Other(format!(
             "vector dimension {dimensions} exceeds the platform usize range"
@@ -47,15 +58,17 @@ pub fn validate_vector_values(dimensions: u32, vector: &[f32]) -> StorageBackend
             vector.len()
         )));
     }
-    if let Some((index, value)) = vector
-        .iter()
-        .copied()
-        .enumerate()
-        .find(|(_, value)| !value.is_finite())
-    {
-        return Err(StorageBackendError::Other(format!(
-            "vector component {index} must be finite, got {value}"
-        )));
+    for (index, value) in vector.iter().copied().enumerate() {
+        if index.is_multiple_of(1024) {
+            if let Some(control) = control {
+                control.check()?;
+            }
+        }
+        if !value.is_finite() {
+            return Err(StorageBackendError::Other(format!(
+                "vector component {index} must be finite, got {value}"
+            )));
+        }
     }
     Ok(())
 }

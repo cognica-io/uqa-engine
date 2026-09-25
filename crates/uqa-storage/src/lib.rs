@@ -19,6 +19,7 @@ mod value_index_key;
 pub use value_index_key::{ValueIndexEntry, ValueIndexKey};
 pub mod catalog;
 pub mod clustered_postings;
+pub mod diskann_index;
 pub mod document_store;
 pub mod encryption_key;
 pub use encryption_key::StorageEncryptionKey;
