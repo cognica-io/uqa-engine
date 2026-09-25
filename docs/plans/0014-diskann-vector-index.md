@@ -1,6 +1,6 @@
 # Native DiskANN implementation plan
 
-Status: Planned; implementation has not started. Baseline: main `f9c667c119e544ef39d3beab18b970c306e1d11d`, inspected on 2026-09-25. The twelve implementation units below are all pending. This document records execution order, ownership, tests, and completion evidence; saving the plan does not add SQL support or establish runtime acceptance.
+Status: Implementation in progress. The configuration/reference-fixture unit is implemented and locally verified at `d096c325` on `feature/diskann-configuration`; merge remains pending and the other eleven units remain pending. Implementation baseline: main `7faeabe3`, inspected on 2026-09-25. This document records execution order, ownership, tests, and completion evidence; configuration types do not add SQL support or establish runtime acceptance.
 
 The [DiskANN design](../design/diskann-vector-index.md) defines the intended behavior and the pinned NeurIPS 2019 paper/reference inputs. Implement Vamana, product quantization, and paged beam search directly in Rust. Mathematical proofs are outside this requested plan. The [manual](../manual/README.md) remains authoritative for existing behavior; update the design when an implementation decision changes its proposed contract.
 
@@ -43,7 +43,7 @@ The order below is the default implementation sequence. Each unit can contain se
 
 | Unit | Prerequisites | Primary owners | Status and evidence |
 | --- | --- | --- | --- |
-| Configuration and independent fixtures | Existing design | Storage, SQL | Pending; none |
+| Configuration and independent fixtures | Existing design | Storage, SQL | `d096c325`: 1,536 Storage/SQL library tests, strict Clippy, fixture and dependency/ownership/harness checks pass. Source and consumer inventory below; merge pending. |
 | Navigation metric and PQ | Configuration and independent fixtures | Storage | Pending; none |
 | Page format and controlled readers | Configuration and independent fixtures | Storage | Pending; none |
 | Provider records and generation leases | Page format and controlled readers | Storage Key/Value, SQLite, redb | Pending; none |
@@ -56,7 +56,7 @@ The order below is the default implementation sequence. Each unit can contain se
 | Bindings and public documentation | SQL lifecycle and planning | Rust/API, Python, Node.js, WASM | Pending; none |
 | Integrated recall and resource acceptance | All preceding units | Affected owners and existing CI/workload harnesses | Pending; none |
 
-The twelve units are completion accounting, not twelve mandatory PRs. The PR map below subdivides the wider provider, recovery, SQL, and binding units into sixteen bounded changes. Fixture preparation, reference review, and documentation review can continue while a relevant CI run is active. Use `feature/` branches, logical commits without label prefixes, and push completed commits during implementation. This plan does not authorize starting implementation or creating a release.
+The twelve units are completion accounting, not twelve mandatory PRs. The PR map below subdivides the wider provider, recovery, SQL, and binding units into sixteen bounded changes. Fixture preparation, reference review, and documentation review can continue while a relevant CI run is active. Use `feature/` branches, logical commits without label prefixes, and push completed commits during implementation.
 
 ## PR boundaries and merge order
 
@@ -100,6 +100,27 @@ The final acceptance PR consolidates evidence and the existing workload. It is n
 - Inventory `VectorIndexSpec`, create/restore dispatch, retained snapshots, copied-table/view/cursor consumers, catalog serialization, and backup consumers; attach each necessary change to its owning unit.
 
 Exit evidence: owner tests reject invalid/duplicate/cross-algorithm options, alpha and size overflow, and invalid dimension/PQ combinations; fixtures have independently reviewable expected values and provenance. Existing IVF/HNSW option behavior and public DiskANN rejection remain intact. The plan records concrete fixture and consumer paths once added.
+
+The resolved parameters and validated `DiskANNAlpha` live under `crates/uqa-storage/src/vector_index/config/diskann.rs`; catalog decoding requires every effective value and recognized algorithm/format revisions. `crates/uqa-sql/src/schema/indexes/options/diskann.rs` preserves absent options, including dimension-dependent PQ width, and parses explicit values without adding a Storage dependency. `VectorIndexSpec` and `index_access_method` remain unchanged. Owner tests compile a real DiskANN index statement, verify its raw descriptors, and confirm that public method routing still rejects it.
+
+Independent fixtures and their generator are in [`crates/uqa-storage/tests/fixtures/diskann`](../../crates/uqa-storage/tests/fixtures/diskann/README.md). They fix rational pruning geometry, PQ chunk/lookup values, exact raw cosine bits, tensor maxima, DocId ties, explicit initial/visit graph order, unaugmented pass outputs, separate UQA cycle augmentation, and a held-out clustered recall workload with byte fingerprints and a preselected recall floor. The canonical-score fixture is executed by Storage owner tests. PQ training, exceptional-norm classification, graph construction, page access, and runtime recall have not yet been implemented or accepted.
+
+The inspected consumer inventory assigns follow-up changes to their owning units:
+
+| Consumer paths | Required owner/unit change |
+| --- | --- |
+| `uqa-storage/src/vector_index/config/types.rs`, `backend.rs`, `key_value/storage_backend.rs`; `uqa-storage-sqlite/src/backend.rs` | Add physical selection only with tested create/restore readers; generation providers and SQL lifecycle. |
+| `uqa-sql/src/schema/indexes/options.rs`, `vectors.rs`; `uqa-execution/src/schema/indexes/creation.rs`, `registry.rs`, `restoration.rs` | Finalize dimension-dependent settings, preserve validation/identity order, and route lifecycle through the ready Storage implementation; catalog/SQL integration. |
+| `uqa-engine/src/open/registries.rs`, `migration/schema.rs`, `tables.rs`, `capabilities/index_creation.rs` | Lend existing catalog/provider/session handles to owner-level restoration/construction; catalog lifecycle and bindings. No graph or page algorithm belongs in these adapters. |
+| `uqa-engine/src/table_storage/dependencies.rs`, `columns.rs`, `persistent.rs`; `open/session_seed.rs`, `open/table_restore.rs` | Preserve registered physical selection during column changes, copied tables and reopening; catalog lifecycle. |
+| `uqa-storage/src/vector_index/collection.rs`, `memory_snapshot.rs`, `read_only_snapshot/vectors.rs`; `uqa-execution/src/query/table_snapshot.rs`, `table_snapshot/vector_metadata.rs` | Retain paged generations through captures/materialization and nested views/cursors instead of rebuilding exact full-corpus substitutes; search/retained views. |
+| `uqa-storage/src/mvcc/vector/layout.rs`; `uqa-storage-sqlite/src/mvcc/native/layout.rs`, `format.rs`; `uqa-execution/src/serializable/vector.rs` | Add versioned change/coverage records and logical observations; provider records, common MVCC, publication and recovery. |
+| `uqa-core/src/catalog_index.rs`; `uqa-engine/src/migration/schema.rs`; `uqa-storage-sqlite/src/connection/restore.rs`, `native_restore.rs`, `mvcc/restore.rs` | Preserve resolved catalog strings and complete database-owned generation data through export/restore; format negotiation and recovery. |
+| `uqa-scoring/src/vector_calibration.rs`; `uqa-operators/src/vector.rs`; Planner/Execution KNN consumers | Preserve canonical scores, requested candidate pools and calibration identity; search and SQL planning. |
+
+All paths in the inventory are relative to `crates/`. Reinspect the relevant implementation and feature configuration when its unit begins; this inventory is not a claim that the downstream adaptations are complete.
+
+Validation of `d096c325`: Linux Docker with Rust 1.90 ran `cargo test -p uqa-storage -p uqa-sql --lib --locked` (524 Storage and 1,012 SQL tests), and `cargo clippy -p uqa-storage -p uqa-sql --lib --tests --locked -- -D warnings`. After the final fixture adjustment, the canonical score fixture passed again. `generate.py`, scoped `cargo fmt --check`, repository hygiene, workspace dependency policy, Engine capability policy, integration-harness policy, and `git diff --check` passed. These are functional checks; no timing or performance acceptance is claimed. No CI workflow was manually dispatched, rerun or cancelled for this change.
 
 ### Navigation metric and PQ
 
