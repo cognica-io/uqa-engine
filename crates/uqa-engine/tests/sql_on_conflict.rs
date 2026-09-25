@@ -463,18 +463,28 @@ fn alter_table_add_unique_constraint_rejects_legacy_duplicates_atomically() {
     )
     .unwrap();
 
-    let error = eng
-        .sql(
-            "ALTER TABLE labels ADD CONSTRAINT labels_tenant_slug_key UNIQUE (tenant, slug)",
-            &[],
-        )
-        .unwrap_err();
-    assert!(error.to_string().to_ascii_lowercase().contains("duplicate"));
-    assert!(!eng
-        .key_constraints("labels")
-        .unwrap()
-        .iter()
-        .any(|constraint| constraint.columns == ["tenant", "slug"]));
+    for statement in [
+        "ALTER TABLE labels ADD CONSTRAINT labels_tenant_slug_key UNIQUE (tenant, slug)",
+        "ALTER TABLE labels ADD UNIQUE (tenant, slug)",
+    ] {
+        let error = eng.sql(statement, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("23505"), "{error}");
+        assert!(matches!(
+            error,
+            uqa_sql::SQLError::Diagnostic { message, detail: Some(detail), .. }
+                if message == "could not create unique index \"labels_tenant_slug_key\""
+                    && detail == "Key (tenant, slug)=(a, one) is duplicated."
+        ));
+        assert!(!eng
+            .key_constraints("labels")
+            .unwrap()
+            .iter()
+            .any(|constraint| constraint.columns == ["tenant", "slug"]));
+    }
+    let rows = eng.sql("SELECT id FROM labels ORDER BY id", &[]).unwrap();
+    assert_eq!(rows.rows.len(), 2);
+    assert_eq!(rows.value_at(0, 0), Some(&Value::Int(1)));
+    assert_eq!(rows.value_at(1, 0), Some(&Value::Int(2)));
 }
 
 #[test]

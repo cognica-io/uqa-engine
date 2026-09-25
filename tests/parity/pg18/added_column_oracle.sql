@@ -44,4 +44,11 @@ SELECT 'columns-after-rollback|' || string_agg(attname, ',' ORDER BY attnum)
 FROM pg_attribute WHERE attrelid = 'left_t'::regclass AND attnum > 0 AND NOT attisdropped;
 ALTER TABLE left_t ADD COLUMN k TEXT UNIQUE DEFAULT 'replacement';
 SELECT 'after-rollback|' || k FROM left_t;
+
+CREATE TEMP TABLE labels (id INTEGER PRIMARY KEY, tenant TEXT, slug TEXT);
+INSERT INTO labels VALUES (1, 'a', 'one'), (2, 'a', 'one');
+SELECT 'failed-constraint|' || pg_temp.added_column_state('ALTER TABLE labels ADD CONSTRAINT labels_tenant_slug_key UNIQUE (tenant, slug)');
+SELECT 'failed-unnamed-constraint|' || pg_temp.added_column_state('ALTER TABLE labels ADD UNIQUE (tenant, slug)');
+SELECT 'keys-after-constraint-failure|' || string_agg(conname, ',' ORDER BY conname)
+FROM pg_constraint WHERE conrelid = 'labels'::regclass AND contype IN ('p', 'u');
 ROLLBACK;
