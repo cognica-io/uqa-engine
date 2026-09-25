@@ -15,6 +15,7 @@ use crate::{StorageBackendError, StorageBackendResult};
 
 mod graph;
 mod initialize;
+mod memory;
 mod prune;
 mod search;
 #[cfg(test)]

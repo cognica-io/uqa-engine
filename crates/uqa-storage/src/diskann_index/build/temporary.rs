@@ -170,6 +170,11 @@ impl TemporaryRun {
     pub(super) fn path(&self) -> &Path {
         self.file.path()
     }
+
+    #[cfg(test)]
+    pub(super) fn block_io_counts(&self) -> (usize, u64) {
+        self.file.block_io_counts()
+    }
 }
 
 pub(super) fn io_error(error: std::io::Error) -> StorageBackendError {

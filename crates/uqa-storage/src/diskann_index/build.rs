@@ -16,11 +16,14 @@ use super::format::{
 use super::{ExactVectorReason, NavigationInput, PQCodebook, PQTrainer, PQTrainingOptions};
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 
+mod partitions;
 mod records;
+mod runs;
 mod temporary;
 #[cfg(test)]
 mod tests;
 
+pub use partitions::{DiskANNPartitionOptions, DiskANNPartitionRuns, DiskANNPartitionSummary};
 pub use temporary::{DiskANNTemporaryBudget, DiskANNTemporaryError};
 
 use records::Records;
@@ -63,6 +66,7 @@ pub struct DiskANNBuildInput {
     side: Records,
     coverage: DiskANNBuildCoverage,
     control: StorageReadControl,
+    temporary: DiskANNTemporaryBudget,
 }
 
 impl DiskANNBuildInput {
@@ -113,6 +117,7 @@ impl DiskANNBuildInput {
             side,
             coverage: coverage.finish(),
             control: control.clone(),
+            temporary: temporary.clone(),
         })
     }
 
