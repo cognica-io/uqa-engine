@@ -7,6 +7,7 @@
 //! Native `SQLite` row mapping, atomic baseline conversion and evaluated commit materialization. The record adapter preserves existing physical tables while shared storage owns private changes and visibility; native catalog/store session routing remains separate.
 
 mod capture;
+mod diskann;
 mod family;
 mod format;
 mod graph_cache;

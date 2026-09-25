@@ -7,6 +7,8 @@
 use super::*;
 use crate::{Catalog, ManagedConnection, SQLiteRecordStore};
 
+mod diskann;
+
 fn retired_search_layout(connection: &ManagedConnection) {
     Catalog::open(connection.clone()).unwrap();
     connection
@@ -66,7 +68,7 @@ fn native_import_normalizes_retired_empty_search_tables_atomically() {
         .unwrap();
     connection
         .with_physical(|sqlite| {
-            validate_format(sqlite, 9).unwrap();
+            validate_format(sqlite, CURRENT_VERSION).unwrap();
             assert!(sqlite.prepare("SELECT * FROM _postings").is_err());
             Ok(())
         })
@@ -136,7 +138,7 @@ fn fresh_native_catalog_and_mapping_bootstrap_atomically() {
     catalog.set_metadata("bootstrap", "visible").unwrap();
     connection
         .with_physical(|sqlite| {
-            check_mapping_version(sqlite, 9).unwrap();
+            check_mapping_version(sqlite, CURRENT_VERSION).unwrap();
             assert_eq!(
                 sqlite.query_row(
                     "SELECT value FROM _metadata WHERE key = 'bootstrap'",
@@ -162,6 +164,7 @@ fn native_vector_mapping_rejects_prior_writers_and_rollback_restores_the_old_mar
             let transaction = schema::begin(sqlite).unwrap();
             crate::mvcc::native::tests::standalone_graph::remove_empty_tables(&transaction)
                 .unwrap();
+            crate::mvcc::native::tests::diskann::remove_empty_table(&transaction).unwrap();
             transaction
                 .execute_batch("DROP TABLE _uqa_mvcc_native_format")
                 .unwrap();
@@ -178,20 +181,20 @@ fn native_vector_mapping_rejects_prior_writers_and_rollback_restores_the_old_mar
             validate_format(sqlite, 6).unwrap();
             let transaction = schema::begin(sqlite).unwrap();
             reopen(&transaction, &control).unwrap();
-            check_mapping_version(&transaction, 9).unwrap();
+            check_mapping_version(&transaction, CURRENT_VERSION).unwrap();
             assert!(check_mapping_version(&transaction, 6).is_err());
             // An error after migration must roll back its DDL and recreated guards together.
             drop(transaction);
             validate_format(sqlite, 6).unwrap();
             check_mapping_version(sqlite, 6).unwrap();
-            assert!(check_mapping_version(sqlite, 9).is_err());
+            assert!(check_mapping_version(sqlite, CURRENT_VERSION).is_err());
             Ok(())
         })
         .unwrap();
     SQLiteRecordStore::for_native(&connection, &control).unwrap();
     connection
         .with_physical(|sqlite| {
-            validate_format(sqlite, 9).unwrap();
+            validate_format(sqlite, CURRENT_VERSION).unwrap();
             assert!(check_mapping_version(sqlite, 6).is_err());
             Ok(())
         })

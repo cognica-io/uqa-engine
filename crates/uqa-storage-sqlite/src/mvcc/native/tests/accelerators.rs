@@ -73,7 +73,7 @@ fn populated_dynamic_accelerators_convert_with_canonical_rows_in_every_file_mode
                     .get::<_, i64>(
                     0
                 ))?,
-                9
+                10
             );
             Ok(())
         });
@@ -124,6 +124,7 @@ fn native_format_three_upgrade_preserves_original_records_and_commit_sequence() 
         let _permit = crate::mvcc::schema::WritePermit::acquire(sqlite)?;
         let transaction = crate::mvcc::schema::begin(sqlite)?;
         crate::mvcc::native::tests::standalone_graph::remove_empty_tables(&transaction)?;
+        super::diskann::remove_empty_table(&transaction)?;
         transaction.execute_batch("DROP TABLE _uqa_mvcc_native_ivf_guards; DROP TABLE _uqa_mvcc_native_occurrence_guards; DROP TABLE _occurrence_skips; DROP TABLE _occurrence_block_max; DROP TABLE _uqa_mvcc_native_format")?;
         transaction.execute_batch("CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 3), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))")?;
         transaction.execute("INSERT INTO _uqa_mvcc_native_format VALUES (1,3,49)", [])?;

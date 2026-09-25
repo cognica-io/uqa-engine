@@ -19,7 +19,7 @@ use super::persistence::connection;
 use super::*;
 use crate::{mvcc::PhysicalResult, SQLiteRecordStore};
 
-pub(super) fn with<T>(
+pub(in crate::mvcc::native) fn with<T>(
     connection: &ManagedConnection,
     operation: impl FnOnce(&rusqlite::Connection) -> PhysicalResult<T>,
 ) -> T {

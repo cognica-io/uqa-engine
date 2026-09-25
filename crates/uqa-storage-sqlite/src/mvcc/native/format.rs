@@ -36,11 +36,15 @@ const FORMAT_SEVEN: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTE
 
 const FORMAT_EIGHT: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 8), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))";
 
+const FORMAT_NINE: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 9), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))";
+
+const CURRENT_VERSION: u32 = 10;
+
 #[cfg(test)]
 mod tests;
 
 const TABLES: [(&str, &str); 4] = [
-    ("_uqa_mvcc_native_format", "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 9), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))"),
+    ("_uqa_mvcc_native_format", "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 10), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))"),
     ("_uqa_mvcc_native_owners", "CREATE TABLE _uqa_mvcc_native_owners (name TEXT PRIMARY KEY NOT NULL, object_id BLOB NOT NULL CHECK(typeof(object_id) = 'blob' AND length(object_id) = 16 AND object_id != zeroblob(16)), generation BLOB NOT NULL CHECK(typeof(generation) = 'blob' AND length(generation) = 16 AND generation != zeroblob(16)), catalog_owned INTEGER NOT NULL CHECK(catalog_owned IN (0, 1))) WITHOUT ROWID"),
     ("_uqa_mvcc_native_expected", "CREATE TABLE _uqa_mvcc_native_expected (family INTEGER NOT NULL, physical_key BLOB NOT NULL, old_key BLOB, new_key BLOB, new_value BLOB, PRIMARY KEY(family, physical_key), CHECK((new_key IS NULL) = (new_value IS NULL))) WITHOUT ROWID"),
     ("_uqa_mvcc_native_changes", "CREATE TABLE _uqa_mvcc_native_changes (family INTEGER NOT NULL, physical_key BLOB NOT NULL, PRIMARY KEY(family, physical_key)) WITHOUT ROWID"),
@@ -72,7 +76,7 @@ pub(in crate::mvcc) fn check_mapping(
     let Some(expected) = native else {
         return reject_mapped(connection);
     };
-    check_mapping_version(connection, 9)?;
+    check_mapping_version(connection, CURRENT_VERSION)?;
     if namespace(connection)? != expected {
         return Err(invalid("native record namespace changed").into());
     }
@@ -93,16 +97,16 @@ fn namespace(connection: &Connection) -> PhysicalResult<NativeRecordNamespace> {
 
 /// A pending history restore already has its stable namespace; validate it without reopening normal record access.
 pub(in crate::mvcc) fn validate_restoration(connection: &Connection) -> PhysicalResult<()> {
-    validate_format(connection, 9)?;
-    check_mapping_version(connection, 9)?;
+    validate_format(connection, CURRENT_VERSION)?;
+    check_mapping_version(connection, CURRENT_VERSION)?;
     namespace(connection)?;
     Ok(())
 }
 
-fn insert_format(connection: &Connection, identity: DatabaseId) -> PhysicalResult<()> {
+fn insert_format(connection: &Connection, namespace: DatabaseId) -> PhysicalResult<()> {
     connection.execute(
-        "INSERT INTO _uqa_mvcc_native_format VALUES (1, 9, 49, ?1)",
-        [identity.as_bytes().as_slice()],
+        "INSERT INTO _uqa_mvcc_native_format VALUES (1, ?1, 49, ?2)",
+        params![CURRENT_VERSION, namespace.as_bytes().as_slice()],
     )?;
     Ok(())
 }
@@ -198,11 +202,12 @@ pub(in crate::mvcc) fn initialize_in(
     transaction.execute_batch(graph_lookup::SQL)?;
     transaction.execute_batch(super::occurrence_guards::SQL)?;
     transaction.execute_batch(super::vector_guards::SQL)?;
+    transaction.execute_batch(super::diskann::SQL)?;
     occurrence_accelerators::create(transaction)?;
     occurrence_accelerators::import(transaction, control)?;
     crate::Catalog::upgrade_metadata_cache_triggers(transaction)?;
-    validate_layouts(transaction, 9)?;
-    validate_cache_triggers(transaction, 9)?;
+    validate_layouts(transaction, CURRENT_VERSION)?;
+    validate_cache_triggers(transaction, CURRENT_VERSION)?;
     owners::seed(transaction, control)?;
     super::sequences::validate_source(transaction)?;
     graph_lookup::seed(transaction, control)?;
@@ -272,8 +277,10 @@ fn reopen(connection: &Connection, control: &StorageReadControl) -> PhysicalResu
             7
         } else if schema::definition_matches(connection, TABLES[0].0, FORMAT_EIGHT)? == Some(true) {
             8
-        } else {
+        } else if schema::definition_matches(connection, TABLES[0].0, FORMAT_NINE)? == Some(true) {
             9
+        } else {
+            CURRENT_VERSION
         };
     validate_format(connection, version)?;
     let initialized = schema::initialize_in(connection)?;
@@ -320,15 +327,22 @@ fn reopen(connection: &Connection, control: &StorageReadControl) -> PhysicalResu
             connection.execute_batch(&sql)?;
         }
     }
-    if version < 9 {
+    if version < 10 {
+        let data_namespace = if version >= 9 {
+            namespace(connection)?.0
+        } else {
+            identity
+        };
+        connection.execute_batch(super::diskann::SQL)?;
+        install_family_guards(connection, Family::DiskANNRecords)?;
         connection.execute_batch("DROP TABLE _uqa_mvcc_native_format")?;
         connection.execute_batch(TABLES[0].1)?;
-        insert_format(connection, identity)?;
+        insert_format(connection, data_namespace)?;
         for action in ["INSERT", "UPDATE", "DELETE"] {
             connection.execute_batch(&schema::trigger(TABLES[0].0, action).1)?;
         }
-        validate_format(connection, 9)?;
-        check_mapping_version(connection, 9)?;
+        validate_format(connection, CURRENT_VERSION)?;
+        check_mapping_version(connection, CURRENT_VERSION)?;
     }
     super::standalone_graph::validate_legacy_guards(connection, control)?;
     Ok(NativeMapping {
@@ -375,6 +389,7 @@ fn validate_format(connection: &Connection, version: u32) -> PhysicalResult<()> 
                 6 => FORMAT_SIX,
                 7 => FORMAT_SEVEN,
                 8 => FORMAT_EIGHT,
+                9 => FORMAT_NINE,
                 _ => sql,
             }
         } else {
@@ -413,6 +428,13 @@ fn validate_format(connection: &Connection, version: u32) -> PhysicalResult<()> 
         for (name, sql) in graph_lookup::source_triggers(&graph_lookup::SCOPED_SOURCES) {
             require_definition(connection, &name, &sql)?;
         }
+    }
+    if version >= 10 {
+        require_definition(
+            connection,
+            Family::DiskANNRecords.layout().table,
+            super::diskann::SQL,
+        )?;
     }
     for family in families(version) {
         for action in ["INSERT", "UPDATE", "DELETE"] {
@@ -460,6 +482,7 @@ fn validate_cache_triggers(connection: &Connection, version: u32) -> PhysicalRes
                     | Family::GraphLookups
                     | Family::GraphPathPairs
                     | Family::GraphPathIndexState
+                    | Family::DiskANNRecords
             )
     }) {
         let layout = family.layout();
@@ -482,6 +505,7 @@ fn families(version: u32) -> impl Iterator<Item = Family> {
         Family::OccurrenceSkips | Family::OccurrenceBlockMax => version >= 4,
         Family::OccurrenceGuards => version >= 5,
         Family::VectorGuards => version >= 6,
+        Family::DiskANNRecords => version >= 10,
         _ => true,
     })
 }
