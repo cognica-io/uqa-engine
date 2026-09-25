@@ -60,11 +60,11 @@ impl Workspace {
         control.check()?;
         let query = super::prune::position(points, query)?;
         self.frontier.clear();
-        self.visited.clear();
-        for chunk in self.expanded.chunks_mut(1024) {
-            control.check()?;
-            chunk.fill(false);
+        for (index, &node) in self.visited.iter().enumerate() {
+            super::super::metric::checkpoint(index, control)?;
+            self.expanded[node as usize] = false;
         }
+        self.visited.clear();
         let entry = graph
             .entry
             .ok_or_else(|| invalid("missing construction entry"))?;
@@ -75,8 +75,8 @@ impl Workspace {
             .find(|(node, _)| !self.expanded[*node as usize])
         {
             control.check()?;
-            self.expanded[current as usize] = true;
             self.visited.push(current)?;
+            self.expanded[current as usize] = true;
             for &neighbor in graph.neighbors(current)? {
                 if !self.frontier.iter().any(|(node, _)| *node == neighbor) {
                     self.admit(neighbor, points, query, control)?;

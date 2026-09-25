@@ -161,6 +161,11 @@ fn construction_keeps_all_visited_nodes_after_the_frontier_evicts_them() {
         work.visited(&graph, &points, 0, &control).unwrap(),
         [4, 3, 2, 1, 0]
     );
+    assert_eq!(work.visited(&graph, &points, 4, &control).unwrap(), [4]);
+    assert_eq!(
+        work.visited(&graph, &points, 0, &control).unwrap(),
+        [4, 3, 2, 1, 0]
+    );
 }
 
 #[test]
