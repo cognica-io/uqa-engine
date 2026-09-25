@@ -21,7 +21,7 @@ use uqa_core::{
 use uqa_storage::{
     diskann_index::{
         format::{DiskANNCanonicalOrigin, DiskANNVectorVersion, CANONICAL_ORIGIN_BYTES},
-        DiskANNCanonicalVectorVisitor,
+        DiskANNCanonicalRead, DiskANNCanonicalVectorVisitor,
     },
     mvcc::VersionError,
     read_control::StorageReadControl,
@@ -250,5 +250,104 @@ impl RetainedSQLiteDiskANNCanonical {
         self.snapshot.control.check()?;
         self.control.check()?;
         control.check()
+    }
+
+    fn next_key_document(
+        &self,
+        family: Family,
+        after: Option<i64>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DocId>> {
+        let Some(owner) = self.owner else {
+            return Ok(None);
+        };
+        let identity = Identity::new(family, owner).map_err(VersionError::into_storage_error)?;
+        let prefix = identity
+            .encode_prefix(&[ValueRef::Text(&self.field)], control)
+            .map_err(VersionError::into_storage_error)?;
+        let after_key = after
+            .map(|document| {
+                let components = [
+                    ValueRef::Text(&self.field),
+                    ValueRef::Integer(document),
+                    ValueRef::Integer(i64::MAX),
+                ];
+                identity.encode_key(
+                    &components[..if family == Family::Vectors { 3 } else { 2 }],
+                    control,
+                )
+            })
+            .transpose()
+            .map_err(VersionError::into_storage_error)?;
+        let mut selected = None;
+        self.snapshot
+            .view
+            .visit_keys(
+                &prefix,
+                after_key.as_deref(),
+                usize::MAX,
+                control,
+                &mut |key, metadata| {
+                    self.check(control).map_err(VersionError::Storage)?;
+                    if !metadata.live {
+                        return Ok(true);
+                    }
+                    let address = Address::decode(key, control)?;
+                    let document = address.numbers[0];
+                    if address.identity != identity
+                        || *address.field != *self.field
+                        || document < 0
+                        || after.is_some_and(|after| document <= after)
+                        || (family == Family::Vectors && u32::try_from(address.numbers[1]).is_err())
+                    {
+                        return Err(VersionError::InvalidEncoding(
+                            "invalid native canonical corpus identity",
+                        ));
+                    }
+                    selected = Some(document as DocId);
+                    Ok(false)
+                },
+            )
+            .map_err(VersionError::into_storage_error)?;
+        Ok(selected)
+    }
+}
+
+impl DiskANNCanonicalRead for RetainedSQLiteDiskANNCanonical {
+    fn dimensions(&self) -> u32 {
+        self.dimensions
+    }
+
+    fn next_document_after(
+        &self,
+        after: Option<DocId>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DocId>> {
+        self.check(control)?;
+        if after.is_some_and(|document| document >= i64::MAX as DocId) {
+            return Ok(None);
+        }
+        let after = after.map(|document| document as i64);
+        let origin = self.next_key_document(Family::VectorOrigins, after, control)?;
+        let vector = self.next_key_document(Family::Vectors, after, control)?;
+        self.check(control)?;
+        Ok(origin.into_iter().chain(vector).min())
+    }
+
+    fn origin(
+        &self,
+        document: DocId,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DiskANNVectorVersion>> {
+        self.origin(document, control)
+    }
+
+    fn visit_document(
+        &self,
+        document: DocId,
+        control: &StorageReadControl,
+        visit: &mut DiskANNCanonicalVectorVisitor<'_>,
+    ) -> StorageBackendResult<Option<DiskANNVectorVersion>> {
+        self.visit_document(document, control, visit)
     }
 }

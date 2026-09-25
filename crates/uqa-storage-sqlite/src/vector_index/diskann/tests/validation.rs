@@ -61,6 +61,8 @@ fn native_diskann_canonical_reads_reject_malformed_origins_and_incomplete_ordina
             .unwrap();
         let read = source.retain(&control).unwrap();
         assert!(read.origin(1, &control).is_err(), "fault {fault}");
+        assert_eq!(read.next_document_after(None, &control).unwrap(), Some(1));
+        assert!(read.visit_all(&control, &mut |_, _, _, _| Ok(())).is_err());
         let mut visited = false;
         assert!(read
             .visit_document(1, &control, &mut |_, _, _| {
