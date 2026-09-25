@@ -46,7 +46,6 @@ fn independent_tensor_score_and_tie_fixtures_match_canonical_search() {
     let found = index
         .search_knn(&scores.query, scores.documents.len())
         .unwrap();
-    let mut ranked = Vec::new();
     let mut ids = Vec::new();
     for entry in &found {
         let score = entry.payload.score;
@@ -63,14 +62,30 @@ fn independent_tensor_score_and_tie_fixtures_match_canonical_search() {
             entry.doc_id
         );
         ids.push(entry.doc_id);
-        ranked.push((entry.doc_id, score));
     }
     assert_eq!(ids, scores.posting_doc_ids);
-    ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    assert_eq!(
-        ranked.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
-        scores.ranked_doc_ids
-    );
-    let top = index.search_knn(&scores.query, 1).unwrap();
-    assert_eq!(top.iter().next().unwrap().doc_id, 2);
+    for k in 0..=scores.documents.len() {
+        let mut expected = scores.ranked_doc_ids[..k.min(scores.ranked_doc_ids.len())].to_vec();
+        expected.sort_unstable();
+        let selected = index.search_knn(&scores.query, k).unwrap();
+        assert_eq!(
+            selected
+                .iter()
+                .map(|entry| entry.doc_id)
+                .collect::<Vec<_>>(),
+            expected,
+            "k = {k}"
+        );
+        for entry in &selected {
+            let full = found
+                .iter()
+                .find(|full| full.doc_id == entry.doc_id)
+                .unwrap();
+            assert_eq!(
+                entry.payload.score, full.payload.score,
+                "k = {k}, document {}",
+                entry.doc_id
+            );
+        }
+    }
 }
