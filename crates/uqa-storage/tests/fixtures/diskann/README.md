@@ -1,0 +1,23 @@
+# DiskANN reference fixtures
+
+`reference.json` contains small algorithm inputs and independent expected values. `generate.py` uses Python's exact rational arithmetic for graph distances and pruning; it neither imports UQA nor reads a candidate's results. Run `python3 crates/uqa-storage/tests/fixtures/diskann/generate.py` to verify the committed fixture and workload fingerprints. `--write` regenerates the fixture after an intentional, reviewed reference change. The fixture revision is 1; the generator and expected data are versioned together in Git.
+
+The algorithm reference is [Subramanya et al., NeurIPS 2019](https://proceedings.neurips.cc/paper_files/paper/2019/file/09853c7fb1d3f8ee67a61b6bf4a7f8e6-Paper.pdf), Algorithms 1-3 and Section 3. The supplemental C++ reference is pinned to [microsoft/DiskANN `78256bbab4685e1774e78d331e081a153be26823`](https://github.com/microsoft/DiskANN/tree/78256bbab4685e1774e78d331e081a153be26823), particularly `src/index.cpp`, `src/pq.cpp`, and `src/pq_flash_index.cpp`. These are analytical fixtures, not captured output from that implementation. Its later pruning heuristics, parallel scheduling, and file formats are not an oracle for UQA's paper-based contract.
+
+## Independent expectations
+
+| Fixture | Input and expected behavior |
+| --- | --- |
+| Pruning | Unit-circle points `(1,0)`, `(3/5,4/5)`, `(-1,0)` give squared distances `4/5`, `16/5`, and `4`. At Euclidean alpha `6/5`, the second candidate survives because `(6/5)^2 * 16/5 > 4`. Using alpha without squaring it incorrectly removes that candidate. Self and duplicate candidates are included. |
+| PQ | Five coordinates split at `[0,3,5]`; remainder coordinates belong to the earliest chunks. The recorded integer codebooks give lookup rows `[2,0]` and `[0,4]`, hence code distances `[2,0,6,4]`. Equidistant centroids choose the lowest label. This isolates lookup/encoding from centroid training. |
+| Scores | Hand-computed raw cosine scores include `1`, `0`, `-1`, and `3/5`, recorded as exact `f32` bit patterns. The tensor's best element is its second vector; an empty tensor is absent. Equal document scores select the smaller DocId, and PostingList storage order remains ascending DocId. Storage tests execute these expectations through the existing canonical memory index. |
+| Graph | Five rational unit vectors have an explicitly recorded degree-3 initial graph and fixed visit order. The entry node is the nearest node to the exact centroid, with node-ID ties. The generator applies full visited candidates, reverse candidates and repruning, first at alpha 1 and then at alpha 2. Both unaugmented results are retained with adjacency sets sorted by node ID. This fixture fixes work order explicitly instead of pretending a seed reproduces an arbitrary upstream initial graph. |
+| Connectivity | Separate expected adjacency reserves the stable node-ID successor, excludes it from the ordinary candidate set, and prunes the remaining original Vamana edges to degree minus one. The successor is added once and neighbors are stored in node-ID order. The result differs from the unaugmented graph; this cycle is UQA behavior, not a claim about the paper. |
+
+Pruning and graph tie order is `(squared distance, generation-local node ID)`. Logical `(DocId, ordinal)` keys are recorded in ascending order. Rational vectors describe the ideal geometry; the owning numeric implementation must separately test its declared floating-point rounding and exceptional raw-norm behavior. PQ training and numeric-side-stream fixtures will accompany their implementations; this file does not claim they have passed.
+
+## Held-out recall inputs
+
+The independent generator fixes 4,096 corpus vectors and 128 held-out queries, each with 32 coordinates, around 32 integer centers. SplitMix64 has explicit wrapping 64-bit operations; seeds 42, 43 and 24301 select centers, corpus perturbations and query perturbations. Components are exactly representable as `f32`. The fixture stores SHA-256 digests of row-major little-endian `f32` bytes, not a machine report or the expanded corpus. The generator rejects an exact corpus/query overlap.
+
+The acceptance limit is mean recall@10 at least 0.95, selected before any DiskANN candidate exists. Ground truth exhaustively ranks canonical raw-vector `f32` cosine with ascending DocId ties. Search must return all requested documents when available and preserve exact scores regardless of recall. This compact clustered workload is one correctness gate, not evidence of SSD latency, larger-than-memory construction, or the final real-provider recall matrix. Those acceptance obligations remain in the implementation plan.

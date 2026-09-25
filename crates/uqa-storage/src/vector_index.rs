@@ -26,7 +26,10 @@ pub(crate) mod retained;
 pub use collection::{
     RetainedVectorIndexesBuilder, VectorIndexSource, VectorIndexes, VectorIndexesIter,
 };
-pub use config::{HNSWIndexParams, IVFIndexParams, VectorIndexOpenMode, VectorIndexSpec};
+pub use config::{
+    DiskANNAlpha, DiskANNIndexParams, HNSWIndexParams, IVFIndexParams, VectorIndexOpenMode,
+    VectorIndexSpec,
+};
 pub use retained::{RetainedVectorIndex, RetainedVectorIndexBuilder};
 
 #[cfg(test)]
