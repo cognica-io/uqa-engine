@@ -48,6 +48,37 @@ impl PQCodebook {
     pub const CODEC_REVISION: u32 = 1;
     pub const TRAINING_REVISION: u32 = 1;
 
+    pub(in crate::diskann_index) fn restore(
+        dimensions: u32,
+        pq_bytes: usize,
+        centroid_count: u16,
+        training: PQTrainingSummary,
+        centroids: BudgetedVec<f64>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        control.check()?;
+        if centroids.len() != training.validate(dimensions, pq_bytes, centroid_count)? {
+            return Err(invalid("centroid scalar count differs from dimensions"));
+        }
+        for (offset, &value) in centroids.iter().enumerate() {
+            checkpoint(offset, control)?;
+            // Unit-coordinate means stay within this conservative rounding envelope for u32 dimensions and sample counts.
+            if !value.is_finite() || value.abs() > 2.0 {
+                return Err(invalid(
+                    "centroid exceeds finite navigation coordinate bounds",
+                ));
+            }
+        }
+        control.check()?;
+        Ok(Self {
+            dimensions: dimensions as usize,
+            pq_bytes,
+            centroid_count,
+            centroids,
+            training,
+        })
+    }
+
     pub fn dimensions(&self) -> usize {
         self.dimensions
     }
@@ -174,7 +205,11 @@ impl PQLookupTable {
     }
 }
 
-fn chunk_range(dimensions: usize, chunks: usize, chunk: usize) -> Range<usize> {
+pub(in crate::diskann_index) fn chunk_range(
+    dimensions: usize,
+    chunks: usize,
+    chunk: usize,
+) -> Range<usize> {
     let width = dimensions / chunks;
     let extra = dimensions % chunks;
     let start = chunk * width + chunk.min(extra);

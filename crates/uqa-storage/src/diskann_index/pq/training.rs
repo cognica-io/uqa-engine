@@ -30,11 +30,52 @@ impl Default for PQTrainingOptions {
     }
 }
 
+impl PQTrainingOptions {
+    pub(in crate::diskann_index) fn validate(self) -> StorageBackendResult<Self> {
+        if self.max_samples == 0
+            || !(1..=256).contains(&self.max_iterations)
+            || !(1..=256).contains(&self.max_centroids)
+        {
+            return Err(invalid(
+                "require positive samples, 1..=256 iterations and 1..=256 centroids",
+            ));
+        }
+        Ok(self)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PQTrainingSummary {
     pub options: PQTrainingOptions,
     pub observed_vectors: u64,
     pub sampled_vectors: u32,
+}
+
+impl PQTrainingSummary {
+    pub(in crate::diskann_index) fn validate(
+        self,
+        dimensions: u32,
+        pq_bytes: usize,
+        count: u16,
+    ) -> StorageBackendResult<usize> {
+        self.options.validate()?;
+        let dimensions = usize::try_from(dimensions).map_err(|_| invalid("dimension range"))?;
+        if dimensions == 0
+            || pq_bytes == 0
+            || pq_bytes > dimensions
+            || self.observed_vectors == 0
+            || u64::from(self.sampled_vectors)
+                != self
+                    .observed_vectors
+                    .min(u64::from(self.options.max_samples))
+            || u32::from(count) != u32::from(self.options.max_centroids).min(self.sampled_vectors)
+        {
+            return Err(invalid(
+                "inconsistent codebook dimensions or training provenance",
+            ));
+        }
+        product(dimensions, usize::from(count))
+    }
 }
 
 /// Bounded reservoir over navigable vectors supplied in stable logical-key order.
@@ -64,14 +105,7 @@ impl PQTrainer {
                 "chunks must be nonempty and cover positive dimensions",
             ));
         }
-        if options.max_samples == 0
-            || !(1..=256).contains(&options.max_iterations)
-            || !(1..=256).contains(&options.max_centroids)
-        {
-            return Err(invalid(
-                "require positive samples, 1..=256 iterations and 1..=256 centroids",
-            ));
-        }
+        options.validate()?;
         Ok(Self {
             dimensions,
             pq_bytes,

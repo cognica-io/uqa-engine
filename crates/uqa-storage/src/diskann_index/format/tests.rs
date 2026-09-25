@@ -12,6 +12,7 @@ use super::*;
 use crate::mvcc::{DatabaseId, StorageTransactionId};
 
 mod malformed;
+mod metadata;
 mod resources;
 
 fn generation() -> DiskANNGeneration {

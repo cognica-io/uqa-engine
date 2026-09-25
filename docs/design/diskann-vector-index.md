@@ -278,6 +278,8 @@ Every page's shape is recomputed from its expected layout and address. Packed pa
 
 ### Reader contract
 
+The implemented [generation metadata format](diskann-generation-format.md) specifies manifests, codebooks, independently addressed code/side batches and canonical-input fingerprints. Its codecs validate representation and generation identity; sealing, complete-stream verification and MVCC visibility remain reader/build/publication responsibilities.
+
 ```rust
 // Proposed Storage-owned interface, not an existing public API.
 pub trait DiskANNPageReader: Send + Sync {

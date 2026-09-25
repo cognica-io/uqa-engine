@@ -4,19 +4,31 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Generation-bound little-endian node slots and checksummed logical pages.
+//! Generation-bound little-endian node slots, logical pages and immutable metadata records.
 
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 
+mod codes;
+mod coverage;
 mod identity;
 mod layout;
+mod manifest;
 mod node;
 mod page;
+mod quantization;
+mod record;
+mod side;
 
+pub use codes::DiskANNCodeBatch;
+pub use coverage::{DiskANNBuildCoverage, DiskANNCoverageBuilder};
 pub use identity::{DiskANNGeneration, DiskANNVectorVersion};
 pub use layout::{DiskANNNodeAddress, DiskANNNodeLayout, DiskANNPageShape};
+pub use manifest::{DiskANNArtifactDigests, DiskANNManifest, DiskANNManifestInput};
 pub use node::{DiskANNNode, DiskANNNodeInput};
 pub use page::{decode_page, encode_page, DiskANNPage};
+pub use quantization::{decode_codebook, encode_codebook, DiskANNQuantizationIdentity};
+pub use record::artifact_digest;
+pub use side::{DiskANNSideBatch, DiskANNSideEntry, DiskANNSideLayout};
 
 pub const NODE_HEADER_BYTES: usize = 64;
 pub const PAGE_BYTES: usize = 4096;
