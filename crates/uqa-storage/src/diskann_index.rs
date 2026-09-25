@@ -4,8 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `DiskANN` numerical primitives. Navigation values are not public retrieval scores.
+//! `DiskANN` numerical and physical primitives. Navigation values are not public retrieval scores.
 
+pub mod format;
 mod metric;
 mod pq;
 mod random;

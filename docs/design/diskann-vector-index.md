@@ -229,7 +229,7 @@ The manifest identifies database/table/index incarnations, format and algorithm 
 | Change records | Per-document evaluated replacement/tombstone and logical version identity; no per-write graph rebuild |
 | Build ownership | Unpublished generation, staging owner/lease, bounded progress, checksums, and cleanup state |
 
-Page/node headers validate declared lengths, counts, ordinals, node ranges, maximum degree, dimension, format, and checksums before allocating adjacency or vectors. Codes and node pages cannot be mixed across generations. Use explicitly versioned little-endian encodings and checked offsets. Initial node IDs are 64-bit generation-local integers; a compact 32-bit representation would require a declared format discriminator and overflow rejection.
+Page envelopes validate their length, generation, dimensions, graph bounds, fragment shape, format, and checksum without allocation. A complete node decoder checks the slot length, node ID, degree, and origin-token shape before reserving vector or adjacency buffers; it then validates raw coordinates, canonical norm, and neighbor invariants. Ordinal membership and origin visibility require the canonical snapshot and are checked by the candidate owner, not inferred from well-formed bytes. Codes and node pages cannot be mixed across generations. Use explicitly versioned little-endian encodings and checked offsets. Initial node IDs are 64-bit generation-local integers; a compact 32-bit representation would require a declared format discriminator and overflow rejection.
 
 For dimension $D$, final degree $R$, and fixed node metadata size $H$, a simple fixed-width slot has size
 
@@ -240,6 +240,43 @@ $$
 A logical page has an initial 4 KiB target with header/checksum overhead excluded from its payload $P$. If $S\le P$, pack $\lfloor P/S\rfloor$ slots and pad unused neighbor positions. Larger slots occupy $\lceil S/P\rceil$ validated fragments. The reader gathers every fragment before decoding a node. High-dimensional vectors must not be truncated or assumed to fit in one page. Record all layout constants in the manifest rather than recalculating them from a new binary's defaults.
 
 These are logical pages. A SQLite/redb lookup may perform multiple B-tree, encrypted-page, compressed-page, or operating-system reads; the design does not equate one BLOB lookup with one aligned SSD read. Physical read amplification and overlap must be measured on the actual provider. Page packing improves locality without inventing a raw-device guarantee.
+
+### Node and page encoding
+
+The revision-1 codec in `uqa-storage::diskann_index::format` fixes $H=64$, page size 4,096 bytes, page header size 144 bytes, and $P=3,952$. Integers and floating-point bit patterns are little-endian; structure padding is never serialized. Layout construction checks addressable slot size, fragment count, and total page-count arithmetic before accepting the layout. A zero-node generation has no legal node or page address.
+
+`DiskANNGeneration` contains a nonzero 16-byte persistent data incarnation and nonzero 64-bit table incarnation, index incarnation, and generation. These identities are issued and retained by the storage owner; filesystem paths, names, and reusable SQL OIDs are unsuitable substitutes. The data incarnation is distinct from MVCC's transaction-history `DatabaseId`, which can change on backup restoration. A restored data generation retains its stored identity, while subsequent vector writes use their actual writer history. The codec checks identity equality; provider affinity, allocation, restore remapping, and generation leases remain owner responsibilities.
+
+Each node contains a `DiskANNVectorVersion`: the original `StorageTransactionId` (16-byte history identity and nonzero 64-bit writer allocation) plus a nonzero 64-bit mutation revision. The vector mutation owner assigns and persists the revision with the canonical value and change record, distinguishing replacements within the same transaction; it retains this origin after writer receipts are reclaimed. A build copies the selected origin rather than substituting the builder's transaction. An origin token is not a snapshot-coverage token, and neither may be inferred from a maximum transaction ID or commit timestamp. This codec defines their representation without claiming that mutation or publication integration is complete.
+
+| Node byte offsets | Field |
+| --- | --- |
+| 0–8, 8–16 | Generation-local node ID, `DocId` (`u64` each) |
+| 16–20, 20–24 | Tensor ordinal (`u32`), canonical raw norm (`f32` bits) |
+| 24–32 | Actual neighbor count (`u64`) |
+| 32–48, 48–56, 56–64 | Origin writer history, writer allocation, mutation revision |
+| 64–$(64+4D)$ | Original $D$ raw `f32` bit patterns |
+| $(64+4D)$–$S$ | $R$ neighbor slots (`u64` each); unused slots are zero |
+
+Graph nodes require finite coordinates and a finite positive canonical raw norm. Zero, underflowed, or nonfinite-derived norms belong in the separately encoded exact side stream. Recomputing the stored norm uses the canonical sequential `f32` arithmetic; neither normalization nor serialization rewrites the raw vector, including signed zero. Neighbors are strictly increasing, unique, below the node count, and different from the node itself. A zero neighbor is a valid node ID within the declared degree; only unused slots are padding. Decode reserves buffers under the supplied memory allowance and releases partial results on any failure.
+
+| Page byte offsets | Field |
+| --- | --- |
+| 0–8, 8–12 | Magic `UQADNPG\0`, page revision (`u32`, initially 1) |
+| 12–16 | Reserved zero bytes |
+| 16–32, 32–40, 40–48, 48–56 | Data, table, index, and generation identities |
+| 56–64, 64–72, 72–80 | Page ID, node count, maximum degree (`u64` each) |
+| 80–84, 84–88 | Dimensions (`u32`), reserved zero bytes |
+| 88–96 | First node ID (`u64`) |
+| 96–100, 100–104, 104–108, 108–112 | Slot count, fragment index, fragment count, payload bytes (`u32` each) |
+| 112–144 | SHA-256 of bytes 0–112 followed by bytes 144–4,096 |
+| 144–4,096 | Payload followed by zero padding |
+
+Every page's shape is recomputed from its expected layout and address. Packed pages contain complete slots with fragment index zero and count one; fragmented pages contain one consecutive part of one node. A page with another dimension/degree layout is rejected even if its slot size happens to match. Unknown revisions, unexpected addresses, nonzero reserved bytes, mismatched checksums, and trailing padding errors fail explicitly. SHA-256 detects damaged bytes; it is not authentication or a replacement for the provider's encryption domain.
+
+`decode_page` returns a borrowed, allocation-free checked envelope. A valid checksum does not establish node validity or visibility: the reader must gather the full slot under one generation and call `decode_node`, then the candidate owner checks its canonical origin and ordinal. `encode_page` similarly accepts only a correctly sized payload and seals the envelope; graph sealing must separately validate complete nodes. The independent [byte fixture](../../crates/uqa-storage/tests/fixtures/diskann/README.md#node-and-page-bytes) fixes header bytes, raw signed-zero bits, packed nodes, and a two-fragment 1,024-dimensional node without storing full page dumps.
+
+### Reader contract
 
 ```rust
 // Proposed Storage-owned interface, not an existing public API.
