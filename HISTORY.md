@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- Have parent processes kill prepared notification crash fixtures without running Rust destructors or C exit handlers. Preserve the original recovery deadline, forced-termination checks, durable messages, sender identity and encrypted-file assertions while avoiding OpenSSL cleanup racing an intentionally live recovery worker.
+
 ## [0.4.0] - 2026-09-25
 
 This release delivers shared MVCC for overlapping SQL writers, PostgreSQL comparison/catalog/assignment corrections, retained-resource fixes, and committed notification recovery. It includes breaking low-level Rust API changes and one-way persistent-format upgrades. Update packages and database-owning processes together; retain a closed pre-upgrade backup and follow the [0.4.0 upgrade guide](docs/manual/reference/10-upgrading.md).

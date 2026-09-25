@@ -118,13 +118,14 @@ fn cross_process_notification_listener_child() {
     if mode.ends_with("transaction") {
         exec(&engine, "BEGIN");
     }
-    std::fs::write(
-        handshake.join(format!("{mode}-ready")),
-        engine.backend_process_id().to_string(),
-    )
-    .unwrap();
+    let preparing = handshake.join(format!("{mode}-preparing"));
+    std::fs::write(&preparing, engine.backend_process_id().to_string()).unwrap();
+    std::fs::rename(preparing, handshake.join(format!("{mode}-ready"))).unwrap();
     if mode == "crash" {
-        std::process::exit(0);
+        // The parent kills the ready process without running Rust or C cleanup.
+        loop {
+            std::thread::park();
+        }
     }
     if mode.ends_with("transaction") {
         assert!(!engine
@@ -238,7 +239,14 @@ fn separate_processes_deliver_defer_and_reap_notifications() {
 
     let mut crashed = spawn_notification_child(&database, directory.path(), "crash");
     wait_for_notification_file(&directory.path().join("crash-ready"));
-    assert!(crashed.wait().unwrap().success());
+    crashed.kill().unwrap();
+    let status = crashed.wait().unwrap();
+    assert!(!status.success(), "listener exited normally: {status}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(status.signal(), Some(libc::SIGKILL), "{status}");
+    }
     exec(&sender, "NOTIFY cross_process_events, 'no recipient'");
     let usage = exec(&sender, "SELECT pg_notification_queue_usage() AS usage");
     assert_eq!(usage.rows[0].get("usage"), Some(&Value::Float(0.0)));

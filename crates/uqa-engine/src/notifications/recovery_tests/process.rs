@@ -79,13 +79,13 @@ fn notification_sender_process() {
     if provider >= 4 {
         assert_encrypted_files(Path::new(&path));
     }
-    std::fs::write(
-        Path::new(&path).with_extension("sender-pid"),
-        sender.backend_process_id().to_string(),
-    )
-    .unwrap();
-    // Exit skips every Rust destructor: only the operating system releases the unfinished registry and session resources, and no application wake is sent.
-    std::process::exit(0);
+    let preparing = Path::new(&path).with_extension("sender-pid-preparing");
+    std::fs::write(&preparing, sender.backend_process_id().to_string()).unwrap();
+    std::fs::rename(preparing, Path::new(&path).with_extension("sender-pid")).unwrap();
+    // The parent kills this prepared child, bypassing Rust destructors and C exit handlers while the registry and session resources remain unfinished.
+    loop {
+        std::thread::park();
+    }
 }
 
 #[rstest::rstest]
@@ -123,6 +123,25 @@ fn idle_listener_recovers_an_exited_process_without_a_sender_wakeup(
         .spawn()
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(20);
+    let ready = path.with_extension("sender-pid");
+    while !ready.is_file() && Instant::now() < deadline {
+        if child.try_wait().unwrap().is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    child.kill().unwrap();
+    let status = child.wait().unwrap();
+    assert!(
+        ready.is_file(),
+        "sender did not prepare process loss: {status}"
+    );
+    assert!(!status.success(), "sender exited normally: {status}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(status.signal(), Some(libc::SIGKILL), "{status}");
+    }
     while pending.is_empty() && Instant::now() < deadline {
         // This is the listener's existing condition variable, not polling SQL or the registry. Only the surviving recovery worker can complete the delivery.
         listener.runtime.notification_wake.wait_for(
@@ -130,16 +149,11 @@ fn idle_listener_recovers_an_exited_process_without_a_sender_wakeup(
             deadline.saturating_duration_since(Instant::now()),
         );
     }
-    if pending.is_empty() {
-        let _ = child.kill();
-    }
-    let status = child.wait().unwrap();
     assert_eq!(
         pending.len(),
         1,
         "idle recovery did not wake the surviving listener"
     );
-    assert!(status.success(), "sender failed: {status}");
     let original = pending.pop_front().unwrap();
     drop(pending);
     let process_id: i32 = std::fs::read_to_string(path.with_extension("sender-pid"))
