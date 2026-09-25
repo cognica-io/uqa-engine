@@ -45,11 +45,8 @@ impl NavigationInput {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         let (canonical_norm, norm) = norms(dimensions, raw, control)?;
-        if canonical_norm == 0.0 {
-            return Ok(Self::Exact(ExactVectorReason::ZeroNorm));
-        }
-        if !canonical_norm.is_finite() {
-            return Ok(Self::Exact(ExactVectorReason::NonFiniteNorm));
+        if let Some(reason) = exact_reason(canonical_norm) {
+            return Ok(Self::Exact(reason));
         }
         let mut coordinates = BudgetedVec::new(control.memory());
         coordinates.reserve(raw.len())?;
@@ -59,6 +56,16 @@ impl NavigationInput {
         }
         control.check()?;
         Ok(Self::Navigable(NavigationVector { coordinates }))
+    }
+}
+
+pub(super) fn exact_reason(canonical_norm: f32) -> Option<ExactVectorReason> {
+    if canonical_norm == 0.0 {
+        Some(ExactVectorReason::ZeroNorm)
+    } else if !canonical_norm.is_finite() {
+        Some(ExactVectorReason::NonFiniteNorm)
+    } else {
+        None
     }
 }
 

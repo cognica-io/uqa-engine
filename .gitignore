@@ -12,6 +12,8 @@ __pycache__/
 .venv/
 venv/
 build/
+# Rust modules under crate source trees are not Python build output.
+!crates/*/src/**/build/
 dist/
 *.egg-info/
 *.whl

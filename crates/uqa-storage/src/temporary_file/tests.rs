@@ -8,6 +8,30 @@ use super::*;
 
 mod failures;
 
+#[test]
+fn physical_length_accounts_for_both_slots_and_rejects_invalid_extents() {
+    type File = BlockTemporaryFile<4096>;
+    let mut file = File::new().unwrap();
+    for length in [0, 1, 4096, 4097, 8192] {
+        file.set_len(length).unwrap();
+        assert_eq!(
+            File::physical_len_for(length).unwrap(),
+            std::fs::metadata(file.path()).unwrap().len()
+        );
+        assert_eq!(
+            File::physical_len_for(length).unwrap(),
+            length.div_ceil(4096) * 8277
+        );
+    }
+    assert!(File::physical_len_for(u64::MAX).is_err());
+    assert!(BlockTemporaryFile::<0>::physical_len_for(0).is_err());
+    assert!(BlockTemporaryFile::<16385>::physical_len_for(0).is_err());
+    file.seek(SeekFrom::Start(0)).unwrap();
+    let mut byte = [1];
+    file.read_exact(&mut byte).unwrap();
+    assert_eq!(byte, [0]);
+}
+
 #[derive(Default)]
 pub(super) struct Faults {
     pub(super) fail_after_bytes: Option<usize>,

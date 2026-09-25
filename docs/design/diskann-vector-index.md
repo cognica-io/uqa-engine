@@ -154,6 +154,8 @@ The independent rational fixture predates this graph implementation and fixes bo
 
 ### Building beyond RAM
 
+The implemented [canonical input capture](diskann-build-input.md) reads one borrowed canonical stream into encrypted fixed-width navigation and numeric-side files. It preserves original bits/origins, assigns dense navigation IDs without a resident global directory, shares a physical temporary-byte allowance and replays the navigation file through the existing bounded PQ trainer. This establishes the input boundary; partition construction and global merge/sealing below remain separate implementation work.
+
 The builder streams a bounded training sample and assigns points to overlapping coarse partitions. It builds one bounded partition at a time and externally merges adjacency runs. Partition membership, temporary vectors, adjacency runs, and validation state use the host's encrypted temporary-storage policy. No partition helper calls `load_all_from` on the full corpus.
 
 A union of overlapping partition edges can exceed the final degree bound. The UQA merge explicitly performs a final bounded pruning pass before adding its reserved connectivity edge; it must not truncate IDs or assume union preserves degree. This differs from an unpruned edge union and therefore has its own recall acceptance. Partition overlap and local-to-global identity maps are deterministic and persisted in build provenance.

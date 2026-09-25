@@ -7,7 +7,10 @@
 use uqa_core::{memory::BudgetedVec, DocId};
 
 use super::{field, invalid, record, DiskANNGeneration, DiskANNVectorVersion};
-use crate::diskann_index::{metric::norms, ExactVectorReason};
+use crate::diskann_index::{
+    metric::{exact_reason, norms},
+    ExactVectorReason,
+};
 use crate::mvcc::{DatabaseId, StorageTransactionId};
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 
@@ -35,15 +38,9 @@ impl DiskANNSideEntry {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         let (norm, _) = norms(dimensions, raw, control)?;
-        let reason = if norm == 0.0 {
-            ExactVectorReason::ZeroNorm
-        } else if !norm.is_finite() {
-            ExactVectorReason::NonFiniteNorm
-        } else {
-            return Err(invalid(
-                "navigable vector does not belong in the numeric side stream",
-            ));
-        };
+        let reason = exact_reason(norm).ok_or_else(|| {
+            invalid("navigable vector does not belong in the numeric side stream")
+        })?;
         control.check()?;
         Ok(Self {
             dimensions,

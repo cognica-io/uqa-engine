@@ -1,0 +1,29 @@
+# DiskANN canonical build input
+
+Storage's internal `diskann_index::build::DiskANNBuildInput` captures one caller-selected canonical stream and replays it for bounded PQ training. It is the input owner for the [bounded build](diskann-vector-index.md#building-beyond-ram); partition assignment, global graph merging and generation sealing remain separate work. It adds no SQL access method, snapshot-selection algorithm or publication permission.
+
+## Input and identity
+
+`capture` accepts a generation identity, dimensions, a temporary directory, the shared `DiskANNTemporaryBudget`, the original `StorageReadControl`, and one enumeration callback. The callback supplies borrowed `(DocId, ordinal, DiskANNVectorVersion, &[f32])` inputs in complete canonical document/ordinal order. Coverage validation requires ordinal zero at each new document and contiguous ordinals within a document. The caller must select the actual canonical snapshot and include its complete visible input; the capture cannot establish that precondition from a content digest.
+
+The numerical owner classifies each finite raw vector using its canonical `f32` norm. Navigable vectors and numeric-side vectors enter separate encrypted files. Both retain the original raw bits, logical key and origin; signed zero, underflowed zero norms and overflowing norms keep their existing meanings. Navigation file position is the dense global node ID, so selected records can be read directly without a resident corpus-sized identity map. Classification does not change the source coverage order or require contiguous tensor ordinals inside either separated file.
+
+The existing `DiskANNCoverageBuilder` fingerprints the original canonical sequence, including both classes. Data incarnation and writer-history identity remain distinct. Coverage is not a visibility watermark or a membership oracle. Captured vectors are neither document support nor posting payloads or ranked scores; later consumers still perform version validation, document reduction and canonical scoring at their own boundaries.
+
+## Temporary ownership and limits
+
+Each file reuses Storage's `BlockTemporaryFile<4096>` with its ephemeral XChaCha20-Poly1305 key and authenticated blocks. Each logical block reserves both ciphertext slots and framing, giving physical length `ceil(logical_bytes / 4096) * 8277`. The temporary-file owner supplies the checked `physical_len_for` calculation, so the build owner does not duplicate the cipher framing calculation. This is an ephemeral format, not a durable index, recovery log or raw-file sidecar.
+
+`DiskANNTemporaryBudget` clones share one live byte counter, hard limit and peak. Every file growth reserves the complete prospective encrypted length before writing. A failed partial run is poisoned and retains that reservation until the file closes; it cannot be read or appended as a successful prefix. Successful captures retain their file reservations until dropped. Separate captures using the same allowance compete for that same limit. A caller must share the intended host/build allowance; constructing another allowance is not a global filesystem quota.
+
+Encoded record buffers, decoded raw vectors and the PQ trainer's sample/centroid workspaces retain the original controlled memory allowance. A returned raw vector keeps its charge after the captured files close. Fixed cipher stack scratch, the two opaque temporary-file owners, allocator bookkeeping and filesystem allocation metadata remain their existing separate boundaries; the temporary-byte counter measures encoded file lengths rather than filesystem block allocation. Abrupt process death can leave ciphertext with no persisted decryption key, as described by the existing temporary-file owner; this capture does not introduce durable recovery semantics.
+
+The private fixed-width record is 44 bytes of little-endian metadata followed by `dimensions * 4` raw vector bytes. Metadata contains document ID at byte 0, ordinal at 8, writer database at 12, writer allocation at 28 and revision at 36. No normalized coordinates or payloads are persisted in the capture. Readers check address arithmetic, framing/authentication, complete record length, origin validity, dimensions, finite raw values and expected numeric class under the original cancellation signal.
+
+## Failure and replay
+
+Any invalid input, source error, memory/temporary limit, cancellation or I/O failure discards the entire capture. The first consumer error is preserved even when enumeration suppresses its returned error or later cancels. There is no partial successful capture and no staged generation to publish. A valid capture is immutable; read/training failures release their buffers and preserve its encrypted inputs.
+
+`train` validates the existing `PQTrainingOptions`, streams only navigable records and reuses `PQTrainer`'s bounded reservoir and deterministic training contract. It never enumerates the provider source again or loads the entire raw corpus. Empty/all-side captures return no codebook after validating training settings. The reader, normalization scratch, reservoir and resulting codebook share the original allowance; insufficient memory fails instead of reducing the requested sample capacity silently.
+
+The [independent capture fixture](../../crates/uqa-storage/tests/fixtures/diskann/README.md#canonical-build-capture) fixes literal raw bits, origin identities, numeric classification and canonical coverage. Owner tests additionally exercise raw input larger than the controlled memory limit, PQ replay, shared physical-byte limits, final-owner release, suppressed visitor failure, invalid order/values, cancellation, partial file writes and corrupted/truncated ciphertext. These checks establish bounded input capture; complete larger-than-memory graph construction remains a separate acceptance obligation.

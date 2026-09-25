@@ -6,6 +6,7 @@
 
 //! `DiskANN` numerical and physical primitives. Navigation values are not public retrieval scores.
 
+pub mod build;
 pub mod format;
 mod metric;
 pub mod pages;
