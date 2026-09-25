@@ -55,6 +55,28 @@ impl StorageTransactionId {
     }
 }
 
+/// Origin of one evaluated mutation in its actual publishing transaction. Revisions are never reused after statement or savepoint undo; the pair is provenance, not commit ordering or proof of visibility.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct StorageMutationOrigin {
+    transaction: StorageTransactionId,
+    revision: u64,
+}
+
+impl StorageMutationOrigin {
+    pub(in crate::mvcc) const fn new(transaction: StorageTransactionId, revision: u64) -> Self {
+        Self {
+            transaction,
+            revision,
+        }
+    }
+    pub const fn transaction(self) -> StorageTransactionId {
+        self.transaction
+    }
+    pub const fn revision(self) -> u64 {
+        self.revision
+    }
+}
+
 pub type CommitFingerprint = [u8; 32];
 pub type RecordPage = BudgetedVec<ScannedRecord>;
 

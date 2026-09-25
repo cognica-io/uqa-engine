@@ -4,6 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+mod origin;
 mod refresh;
 mod serializable;
 #[cfg(test)]
@@ -44,6 +45,8 @@ pub(super) struct Transaction {
     read_only: bool,
     pub(super) allocation: Option<StorageTransactionId>,
     receipt_owner: Option<crate::mvcc::RetainedTransactionAllocation>,
+    mutation_revision: u64,
+    abort_only: bool,
     prepared: Option<PreparedRecordCommit>,
     materialized: Option<PreparedRecordCommit>,
     graph: BudgetedVec<OwnedGraphMutation>,
@@ -80,6 +83,8 @@ impl Transaction {
             read_only,
             allocation: None,
             receipt_owner: None,
+            mutation_revision: 0,
+            abort_only: false,
             prepared: None,
             materialized: None,
             graph: BudgetedVec::new(control.memory()),
@@ -127,7 +132,11 @@ impl Transaction {
     }
 
     pub(super) fn unsealed(&self) -> VersionResult<()> {
-        if self.prepared.is_some() || self.completion.is_some() {
+        if self.prepared.is_some()
+            || self.completion.is_some()
+            || self.outcome.is_some()
+            || self.abort_only
+        {
             return Err(VersionError::TransactionSealed);
         }
         Ok(())
@@ -432,7 +441,7 @@ impl Transaction {
         }
     }
 
-    /// Freeze the evaluated batch once and allocate only when records or validation effects require physical publication.
+    /// Freeze the evaluated batch once. A previously issued mutation origin must resolve its allocation even if every record was undone.
     fn seal_publication(
         &mut self,
         persistence: &dyn VersionedPersistence,
@@ -447,20 +456,11 @@ impl Transaction {
             && prepared.vector.is_none()
             && prepared.notification.is_none()
             && !prepared.has_requirements()
+            && self.allocation.is_none()
         {
             return Ok(None);
         }
-        if self.allocation.is_none() {
-            let owner = match persistence.allocate_managed_transaction(control) {
-                Err(VersionError::ReceiptRetentionExhausted { .. }) => {
-                    persistence.reclaim_transaction_receipts(control)?;
-                    persistence.allocate_managed_transaction(control)?
-                }
-                result => result?,
-            };
-            self.allocation = Some(owner.transaction());
-            self.receipt_owner = Some(owner);
-        }
+        self.ensure_allocation(persistence, control)?;
         Ok(self.allocation)
     }
 
@@ -595,8 +595,12 @@ impl Transaction {
                 Ok(())
             }
             CommitStatus::Committed(receipt) => {
-                let prepared = self.prepared.as_ref().expect("allocated prepared attempt");
-                if receipt.transaction != id || receipt.fingerprint != prepared.fingerprint() {
+                if receipt.transaction != id
+                    || self
+                        .prepared
+                        .as_ref()
+                        .is_none_or(|prepared| receipt.fingerprint != prepared.fingerprint())
+                {
                     self.outcome = Some(CommitErrorOutcome::Indeterminate(id));
                     return Err(
                         self.retain_uncertain_outcome(id, VersionError::CommitMismatch.into())

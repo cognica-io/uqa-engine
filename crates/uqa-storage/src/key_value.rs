@@ -50,7 +50,10 @@ pub use ivf_records::KeyValueIVFRecords;
 pub(crate) mod occurrence_records;
 pub use occurrence_records::KeyValueOccurrenceRecords;
 mod view;
-pub use view::{KeyValueMutation, KeyValueRead, KeyValueReadRevision, KeyValueReadScope};
+pub use view::{
+    KeyValueMutation, KeyValueRead, KeyValueReadRevision, KeyValueReadScope,
+    KeyValueVersionedMutation,
+};
 
 const TAG_METADATA: u8 = b'm';
 const TAG_TABLE: u8 = b't';
@@ -352,6 +355,16 @@ pub trait KeyValueStore: Send + Sync {
     fn with_mutation(&self, _mutate: &mut KeyValueMutation<'_>) -> StorageBackendResult<()> {
         Err(StorageBackendError::Other(
             "atomic KeyValue evaluation is not supported by this store".into(),
+        ))
+    }
+
+    /// Evaluate and stage once with the actual durable writer and a non-reused mutation revision. Origins may be persisted alongside canonical values, but do not prove publication or visibility. The callback has the same non-reentrancy rules as `with_mutation`; capable wrappers must preserve the original origin and atomic batch.
+    fn with_versioned_mutation(
+        &self,
+        _mutate: &mut KeyValueVersionedMutation<'_>,
+    ) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "versioned KeyValue mutation origins are not supported by this store".into(),
         ))
     }
 
