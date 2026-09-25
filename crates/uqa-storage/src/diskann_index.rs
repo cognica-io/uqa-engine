@@ -12,6 +12,7 @@ mod metric;
 pub mod pages;
 mod pq;
 mod random;
+pub mod search;
 mod vamana;
 
 pub use metric::{ExactVectorReason, NavigationInput, NavigationVector, SquaredNavigationDistance};

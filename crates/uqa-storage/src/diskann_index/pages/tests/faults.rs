@@ -196,6 +196,20 @@ fn reordered_batches_preserve_request_order_and_bad_completions_fail_closed() {
             assert!(result.is_err());
         }
         assert_eq!(query.memory().used(), 0);
+        let result = reader.read_nodes(&[2, 0, 1], &query);
+        if matches!(fault, Fault::Reverse) {
+            assert_eq!(
+                result
+                    .unwrap()
+                    .iter()
+                    .map(DiskANNNode::node_id)
+                    .collect::<Vec<_>>(),
+                [2, 0, 1]
+            );
+        } else {
+            assert!(result.is_err());
+        }
+        assert_eq!(query.memory().used(), 0);
         assert!(reader.read_pages(&[1, 0], &query).is_err());
         assert!(reader.read_pages(&[0, 0], &query).is_err());
         assert!(reader.read_pages(&[3], &query).is_err());

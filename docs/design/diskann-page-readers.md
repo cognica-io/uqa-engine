@@ -14,6 +14,8 @@ Visitors are internal copy operations. A provider may borrow its existing data d
 
 `read_node` validates the page envelope before decoding a packed node. For a fragmented node it reserves the complete slot, gathers one validated fragment at a time, and decodes only after every fragment arrives. Its transient page requirement is therefore one logical page regardless of the node's dimension count. Complete node validation checks raw coordinates, canonical norm, logical identity, origin and neighbor representation; it supplies no snapshot-visibility decision.
 
+`read_nodes` accepts unique node IDs in arbitrary priority order and rejects duplicate or out-of-range requests before provider I/O. It sorts and deduplicates required page IDs, retains one validated lease per required page, reconstructs fragments and returns checked nodes in the original order. Each provider call respects the in-flight page cap; aggregate leases and decoded nodes share the query allowance. The [paged traversal](diskann-paged-navigation.md) uses this path directly, so a disabled cache cannot cause prefetch followed by duplicate node reads.
+
 `visit_side` streams bounded numeric-side records, checks ordering across batch boundaries, and verifies the complete stream digest. An internal consumer may have received a prefix when a later error occurs; it must discard its partial candidate state and must not expose rows or publish effects before successful completion. Canonical value lookup, origin/ordinal visibility and scoring remain the candidate owner's responsibility.
 
 ## Allocation and lifetime

@@ -22,6 +22,8 @@ use crate::read_control::StorageReadControl;
 use crate::vector_index::DiskANNIndexParams;
 use crate::{KeyValueStore, StorageBackendError, StorageBackendResult};
 
+mod search;
+
 const DIMENSIONS: u32 = 32;
 const NODES: u64 = 1024;
 const WORKSPACE: usize = 65_536;
@@ -210,7 +212,7 @@ pub fn verify_diskann_built_reopen(
         },
     )?;
     let reader = DiskANNReader::open(
-        source,
+        source.clone(),
         DIMENSIONS,
         build_parameters(),
         DiskANNReadLimits {
@@ -259,7 +261,9 @@ pub fn verify_diskann_built_reopen(
         Ok(())
     })?;
     expect_eq(&side, &3, "complete reopened side stream")?;
-    drop((reader, repository));
+    drop(repository);
+    search::verify(source, &reader, &control)?;
+    drop(reader);
     expect_eq(
         &control.memory().used(),
         &0,

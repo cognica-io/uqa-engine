@@ -68,6 +68,12 @@ These expectations cover assignment and capacity mechanics, while the existing i
 
 Owner checks complete capture, partitioning and global merge for 1,024 32-dimensional vectors (131,072 raw bytes) under a 65,536-byte controlled allowance using encrypted files. Every dense row retains sorted unique neighbors, bounded degree and its global successor. A separate two-way pass over 700 24-byte records and 350 one-record range pairs performs exactly ten input block decryptions: five blocks for each retained cursor. This is an algorithmic I/O count, not elapsed-time or device-performance evidence. Complete physical generation and held-out query recall acceptance remain separate work.
 
+## Paged beam order
+
+`beams.json` and `generate_beams.py` fix independent rational expectations before the Rust query traversal. Four declared axis centroids and nine code labels isolate navigation from PQ training; an explicit cyclic graph includes distance ties and an entry outside the nearest set. For `(list size, beam width)` values `(3,1)`, `(3,2)` and `(4,3)`, approximate expansion orders are `[6,0,1,4]`, `[6,0,3,4,1]` and `[6,0,3,7,4,8,1]`. Every round records the frontier before and after its frozen beam. Completion visits remaining IDs in ascending order. Python imports no UQA code or candidate output.
+
+Rust constructs sealed physical records from those declared inputs and checks all transitions through packed and fragmented pages, cache modes and reversed completions. Neighbor routing carries original document/ordinal identities; two physical ordinals may name one document and remain distinct until the later canonical projection. These expectations establish deterministic physical work, not ANN recall, score equality or probability calibration.
+
 ## Held-out recall inputs
 
 The independent generator fixes 4,096 corpus vectors and 128 held-out queries, each with 32 coordinates, around 32 integer centers. SplitMix64 has explicit wrapping 64-bit operations; seeds 42, 43 and 24301 select centers, corpus perturbations and query perturbations. Components are exactly representable as `f32`. The fixture stores SHA-256 digests of row-major little-endian `f32` bytes, not a machine report or the expanded corpus. The generator rejects an exact corpus/query overlap.
