@@ -85,6 +85,7 @@ impl KeyValueVectorIndex {
 
     pub(super) fn stage_clear(&self, batch: &mut dyn KeyValueBatch) -> StorageBackendResult<()> {
         batch.delete_prefix(&origin::prefix(&self.table, &self.field)?)?;
+        batch.delete_prefix(&origin::journal::prefix(&self.table, &self.field)?)?;
         batch.delete_prefix(&vector_field_prefix(&self.table, &self.field)?)
     }
 

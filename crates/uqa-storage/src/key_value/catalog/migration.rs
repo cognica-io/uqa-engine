@@ -457,6 +457,7 @@ pub(super) fn table_data_prefixes(table_name: &str) -> StorageBackendResult<Vec<
         reverse_posting_key_prefix(table_name)?,
         vector_key_prefix(table_name)?,
         super::super::vector_index::origin::table_prefix(table_name)?,
+        super::super::vector_index::origin::journal::table_prefix(table_name)?,
         column_stats_prefix(table_name)?,
         table_field_analyzer_prefix(table_name)?,
         field_binding_prefix(table_name)?,

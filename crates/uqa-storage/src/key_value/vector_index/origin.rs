@@ -6,6 +6,7 @@
 
 //! `DiskANN` origins accompany the existing canonical vector keys, without a duplicate corpus.
 
+pub(in crate::key_value) mod journal;
 mod retained;
 #[cfg(test)]
 mod tests;
@@ -15,7 +16,8 @@ use std::sync::Arc;
 
 use super::KeyValueVectorIndex;
 use crate::diskann_index::format::{
-    DiskANNCanonicalOrigin as Record, DiskANNVectorVersion, CANONICAL_ORIGIN_BYTES as BYTES,
+    DiskANNCanonicalOrigin as Record, DiskANNChangeIdentity, DiskANNVectorVersion,
+    CANONICAL_ORIGIN_BYTES as BYTES,
 };
 use crate::key_value::{codec, KeyValueRead};
 use crate::mvcc::VersionError;
@@ -75,6 +77,14 @@ impl KeyValueDiskANNCanonical {
                 let record = Record::new(current, self.index.dimensions, count)?;
                 self.index.stage_replace(batch, document, vectors)?;
                 batch.put(&key, &record.encode())?;
+                batch.put(
+                    &journal::key(
+                        &self.index.table,
+                        &self.index.field,
+                        DiskANNChangeIdentity::new(document, current),
+                    )?,
+                    &record.encode(),
+                )?;
                 control.check()?;
                 version = Some(current);
                 Ok(())
@@ -91,14 +101,16 @@ impl KeyValueDiskANNCanonical {
         let _workspace = control.memory().reserve(self.workspace_bytes(false)?)?;
         let vectors = codec::vector_field_prefix(&self.index.table, &self.index.field)?;
         let origins = prefix(&self.index.table, &self.index.field)?;
+        let changes = journal::prefix(&self.index.table, &self.index.field)?;
         let mut selected = None;
         self.index
             .store
             .with_read_view(&mut |read: &dyn KeyValueRead| {
                 selected = Some(RetainedDiskANNCanonical::new(
-                    read.retain(&[&vectors, &origins])?,
+                    read.retain(&[&vectors, &origins, &changes])?,
                     &vectors,
                     &origins,
+                    &changes,
                     self.index.dimensions,
                     control,
                 )?);
@@ -113,7 +125,7 @@ impl KeyValueDiskANNCanonical {
             .table
             .len()
             .checked_add(self.index.field.len())
-            .and_then(|bytes| bytes.checked_add(ROOT.len() + 64))
+            .and_then(|bytes| bytes.checked_add(ROOT.len() + 128))
             .and_then(|bytes| bytes.checked_mul(8))
             .and_then(|bytes| {
                 bytes.checked_add(
