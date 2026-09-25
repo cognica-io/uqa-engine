@@ -1,6 +1,6 @@
-# DiskANN generations in Key/Value providers
+# DiskANN physical generations
 
-The Storage-owned `KeyValueDiskANNStore` persists physical DiskANN generations through existing versioned Key/Value sessions. SQLite Key/Value and redb share this implementation. It supplies staging, physical sealing and retained page sources; native SQLite catalog mapping, canonical MVCC coverage, catalog publication, search and SQL creation remain separate implementation units.
+The Storage-owned `KeyValueDiskANNStore` persists physical DiskANN generations through existing versioned Key/Value sessions. SQLite Key/Value, redb and native SQLite share this implementation. It supplies staging, physical sealing and retained page sources; canonical MVCC coverage, catalog publication, search and SQL creation remain separate implementation units.
 
 ## Ownership and identities
 
@@ -46,10 +46,18 @@ The dedicated writer uses the existing MVCC evaluated-batch and receipt protocol
 
 `open_source` retains one immutable provider read boundary and reads only the fixed database marker and state. It does not enumerate or load graph/PQ records. The retained source holds its MVCC lease after the live repository closes; historical values remain available through later replacement, deletion and version reclamation. Page batches contain at most 32 unique IDs and report actual I/O concurrency 1.
 
-Point reads enforce each encoded-size cap before provider materialization. Source metadata, copied key pages and reader buffers retain the supplied memory allowance; provider private batches and retained sessions keep their existing separate session allowance. Every read uses the current operation's cancellation and workspace control, so cancelling the opening query does not cancel independent readers. Total build memory, public index retention, native provider mapping and larger-than-memory build acceptance remain later obligations.
+Point reads enforce each encoded-size cap before provider materialization. Source metadata, copied key pages and reader buffers retain the supplied memory allowance; provider private batches and retained sessions keep their existing separate session allowance. Every read uses the current operation's cancellation and workspace control, so cancelling the opening query does not cancel independent readers. Total build memory, public index retention and larger-than-memory build acceptance remain later obligations.
+
+## Native SQLite mapping
+
+`ManagedConnection::diskann_generations` requires an already bound native record session and returns the same Storage-owned generation repository. It obtains an independent staging session from the existing pool, retaining its encryption credential, native data namespace, transaction-history identity, retention allowance and receipt protocol. It does not construct a SQLite Key/Value database over a native file. Opening it during a caller transaction does not publish or undo the caller's changes.
+
+Native mapping format 10 registers database-owned family 57, `_uqa_mvcc_native_diskann_records`, with BLOB key/value columns. The logical bytes above become the physical table's binary key/value; native MVCC keys and row envelopes wrap those bytes without JSON or text conversion. A graph-page value remains exactly 4,096 bytes in the physical table. Native materialization and history publication share the existing guarded atomic commit. Upgrade preserves earlier family identities and format 9's independently persisted data namespace; failed upgrades leave the previous schema/history intact. Current malformed tables or missing guards reject reopening.
+
+The private translation adapter implements the existing ordered Key/Value interface. Native key encoding owns both complete BLOB components and unterminated byte-prefix encoding, preserving empty keys, embedded zero bytes, binary order and strict continuation. Key-only scans never fetch payloads. Point-read limits include the checked native row/key envelope before the provider loads a value; decoding checks the complete native identity and logical key before exposing borrowed payload bytes. Compound reads, retained prefix scopes, original revisions, conditional writes, savepoints and typed commit outcomes retain their existing common MVCC owners. No generation state machine is duplicated in SQLite.
 
 ## Verification
 
-The reusable conformance suite writes an actual graph page, codebook, code batch, side batch and manifest; checks raw signed-zero bits and original vector versions after reopening; verifies caller-transaction isolation; rejects late writes, missing/oversized pages and corrupt seals; and exercises bounded cleanup plus retained reads across replacement, deletion and collection. SQLite runs it through plain, encrypted, compressed and encrypted-compressed connections. redb closes all prior shared-owner handles before its cold reopen.
+The reusable conformance suite writes an actual graph page, codebook, code batch, side batch and manifest; checks raw signed-zero bits and original vector versions after reopening; verifies caller-transaction isolation; rejects late writes, missing/oversized pages and corrupt seals; and exercises bounded cleanup plus retained reads across replacement, deletion and collection. Both native SQLite and SQLite Key/Value run it through plain, encrypted, compressed and encrypted-compressed connections. redb closes all prior shared-owner handles before its cold reopen.
 
 Common MVCC fault tests cover lost creation replies, rejected publication, lost replies before/after durability, original commit fingerprints and a previously evaluated writer racing freeze or discard. Fixed metadata tests preserve typed quota diagnostics and reject missing, repeated or suppressed invalid completions. These are deterministic correctness/resource checks, not timing or SSD performance evidence.

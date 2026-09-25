@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Advance native SQLite mapping to format 10 for guarded binary DiskANN generation records, reusing the common staging, sealing and retained-reader lifecycle across plain, encrypted and compressed owners. Atomic upgrades preserve existing data and history; older native binaries reject the new mapping. Public DiskANN index creation remains unavailable. See the [development upgrade contract](docs/manual/reference/10-upgrading.md#development-native-sqlite-mapping).
 - Have parent processes kill prepared notification crash fixtures without running Rust destructors or C exit handlers. Preserve the original recovery deadline, forced-termination checks, durable messages, sender identity and encrypted-file assertions while avoiding OpenSSL cleanup racing an intentionally live recovery worker.
 
 ## [0.4.0] - 2026-09-25

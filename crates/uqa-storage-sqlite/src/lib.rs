@@ -14,6 +14,7 @@ pub mod compressed_vfs;
 pub mod connection;
 mod connection_lease;
 pub mod detect;
+mod diskann;
 pub mod document_store;
 pub mod inverted_index;
 pub mod vector_index;

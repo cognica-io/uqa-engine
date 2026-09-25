@@ -216,6 +216,26 @@ impl NativeRecordIdentity {
         Ok(key)
     }
 
+    /// Encode a byte prefix within a single BLOB key, without its component terminator. Complete keys retain the existing escaped byte order.
+    pub(crate) fn encode_blob_prefix(
+        self,
+        bytes: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<BudgetedVec<u8>> {
+        let layout = self.family.layout();
+        if layout.identity_columns.len() != 1
+            || layout.column_types[layout.identity_columns[0]] != super::NativeColumnType::Blob
+        {
+            return Err(invalid(
+                "native byte prefix requires one BLOB identity column",
+            ));
+        }
+        let mut key = self.encode_prefix(&[], control)?;
+        key.push(3)?;
+        escaped_prefix(&mut key, bytes, control)?;
+        Ok(key)
+    }
+
     /// Validate every ordered component, including keys for an absent tombstone.
     pub(super) fn decode_full(key: &[u8], control: &StorageReadControl) -> VersionResult<Self> {
         Self::visit_key_components(key, control, |_, _| Ok(()))
@@ -293,6 +313,16 @@ fn escaped_bytes(
     bytes: &[u8],
     control: &StorageReadControl,
 ) -> VersionResult<()> {
+    escaped_prefix(output, bytes, control)?;
+    output.extend_from_slice(&[0, 0])?;
+    Ok(())
+}
+
+fn escaped_prefix(
+    output: &mut BudgetedVec<u8>,
+    bytes: &[u8],
+    control: &StorageReadControl,
+) -> VersionResult<()> {
     output.reserve(
         bytes
             .len()
@@ -308,6 +338,5 @@ fn escaped_bytes(
             }
         }
     }
-    output.extend_from_slice(&[0, 0])?;
     Ok(())
 }

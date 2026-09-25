@@ -15,6 +15,32 @@ use super::{Arc, KeyValueStore, ManagedConnection, Result, SQLiteError, Versione
 use crate::mvcc::native::NativeSnapshot;
 
 impl ManagedConnection {
+    /// Connect physical `DiskANN` staging to an already bound native owner. The returned store opens a dedicated session; it cannot complete this connection's transaction or publish a SQL index.
+    pub fn diskann_generations(
+        &self,
+        control: &StorageReadControl,
+    ) -> uqa_storage::StorageBackendResult<uqa_storage::key_value::KeyValueDiskANNStore> {
+        let records: Arc<dyn KeyValueStore> = Arc::new(self.native_diskann_records()?);
+        uqa_storage::key_value::KeyValueDiskANNStore::connect(&records, control)
+    }
+
+    pub(crate) fn native_diskann_records(&self) -> Result<crate::diskann::Records> {
+        self.surface_cleanup_failure()?;
+        let _gate = self.session.gate.read();
+        let logical = self
+            .session
+            .logical
+            .get()
+            .ok_or(SQLiteError::LogicalSessionRequired)?;
+        let namespace = logical.native.ok_or(SQLiteError::SessionMappingMismatch)?;
+        crate::diskann::Records::new(
+            logical.store.clone(),
+            namespace,
+            self.auxiliary_encryption_key(),
+        )
+        .map_err(Into::into)
+    }
+
     pub(crate) fn native_identifier_watermark(&self, namespace: &[u8]) -> Result<Option<u64>> {
         self.surface_cleanup_failure()?;
         let _gate = self.session.gate.read();
