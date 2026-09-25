@@ -29,6 +29,10 @@ use crate::{StorageBackendError, StorageBackendResult};
 
 mod catalog;
 pub use catalog::KeyValueCatalog;
+mod diskann;
+pub use diskann::{
+    DiskANNStageStatus, KeyValueDiskANNSource, KeyValueDiskANNStage, KeyValueDiskANNStore,
+};
 mod graph_commit;
 mod table_owners;
 pub use graph_commit::KeyValueGraphRecords;
@@ -380,6 +384,20 @@ pub trait KeyValueStore: Send + Sync {
             "controlled value reads are not supported by this KeyValue store".into(),
         ))
     }
+    /// Visit one value with an encoded-size cap checked before provider materialization. This is distinct from the shared workspace allowance; unsupported stores must not fetch an unbounded value as a fallback.
+    fn visit_value_bounded(
+        &self,
+        _key: &[u8],
+        _max_bytes: usize,
+        control: &crate::read_control::StorageReadControl,
+        _visit: &mut crate::read_control::ValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "size-bounded value reads are not supported by this KeyValue store".into(),
+        ))
+    }
+
     /// Visit at most `limit` entries in key order, strictly after `after` when supplied. Encoded values remain borrowed from their provider owner and callbacks must not reenter the store.
     fn visit_prefix_after(
         &self,

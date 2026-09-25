@@ -58,6 +58,8 @@ pub struct DiskANNManifest {
 }
 
 impl DiskANNManifest {
+    pub const ENCODED_BYTES: usize = record::HEADER_BYTES + BODY_BYTES;
+
     pub fn new(input: DiskANNManifestInput) -> StorageBackendResult<Self> {
         input.parameters.validate(input.dimensions)?;
         let layout =

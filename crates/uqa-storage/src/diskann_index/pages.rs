@@ -117,7 +117,7 @@ fn copy(
     Ok(result)
 }
 
-fn read_record(
+pub(crate) fn read_record(
     source: &dyn DiskANNPageSource,
     key: DiskANNRecordKey,
     limit: usize,

@@ -16,6 +16,8 @@ mod commands;
 mod compound;
 #[path = "mvcc_sessions/contracts.rs"]
 mod contracts;
+#[path = "mvcc_sessions/diskann.rs"]
+mod diskann;
 #[path = "mvcc_sessions/documents.rs"]
 mod documents;
 #[path = "mvcc_sessions/graph.rs"]
@@ -36,6 +38,8 @@ mod notifications;
 mod occurrence_merging;
 #[path = "mvcc_sessions/occurrences.rs"]
 mod occurrences;
+#[path = "mvcc_sessions/read_limits.rs"]
+mod read_limits;
 #[path = "mvcc_sessions/retained.rs"]
 mod retained;
 #[path = "mvcc_sessions/sequences.rs"]

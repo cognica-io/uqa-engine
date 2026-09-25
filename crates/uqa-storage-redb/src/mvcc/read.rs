@@ -64,6 +64,21 @@ impl CommittedRecordSnapshot for Snapshot {
         Ok(())
     }
 
+    fn visit_value_bounded(
+        &self,
+        key: &[u8],
+        max_bytes: usize,
+        control: &StorageReadControl,
+        visit: &mut uqa_storage::mvcc::RecordValueVisitor<'_>,
+    ) -> VersionResult<()> {
+        self.visit_value(key, control, &mut |record| {
+            if let Some(value) = record.and_then(|record| record.value) {
+                control.check_value_size(value.len(), max_bytes)?;
+            }
+            visit(record)
+        })
+    }
+
     fn visit_prefix(
         &self,
         prefix: &[u8],

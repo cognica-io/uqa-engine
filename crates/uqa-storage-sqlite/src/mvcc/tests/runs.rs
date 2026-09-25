@@ -14,6 +14,38 @@ use super::*;
 type Records = BTreeMap<Vec<u8>, Option<Vec<u8>>>;
 
 #[test]
+fn bounded_value_reads_reject_oversize_compacted_templates_before_loading() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    let records = (0..130)
+        .map(|index| (key(b"bounded", index), Some(vec![b'x'; 64])))
+        .collect::<Records>();
+    publish(&store, &records, None);
+    store.reclaim_versions(&control()).unwrap();
+    assert!(count(&store, "_uqa_mvcc_runs") > 0);
+    let snapshot = store.snapshot(&control()).unwrap();
+    let query = StorageReadControl::with_limit(4096);
+    let mut visited = false;
+    let error = snapshot
+        .visit_value_bounded(&key(b"bounded", 1), 63, &query, &mut |_| {
+            visited = true;
+            Ok(())
+        })
+        .unwrap_err()
+        .into_storage_error();
+    assert!(matches!(error, uqa_storage::StorageBackendError::Memory(_)));
+    assert!(!visited);
+    assert!(query.memory().peak() < 64);
+    snapshot
+        .visit_value_bounded(&key(b"bounded", 1), 64, &query, &mut |record| {
+            assert_eq!(record.unwrap().value.unwrap(), [b'x'; 64]);
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(query.memory().used(), 0);
+}
+
+#[test]
 fn acl_format_upgrade_retains_populated_runs_and_rejects_missing_predecessor_guards() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     let store = SQLiteRecordStore::new(&connection).unwrap();
