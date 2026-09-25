@@ -6,13 +6,20 @@
 
 //! Transactional SQL asynchronous-notification coordination.
 
+mod completion;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod cross_process;
 mod hub;
 
 #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
 mod cross_process {
+    use std::sync::Arc;
     use uqa_sql::SQLError;
+    use uqa_storage::{
+        notifications::{NotificationPublication, PendingNotification},
+        read_control::StorageReadControl,
+        PersistentStorageBackend,
+    };
 
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
     pub(super) struct CrossProcessQueueState {
@@ -53,21 +60,34 @@ mod cross_process {
     pub(super) struct CrossProcessRegistryTransaction;
 
     impl CrossProcessRegistryTransaction {
+        pub(super) fn suspend_publication(
+            &mut self,
+            _publication: &uqa_storage::notifications::NotificationPublication,
+            _owner: [u8; 16],
+        ) -> Result<(), SQLError> {
+            Err(unsupported())
+        }
+        pub(super) fn resume_publication(
+            &mut self,
+            _publication: &uqa_storage::notifications::NotificationPublication,
+            _owner: [u8; 16],
+            _control: &StorageReadControl,
+        ) -> Result<bool, SQLError> {
+            Err(unsupported())
+        }
+        pub(super) fn prepare_publication(
+            &mut self,
+            _process_id: i32,
+            _pending: &[PendingNotification],
+            _listener: Option<&CrossProcessListenerRow>,
+            _control: &StorageReadControl,
+        ) -> Result<NotificationPublication, SQLError> {
+            Err(unsupported())
+        }
+        pub(super) const fn pending_acknowledgement(&self) -> Option<[u8; 32]> {
+            None
+        }
         pub(super) fn queue_state(&self) -> Result<CrossProcessQueueState, SQLError> {
-            Err(unsupported())
-        }
-
-        pub(super) fn save_queue_state(
-            &self,
-            _state: CrossProcessQueueState,
-        ) -> Result<(), SQLError> {
-            Err(unsupported())
-        }
-
-        pub(super) fn append_entries(
-            &self,
-            _entries: &[CrossProcessQueueEntry],
-        ) -> Result<(), SQLError> {
             Err(unsupported())
         }
 
@@ -109,6 +129,32 @@ mod cross_process {
     pub(super) struct CrossProcessCoordinator;
 
     impl CrossProcessCoordinator {
+        pub(super) fn begin_publication_transaction(
+            &self,
+            _control: &StorageReadControl,
+            _resume: Option<(
+                &uqa_storage::notifications::NotificationPublication,
+                [u8; 16],
+            )>,
+        ) -> Result<CrossProcessRegistryTransaction, SQLError> {
+            Err(unsupported())
+        }
+        pub(super) fn initialize_recovery(
+            &self,
+            _backend: &Arc<dyn PersistentStorageBackend>,
+            _control: &StorageReadControl,
+        ) -> Result<(), SQLError> {
+            Err(unsupported())
+        }
+        pub(super) fn recovery_control(&self) -> Result<StorageReadControl, SQLError> {
+            Err(unsupported())
+        }
+        pub(super) const fn recovery_initialized(&self) -> bool {
+            false
+        }
+        pub(super) fn poll_needed(&self, _local_owners: &[[u8; 16]]) -> Result<bool, SQLError> {
+            Err(unsupported())
+        }
         pub(super) fn begin_registry_transaction(
             &self,
         ) -> Result<CrossProcessRegistryTransaction, SQLError> {
@@ -147,18 +193,19 @@ use std::time::{Duration, Instant};
 
 use crate::Engine;
 use cross_process::{
-    CrossProcessCoordinator, CrossProcessListenerRow, CrossProcessQueueEntry,
-    CrossProcessQueueState, CrossProcessRegistryTransaction, ListenerLease,
+    CrossProcessCoordinator, CrossProcessListenerRow, CrossProcessQueueState,
+    CrossProcessRegistryTransaction, ListenerLease,
 };
 use parking_lot::{Condvar, Mutex, MutexGuard};
 use uqa_sql::SQLError;
+pub(crate) use uqa_storage::notifications::PendingNotification;
+#[cfg(test)]
+use uqa_storage::notifications::NOTIFICATION_QUEUE_PAGE_BYTES;
+use uqa_storage::notifications::{
+    notification_end_position, notifications_fit_queue, queue_page, MAX_NOTIFICATION_CHANNEL_BYTES,
+    MAX_NOTIFICATION_PAYLOAD_BYTES, MAX_NOTIFICATION_QUEUE_PAGES,
+};
 
-const MAX_NOTIFICATION_CHANNEL_BYTES: usize = 64;
-const MAX_NOTIFICATION_PAYLOAD_BYTES: usize = 8_000;
-const NOTIFICATION_QUEUE_PAGE_BYTES: u64 = 8_192;
-const MAX_NOTIFICATION_QUEUE_PAGES: u64 = 1_048_576;
-const NOTIFICATION_ENTRY_HEADER_BYTES: u64 = 16;
-const MIN_NOTIFICATION_ENTRY_BYTES: u64 = 20;
 const NOTIFICATION_QUEUE_WARNING_INTERVAL: Duration = Duration::from_secs(5);
 
 /// One committed SQL notification waiting for this session.
@@ -170,12 +217,6 @@ pub struct SQLNotification {
     pub channel: String,
     /// Sender-provided payload, or the empty string when `NOTIFY` omitted it.
     pub payload: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PendingNotification {
-    pub(crate) channel: String,
-    pub(crate) payload: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -230,25 +271,38 @@ struct PreparedDelivery {
     notifications: Vec<SQLNotification>,
 }
 
-struct CrossNotificationCommit {
+pub(super) struct CrossNotificationCommit {
     registry: Option<CrossProcessRegistryTransaction>,
     new_lease: Option<ListenerLease>,
-    deliveries: Vec<PreparedDelivery>,
+    publisher_lease: Option<ListenerLease>,
+    publication_applied: bool,
+    publication: Option<uqa_storage::notifications::NotificationPublication>,
+    previous_publication: Option<[u8; 32]>,
     wake_ports: Vec<u16>,
     warning: Option<String>,
 }
 
+#[derive(Clone, Copy)]
+struct CrossNotificationRequest<'a> {
+    session_id: u64,
+    process_id: i32,
+    channels: &'a [String],
+    pending: &'a [PendingNotification],
+    control: &'a uqa_storage::read_control::StorageReadControl,
+    durable_publication: bool,
+}
+
 struct PreparedCrossSubscription {
     new_lease: Option<ListenerLease>,
-    owner_id: Option<[u8; 16]>,
     listeners: Vec<CrossProcessListenerRow>,
+    subscription: Option<CrossProcessListenerRow>,
 }
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 struct CrossProcessState {
     database_path: std::path::PathBuf,
     encryption_key: Option<uqa_storage::StorageEncryptionKey>,
-    registry: Mutex<Option<uqa_storage_sqlite::ManagedConnection>>,
+    registry: Mutex<Option<uqa_storage_sqlite::notifications::NotificationRegistry>>,
     hub: Weak<NotificationHub>,
     coordinator: Mutex<Option<Arc<CrossProcessCoordinator>>>,
 }
@@ -258,7 +312,19 @@ struct CrossProcessState;
 
 impl CrossProcessState {
     #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
-    fn registry(&self) -> Result<uqa_storage_sqlite::ManagedConnection, SQLError> {
+    fn initialized_coordinator(&self) -> Option<Arc<CrossProcessCoordinator>> {
+        self.coordinator.lock().clone()
+    }
+
+    #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
+    fn initialized_coordinator(&self) -> Option<Arc<CrossProcessCoordinator>> {
+        None
+    }
+
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+    fn registry(
+        &self,
+    ) -> Result<uqa_storage_sqlite::notifications::NotificationRegistry, SQLError> {
         let mut initialized = self.registry.lock();
         if let Some(registry) = initialized.as_ref() {
             return Ok(registry.clone());
@@ -309,7 +375,33 @@ impl CrossProcessState {
 
 pub(super) struct NotificationCommitGuard<'a> {
     _gate: MutexGuard<'a, ()>,
-    cross: Option<CrossNotificationCommit>,
+    cross: Option<Box<CrossNotificationCommit>>,
+}
+
+impl NotificationCommitGuard<'_> {
+    pub(super) fn retain(mut self) -> (Option<Box<CrossNotificationCommit>>, Result<(), SQLError>) {
+        let suspended = self.cross.as_mut().map_or(Ok(()), |prepared| {
+            if !prepared.publication_applied {
+                if let (Some(registry), Some(publication)) =
+                    (prepared.registry.as_mut(), prepared.publication.as_ref())
+                {
+                    let owner = prepared
+                        .publisher_lease
+                        .as_ref()
+                        .ok_or_else(|| {
+                            SQLError::Internal(
+                                "retained notification has no publication lease".into(),
+                            )
+                        })?
+                        .owner_id();
+                    registry.suspend_publication(publication, owner)?;
+                }
+            }
+            prepared.registry.take();
+            Ok(())
+        });
+        (self.cross, suspended)
+    }
 }
 
 #[derive(Default)]
@@ -358,57 +450,6 @@ fn append_notification(
     state.head_position = end_position;
 }
 
-fn notification_end_position(position: u64, notification: &PendingNotification) -> u64 {
-    let content = NOTIFICATION_ENTRY_HEADER_BYTES
-        .saturating_add(notification.channel.len() as u64)
-        .saturating_add(1)
-        .saturating_add(notification.payload.len() as u64)
-        .saturating_add(1);
-    let length = content.saturating_add(3) & !3;
-    let offset = position % NOTIFICATION_QUEUE_PAGE_BYTES;
-    let aligned_position = if offset.saturating_add(length) > NOTIFICATION_QUEUE_PAGE_BYTES {
-        position.saturating_add(NOTIFICATION_QUEUE_PAGE_BYTES - offset)
-    } else {
-        position
-    };
-    let end = aligned_position.saturating_add(length);
-    let end_offset = end % NOTIFICATION_QUEUE_PAGE_BYTES;
-    if end_offset.saturating_add(MIN_NOTIFICATION_ENTRY_BYTES) > NOTIFICATION_QUEUE_PAGE_BYTES {
-        end.saturating_add(NOTIFICATION_QUEUE_PAGE_BYTES - end_offset)
-    } else {
-        end
-    }
-}
-
-fn notifications_fit_queue(
-    mut head: u64,
-    tail: u64,
-    max_queue_pages: u64,
-    pending: &[PendingNotification],
-) -> bool {
-    let tail_page = queue_page(tail);
-    for notification in pending {
-        if queue_page(head).saturating_sub(tail_page) >= max_queue_pages {
-            return false;
-        }
-        let content = NOTIFICATION_ENTRY_HEADER_BYTES
-            .saturating_add(notification.channel.len() as u64)
-            .saturating_add(1)
-            .saturating_add(notification.payload.len() as u64)
-            .saturating_add(1);
-        let length = content.saturating_add(3) & !3;
-        let offset = head % NOTIFICATION_QUEUE_PAGE_BYTES;
-        if offset.saturating_add(length) > NOTIFICATION_QUEUE_PAGE_BYTES {
-            head = head.saturating_add(NOTIFICATION_QUEUE_PAGE_BYTES - offset);
-            if queue_page(head).saturating_sub(tail_page) >= max_queue_pages {
-                return false;
-            }
-        }
-        head = notification_end_position(head, notification);
-    }
-    true
-}
-
 fn projected_tail_position(
     state: &NotificationHubState,
     session_id: u64,
@@ -422,10 +463,6 @@ fn projected_tail_position(
         })
         .min()
         .unwrap_or(state.head_position)
-}
-
-fn queue_page(position: u64) -> u64 {
-    position / NOTIFICATION_QUEUE_PAGE_BYTES
 }
 
 fn queue_usage(state: &NotificationHubState, max_queue_pages: u64) -> f64 {
@@ -593,94 +630,6 @@ impl Engine {
         self.notification_hub.begin_transaction(self.session_id)
     }
 
-    pub(super) fn begin_notification_commit<'a>(
-        &'a self,
-        outer: bool,
-        transaction: &crate::TransactionFrame,
-    ) -> Result<Option<NotificationCommitGuard<'a>>, SQLError> {
-        if !outer {
-            return Ok(None);
-        }
-        let current_channels = self.session.state.read().listened_channels.clone();
-        if current_channels.is_empty()
-            && transaction.pending_listen_actions.is_empty()
-            && transaction.pending_notifications.is_empty()
-        {
-            return Ok(None);
-        }
-        let final_channels = transaction.final_listened_channels(&current_channels);
-        let cross = self
-            .notification_hub
-            .cross
-            .as_ref()
-            .map(CrossProcessState::coordinator)
-            .transpose()?;
-        let registry = cross
-            .as_ref()
-            .map(|cross| cross.begin_registry_transaction())
-            .transpose()?;
-        let commit = self.notification_hub.commit_gate.lock();
-        let prepared = if let (Some(cross), Some(registry)) = (cross, registry) {
-            Some(self.notification_hub.prepare_cross_commit(
-                &cross,
-                registry,
-                self.session_id,
-                self.backend_process_id(),
-                &final_channels,
-                &transaction.pending_notifications,
-            )?)
-        } else {
-            self.notification_hub.validate_commit(
-                &commit,
-                self.session_id,
-                &final_channels,
-                &transaction.pending_notifications,
-            )?;
-            None
-        };
-        Ok(Some(NotificationCommitGuard {
-            _gate: commit,
-            cross: prepared,
-        }))
-    }
-
-    pub(super) fn commit_notification_state(
-        &self,
-        commit: NotificationCommitGuard<'_>,
-        transaction: &crate::TransactionFrame,
-    ) -> Result<(), SQLError> {
-        let current_channels = self.session.state.read().listened_channels.clone();
-        let channels = transaction.final_listened_channels(&current_channels);
-        let session = NotificationSessionCommit {
-            session_id: self.session_id,
-            process_id: self.backend_process_id(),
-            channels: channels.clone(),
-            queue: &self.runtime.notifications,
-            wake: &self.runtime.notification_wake,
-            notices: &self.runtime.notices,
-            pending: &transaction.pending_notifications,
-        };
-        let NotificationCommitGuard { _gate: gate, cross } = commit;
-        match cross {
-            Some(prepared) => {
-                if let Err(error) = self
-                    .notification_hub
-                    .finalize_cross_commit(gate, prepared, session)
-                {
-                    return Err(match self.notification_hub.rollback_session(self.session_id) {
-                        Ok(()) => error,
-                        Err(recovery_error) => SQLError::Internal(format!(
-                            "{error}; restore asynchronous notification listener after commit failure: {recovery_error}"
-                        )),
-                    });
-                }
-            }
-            None => self.notification_hub.commit_session(&gate, session),
-        }
-        self.session.state.write().listened_channels = channels;
-        Ok(())
-    }
-
     pub(super) fn rollback_notification_state(&self) -> Result<(), SQLError> {
         self.notification_hub.rollback_session(self.session_id)
     }
@@ -711,6 +660,7 @@ impl Engine {
     }
 
     pub(crate) fn notification_queue_usage(&self) -> Result<f64, SQLError> {
+        self.prepare_notification_recovery()?;
         self.notification_hub.usage()
     }
 
@@ -788,41 +738,11 @@ impl crate::TransactionFrame {
 }
 
 #[cfg(test)]
+mod recovery_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-
-    fn pending(channel_bytes: usize, payload_bytes: usize) -> PendingNotification {
-        PendingNotification {
-            channel: "c".repeat(channel_bytes),
-            payload: "p".repeat(payload_bytes),
-        }
-    }
-
-    #[test]
-    fn queue_layout_accounts_for_alignment_page_padding_and_capacity() {
-        let largest = pending(63, 7_999);
-        let smallest = pending(1, 0);
-        assert_eq!(notification_end_position(0, &largest), 8_080);
-        assert_eq!(notification_end_position(8_080, &smallest), 8_100);
-
-        let mut one_page = vec![largest];
-        one_page.extend(std::iter::repeat_n(smallest.clone(), 5));
-        assert!(notifications_fit_queue(0, 0, 1, &one_page));
-        assert!(!notifications_fit_queue(
-            0,
-            0,
-            1,
-            &[one_page, vec![smallest]].concat()
-        ));
-
-        let entry_that_requires_the_next_page = pending(1, 30);
-        assert!(!notifications_fit_queue(
-            8_160,
-            0,
-            1,
-            &[entry_that_requires_the_next_page]
-        ));
-    }
 
     #[test]
     fn queue_warning_identifies_the_oldest_transaction_and_is_throttled() {

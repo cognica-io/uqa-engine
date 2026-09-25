@@ -356,6 +356,7 @@ impl Engine {
             deferred_constraint_trigger_events,
             pending_listen_actions: Vec::new(),
             pending_notifications: Vec::new(),
+            pending_notification_commit: parking_lot::Mutex::new(None),
             constraint_modes,
             nontransactional_sequence_values: NontransactionalSequenceValues::new(),
         });

@@ -31,8 +31,18 @@ impl KeyValueStorageBackend {
 }
 
 impl PersistentStorageBackend for KeyValueStorageBackend {
+    fn auxiliary_encryption_key(&self) -> Option<crate::StorageEncryptionKey> {
+        self.store.auxiliary_encryption_key()
+    }
+
     fn retention_control(&self) -> Option<crate::read_control::StorageReadControl> {
         self.store.retention_control()
+    }
+
+    fn notification_publications(
+        &self,
+    ) -> Option<&dyn crate::notifications::NotificationPublicationStore> {
+        self.store.notification_publications()
     }
 
     fn serializable_session(&self) -> Option<&dyn crate::mvcc::SerializableSession> {

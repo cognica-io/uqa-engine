@@ -37,6 +37,7 @@ impl ContainerFile {
             .transpose()?;
         Ok(Self {
             path,
+            committed_file: None,
             logical_len: 0,
             append_offset: usize_to_u64(HEADER_SIZE, "container header size")?,
             chunks: BTreeMap::new(),
@@ -72,6 +73,7 @@ impl ContainerFile {
         let committed = scan_committed_records(&mut file, &header, keys.as_ref(), chunk_size)?;
         Ok(Self {
             path,
+            committed_file: Some(file),
             logical_len: committed.logical_len,
             append_offset: committed.end_offset,
             chunks: committed.chunks,
@@ -191,6 +193,7 @@ impl ContainerFile {
             && committed.end_offset == self.append_offset
         {
             self.committed_file_len = metadata.len();
+            self.committed_file = Some(file);
             return Ok(());
         }
         self.logical_len = committed.logical_len;
@@ -200,6 +203,7 @@ impl ContainerFile {
         self.generation = committed.generation;
         self.state_tag = committed.state_tag;
         self.committed_file_len = metadata.len();
+        self.committed_file = Some(file);
         Ok(())
     }
 
@@ -295,10 +299,13 @@ impl ContainerFile {
             .retain(|chunk_id, _| *chunk_id < active_chunk_count);
         self.dirty_chunks.clear();
         self.dirty_header = false;
-        self.write_current_header(&mut file)?;
-        file.flush()?;
-        file.sync_all()?;
-        drop(file);
+        let header_result = self
+            .write_current_header(&mut file)
+            .and_then(|()| file.flush())
+            .and_then(|()| file.sync_all());
+        // The committed chunk map has already been adopted; its source must follow it even when publishing the header reports an error.
+        self.committed_file = Some(file);
+        header_result?;
         self.compact_if_needed()?;
         Ok(())
     }
@@ -535,7 +542,11 @@ impl ContainerFile {
         let Some(entry) = self.chunks.get(&chunk_id) else {
             return Ok(vec![0_u8; expected_len]);
         };
-        let mut file = File::open(&self.path)?;
+        // The pathname may already refer to a newer compacted file before SQLite acquires its first shared lock. Keep authenticated offsets bound to the file from which they were decoded.
+        let mut file = self
+            .committed_file
+            .as_ref()
+            .ok_or_else(|| invalid_data("committed chunk metadata has no retained source file"))?;
         file.seek(SeekFrom::Start(entry.offset))?;
         let mut payload = allocate_payload(entry.stored_len, "chunk stored payload")?;
         file.read_exact(&mut payload)?;

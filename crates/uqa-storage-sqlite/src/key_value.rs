@@ -87,8 +87,18 @@ impl uqa_storage::mvcc::IdentifierAllocator for SQLiteKeyValueStore {
 }
 
 impl KeyValueStore for SQLiteKeyValueStore {
+    fn auxiliary_encryption_key(&self) -> Option<uqa_storage::StorageEncryptionKey> {
+        self.conn.auxiliary_encryption_key()
+    }
+
     fn retention_control(&self) -> Option<uqa_storage::read_control::StorageReadControl> {
         Some(self.records.retention_control())
+    }
+
+    fn notification_publications(
+        &self,
+    ) -> Option<&dyn uqa_storage::notifications::NotificationPublicationStore> {
+        Some(&self.conn)
     }
 
     fn serializable_session(&self) -> Option<&dyn uqa_storage::mvcc::SerializableSession> {
@@ -486,6 +496,10 @@ impl SQLiteKeyValueStorage {
 }
 
 impl PersistentStorageProvider for SQLiteKeyValueStorage {
+    fn auxiliary_encryption_key(&self) -> Option<uqa_storage::StorageEncryptionKey> {
+        self.store.conn.auxiliary_encryption_key()
+    }
+
     fn open_session(&self) -> StorageBackendResult<PersistentStorageSession> {
         self.open_session_with_cancellation(&uqa_core::CancellationToken::new())
     }

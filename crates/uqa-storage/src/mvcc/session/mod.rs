@@ -7,6 +7,7 @@
 //! Logical Key/Value sessions retain private changes rather than a physical writer.
 
 mod batch;
+mod notifications;
 mod read;
 mod serializable;
 pub use serializable::{
@@ -344,6 +345,12 @@ impl super::IdentifierAllocator for VersionedKeyValueStore {
 impl KeyValueStore for VersionedKeyValueStore {
     fn retention_control(&self) -> Option<StorageReadControl> {
         Some(Self::retention_control(self))
+    }
+
+    fn notification_publications(
+        &self,
+    ) -> Option<&dyn crate::notifications::NotificationPublicationStore> {
+        Some(self)
     }
 
     fn serializable_session(&self) -> Option<&dyn SerializableSession> {

@@ -30,6 +30,8 @@ mod identifiers;
 mod maintenance;
 #[path = "mvcc_sessions/metadata.rs"]
 mod metadata;
+#[path = "mvcc_sessions/notifications.rs"]
+mod notifications;
 #[path = "mvcc_sessions/occurrence_merging.rs"]
 mod occurrence_merging;
 #[path = "mvcc_sessions/occurrences.rs"]

@@ -49,6 +49,9 @@ impl Engine {
             (storage_savepoint.is_none() && !resolving).then(|| frame.statistics_changes.clone());
         if !resolving {
             self.validate_read_only_commit(stack, read_only, storage_savepoint.is_none())?;
+            if storage_savepoint.is_none() {
+                self.prepare_notification_writer(stack)?;
+            }
         }
         let mut publication =
             self.prepare_transaction_publication(stack, storage_savepoint.is_none())?;
@@ -84,10 +87,19 @@ impl Engine {
                 backend.commit_transaction()
             };
             if let Err(error) = commit_result {
-                drop(publication);
                 if let Some(error) = Self::retain_pending_completion(stack, &error, false) {
+                    if let Some(notification) = publication.notifications.take() {
+                        return Err(Self::retain_notification_resources(
+                            stack
+                                .last()
+                                .expect("retained completion has a transaction frame"),
+                            notification,
+                            error,
+                        ));
+                    }
                     return Err(error);
                 }
+                drop(publication);
                 let action = if storage_savepoint.is_some() {
                     "nested COMMIT savepoint"
                 } else {
@@ -146,11 +158,18 @@ impl Engine {
             match self.prepare_temporary_role_publication() {
                 Ok(publication) => publication,
                 Err(error) => {
-                    drop(notification_commit);
-                    drop(change_publication);
                     if let TransactionStatus::CommitPending(transaction) = status {
+                        if let Some(notification) = notification_commit {
+                            return Err(Self::retain_notification_resources(
+                                stack.last().expect("retained completion frame"),
+                                notification,
+                                Self::pending_completion_error(transaction, error),
+                            ));
+                        }
                         return Err(Self::pending_completion_error(transaction, error));
                     }
+                    drop(notification_commit);
+                    drop(change_publication);
                     return Err(match self.rollback_transaction_frame(stack) {
                         Ok(()) => error,
                         Err(rollback) => Self::rollback_cleanup_error(&rollback, format!("{error}; temporary catalog preparation rollback also failed: {rollback}")),
@@ -165,6 +184,21 @@ impl Engine {
             notifications: notification_commit,
             changes: change_publication,
         })
+    }
+
+    fn retain_notification_resources(
+        frame: &TransactionFrame,
+        notification: NotificationCommitGuard<'_>,
+        original: SQLError,
+    ) -> SQLError {
+        let (retained, suspended) = notification.retain();
+        *frame.pending_notification_commit.lock() = retained;
+        match (suspended, frame.status) {
+            (Err(error), TransactionStatus::CommitPending(transaction)) => {
+                Self::pending_completion_error(transaction, format!("{original}; notification reservation could not release its writer: {error}"))
+            }
+            _ => original,
+        }
     }
 
     fn rollback_failed_statistics_preparation(
@@ -465,6 +499,7 @@ impl Engine {
         let frame = stack.last().ok_or_else(|| {
             SQLError::Internal("ROLLBACK lost its checked transaction frame".into())
         })?;
+        drop(frame.pending_notification_commit.lock().take());
         let session_snapshot = frame.session_snapshot.clone();
         self.restore_graph_transaction_overlay(&session_snapshot);
         let mut cleanup_errors = Vec::new();

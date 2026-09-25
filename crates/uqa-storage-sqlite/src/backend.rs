@@ -128,6 +128,12 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         self.conn.retention_control()
     }
 
+    fn notification_publications(
+        &self,
+    ) -> Option<&dyn uqa_storage::notifications::NotificationPublicationStore> {
+        Some(&self.conn)
+    }
+
     fn serializable_session(&self) -> Option<&dyn uqa_storage::mvcc::SerializableSession> {
         self.conn
             .is_native_record_session()

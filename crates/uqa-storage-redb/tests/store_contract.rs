@@ -13,6 +13,8 @@ mod documents;
 mod graph_identifiers;
 #[path = "store_contract/guards.rs"]
 mod guards;
+#[path = "store_contract/notifications.rs"]
+mod notifications;
 #[path = "store_contract/sequences.rs"]
 mod sequences;
 

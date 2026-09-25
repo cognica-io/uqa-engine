@@ -122,6 +122,7 @@ pub struct PreparedRecordCommit {
     fingerprint: CommitFingerprint,
     pub(super) graph: Option<GraphEffects>,
     pub(super) vector: Option<super::vector::VectorEffects>,
+    pub(super) notification: Option<Arc<super::notifications::NotificationEffect>>,
     pub(super) resolved_at: Option<CommitSequence>,
     requirements: Option<Arc<BudgetedVec<RecordRequirement>>>,
 }
@@ -219,6 +220,7 @@ impl PreparedRecordCommit {
             fingerprint: digest.finalize().into(),
             graph: None,
             vector: None,
+            notification: None,
             resolved_at: None,
             requirements: None,
         })
@@ -288,6 +290,17 @@ impl PreparedRecordCommit {
         Ok(self)
     }
 
+    pub(super) fn with_notification_effect(
+        mut self,
+        effect: Option<&Arc<super::notifications::NotificationEffect>>,
+    ) -> Self {
+        if let Some(effect) = effect {
+            self.fingerprint = effect.seal(self.fingerprint);
+            self.notification = Some(Arc::clone(effect));
+        }
+        self
+    }
+
     pub(crate) fn resolved(mut self, original: &Self, sequence: CommitSequence) -> Self {
         self.fingerprint = original.fingerprint;
         self.resolved_at = Some(sequence);
@@ -319,6 +332,7 @@ impl PreparedRecordCommit {
     pub fn validate_snapshot(&self, current: CommitSequence) -> VersionResult<()> {
         if self.graph.is_some()
             || self.vector.is_some()
+            || self.notification.is_some()
             || self
                 .writes
                 .iter()
@@ -352,6 +366,7 @@ impl PreparedRecordCommit {
         cancellation.check()?;
         if self.graph.is_some()
             || self.vector.is_some()
+            || self.notification.is_some()
             || self
                 .writes
                 .iter()

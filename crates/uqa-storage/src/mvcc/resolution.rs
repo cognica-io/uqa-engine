@@ -31,6 +31,7 @@ impl ResolutionMode {
 
 pub(super) fn has_effects(prepared: &PreparedRecordCommit) -> bool {
     prepared.graph.is_some()
+        || prepared.notification.is_some()
         || prepared.vector.is_some()
         || prepared
             .records()
@@ -119,6 +120,17 @@ pub(super) fn resolve(
             mode,
             control,
         )?);
+    }
+    if mode == ResolutionMode::Publication {
+        if let Some(effect) = &prepared.notification {
+            resolved = Some(super::notifications::resolve(
+                resolved.as_ref().unwrap_or(prepared),
+                effect,
+                current.as_ref(),
+                persistence.notification_record_layout(),
+                control,
+            )?);
+        }
     }
     Ok(resolved)
 }

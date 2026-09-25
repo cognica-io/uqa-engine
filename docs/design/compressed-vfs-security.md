@@ -10,6 +10,8 @@ The format authenticates:
 
 The loader applies chunk records only when a later authenticated commit covers their generation. Old-generation records appended after a commit are rejected, an incomplete next-generation tail is ignored for crash recovery, and a file truncated below the generation named by its authenticated header is rejected. The chained commit tags reject history splicing, while the file identity and per-file derived keys prevent records from being moved between containers.
 
+A decoded chunk map retains the physical file from which its authenticated records were read. Compaction may replace the pathname before an unlocked SQLite initialization read, but that read continues through the original descriptor; the next shared-lock refresh validates and adopts the newer file and metadata together. A committed compaction retains its replacement descriptor even when subsequent directory synchronization reports an error. These lifecycle rules preserve authentication checks and do not change the on-disk format or the trusted-anchor threat boundary.
+
 ## Threat boundary
 
 These checks detect modification, relocation, resequencing, replay, history splicing, and truncation within the visible container. They cannot distinguish an attacker replacing the entire file with a previously captured, internally valid snapshot or same-generation fork. That requires an exact trusted state anchor stored outside the database.
