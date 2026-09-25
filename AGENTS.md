@@ -1,6 +1,6 @@
 # Agent instructions
 
-Read `llms.txt` first.
+Read `llms.txt` first, then [AI_POLICY.md](AI_POLICY.md).
 
 For UQA Engine SQL, documentation, and feature verification, follow `.agents/skills/uqa-engine/SKILL.md`.
 

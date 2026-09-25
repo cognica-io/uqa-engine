@@ -16,6 +16,8 @@ Build UQA Engine as an embeddable Rust engine for the Unified Query Algebra:
 4. **Persistent by default where configured.** Catalog metadata, table data, secondary indexes, statistics, graphs, models, and analyzer configuration must survive reopen.
 5. **Production-grade.** Startup, shutdown, migration, and recovery behavior must be deterministic and covered by tests.
 
+Contribution requirements for PostgreSQL compatibility, semantic preservation, feature proofs, and maintainer judgment are defined in the [AI contribution policy](../../AI_POLICY.md).
+
 ### 1.2 Non-goals
 
 - Distributed execution in the core engine.

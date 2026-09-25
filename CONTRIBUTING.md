@@ -10,6 +10,10 @@ External copyrightable contributions of code or documentation require a contribu
 
 The master plan in [`docs/plans/0001-uqa-engine-implementation-plan.md`](docs/plans/0001-uqa-engine-implementation-plan.md) is the source of truth for staged deliverables and explicit deferrals. Read the relevant section before starting work on a new crate or operator.
 
+## AI assistance
+
+AI-assisted contributions are permitted under [AI_POLICY.md](AI_POLICY.md). Follow its PostgreSQL compatibility, UQA semantic preservation, feature-proof, and maintainer-judgment requirements.
+
 ## Local gates
 
 Install the repository hook with `bash scripts/install-git-hooks.sh` once per clone. It sets the local `core.hooksPath` to `.githooks` and refuses to replace an existing custom hook configuration. The pre-commit hook checks the exact staged Cargo manifests, lockfile, targets, source paths, and dependency policy in an offline snapshot, so unstaged edits cannot mask an invalid commit. Runtime, build, platform-specific, and transitive workspace dependencies are checked. Provider-independent crates cannot declare forbidden database drivers, including through another workspace crate or a renamed Cargo dependency. Development-only fixture dependencies are excluded from the runtime graph. CI runs the same checker against the committed tree.
@@ -62,7 +66,7 @@ The codebase does not ship workarounds, stopgap patches, or backwards-compatibil
 
 ## Tests
 
-The project leans heavily on `proptest` to pin algebraic invariants from the master plan. New algorithmic code should land with at least one property test that proves the relevant invariant holds for any random input, not just the hand-picked unit cases.
+The project uses `proptest` to exercise algebraic invariants from the master plan across generated inputs. New algorithmic code must include property tests for the relevant invariants as well as focused regression cases. Finite test runs do not prove a law for all inputs; product feature additions also require the written algebraic proof described in [AI_POLICY.md](AI_POLICY.md#prove-feature-additions).
 
 | Concern | Where it lives |
 | --- | --- |
