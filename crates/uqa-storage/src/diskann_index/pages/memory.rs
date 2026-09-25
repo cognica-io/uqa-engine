@@ -33,6 +33,10 @@ pub struct DiskANNMemorySource {
 }
 
 impl DiskANNMemoryBuilder {
+    pub fn generation(&self) -> DiskANNGeneration {
+        self.generation
+    }
+
     pub fn new(generation: DiskANNGeneration, budget: &MemoryBudget) -> Self {
         Self {
             generation,

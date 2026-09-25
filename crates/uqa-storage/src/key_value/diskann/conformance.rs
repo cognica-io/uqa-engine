@@ -28,6 +28,9 @@ use super::{
 
 const MAX_RECORD: usize = 65_536;
 
+mod build;
+pub use build::{verify_diskann_built_generation, verify_diskann_built_reopen};
+
 /// Exercise real physical streams, conditional staging, bounded discard and retained reads on a disposable versioned provider. Returns a sealed generation for a subsequent cold reopen check.
 pub fn verify_diskann_generations(
     store: &Arc<dyn KeyValueStore>,

@@ -19,6 +19,16 @@ pub(super) fn begin(
     body_bytes: usize,
     control: &StorageReadControl,
 ) -> StorageBackendResult<BudgetedVec<u8>> {
+    begin_revision(magic, REVISION, generation, body_bytes, control)
+}
+
+pub(super) fn begin_revision(
+    magic: [u8; 8],
+    revision: u32,
+    generation: DiskANNGeneration,
+    body_bytes: usize,
+    control: &StorageReadControl,
+) -> StorageBackendResult<BudgetedVec<u8>> {
     control.check()?;
     let size = HEADER_BYTES
         .checked_add(body_bytes)
@@ -26,7 +36,7 @@ pub(super) fn begin(
     let mut bytes = BudgetedVec::new(control.memory());
     bytes.reserve(size)?;
     bytes.extend_from_slice(&magic)?;
-    bytes.extend_from_slice(&REVISION.to_le_bytes())?;
+    bytes.extend_from_slice(&revision.to_le_bytes())?;
     bytes.extend_from_slice(&(HEADER_BYTES as u32).to_le_bytes())?;
     bytes.extend_from_slice(&generation.database)?;
     for value in [
@@ -60,10 +70,20 @@ pub(super) fn open<'a>(
     bytes: &'a [u8],
     control: &StorageReadControl,
 ) -> StorageBackendResult<&'a [u8]> {
+    open_revision(magic, REVISION, generation, bytes, control)
+}
+
+pub(super) fn open_revision<'a>(
+    magic: [u8; 8],
+    revision: u32,
+    generation: DiskANNGeneration,
+    bytes: &'a [u8],
+    control: &StorageReadControl,
+) -> StorageBackendResult<&'a [u8]> {
     control.check()?;
     if bytes.len() < HEADER_BYTES
         || &bytes[..8] != magic.as_slice()
-        || u32::from_le_bytes(field(bytes, 8)?) != REVISION
+        || u32::from_le_bytes(field(bytes, 8)?) != revision
         || u32::from_le_bytes(field(bytes, 12)?) != HEADER_BYTES as u32
     {
         return Err(invalid(

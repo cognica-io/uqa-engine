@@ -8,8 +8,8 @@ use sha2::{Digest, Sha256};
 use uqa_core::memory::BudgetedVec;
 
 use super::{
-    field, invalid, record, DiskANNBuildCoverage, DiskANNGeneration, DiskANNNodeLayout,
-    NODE_HEADER_BYTES, PAGE_BYTES, PAGE_FORMAT_REVISION, PAGE_HEADER_BYTES,
+    field, invalid, record, DiskANNBuildCoverage, DiskANNBuildProvenance, DiskANNGeneration,
+    DiskANNNodeLayout, NODE_HEADER_BYTES, PAGE_BYTES, PAGE_FORMAT_REVISION, PAGE_HEADER_BYTES,
 };
 use crate::vector_index::{DiskANNAlpha, DiskANNIndexParams};
 use crate::{read_control::StorageReadControl, StorageBackendResult};
@@ -55,10 +55,13 @@ pub struct DiskANNManifestInput {
 pub struct DiskANNManifest {
     input: DiskANNManifestInput,
     layout: DiskANNNodeLayout,
+    provenance: Option<DiskANNBuildProvenance>,
 }
 
 impl DiskANNManifest {
     pub const ENCODED_BYTES: usize = record::HEADER_BYTES + BODY_BYTES;
+    pub const MAX_ENCODED_BYTES: usize =
+        Self::ENCODED_BYTES + DiskANNBuildProvenance::ENCODED_BYTES;
 
     pub fn new(input: DiskANNManifestInput) -> StorageBackendResult<Self> {
         input.parameters.validate(input.dimensions)?;
@@ -90,7 +93,25 @@ impl DiskANNManifest {
         {
             return Err(invalid("empty artifacts require the empty digest"));
         }
-        Ok(Self { input, layout })
+        Ok(Self {
+            input,
+            layout,
+            provenance: None,
+        })
+    }
+
+    /// Attach validated construction metadata using manifest envelope revision 2. Node/page/index layout revisions remain unchanged.
+    pub fn with_build_provenance(
+        mut self,
+        provenance: DiskANNBuildProvenance,
+    ) -> StorageBackendResult<Self> {
+        provenance.validate(self.input.nodes, self.input.parameters)?;
+        self.provenance = Some(provenance);
+        Ok(self)
+    }
+
+    pub fn build_provenance(&self) -> Option<&DiskANNBuildProvenance> {
+        self.provenance.as_ref()
     }
 
     pub fn input(&self) -> &DiskANNManifestInput {
@@ -103,7 +124,12 @@ impl DiskANNManifest {
     pub fn encode(self, control: &StorageReadControl) -> StorageBackendResult<BudgetedVec<u8>> {
         let input = self.input;
         let params = input.parameters;
-        let mut bytes = record::begin(MAGIC, input.generation, BODY_BYTES, control)?;
+        let (revision, size) = if self.provenance.is_some() {
+            (2, BODY_BYTES + DiskANNBuildProvenance::ENCODED_BYTES)
+        } else {
+            (1, BODY_BYTES)
+        };
+        let mut bytes = record::begin_revision(MAGIC, revision, input.generation, size, control)?;
         for value in [
             input.dimensions,
             params.algorithm_revision,
@@ -141,6 +167,9 @@ impl DiskANNManifest {
         ] {
             bytes.extend_from_slice(&digest)?;
         }
+        if let Some(provenance) = self.provenance {
+            provenance.encode(&mut bytes)?;
+        }
         record::finish(bytes, control)
     }
 
@@ -149,8 +178,15 @@ impl DiskANNManifest {
         bytes: &[u8],
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
-        let body = record::open(MAGIC, generation, bytes, control)?;
-        if body.len() != BODY_BYTES {
+        control.check()?;
+        let revision = record::u32_at(bytes, 8)?;
+        let size = match revision {
+            1 => BODY_BYTES,
+            2 => BODY_BYTES + DiskANNBuildProvenance::ENCODED_BYTES,
+            _ => return Err(invalid("unsupported manifest envelope revision")),
+        };
+        let body = record::open_revision(MAGIC, revision, generation, bytes, control)?;
+        if body.len() != size {
             return Err(invalid("manifest body size differs"));
         }
         for (offset, expected) in [
@@ -178,11 +214,11 @@ impl DiskANNManifest {
             beam_width: size(64)?,
             pq_bytes: size(72)?,
             seed: record::u64_at(body, 80)?,
-            format_revision: record::REVISION,
+            format_revision: DiskANNIndexParams::FORMAT_REVISION,
             algorithm_revision: record::u32_at(body, 4)?,
         };
         let entry = record::u64_at(body, 104)?;
-        let manifest = Self::new(DiskANNManifestInput {
+        let mut manifest = Self::new(DiskANNManifestInput {
             generation,
             dimensions,
             parameters,
@@ -204,6 +240,13 @@ impl DiskANNManifest {
         })?;
         if record::u64_at(body, 152)? != manifest.layout.page_count() {
             return Err(invalid("manifest page count differs from node layout"));
+        }
+        if revision == 2 {
+            manifest = manifest.with_build_provenance(DiskANNBuildProvenance::decode(
+                &body[BODY_BYTES..],
+                manifest.input.nodes,
+                parameters,
+            )?)?;
         }
         Ok(manifest)
     }

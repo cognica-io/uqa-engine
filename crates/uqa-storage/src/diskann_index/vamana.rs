@@ -18,6 +18,7 @@ mod initialize;
 mod memory;
 mod prune;
 mod search;
+pub(in crate::diskann_index) use initialize::select_entry;
 pub(in crate::diskann_index) use prune::Selection;
 #[cfg(test)]
 mod tests;

@@ -335,20 +335,24 @@ fn verify_manifest(
     expected: &[u8],
     control: &StorageReadControl,
 ) -> StorageBackendResult<()> {
-    // The format has a fixed envelope and body; comparison also validates every persisted field against the caller's manifest.
-    let bytes = fixed::<{ DiskANNManifest::ENCODED_BYTES }>(control, |visit| {
-        read.visit_value_bounded(
-            keys.key(Kind::Record(DiskANNRecordKey::Manifest)).as_ref(),
-            expected.len(),
-            control,
-            visit,
-        )
-    })?;
-    if bytes
-        .as_ref()
-        .map(<[u8; DiskANNManifest::ENCODED_BYTES]>::as_slice)
-        != Some(expected)
-    {
+    let mut matches = false;
+    let mut visited = false;
+    read.visit_value_bounded(
+        keys.key(Kind::Record(DiskANNRecordKey::Manifest)).as_ref(),
+        expected.len(),
+        control,
+        &mut |bytes| {
+            if visited {
+                matches = false;
+                return Err(invalid("frozen manifest returned repeatedly"));
+            }
+            visited = true;
+            matches = bytes == Some(expected);
+            Ok(())
+        },
+    )?;
+    control.check()?;
+    if !visited || !matches {
         return Err(invalid("frozen manifest differs"));
     }
     Ok(())

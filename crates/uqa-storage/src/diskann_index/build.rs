@@ -16,6 +16,7 @@ use super::format::{
 use super::{ExactVectorReason, NavigationInput, PQCodebook, PQTrainer, PQTrainingOptions};
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 
+mod generation;
 mod merge;
 mod partitions;
 mod records;
@@ -24,6 +25,7 @@ mod temporary;
 #[cfg(test)]
 mod tests;
 
+pub use generation::{DiskANNBuildSink, DiskANNGenerationOptions};
 pub use merge::{DiskANNMergeOptions, DiskANNMergeSummary, DiskANNMergedGraph};
 pub use partitions::{DiskANNPartitionOptions, DiskANNPartitionRuns, DiskANNPartitionSummary};
 pub use temporary::{DiskANNTemporaryBudget, DiskANNTemporaryError};

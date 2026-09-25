@@ -7,6 +7,9 @@
 use std::{path::Path, sync::Arc};
 
 use uqa_core::memory::MemoryError;
+use uqa_storage::key_value::conformance::{
+    verify_diskann_built_generation, verify_diskann_built_reopen,
+};
 use uqa_storage::key_value::conformance::{verify_diskann_generations, verify_diskann_reopen};
 use uqa_storage::mvcc::VersionedSessionOptions;
 use uqa_storage::read_control::StorageReadControl;
@@ -63,6 +66,29 @@ fn native_diskann_generations_pass_shared_acceptance_and_cold_reopen_in_all_file
         let repository = connection.diskann_generations(&control).unwrap();
         assert!(repository.open_source(generation, &control).is_ok());
     }
+}
+
+#[test]
+fn native_diskann_bounded_build_seals_and_reopens_complete_artifacts() {
+    let directory = tempfile::tempdir().unwrap();
+    let temporary = tempfile::tempdir().unwrap();
+    let path = directory.path().join("built.db");
+    let (generation, memory_peak, temporary_peak) = {
+        let connection = open(&path, 0);
+        let store = bind(&connection);
+        verify_diskann_built_generation(&store, temporary.path()).unwrap()
+    };
+    assert!(std::fs::read_dir(temporary.path())
+        .unwrap()
+        .next()
+        .is_none());
+    eprintln!(
+        "native SQLite DiskANN build: memory={memory_peak}, encrypted temporary={temporary_peak}"
+    );
+    drop(temporary);
+    let connection = open(&path, 0);
+    let store = bind(&connection);
+    verify_diskann_built_reopen(&store, generation).unwrap();
 }
 
 #[test]
