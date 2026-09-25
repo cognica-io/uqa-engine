@@ -1,6 +1,6 @@
 # DiskANN canonical origins
 
-Status: Common MVCC and Key/Value origins merged in PR #170; native SQLite canonical sources merged in PR #171; ordered corpus reads and retained-source build capture merged in PR #172. [Canonical document scoring](diskann-canonical-scoring.md) is implemented for review. Changed-vector coverage, paged query integration and public DiskANN routing remain pending in the [implementation plan](../plans/0014-diskann-vector-index.md).
+Status: Common MVCC and Key/Value origins merged in PR #170; native SQLite canonical sources merged in PR #171; ordered corpus reads and retained-source build capture merged in PR #172. [Canonical document scoring](diskann-canonical-scoring.md) merged in PR #173. The [Key/Value change journal](diskann-versioned-changes.md) is implemented for review. Changed-vector coverage, paged query integration and public DiskANN routing remain pending in the [implementation plan](../plans/0014-diskann-vector-index.md).
 
 ## Ownership and identity
 

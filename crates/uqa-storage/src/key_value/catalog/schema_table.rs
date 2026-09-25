@@ -288,6 +288,10 @@ impl KeyValueCatalog {
             table_name,
             column_name,
         )?)?;
+        batch.delete_prefix(&super::super::vector_index::origin::journal::prefix(
+            table_name,
+            column_name,
+        )?)?;
         drop_field_indexes(batch.as_mut(), table_name, column_name)?;
         batch.delete_prefix(&table_field_analyzer_field_prefix(table_name, column_name)?)?;
         batch.delete(&field_binding_key(table_name, column_name)?)?;
@@ -386,6 +390,12 @@ impl KeyValueCatalog {
             batch.as_mut(),
             &super::super::vector_index::origin::prefix(table_name, from)?,
             &super::super::vector_index::origin::prefix(table_name, to)?,
+        )?;
+        batch_rekey_prefix_or_keep_existing(
+            self.store.as_ref(),
+            batch.as_mut(),
+            &super::super::vector_index::origin::journal::prefix(table_name, from)?,
+            &super::super::vector_index::origin::journal::prefix(table_name, to)?,
         )?;
         rename_field_indexes(self.store.as_ref(), batch.as_mut(), table_name, from, to)?;
         batch_rekey_prefix_or_keep_existing(

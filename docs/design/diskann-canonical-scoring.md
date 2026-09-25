@@ -1,6 +1,6 @@
 # DiskANN canonical document scoring
 
-Status: Implemented for review on top of the [retained canonical sources](diskann-canonical-origins.md). Physical graph/side/change integration, coverage authority, publication and public DiskANN SQL remain incomplete in the [implementation plan](../plans/0014-diskann-vector-index.md).
+Status: Merged in PR #173 on top of the [retained canonical sources](diskann-canonical-origins.md). Physical graph/side/change integration, coverage authority, publication and public DiskANN SQL remain incomplete in the [implementation plan](../plans/0014-diskann-vector-index.md).
 
 ## Ownership and observations
 

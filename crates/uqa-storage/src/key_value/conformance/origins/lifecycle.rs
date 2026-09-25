@@ -74,6 +74,7 @@ pub fn verify_mutation_origins(
     empty_and_serializable(&store, &faults, &control)?;
     failed_autocommit(&store, &faults, &control)?;
     lost_commit(&store, &faults)?;
+    lost_canonical_commit(&faults, &control)?;
     store.begin_read_transaction()?;
     let mut invoked = false;
     expect(
@@ -251,6 +252,61 @@ fn lost_commit(store: &VersionedKeyValueStore, faults: &Faults) -> StorageBacken
         &Some(origin.transaction().allocation().to_le_bytes().to_vec()),
         "retry publishes the original evaluated origin bytes",
     )
+}
+
+fn lost_canonical_commit(
+    faults: &Arc<Faults>,
+    control: &StorageReadControl,
+) -> StorageBackendResult<()> {
+    use crate::diskann_index::format::DiskANNChangeIdentity;
+    use crate::key_value::{vector_index::origin::journal, KeyValueDiskANNCanonical};
+    let session = Arc::new(VersionedKeyValueStore::new(
+        faults.clone(),
+        None,
+        VersionedSessionOptions::default(),
+    ));
+    let store: Arc<dyn KeyValueStore> = session.clone();
+    let canonical = KeyValueDiskANNCanonical::new(store.clone(), "lost-change", "embedding", 2)?;
+    faults.lose_commit.store(true, Ordering::SeqCst);
+    expect(
+        canonical.replace(9, &[vec![3.0, 4.0]], control).is_err(),
+        "lost canonical commit reply propagates",
+    )?;
+    let pending = session.pending_commit().expect("retained commit attempt");
+    store.commit_transaction()?;
+    let source = canonical.retain(control)?;
+    let origin = source
+        .origin(9, control)?
+        .expect("committed canonical origin");
+    expect_eq(
+        &origin.writer(),
+        &pending,
+        "retry preserves the actual canonical writer",
+    )?;
+    expect_eq(
+        &origin.revision(),
+        &1,
+        "retry does not reevaluate canonical mutation",
+    )?;
+    expect_eq(
+        &source.next_change_after(None, control)?,
+        &Some(DiskANNChangeIdentity::new(9, origin)),
+        "change and canonical data commit together after lost reply",
+    )?;
+    let mut count = 0;
+    let prefix = journal::prefix("lost-change", "embedding")?;
+    store.with_read_view(&mut |read| {
+        read.visit_keys_after(&prefix, None, usize::MAX, control, &mut |_| {
+            count += 1;
+            Ok(())
+        })
+    })?;
+    expect_eq(
+        &count,
+        &1,
+        "commit retry does not duplicate a change record",
+    )?;
+    super::values(&source, 9, &[vec![3.0, 4.0]], control)
 }
 
 fn rejected() -> StorageBackendError {

@@ -8,6 +8,7 @@
 
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 
+mod change;
 mod codes;
 mod coverage;
 mod identity;
@@ -21,6 +22,7 @@ mod quantization;
 mod record;
 mod side;
 
+pub use change::{DiskANNChangeIdentity, CHANGE_IDENTITY_BYTES};
 pub use codes::DiskANNCodeBatch;
 pub use coverage::{DiskANNBuildCoverage, DiskANNCoverageBuilder};
 pub use identity::{DiskANNGeneration, DiskANNVectorVersion};

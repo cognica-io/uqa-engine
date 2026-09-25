@@ -17,11 +17,14 @@ use uqa_core::DocId;
 
 pub use crate::diskann_index::DiskANNCanonicalVectorVisitor;
 
+mod changes;
+
 /// A fixed canonical view. Visitors borrow one decoded vector at a time and must not reenter the source from inside a callback. Any failure invalidates the caller's partial result.
 pub struct RetainedDiskANNCanonical {
     read: Arc<dyn KeyValueRead + Send + Sync>,
     vectors: BudgetedVec<u8>,
     origins: BudgetedVec<u8>,
+    changes: BudgetedVec<u8>,
     dimensions: u32,
     control: StorageReadControl,
 }
@@ -31,6 +34,7 @@ impl RetainedDiskANNCanonical {
         read: Arc<dyn KeyValueRead + Send + Sync>,
         vectors: &[u8],
         origins: &[u8],
+        changes: &[u8],
         dimensions: u32,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
@@ -38,6 +42,7 @@ impl RetainedDiskANNCanonical {
             read,
             vectors: append(vectors, &[], control)?,
             origins: append(origins, &[], control)?,
+            changes: append(changes, &[], control)?,
             dimensions,
             control: control.clone(),
         })

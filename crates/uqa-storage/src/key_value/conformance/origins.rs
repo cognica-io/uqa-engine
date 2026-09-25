@@ -7,14 +7,17 @@
 //! Actual publication identities, undo branches and bounded canonical views on disposable providers.
 
 mod catalog;
+mod changes;
 mod corpus;
 mod lifecycle;
 pub use lifecycle::verify_mutation_origins;
 
 use super::{expect, expect_eq};
 use crate::diskann_index::{
-    format::DiskANNVectorVersion, DiskANNCanonicalRead, DiskANNCanonicalScorer,
+    format::{DiskANNChangeIdentity, DiskANNVectorVersion},
+    DiskANNCanonicalRead, DiskANNCanonicalScorer,
 };
+use crate::key_value::vector_index::origin::journal;
 use crate::key_value::{KeyValueDiskANNCanonical, KeyValueVectorIndex, RetainedDiskANNCanonical};
 use crate::read_control::StorageReadControl;
 use crate::{KeyValueStore, StorageBackendResult, VectorIndex};
@@ -109,6 +112,7 @@ pub fn verify_diskann_canonical_origins(
     bounded(store, &control)?;
     catalog::verify(store, &control)?;
     corpus::verify(store)?;
+    changes::verify(store)?;
     let tiny = StorageReadControl::with_limit(1);
     expect(
         fresh
@@ -145,7 +149,8 @@ pub fn verify_diskann_canonical_reopen(
         "canonical origin survives cold reopen",
     )?;
     values(&source, 1, &[vec![9.0, -0.0]], &control)?;
-    corpus::verify_reopen(store)
+    corpus::verify_reopen(store)?;
+    changes::verify_reopen(store)
 }
 
 fn concurrent(
@@ -187,14 +192,30 @@ fn concurrent(
     let b = store.open_session()?;
     a.begin_transaction()?;
     b.begin_transaction()?;
-    canonical(&a)?.replace(200, &[], control)?;
-    canonical(&b)?.replace(200, &[vec![1.0, 1.0]], control)?;
+    let committed = canonical(&a)?.replace(200, &[], control)?;
+    let discarded = canonical(&b)?.replace(200, &[vec![1.0, 1.0]], control)?;
     a.commit_transaction()?;
     expect(
         b.commit_transaction().is_err(),
         "empty tensor origin guards conflicting writer",
     )?;
     b.rollback_transaction()?;
+    let source = canonical(store)?.retain(control)?;
+    expect_eq(
+        &source.next_change_after(Some(199), control)?,
+        &Some(DiskANNChangeIdentity::new(200, committed)),
+        "conflicting writer cannot replace the committed change",
+    )?;
+    expect(
+        store
+            .get(&journal::key(
+                "diskann-origins",
+                "embedding",
+                DiskANNChangeIdentity::new(200, discarded),
+            )?)?
+            .is_none(),
+        "conflicting publication leaves no orphan change",
+    )?;
     values(&canonical(store)?.retain(control)?, 200, &[], control)
 }
 
