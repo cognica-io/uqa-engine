@@ -12,7 +12,7 @@ The master plan in [`docs/plans/0001-uqa-engine-implementation-plan.md`](docs/pl
 
 ## AI assistance
 
-AI-assisted contributions are permitted under [AI_POLICY.md](AI_POLICY.md). Follow its PostgreSQL compatibility, UQA semantic preservation, feature-proof, and maintainer-judgment requirements.
+AI-assisted contributions are permitted under [AI_POLICY.md](AI_POLICY.md). Disclosure of AI use is optional. Follow its PostgreSQL compatibility, UQA semantic preservation, feature-proof, and maintainer-judgment requirements.
 
 ## Local gates
 

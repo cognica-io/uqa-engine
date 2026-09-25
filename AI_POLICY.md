@@ -2,6 +2,8 @@
 
 AI tools may be used to design, implement, test, document, and review contributions to UQA Engine. Contributors remain responsible for understanding and defending every submitted change, proof, and verification result. AI output does not establish correctness. The [contributor licensing policy](CONTRIBUTOR_POLICY.md) continues to apply.
 
+Disclosure of AI use is optional. Contributions do not need AI-use declarations or labels in code, documentation, commit messages, or pull requests.
+
 ## Preserve the behavioral contract
 
 Contributions must match the project's target PostgreSQL version, currently PostgreSQL 18, and preserve UQA's established semantics. PostgreSQL compatibility includes values, types, NULL behavior, comparisons, diagnostics, validation order, transaction effects, and persistent state. Use an independent instance of the target version or independently captured reference results to verify affected behavior; expectations generated from UQA's implementation or an AI answer are not an independent oracle.
