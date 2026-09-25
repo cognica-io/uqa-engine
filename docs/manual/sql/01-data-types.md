@@ -57,7 +57,7 @@ SELECT '1 2'::int2vector AS items,
        array_dims(ARRAY[''::int2vector, '1 2'::int2vector]) AS outer_bounds;
 ```
 
-The result is `1 2`, `[0:-1]`, and `[1:2]`. Rust exposes `Value::LegacyVector(LegacyVectorValue)` with an explicit `LegacyVectorKind`; it is distinct from an ordinary `Value::Array` or untyped `Value::List`. See the [upgrade contract](../reference/10-upgrading.md#unreleased-catalog-vector-carriers) for existing stored values.
+The result is `1 2`, `[0:-1]`, and `[1:2]`. Rust exposes `Value::LegacyVector(LegacyVectorValue)` with an explicit `LegacyVectorKind`; it is distinct from an ordinary `Value::Array` or untyped `Value::List`. See the [upgrade contract](../reference/10-upgrading.md#040-catalog-vector-carriers) for existing stored values.
 
 ## Floating point
 
