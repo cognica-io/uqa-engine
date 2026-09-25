@@ -50,7 +50,10 @@ pub use ivf_records::KeyValueIVFRecords;
 pub(crate) mod occurrence_records;
 pub use occurrence_records::KeyValueOccurrenceRecords;
 mod view;
-pub use view::{KeyValueMutation, KeyValueRead, KeyValueReadRevision, KeyValueReadScope};
+pub use view::{
+    KeyValueMutation, KeyValueRead, KeyValueReadRevision, KeyValueReadScope,
+    KeyValueVersionedMutation,
+};
 
 const TAG_METADATA: u8 = b'm';
 const TAG_TABLE: u8 = b't';
@@ -355,6 +358,16 @@ pub trait KeyValueStore: Send + Sync {
         ))
     }
 
+    /// Evaluate and stage once with the actual durable writer and a non-reused mutation revision. Origins may be persisted alongside canonical values, but do not prove publication or visibility. The callback has the same non-reentrancy rules as `with_mutation`; capable wrappers must preserve the original origin and atomic batch.
+    fn with_versioned_mutation(
+        &self,
+        _mutate: &mut KeyValueVersionedMutation<'_>,
+    ) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "versioned KeyValue mutation origins are not supported by this store".into(),
+        ))
+    }
+
     /// Identity of the transaction context shared by this store's catalog and data handles. Independent sessions must report different identities, even over the same file.
     fn transaction_affinity(&self) -> Option<crate::StorageSessionAffinity> {
         None
@@ -581,7 +594,10 @@ pub use inverted_index::{KeyValueInvertedIndex, OccurrenceStorage};
 pub use ivf_index::KeyValueIVFIndex;
 pub use memory_store::MemoryKeyValueStore;
 pub use storage_backend::KeyValueStorageBackend;
-pub use vector_index::KeyValueVectorIndex;
+pub use vector_index::{
+    DiskANNCanonicalVectorVisitor, KeyValueDiskANNCanonical, KeyValueVectorIndex,
+    RetainedDiskANNCanonical,
+};
 
 #[cfg(test)]
 mod tests;

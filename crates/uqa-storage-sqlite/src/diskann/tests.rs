@@ -186,6 +186,50 @@ fn native_diskann_translation_preserves_private_undo_retention_and_atomic_evalua
 }
 
 #[test]
+fn native_diskann_translation_preserves_versioned_mutation_origins() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let store = bind(&connection);
+    store.begin_transaction().unwrap();
+    let mut first = None;
+    store
+        .with_versioned_mutation(&mut |origin, read, batch| {
+            assert!(read.get(b"origin")?.is_none());
+            first = Some(origin);
+            batch.put(b"origin", &origin.revision().to_le_bytes())
+        })
+        .unwrap();
+    store.savepoint("origin").unwrap();
+    let mut undone = None;
+    store
+        .with_versioned_mutation(&mut |origin, read, batch| {
+            assert_eq!(
+                read.get(b"origin")?.as_deref(),
+                Some(first.unwrap().revision().to_le_bytes().as_slice())
+            );
+            undone = Some(origin);
+            batch.put(b"origin", &origin.revision().to_le_bytes())
+        })
+        .unwrap();
+    store.rollback_to_savepoint("origin").unwrap();
+    let mut last = None;
+    store
+        .with_versioned_mutation(&mut |origin, _, batch| {
+            assert_eq!(origin.transaction(), first.unwrap().transaction());
+            assert!(origin.revision() > undone.unwrap().revision());
+            last = Some(origin);
+            batch.put(b"origin", &origin.revision().to_le_bytes())
+        })
+        .unwrap();
+    store.release_savepoint("origin").unwrap();
+    store.commit_transaction().unwrap();
+    assert_eq!(
+        store.get(b"origin").unwrap(),
+        Some(last.unwrap().revision().to_le_bytes().to_vec())
+    );
+    assert!(!store.in_transaction());
+}
+
+#[test]
 fn native_diskann_entry_requires_native_binding_and_preserves_the_callers_transaction() {
     let control = StorageReadControl::with_limit(1 << 20);
     let connection = ManagedConnection::open_in_memory().unwrap();

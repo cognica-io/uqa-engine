@@ -7,10 +7,34 @@
 use std::sync::Arc;
 
 use uqa_storage::key_value::conformance::{
-    verify_diskann_built_generation, verify_diskann_built_reopen,
+    verify_diskann_built_generation, verify_diskann_built_reopen, verify_diskann_canonical_origins,
+    verify_diskann_canonical_reopen, verify_mutation_origins,
 };
 use uqa_storage::key_value::conformance::{verify_diskann_generations, verify_diskann_reopen};
 use uqa_storage::KeyValueStore;
+
+#[test]
+fn diskann_canonical_origins_and_tensors_reopen_through_redb() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("origins.redb");
+    let origin = {
+        let owner = crate::RedbStorage::open(&path).unwrap();
+        let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
+        verify_diskann_canonical_origins(&store).unwrap()
+    };
+    let owner = crate::RedbStorage::open(&path).unwrap();
+    let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
+    verify_diskann_canonical_reopen(&store, origin).unwrap();
+}
+
+#[test]
+fn diskann_mutation_origins_resolve_actual_redb_receipts_and_failed_evaluation() {
+    let directory = tempfile::tempdir().unwrap();
+    let database =
+        Arc::new(redb::Database::create(directory.path().join("lifecycle.redb")).unwrap());
+    let persistence = Arc::new(super::RedbRecordStore::new(database).unwrap());
+    verify_mutation_origins(persistence).unwrap();
+}
 
 #[test]
 fn diskann_generations_use_shared_redb_ownership_and_cold_reopen() {

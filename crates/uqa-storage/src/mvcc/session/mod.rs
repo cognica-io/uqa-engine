@@ -7,6 +7,7 @@
 //! Logical Key/Value sessions retain private changes rather than a physical writer.
 
 mod batch;
+mod evaluation;
 mod notifications;
 mod read;
 mod serializable;
@@ -214,7 +215,7 @@ impl VersionedKeyValueStore {
         self.active
             .lock()
             .as_ref()
-            .and_then(|transaction| transaction.allocation)
+            .and_then(Transaction::pending_commit)
     }
 
     /// Identify a retained physical attempt or uncertain logical completion, including an empty/read-only SSI transaction without a write receipt. Completion retries never replay evaluated application work.
@@ -298,11 +299,9 @@ impl VersionedKeyValueStore {
                 .atomic(operation)
                 .map_err(VersionError::into_storage_error);
         }
-        let mut transaction = Transaction::new(&*self.persistence, false, &self.control)
+        let transaction = Transaction::new(&*self.persistence, false, &self.control)
             .map_err(VersionError::into_storage_error)?;
-        let result = operation(&mut transaction).map_err(VersionError::into_storage_error)?;
-        // Retain even an autocommit attempt until its durable outcome is known.
-        *active = Some(transaction);
+        let result = self.evaluate_autocommit(&mut active, transaction, operation)?;
         active
             .as_mut()
             .expect("retained attempt")
@@ -438,6 +437,31 @@ impl KeyValueStore for VersionedKeyValueStore {
                     .map(SerializableReadContext::id),
             );
             operation(&read, &mut batch)?;
+            self.control.check()?;
+            batch.apply(transaction)
+        })
+    }
+
+    fn with_versioned_mutation(
+        &self,
+        operation: &mut crate::key_value::KeyValueVersionedMutation<'_>,
+    ) -> StorageBackendResult<()> {
+        self.control.check()?;
+        self.write(|transaction| {
+            let origin = transaction.mutation_origin(&*self.persistence, &self.write_control())?;
+            let view = transaction.view()?;
+            let read = read::RecordRead {
+                view: &view,
+                database: self.persistence.database_id(),
+                control: &self.control,
+            };
+            let mut batch = batch::Batch::new(
+                self,
+                transaction
+                    .serializable_context()
+                    .map(SerializableReadContext::id),
+            );
+            operation(origin, &read, &mut batch)?;
             self.control.check()?;
             batch.apply(transaction)
         })

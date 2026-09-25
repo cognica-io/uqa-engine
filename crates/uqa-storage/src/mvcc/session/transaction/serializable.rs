@@ -47,7 +47,7 @@ impl Transaction {
     }
 
     pub(in crate::mvcc::session) fn pending_completion(&self) -> Option<TransactionOutcomeId> {
-        self.allocation
+        self.pending_commit()
             .map(TransactionOutcomeId::Records)
             .or_else(|| self.completion.map(TransactionOutcome::id))
     }
@@ -73,6 +73,9 @@ impl Transaction {
         persistence: &dyn VersionedPersistence,
         control: &StorageReadControl,
     ) -> StorageBackendResult<()> {
+        if self.abort_only {
+            return Err(VersionError::TransactionSealed.into_storage_error());
+        }
         let Some(context) = self.serializable.clone() else {
             return self
                 .commit_records(persistence, control)
@@ -257,7 +260,12 @@ impl Transaction {
                 .abort_records(persistence, control)
                 .map_err(super::super::commit_error);
         };
-        let result = if self.allocation.is_none() {
+        let result = if self.prepared.is_none() {
+            // An origin can reserve an identity while SSI is still active (or already selected as a victim). Resolve that physical allocation before completing the logical rollback.
+            self.abort_records(persistence, control)
+                .map_err(super::super::commit_error)
+                .and_then(|()| self.finish_logical(&context, false, control))
+        } else if self.allocation.is_none() {
             self.finish_logical(&context, false, control)
         } else {
             context

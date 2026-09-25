@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use uqa_core::{memory::MemoryReservation, CancellationToken};
-use uqa_storage::key_value::{KeyValueMutation, KeyValueReadScope};
+use uqa_storage::key_value::{KeyValueMutation, KeyValueReadScope, KeyValueVersionedMutation};
 use uqa_storage::mvcc::{DatabaseId, IdentifierAllocator, SerializableSession};
 use uqa_storage::read_control::{KeyValueReadVisitor, StorageReadControl, ValueReadVisitor};
 use uqa_storage::{
@@ -138,6 +138,28 @@ impl KeyValueStore for Records {
                 },
             )
         })
+    }
+
+    fn with_versioned_mutation(
+        &self,
+        mutate: &mut KeyValueVersionedMutation<'_>,
+    ) -> StorageBackendResult<()> {
+        self.inner
+            .with_versioned_mutation(&mut |origin, read, batch| {
+                mutate(
+                    origin,
+                    &Read {
+                        inner: read,
+                        mapping: self.mapping,
+                        _memory: None,
+                    },
+                    &mut Batch {
+                        inner: Owner::Scoped(batch),
+                        mapping: self.mapping,
+                        control: read.control().clone(),
+                    },
+                )
+            })
     }
 
     fn get(&self, key: &[u8]) -> StorageBackendResult<Option<Vec<u8>>> {

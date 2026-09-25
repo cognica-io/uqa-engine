@@ -7,7 +7,8 @@
 use std::{path::Path, sync::Arc};
 
 use uqa_storage::key_value::conformance::{
-    verify_diskann_built_generation, verify_diskann_built_reopen,
+    verify_diskann_built_generation, verify_diskann_built_reopen, verify_diskann_canonical_origins,
+    verify_diskann_canonical_reopen, verify_mutation_origins,
 };
 use uqa_storage::key_value::conformance::{verify_diskann_generations, verify_diskann_reopen};
 use uqa_storage::KeyValueStore;
@@ -28,6 +29,28 @@ fn connection(path: &Path, mode: u8) -> ManagedConnection {
         ),
     }
     .unwrap()
+}
+
+#[test]
+fn diskann_canonical_origins_and_tensors_reopen_in_sqlite_key_value_modes() {
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("origins.db");
+        let store: Arc<dyn KeyValueStore> =
+            Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+        let origin = verify_diskann_canonical_origins(&store).unwrap();
+        drop(store);
+        let store: Arc<dyn KeyValueStore> =
+            Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+        verify_diskann_canonical_reopen(&store, origin).unwrap();
+    }
+}
+
+#[test]
+fn diskann_mutation_origins_resolve_actual_sqlite_receipts_and_failed_evaluation() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let persistence = Arc::new(super::SQLiteRecordStore::new(&connection).unwrap());
+    verify_mutation_origins(persistence).unwrap();
 }
 
 #[test]

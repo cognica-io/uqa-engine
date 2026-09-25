@@ -51,6 +51,12 @@ pub(crate) fn for_each_key(
 pub type KeyValueReadScope<'a> = dyn FnMut(&dyn KeyValueRead) -> StorageBackendResult<()> + 'a;
 pub type KeyValueMutation<'a> =
     dyn FnMut(&dyn KeyValueRead, &mut dyn KeyValueBatch) -> StorageBackendResult<()> + 'a;
+pub type KeyValueVersionedMutation<'a> = dyn FnMut(
+        crate::mvcc::StorageMutationOrigin,
+        &dyn KeyValueRead,
+        &mut dyn KeyValueBatch,
+    ) -> StorageBackendResult<()>
+    + 'a;
 
 /// A fixed read boundary supplied by the store. Borrowed visitors must not reenter persistence; compound reads make successive calls through this same reader.
 pub trait KeyValueRead {

@@ -55,7 +55,8 @@ pub use overlay::{
 };
 pub use persistence::{
     resolve_prepared_receipt, CommitErrorOutcome, CommitFailure, CommitFingerprint, CommitReceipt,
-    CommitResult, CommitStatus, DatabaseId, RecordPage, StorageTransactionId, VersionedPersistence,
+    CommitResult, CommitStatus, DatabaseId, RecordPage, StorageMutationOrigin,
+    StorageTransactionId, VersionedPersistence,
 };
 pub use receipts::{
     receipt_lease_id, ReceiptAcknowledgement, RetainedTransactionAllocation,

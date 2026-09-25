@@ -159,6 +159,14 @@ impl KeyValueStore for SQLiteKeyValueStore {
         self.conn.with_records(|store| store.with_mutation(mutate))
     }
 
+    fn with_versioned_mutation(
+        &self,
+        mutate: &mut uqa_storage::key_value::KeyValueVersionedMutation<'_>,
+    ) -> StorageBackendResult<()> {
+        self.conn
+            .with_records(|store| store.with_versioned_mutation(mutate))
+    }
+
     fn transaction_affinity(&self) -> Option<uqa_storage::StorageSessionAffinity> {
         Some(self.records.session_affinity())
     }
