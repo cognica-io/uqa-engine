@@ -54,6 +54,32 @@ pub fn field_index<'a>(
     Ok(found)
 }
 
+/// The column rename keeps a catalog-bound generation and its canonical origins together; other physical methods use their existing rebuild path.
+pub struct ColumnVectorRename {
+    pub dimensions: u32,
+    pub retained: Option<Box<dyn VectorIndex>>,
+}
+
+pub fn detach_for_column_rename(
+    indexes: &mut uqa_storage::vector_index::VectorIndexes,
+    field: &str,
+) -> StorageBackendResult<Option<ColumnVectorRename>> {
+    let Some(mut index) = indexes.live_mut()?.remove(field) else {
+        return Ok(None);
+    };
+    let dimensions = index.dimensions();
+    let retained = if index.index_kind() == "diskann" {
+        Some(index)
+    } else {
+        index.clear()?;
+        None
+    };
+    Ok(Some(ColumnVectorRename {
+        dimensions,
+        retained,
+    }))
+}
+
 /// Populate a newly selected memory index from one fixed document view, preserving SQL tensor extraction and the index owner's initialization contract.
 pub fn populate(
     index: &mut dyn VectorIndex,
