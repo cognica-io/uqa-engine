@@ -22,8 +22,10 @@ const FIELD: &str = "vector";
 const MARKER: &[u8] = b"diskann-binding-guarded-write";
 
 mod identity;
+mod pruning;
 mod publication;
 pub use identity::{verify_diskann_catalog_identity, verify_diskann_catalog_identity_reopen};
+pub use pruning::{verify_diskann_pruning, verify_diskann_pruning_reopen};
 pub use publication::{verify_diskann_publication, verify_diskann_publication_reopen};
 
 fn definition() -> StorageBackendResult<CatalogIndexRow> {

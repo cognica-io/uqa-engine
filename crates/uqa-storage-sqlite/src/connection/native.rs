@@ -15,6 +15,26 @@ use super::{Arc, KeyValueStore, ManagedConnection, Result, SQLiteError, Versione
 use crate::mvcc::native::NativeSnapshot;
 
 impl ManagedConnection {
+    /// Prune one bounded `DiskANN` journal page in this connection's evaluated transaction. The captured source guards the catalog; the current committed canonical view and selected physical coverage determine deletion. Advance the returned cursor only after committing the caller's transaction.
+    pub fn prune_diskann_changes(
+        &self,
+        source: &crate::vector_index::RetainedSQLiteDiskANNCanonical,
+        resolver: &dyn uqa_storage::diskann_index::catalog::DiskANNIndexResolver,
+        pruner: &uqa_storage::key_value::KeyValueDiskANNPruner,
+        request: uqa_storage::diskann_index::changes::DiskANNPruneRequest,
+        control: &StorageReadControl,
+    ) -> uqa_storage::StorageBackendResult<uqa_storage::diskann_index::changes::DiskANNPruneResult>
+    {
+        self.with_native_write(|snapshot, batch| {
+            Ok(source.prune_changes(resolver, pruner, (snapshot, batch), request, control)?)
+        })?
+        .ok_or_else(|| {
+            uqa_storage::StorageBackendError::Other(
+                "DiskANN pruning requires a bound native session".into(),
+            )
+        })
+    }
+
     /// Install an actually sealed `DiskANN` generation and its complete coverage in this connection's native transaction. The build's retained source supplies catalog and expected-head evidence. Later private DDL must cancel or supersede this effect through the catalog lifecycle owner.
     pub fn publish_diskann_generation(
         &self,

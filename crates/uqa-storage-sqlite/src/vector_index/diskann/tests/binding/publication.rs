@@ -16,7 +16,7 @@ use uqa_storage::key_value::{
     DiskANNStageStatus, KeyValueDiskANNStage,
 };
 
-fn build(
+pub(super) fn build(
     connection: &ManagedConnection,
     control: &StorageReadControl,
 ) -> (

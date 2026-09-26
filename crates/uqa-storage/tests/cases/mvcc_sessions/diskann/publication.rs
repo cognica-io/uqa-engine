@@ -16,7 +16,7 @@ use uqa_storage::{
     StorageBackendResult, TableSchema, VectorFieldSchema,
 };
 
-struct Resolver;
+pub(super) struct Resolver;
 impl DiskANNIndexResolver for Resolver {
     fn resolve(
         &self,
@@ -30,7 +30,7 @@ impl DiskANNIndexResolver for Resolver {
     }
 }
 
-fn setup(store: &Arc<dyn KeyValueStore>) -> KeyValueDiskANNCanonical {
+pub(super) fn setup(store: &Arc<dyn KeyValueStore>) -> KeyValueDiskANNCanonical {
     let catalog = KeyValueCatalog::new(store.clone());
     catalog.save_schema("public").unwrap();
     catalog

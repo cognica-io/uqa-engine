@@ -26,7 +26,7 @@ use std::sync::Arc;
 
 type Coverage = DiskANNCanonicalCoverage<RetainedDiskANNCanonical>;
 
-fn build(
+pub(super) fn build(
     canonical: &KeyValueDiskANNCanonical,
     repository: &KeyValueDiskANNStore,
     control: &StorageReadControl,
@@ -39,7 +39,7 @@ fn build(
     Ok((coverage, stage))
 }
 
-fn publish(
+pub(super) fn publish(
     store: &Arc<dyn KeyValueStore>,
     coverage: &Coverage,
     control: &StorageReadControl,

@@ -11,6 +11,7 @@ use uqa_storage::{
 };
 
 mod identity;
+mod pruning;
 mod publication;
 mod validation;
 

@@ -38,6 +38,19 @@ impl KeyValueRead for FaultyRead {
         visit: &mut ValueReadVisitor<'_>,
     ) -> StorageBackendResult<()> {
         if key.starts_with(b"origins") {
+            match self.mode {
+                5 => return Ok(()),
+                6 => {
+                    let _ignored = visit(Some(b"invalid origin"));
+                    return Ok(());
+                }
+                7 => {
+                    visit(Some(&self.record.encode()))?;
+                    let _ignored = visit(None);
+                    return Ok(());
+                }
+                _ => {}
+            }
             return visit(Some(&self.record.encode()));
         }
         assert!(key.starts_with(b"changes"));
@@ -76,6 +89,9 @@ impl KeyValueRead for FaultyRead {
             assert!(prefix.starts_with(b"vectors"));
             key.extend_from_slice(&0_u64.to_be_bytes());
             visit(&key)?;
+            if self.mode == 8 {
+                let _ignored = visit(&key);
+            }
         }
         Ok(())
     }
@@ -91,6 +107,10 @@ fn diskann_change_cursor_preserves_suppressed_errors_and_requires_complete_point
         (2, "was not returned"),
         (3, "invalid change identity width"),
         (4, "differs from its canonical origin"),
+        (5, "canonical origin was not returned"),
+        (6, "origin"),
+        (7, "canonical origin returned repeatedly"),
+        (8, "canonical origins or ordinal coverage mismatch"),
     ] {
         let control = StorageReadControl::with_limit(8192);
         let source = RetainedDiskANNCanonical::new(
