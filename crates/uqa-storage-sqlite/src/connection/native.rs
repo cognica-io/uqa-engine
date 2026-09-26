@@ -15,6 +15,31 @@ use super::{Arc, KeyValueStore, ManagedConnection, Result, SQLiteError, Versione
 use crate::mvcc::native::NativeSnapshot;
 
 impl ManagedConnection {
+    /// Install an actually sealed `DiskANN` generation and its complete coverage in this connection's native transaction. The build's retained source supplies catalog and expected-head evidence. Later private DDL must cancel or supersede this effect through the catalog lifecycle owner.
+    pub fn publish_diskann_generation(
+        &self,
+        coverage: &uqa_storage::diskann_index::build::DiskANNCanonicalCoverage<
+            crate::vector_index::RetainedSQLiteDiskANNCanonical,
+        >,
+        resolver: &dyn uqa_storage::diskann_index::catalog::DiskANNIndexResolver,
+        control: &StorageReadControl,
+    ) -> uqa_storage::StorageBackendResult<()> {
+        let sealed = self
+            .diskann_generations(control)?
+            .open_source(coverage.fingerprint().generation(), control)?;
+        self.with_native_write(|snapshot, batch| {
+            crate::vector_index::RetainedSQLiteDiskANNCanonical::publish_generation(
+                coverage, resolver, &sealed, snapshot, batch, control,
+            )?;
+            Ok(())
+        })?
+        .ok_or_else(|| {
+            uqa_storage::StorageBackendError::Other(
+                "DiskANN publication requires a bound native session".into(),
+            )
+        })
+    }
+
     /// Connect physical `DiskANN` staging to an already bound native owner. The returned store opens a dedicated session; it cannot complete this connection's transaction or publish a SQL index.
     pub fn diskann_generations(
         &self,

@@ -11,13 +11,21 @@ use super::invalid;
 
 pub(super) const STATE_BYTES: usize = 18;
 
-/// Physical staging status. A sealed generation is not a public catalog publication.
+/// Physical generation lifecycle. A seal alone does not select a catalog head.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiskANNStageStatus {
     Writing,
     Frozen,
     Sealed,
     Discarding,
+    Published,
+    Retired,
+}
+
+impl DiskANNStageStatus {
+    pub(super) fn is_complete(self) -> bool {
+        matches!(self, Self::Sealed | Self::Published | Self::Retired)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -35,6 +43,8 @@ impl State {
             DiskANNStageStatus::Frozen => 1,
             DiskANNStageStatus::Sealed => 2,
             DiskANNStageStatus::Discarding => 3,
+            DiskANNStageStatus::Published => 4,
+            DiskANNStageStatus::Retired => 5,
         };
         bytes[2..].copy_from_slice(&self.owner);
         bytes
@@ -50,6 +60,8 @@ impl State {
             1 => DiskANNStageStatus::Frozen,
             2 => DiskANNStageStatus::Sealed,
             3 => DiskANNStageStatus::Discarding,
+            4 => DiskANNStageStatus::Published,
+            5 => DiskANNStageStatus::Retired,
             _ => return Err(invalid("unknown staging status")),
         };
         Ok(Self { status, owner })

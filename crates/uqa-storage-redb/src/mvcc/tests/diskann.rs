@@ -14,6 +14,23 @@ use uqa_storage::key_value::conformance::{verify_diskann_generations, verify_dis
 use uqa_storage::KeyValueStore;
 
 #[test]
+fn diskann_publication_is_atomic_and_reopens_in_redb() {
+    use uqa_storage::key_value::conformance::{
+        verify_diskann_publication, verify_diskann_publication_reopen,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("publication.redb");
+    let generation = {
+        let owner = crate::RedbStorage::open(&path).unwrap();
+        let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
+        verify_diskann_publication(&store).unwrap()
+    };
+    let owner = crate::RedbStorage::open(&path).unwrap();
+    let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
+    verify_diskann_publication_reopen(&store, generation).unwrap();
+}
+
+#[test]
 fn diskann_catalog_identity_handles_survive_redb_cold_reopen() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("identity.redb");

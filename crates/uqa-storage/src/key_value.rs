@@ -31,7 +31,8 @@ mod catalog;
 pub use catalog::KeyValueCatalog;
 mod diskann;
 pub use diskann::{
-    DiskANNStageStatus, KeyValueDiskANNSource, KeyValueDiskANNStage, KeyValueDiskANNStore,
+    publication, DiskANNStageStatus, KeyValueDiskANNSource, KeyValueDiskANNStage,
+    KeyValueDiskANNStore,
 };
 mod graph_commit;
 mod table_owners;
@@ -131,6 +132,27 @@ pub trait KeyValueBatch {
     fn require_unchanged(&mut self, _key: &[u8]) -> StorageBackendResult<()> {
         Err(StorageBackendError::Other(
             "commit-time record requirements are not supported".into(),
+        ))
+    }
+    /// Require an actual committed record observed through an independently retained metadata view, without advancing the transaction's data snapshot. The revision must identify this same key in this database; private and unversioned provenance is rejected. Reserved for storage-owned independently staged resources, not SQL row writes.
+    fn require_observed(
+        &mut self,
+        _key: &[u8],
+        _revision: &KeyValueReadRevision,
+    ) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "observed metadata requirements are not supported".into(),
+        ))
+    }
+    /// Replace an independently staged metadata record using its observed committed precondition. Existing private changes to the key are rejected. Commit conflict, savepoint and receipt semantics are the same as other evaluated writes; this does not refresh the caller's snapshot.
+    fn put_observed(
+        &mut self,
+        _key: &[u8],
+        _value: &[u8],
+        _revision: &KeyValueReadRevision,
+    ) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "observed metadata replacements are not supported".into(),
         ))
     }
     /// Publish a new revision of an immutable marker, merging concurrent touches of the same value. Structural changes fence the marker and replace their definition; data changes require the definition and touch the marker. The payload must contain only immutable owner/format data. Capable wrappers must forward this operation.

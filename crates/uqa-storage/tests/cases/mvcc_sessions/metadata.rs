@@ -5,6 +5,9 @@
 //
 
 use super::*;
+
+#[path = "metadata/observed.rs"]
+mod observed;
 use uqa_storage::{CatalogFacade, KeyValueCatalog};
 
 #[test]

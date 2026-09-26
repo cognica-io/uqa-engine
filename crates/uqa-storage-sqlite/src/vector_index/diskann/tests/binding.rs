@@ -11,6 +11,7 @@ use uqa_storage::{
 };
 
 mod identity;
+mod publication;
 mod validation;
 
 const TABLE: &str = "public.native_binding";

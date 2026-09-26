@@ -116,6 +116,7 @@ impl<S: DiskANNCanonicalRead> DiskANNBuildCapture<S> {
             fingerprint: self.input.coverage(),
             control: self.input.control.clone(),
             origins: self.origins.summary(),
+            manifest: *manifest,
         })
     }
 }
@@ -126,9 +127,21 @@ pub struct DiskANNCanonicalCoverage<S> {
     fingerprint: DiskANNBuildCoverage,
     control: StorageReadControl,
     origins: DiskANNOriginSummary,
+    manifest: DiskANNManifest,
 }
 
 impl<S: DiskANNCanonicalRead> DiskANNCanonicalCoverage<S> {
+    /// Preserve the original capture's controls independently of later operation allowances.
+    pub fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
+        self.control.check()?;
+        self.source.check_control(control)
+    }
+
+    /// The exact manifest accepted by this capture, including separate graph/side counts and artifact identities. Publication must compare it with the actual sealed record.
+    pub fn manifest(&self) -> &DiskANNManifest {
+        &self.manifest
+    }
+
     pub fn fingerprint(&self) -> DiskANNBuildCoverage {
         self.fingerprint
     }

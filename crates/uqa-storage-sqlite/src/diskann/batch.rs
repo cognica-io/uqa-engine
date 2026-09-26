@@ -58,6 +58,25 @@ impl KeyValueBatch for Batch<'_> {
         let key = self.mapping.key(key, &self.control)?;
         self.inner.get_mut().require_unchanged(&key)
     }
+    fn require_observed(
+        &mut self,
+        key: &[u8],
+        revision: &uqa_storage::key_value::KeyValueReadRevision,
+    ) -> StorageBackendResult<()> {
+        let key = self.mapping.key(key, &self.control)?;
+        self.inner.get_mut().require_observed(&key, revision)
+    }
+    fn put_observed(
+        &mut self,
+        key: &[u8],
+        value: &[u8],
+        revision: &uqa_storage::key_value::KeyValueReadRevision,
+    ) -> StorageBackendResult<()> {
+        let record = self.mapping.record(key, value, &self.control)?;
+        self.inner
+            .get_mut()
+            .put_observed(record.key(), record.row(), revision)
+    }
     fn fence_record(&mut self, key: &[u8]) -> StorageBackendResult<()> {
         let key = self.mapping.key(key, &self.control)?;
         self.inner.get_mut().fence_record(&key)

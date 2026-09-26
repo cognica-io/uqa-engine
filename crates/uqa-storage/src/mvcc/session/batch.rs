@@ -20,6 +20,8 @@ use super::VersionedKeyValueStore;
 
 enum Operation {
     Requirement(BudgetedVec<u8>),
+    ObservedRequirement(RecordKey, crate::mvcc::CommitSequence),
+    ObservedRecord(RecordKey, SharedRecordValue, crate::mvcc::CommitSequence),
     IdentifierObservation(BudgetedVec<u8>, u64),
     IdentifierInheritance(BudgetedVec<u8>, BudgetedVec<u8>),
     DeletePrefix(BudgetedVec<u8>, RecordWriteKind),
@@ -92,6 +94,12 @@ impl<'a> Batch<'a> {
             match operation {
                 Operation::Requirement(key) => {
                     transaction.require_unchanged(key, control)?;
+                }
+                Operation::ObservedRequirement(key, expected) => {
+                    transaction.require_observed(key, *expected, control)?;
+                }
+                Operation::ObservedRecord(key, value, expected) => {
+                    transaction.write_observed(key, value, *expected, control)?;
                 }
                 Operation::IdentifierObservation(_, _) | Operation::IdentifierInheritance(_, _) => {
                 }
@@ -337,6 +345,44 @@ impl KeyValueBatch for Batch<'_> {
     }
     fn put(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
         self.typed_record(key, Some(value), RecordWriteKind::Canonical)
+    }
+    fn require_observed(
+        &mut self,
+        key: &[u8],
+        revision: &crate::key_value::KeyValueReadRevision,
+    ) -> StorageBackendResult<()> {
+        let expected = revision
+            .observed_commit(self.store.persistence.database_id())
+            .ok_or_else(|| {
+                VersionError::InvalidEncoding("metadata revision is not committed in this database")
+                    .into_storage_error()
+            })?;
+        self.operations.push(Operation::ObservedRequirement(
+            RecordKey::new(key, self.store.control.memory())
+                .map_err(VersionError::into_storage_error)?,
+            expected,
+        ))?;
+        Ok(())
+    }
+    fn put_observed(
+        &mut self,
+        key: &[u8],
+        value: &[u8],
+        revision: &crate::key_value::KeyValueReadRevision,
+    ) -> StorageBackendResult<()> {
+        let expected = revision
+            .observed_commit(self.store.persistence.database_id())
+            .ok_or_else(|| {
+                VersionError::InvalidEncoding("metadata revision is not committed in this database")
+                    .into_storage_error()
+            })?;
+        self.operations.push(Operation::ObservedRecord(
+            RecordKey::new(key, self.store.control.memory())
+                .map_err(VersionError::into_storage_error)?,
+            Arc::new(self.copy(value)?),
+            expected,
+        ))?;
+        Ok(())
     }
     fn delete(&mut self, key: &[u8]) -> StorageBackendResult<()> {
         self.typed_record(key, None, RecordWriteKind::Canonical)

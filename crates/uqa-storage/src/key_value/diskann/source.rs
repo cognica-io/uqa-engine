@@ -27,7 +27,7 @@ pub(super) const KEY_PAGE_LIMIT: usize = 64;
 
 /// A physical generation pinned to an existing MVCC lease. Opening it reads only fixed metadata; pages and record batches remain lazy.
 pub struct KeyValueDiskANNSource {
-    store: Arc<dyn KeyValueStore>,
+    pub(super) store: Arc<dyn KeyValueStore>,
     generation: DiskANNGeneration,
     _memory: MemoryReservation,
 }
@@ -61,7 +61,9 @@ impl KeyValueDiskANNSource {
         .map(State::decode)
         .transpose()?
         .ok_or_else(|| invalid("generation state is missing"))?;
-        if state.status != status {
+        if state.status != status
+            && !(status == DiskANNStageStatus::Sealed && state.status.is_complete())
+        {
             return Err(invalid(
                 "generation has not reached the requested physical state",
             ));

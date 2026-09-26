@@ -25,6 +25,7 @@ use super::{KeyValueMutation, KeyValueRead};
 pub(super) mod conformance;
 mod identity;
 mod keys;
+pub mod publication;
 mod source;
 mod staging;
 mod state;

@@ -40,6 +40,12 @@ pub struct VisibleRecordRevision {
 }
 
 impl VisibleRecordRevision {
+    pub(crate) fn committed(self, database: super::DatabaseId) -> Option<CommitSequence> {
+        (self.database == database && self.private.is_none())
+            .then_some(self.committed)
+            .flatten()
+    }
+
     pub(crate) fn database(self) -> super::DatabaseId {
         self.database
     }

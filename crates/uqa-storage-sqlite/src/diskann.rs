@@ -27,6 +27,29 @@ use batch::{Batch, Owner};
 use encoding::{invalid, Mapping};
 use read::Read;
 
+pub(crate) fn map_read(
+    inner: &dyn uqa_storage::key_value::KeyValueRead,
+    namespace: DatabaseId,
+) -> StorageBackendResult<impl uqa_storage::key_value::KeyValueRead + '_> {
+    Ok(Read {
+        inner,
+        mapping: Mapping::new(namespace)?,
+        _memory: None,
+    })
+}
+
+pub(crate) fn map_batch<'a>(
+    inner: &'a mut dyn KeyValueBatch,
+    namespace: DatabaseId,
+    control: &StorageReadControl,
+) -> StorageBackendResult<impl KeyValueBatch + 'a> {
+    Ok(Batch {
+        inner: Owner::Scoped(inner),
+        mapping: Mapping::new(namespace)?,
+        control: control.clone(),
+    })
+}
+
 pub(crate) struct Records {
     inner: Arc<dyn KeyValueStore>,
     mapping: Mapping,
