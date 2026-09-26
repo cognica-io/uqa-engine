@@ -6,6 +6,7 @@
 
 use super::{sessions, sql, Arc, Engine, Value};
 
+mod observations;
 mod renaming;
 
 fn assert_search(engine: &Engine, expected: &[(i64, f64)]) {

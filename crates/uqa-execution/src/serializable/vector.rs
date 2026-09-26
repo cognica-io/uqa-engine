@@ -12,6 +12,7 @@ use uqa_core::{memory::Budgeted, DocId, PostingList};
 use uqa_sql::{ast::ColumnDef, SQLError};
 use uqa_storage::{
     mvcc::{SerializableKeySpace, SerializablePredicate},
+    read_control::StorageReadControl,
     vector_index::validate_vector_values,
     StorageBackendError, StorageBackendResult, VectorIndex,
 };
@@ -127,6 +128,36 @@ impl VectorIndex for ObservedVectorIndex {
         }
         self.observation.observe()?;
         self.index.search_threshold(query, threshold)
+    }
+    fn search_knn_with_control(
+        &self,
+        query: &[f32],
+        k: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<PostingList> {
+        control.check()?;
+        validate_vector_values(self.dimensions(), query)?;
+        if k != 0 {
+            self.observation.observe()?;
+        }
+        self.index.search_knn_with_control(query, k, control)
+    }
+    fn search_threshold_with_control(
+        &self,
+        query: &[f32],
+        threshold: f32,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<PostingList> {
+        control.check()?;
+        validate_vector_values(self.dimensions(), query)?;
+        if !threshold.is_finite() {
+            return Err(StorageBackendError::Other(
+                "vector similarity threshold must be finite".into(),
+            ));
+        }
+        self.observation.observe()?;
+        self.index
+            .search_threshold_with_control(query, threshold, control)
     }
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
         Ok(Arc::new(self.clone()))
