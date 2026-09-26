@@ -412,10 +412,12 @@ impl Engine {
         true
     }
 
+    /// Decode the stored selection using the caller's registered dimensions. Cache rebinding already holds the refresh gate and cannot perform another synchronized table lookup.
     pub(super) fn vector_index_spec_for_column(
         &self,
         table: &str,
         column: &str,
+        dimensions: u32,
     ) -> StorageBackendResult<Option<VectorIndexSpec>> {
         let row = uqa_execution::catalog::index::vectors::field_index(
             self.durable.catalog_indexes.read().values(),
@@ -423,19 +425,8 @@ impl Engine {
             column,
         )?
         .cloned();
-        row.map(|row| {
-            let Some(
-                uqa_sql::ast::ColumnType::Vector(dimensions)
-                | uqa_sql::ast::ColumnType::Tensor(dimensions),
-            ) = self.column_type(table, column)?
-            else {
-                return Err(StorageBackendError::Other(
-                    "physical vector index has no typed vector field".into(),
-                ));
-            };
-            uqa_execution::catalog::index::vectors::stored_spec(&row, dimensions)
-        })
-        .transpose()
+        row.map(|row| uqa_execution::catalog::index::vectors::stored_spec(&row, dimensions))
+            .transpose()
     }
 
     pub(crate) fn vector_catalog_index_names_for_column(
