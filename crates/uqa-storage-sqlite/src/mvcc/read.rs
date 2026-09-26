@@ -22,6 +22,7 @@ use super::{codec, runs, PhysicalResult, SQLiteRecordStore};
 pub(super) struct Snapshot {
     pub(super) store: SQLiteRecordStore,
     pub(super) sequence: CommitSequence,
+    pub(super) reclamation_epoch: u64,
     pub(super) _lease: std::sync::Arc<uqa_storage::mvcc::SnapshotLease>,
 }
 
@@ -42,6 +43,9 @@ impl Snapshot {
 }
 
 impl CommittedRecordSnapshot for Snapshot {
+    fn reclamation_epoch(&self) -> Option<u64> {
+        Some(self.reclamation_epoch)
+    }
     fn sequence(&self) -> CommitSequence {
         self.sequence
     }

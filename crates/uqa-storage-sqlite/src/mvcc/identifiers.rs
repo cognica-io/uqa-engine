@@ -62,7 +62,7 @@ pub(super) fn consolidate_diskann_generations(connection: &Connection) -> Physic
     Ok(())
 }
 
-fn watermark(connection: &Connection, namespace: &[u8]) -> PhysicalResult<Option<u64>> {
+pub(super) fn watermark(connection: &Connection, namespace: &[u8]) -> PhysicalResult<Option<u64>> {
     connection
         .query_row(
             "SELECT watermark FROM _uqa_mvcc_identifiers WHERE namespace = ?1",

@@ -127,6 +127,9 @@ impl VersionedPersistence for FaultPersistence {
     fn graph_record_layout(&self) -> Option<&dyn uqa_storage::mvcc::GraphRecordLayout> {
         self.inner.graph_record_layout()
     }
+    fn resource_leases(&self) -> Option<&dyn uqa_storage::mvcc::ResourceLeaseProvider> {
+        self.inner.resource_leases()
+    }
     fn allocate_identifiers(
         &self,
         namespace: &[u8],
@@ -156,6 +159,18 @@ impl VersionedPersistence for FaultPersistence {
     }
     fn reclaim_versions(&self, control: &StorageReadControl) -> VersionResult<u64> {
         self.inner.reclaim_versions(control)
+    }
+
+    fn reclaim_diskann_tombstones(&self, control: &StorageReadControl) -> VersionResult<()> {
+        self.inner.reclaim_diskann_tombstones(control)
+    }
+
+    fn reclaim_tombstones(
+        &self,
+        request: &uqa_storage::mvcc::TombstoneReclamationRequest<'_>,
+        control: &StorageReadControl,
+    ) -> VersionResult<uqa_storage::mvcc::TombstoneReclamationStep> {
+        self.inner.reclaim_tombstones(request, control)
     }
 
     fn snapshot(
@@ -305,6 +320,20 @@ fn count(engine: &Engine, table: &str) -> Value {
         .unwrap()
         .rows[0]["n"]
         .clone()
+}
+
+#[test]
+fn fault_persistence_forwards_physical_reclamation_and_provider_layout() {
+    let (_directory, fixtures) = fixtures();
+    for persistence in fixtures {
+        uqa_storage::mvcc::verify_tombstone_reclamation(&*persistence).unwrap();
+        let store: Arc<dyn KeyValueStore> = Arc::new(VersionedKeyValueStore::new(
+            persistence,
+            None,
+            VersionedSessionOptions::default(),
+        ));
+        uqa_storage::key_value::conformance::verify_diskann_canonical_reclamation(&store).unwrap();
+    }
 }
 
 #[test]

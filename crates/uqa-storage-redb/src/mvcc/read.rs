@@ -25,6 +25,7 @@ pub(super) struct Snapshot {
     pub(super) database: Arc<Database>,
     pub(super) identity: DatabaseId,
     pub(super) sequence: CommitSequence,
+    pub(super) reclamation_epoch: u64,
     pub(super) _lease: Arc<uqa_storage::mvcc::SnapshotLease>,
 }
 
@@ -40,6 +41,9 @@ impl Snapshot {
 }
 
 impl CommittedRecordSnapshot for Snapshot {
+    fn reclamation_epoch(&self) -> Option<u64> {
+        Some(self.reclamation_epoch)
+    }
     fn sequence(&self) -> CommitSequence {
         self.sequence
     }

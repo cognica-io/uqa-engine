@@ -151,7 +151,27 @@ fn live_and_dead_processes_define_the_retention_horizon() {
             )
             .unwrap();
             let id = store.allocate_transaction(&control).unwrap();
-            store.commit(id, &changed, &control).unwrap();
+            let current_receipt = store.commit(id, &changed, &control).unwrap();
+            let tombstone = PreparedRecordCommit::new(
+                &[RecordWrite {
+                    key: b"process-tombstone",
+                    expected: None,
+                    value: None,
+                }],
+                &control,
+            )
+            .unwrap();
+            let tombstone_id = store.allocate_transaction(&control).unwrap();
+            let deleted = store.commit(tombstone_id, &tombstone, &control).unwrap();
+            let request = uqa_storage::mvcc::TombstoneReclamationRequest {
+                prefix: b"process-tombstone",
+                after: None,
+                through: deleted.sequence,
+            };
+            assert!(matches!(
+                store.reclaim_tombstones(&request, &control).unwrap(),
+                uqa_storage::mvcc::TombstoneReclamationStep::Retained
+            ));
             assert_eq!(store.reclaim_versions(&control).unwrap(), 0);
             peer.command("check", "old-visible");
             if killed {
@@ -161,7 +181,20 @@ fn live_and_dead_processes_define_the_retention_horizon() {
                 peer.command("release", "lease-released");
             }
             assert_eq!(store.reclaim_versions(&control).unwrap(), 1);
+            assert!(matches!(
+                store.reclaim_tombstones(&request, &control).unwrap(),
+                uqa_storage::mvcc::TombstoneReclamationStep::Complete { removed: 1 }
+            ));
             let current = store.snapshot(&control).unwrap();
+            assert_eq!(current.reclamation_epoch(), Some(1));
+            assert!(current
+                .get(b"process-tombstone", &control)
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                current.get(b"key", &control).unwrap().unwrap().sequence(),
+                current_receipt.sequence
+            );
             assert_eq!(
                 &***current
                     .get(b"key", &control)

@@ -67,6 +67,12 @@ pub enum VersionError {
         expected: CommitSequence,
         actual: CommitSequence,
     },
+    #[error("record observation epoch {observed:?} is outside retained reclamation epochs {minimum}..={current}")]
+    ReclaimedObservation {
+        observed: Option<u64>,
+        minimum: u64,
+        current: u64,
+    },
     #[error("record mutations {first} and {second} replace the same identity")]
     DuplicateRecord { first: usize, second: usize },
     #[error("private record revision space exhausted")]

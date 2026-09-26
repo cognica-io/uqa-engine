@@ -40,6 +40,44 @@ fn bind(connection: &ManagedConnection) -> Arc<dyn KeyValueStore> {
 }
 
 #[test]
+fn native_diskann_maintenance_bounds_sparse_generation_and_mapping_metadata() {
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let connection = open(&directory.path().join("retired-metadata.db"), mode);
+        let store = bind(&connection);
+        let mut previous = None;
+        for _ in 0..3 {
+            uqa_storage::key_value::conformance::verify_diskann_maintenance(&store).unwrap();
+            let counts = connection
+                .with_physical(|sqlite| {
+                    let mut counts = Vec::new();
+                    for table in [
+                        "_uqa_mvcc_heads",
+                        "_uqa_mvcc_versions",
+                        "_uqa_mvcc_runs",
+                        "_uqa_mvcc_identifiers",
+                    ] {
+                        counts.push(sqlite.query_row(
+                            &format!("SELECT count(*) FROM {table}"),
+                            [],
+                            |row| row.get::<_, i64>(0),
+                        )?);
+                    }
+                    Ok(counts)
+                })
+                .unwrap();
+            if let Some(previous) = &previous {
+                assert_eq!(
+                    &counts, previous,
+                    "repeated generation/map cleanup must not retain another physical identity"
+                );
+            }
+            previous = Some(counts);
+        }
+    }
+}
+
+#[test]
 fn native_diskann_generations_pass_shared_acceptance_and_cold_reopen_in_all_file_modes() {
     let directory = tempfile::tempdir().unwrap();
     for mode in 0..4 {

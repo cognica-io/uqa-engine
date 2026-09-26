@@ -26,6 +26,7 @@ mod catalog;
 pub use binding::verify_diskann_catalog_binding;
 pub use binding::{verify_diskann_catalog_identity, verify_diskann_catalog_identity_reopen};
 mod changes;
+pub use changes::verify_diskann_canonical_reclamation;
 mod corpus;
 mod coverage;
 mod lifecycle;

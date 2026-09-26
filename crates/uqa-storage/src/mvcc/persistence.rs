@@ -235,6 +235,22 @@ pub trait VersionedPersistence: Send + Sync {
     /// Atomically remove obsolete historical revisions under snapshot admission. Preserve the newest revision at/before every live snapshot, all newer revisions, head tombstones and every transaction receipt. Neither visibility nor transaction allocation advances. Wrappers must forward the capability and its resource/cancellation control.
     fn reclaim_versions(&self, control: &StorageReadControl) -> VersionResult<u64>;
 
+    /// Retire physical `DiskANN` identities after ordinary history collection. The default owns the common Key/Value generation, canonical-origin and change-journal namespaces; providers with another layout must override it. Wrappers must forward the original control and physical layout selection.
+    fn reclaim_diskann_tombstones(&self, control: &StorageReadControl) -> VersionResult<()> {
+        super::reclaim_key_value_diskann_tombstones(self, control)
+    }
+
+    /// Retire one bounded page of deleted record identities in an explicitly selected prefix. Requires no live record snapshots under shared admission, and atomically publishes a reclamation epoch with deletion. Commits touching an enrolled prefix must validate their original snapshot epoch after receipt resolution. Generic history reclamation keeps its existing tombstone contract. Wrappers must forward this capability and the original controls.
+    fn reclaim_tombstones(
+        &self,
+        _request: &super::TombstoneReclamationRequest<'_>,
+        _control: &StorageReadControl,
+    ) -> VersionResult<super::TombstoneReclamationStep> {
+        Err(VersionError::InvalidEncoding(
+            "scoped tombstone reclamation is not implemented by this provider",
+        ))
+    }
+
     /// Retry the same sealed logical changes and fingerprint. Return a durable matching receipt before validating snapshots or record heads. After verifying a pending receipt under exclusive admission, call `PreparedRecordCommit::validate_snapshot` before validating heads; only its rejection permits common storage to materialize derived effects again. Canonical changes and application callbacks must never be replayed, and mismatched fingerprint reuse is rejected.
     fn commit(
         &self,

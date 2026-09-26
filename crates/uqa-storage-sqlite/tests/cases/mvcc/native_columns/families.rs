@@ -44,7 +44,7 @@ fn native_column_rename_and_drop_preserve_every_fixed_field_family_and_old_histo
             Some((family, column, rows(&connection, family, TABLE)))
         })
         .collect();
-    assert_eq!(original.len(), 23);
+    assert_eq!(original.len(), 25);
     assert!(original.iter().all(|(_, _, rows)| !rows.is_empty()));
     let old = records.snapshot(&control).unwrap();
     bind(&connection);

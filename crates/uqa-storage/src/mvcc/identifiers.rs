@@ -15,7 +15,7 @@ use uqa_core::memory::{MemoryError, MemoryReservation};
 
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 
-use super::{VersionError, VersionResult};
+use super::{VersionError, VersionResult, RECLAMATION_DOMAIN_PREFIX, RECLAMATION_EPOCH_NAMESPACE};
 
 /// Session-bound access to durable, nontransactional identifier reservations. Implementations retain their session's cancellation, memory and read-only checks; forwarding storage wrappers must preserve this capability.
 pub trait IdentifierAllocator: Send + Sync {
@@ -106,6 +106,12 @@ pub fn reserve_identifier_workspace(
     control.cancellation().check()?;
     if namespace.is_empty() {
         return Err(VersionError::InvalidEncoding("empty identifier namespace"));
+    }
+    if namespace == RECLAMATION_EPOCH_NAMESPACE || namespace.starts_with(RECLAMATION_DOMAIN_PREFIX)
+    {
+        return Err(VersionError::InvalidEncoding(
+            "reserved reclamation namespace",
+        ));
     }
     let bytes = namespace
         .len()

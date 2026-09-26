@@ -24,6 +24,7 @@ mod schema;
 mod serializable;
 #[cfg(test)]
 mod tests;
+mod tombstones;
 mod write;
 
 pub(crate) use schema::WritePermit;
@@ -331,11 +332,13 @@ impl VersionedPersistence for SQLiteRecordStore {
         control: &StorageReadControl,
     ) -> VersionResult<Arc<dyn CommittedRecordSnapshot>> {
         control.cancellation().check()?;
+        let mut reclamation_epoch = 0;
         let lease = self.snapshots.capture(control, || {
             self.with(|connection| {
                 let read = connection.unchecked_transaction()?;
                 native::check_mapping(&read, self.native)?;
                 let sequence = codec::header(&read, self.identity)?.sequence;
+                reclamation_epoch = tombstones::epoch(&read)?;
                 read.commit()?;
                 Ok(sequence)
             })
@@ -344,6 +347,7 @@ impl VersionedPersistence for SQLiteRecordStore {
             read::Snapshot {
                 store: self.clone(),
                 sequence: lease.sequence(),
+                reclamation_epoch,
                 _lease: lease,
             },
             control,
@@ -355,6 +359,37 @@ impl VersionedPersistence for SQLiteRecordStore {
                 reclamation::reclaim(connection, self.identity, self.native, oldest, control)
             })
         })
+    }
+
+    fn reclaim_tombstones(
+        &self,
+        request: &uqa_storage::mvcc::TombstoneReclamationRequest<'_>,
+        control: &StorageReadControl,
+    ) -> VersionResult<uqa_storage::mvcc::TombstoneReclamationStep> {
+        request.validate(control)?;
+        self.snapshots.reclaim(control, |oldest| {
+            if oldest.is_some() {
+                return Ok(uqa_storage::mvcc::TombstoneReclamationStep::Retained);
+            }
+            self.with_write(control, |connection| {
+                tombstones::reclaim(connection, self.identity, self.native, request, control)
+            })
+        })
+    }
+
+    fn reclaim_diskann_tombstones(&self, control: &StorageReadControl) -> VersionResult<()> {
+        if self.native.is_none() {
+            return uqa_storage::mvcc::reclaim_key_value_diskann_tombstones(self, control);
+        }
+        for family in [
+            native::NativeRecordFamily::DiskANNRecords,
+            native::NativeRecordFamily::VectorOrigins,
+            native::NativeRecordFamily::VectorChanges,
+        ] {
+            let prefix = native::NativeRecordIdentity::family_prefix(family, control)?;
+            uqa_storage::mvcc::reclaim_tombstone_prefix(self, &prefix, control)?;
+        }
+        Ok(())
     }
 
     fn commit(

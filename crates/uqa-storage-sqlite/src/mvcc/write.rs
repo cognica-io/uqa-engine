@@ -110,6 +110,7 @@ pub(super) fn commit(
         return Ok(receipt);
     }
     prepared.validate_snapshot(current.sequence)?;
+    super::tombstones::validate(&transaction, prepared, control).map_err(rejected)?;
     prepared.validate(control.cancellation(), |key| {
         codec::head(&transaction, key).map_err(Error::into_version)
     })?;

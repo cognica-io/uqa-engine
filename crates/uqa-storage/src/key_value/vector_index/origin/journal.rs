@@ -10,7 +10,7 @@ use crate::diskann_index::format::DiskANNChangeIdentity;
 use crate::key_value::codec;
 use crate::StorageBackendResult;
 
-const ROOT: &[u8] = b"\0uqa-diskann-changes-v1\0";
+pub(in crate::key_value) const ROOT: &[u8] = b"\0uqa-diskann-changes-v1\0";
 
 pub(in crate::key_value) fn table_prefix(table: &str) -> StorageBackendResult<Vec<u8>> {
     Ok(namespaced(&codec::vector_key_prefix(table)?))

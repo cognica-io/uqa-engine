@@ -256,6 +256,14 @@ impl VersionedPersistence for Persistence {
         self.store.reclaim().map(|count| count as u64)
     }
 
+    fn reclaim_tombstones(
+        &self,
+        request: &uqa_storage::mvcc::TombstoneReclamationRequest<'_>,
+        control: &StorageReadControl,
+    ) -> VersionResult<uqa_storage::mvcc::TombstoneReclamationStep> {
+        self.store.reclaim_tombstones(request, control)
+    }
+
     fn snapshot(
         &self,
         control: &StorageReadControl,
