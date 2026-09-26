@@ -8,6 +8,21 @@ use super::*;
 use uqa_storage::diskann_index::pages::DiskANNRecordKey;
 
 #[test]
+fn diskann_runtime_retirement_preserves_private_undo_and_recreation() {
+    use uqa_storage::key_value::conformance::{
+        verify_diskann_runtime_retirement, verify_diskann_runtime_retirement_reopen,
+    };
+    for private in [false, true] {
+        let persistence = Persistence::new();
+        let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+        let generations = verify_diskann_runtime_retirement(&store, private).unwrap();
+        drop(store);
+        let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+        verify_diskann_runtime_retirement_reopen(&store, generations).unwrap();
+    }
+}
+
+#[test]
 fn diskann_runtime_adoption_conflicts_with_unstamped_insertions() {
     let persistence = Persistence::new();
     let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));

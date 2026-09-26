@@ -28,6 +28,9 @@ use crate::{
 };
 use std::sync::Arc;
 
+mod retirement;
+pub use retirement::{verify_diskann_runtime_retirement, verify_diskann_runtime_retirement_reopen};
+
 /// Small deterministic provider acceptance settings, never runtime defaults.
 pub fn diskann_runtime_fixture_options(
     dimensions: u32,

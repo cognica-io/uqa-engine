@@ -14,6 +14,25 @@ use uqa_storage::key_value::conformance::{verify_diskann_generations, verify_dis
 use uqa_storage::KeyValueStore;
 
 #[test]
+fn diskann_runtime_retirement_preserves_redb_undo_recreation_and_cold_reopen() {
+    use uqa_storage::key_value::conformance::{
+        verify_diskann_runtime_retirement, verify_diskann_runtime_retirement_reopen,
+    };
+    for private in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("retirement.redb");
+        let generations = {
+            let owner = crate::RedbStorage::open(&path).unwrap();
+            let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
+            verify_diskann_runtime_retirement(&store, private).unwrap()
+        };
+        let owner = crate::RedbStorage::open(&path).unwrap();
+        let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
+        verify_diskann_runtime_retirement_reopen(&store, generations).unwrap();
+    }
+}
+
+#[test]
 fn diskann_runtime_adoption_conflicts_with_redb_unstamped_insertions() {
     let directory = tempfile::tempdir().unwrap();
     let owner = crate::RedbStorage::open(directory.path().join("adoption.redb")).unwrap();

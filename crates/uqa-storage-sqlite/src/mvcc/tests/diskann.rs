@@ -18,6 +18,25 @@ use crate::key_value::SQLiteKeyValueStore;
 use crate::SQLiteCompressionOptions;
 
 #[test]
+fn diskann_runtime_retirement_preserves_sqlite_undo_recreation_and_cold_reopen() {
+    use uqa_storage::key_value::conformance::{
+        verify_diskann_runtime_retirement, verify_diskann_runtime_retirement_reopen,
+    };
+    for (mode, private) in (0..4).flat_map(|mode| [false, true].map(|private| (mode, private))) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("retirement.db");
+        let generations = {
+            let store: Arc<dyn KeyValueStore> =
+                Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+            verify_diskann_runtime_retirement(&store, private).unwrap()
+        };
+        let store: Arc<dyn KeyValueStore> =
+            Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+        verify_diskann_runtime_retirement_reopen(&store, generations).unwrap();
+    }
+}
+
+#[test]
 fn diskann_runtime_adoption_conflicts_with_sqlite_unstamped_insertions() {
     let directory = tempfile::tempdir().unwrap();
     let store: Arc<dyn KeyValueStore> = Arc::new(

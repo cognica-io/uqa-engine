@@ -20,6 +20,23 @@ use crate::{
 };
 
 impl KeyValueDiskANNCanonical {
+    /// Retire the selected generation before removing its SQL catalog definition. Raw vectors remain available to the replacement exact index, while stale writers and the old live handle can no longer mutate this field through its retired selection.
+    pub fn retire_index(
+        &self,
+        index: &RelationIdentity,
+        resolver: &dyn DiskANNIndexResolver,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<()> {
+        self.structural_change(|| {
+            let source = self.retain_for_index(index, control)?;
+            self.index.store.with_mutation(&mut |read, batch| {
+                source.retire_generation(resolver, read, batch, control)?;
+                self.index.coordinate_field(batch, true)?;
+                control.check()
+            })
+        })
+    }
+
     /// Adopt the complete existing raw field and publish its first generation. The actual private catalog definition must already exist, and the caller must retain the enclosing definition transaction.
     pub fn create_index(
         &self,

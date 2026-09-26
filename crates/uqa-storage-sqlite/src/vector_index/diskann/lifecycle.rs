@@ -21,6 +21,33 @@ use uqa_storage::{
 };
 
 impl SQLiteDiskANNCanonical {
+    /// Retire the selected generation in the caller's transaction before its SQL catalog row is removed. Preserve raw vectors for the replacement exact index and fence obsolete writers.
+    pub fn retire_index(
+        &self,
+        index: &RelationIdentity,
+        resolver: &dyn DiskANNIndexResolver,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<()> {
+        self.structural_change(|| {
+            let source = self.retain_for_index(index, control)?;
+            self.index
+                .conn
+                .with_native_write(|snapshot, batch| {
+                    source.retire_generation(resolver, snapshot, batch, control)?;
+                    let owner = snapshot.ensure_table_owner(&self.index.table, batch)?;
+                    snapshot.coordinate_vector_field(
+                        batch,
+                        owner,
+                        ValueRef::Text(self.index.field.as_bytes()),
+                        true,
+                    )?;
+                    control.check()?;
+                    Ok(())
+                })?
+                .ok_or_else(|| invalid("retirement requires a native record session"))
+        })
+    }
+
     /// Adopt the complete existing raw field and publish its first generation inside the caller's active catalog transaction. Its private table/index definitions must already exist.
     pub fn create_index(
         &self,

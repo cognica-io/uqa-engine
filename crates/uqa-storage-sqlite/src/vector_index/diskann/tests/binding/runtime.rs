@@ -16,6 +16,8 @@ use uqa_storage::{
     VectorIndex,
 };
 
+mod retirement;
+
 fn runtime(
     connection: &ManagedConnection,
     temporary: &DiskANNTemporaryBudget,

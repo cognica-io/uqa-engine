@@ -18,6 +18,29 @@ use uqa_storage::{
 };
 
 impl RetainedSQLiteDiskANNCanonical {
+    pub(crate) fn retire_generation(
+        &self,
+        resolver: &dyn DiskANNIndexResolver,
+        current: &NativeSnapshot,
+        batch: &mut dyn KeyValueBatch,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::diskann_index::format::DiskANNGeneration> {
+        let captured_read = self.snapshot.record_read();
+        let current_read = current.record_read();
+        self.require_current_index(&current_read, batch, control)?;
+        let scope = self.index_scope(resolver, control)?;
+        let captured = crate::diskann::map_read(&captured_read, self.snapshot.database)?;
+        let current_records = crate::diskann::map_read(&current_read, current.database)?;
+        let mut batch = crate::diskann::map_batch(batch, current.database, &current.control)?;
+        publication::retire_captured_generation(
+            &scope,
+            &captured,
+            &current_records,
+            &mut batch,
+            control,
+        )
+    }
+
     pub(crate) fn publish_generation(
         coverage: &DiskANNCanonicalCoverage<Self>,
         resolver: &dyn DiskANNIndexResolver,

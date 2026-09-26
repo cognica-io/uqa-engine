@@ -34,7 +34,8 @@ pub use pruning::{verify_diskann_pruning, verify_diskann_pruning_reopen};
 pub use publication::{verify_diskann_publication, verify_diskann_publication_reopen};
 pub use runtime::{
     diskann_runtime_fixture_options, verify_diskann_runtime_lifecycle,
-    verify_diskann_runtime_reopen,
+    verify_diskann_runtime_reopen, verify_diskann_runtime_retirement,
+    verify_diskann_runtime_retirement_reopen,
 };
 pub use selection::{verify_diskann_query_reopen, verify_diskann_query_views};
 

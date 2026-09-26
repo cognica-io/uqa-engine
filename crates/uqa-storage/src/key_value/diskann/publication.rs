@@ -194,6 +194,32 @@ pub fn selected_generation(
     Ok(selected)
 }
 
+/// Remove the original selected head and retire its generation in the caller's catalog transaction. The provider must guard the captured index definition in this same batch. A privately published generation keeps its original observed seal requirement through retirement; retained readers keep their own source.
+pub fn retire_captured_generation(
+    scope: &DiskANNIndexScope,
+    captured: &dyn KeyValueRead,
+    current: &dyn KeyValueRead,
+    batch: &mut dyn KeyValueBatch,
+    control: &StorageReadControl,
+) -> StorageBackendResult<DiskANNGeneration> {
+    let generation = selected_generation(scope, captured, control)?
+        .ok_or_else(|| invalid("retirement requires a published generation"))?;
+    if selected_generation(scope, current, control)? != Some(generation) {
+        return Err(invalid("selected generation changed before retirement"));
+    }
+    let state = read_state(current, generation, control)?
+        .filter(|state| state.status == DiskANNStageStatus::Published)
+        .ok_or_else(|| invalid("retired head has no published generation"))?;
+    transition(batch, generation, state, DiskANNStageStatus::Retired)?;
+    let key = head_key(scope);
+    batch.require_unchanged(&key)?;
+    batch.delete(&key)?;
+    captured.control().check()?;
+    current.control().check()?;
+    control.check()?;
+    Ok(generation)
+}
+
 fn transition(
     batch: &mut dyn KeyValueBatch,
     generation: DiskANNGeneration,

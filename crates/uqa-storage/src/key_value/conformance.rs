@@ -30,7 +30,8 @@ mod origins;
 pub use origins::verify_diskann_runtime_adoption_conflicts;
 pub use origins::{
     diskann_runtime_fixture_options, verify_diskann_runtime_lifecycle,
-    verify_diskann_runtime_reopen,
+    verify_diskann_runtime_reopen, verify_diskann_runtime_retirement,
+    verify_diskann_runtime_retirement_reopen,
 };
 pub use origins::{
     verify_diskann_canonical_origins, verify_diskann_canonical_reopen,
