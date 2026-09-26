@@ -24,6 +24,31 @@ The document-search preservation argument applies to each fixed $(D_\tau,J_\tau,
 
 These handles expose ordinary complete replacements and owned query snapshots for already published indexes. `PersistentDiskANNIndex` supplies their mutable runtime interface through the provider-owned structural operations below. Execution connects SQL create/drop/truncate and logical SSI observation through merged PR #189, and schedules automatic finite journal maintenance through the existing database worker. Complete lifecycle acceptance remains unfinished.
 
+## Transaction view acceptance
+
+Let $C_{\sigma(s)}$ be the committed canonical state selected for statement $s$, and let $M_t$ be the transaction's already evaluated document replacements and deletions. Its query state is
+
+$$
+C_s=C_{\sigma(s)}\oplus M_t,
+$$
+
+where $\oplus$ replaces a document's entire tensor, including an empty replacement, or removes that document. READ COMMITTED selects a new $\sigma(s)$ at each command; REPEATABLE READ keeps the first data snapshot through later statements and savepoint rollback. Undo changes $M_t$ without changing that fixed committed boundary or reusing a mutation identity. Storage captures canonical values, current journal origins, catalog and head on this same view, so the existing masking and reranking argument applies to $C_s$ without mixing row versions with newer vector scores. A row-lock recheck instead substitutes the updated target tuple and evaluates its retrieval membership and score through the existing committed retrieval adapter; only that pinned target can survive the recheck. A conflicting fixed-snapshot lock reports `40001` through the existing transaction owner. This is the existing [PostgreSQL 18 transaction contract](https://www.postgresql.org/docs/18/transaction-iso.html) applied to the DiskANN storage adapter.
+
+The [Engine isolation schedules](../../crates/uqa-engine/src/tests/catalog/index_registry/diskann/isolation.rs) exercise native SQLite, SQLite Key/Value and redb. They cover first-read admission after BEGIN/SAVEPOINT, peer commits, private update/delete/insert, rollback before and after snapshot selection, durable rows/scores after session reopen, and observed row-lock waits. The locking schedules check changed scores, loss of top-k membership, failed residual predicates and deletion under both isolation levels. A duplicate-key failure reports `23505`, later SQL reports `25P02`, and rolling back to the earlier savepoint preserves preceding private vectors without leaking failed rows or scores to a peer.
+
+Independent reference execution on 2026-09-27 KST used Docker `postgres:18.4`, reporting `18.4 (Debian 18.4-1.pgdg13+1)`. The reference stores these single-vector unit tensors as `float8[][]` and projects `embedding[1][1]`, whose literal values are their cosines against $(1,0)$. The same visibility, savepoint, constraint-error and observed locking schedules establish SQL results and SQLSTATEs independently of UQA. The reference uses an ordinary scalar row predicate for locking; DiskANN top-k membership is checked separately against the fixed three-vector ordering.
+
+| Obligation | Owning evidence |
+| --- | --- |
+| Atomic complete tensor/origin/change publication, private undo, disjoint writers in both commit orders and same-document rejection | [Canonical conformance](../../crates/uqa-storage/src/key_value/conformance/origins.rs), [change conformance](../../crates/uqa-storage/src/key_value/conformance/origins/changes.rs) and [native journal tests](../../crates/uqa-storage-sqlite/src/vector_index/diskann/tests/changes.rs); [memory root replacement and undo](../../crates/uqa-storage/src/diskann_index/memory/tests.rs) |
+| Exact late-commit visibility, empty replacements and bounded scans when journal history exceeds the query allowance | The same provider change conformance, [captured coverage](../../crates/uqa-storage/src/key_value/conformance/origins/coverage.rs) and [4,096-document query under 4 KiB workspace](../../crates/uqa-storage/src/diskann_index/query/tests.rs) |
+| READ COMMITTED rechecks, REPEATABLE READ, failed statements and savepoint visibility | [Engine isolation schedules](../../crates/uqa-engine/src/tests/catalog/index_registry/diskann/isolation.rs) and the independent reference above |
+| SERIALIZABLE coverage for nonreturned/unvisited candidates, warm caches and nested views, with zero-k/EXPLAIN controls | [Observation schedules](../../crates/uqa-engine/src/tests/catalog/index_registry/diskann/observations.rs) and [witnessed unvisited-candidate cycles in both commit orders](../../crates/uqa-engine/src/tests/catalog/index_registry/diskann/observations/unvisited.rs) |
+| Original evaluated mutations and builds survive lost or rejected completion without replay | [Counted live mutation and receipt identity](../../crates/uqa-storage/tests/cases/mvcc_sessions/diskann/live.rs), native journal acknowledgement failure above and [Execution rebuild completion](../../crates/uqa-execution/src/maintenance/diskann/tests/rebuild.rs) |
+| Exact maintenance counts and same-source reconstruction preserve later writers and original queries | [Provider maintenance conformance](../../crates/uqa-storage/src/key_value/conformance/origins/binding/maintenance.rs) and [Engine automatic reconstruction](../../crates/uqa-engine/src/tests/catalog/index_registry/diskann/maintenance/rebuild.rs) |
+
+These establish the versioned-change and observation unit. Physical metadata reclamation, the remaining publication/recovery matrix, planner/model provenance, public consumers and platform artifacts keep their separate acceptance gates in the implementation plan.
+
 ## Mutable persistent lifecycle
 
 Both canonical owners provide `create_index`, `rebuild_index` and `retire_index`. Structural operations require the caller's active definition transaction. Creation requires an actual stored index definition with no published head. It takes a private savepoint, validates existing raw ordinals in document order, and stamps complete origins and changes without copying or rewriting coordinates. Construction failure rolls back only this operation, preserving earlier caller effects and leaving the original raw field intact. Structural operations never commit the enclosing transaction.

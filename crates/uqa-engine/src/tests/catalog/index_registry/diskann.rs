@@ -6,6 +6,7 @@
 
 use super::{sessions, sql, Arc, Engine, Value};
 
+mod isolation;
 mod maintenance;
 mod observations;
 mod renaming;
