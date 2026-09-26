@@ -21,6 +21,8 @@ const TABLE: &str = "public.diskann_binding";
 const FIELD: &str = "vector";
 const MARKER: &[u8] = b"diskann-binding-guarded-write";
 
+mod corruption;
+pub use corruption::verify_diskann_selected_corruption;
 mod identity;
 mod live;
 mod maintenance;

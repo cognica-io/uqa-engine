@@ -29,7 +29,9 @@ use super::{
 const MAX_RECORD: usize = 65_536;
 
 mod build;
+mod corruption;
 pub use build::{verify_diskann_built_generation, verify_diskann_built_reopen};
+pub(crate) use corruption::verify_selected_corruption;
 mod identifiers;
 mod maintenance;
 mod mappings;

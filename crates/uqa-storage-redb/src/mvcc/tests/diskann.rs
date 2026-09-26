@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+mod corruption;
 mod restore;
 
 use uqa_storage::key_value::conformance::{

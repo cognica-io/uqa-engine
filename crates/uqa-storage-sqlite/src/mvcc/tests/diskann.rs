@@ -17,6 +17,8 @@ use crate::connection::ManagedConnection;
 use crate::key_value::SQLiteKeyValueStore;
 use crate::SQLiteCompressionOptions;
 
+mod corruption;
+
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod ownership;
 
