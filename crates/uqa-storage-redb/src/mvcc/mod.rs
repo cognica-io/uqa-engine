@@ -66,7 +66,7 @@ impl RedbRecordStore {
             let heads = transaction.open_table(HEADS).map_err(redb_error)?;
             let versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
             let receipts = transaction.open_table(TRANSACTIONS).map_err(redb_error)?;
-            let identifiers = transaction
+            let mut identifiers = transaction
                 .open_table(identifiers::TABLE)
                 .map_err(redb_error)?;
             let initialized = metadata
@@ -75,7 +75,7 @@ impl RedbRecordStore {
                 .map(|value| codec::decode_u64(value.value()))
                 .transpose()?;
             if let Some(format) = initialized {
-                if !matches!(format, 1..=49) {
+                if !matches!(format, 1..=50) {
                     return Err(VersionError::InvalidEncoding("unknown record format"));
                 }
                 if present != if format < 5 { 15 } else { 31 } {
@@ -104,42 +104,19 @@ impl RedbRecordStore {
                         )
                         .map_err(redb_error)?;
                 }
-                if format < 49 {
+                if format < 50 {
+                    identifiers::consolidate_diskann_generations(&mut identifiers)?;
                     metadata
-                        .insert("format", 49_u64.to_be_bytes().as_slice())
+                        .insert("format", 50_u64.to_be_bytes().as_slice())
                         .map_err(redb_error)?;
                 }
                 codec::receipt_limit(&metadata)?;
                 identity
             } else {
-                if metadata
-                    .iter()
-                    .map_err(redb_error)?
-                    .next()
-                    .transpose()
-                    .map_err(redb_error)?
-                    .is_some()
-                    || heads
-                        .iter()
-                        .map_err(redb_error)?
-                        .next()
-                        .transpose()
-                        .map_err(redb_error)?
-                        .is_some()
-                    || versions
-                        .iter()
-                        .map_err(redb_error)?
-                        .next()
-                        .transpose()
-                        .map_err(redb_error)?
-                        .is_some()
-                    || receipts
-                        .iter()
-                        .map_err(redb_error)?
-                        .next()
-                        .transpose()
-                        .map_err(redb_error)?
-                        .is_some()
+                if !metadata.is_empty().map_err(redb_error)?
+                    || !heads.is_empty().map_err(redb_error)?
+                    || !versions.is_empty().map_err(redb_error)?
+                    || !receipts.is_empty().map_err(redb_error)?
                     || !identifiers.is_empty().map_err(redb_error)?
                 {
                     return Err(VersionError::InvalidEncoding(
@@ -429,7 +406,7 @@ fn initialize_record_metadata(
         .insert("database", bytes.as_slice())
         .map_err(redb_error)?;
     metadata
-        .insert("format", 49_u64.to_be_bytes().as_slice())
+        .insert("format", 50_u64.to_be_bytes().as_slice())
         .map_err(redb_error)?;
     metadata
         .insert("allocated", 0_u64.to_be_bytes().as_slice())

@@ -105,7 +105,7 @@ impl Keys {
         &self.prefix
     }
 
-    pub(super) fn allocation_namespace(&self) -> &[u8] {
+    pub(super) fn legacy_allocation_namespace(&self) -> &[u8] {
         &self.prefix[..PREFIX_BYTES - 8]
     }
 

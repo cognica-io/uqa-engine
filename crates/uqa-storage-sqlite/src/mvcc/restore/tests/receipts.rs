@@ -54,7 +54,7 @@ fn interrupted_predecessor_restores_upgrade_without_losing_the_original_intent(
     #[values(0, 1, 2, 3)] mode: usize,
     #[values(false, true)] native: bool,
     #[values(false, true)] coordinator_published: bool,
-    #[values(43, 44, 45, 46, 47, 48, 49)] predecessor: i64,
+    #[values(43, 44, 45, 46, 47, 48, 49, 50)] predecessor: i64,
 ) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("old-pending-restore.db");
@@ -109,7 +109,7 @@ fn interrupted_predecessor_restores_upgrade_without_losing_the_original_intent(
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )?;
-            assert_eq!(format, 50);
+            assert_eq!(format, 51);
             assert_eq!(
                 limit,
                 if predecessor >= 44 {

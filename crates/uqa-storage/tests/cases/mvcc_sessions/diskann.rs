@@ -94,6 +94,8 @@ fn diskann_publication_is_atomic_on_shared_memory_sessions() {
 }
 use uqa_storage::key_value::{DiskANNStageStatus, KeyValueDiskANNStore};
 
+#[path = "diskann/identifiers.rs"]
+mod identifiers;
 #[path = "diskann/identity.rs"]
 mod identity;
 #[path = "diskann/live.rs"]

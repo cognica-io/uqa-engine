@@ -30,6 +30,7 @@ use crate::{StorageBackendError, StorageBackendResult};
 mod catalog;
 pub use catalog::KeyValueCatalog;
 mod diskann;
+pub use diskann::identifiers as diskann_identifiers;
 pub use diskann::{
     publication, DiskANNMaintenanceStatus, DiskANNMaintenanceStep, DiskANNStageStatus,
     KeyValueDiskANNMaintenance, KeyValueDiskANNPruner, KeyValueDiskANNSource, KeyValueDiskANNStage,

@@ -30,6 +30,7 @@ const MAX_RECORD: usize = 65_536;
 
 mod build;
 pub use build::{verify_diskann_built_generation, verify_diskann_built_reopen};
+mod identifiers;
 mod maintenance;
 mod ownership;
 mod reclamation;
@@ -49,6 +50,7 @@ pub fn verify_diskann_generations(
         &database,
         "stable DiskANN data identity",
     )?;
+    identifiers::verify(store, &repository, &control)?;
 
     store.begin_transaction()?;
     store.put(b"diskann-caller-private", b"uncommitted")?;
