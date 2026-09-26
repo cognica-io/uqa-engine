@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Private canonical build capture. A coverage fingerprint does not verify the caller's selected snapshot or authorize generation publication.
+//! Encrypted canonical build input and retained source membership. A fingerprint alone does not establish visibility or authorize generation publication.
 
 use std::path::Path;
 
@@ -19,6 +19,7 @@ use super::{
 };
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 
+mod capture;
 mod generation;
 mod merge;
 mod partitions;
@@ -28,6 +29,7 @@ mod temporary;
 #[cfg(test)]
 mod tests;
 
+pub use capture::{DiskANNBuildCapture, DiskANNCanonicalCoverage};
 pub use generation::{DiskANNBuildSink, DiskANNGenerationOptions};
 pub use merge::{DiskANNMergeOptions, DiskANNMergeSummary, DiskANNMergedGraph};
 pub use partitions::{DiskANNPartitionOptions, DiskANNPartitionRuns, DiskANNPartitionSummary};

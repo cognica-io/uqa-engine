@@ -1,6 +1,6 @@
 # DiskANN versioned changes
 
-Status: The Key/Value change journal and retained document cursor merged in PR #174. Native SQLite changes and their retained cursor are implemented for review. Storage-issued build coverage, covered-version retirement, paged query merging and public DiskANN routing remain pending in the [implementation plan](../plans/0014-diskann-vector-index.md).
+Status: The Key/Value change journal and retained document cursor merged in PR #174; native SQLite changes and their retained cursor merged in PR #176. [Retained build membership](diskann-build-coverage.md) is implemented for review. Provider-bound publication, covered-version retirement, paged query merging and public DiskANN routing remain pending in the [implementation plan](../plans/0014-diskann-vector-index.md).
 
 ## Ownership and atomicity
 
