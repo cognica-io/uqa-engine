@@ -11,7 +11,8 @@ use super::{
 };
 use crate::diskann_index::{
     format::{DiskANNCanonicalOrigin, DiskANNGeneration, DiskANNVectorVersion, PAGE_BYTES},
-    pages::{DiskANNOriginReader, DiskANNPageSource},
+    pages::{DiskANNOriginReader, DiskANNPageSource, DiskANNReadLimits},
+    DiskANNCanonicalScorer,
 };
 use crate::key_value::{
     conformance::{expect, expect_eq},
@@ -64,7 +65,32 @@ fn check(
         count += 1;
         Ok(())
     })?;
-    expect_eq(&count, &1, "one complete selected graph page")
+    expect_eq(&count, &1, "one complete selected graph page")?;
+    let query = view
+        .query(
+            &Resolver,
+            DiskANNReadLimits {
+                resident_bytes: 65_536,
+                cache_bytes: 0,
+                max_in_flight_page_bytes: 2 * PAGE_BYTES,
+                max_record_bytes: 8192,
+            },
+            control,
+        )?
+        .expect("published query");
+    let actual = query.search_knn(&[1.0, 0.0], 10, control)?.postings;
+    let exact = DiskANNCanonicalScorer::new(view, &[1.0, 0.0], control)?.search_exact_knn(10)?;
+    let bits = |postings: &uqa_core::PostingList| {
+        postings
+            .iter()
+            .map(|posting| (posting.doc_id, posting.payload.score.to_bits()))
+            .collect::<Vec<_>>()
+    };
+    expect_eq(
+        &bits(&actual),
+        &bits(&exact),
+        "selected generation merges the retained canonical changes and full tensors",
+    )
 }
 
 /// Exercise real private and committed query generation selection on a disposable provider. Physical construction occurs after the transaction's data snapshot; retained private readers survive refresh, undo and release of every build owner.

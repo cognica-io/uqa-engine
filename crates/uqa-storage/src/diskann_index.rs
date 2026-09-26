@@ -14,16 +14,18 @@ pub mod format;
 mod metric;
 pub mod pages;
 mod pq;
+mod query;
 mod random;
 mod scoring;
 pub mod search;
 mod vamana;
 
-pub use canonical::{DiskANNCanonicalCorpusVisitor, DiskANNCanonicalRead};
+pub use canonical::{DiskANNCanonicalCorpusVisitor, DiskANNCanonicalRead, DiskANNQueryRead};
 pub use metric::{ExactVectorReason, NavigationInput, NavigationVector, SquaredNavigationDistance};
 pub use pq::{
     PQCodebook, PQDistance, PQLookupTable, PQTrainer, PQTrainingOptions, PQTrainingSummary,
 };
+pub use query::{DiskANNQuery, DiskANNQueryResult};
 pub use scoring::{DiskANNCanonicalScorer, DiskANNDocumentScore};
 pub use vamana::{VamanaGraph, VamanaPoint};
 

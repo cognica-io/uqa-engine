@@ -1,6 +1,6 @@
 # DiskANN canonical document scoring
 
-Status: Merged in PR #173 on top of the [retained canonical sources](diskann-canonical-origins.md). Physical graph/side/change integration, coverage authority, publication and public DiskANN SQL remain incomplete in the [implementation plan](../plans/0014-diskann-vector-index.md).
+Status: Merged in PR #173 on top of the [retained canonical sources](diskann-canonical-origins.md). The [document search owner](diskann-document-search.md) now connects graph, side and current-change candidates to this scorer, using the published generation and retained canonical view. Public index dispatch and SQL remain incomplete in the [implementation plan](../plans/0014-diskann-vector-index.md).
 
 ## Ownership and observations
 
@@ -28,7 +28,7 @@ Canonical cosine retains the established sequential `f32` dot and squared-norm r
 
 Result construction reuses Storage's controlled posting helper. Scores widen from `f32` to `f64` without probability conversion, and postings are stored in ascending document order. Heap capacity, score buffers and posting construction share the invoking allowance. Threshold output is proportional to matches and fails when that output cannot fit; it does not silently truncate. The returned `PostingList` keeps the existing caller-owned result boundary after controlled construction.
 
-These exact methods supply explicit exact-threshold and numeric-edge routing. Ordinary ANN queries still require validated generation selection, side/change merging, distinct document candidates and adaptive completeness. Missing coverage or a failed graph read must not silently select this exact path.
+These exact methods supply explicit exact-threshold and numeric-edge routing. The document query owner supplies validated generation selection, side/change merging, distinct document candidates and deterministic completeness. Missing coverage or a failed graph read must not silently select this exact path.
 
 ## Verification
 

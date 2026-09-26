@@ -19,7 +19,7 @@ use crate::{
 };
 use uqa_core::{DocId, PostingList};
 
-mod selection;
+pub(super) mod selection;
 #[cfg(test)]
 mod tests;
 
