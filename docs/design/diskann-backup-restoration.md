@@ -12,18 +12,18 @@ SQLite [restore publication](../../crates/uqa-storage-sqlite/src/mvcc/restore.rs
 
 ## Preservation argument
 
-Let $D$ map each physical logical-record key to its visible revision and optional value, including tombstones. Let $H$ be the transaction-history incarnation, $N$ the independent persistent data namespace, and $G$ the selected DiskANN generation in that namespace. Under a closed, consistent copy and a supported format, successful restoration has the form
+Let $D$ map each physical logical-record key to its visible revision and optional value, including tombstones. Let $H$ be the transaction-history incarnation, $N$ the independent persistent data namespace, and $G$ the selected DiskANN generation in that namespace. For a closed, consistent copy already using the current provider format, successful restoration has the form
 
 $$
 \operatorname{restore}_{H \to H'}(D,H,N,G)=(D,H',N,G),\qquad H'\ne H.
 $$
 
-The SQLite main transition updates only the history header and receipt table; its auxiliary transition replaces coordination state. The redb transition updates the corresponding header, receipt and coordination tables atomically. These locations are disjoint from the records represented by $D$. Native record addressing uses its retained data namespace, and common DiskANN addressing uses the persisted data identity. Thus changing $H$ changes neither the key used to select $G$ nor any reachable record's bytes or revision. A pending SQLite intent exposes no ordinary database handle; a failed redb synchronization can leave either complete history, and retrying the same request resolves which one without applying a second data transformation.
+The SQLite main transition updates only the history header and receipt table; its auxiliary transition replaces coordination state. The redb transition updates the corresponding header, receipt and coordination tables atomically. These locations are disjoint from the records represented by $D$. Native record addressing uses its retained data namespace, and common DiskANN addressing uses the persisted data identity. Thus changing $H$ changes neither the key used to select $G$ nor any reachable record's bytes or revision. A pending SQLite intent exposes no ordinary database handle; a failed redb synchronization can leave either complete history, and retrying the same request resolves which one without applying a second data transformation. Eligible predecessor backups first follow their provider's separate format-upgrade contract; the byte-preservation equation describes the subsequent history transition and does not assert that every upgrade preserves its input encoding.
 
-For a fixed query $q$ and fixed search configuration, the selected graph, PQ codes, complete origins, canonical tensors and visible change records therefore remain the same. The existing query algorithm receives the same coordinate bits and candidate identities, so it produces the same full scored result, not merely the same document support:
+For a fixed query $q$ and fixed search configuration, the selected graph, PQ codes, complete origins, canonical tensors and visible change records therefore remain the same. The existing query algorithm receives the same coordinate bits and candidate identities, so it produces the same full scored result, not merely the same document support. Writing $\pi_D$ for the data-image projection gives
 
 $$
-\operatorname{Query}(D,N,G,q)=\operatorname{Query}(\operatorname{restore}(D),N,G,q).
+\operatorname{Query}(D,N,G,q)=\operatorname{Query}(\pi_D(\operatorname{restore}_{H\to H'}(D,H,N,G)),N,G,q).
 $$
 
 This argument adds no commutativity, idempotence or semiring law to payloads. Existing relational and ranked compositions consume unchanged values and scores. Approximate traversal retains its existing assumptions because restoration neither changes the graph nor substitutes another access method. Missing or corrupt index state is not repaired by this operation.
