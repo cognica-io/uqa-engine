@@ -8,7 +8,7 @@ Manifests, codebooks, code batches, numeric side batches and document-origin bat
 
 | Byte offsets | Contents |
 | --- | --- |
-| 0–8 | Magic: `UQADNMF\0`, `UQADNPQ\0`, `UQADNCD\0` or `UQADNSD\0` |
+| 0–8 | Magic: `UQADNMF\0`, `UQADNPQ\0`, `UQADNCD\0`, `UQADNSD\0` or `UQADNOR\0` |
 | 8–12, 12–16 | Record revision and header size 96 (`u32` each); manifests accept 1, 2 or 3, other metadata accepts 1 |
 | 16–32 | Persistent data incarnation |
 | 32–40, 40–48, 48–56 | Table incarnation, index incarnation, generation (`u64` each) |
