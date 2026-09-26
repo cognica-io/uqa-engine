@@ -14,6 +14,43 @@ use uqa_storage::key_value::conformance::{verify_diskann_generations, verify_dis
 use uqa_storage::KeyValueStore;
 
 #[test]
+fn diskann_runtime_reclamation_preserves_redb_undo_recreation_and_cold_reopen() {
+    use redb::{ReadableDatabase, ReadableTable};
+    use uqa_storage::key_value::conformance::{
+        verify_diskann_reclamation_bounds, verify_diskann_reclamation_reopen,
+        verify_diskann_runtime_reclaimed_reopen, verify_diskann_runtime_reclamation,
+    };
+    for private in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("reclamation.redb");
+        let (generations, partial) = {
+            let owner = crate::RedbStorage::open(&path).unwrap();
+            let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
+            let generations = verify_diskann_runtime_reclamation(&store, private).unwrap();
+            let partial = verify_diskann_reclamation_bounds(&store).unwrap();
+            (generations, partial)
+        };
+        let owner = crate::RedbStorage::open(&path).unwrap();
+        let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
+        verify_diskann_runtime_reclaimed_reopen(&store, generations).unwrap();
+        verify_diskann_reclamation_reopen(&store, partial).unwrap();
+        let records = owner.record_store().unwrap();
+        let read = records.database.begin_read().unwrap();
+        for entry in read
+            .open_table(super::super::VERSIONS)
+            .unwrap()
+            .iter()
+            .unwrap()
+        {
+            assert!(
+                entry.unwrap().1.value().len() < 32768,
+                "final-reader release reclaims large historical payloads"
+            );
+        }
+    }
+}
+
+#[test]
 fn diskann_runtime_retirement_preserves_redb_undo_recreation_and_cold_reopen() {
     use uqa_storage::key_value::conformance::{
         verify_diskann_runtime_retirement, verify_diskann_runtime_retirement_reopen,

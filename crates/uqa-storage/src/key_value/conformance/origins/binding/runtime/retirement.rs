@@ -24,6 +24,13 @@ pub fn verify_diskann_runtime_retirement(
     store: &Arc<dyn KeyValueStore>,
     private: bool,
 ) -> StorageBackendResult<(DiskANNGeneration, DiskANNGeneration)> {
+    retire_and_recreate(store, private).map(|(generations, _)| generations)
+}
+
+pub(super) fn retire_and_recreate(
+    store: &Arc<dyn KeyValueStore>,
+    private: bool,
+) -> StorageBackendResult<((DiskANNGeneration, DiskANNGeneration), Arc<dyn VectorIndex>)> {
     let control = StorageReadControl::with_limit(1 << 21);
     let temporary = DiskANNTemporaryBudget::new(1 << 20);
     let options = diskann_runtime_fixture_options(2)?;
@@ -73,6 +80,12 @@ pub fn verify_diskann_runtime_retirement(
     store.savepoint("before-retirement")?;
     canonical(store)?.retire_index(&definition.relation, &Resolver, &control)?;
     expect(
+        KeyValueDiskANNStore::connect(store, &control)?
+            .reclaim_retired_step(first, 1, &control)
+            .is_err(),
+        "private retirement cannot authorize physical reclamation",
+    )?;
+    expect(
         stale.snapshot().is_err(),
         "retired live selection is not queryable",
     )?;
@@ -117,7 +130,7 @@ pub fn verify_diskann_runtime_retirement(
     )?;
     scores(&*held, &[(1, 1.0), (2, 0.0)])?;
     verify_diskann_runtime_retirement_reopen(store, (first, replacement))?;
-    Ok((first, replacement))
+    Ok(((first, replacement), held))
 }
 
 /// Check actual durable retirement and replacement selection after all original provider owners close.

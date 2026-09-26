@@ -30,6 +30,10 @@ use std::sync::Arc;
 
 mod retirement;
 pub use retirement::{verify_diskann_runtime_retirement, verify_diskann_runtime_retirement_reopen};
+mod reclamation;
+pub use reclamation::{
+    verify_diskann_runtime_reclaimed_reopen, verify_diskann_runtime_reclamation,
+};
 
 /// Small deterministic provider acceptance settings, never runtime defaults.
 pub fn diskann_runtime_fixture_options(

@@ -68,6 +68,11 @@ fn retire_and_recreate(
     canonical
         .retire_index(&definition.relation, &Resolver, &control)
         .unwrap();
+    assert!(connection
+        .diskann_generations(&control)
+        .unwrap()
+        .reclaim_retired_step(first, 1, &control)
+        .is_err());
     assert!(stale.snapshot().is_err());
     assert!(stale.add(9, vec![1.0, 0.0]).is_err());
     assert_eq!(raw.count().unwrap(), 3);
@@ -136,5 +141,81 @@ fn native_diskann_runtime_retirement_preserves_undo_recreation_and_cold_reopen()
             &runtime(&connection, &temporary, &control),
             &[(1, 1.0), (2, 0.0)],
         );
+    }
+}
+
+#[test]
+fn native_diskann_runtime_reclamation_keeps_private_and_committed_readers_through_vacuum() {
+    use uqa_storage::key_value::conformance::{
+        verify_diskann_reclamation_bounds, verify_diskann_reclamation_reopen,
+    };
+    for (mode, private) in (0..4).flat_map(|mode| [false, true].map(|private| (mode, private))) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("reclamation.db");
+        let (first, replacement, partial) = {
+            let connection = open(&path, mode);
+            let ((first, replacement), held) = retire_and_recreate(&connection, private);
+            let control = StorageReadControl::with_limit(1 << 20);
+            let repository = connection.diskann_generations(&control).unwrap();
+            let physical = repository.open_source(first, &control).unwrap();
+            assert!(repository
+                .reclaim_retired_step(replacement, 1, &control)
+                .is_err());
+            assert!(!repository.reclaim_retired_step(first, 1, &control).unwrap());
+            connection.vacuum().unwrap();
+            scores(&*held, &[(1, 1.0), (2, 0.0)]);
+            assert!(repository.open_source(first, &control).is_err());
+            let mut complete = false;
+            for _ in 0..32 {
+                complete = repository.reclaim_retired_step(first, 1, &control).unwrap();
+                if complete {
+                    break;
+                }
+            }
+            assert!(complete);
+            connection.vacuum().unwrap();
+            scores(&*held, &[(1, 1.0), (2, 0.0)]);
+            physical
+                .read_graph_pages(&[0], &control, &mut |_, bytes| {
+                    assert_eq!(bytes.len(), 4096);
+                    Ok(())
+                })
+                .unwrap();
+            drop(physical);
+            drop(held);
+            connection.vacuum().unwrap();
+            assert_eq!(selected(&connection, &control), replacement);
+            let store: Arc<dyn uqa_storage::KeyValueStore> =
+                Arc::new(connection.native_diskann_records().unwrap());
+            let partial = verify_diskann_reclamation_bounds(&store).unwrap();
+            (first, replacement, partial)
+        };
+        let connection = open(&path, mode);
+        let control = StorageReadControl::with_limit(1 << 20);
+        let repository = connection.diskann_generations(&control).unwrap();
+        assert!(repository.reclaim_retired_step(first, 1, &control).unwrap());
+        assert!(repository.resume_stage(first, &control).is_err());
+        assert_eq!(selected(&connection, &control), replacement);
+        scores(
+            &runtime(&connection, &DiskANNTemporaryBudget::new(1 << 20), &control),
+            &[(1, 1.0), (2, 0.0)],
+        );
+        let store: Arc<dyn uqa_storage::KeyValueStore> =
+            Arc::new(connection.native_diskann_records().unwrap());
+        verify_diskann_reclamation_reopen(&store, partial).unwrap();
+        connection
+            .with_physical(|sqlite| {
+                let retained: i64 = sqlite.query_row(
+                    "SELECT count(*) FROM _uqa_mvcc_versions WHERE length(value) >= 32768",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert_eq!(
+                    retained, 0,
+                    "final-reader release reclaims large native history payloads"
+                );
+                Ok(())
+            })
+            .unwrap();
     }
 }

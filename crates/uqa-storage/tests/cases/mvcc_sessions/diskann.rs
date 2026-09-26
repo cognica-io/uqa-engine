@@ -8,6 +8,24 @@ use super::*;
 use uqa_storage::diskann_index::pages::DiskANNRecordKey;
 
 #[test]
+fn diskann_runtime_reclamation_preserves_private_undo_and_recreation() {
+    use uqa_storage::key_value::conformance::{
+        verify_diskann_reclamation_bounds, verify_diskann_reclamation_reopen,
+        verify_diskann_runtime_reclaimed_reopen, verify_diskann_runtime_reclamation,
+    };
+    for private in [false, true] {
+        let persistence = Persistence::new();
+        let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+        let generations = verify_diskann_runtime_reclamation(&store, private).unwrap();
+        let partial = verify_diskann_reclamation_bounds(&store).unwrap();
+        drop(store);
+        let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+        verify_diskann_runtime_reclaimed_reopen(&store, generations).unwrap();
+        verify_diskann_reclamation_reopen(&store, partial).unwrap();
+    }
+}
+
+#[test]
 fn diskann_runtime_retirement_preserves_private_undo_and_recreation() {
     use uqa_storage::key_value::conformance::{
         verify_diskann_runtime_retirement, verify_diskann_runtime_retirement_reopen,
@@ -84,6 +102,8 @@ mod live;
 mod pruning;
 #[path = "diskann/publication.rs"]
 mod publication;
+#[path = "diskann/reclamation.rs"]
+mod reclamation;
 #[path = "diskann/selection.rs"]
 mod selection;
 

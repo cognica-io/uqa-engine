@@ -10,6 +10,7 @@ mod binding;
 pub use binding::verify_diskann_runtime_adoption_conflicts;
 pub use binding::{
     diskann_runtime_fixture_options, verify_diskann_runtime_lifecycle,
+    verify_diskann_runtime_reclaimed_reopen, verify_diskann_runtime_reclamation,
     verify_diskann_runtime_reopen, verify_diskann_runtime_retirement,
     verify_diskann_runtime_retirement_reopen,
 };

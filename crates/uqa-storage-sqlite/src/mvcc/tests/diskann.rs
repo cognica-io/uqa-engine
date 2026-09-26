@@ -18,6 +18,44 @@ use crate::key_value::SQLiteKeyValueStore;
 use crate::SQLiteCompressionOptions;
 
 #[test]
+fn diskann_runtime_reclamation_preserves_sqlite_undo_recreation_and_cold_reopen() {
+    use uqa_storage::key_value::conformance::{
+        verify_diskann_reclamation_bounds, verify_diskann_reclamation_reopen,
+        verify_diskann_runtime_reclaimed_reopen, verify_diskann_runtime_reclamation,
+    };
+    for (mode, private) in (0..4).flat_map(|mode| [false, true].map(|private| (mode, private))) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("reclamation.db");
+        let (generations, partial) = {
+            let store: Arc<dyn KeyValueStore> =
+                Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+            let generations = verify_diskann_runtime_reclamation(&store, private).unwrap();
+            let partial = verify_diskann_reclamation_bounds(&store).unwrap();
+            (generations, partial)
+        };
+        let current = connection(&path, mode);
+        let store: Arc<dyn KeyValueStore> =
+            Arc::new(SQLiteKeyValueStore::new(current.clone()).unwrap());
+        verify_diskann_runtime_reclaimed_reopen(&store, generations).unwrap();
+        verify_diskann_reclamation_reopen(&store, partial).unwrap();
+        current
+            .with_physical(|sqlite| {
+                let retained: i64 = sqlite.query_row(
+                    "SELECT count(*) FROM _uqa_mvcc_versions WHERE length(value) >= 32768",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert_eq!(
+                    retained, 0,
+                    "final-reader release reclaims large historical payloads"
+                );
+                Ok(())
+            })
+            .unwrap();
+    }
+}
+
+#[test]
 fn diskann_runtime_retirement_preserves_sqlite_undo_recreation_and_cold_reopen() {
     use uqa_storage::key_value::conformance::{
         verify_diskann_runtime_retirement, verify_diskann_runtime_retirement_reopen,

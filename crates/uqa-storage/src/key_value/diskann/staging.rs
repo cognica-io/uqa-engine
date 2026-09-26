@@ -15,7 +15,6 @@ use crate::read_control::StorageReadControl;
 use crate::{KeyValueBatch, StorageBackendResult};
 
 use super::keys::{database_key, Keys, Kind};
-use super::source::{key_page, KEY_PAGE_LIMIT};
 use super::state::{fixed, State, STATE_BYTES};
 use super::{
     invalid, read_data_identity, DiskANNStageStatus, KeyValueDiskANNSource, KeyValueDiskANNStore,
@@ -240,9 +239,7 @@ impl KeyValueDiskANNStage {
             return Err(invalid("discard requires a positive record limit"));
         }
         self.attempted = true;
-        let limit = max_records.min(KEY_PAGE_LIMIT);
         let keys = Keys::new(self.generation);
-        let state_key = keys.key(Kind::State);
         let mut complete = false;
         self.repository.mutate(control, &mut |read, batch| {
             let Some(state) = self.state(read, control)? else {
@@ -257,17 +254,8 @@ impl KeyValueDiskANNStage {
                     "sealed generation requires catalog-owned reclamation",
                 ));
             }
-            let page = key_page(read, keys, Some(state_key.as_ref()), limit, control)?;
-            self.fence(batch)?;
-            for (key, _) in page.iter() {
-                batch.delete(key.as_ref())?;
-            }
-            complete = page.len() < limit;
-            if complete {
-                batch.delete(state_key.as_ref())?;
-            } else {
-                self.set_status(batch, DiskANNStageStatus::Discarding)?;
-            }
+            complete =
+                super::reclamation::delete_page(read, batch, keys, state, max_records, control)?;
             Ok(())
         })?;
         Ok(complete)

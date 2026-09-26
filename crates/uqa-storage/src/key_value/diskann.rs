@@ -28,6 +28,7 @@ mod identity;
 mod keys;
 mod pruning;
 pub mod publication;
+mod reclamation;
 mod source;
 mod staging;
 mod state;
