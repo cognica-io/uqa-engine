@@ -17,6 +17,8 @@ pub use serializable::{
     SerializableSnapshotOptions,
 };
 mod transaction;
+mod vector_fields;
+pub use vector_fields::VectorFieldGuardMaintenance;
 
 use std::sync::Arc;
 
@@ -90,6 +92,7 @@ impl VersionedKeyValueStore {
     /// Reclaim committed history without changing an active transaction or its retained readers. The persistence owner supplies atomic snapshot admission and physical deletion.
     pub fn reclaim_versions(&self) -> StorageBackendResult<u64> {
         let control = self.write_control();
+        VectorFieldGuardMaintenance::run(self, &control)?;
         let removed = self
             .persistence
             .reclaim_versions(&control)

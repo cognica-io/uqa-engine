@@ -6,7 +6,7 @@
 
 //! Vector-index adapter over an ordered key/value store.
 
-mod guards;
+pub(crate) mod guards;
 pub(in crate::key_value) mod origin;
 mod read;
 pub use origin::{

@@ -304,11 +304,14 @@ pub trait KeyValueBatch {
     fn commit(self: Box<Self>) -> StorageBackendResult<()>;
 }
 
-pub(crate) fn diskann_tombstone_prefixes() -> [&'static [u8]; 3] {
+pub use vector_index::guards::KeyValueVectorFieldGuards;
+
+pub(crate) fn diskann_tombstone_prefixes() -> [&'static [u8]; 4] {
     [
         diskann::READ_PREFIX,
         vector_index::origin::ROOT,
         vector_index::origin::journal::ROOT,
+        vector_index::guards::ROOT,
     ]
 }
 

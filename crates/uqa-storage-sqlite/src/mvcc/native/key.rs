@@ -222,16 +222,36 @@ impl NativeRecordIdentity {
         bytes: &[u8],
         control: &StorageReadControl,
     ) -> VersionResult<BudgetedVec<u8>> {
+        self.encode_variable_prefix(bytes, super::NativeColumnType::Blob, 3, control)
+    }
+
+    /// Encode a UTF-8 prefix within one TEXT identity, without a component terminator.
+    pub(crate) fn encode_text_prefix(
+        self,
+        bytes: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<BudgetedVec<u8>> {
+        std::str::from_utf8(bytes).map_err(|_| invalid("native text prefix is not UTF-8"))?;
+        self.encode_variable_prefix(bytes, super::NativeColumnType::Text, 2, control)
+    }
+
+    fn encode_variable_prefix(
+        self,
+        bytes: &[u8],
+        kind: super::NativeColumnType,
+        tag: u8,
+        control: &StorageReadControl,
+    ) -> VersionResult<BudgetedVec<u8>> {
         let layout = self.family.layout();
         if layout.identity_columns.len() != 1
-            || layout.column_types[layout.identity_columns[0]] != super::NativeColumnType::Blob
+            || layout.column_types[layout.identity_columns[0]] != kind
         {
             return Err(invalid(
-                "native byte prefix requires one BLOB identity column",
+                "native variable prefix requires one matching identity column",
             ));
         }
         let mut key = self.encode_prefix(&[], control)?;
-        key.push(3)?;
+        key.push(tag)?;
         escaped_prefix(&mut key, bytes, control)?;
         Ok(key)
     }
@@ -245,12 +265,33 @@ impl NativeRecordIdentity {
     pub(crate) fn visit_key_components(
         key: &[u8],
         control: &StorageReadControl,
+        visit: impl FnMut(usize, ValueRef<'_>) -> VersionResult<()>,
+    ) -> VersionResult<Self> {
+        let count = Self::decode(key)?.family.layout().identity_columns.len();
+        Self::visit_prefix_components(key, count, control, visit)
+    }
+
+    /// Validate an exact number of complete primary-key components in an encoded prefix.
+    pub(crate) fn visit_prefix_components(
+        key: &[u8],
+        count: usize,
+        control: &StorageReadControl,
         mut visit: impl FnMut(usize, ValueRef<'_>) -> VersionResult<()>,
     ) -> VersionResult<Self> {
         let identity = Self::decode(key)?;
+        if count > identity.family.layout().identity_columns.len() {
+            return Err(invalid("native prefix has too many components"));
+        }
         let header = identity.encode_prefix(&[], control)?;
         let mut input = &key[header.len()..];
-        for (component, &column) in identity.family.layout().identity_columns.iter().enumerate() {
+        for (component, &column) in identity
+            .family
+            .layout()
+            .identity_columns
+            .iter()
+            .take(count)
+            .enumerate()
+        {
             control.cancellation().check()?;
             let (&tag, rest) = input
                 .split_first()

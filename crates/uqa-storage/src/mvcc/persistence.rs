@@ -235,7 +235,12 @@ pub trait VersionedPersistence: Send + Sync {
     /// Atomically remove obsolete historical revisions under snapshot admission. Preserve the newest revision at/before every live snapshot, all newer revisions, head tombstones and every transaction receipt. Neither visibility nor transaction allocation advances. Wrappers must forward the capability and its resource/cancellation control.
     fn reclaim_versions(&self, control: &StorageReadControl) -> VersionResult<u64>;
 
-    /// Retire physical `DiskANN` identities after ordinary history collection. The default owns the common Key/Value generation, canonical-origin and change-journal namespaces; providers with another layout must override it. Wrappers must forward the original control and physical layout selection.
+    /// Physical encoding of shared vector-field coordination records. Native providers and wrappers must preserve the original layout selection.
+    fn vector_field_guard_layout(&self) -> &dyn super::VectorFieldGuardLayout {
+        &crate::key_value::KeyValueVectorFieldGuards
+    }
+
+    /// Retire physical `DiskANN` identities after ordinary history collection. The default owns the common Key/Value generation, canonical-origin, change-journal and field-guard namespaces; providers with another layout must override it. Wrappers must forward the original control and physical layout selection.
     fn reclaim_diskann_tombstones(&self, control: &StorageReadControl) -> VersionResult<()> {
         super::reclaim_key_value_diskann_tombstones(self, control)
     }

@@ -6,6 +6,9 @@
 
 //! Origin allocation resolves through real provider receipts, including failed evaluation and lost replies.
 
+mod field_guards;
+pub use field_guards::verify_vector_field_guard_attempts;
+
 use super::super::{expect, expect_eq};
 use crate::mvcc::{
     CommitResult, CommitStatus, CommittedRecordSnapshot, DatabaseId, IdentifierAllocation,
@@ -321,6 +324,10 @@ struct Faults {
 }
 
 impl VersionedPersistence for Faults {
+    fn resource_leases(&self) -> Option<&dyn crate::mvcc::ResourceLeaseProvider> {
+        self.inner.resource_leases()
+    }
+
     fn database_id(&self) -> DatabaseId {
         self.inner.database_id()
     }
@@ -362,6 +369,10 @@ impl VersionedPersistence for Faults {
     }
     fn reclaim_versions(&self, control: &StorageReadControl) -> VersionResult<u64> {
         self.inner.reclaim_versions(control)
+    }
+
+    fn vector_field_guard_layout(&self) -> &dyn crate::mvcc::VectorFieldGuardLayout {
+        self.inner.vector_field_guard_layout()
     }
 
     fn reclaim_diskann_tombstones(&self, control: &StorageReadControl) -> VersionResult<()> {

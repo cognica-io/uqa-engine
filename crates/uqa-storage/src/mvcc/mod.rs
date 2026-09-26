@@ -35,7 +35,11 @@ mod session;
 mod tombstones;
 mod types;
 mod vector;
+mod vector_fields;
 mod view;
+
+pub use session::VectorFieldGuardMaintenance;
+pub use vector_fields::{VectorFieldGuard, VectorFieldGuardLayout};
 
 pub use commit::{PreparedRecordCommit, PreparedRecordWrite};
 pub use graph::{GraphMutation, GraphRecordKey, GraphRecordLayout};

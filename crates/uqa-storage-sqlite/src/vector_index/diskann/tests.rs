@@ -14,6 +14,7 @@ mod binding;
 mod changes;
 mod corpus;
 mod coverage;
+mod field_guards;
 mod lifecycle;
 mod validation;
 
