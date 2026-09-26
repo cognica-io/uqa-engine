@@ -35,8 +35,8 @@ pub use uqa_storage::catalog::{
     TableSchema, VectorFieldSchema,
 };
 pub use vector_index::{
-    RetainedSQLiteDiskANNCanonical, SQLiteDiskANNCanonical, SQLiteHNSWIndex, SQLiteIVFIndex,
-    SQLiteVectorIndex,
+    RetainedSQLiteDiskANNCanonical, SQLiteDiskANNCanonical, SQLiteDiskANNHandle, SQLiteHNSWIndex,
+    SQLiteIVFIndex, SQLiteVectorIndex,
 };
 
 pub mod backend;

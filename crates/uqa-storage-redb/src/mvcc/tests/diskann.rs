@@ -14,6 +14,20 @@ use uqa_storage::key_value::conformance::{verify_diskann_generations, verify_dis
 use uqa_storage::KeyValueStore;
 
 #[test]
+fn diskann_live_writes_keep_actual_catalog_visibility_and_redb_cold_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("live.redb");
+    let generation = {
+        let owner = crate::RedbStorage::open(&path).unwrap();
+        let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
+        uqa_storage::key_value::conformance::verify_diskann_live_writes(&store).unwrap()
+    };
+    let owner = crate::RedbStorage::open(&path).unwrap();
+    let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
+    uqa_storage::key_value::conformance::verify_diskann_live_reopen(&store, generation).unwrap();
+}
+
+#[test]
 fn diskann_query_views_retain_private_and_old_committed_generations_in_redb() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("query-views.redb");

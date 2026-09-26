@@ -51,6 +51,24 @@ impl DiskANNIndexScope {
         self.index
     }
 
+    /// Require the same immutable catalog incarnations and actual provider history. A private definition may become committed without changing this identity; the invoking mutation must still guard its freshly captured definition records in its own batch.
+    pub fn require_same_index(
+        &self,
+        current: &Self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<()> {
+        self.check_control(control)?;
+        current.check_control(control)?;
+        if self.table != current.table
+            || self.storage != current.storage
+            || self.index != current.index
+            || self.revision.record_database() != current.revision.record_database()
+        {
+            return Err(invalid("live index belongs to another catalog incarnation"));
+        }
+        Ok(())
+    }
+
     pub(crate) fn check(
         &self,
         database: DatabaseId,

@@ -8,6 +8,17 @@ use super::*;
 use uqa_storage::diskann_index::pages::DiskANNRecordKey;
 
 #[test]
+fn diskann_live_writes_keep_actual_catalog_visibility_and_reopen() {
+    let persistence = Persistence::new();
+    let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+    let generation =
+        uqa_storage::key_value::conformance::verify_diskann_live_writes(&store).unwrap();
+    drop(store);
+    let reopened: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+    uqa_storage::key_value::conformance::verify_diskann_live_reopen(&reopened, generation).unwrap();
+}
+
+#[test]
 fn diskann_query_views_retain_private_and_old_committed_generations() {
     let persistence = Persistence::new();
     let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
@@ -34,6 +45,8 @@ use uqa_storage::key_value::{DiskANNStageStatus, KeyValueDiskANNStore};
 
 #[path = "diskann/identity.rs"]
 mod identity;
+#[path = "diskann/live.rs"]
+mod live;
 #[path = "diskann/pruning.rs"]
 mod pruning;
 #[path = "diskann/publication.rs"]

@@ -22,10 +22,12 @@ const FIELD: &str = "vector";
 const MARKER: &[u8] = b"diskann-binding-guarded-write";
 
 mod identity;
+mod live;
 mod pruning;
 mod publication;
 mod selection;
 pub use identity::{verify_diskann_catalog_identity, verify_diskann_catalog_identity_reopen};
+pub use live::{verify_diskann_live_reopen, verify_diskann_live_writes};
 pub use pruning::{verify_diskann_pruning, verify_diskann_pruning_reopen};
 pub use publication::{verify_diskann_publication, verify_diskann_publication_reopen};
 pub use selection::{verify_diskann_query_reopen, verify_diskann_query_views};

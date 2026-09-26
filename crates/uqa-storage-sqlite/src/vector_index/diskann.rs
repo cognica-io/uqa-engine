@@ -6,10 +6,12 @@
 
 //! Native canonical tensors and origins share one evaluated publishing mutation.
 
+mod live;
 mod retained;
 #[cfg(test)]
 mod tests;
 
+pub use live::SQLiteDiskANNHandle;
 pub use retained::RetainedSQLiteDiskANNCanonical;
 
 use rusqlite::types::ValueRef;
@@ -54,6 +56,19 @@ impl SQLiteDiskANNCanonical {
         vectors: &[Vec<f32>],
         control: &StorageReadControl,
     ) -> StorageBackendResult<DiskANNVectorVersion> {
+        self.replace_guarded(document, vectors, control, |_, _| Ok(()))
+    }
+
+    fn replace_guarded(
+        &self,
+        document: DocId,
+        vectors: &[Vec<f32>],
+        control: &StorageReadControl,
+        guard: impl FnOnce(
+            &crate::mvcc::native::NativeSnapshot,
+            &mut dyn uqa_storage::KeyValueBatch,
+        ) -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<DiskANNVectorVersion> {
         control.check()?;
         let document = encode_doc_id(document)?;
         let count =
@@ -67,6 +82,7 @@ impl SQLiteDiskANNCanonical {
             .conn
             .with_native_versioned_write(|origin, snapshot, batch| {
                 control.check()?;
+                guard(snapshot, batch)?;
                 let owner = snapshot.ensure_table_owner(&self.index.table, batch)?;
                 let field = ValueRef::Text(self.index.field.as_bytes());
                 let version = DiskANNVectorVersion::new(origin.transaction(), origin.revision())?;

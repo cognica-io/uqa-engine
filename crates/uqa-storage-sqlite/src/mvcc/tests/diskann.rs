@@ -18,6 +18,23 @@ use crate::key_value::SQLiteKeyValueStore;
 use crate::SQLiteCompressionOptions;
 
 #[test]
+fn diskann_live_writes_keep_actual_catalog_visibility_and_sqlite_cold_reopen() {
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("live.db");
+        let generation = {
+            let store: Arc<dyn KeyValueStore> =
+                Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+            uqa_storage::key_value::conformance::verify_diskann_live_writes(&store).unwrap()
+        };
+        let store: Arc<dyn KeyValueStore> =
+            Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+        uqa_storage::key_value::conformance::verify_diskann_live_reopen(&store, generation)
+            .unwrap();
+    }
+}
+
+#[test]
 fn diskann_query_views_retain_private_and_old_committed_generations_in_sqlite_modes() {
     for mode in 0..4 {
         let directory = tempfile::tempdir().unwrap();
