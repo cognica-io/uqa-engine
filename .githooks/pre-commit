@@ -4,4 +4,5 @@
 set -eu
 
 root=$(git rev-parse --show-toplevel)
+python3 "$root/scripts/check-target-cache-size.py"
 exec python3 "$root/scripts/check-workspace-dependencies.py" --staged
