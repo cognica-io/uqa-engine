@@ -27,7 +27,12 @@ mod maintenance;
 pub use maintenance::{verify_diskann_maintenance_reopen, verify_diskann_maintenance_source};
 mod pruning;
 mod publication;
+mod restore;
 mod runtime;
+pub use restore::{
+    diskann_restore_records, verify_diskann_restore_source, verify_diskann_restored,
+    verify_diskann_restored_rebuild, verify_diskann_restored_writes, DiskANNRestoreRecords,
+};
 pub use runtime::verify_diskann_runtime_adoption_conflicts;
 mod selection;
 pub use identity::{verify_diskann_catalog_identity, verify_diskann_catalog_identity_reopen};
