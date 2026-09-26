@@ -7,6 +7,8 @@
 use super::*;
 use uqa_storage::{read_control::StorageReadControl, StorageBackendError};
 
+mod unvisited;
+
 #[test]
 fn diskann_sql_serializable_snapshot_preserves_invocation_controls() {
     for provider in 0..3 {
@@ -91,18 +93,20 @@ fn diskann_sql_serializable_snapshot_preserves_invocation_controls() {
 }
 
 #[test]
-fn diskann_sql_serializable_reads_cover_nonreturned_candidates_but_not_zero_k() {
+fn diskann_sql_serializable_reads_cover_nonreturned_candidates_but_not_zero_k_or_explain() {
     for provider in 0..3 {
-        for k in [0, 1] {
+        for mode in ["zero", "explain", "search"] {
             let (_directory, first, second) = sessions(provider);
             sql(&first, "CREATE TABLE diskann_docs(id int PRIMARY KEY, embedding vector(2)); INSERT INTO diskann_docs VALUES(1,ARRAY[0.0,1.0]),(2,ARRAY[-1.0,0.0]); CREATE INDEX diskann_idx ON diskann_docs USING diskann(embedding)");
             sql(&first, "BEGIN ISOLATION LEVEL SERIALIZABLE");
             sql(&second, "BEGIN ISOLATION LEVEL SERIALIZABLE");
-            if k == 0 {
+            if mode == "zero" {
                 assert!(first
                     .knn_search("diskann_docs", "embedding", [1.0, 0.0], 0)
                     .unwrap()
                     .is_empty());
+            } else if mode == "explain" {
+                sql(&first, "EXPLAIN SELECT id FROM diskann_docs WHERE knn_match(embedding,ARRAY[1.0,0.0],1)");
             } else {
                 let found = sql(
                     &first,
@@ -118,9 +122,7 @@ fn diskann_sql_serializable_reads_cover_nonreturned_candidates_but_not_zero_k() 
                 "UPDATE diskann_docs SET embedding=ARRAY[1.0,0.0] WHERE id=2",
             );
             let outcomes = [first.commit(), second.commit()];
-            if k == 0 {
-                assert!(outcomes.iter().all(Result::is_ok), "{outcomes:?}");
-            } else {
+            if mode == "search" {
                 assert!(
                     outcomes.iter().any(Result::is_err),
                     "candidate dependency cycle committed"
@@ -128,6 +130,8 @@ fn diskann_sql_serializable_reads_cover_nonreturned_candidates_but_not_zero_k() 
                 for error in outcomes.into_iter().filter_map(Result::err) {
                     assert_eq!(error.sqlstate(), Some("40001"), "{error}");
                 }
+            } else {
+                assert!(outcomes.iter().all(Result::is_ok), "{outcomes:?}");
             }
         }
     }
