@@ -183,6 +183,13 @@ enum Revision {
 }
 
 impl KeyValueReadRevision {
+    pub(crate) fn record_database(&self) -> Option<DatabaseId> {
+        match &self.0 {
+            Revision::Record(revision) => Some(revision.database()),
+            Revision::Memory(_) | Revision::Records { .. } => None,
+        }
+    }
+
     /// Whether the selected record prefixes include changes private to this transaction. Unversioned view identities conservatively report private state because they cannot prove committed provenance.
     pub fn has_private_changes(&self) -> bool {
         match &self.0 {

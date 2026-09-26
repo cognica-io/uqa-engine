@@ -27,6 +27,26 @@ struct Record {
 }
 
 impl Binding {
+    pub(in crate::key_value) fn scope(
+        &self,
+        read: &dyn KeyValueRead,
+        resolver: &dyn catalog::DiskANNIndexResolver,
+        capture: &StorageReadControl,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<catalog::DiskANNIndexScope> {
+        let table: Budgeted<TableSchema> = decode(read, &self.table.key, control)?;
+        let index: Budgeted<StoredCatalogIndex> = decode(read, &self.index.key, control)?;
+        catalog::resolve_scope(
+            resolver,
+            (table.object_id, table.storage_generation),
+            index.definition_json.as_deref(),
+            &self.index.revision,
+            read.control(),
+            capture,
+            control,
+        )
+    }
+
     pub(in crate::key_value) fn capture(
         read: &dyn KeyValueRead,
         table: &str,

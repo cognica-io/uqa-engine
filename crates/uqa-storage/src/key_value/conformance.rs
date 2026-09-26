@@ -29,7 +29,8 @@ pub use compound::{verify_compound_concurrency, verify_compound_mutations};
 mod origins;
 pub use origins::{
     verify_diskann_canonical_origins, verify_diskann_canonical_reopen,
-    verify_diskann_catalog_binding, verify_mutation_origins,
+    verify_diskann_catalog_binding, verify_diskann_catalog_identity,
+    verify_diskann_catalog_identity_reopen, verify_mutation_origins,
 };
 mod physical_vectors;
 pub use physical_vectors::{

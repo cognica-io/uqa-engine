@@ -23,6 +23,7 @@ use crate::{
 use super::{KeyValueMutation, KeyValueRead};
 
 pub(super) mod conformance;
+mod identity;
 mod keys;
 mod source;
 mod staging;
@@ -49,6 +50,23 @@ pub struct KeyValueDiskANNStore {
 }
 
 impl KeyValueDiskANNStore {
+    /// Allocate a physical generation through durable mappings of the captured catalog incarnations. This only prepares staging; publication still requires the retained source's current-definition guard and complete build coverage.
+    pub fn allocate_bound_stage(
+        &self,
+        scope: &crate::diskann_index::catalog::DiskANNIndexScope,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<KeyValueDiskANNStage> {
+        let (database, table, index) = self.catalog_handles(scope, control)?;
+        let stage = self.allocate_stage(table, index, control)?;
+        scope.check(self.owner.database, control)?;
+        if stage.generation().database() != database {
+            return Err(invalid(
+                "data identity changed during bound generation allocation",
+            ));
+        }
+        Ok(stage)
+    }
+
     pub fn connect(
         source: &Arc<dyn KeyValueStore>,
         control: &StorageReadControl,
