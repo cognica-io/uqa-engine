@@ -71,6 +71,16 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         Ok(PersistentStorageSession::new(catalog, backend))
     }
 
+    fn open_controlled_session(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        let store = self.store.open_controlled_session(control)?;
+        let catalog: Arc<dyn CatalogFacade> = Arc::new(KeyValueCatalog::new(Arc::clone(&store)));
+        let backend: Arc<dyn PersistentStorageBackend> = Arc::new(Self::new(store));
+        Ok(PersistentStorageSession::new(catalog, backend))
+    }
+
     fn open_retained_read_session(
         &self,
         cancellation: &uqa_core::CancellationToken,
@@ -212,6 +222,25 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         Ok(Box::new(crate::diskann_index::PersistentDiskANNIndex::new(
             handle, options, temporary,
         )?))
+    }
+
+    fn diskann_journal_pruner(
+        &self,
+        binding: crate::diskann_index::DiskANNIndexBinding<'_>,
+        max_record_bytes: usize,
+    ) -> StorageBackendResult<Box<dyn crate::diskann_index::changes::DiskANNJournalPruner>> {
+        super::KeyValueDiskANNCanonical::new(
+            self.store.clone(),
+            binding.table,
+            binding.field,
+            binding.dimensions,
+        )?
+        .journal_pruner(
+            binding.index,
+            binding.resolver,
+            max_record_bytes,
+            binding.control,
+        )
     }
 
     fn retire_diskann_index(

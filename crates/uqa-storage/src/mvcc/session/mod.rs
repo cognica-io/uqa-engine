@@ -173,6 +173,13 @@ impl VersionedKeyValueStore {
         )
     }
 
+    /// Keep an independent writer while sharing the invoking operation's memory allowance. Read/rollback cancellation stays independent so cleanup remains possible after write cancellation.
+    pub fn new_controlled_session(&self, control: &StorageReadControl) -> Self {
+        let mut session = self.new_session_with_cancellation(control.cancellation());
+        session.control = StorageReadControl::new(control.memory(), session.control.cancellation());
+        session
+    }
+
     /// Open an independently owned read-only session at this exact committed/private view. Its original participant, snapshot leases and retention allowance remain shared, while read cancellation stays independent. Completing this reader never completes the originating transaction.
     pub fn new_retained_read_session(
         &self,
@@ -405,6 +412,14 @@ impl KeyValueStore for VersionedKeyValueStore {
 
     fn write_cancellation(&self) -> Option<uqa_core::CancellationToken> {
         Some(self.write_cancellation.clone())
+    }
+
+    fn open_controlled_session(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
+        control.check()?;
+        Ok(Arc::new(self.new_controlled_session(control)))
     }
 
     fn open_session_with_cancellation(

@@ -88,6 +88,30 @@ impl ManagedConnection {
         }
     }
 
+    /// Admit a versioned maintenance writer to the original operation's allowance without changing any existing session's transaction or cancellation.
+    pub(crate) fn new_controlled_session(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        control.check()?;
+        let _gate = self.session.gate.read();
+        let logical = self.session.logical.get().ok_or_else(|| {
+            uqa_storage::StorageBackendError::Other(
+                "controlled sessions require bound versioned records".into(),
+            )
+        })?;
+        let session = SessionState::with_cancellation(control.cancellation().clone());
+        let _ = session.logical.set(Arc::new(BoundRecordSession {
+            store: Arc::new(logical.store.new_controlled_session(control)),
+            native: logical.native,
+        }));
+        Ok(Self {
+            pool: Arc::clone(&self.pool),
+            session: Arc::new(session),
+            record_access: self.record_access,
+        })
+    }
+
     /// Keep the bound record view and its logical reader attribution in an independent read-only connection. The source session retains ownership of publication and transaction completion.
     pub(crate) fn new_retained_read_session(
         &self,

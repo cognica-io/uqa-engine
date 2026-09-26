@@ -9,6 +9,7 @@
 pub(in crate::key_value) mod journal;
 mod lifecycle;
 mod live;
+mod maintenance;
 mod retained;
 #[cfg(test)]
 mod tests;

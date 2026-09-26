@@ -33,6 +33,42 @@ impl RetainedSQLiteDiskANNCanonical {
         control: &StorageReadControl,
     ) -> StorageBackendResult<DiskANNPruneResult> {
         let (current, batch) = mutation;
+        self.prune_discovery(
+            resolver,
+            pruner,
+            (current, current, batch),
+            request,
+            control,
+        )
+    }
+
+    pub(in crate::vector_index::diskann) fn prune_captured_changes(
+        &self,
+        resolver: &dyn DiskANNIndexResolver,
+        pruner: &KeyValueDiskANNPruner,
+        mutation: (&NativeSnapshot, &mut dyn KeyValueBatch),
+        request: DiskANNPruneRequest,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<DiskANNPruneResult> {
+        let (current, batch) = mutation;
+        self.prune_discovery(
+            resolver,
+            pruner,
+            (&self.snapshot, current, batch),
+            request,
+            control,
+        )
+    }
+
+    fn prune_discovery(
+        &self,
+        resolver: &dyn DiskANNIndexResolver,
+        pruner: &KeyValueDiskANNPruner,
+        mutation: (&NativeSnapshot, &NativeSnapshot, &mut dyn KeyValueBatch),
+        request: DiskANNPruneRequest,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<DiskANNPruneResult> {
+        let (discovery, current, batch) = mutation;
         let read = current.record_read();
         self.require_current_index(&read, batch, control)?;
         let owner = self
@@ -66,6 +102,7 @@ impl RetainedSQLiteDiskANNCanonical {
         let result = pruner.prune(
             &mut Journal {
                 source: self,
+                discovery,
                 current,
                 batch,
             },
@@ -79,6 +116,7 @@ impl RetainedSQLiteDiskANNCanonical {
 
 struct Journal<'a> {
     source: &'a RetainedSQLiteDiskANNCanonical,
+    discovery: &'a NativeSnapshot,
     current: &'a NativeSnapshot,
     batch: &'a mut dyn KeyValueBatch,
 }
@@ -124,7 +162,7 @@ impl DiskANNChangeJournal for Journal<'_> {
             .map_err(VersionError::into_storage_error)?;
         let cursor = after.map(|after| self.key(after, control)).transpose()?;
         let mut selected = None;
-        self.current.record_read().visit_keys_after(
+        self.discovery.record_read().visit_keys_after(
             &prefix,
             cursor.as_deref(),
             1,
@@ -175,13 +213,13 @@ impl DiskANNChangeJournal for Journal<'_> {
         &self,
         change: DiskANNChangeIdentity,
         control: &StorageReadControl,
-    ) -> StorageBackendResult<DiskANNCanonicalOrigin> {
+    ) -> StorageBackendResult<Option<DiskANNCanonicalOrigin>> {
         self.source.check(control)?;
         let key = self.key(change, control)?;
         let read = self.current.record_read();
         if read
             .record_revision(&key)?
-            .is_none_or(|revision| revision.has_private_changes())
+            .is_some_and(|revision| revision.has_private_changes())
         {
             return Err(invalid(
                 "native pruning requires an actual committed change",
@@ -195,12 +233,16 @@ impl DiskANNChangeJournal for Journal<'_> {
         ])
         .map_err(VersionError::into_storage_error)?;
         let mut selected = None;
+        let mut seen = false;
         read.visit_value_bounded(&key, limit, control, &mut |bytes| {
             self.source.check(control)?;
-            if selected.is_some() {
+            if seen {
                 return Err(invalid("native pruning change returned repeatedly"));
             }
-            let bytes = bytes.ok_or_else(|| invalid("native pruning change disappeared"))?;
+            seen = true;
+            let Some(bytes) = bytes else {
+                return Ok(());
+            };
             let (actual, row) =
                 decode_record(&key, bytes, control).map_err(VersionError::into_storage_error)?;
             if actual != self.identity()? || row[0] != ValueRef::Text(&self.source.table) {
@@ -216,7 +258,10 @@ impl DiskANNChangeJournal for Journal<'_> {
             Ok(())
         })?;
         self.source.check(control)?;
-        selected.ok_or_else(|| invalid("native pruning change was not returned"))
+        if !seen {
+            return Err(invalid("native pruning change was not returned"));
+        }
+        Ok(selected)
     }
 
     fn current_origin(

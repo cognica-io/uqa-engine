@@ -26,6 +26,36 @@ impl RetainedDiskANNCanonical {
         control: &StorageReadControl,
     ) -> StorageBackendResult<DiskANNPruneResult> {
         let (read, batch) = mutation;
+        self.prune_discovery(resolver, pruner, (read, read, batch), request, control)
+    }
+
+    pub(in crate::key_value::vector_index::origin) fn prune_captured_changes(
+        &self,
+        resolver: &dyn DiskANNIndexResolver,
+        pruner: &KeyValueDiskANNPruner,
+        mutation: (&dyn KeyValueRead, &mut dyn KeyValueBatch),
+        request: DiskANNPruneRequest,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<DiskANNPruneResult> {
+        let (read, batch) = mutation;
+        self.prune_discovery(
+            resolver,
+            pruner,
+            (&*self.read, read, batch),
+            request,
+            control,
+        )
+    }
+
+    fn prune_discovery(
+        &self,
+        resolver: &dyn DiskANNIndexResolver,
+        pruner: &KeyValueDiskANNPruner,
+        mutation: (&dyn KeyValueRead, &dyn KeyValueRead, &mut dyn KeyValueBatch),
+        request: DiskANNPruneRequest,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<DiskANNPruneResult> {
+        let (discovery, read, batch) = mutation;
         self.require_current_index(read, batch, control)?;
         if read
             .revision(&[&self.vectors, &self.origins])?
@@ -47,6 +77,7 @@ impl RetainedDiskANNCanonical {
         let result = pruner.prune(
             &mut Journal {
                 source: self,
+                discovery,
                 read,
                 batch,
             },
@@ -60,6 +91,7 @@ impl RetainedDiskANNCanonical {
 
 struct Journal<'a> {
     source: &'a RetainedDiskANNCanonical,
+    discovery: &'a dyn KeyValueRead,
     read: &'a dyn KeyValueRead,
     batch: &'a mut dyn KeyValueBatch,
 }
@@ -76,7 +108,7 @@ impl DiskANNChangeJournal for Journal<'_> {
             .transpose()?;
         let mut selected = None;
         let mut failure = None;
-        let result = self.read.visit_keys_after(
+        let result = self.discovery.visit_keys_after(
             &self.source.changes,
             cursor.as_deref(),
             1,
@@ -115,13 +147,13 @@ impl DiskANNChangeJournal for Journal<'_> {
         &self,
         identity: DiskANNChangeIdentity,
         control: &StorageReadControl,
-    ) -> StorageBackendResult<Record> {
+    ) -> StorageBackendResult<Option<Record>> {
         self.source.check_control(control)?;
         let key = append(&self.source.changes, &identity.encode(), control)?;
         if self
             .read
             .record_revision(&key)?
-            .is_none_or(|revision| revision.has_private_changes())
+            .is_some_and(|revision| revision.has_private_changes())
         {
             return Err(invalid("pruning requires an actual committed change"));
         }
@@ -137,10 +169,9 @@ impl DiskANNChangeJournal for Journal<'_> {
                         return Err(invalid("pruning change returned repeatedly"));
                     }
                     seen = true;
-                    selected = Some(Record::decode(
-                        value.ok_or_else(|| invalid("pruning change disappeared"))?,
-                        self.source.dimensions,
-                    )?);
+                    selected = value
+                        .map(|value| Record::decode(value, self.source.dimensions))
+                        .transpose()?;
                     Ok(())
                 })();
                 if let Err(error) = result {
@@ -156,7 +187,10 @@ impl DiskANNChangeJournal for Journal<'_> {
         }
         result?;
         self.source.check_control(control)?;
-        selected.ok_or_else(|| invalid("pruning change was not returned"))
+        if !seen {
+            return Err(invalid("pruning change was not returned"));
+        }
+        Ok(selected)
     }
 
     fn current_origin(

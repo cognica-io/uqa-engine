@@ -324,6 +324,16 @@ pub trait PersistentStorageBackend: Send + Sync {
         self.open_session()
     }
 
+    /// Admit a maintenance writer to the invoking operation's existing allowance and write cancellation, while retaining independent transaction completion and cleanup. Capable wrappers must forward this rather than allocate another retention limit.
+    fn open_controlled_session(
+        &self,
+        _control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        Err(StorageBackendError::Other(
+            "controlled independent sessions are not implemented by this backend".into(),
+        ))
+    }
+
     /// Bind an independent read-only catalog/backend pair to this exact committed/private view before restoration. Both handles must retain the original snapshot and logical reader attribution without taking ownership of transaction completion. Versioned wrappers must forward this capability.
     fn open_retained_read_session(
         &self,
@@ -407,6 +417,17 @@ pub trait PersistentStorageBackend: Send + Sync {
     ) -> StorageBackendResult<Box<dyn VectorIndex>> {
         Err(StorageBackendError::Other(
             "this backend does not support catalog-bound DiskANN indexes".into(),
+        ))
+    }
+
+    /// Capture a finite change-journal pass without loading graph or resident PQ data. The returned handle uses this exact session's active transactions and preserves its original catalog, coverage and resource controls; wrappers supporting `DiskANN` maintenance must forward it.
+    fn diskann_journal_pruner(
+        &self,
+        _binding: crate::diskann_index::DiskANNIndexBinding<'_>,
+        _max_record_bytes: usize,
+    ) -> StorageBackendResult<Box<dyn crate::diskann_index::changes::DiskANNJournalPruner>> {
+        Err(StorageBackendError::Other(
+            "this backend does not support DiskANN journal maintenance".into(),
         ))
     }
 

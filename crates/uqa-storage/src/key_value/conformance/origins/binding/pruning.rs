@@ -342,5 +342,89 @@ pub fn verify_diskann_pruning_reopen(
         &store.scan_prefix(&journal::prefix(TABLE, FIELD)?)?.len(),
         &1,
         "cold reopen retains bounded physical deletion",
+    )?;
+    finite_discovery(store, &control)
+}
+
+fn finite_discovery(
+    store: &Arc<dyn KeyValueStore>,
+    control: &StorageReadControl,
+) -> StorageBackendResult<()> {
+    controlled_session(store, control)?;
+    let original = StorageReadControl::new(control.memory(), &uqa_core::CancellationToken::new());
+    let pruner = KeyValueDiskANNCanonical::new(store.clone(), TABLE, FIELD, 2)?.journal_pruner(
+        &row([91; 16])?.relation,
+        Arc::new(Resolver),
+        8192,
+        &original,
+    )?;
+    expect(
+        pruner.prune(page(64), control).is_err(),
+        "finite journal page requires caller transaction",
+    )?;
+    let canonical = KeyValueDiskANNCanonical::new(store.clone(), TABLE, FIELD, 2)?;
+    let retained = canonical.retain(control)?;
+    canonical.replace(9, &[], control)?;
+    store.begin_transaction()?;
+    let result = pruner.prune(page(64), control)?;
+    expect_eq(
+        &(result.examined, result.removed, result.next),
+        &(1, 1, None),
+        "finite discovery excludes new keys and rechecks current obsolescence",
+    )?;
+    store.commit_transaction()?;
+    expect_eq(
+        &store.scan_prefix(&journal::prefix(TABLE, FIELD)?)?.len(),
+        &1,
+        "uncovered replacement survives finite pruning",
+    )?;
+    expect(
+        retained.next_change_after(None, control)?.is_some(),
+        "older reader preserves removed history",
+    )?;
+    original.cancellation().cancel();
+    store.begin_transaction()?;
+    expect(
+        pruner.prune(page(64), control).is_err(),
+        "finite discovery retains original cancellation",
+    )?;
+    store.rollback_transaction()
+}
+
+fn controlled_session(
+    store: &Arc<dyn KeyValueStore>,
+    control: &StorageReadControl,
+) -> StorageBackendResult<()> {
+    let control = StorageReadControl::new(control.memory(), &uqa_core::CancellationToken::new());
+    let sibling = store.open_controlled_session(&control)?;
+    let retained = sibling
+        .retention_control()
+        .expect("controlled session exposes allowance");
+    expect(
+        retained.memory().shares_allowance(control.memory()),
+        "independent maintenance uses original allowance",
+    )?;
+    let before = control.memory().used();
+    sibling.begin_transaction()?;
+    sibling.put(b"diskann-maintenance-budget-probe", &[7; 1024])?;
+    expect(
+        control.memory().used() > before,
+        "private maintenance writes charge original allowance",
+    )?;
+    let held = control
+        .memory()
+        .reserve(control.memory().limit() - control.memory().used())?;
+    expect(
+        sibling
+            .put(b"diskann-maintenance-budget-second", &[7; 1024])
+            .is_err(),
+        "maintenance cannot escape an exhausted allowance",
+    )?;
+    drop(held);
+    control.cancellation().cancel();
+    sibling.rollback_transaction()?;
+    expect(
+        store.get(b"diskann-maintenance-budget-probe")?.is_none(),
+        "cancelled maintenance rolls back only its own writes",
     )
 }

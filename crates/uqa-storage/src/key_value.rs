@@ -352,6 +352,16 @@ pub trait KeyValueStore: Send + Sync {
         None
     }
 
+    /// Open an independent writer sharing the invoking maintenance operation's allowance and write cancellation. Retained reads and cleanup keep independent cancellation. Capable wrappers must forward this without granting another memory limit.
+    fn open_controlled_session(
+        &self,
+        _control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
+        Err(StorageBackendError::Other(
+            "controlled independent sessions are not implemented for this store".into(),
+        ))
+    }
+
     /// Create a transaction-isolated session with the caller's write cancellation and a fresh retention budget.
     fn open_session_with_cancellation(
         &self,
