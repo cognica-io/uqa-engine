@@ -1,6 +1,6 @@
 # DiskANN physical generations
 
-The Storage-owned `KeyValueDiskANNStore` persists physical DiskANN generations through existing versioned Key/Value sessions. SQLite Key/Value, redb and native SQLite share staging, physical sealing and retained page sources. Bound canonical sources use the [generation publication contract](diskann-generation-publication.md) to select a sealed generation and its complete coverage atomically; the [bounded journal pruner](diskann-journal-pruning.md) consumes that coverage under the same provider transaction. Query routing, reclamation and SQL creation remain unfinished.
+The Storage-owned `KeyValueDiskANNStore` persists physical DiskANN generations through existing versioned Key/Value sessions. SQLite Key/Value, redb and native SQLite share staging, physical sealing and retained page sources. Bound canonical sources use the [generation publication contract](diskann-generation-publication.md) to select a sealed generation and its complete coverage atomically; the [bounded journal pruner](diskann-journal-pruning.md) consumes that coverage under the same provider transaction. [Query generation selection](diskann-query-generations.md) retains committed and private physical sources with the canonical view. Candidate merging, reclamation and SQL creation remain unfinished.
 
 ## Ownership and identities
 
@@ -55,7 +55,7 @@ The dedicated writer uses the existing MVCC evaluated-batch and receipt protocol
 
 `open_source` retains one immutable provider read boundary and reads only the fixed database marker and state. It does not enumerate or load graph/PQ records. The retained source holds its MVCC lease after the live repository closes; historical values remain available through later replacement, deletion and version reclamation. Page batches contain at most 32 unique IDs and report actual I/O concurrency 1.
 
-Point reads enforce each encoded-size cap before provider materialization. Source metadata, copied key pages and reader buffers retain the supplied memory allowance; provider private batches and retained sessions keep their existing separate session allowance. Every read uses the current operation's cancellation and workspace control, so cancelling the opening query does not cancel independent readers. Total build memory, public index retention and larger-than-memory build acceptance remain later obligations.
+Point reads enforce each encoded-size cap before provider materialization. Source metadata, copied key pages and reader buffers retain the supplied memory allowance; provider private batches and retained sessions keep their existing separate session allowance. Every read uses the current operation's cancellation and workspace control, so cancelling the opening query does not cancel independent readers. Canonical query selection additionally retains the original query cancellation while preserving that physical opener contract. Bounded physical construction follows the [generation build contract](diskann-generation-build.md); public index integration and complete runtime resource acceptance remain later obligations.
 
 ## Native SQLite mapping
 

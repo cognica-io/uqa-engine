@@ -323,6 +323,15 @@ pub(super) fn load_state(
     if read_data_identity(read, control)? != Some(generation.database()) {
         return Err(invalid("generation belongs to another data identity"));
     }
+    read_state(read, generation, control)
+}
+
+/// Read the state after the caller validates the actual physical data identity. A private publication can select independently staged data newer than its SQL marker view.
+pub(super) fn read_state(
+    read: &dyn KeyValueRead,
+    generation: DiskANNGeneration,
+    control: &StorageReadControl,
+) -> StorageBackendResult<Option<State>> {
     let key = Keys::new(generation).key(Kind::State);
     fixed(control, |visit| {
         read.visit_value_bounded(key.as_ref(), STATE_BYTES, control, visit)

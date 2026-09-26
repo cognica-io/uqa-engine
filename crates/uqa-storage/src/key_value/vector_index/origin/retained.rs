@@ -20,6 +20,7 @@ pub use crate::diskann_index::DiskANNCanonicalVectorVisitor;
 mod changes;
 mod pruning;
 mod publication;
+mod selection;
 
 /// A fixed canonical view. Visitors borrow one decoded vector at a time and must not reenter the source from inside a callback. Any failure invalidates the caller's partial result.
 pub struct RetainedDiskANNCanonical {

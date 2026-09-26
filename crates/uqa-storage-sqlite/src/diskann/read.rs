@@ -42,6 +42,14 @@ where
             .record_revision(&self.mapping.key(key, self.control())?)
     }
 
+    fn retained_source(
+        &self,
+        key: &[u8],
+    ) -> StorageBackendResult<Option<Arc<dyn KeyValueRead + Send + Sync>>> {
+        self.inner
+            .retained_source(&self.mapping.key(key, self.control())?)
+    }
+
     fn retain(
         &self,
         prefixes: &[&[u8]],

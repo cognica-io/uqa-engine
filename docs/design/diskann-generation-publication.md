@@ -1,6 +1,6 @@
 # DiskANN generation publication
 
-Storage owns the atomic selection of a physically sealed generation and its complete document-origin coverage. Key/Value canonical sources and native SQLite supply actual retained catalog and input views; native SQLite maps generation records through its existing family 57 while keeping catalog guards and generation changes in the same caller transaction. The [bounded journal pruner](diskann-journal-pruning.md) consumes that selected coverage. Public DiskANN SQL, query routing and physical-generation reclamation are still unfinished.
+Storage owns the atomic selection of a physically sealed generation and its complete document-origin coverage. Key/Value canonical sources and native SQLite supply actual retained catalog and input views; native SQLite maps generation records through its existing family 57 while keeping catalog guards and generation changes in the same caller transaction. The [bounded journal pruner](diskann-journal-pruning.md) consumes that selected coverage. Retained query source selection follows the [query generation contract](diskann-query-generations.md); public DiskANN SQL, candidate merging and physical-generation reclamation are still unfinished.
 
 ## Publication evidence
 
@@ -24,4 +24,4 @@ State bytes retain revision 1 and their original staging owner. Status values 4 
 
 Head selection makes the already sealed complete origin artifact logically reachable in one atomic step; it does not copy a document map or delete the journal during publication. The bounded journal pruner checks the unchanged selected head and removes exact covered or committed-obsolete keys in resumable pages. Retained snapshots, unresolved receipts, abandoned candidates and retired-generation cleanup still require their owning lifecycle work.
 
-Query integration must retain a head and its physical source together. Committed selection cannot open a fresh source after reading an older head; a private head may refer to staging artifacts newer than the transaction's data snapshot and must retain its verified physical source. The current publication mutation does not implement that query resource adapter or enable public search.
+Publication now retains its verified physical read source with the private head in the same evaluated batch. Shared MVCC carries that resource through undo, retained views, command refresh and original receipt resolution. The [query generation selector](diskann-query-generations.md) uses it for private heads and retains the original query view for committed heads; it never refreshes the SQL data snapshot. Candidate merging and public search remain unfinished.

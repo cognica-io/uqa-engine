@@ -367,6 +367,14 @@ impl KeyValueBatch for SQLiteKeyValueBatch<'_> {
     ) -> StorageBackendResult<()> {
         self.batch.put_observed(key, value, revision)
     }
+    fn put_with_retained_source(
+        &mut self,
+        key: &[u8],
+        value: &[u8],
+        source: Arc<dyn uqa_storage::key_value::KeyValueRead + Send + Sync>,
+    ) -> StorageBackendResult<()> {
+        self.batch.put_with_retained_source(key, value, source)
+    }
     fn touch_marker(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
         self.batch.touch_marker(key, value)
     }

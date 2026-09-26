@@ -48,6 +48,7 @@ impl Transaction {
         }
         let changes = PrivateRecordChanges::new(control.memory());
         changes.apply_owned(records, control)?;
+        changes.inherit_retained_sources(&self.changes, control)?;
         control.check()?;
         self.changes = changes;
         self.committed = current;

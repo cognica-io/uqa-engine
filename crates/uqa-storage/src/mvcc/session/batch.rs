@@ -22,6 +22,11 @@ enum Operation {
     Requirement(BudgetedVec<u8>),
     ObservedRequirement(RecordKey, crate::mvcc::CommitSequence),
     ObservedRecord(RecordKey, SharedRecordValue, crate::mvcc::CommitSequence),
+    RetainedRecord(
+        RecordKey,
+        SharedRecordValue,
+        Arc<dyn crate::key_value::KeyValueRead + Send + Sync>,
+    ),
     IdentifierObservation(BudgetedVec<u8>, u64),
     IdentifierInheritance(BudgetedVec<u8>, BudgetedVec<u8>),
     DeletePrefix(BudgetedVec<u8>, RecordWriteKind),
@@ -101,6 +106,9 @@ impl<'a> Batch<'a> {
                 Operation::ObservedRecord(key, value, expected) => {
                     transaction.write_observed(key, value, *expected, control)?;
                 }
+                Operation::RetainedRecord(key, value, source) => {
+                    transaction.write_with_retained_source(key, value, source.clone(), control)?;
+                }
                 Operation::IdentifierObservation(_, _) | Operation::IdentifierInheritance(_, _) => {
                 }
                 Operation::DeletePrefix(prefix, kind) => {
@@ -154,6 +162,11 @@ impl<'a> Batch<'a> {
             }
         }
         // Validate and stage every record first. Allocation uses persistence directly because the session's mutation boundary already holds its active-transaction lock.
+        self.apply_identifiers()?;
+        self.observe_writes(transaction)
+    }
+
+    fn apply_identifiers(&self) -> Result<(), VersionError> {
         let write_control = self.store.write_control();
         for operation in self.operations.iter() {
             match operation {
@@ -179,7 +192,7 @@ impl<'a> Batch<'a> {
                 _ => {}
             }
         }
-        self.observe_writes(transaction)
+        Ok(())
     }
 
     fn observe_writes(&self, transaction: &Transaction) -> Result<(), VersionError> {
@@ -235,6 +248,21 @@ impl KeyValueBatch for Batch<'_> {
     fn require_unchanged(&mut self, key: &[u8]) -> StorageBackendResult<()> {
         self.operations
             .push(Operation::Requirement(self.copy(key)?))?;
+        Ok(())
+    }
+    fn put_with_retained_source(
+        &mut self,
+        key: &[u8],
+        value: &[u8],
+        source: Arc<dyn crate::key_value::KeyValueRead + Send + Sync>,
+    ) -> StorageBackendResult<()> {
+        source.control().check()?;
+        self.operations.push(Operation::RetainedRecord(
+            RecordKey::new(key, self.store.control.memory())
+                .map_err(VersionError::into_storage_error)?,
+            Arc::new(self.copy(value)?),
+            source,
+        ))?;
         Ok(())
     }
     fn touch_marker(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {

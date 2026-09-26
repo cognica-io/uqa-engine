@@ -34,6 +34,7 @@ pub use origins::{
     verify_diskann_publication_reopen, verify_mutation_origins,
 };
 pub use origins::{verify_diskann_pruning, verify_diskann_pruning_reopen};
+pub use origins::{verify_diskann_query_reopen, verify_diskann_query_views};
 mod physical_vectors;
 pub use physical_vectors::{
     verify_hnsw_concurrency, verify_hnsw_reopen, verify_hnsw_undo, verify_ivf_concurrency,

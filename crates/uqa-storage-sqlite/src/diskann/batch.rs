@@ -77,6 +77,17 @@ impl KeyValueBatch for Batch<'_> {
             .get_mut()
             .put_observed(record.key(), record.row(), revision)
     }
+    fn put_with_retained_source(
+        &mut self,
+        key: &[u8],
+        value: &[u8],
+        source: std::sync::Arc<dyn uqa_storage::key_value::KeyValueRead + Send + Sync>,
+    ) -> StorageBackendResult<()> {
+        let record = self.mapping.record(key, value, &self.control)?;
+        self.inner
+            .get_mut()
+            .put_with_retained_source(record.key(), record.row(), source)
+    }
     fn fence_record(&mut self, key: &[u8]) -> StorageBackendResult<()> {
         let key = self.mapping.key(key, &self.control)?;
         self.inner.get_mut().fence_record(&key)

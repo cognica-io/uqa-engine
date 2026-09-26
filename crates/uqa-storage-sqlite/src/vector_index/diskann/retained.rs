@@ -9,6 +9,7 @@
 mod changes;
 mod pruning;
 mod publication;
+mod selection;
 
 use super::invalid;
 use crate::mvcc::native::{

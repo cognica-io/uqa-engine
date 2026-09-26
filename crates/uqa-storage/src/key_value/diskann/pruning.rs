@@ -54,9 +54,8 @@ impl KeyValueDiskANNPruner {
             ));
         }
         let generation = input.generation;
-        self.source.store.with_read_view(&mut |physical| {
-            validate_mapping(scope, generation, physical, control)
-        })?;
+        self.source.check(control)?;
+        validate_mapping(scope, generation, &*self.source.read, control)?;
         if publication::selected_generation(scope, read, control)? != Some(generation) {
             return Err(invalid("journal pruning requires the selected generation"));
         }

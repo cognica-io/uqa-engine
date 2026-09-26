@@ -17,6 +17,23 @@ use crate::connection::ManagedConnection;
 use crate::key_value::SQLiteKeyValueStore;
 use crate::SQLiteCompressionOptions;
 
+#[test]
+fn diskann_query_views_retain_private_and_old_committed_generations_in_sqlite_modes() {
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("query-views.db");
+        let generation = {
+            let store: Arc<dyn KeyValueStore> =
+                Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+            uqa_storage::key_value::conformance::verify_diskann_query_views(&store).unwrap()
+        };
+        let store: Arc<dyn KeyValueStore> =
+            Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+        uqa_storage::key_value::conformance::verify_diskann_query_reopen(&store, generation)
+            .unwrap();
+    }
+}
+
 fn connection(path: &Path, mode: u8) -> ManagedConnection {
     match mode {
         0 => ManagedConnection::open(path),

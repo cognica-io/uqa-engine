@@ -13,6 +13,7 @@ use uqa_storage::{
 mod identity;
 mod pruning;
 mod publication;
+mod selection;
 mod validation;
 
 const TABLE: &str = "public.native_binding";

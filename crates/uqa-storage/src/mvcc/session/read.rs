@@ -74,6 +74,15 @@ impl KeyValueRead for RecordRead<'_> {
             .map_err(VersionError::into_storage_error)
     }
 
+    fn retained_source(
+        &self,
+        key: &[u8],
+    ) -> StorageBackendResult<Option<std::sync::Arc<dyn KeyValueRead + Send + Sync>>> {
+        self.view
+            .retained_source(key, self.control)
+            .map_err(VersionError::into_storage_error)
+    }
+
     fn retain(
         &self,
         _prefixes: &[&[u8]],
@@ -236,6 +245,12 @@ impl KeyValueRead for RetainedRecordRead {
     }
     fn record_revision(&self, key: &[u8]) -> StorageBackendResult<Option<KeyValueReadRevision>> {
         self.read().record_revision(key)
+    }
+    fn retained_source(
+        &self,
+        key: &[u8],
+    ) -> StorageBackendResult<Option<std::sync::Arc<dyn KeyValueRead + Send + Sync>>> {
+        self.read().retained_source(key)
     }
     fn retain(
         &self,
