@@ -110,6 +110,10 @@ impl KeyValueBatch for Batch<'_> {
         let prefix = self.mapping.prefix(prefix, &self.control)?;
         self.inner.get_mut().delete_prefix(&prefix)
     }
+    fn delete_prefix_allow_absent(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
+        let prefix = self.mapping.prefix(prefix, &self.control)?;
+        self.inner.get_mut().delete_prefix_allow_absent(&prefix)
+    }
     fn commit(self: Box<Self>) -> StorageBackendResult<()> {
         match self.inner {
             Owner::Owned(batch) => batch.commit(),

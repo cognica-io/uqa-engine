@@ -143,7 +143,10 @@ impl KeyValueDiskANNCanonical {
                 // Both commit orders are guarded, including insertions absent from this view. Adoption stamps origins without rewriting or copying the canonical vector corpus.
                 self.index.coordinate_field(batch, true)?;
                 batch.delete_prefix(&super::prefix(&self.index.table, &self.index.field)?)?;
-                batch.delete_prefix(&journal::prefix(&self.index.table, &self.index.field)?)?;
+                batch.delete_prefix_allow_absent(&journal::prefix(
+                    &self.index.table,
+                    &self.index.field,
+                )?)?;
                 let mut decoder = super::super::read::CanonicalDecoder::new(&self.index);
                 let mut current = None;
                 let mut count = 0_u64;

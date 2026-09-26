@@ -29,6 +29,13 @@ mod maintenance;
 pub use maintenance::{verify_diskann_maintenance_reopen, verify_diskann_maintenance_source};
 mod pruning;
 mod publication;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod recovery;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use recovery::{
+    diskann_rebuild_until_process_loss, kill_diskann_publication_owner,
+    verify_diskann_recovered_publication,
+};
 mod restore;
 mod runtime;
 pub use restore::{

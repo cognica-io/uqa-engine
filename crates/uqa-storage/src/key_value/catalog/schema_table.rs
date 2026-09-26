@@ -288,7 +288,7 @@ impl KeyValueCatalog {
             table_name,
             column_name,
         )?)?;
-        batch.delete_prefix(&super::super::vector_index::origin::journal::prefix(
+        batch.delete_prefix_allow_absent(&super::super::vector_index::origin::journal::prefix(
             table_name,
             column_name,
         )?)?;

@@ -108,7 +108,9 @@ fn initial_writes(
         control.cancellation().check()?;
         if matches!(
             write.kind(),
-            RecordWriteKind::Marker | RecordWriteKind::StatisticsMaintenance
+            RecordWriteKind::Marker
+                | RecordWriteKind::StatisticsMaintenance
+                | RecordWriteKind::IdempotentDelete
         ) || (mode == ResolutionMode::Command
             && matches!(
                 write.kind(),

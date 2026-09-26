@@ -98,6 +98,18 @@ pub(super) fn resolve(
     if prepared
         .records()
         .iter()
+        .any(|write| write.kind() == RecordWriteKind::IdempotentDelete)
+    {
+        resolved = Some(super::deletions::resolve(
+            resolved.as_ref().unwrap_or(prepared),
+            current.as_ref(),
+            mode,
+            control,
+        )?);
+    }
+    if prepared
+        .records()
+        .iter()
         .any(|write| write.kind() == RecordWriteKind::StatisticsMaintenance)
     {
         resolved = Some(super::maintenance::resolve(

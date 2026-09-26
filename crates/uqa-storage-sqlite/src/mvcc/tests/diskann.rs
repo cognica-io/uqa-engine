@@ -11,7 +11,9 @@ use uqa_storage::key_value::conformance::{
     verify_diskann_canonical_reopen, verify_mutation_origins,
 };
 use uqa_storage::key_value::conformance::{verify_diskann_generations, verify_diskann_reopen};
-use uqa_storage::KeyValueStore;
+use uqa_storage::{
+    KeyValueStorageBackend, KeyValueStore, PersistentStorageBackend, PersistentStorageProvider,
+};
 
 use crate::connection::ManagedConnection;
 use crate::key_value::SQLiteKeyValueStore;
@@ -21,6 +23,28 @@ mod corruption;
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod ownership;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod recovery;
+
+fn backend(
+    connection: &ManagedConnection,
+    native: bool,
+) -> (Arc<dyn PersistentStorageBackend>, Arc<dyn KeyValueStore>) {
+    if native {
+        let backend = crate::SQLiteStorageProvider::new(connection.clone())
+            .open_session()
+            .unwrap()
+            .backend;
+        (
+            backend,
+            Arc::new(connection.native_diskann_records().unwrap()),
+        )
+    } else {
+        let store: Arc<dyn KeyValueStore> =
+            Arc::new(SQLiteKeyValueStore::new(connection.clone()).unwrap());
+        (Arc::new(KeyValueStorageBackend::new(store.clone())), store)
+    }
+}
 
 #[test]
 fn vector_field_guard_reclamation_bounds_deleted_tables_and_preserves_writers() {

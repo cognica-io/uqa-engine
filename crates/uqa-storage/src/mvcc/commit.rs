@@ -44,6 +44,7 @@ pub(crate) enum RecordWriteKind {
     HNSWPreview,
     Marker,
     StatisticsMaintenance,
+    IdempotentDelete,
 }
 
 impl PreparedRecordWrite {
@@ -197,6 +198,7 @@ impl PreparedRecordCommit {
                     RecordWriteKind::HNSWPreview => 6,
                     RecordWriteKind::Marker => 7,
                     RecordWriteKind::StatisticsMaintenance => 8,
+                    RecordWriteKind::IdempotentDelete => 9,
                 }]);
             }
             digest.update((write.key().len() as u64).to_be_bytes());

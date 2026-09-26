@@ -18,7 +18,7 @@ use uqa_storage::{
 
 mod retirement;
 
-fn runtime(
+pub(super) fn runtime(
     connection: &ManagedConnection,
     temporary: &DiskANNTemporaryBudget,
     control: &StorageReadControl,

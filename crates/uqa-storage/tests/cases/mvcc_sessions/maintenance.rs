@@ -230,18 +230,22 @@ fn maintenance_and_graph_occurrence_vector_effects_share_refresh_and_publication
             let mut text_left =
                 KeyValueInvertedIndex::new(a.clone(), "docs", uqa_analysis::whitespace_analyzer());
             let mut text_right =
-                KeyValueInvertedIndex::new(b, "docs", uqa_analysis::whitespace_analyzer());
+                KeyValueInvertedIndex::new(b.clone(), "docs", uqa_analysis::whitespace_analyzer());
             let fields = |text: &str| BTreeMap::from([("body".into(), text.into())]);
             text_left.add_document(1, fields("alpha")).unwrap();
             analyze(&left, 100);
             left.save_named_graph("g").unwrap();
             left.save_vertex(1, "node", "{}").unwrap();
             left.save_graph_membership("vertex", 1, "g").unwrap();
+            a.put(b"obsolete/journal", b"covered").unwrap();
             a.begin_transaction().unwrap();
+            a.with_mutation(&mut |_, batch| batch.delete_prefix_allow_absent(b"obsolete/"))
+                .unwrap();
             text_left.add_document(2, fields("alpha alpha")).unwrap();
             vector_left.add(11, vec![0.5, 0.5]).unwrap();
             left.save_vertex(1, "node", "{\"changed\":true}").unwrap();
             changes(&left, 3);
+            b.delete(b"obsolete/journal").unwrap();
             text_right
                 .add_document(3, fields("alpha alpha alpha"))
                 .unwrap();
@@ -257,6 +261,7 @@ fn maintenance_and_graph_occurrence_vector_effects_share_refresh_and_publication
             right.save_path_index("late", "[]").unwrap();
             right.finish_path_index_data("late", "g", "[]").unwrap();
             a.commit_transaction().unwrap();
+            assert!(b.get(b"obsolete/journal").unwrap().is_none());
             assert_eq!(state(&right)["changes"], if refresh { 9 } else { 5 });
             assert_eq!(vector_right.count().unwrap(), if refresh { 4 } else { 3 });
             assert_eq!(text_right.doc_count().unwrap(), 3);

@@ -189,6 +189,10 @@ pub trait KeyValueBatch {
     fn put(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()>;
     fn delete(&mut self, key: &[u8]) -> StorageBackendResult<()>;
     fn delete_prefix(&mut self, prefix: &[u8]) -> StorageBackendResult<()>;
+    /// Delete only the keys selected by this evaluated prefix, accepting concurrent deletion of those keys. A concurrent live replacement still conflicts, and explicit read requirements remain strict. Reserved for obsolete internal records; callers must separately fence structural changes and new insertions. Concurrent wrappers must forward this operation.
+    fn delete_prefix_allow_absent(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
+        self.delete_prefix(prefix)
+    }
     /// Retain already evaluated document input in the same atomic batch as its canonical values and IVF preview. Concurrent wrappers must forward this call.
     fn ivf_mutation(
         &mut self,

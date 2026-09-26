@@ -9,6 +9,11 @@
 mod binding;
 pub use binding::verify_diskann_runtime_adoption_conflicts;
 pub use binding::verify_diskann_selected_corruption;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use binding::{
+    diskann_rebuild_until_process_loss, kill_diskann_publication_owner,
+    verify_diskann_recovered_publication,
+};
 pub use binding::{
     diskann_restore_records, verify_diskann_restore_source, verify_diskann_restored,
     verify_diskann_restored_rebuild, verify_diskann_restored_writes, DiskANNRestoreRecords,
