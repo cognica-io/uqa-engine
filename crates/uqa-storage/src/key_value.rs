@@ -33,8 +33,8 @@ mod diskann;
 pub use diskann::identifiers as diskann_identifiers;
 pub use diskann::{
     publication, DiskANNMaintenanceStatus, DiskANNMaintenanceStep, DiskANNStageStatus,
-    KeyValueDiskANNMaintenance, KeyValueDiskANNPruner, KeyValueDiskANNSource, KeyValueDiskANNStage,
-    KeyValueDiskANNStore,
+    KeyValueDiskANNMaintenance, KeyValueDiskANNMappingMaintenance, KeyValueDiskANNPruner,
+    KeyValueDiskANNSource, KeyValueDiskANNStage, KeyValueDiskANNStore,
 };
 mod graph_commit;
 mod table_owners;

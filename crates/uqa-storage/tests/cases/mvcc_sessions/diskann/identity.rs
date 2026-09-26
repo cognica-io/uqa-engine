@@ -22,7 +22,10 @@ impl DiskANNIndexResolver for Resolver {
     }
 }
 
-fn scope(store: &Arc<dyn KeyValueStore>, control: &StorageReadControl) -> DiskANNIndexScope {
+pub(super) fn scope(
+    store: &Arc<dyn KeyValueStore>,
+    control: &StorageReadControl,
+) -> DiskANNIndexScope {
     store
         .put(b"catalog-fixture", b"fixture definition")
         .unwrap();
@@ -67,6 +70,19 @@ fn diskann_catalog_identity_resolves_lost_mapping_replies_without_replaying_or_c
         persistence.state.lock().commit_fault = fault;
         assert!(repository.allocate_bound_stage(&scope, &control).is_err());
         assert!(repository.allocate_bound_stage(&scope, &control).is_err());
+        let observer: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+        let original = observer.scan_prefix(b"\0uqa-diskann-v1\0").unwrap();
+        if fault == CommitFault::LoseReply {
+            assert!(!observer
+                .scan_prefix(b"\0uqa-diskann-v1\0\x01")
+                .unwrap()
+                .is_empty());
+        }
+        uqa_storage::key_value::KeyValueDiskANNMaintenance::run(&observer, &control).unwrap();
+        assert_eq!(
+            observer.scan_prefix(b"\0uqa-diskann-v1\0").unwrap(),
+            original
+        );
         persistence.state.lock().commit_fault = CommitFault::None;
         repository.commit_pending().unwrap();
         {
@@ -83,7 +99,7 @@ fn diskann_catalog_identity_resolves_lost_mapping_replies_without_replaying_or_c
         }
         let attempts = persistence.state.lock().attempts.len();
         let stage = repository.allocate_bound_stage(&scope, &control).unwrap();
-        assert_eq!(persistence.state.lock().attempts.len(), attempts);
+        assert_eq!(persistence.state.lock().attempts.len(), attempts + 1);
         assert!(store.in_transaction());
         assert_eq!(
             store.get(b"caller-private").unwrap().as_deref(),

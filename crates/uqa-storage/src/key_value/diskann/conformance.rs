@@ -32,6 +32,7 @@ mod build;
 pub use build::{verify_diskann_built_generation, verify_diskann_built_reopen};
 mod identifiers;
 mod maintenance;
+mod mappings;
 mod ownership;
 mod reclamation;
 pub use maintenance::verify_diskann_maintenance;
@@ -51,6 +52,7 @@ pub fn verify_diskann_generations(
         "stable DiskANN data identity",
     )?;
     identifiers::verify(store, &repository, &control)?;
+    mappings::verify(store, &control)?;
 
     store.begin_transaction()?;
     store.put(b"diskann-caller-private", b"uncommitted")?;

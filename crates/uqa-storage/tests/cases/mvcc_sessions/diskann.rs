@@ -102,6 +102,8 @@ mod identity;
 mod live;
 #[path = "diskann/maintenance.rs"]
 mod maintenance;
+#[path = "diskann/mappings.rs"]
+mod mappings;
 #[path = "diskann/pruning.rs"]
 mod pruning;
 #[path = "diskann/publication.rs"]

@@ -144,7 +144,7 @@ fn diskann_identifier_upgrade_sync_failure_recovers_one_complete_allocation_doma
         let watermark = codec::decode_u64(table.get(NAMESPACE).unwrap().unwrap().value()).unwrap();
         match format {
             49 => assert_eq!((legacy_count, watermark), (130, 3)),
-            50 => assert_eq!((legacy_count, watermark), (0, 230)),
+            51 => assert_eq!((legacy_count, watermark), (0, 230)),
             _ => panic!("incomplete generation identifier upgrade: {format}"),
         }
     }

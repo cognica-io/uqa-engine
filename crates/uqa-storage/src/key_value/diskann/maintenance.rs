@@ -146,7 +146,7 @@ impl KeyValueDiskANNMaintenance {
     ) -> StorageBackendResult<()> {
         let mut pass = Self::start(store, control)?;
         while pass.step()?.is_some() {}
-        Ok(())
+        super::KeyValueDiskANNMappingMaintenance::run(store, control)
     }
 
     fn next_generation(&self) -> StorageBackendResult<Option<DiskANNGeneration>> {

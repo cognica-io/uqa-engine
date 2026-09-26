@@ -131,32 +131,40 @@ impl KeyValueDiskANNStage {
     }
 
     pub fn start(&mut self, control: &StorageReadControl) -> StorageBackendResult<()> {
+        let repository = self.repository.clone();
+        let lease = self.lease.clone();
+        repository.mutate_owned(lease.as_ref(), control, &mut |read, batch| {
+            self.start_in(read, batch, control)
+        })
+    }
+
+    pub(super) fn start_in(
+        &mut self,
+        read: &dyn KeyValueRead,
+        batch: &mut dyn KeyValueBatch,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<()> {
         let create = !self.attempted;
         self.attempted = true;
         let keys = Keys::new(self.generation);
-        self.repository
-            .mutate_owned(self.lease.as_ref(), control, &mut |read, batch| {
-                match self.state(read, control)? {
-                    Some(state) if state.status == DiskANNStageStatus::Writing => return Ok(()),
-                    Some(_) => return Err(invalid("generation is no longer writable")),
-                    None if !create => {
-                        return Err(invalid("a consumed generation cannot be recreated"))
-                    }
-                    None => {}
-                }
-                if read.contains_prefix_budgeted(keys.prefix(), control)? {
-                    return Err(invalid("generation has orphaned records"));
-                }
-                batch.require_unchanged(&database_key())?;
-                batch.put(
-                    keys.key(Kind::State).as_ref(),
-                    &State {
-                        status: DiskANNStageStatus::Writing,
-                        owner: self.owner,
-                    }
-                    .encode(),
-                )
-            })
+        match self.state(read, control)? {
+            Some(state) if state.status == DiskANNStageStatus::Writing => return Ok(()),
+            Some(_) => return Err(invalid("generation is no longer writable")),
+            None if !create => return Err(invalid("a consumed generation cannot be recreated")),
+            None => {}
+        }
+        if read.contains_prefix_budgeted(keys.prefix(), control)? {
+            return Err(invalid("generation has orphaned records"));
+        }
+        batch.require_unchanged(&database_key())?;
+        batch.put(
+            keys.key(Kind::State).as_ref(),
+            &State {
+                status: DiskANNStageStatus::Writing,
+                owner: self.owner,
+            }
+            .encode(),
+        )
     }
 
     /// Store one already encoded batch. The provider's existing private-write allowance owns its retained copy.
