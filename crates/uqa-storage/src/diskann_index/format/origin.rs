@@ -42,6 +42,9 @@ impl DiskANNCanonicalOrigin {
     pub fn count(self) -> u64 {
         self.count
     }
+    pub fn dimensions(self) -> u32 {
+        self.dimensions
+    }
 
     pub fn encode(self) -> [u8; BYTES] {
         let mut bytes = [0; BYTES];

@@ -259,6 +259,20 @@ fn diskann_pruning_preserves_committed_and_retained_session_views() {
 }
 
 #[test]
+fn diskann_maintenance_source_preserves_census_builds_and_reopen() {
+    let persistence = Persistence::new();
+    let generation = {
+        let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+        let backend = uqa_storage::key_value::KeyValueStorageBackend::new(store);
+        uqa_storage::key_value::conformance::verify_diskann_maintenance_source(&backend).unwrap()
+    };
+    let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+    let backend = uqa_storage::key_value::KeyValueStorageBackend::new(store);
+    uqa_storage::key_value::conformance::verify_diskann_maintenance_reopen(&backend, generation)
+        .unwrap();
+}
+
+#[test]
 fn diskann_build_ownership_protects_live_and_retained_sources() {
     let persistence = Persistence::new();
     let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));

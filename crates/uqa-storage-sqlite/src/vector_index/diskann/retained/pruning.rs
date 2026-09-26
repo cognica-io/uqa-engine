@@ -14,8 +14,11 @@ use uqa_core::{memory::BudgetedVec, DocId};
 use uqa_storage::{
     diskann_index::{
         catalog::DiskANNIndexResolver,
-        changes::{DiskANNChangeJournal, DiskANNPruneRequest, DiskANNPruneResult},
+        changes::{
+            DiskANNChangeJournal, DiskANNChangeRead, DiskANNPruneRequest, DiskANNPruneResult,
+        },
         format::{DiskANNChangeIdentity, CANONICAL_ORIGIN_BYTES, CHANGE_IDENTITY_BYTES},
+        maintenance::{DiskANNStatisticsPage, DiskANNStatisticsRequest},
     },
     key_value::{KeyValueDiskANNPruner, KeyValueRead},
     mvcc::VersionError,
@@ -24,6 +27,26 @@ use uqa_storage::{
 };
 
 impl RetainedSQLiteDiskANNCanonical {
+    pub(in crate::vector_index::diskann) fn measure_changes(
+        &self,
+        pruner: &KeyValueDiskANNPruner,
+        request: DiskANNStatisticsRequest,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<DiskANNStatisticsPage> {
+        self.check(control)?;
+        let page = pruner.statistics(
+            &Journal {
+                source: self,
+                discovery: &self.snapshot,
+                current: &self.snapshot,
+            },
+            request,
+            control,
+        )?;
+        self.check(control)?;
+        Ok(page)
+    }
+
     pub(crate) fn prune_changes(
         &self,
         resolver: &dyn DiskANNIndexResolver,
@@ -100,10 +123,12 @@ impl RetainedSQLiteDiskANNCanonical {
             control,
         )?;
         let result = pruner.prune(
-            &mut Journal {
-                source: self,
-                discovery,
-                current,
+            &mut JournalMutation {
+                read: Journal {
+                    source: self,
+                    discovery,
+                    current,
+                },
                 batch,
             },
             request,
@@ -118,7 +143,6 @@ struct Journal<'a> {
     source: &'a RetainedSQLiteDiskANNCanonical,
     discovery: &'a NativeSnapshot,
     current: &'a NativeSnapshot,
-    batch: &'a mut dyn KeyValueBatch,
 }
 
 impl Journal<'_> {
@@ -149,7 +173,7 @@ impl Journal<'_> {
     }
 }
 
-impl DiskANNChangeJournal for Journal<'_> {
+impl DiskANNChangeRead for Journal<'_> {
     fn next_after(
         &self,
         after: Option<DiskANNChangeIdentity>,
@@ -271,14 +295,25 @@ impl DiskANNChangeJournal for Journal<'_> {
     ) -> StorageBackendResult<Option<DiskANNCanonicalOrigin>> {
         self.source.record_on(self.current, document, control)
     }
+}
+
+struct JournalMutation<'a> {
+    read: Journal<'a>,
+    batch: &'a mut dyn KeyValueBatch,
+}
+
+impl DiskANNChangeJournal for JournalMutation<'_> {
+    fn read(&self) -> &dyn DiskANNChangeRead {
+        &self.read
+    }
 
     fn remove(
         &mut self,
         identity: DiskANNChangeIdentity,
         control: &StorageReadControl,
     ) -> StorageBackendResult<()> {
-        self.source.check(control)?;
-        let key = self.key(identity, control)?;
+        self.read.source.check(control)?;
+        let key = self.read.key(identity, control)?;
         self.batch.require_unchanged(&key)?;
         self.batch.delete(&key)
     }

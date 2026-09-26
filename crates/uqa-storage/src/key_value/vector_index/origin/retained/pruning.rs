@@ -7,8 +7,9 @@
 use super::{append, invalid, Record, RetainedDiskANNCanonical, BYTES};
 use crate::diskann_index::{
     catalog::DiskANNIndexResolver,
-    changes::{DiskANNChangeJournal, DiskANNPruneRequest, DiskANNPruneResult},
+    changes::{DiskANNChangeJournal, DiskANNChangeRead, DiskANNPruneRequest, DiskANNPruneResult},
     format::DiskANNChangeIdentity,
+    maintenance::{DiskANNStatisticsPage, DiskANNStatisticsRequest},
     DiskANNCanonicalRead,
 };
 use crate::key_value::{KeyValueDiskANNPruner, KeyValueRead};
@@ -16,6 +17,26 @@ use crate::{read_control::StorageReadControl, KeyValueBatch, StorageBackendResul
 use uqa_core::DocId;
 
 impl RetainedDiskANNCanonical {
+    pub(in crate::key_value::vector_index::origin) fn measure_changes(
+        &self,
+        pruner: &KeyValueDiskANNPruner,
+        request: DiskANNStatisticsRequest,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<DiskANNStatisticsPage> {
+        self.check_control(control)?;
+        let page = pruner.statistics(
+            &Journal {
+                source: self,
+                discovery: &*self.read,
+                read: &*self.read,
+            },
+            request,
+            control,
+        )?;
+        self.check_control(control)?;
+        Ok(page)
+    }
+
     /// Evaluate a bounded journal page in the caller's same read/batch scope. Only the catalog binding comes from this retained source; obsolescence uses the command's committed canonical view. Private canonical writes or a private head cannot authorize cleanup.
     pub fn prune_changes(
         &self,
@@ -75,10 +96,12 @@ impl RetainedDiskANNCanonical {
             control,
         )?;
         let result = pruner.prune(
-            &mut Journal {
-                source: self,
-                discovery,
-                read,
+            &mut JournalMutation {
+                read: Journal {
+                    source: self,
+                    discovery,
+                    read,
+                },
                 batch,
             },
             request,
@@ -93,10 +116,9 @@ struct Journal<'a> {
     source: &'a RetainedDiskANNCanonical,
     discovery: &'a dyn KeyValueRead,
     read: &'a dyn KeyValueRead,
-    batch: &'a mut dyn KeyValueBatch,
 }
 
-impl DiskANNChangeJournal for Journal<'_> {
+impl DiskANNChangeRead for Journal<'_> {
     fn next_after(
         &self,
         after: Option<DiskANNChangeIdentity>,
@@ -200,14 +222,25 @@ impl DiskANNChangeJournal for Journal<'_> {
     ) -> StorageBackendResult<Option<Record>> {
         self.source.record_on(self.read, document, control)
     }
+}
+
+struct JournalMutation<'a> {
+    read: Journal<'a>,
+    batch: &'a mut dyn KeyValueBatch,
+}
+
+impl DiskANNChangeJournal for JournalMutation<'_> {
+    fn read(&self) -> &dyn DiskANNChangeRead {
+        &self.read
+    }
 
     fn remove(
         &mut self,
         identity: DiskANNChangeIdentity,
         control: &StorageReadControl,
     ) -> StorageBackendResult<()> {
-        self.source.check_control(control)?;
-        let key = append(&self.source.changes, &identity.encode(), control)?;
+        self.read.source.check_control(control)?;
+        let key = append(&self.read.source.changes, &identity.encode(), control)?;
         self.batch.require_unchanged(&key)?;
         self.batch.delete(&key)
     }

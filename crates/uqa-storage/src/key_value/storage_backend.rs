@@ -243,6 +243,26 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         )
     }
 
+    fn diskann_maintenance_source(
+        &self,
+        binding: crate::diskann_index::DiskANNIndexBinding<'_>,
+        max_record_bytes: usize,
+    ) -> StorageBackendResult<Box<dyn crate::diskann_index::maintenance::DiskANNMaintenanceSource>>
+    {
+        super::KeyValueDiskANNCanonical::new(
+            self.store.clone(),
+            binding.table,
+            binding.field,
+            binding.dimensions,
+        )?
+        .maintenance_source(
+            binding.index,
+            binding.resolver,
+            max_record_bytes,
+            binding.control,
+        )
+    }
+
     fn retire_diskann_index(
         &self,
         binding: crate::diskann_index::DiskANNIndexBinding<'_>,

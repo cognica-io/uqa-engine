@@ -23,6 +23,8 @@ const MARKER: &[u8] = b"diskann-binding-guarded-write";
 
 mod identity;
 mod live;
+mod maintenance;
+pub use maintenance::{verify_diskann_maintenance_reopen, verify_diskann_maintenance_source};
 mod pruning;
 mod publication;
 mod runtime;
@@ -60,6 +62,11 @@ fn definition() -> StorageBackendResult<CatalogIndexRow> {
 
 fn setup(store: &Arc<dyn KeyValueStore>) -> StorageBackendResult<KeyValueDiskANNCanonical> {
     let catalog = KeyValueCatalog::new(store.clone());
+    setup_catalog(&catalog)?;
+    KeyValueDiskANNCanonical::new(store.clone(), TABLE, FIELD, 2)
+}
+
+fn setup_catalog(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
     catalog.save_schema("public")?;
     catalog.save_table(&TableSchema {
         relation: RelationIdentity::new("public", "diskann_binding"),
@@ -75,8 +82,7 @@ fn setup(store: &Arc<dyn KeyValueStore>) -> StorageBackendResult<KeyValueDiskANN
         columns_json: "[]".into(),
         constraints_json: "{}".into(),
     })?;
-    catalog.save_catalog_index_row(&definition()?)?;
-    KeyValueDiskANNCanonical::new(store.clone(), TABLE, FIELD, 2)
+    catalog.save_catalog_index_row(&definition()?)
 }
 
 fn guard(

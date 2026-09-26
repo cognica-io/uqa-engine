@@ -42,14 +42,14 @@ pub trait DiskANNJournalPruner: Send + Sync {
     ) -> StorageBackendResult<DiskANNPruneResult>;
 }
 
-/// Provider adapter over one fixed committed canonical/journal view and its evaluated mutation batch. The provider guards the real catalog and selected head in that same batch before pruning. Keys are immutable mutation identities; callbacks must not advance the view.
-pub trait DiskANNChangeJournal {
+/// Actual provider journal keys and complete canonical origins. Pruning may retain older discovery with current deletion evidence; exact statistics use one fixed view for every read. Callbacks must not advance either view.
+pub trait DiskANNChangeRead {
     fn next_after(
         &self,
         after: Option<DiskANNChangeIdentity>,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Option<DiskANNChangeIdentity>>;
-    /// Read the current committed value. A key discovered on an older fixed view may already have been removed by another maintenance transaction.
+    /// Read the value on the supplied evidence view. Pruning uses its current transaction, where an older discovery key may already be absent; statistics use the same retained view for discovery and evidence.
     fn change(
         &self,
         identity: DiskANNChangeIdentity,
@@ -60,6 +60,11 @@ pub trait DiskANNChangeJournal {
         document: DocId,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Option<DiskANNCanonicalOrigin>>;
+}
+
+/// Exact-key deletion shares the reader's publishing transaction and its catalog/head guards.
+pub trait DiskANNChangeJournal {
+    fn read(&self) -> &dyn DiskANNChangeRead;
     fn remove(
         &mut self,
         identity: DiskANNChangeIdentity,
@@ -90,7 +95,7 @@ pub(crate) fn prune(
     };
     for _ in 0..request.max_records.min(64) {
         control.check()?;
-        let Some(identity) = journal.next_after(after, control)? else {
+        let Some(identity) = journal.read().next_after(after, control)? else {
             result.next = None;
             control.check()?;
             return Ok(result);
@@ -104,34 +109,61 @@ pub(crate) fn prune(
             generation,
             after: identity,
         });
-        let Some(change) = journal.change(identity, control)? else {
-            continue;
-        };
-        if change.version() != identity.version() {
-            return Err(invalid(
-                "journal payload differs from its mutation identity",
-            ));
-        }
-        let current = journal.current_origin(identity.document(), control)?;
-        if current.is_some_and(|origin| origin.version() == identity.version() && origin != change)
-        {
-            return Err(invalid("journal payload differs from the current origin"));
-        }
-        let covered = origins.origin(identity.document(), control)?;
-        if covered.is_some_and(|origin| origin.version() == identity.version() && origin != change)
-        {
-            return Err(invalid("journal payload differs from the published origin"));
-        }
         // A committed mutation never regains a superseded origin: undo cannot reuse revisions and receipt recovery never reevaluates writes. Older readers retain historical journal rows through MVCC.
-        if covered == Some(change)
-            || current.map(DiskANNCanonicalOrigin::version) != Some(identity.version())
-        {
+        if matches!(
+            classify(origins, journal.read(), identity, control)?,
+            Change::Reclaimable
+        ) {
             journal.remove(identity, control)?;
             result.removed += 1;
         }
     }
     control.check()?;
     Ok(result)
+}
+
+pub(super) enum Change {
+    Missing,
+    Reclaimable,
+    Outstanding(DiskANNCanonicalOrigin),
+}
+
+pub(super) fn classify<J: DiskANNChangeRead + ?Sized>(
+    origins: &DiskANNOriginReader,
+    journal: &J,
+    identity: DiskANNChangeIdentity,
+    control: &StorageReadControl,
+) -> StorageBackendResult<Change> {
+    let Some(change) = journal.change(identity, control)? else {
+        return Ok(Change::Missing);
+    };
+    if change.version() != identity.version() {
+        return Err(invalid(
+            "journal payload differs from its mutation identity",
+        ));
+    }
+    if change.dimensions() != origins.manifest().input().dimensions {
+        return Err(invalid(
+            "journal dimensions differ from the published generation",
+        ));
+    }
+    let current = journal.current_origin(identity.document(), control)?;
+    if current.is_some_and(|origin| origin.version() == identity.version() && origin != change) {
+        return Err(invalid("journal payload differs from the current origin"));
+    }
+    let covered = origins.origin(identity.document(), control)?;
+    if covered.is_some_and(|origin| origin.version() == identity.version() && origin != change) {
+        return Err(invalid("journal payload differs from the published origin"));
+    }
+    Ok(
+        if covered == Some(change)
+            || current.map(DiskANNCanonicalOrigin::version) != Some(identity.version())
+        {
+            Change::Reclaimable
+        } else {
+            Change::Outstanding(change)
+        },
+    )
 }
 
 fn invalid(message: &'static str) -> StorageBackendError {

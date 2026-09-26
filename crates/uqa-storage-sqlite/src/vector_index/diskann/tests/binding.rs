@@ -12,6 +12,7 @@ use uqa_storage::{
 
 mod identity;
 mod live;
+mod maintenance;
 mod pruning;
 mod publication;
 mod runtime;
