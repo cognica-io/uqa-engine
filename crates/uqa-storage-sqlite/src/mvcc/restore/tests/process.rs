@@ -19,13 +19,13 @@ const ACTION: &str = "UQA_SQLITE_RESTORE_TEST_ACTION";
 const SOURCE: &str = "UQA_SQLITE_RESTORE_TEST_SOURCE";
 const TARGET: &str = "UQA_SQLITE_RESTORE_TEST_TARGET";
 
-struct ReadyPeer {
+pub(super) struct ReadyPeer {
     child: Child,
     ready: bool,
 }
 
 impl ReadyPeer {
-    fn start(path: &Path, mode: usize, action: &str, request: DatabaseRestore) -> Self {
+    pub(super) fn start(path: &Path, mode: usize, action: &str, request: DatabaseRestore) -> Self {
         let name = concat!(module_path!(), "::restore_process_helper");
         let (_, test) = name.split_once("::").unwrap();
         let mut peer = Self {
@@ -65,7 +65,7 @@ impl ReadyPeer {
         }
     }
 
-    fn crash(mut self) {
+    pub(super) fn crash(mut self) {
         self.child.kill().unwrap();
         assert!(!self.child.wait().unwrap().success());
     }

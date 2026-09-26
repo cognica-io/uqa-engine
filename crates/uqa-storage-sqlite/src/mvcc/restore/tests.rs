@@ -18,6 +18,7 @@ use crate::{
     Catalog, SQLiteCompressionOptions, SQLiteRecordStore,
 };
 
+mod diskann;
 mod failures;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod process;

@@ -9,6 +9,10 @@
 mod binding;
 pub use binding::verify_diskann_runtime_adoption_conflicts;
 pub use binding::{
+    diskann_restore_records, verify_diskann_restore_source, verify_diskann_restored,
+    verify_diskann_restored_rebuild, verify_diskann_restored_writes, DiskANNRestoreRecords,
+};
+pub use binding::{
     diskann_runtime_fixture_options, verify_diskann_runtime_lifecycle,
     verify_diskann_runtime_reclaimed_reopen, verify_diskann_runtime_reclamation,
     verify_diskann_runtime_reopen, verify_diskann_runtime_retirement,

@@ -34,7 +34,7 @@ fn binding(control: &StorageReadControl) -> StorageBackendResult<crate::CatalogI
     row([91; 16])
 }
 
-fn source(
+pub(super) fn source(
     backend: &dyn PersistentStorageBackend,
     control: &StorageReadControl,
 ) -> StorageBackendResult<Box<dyn DiskANNMaintenanceSource>> {
@@ -52,7 +52,7 @@ fn source(
     )
 }
 
-fn index(
+pub(super) fn index(
     backend: &dyn PersistentStorageBackend,
     temporary: &DiskANNTemporaryBudget,
     control: &StorageReadControl,
@@ -81,7 +81,7 @@ fn page() -> DiskANNStatisticsRequest {
     }
 }
 
-fn scores(index: &dyn VectorIndex, expected: &[(u64, f64)]) -> StorageBackendResult<()> {
+pub(super) fn scores(index: &dyn VectorIndex, expected: &[(u64, f64)]) -> StorageBackendResult<()> {
     let actual: Vec<_> = index
         .search_knn(&[1.0, 0.0], 10)?
         .iter()

@@ -6,6 +6,8 @@
 
 use std::sync::Arc;
 
+mod restore;
+
 use uqa_storage::key_value::conformance::{
     verify_diskann_built_generation, verify_diskann_built_reopen, verify_diskann_canonical_origins,
     verify_diskann_canonical_reopen, verify_mutation_origins,
