@@ -1,6 +1,6 @@
 # DiskANN build coverage
 
-Status: Retained build capture and exact source membership merged in PR #177. Key/Value catalog binding merged in PR #178; native SQLite catalog binding merged in PR #179. Catalog incarnation resolution and durable physical-handle mapping merged in PR #180. Complete origin artifacts and bounded reopened lookup are implemented for review. Atomic generation publication and covered/obsolete journal retirement remain required in the [implementation plan](../plans/0014-diskann-vector-index.md). This contract does not enable public DiskANN queries.
+Status: Retained build capture and exact source membership merged in PR #177. Key/Value catalog binding merged in PR #178; native SQLite catalog binding merged in PR #179. Catalog incarnation resolution and durable physical-handle mapping merged in PR #180. Complete origin artifacts and bounded reopened lookup merged in PR #181. Atomic generation publication is implemented in PR #182 and described in the [publication contract](diskann-generation-publication.md); covered/obsolete journal retirement remains required in the [implementation plan](../plans/0014-diskann-vector-index.md). This contract does not enable public DiskANN queries.
 
 ## Capture and membership
 
