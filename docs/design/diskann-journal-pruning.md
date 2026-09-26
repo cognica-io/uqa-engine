@@ -2,6 +2,8 @@
 
 Storage owns bounded reclamation of immutable change records after [atomic generation publication](diskann-generation-publication.md). Key/Value and native SQLite adapters supply the current canonical/journal view, actual catalog binding and the evaluated mutation batch. Execution schedules finite journal passes through the database's existing background maintenance host; Engine retains provider, catalog, cancellation and status adapters. Background rebuilding and final physical metadata reclamation remain separate unfinished work.
 
+The same provider capture also supports [exact outstanding-change accounting and consuming reconstruction](diskann-maintenance-capture.md). Census pages use the fixed canonical/journal view throughout; pruning continues to decide deletion from its current publishing transaction. Shared origin classification does not make these two evidence views interchangeable.
+
 ## Authority and deletion
 
 `KeyValueDiskANNPruner` opens complete origins from an actual retained `KeyValueDiskANNSource`. It verifies the immutable origin artifact once and reuses bounded point lookup for subsequent pages; it does not accept a caller-created membership map or reconstruct coverage from a digest. Each command checks the source's actual history and full catalog-to-physical mapping, validates the current dimensions, complete index parameters and committed selected head, and requires that head to remain unchanged at commit. The canonical source supplies captured catalog guards, while obsolescence is checked against the command's current view rather than the older build snapshot. Native SQLite maps the head through family 57 and deletes journal rows in family 59 in the same underlying transaction.
