@@ -34,8 +34,13 @@ pub(super) fn run(
     };
     let mut session = None;
     let mut diskann = None;
+    let mut poll_at = Instant::now();
     loop {
         let pass_started = Instant::now();
+        let refresh_due = pass_started >= poll_at;
+        if refresh_due {
+            poll_at = pass_started + POLL;
+        }
         let mut continue_diskann = false;
         if cancellation.is_cancelled() {
             return;
@@ -68,19 +73,22 @@ pub(super) fn run(
             }
         }
         if let Some(engine) = session.as_ref() {
-            statistics.automatic_statistics.status.lock().running = true;
-            let result = refresh_due_tables(engine);
-            let mut status = statistics.automatic_statistics.status.lock();
-            status.running = false;
-            match result {
-                Ok(()) => {
-                    status.last_error = None;
-                }
-                Err(error) => {
-                    status.last_error = Some(error.to_string());
+            // Finite DiskANN pages share the worker without restarting the
+            // whole-catalog statistics pass before its next poll.
+            if refresh_due {
+                statistics.automatic_statistics.status.lock().running = true;
+                let result = refresh_due_tables(engine);
+                let mut status = statistics.automatic_statistics.status.lock();
+                status.running = false;
+                match result {
+                    Ok(()) => {
+                        status.last_error = None;
+                    }
+                    Err(error) => {
+                        status.last_error = Some(error.to_string());
+                    }
                 }
             }
-            drop(status);
             match step_diskann(engine, &mut diskann) {
                 Ok(pending) => continue_diskann = pending,
                 Err(error) => statistics.diskann.lock().last_error = Some(error.to_string()),
@@ -91,7 +99,7 @@ pub(super) fn run(
         if continue_diskann {
             continue;
         }
-        if !wait_until(receiver, cancellation, pass_started + POLL) {
+        if !wait_until(receiver, cancellation, poll_at) {
             return;
         }
     }
