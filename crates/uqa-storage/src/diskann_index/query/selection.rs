@@ -21,9 +21,9 @@ use uqa_core::{
     DocId,
 };
 
-type SelectedSources = Arc<Budgeted<BudgetedVec<(DocId, DiskANNReadSnapshot)>>>;
+type SelectedSources = Arc<Budgeted<BudgetedVec<(DocId, Option<DiskANNReadSnapshot>)>>>;
 
-/// Immutable, ordered replacements selected from actual `DiskANN` snapshots. A selected document absent from its source is deleted; a zero-ordinal origin remains an explicit empty replacement. Neither case reads the original document. Clones share the sparse directory and its original allowance.
+/// Immutable, ordered replacements selected from actual `DiskANN` snapshots. None selects an evaluated deletion independently of retained source membership. A selected document absent from its source is also deleted; a zero-ordinal origin remains an explicit empty replacement. None of these cases reads the original document. Clones share the sparse directory and its original allowance.
 #[derive(Clone)]
 pub struct DiskANNReadChanges {
     sources: SelectedSources,
@@ -31,9 +31,9 @@ pub struct DiskANNReadChanges {
 }
 
 impl DiskANNReadChanges {
-    /// Capture a strictly increasing document selection. Callers supply the already evaluated private source for each identity, including deletions; unselected documents remain on the original view.
+    /// Capture a strictly increasing document selection. Callers supply the already evaluated private source for each replacement and None for each deletion; unselected documents remain on the original view.
     pub fn capture(
-        sources: impl IntoIterator<Item = StorageBackendResult<(DocId, DiskANNReadSnapshot)>>,
+        sources: impl IntoIterator<Item = StorageBackendResult<(DocId, Option<DiskANNReadSnapshot>)>>,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         control.check()?;
@@ -47,7 +47,9 @@ impl DiskANNReadChanges {
                     "private document selection is not strictly increasing",
                 ));
             }
-            source.check_control(control)?;
+            if let Some(source) = &source {
+                source.check_control(control)?;
+            }
             selected.push((document, source))?;
             after = Some(document);
         }
@@ -60,7 +62,7 @@ impl DiskANNReadChanges {
         })
     }
 
-    fn source(&self, document: DocId) -> Option<&DiskANNReadSnapshot> {
+    fn source(&self, document: DocId) -> Option<&Option<DiskANNReadSnapshot>> {
         self.sources
             .binary_search_by_key(&document, |(id, _)| *id)
             .ok()
@@ -88,7 +90,11 @@ impl SelectedCanonical {
     ) -> StorageBackendResult<Self> {
         base.check_control(control)?;
         changes.control.check()?;
-        for (_, source) in changes.sources.iter() {
+        for source in changes
+            .sources
+            .iter()
+            .filter_map(|(_, source)| source.as_ref())
+        {
             source.check_control(control)?;
             if !base.same_lineage(source) || base.dimensions() != source.dimensions() {
                 return Err(invalid(
@@ -102,8 +108,10 @@ impl SelectedCanonical {
         })
     }
 
-    fn source(&self, document: DocId) -> &DiskANNReadSnapshot {
-        self.changes.source(document).unwrap_or(&self.base)
+    fn source(&self, document: DocId) -> Option<&DiskANNReadSnapshot> {
+        self.changes
+            .source(document)
+            .map_or(Some(&self.base), Option::as_ref)
     }
 }
 
@@ -147,7 +155,10 @@ impl DiskANNCanonicalRead for SelectedCanonical {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Option<DiskANNVectorVersion>> {
         self.check_control(control)?;
-        self.source(document).origin(document, control)
+        self.source(document)
+            .map(|source| source.origin(document, control))
+            .transpose()
+            .map(Option::flatten)
     }
 
     fn visit_document(
@@ -158,7 +169,9 @@ impl DiskANNCanonicalRead for SelectedCanonical {
     ) -> StorageBackendResult<Option<DiskANNVectorVersion>> {
         self.check_control(control)?;
         self.source(document)
-            .visit_document(document, control, visit)
+            .map(|source| source.visit_document(document, control, visit))
+            .transpose()
+            .map(Option::flatten)
     }
 }
 
@@ -169,7 +182,10 @@ impl DiskANNQueryRead for SelectedCanonical {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Option<DiskANNCanonicalOrigin>> {
         self.check_control(control)?;
-        self.source(document).document_origin(document, control)
+        self.source(document)
+            .map(|source| source.document_origin(document, control))
+            .transpose()
+            .map(Option::flatten)
     }
 
     fn next_change_after(
@@ -189,7 +205,12 @@ impl DiskANNQueryRead for SelectedCanonical {
             }
             if let Some(source) = self.changes.source(document) {
                 // A private source may already have compacted its own journal. Its actual origin still marks coverage relative to the retained base generation.
-                if let Some(version) = source.origin(document, control)? {
+                if let Some(version) = source
+                    .as_ref()
+                    .map(|source| source.origin(document, control))
+                    .transpose()?
+                    .flatten()
+                {
                     return Ok(Some(DiskANNChangeIdentity::new(document, version)));
                 }
             } else {

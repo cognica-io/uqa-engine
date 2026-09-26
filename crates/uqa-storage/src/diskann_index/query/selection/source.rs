@@ -48,7 +48,8 @@ impl DiskANNReadSnapshot {
         }
     }
 
-    pub(super) fn same_lineage(&self, other: &Self) -> bool {
+    /// Whether both actual sources belong to the same database, table and index incarnation. This metadata comparison does not establish equal visibility, generation, configuration or canonical width.
+    pub fn same_lineage(&self, other: &Self) -> bool {
         self.generation.database() == other.generation.database()
             && self.generation.table() == other.generation.table()
             && self.generation.index() == other.generation.index()

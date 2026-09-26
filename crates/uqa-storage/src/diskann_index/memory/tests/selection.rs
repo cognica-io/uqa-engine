@@ -13,7 +13,11 @@ fn selection(
     control: &StorageReadControl,
 ) -> DiskANNReadChanges {
     let source = index.diskann_read_snapshot(control).unwrap().unwrap();
-    DiskANNReadChanges::capture(ids.iter().map(|id| Ok((*id, source.clone()))), control).unwrap()
+    DiskANNReadChanges::capture(
+        ids.iter().map(|id| Ok((*id, Some(source.clone())))),
+        control,
+    )
+    .unwrap()
 }
 
 #[test]
@@ -84,6 +88,7 @@ fn diskann_selected_sources_keep_each_evaluated_version_and_absent_terminal_iden
     let mut base = new(&control);
     base.add(1, vec![1.0, 0.0]).unwrap();
     base.add(2, vec![0.0, 1.0]).unwrap();
+    base.add(3, vec![1.0, 0.0]).unwrap();
     base.add(DocId::MAX, vec![1.0, 0.0]).unwrap();
     base.initialize().unwrap();
     let mut private = base.fork().unwrap();
@@ -95,7 +100,12 @@ fn diskann_selected_sources_keep_each_evaluated_version_and_absent_terminal_iden
     private.clear().unwrap();
     let absent = private.diskann_read_snapshot(&control).unwrap().unwrap();
     let changes = DiskANNReadChanges::capture(
-        [Ok((1, first)), Ok((2, second)), Ok((DocId::MAX, absent))],
+        [
+            Ok((1, Some(first))),
+            Ok((2, Some(second))),
+            Ok((3, None)),
+            Ok((DocId::MAX, Some(absent))),
+        ],
         &control,
     )
     .unwrap();
@@ -139,9 +149,11 @@ fn diskann_private_selection_rejects_unrelated_lineages_and_unordered_identities
     assert_eq!(scores(&base), [(1, 1.0)]);
     let source = base.diskann_read_snapshot(&control).unwrap().unwrap();
     for ids in [[2, 1], [1, 1]] {
-        assert!(
-            DiskANNReadChanges::capture(ids.map(|id| Ok((id, source.clone()))), &control).is_err()
-        );
+        assert!(DiskANNReadChanges::capture(
+            ids.map(|id| Ok((id, Some(source.clone())))),
+            &control
+        )
+        .is_err());
         assert_eq!(control.memory().used(), used);
     }
 }
@@ -153,7 +165,7 @@ fn diskann_private_selection_reserves_original_allowances_and_releases_failures(
     base.add(1, vec![1.0, 0.0]).unwrap();
     let source = base.diskann_read_snapshot(&control).unwrap().unwrap();
     let tiny = StorageReadControl::with_limit(1);
-    assert!(DiskANNReadChanges::capture([Ok((1, source))], &tiny).is_err());
+    assert!(DiskANNReadChanges::capture([Ok((1, Some(source)))], &tiny).is_err());
     assert_eq!(tiny.memory().used(), 0);
     let changes = selection(&base, &[1], &control);
     let used = control.memory().used();

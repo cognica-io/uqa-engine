@@ -169,7 +169,8 @@ fn diskann_selected_source_snapshots_keep_original_serializable_observation() {
             .unwrap();
             let control = first.query_retention_control().unwrap();
             let source = observed.diskann_read_snapshot(&control).unwrap().unwrap();
-            let changes = DiskANNReadChanges::capture([Ok((document, source))], &control).unwrap();
+            let changes =
+                DiskANNReadChanges::capture([Ok((document, Some(source)))], &control).unwrap();
             let projected = observed
                 .snapshot_with_diskann_changes(&changes, &control)
                 .unwrap()

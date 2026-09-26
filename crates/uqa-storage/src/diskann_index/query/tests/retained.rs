@@ -242,7 +242,7 @@ fn diskann_private_projection_reuses_preparation_without_reading_the_canonical_c
     let changes = DiskANNReadChanges::capture(
         [Ok((
             1,
-            newer.diskann_read_snapshot(&control).unwrap().unwrap(),
+            Some(newer.diskann_read_snapshot(&control).unwrap().unwrap()),
         ))],
         &control,
     )
