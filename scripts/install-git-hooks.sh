@@ -16,4 +16,4 @@ if [ -z "$current" ] && [ -f "$hooks/pre-commit" ]; then
 fi
 test -x "$root/.githooks/pre-commit"
 git config --local core.hooksPath .githooks
-echo "Installed the staged crate-dependency check for this repository."
+echo "Installed the 100 GB target-cache limit and staged crate-dependency checks for this repository."

@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import pathlib
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -24,6 +26,7 @@ class StagedDependencyTests(unittest.TestCase):
         self.root = pathlib.Path(self.directory.name)
         (self.root / "scripts").mkdir()
         shutil.copyfile(CHECKER, self.root / "scripts/check-workspace-dependencies.py")
+        shutil.copyfile(ROOT / "scripts/check-target-cache-size.py", self.root / "scripts/check-target-cache-size.py")
         shutil.copyfile(ROOT / "scripts/install-git-hooks.sh", self.root / "scripts/install-git-hooks.sh")
         (self.root / ".githooks").mkdir()
         shutil.copyfile(ROOT / ".githooks/pre-commit", self.root / ".githooks/pre-commit")
@@ -110,6 +113,27 @@ class StagedDependencyTests(unittest.TestCase):
     def test_valid_index_can_be_committed(self) -> None:
         result = self.command("git", "commit", "-m", "Validate crate ownership")
         self.assertIn("Workspace dependency policy OK", result.stdout + result.stderr)
+
+    def test_target_cache_limit_blocks_the_actual_commit(self) -> None:
+        result = self.commit_with_target_size(97_656_251)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("target/ exceeds 100 GB", result.stderr)
+        self.assertNotEqual(self.command("git", "rev-parse", "--verify", "HEAD", check=False).returncode, 0)
+
+    def test_exact_target_cache_limit_still_runs_dependency_checks(self) -> None:
+        result = self.commit_with_target_size(97_656_250)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Workspace dependency policy OK", result.stdout + result.stderr)
+
+    def commit_with_target_size(self, kibibytes: int) -> subprocess.CompletedProcess:
+        (self.root / "target").mkdir()
+        binaries = self.root / "fake tools"
+        binaries.mkdir()
+        du = binaries / "du"
+        du.write_text(f'#!/bin/sh\nprintf \'{kibibytes}\\t%s\\n\' "$2"\n')
+        du.chmod(0o755)
+        with mock.patch.dict(os.environ, {"PATH": f"{binaries}{os.pathsep}{os.environ['PATH']}"}):
+            return self.command("git", "commit", "-m", "Check target cache limit", check=False)
 
     def test_unstaged_dependency_does_not_change_the_committed_graph(self) -> None:
         self.add_engine_dependency()
