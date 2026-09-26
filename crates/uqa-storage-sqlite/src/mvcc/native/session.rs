@@ -15,7 +15,7 @@ mod graph_selection;
 use rusqlite::types::ValueRef;
 use uqa_storage::mvcc::{DatabaseId, MergedRecordSnapshot, VersionError, VersionedKeyValueStore};
 use uqa_storage::read_control::StorageReadControl;
-use uqa_storage::KeyValueBatch;
+use uqa_storage::{KeyValueBatch, KeyValueStore, StorageTransactionModel};
 
 use super::{
     decode_record, invalid, owners, NativeRecord, NativeRecordFamily as Family,
@@ -28,9 +28,15 @@ pub(crate) struct NativeSnapshot {
     pub(crate) control: StorageReadControl,
     /// Stable native data namespace used to address records across history restorations.
     pub(crate) database: DatabaseId,
+    /// Transaction history belongs to the logical provider and may differ after backup restoration.
+    pub(crate) history: DatabaseId,
 }
 
 impl NativeSnapshot {
+    pub(crate) fn record_read(&self) -> uqa_storage::mvcc::RecordRead<'_> {
+        uqa_storage::mvcc::RecordRead::new(&self.view, self.history, &self.control)
+    }
+
     /// Select entity identities without reading unselected property payloads. `None` names the catalog graph; a string selects one standalone namespace.
     pub(crate) fn visit_graph_ids(
         &self,
@@ -91,10 +97,16 @@ impl NativeSnapshot {
     }
 
     pub(crate) fn capture(store: &VersionedKeyValueStore, database: DatabaseId) -> Result<Self> {
+        let StorageTransactionModel::VersionedConcurrent { database: history } =
+            store.transaction_model()
+        else {
+            return Err(invalid("native snapshot requires versioned history").into());
+        };
         Ok(Self {
             view: store.record_snapshot()?,
             control: store.retention_control(),
             database,
+            history,
         })
     }
 

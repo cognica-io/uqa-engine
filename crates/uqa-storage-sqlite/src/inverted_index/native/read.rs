@@ -42,6 +42,7 @@ impl NativeRead {
                     .map_err(VersionError::into_storage_error)?,
                 control: snapshot.control.clone(),
                 database: snapshot.database,
+                history: snapshot.history,
             },
             table: table.to_owned(),
             owner,

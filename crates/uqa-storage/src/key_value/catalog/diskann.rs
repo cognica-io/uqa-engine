@@ -6,6 +6,7 @@
 
 //! Bind canonical build input to actual catalog records on the same fixed view.
 
+use crate::diskann_index::catalog;
 use uqa_core::memory::{Budgeted, BudgetedVec};
 
 use super::{decode_value, relation_key, StoredCatalogIndex, TAG_CATALOG_INDEX, TAG_TABLE};
@@ -45,34 +46,25 @@ impl Binding {
         if schema.relation != relation
             || schema.object_id == [0; 16]
             || schema.storage_generation == [0; 16]
-            || schema
-                .vector_fields
-                .iter()
-                .filter(|item| item.field == field)
-                .count()
-                != 1
-            || !schema
-                .vector_fields
-                .iter()
-                .any(|item| item.field == field && item.dimensions == dimensions)
         {
             return Err(invalid(
                 "canonical field has no matching table owner and dimensions",
             ));
         }
+        catalog::validate_field(&schema.vector_fields, field, dimensions)?;
         super::super::table_owners::validate_table(read, &schema)?;
         let index = Record::capture(read, TAG_CATALOG_INDEX, index, control)?;
         let definition: Budgeted<StoredCatalogIndex> = decode(read, &index.key, control)?;
-        let columns: Vec<String> = decode_value(definition.columns_json.as_bytes())?;
-        if !definition.index_type.eq_ignore_ascii_case("diskann")
-            || definition.table_name != relation.qualified_name()
-            || columns.as_slice() != [field]
-        {
+        if definition.table_name != relation.qualified_name() {
             return Err(invalid("catalog index does not own this canonical field"));
         }
-        let parameters = DiskANNIndexParams::from_catalog_map(
+        let parameters = catalog::parameters(
+            &definition.index_type,
+            &definition.columns_json,
+            &definition.parameters_json,
+            field,
             dimensions,
-            &decode_value(definition.parameters_json.as_bytes())?,
+            control,
         )?;
         control.check()?;
         Ok(Self {

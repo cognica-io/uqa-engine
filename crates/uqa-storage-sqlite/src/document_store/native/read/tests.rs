@@ -29,6 +29,7 @@ fn borrowed_native_identity_pages_keep_their_lease_during_reentrant_writes() {
             view: captured.view.try_clone().unwrap(),
             control: control.clone(),
             database: captured.database,
+            history: captured.history,
         })),
     };
     let retained = control.memory().used();
@@ -120,6 +121,7 @@ fn native_identity_page_buffers_share_the_read_allowance() {
         view: captured.view.try_clone().unwrap(),
         control: control.clone(),
         database: captured.database,
+        history: captured.history,
     };
     let read = NativeDocumentRead::new(&snapshot, "docs").unwrap();
     let ids = read.ids(None, 4096).unwrap();

@@ -75,14 +75,14 @@ pub use serializable::{
     SerializableTransactionId, SerializableWriteMark,
 };
 pub use session::{
-    SerializableReadContext, SerializableSession, SerializableSnapshotCapture,
+    RecordRead, SerializableReadContext, SerializableSession, SerializableSnapshotCapture,
     SerializableSnapshotOptions, VersionedKeyValueStore, VersionedSessionOptions,
 };
 pub use types::{CommitSequence, RecordWrite, VersionError, VersionResult};
 pub use view::{
     retain_record_snapshot, BorrowedRecord, CommittedRecordSnapshot, MergedRecordSnapshot,
     RecordKeyVisitor, RecordMetadata, RecordScanVisitor, RecordValueVisitor, ScannedVisibleRecord,
-    VisibleRecord,
+    VisibleRecord, VisibleRecordRevision,
 };
 
 mod maintenance;

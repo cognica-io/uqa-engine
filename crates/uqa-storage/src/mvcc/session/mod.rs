@@ -10,6 +10,7 @@ mod batch;
 mod evaluation;
 mod notifications;
 mod read;
+pub use read::RecordRead;
 mod serializable;
 pub use serializable::{
     SerializableReadContext, SerializableSession, SerializableSnapshotCapture,

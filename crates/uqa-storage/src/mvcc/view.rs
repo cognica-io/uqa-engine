@@ -31,6 +31,20 @@ pub struct RecordMetadata {
     pub live: bool,
 }
 
+/// Exact identity of a live record on one committed/private view. Compare only for the same physical key; history and undo-branch identities distinguish equal payloads that were replaced.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VisibleRecordRevision {
+    database: super::DatabaseId,
+    committed: Option<CommitSequence>,
+    private: Option<super::PrivateRecordRevision>,
+}
+
+impl VisibleRecordRevision {
+    pub fn is_private(self) -> bool {
+        self.private.is_some()
+    }
+}
+
 impl From<BorrowedRecord<'_>> for RecordMetadata {
     fn from(record: BorrowedRecord<'_>) -> Self {
         Self {
@@ -306,6 +320,31 @@ pub struct MergedRecordSnapshot {
 }
 
 impl MergedRecordSnapshot {
+    /// Select one live record's actual revision without materializing its payload. The owning provider supplies this snapshot's transaction-history identity, distinct from any restored data namespace.
+    pub fn record_revision(
+        &self,
+        database: super::DatabaseId,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<VisibleRecordRevision>> {
+        control.check()?;
+        let Some(metadata) = self.metadata(key, control)?.filter(|record| record.live) else {
+            control.check()?;
+            return Ok(None);
+        };
+        let private = self.private_keys(key, None, 1, control)?;
+        let private = private
+            .first()
+            .filter(|record| record.key() == key)
+            .map(super::PrivateRecordKey::revision);
+        control.check()?;
+        Ok(Some(VisibleRecordRevision {
+            database,
+            committed: metadata.revision,
+            private,
+        }))
+    }
+
     /// Share the committed owner and retain the original private revision under its existing allowance.
     pub fn try_clone(&self) -> VersionResult<Self> {
         Ok(Self {

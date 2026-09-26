@@ -8,6 +8,7 @@
 
 pub mod build;
 mod canonical;
+pub mod catalog;
 pub mod format;
 mod metric;
 pub mod pages;
