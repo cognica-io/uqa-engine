@@ -162,6 +162,27 @@ impl VectorIndex for ObservedVectorIndex {
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
         Ok(Arc::new(self.clone()))
     }
+    fn diskann_read_snapshot(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_storage::diskann_index::DiskANNReadSnapshot>> {
+        self.index.diskann_read_snapshot(control)
+    }
+    fn snapshot_with_diskann_changes(
+        &self,
+        changes: &uqa_storage::diskann_index::DiskANNReadChanges,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<Arc<dyn VectorIndex>>> {
+        Ok(self
+            .index
+            .snapshot_with_diskann_changes(changes, control)?
+            .map(|index| {
+                Arc::new(Self {
+                    index,
+                    observation: self.observation.clone(),
+                }) as Arc<dyn VectorIndex>
+            }))
+    }
     fn add(&mut self, _: DocId, _: Vec<f32>) -> StorageBackendResult<()> {
         Err(read_only())
     }

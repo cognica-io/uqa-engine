@@ -132,6 +132,23 @@ impl<P: DiskANNPersistentOwner> VectorIndex for PersistentDiskANNIndex<P> {
     fn contains_document(&self, document: DocId) -> StorageBackendResult<bool> {
         self.owner.contains_document(document)
     }
+    fn diskann_read_snapshot(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<super::DiskANNReadSnapshot>> {
+        control.check()?;
+        self.owner.snapshot()?.diskann_read_snapshot(control)
+    }
+    fn snapshot_with_diskann_changes(
+        &self,
+        changes: &super::DiskANNReadChanges,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<Arc<dyn VectorIndex>>> {
+        control.check()?;
+        self.owner
+            .snapshot()?
+            .snapshot_with_diskann_changes(changes, control)
+    }
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
         self.owner.snapshot()?.snapshot()
     }

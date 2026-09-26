@@ -136,3 +136,81 @@ fn diskann_sql_serializable_reads_cover_nonreturned_candidates_but_not_zero_k_or
         }
     }
 }
+
+#[test]
+fn diskann_selected_source_snapshots_keep_original_serializable_observation() {
+    use uqa_storage::diskann_index::DiskANNReadChanges;
+    for provider in 0..3 {
+        for mode in ["metadata", "zero", "knn", "threshold"] {
+            let (_directory, first, second) = sessions(provider);
+            sql(&first, "CREATE TABLE diskann_docs(id int PRIMARY KEY, embedding vector(2)); INSERT INTO diskann_docs VALUES(1,ARRAY[0.0,1.0]),(2,ARRAY[-1.0,0.0]); CREATE INDEX diskann_idx ON diskann_docs USING diskann(embedding)");
+            sql(&first, "BEGIN ISOLATION LEVEL SERIALIZABLE");
+            sql(&second, "BEGIN ISOLATION LEVEL SERIALIZABLE");
+            first.prepare_serializable_transaction_snapshot().unwrap();
+            let table = first.try_table("diskann_docs").unwrap().unwrap();
+            let document = table.document_store.read().next_doc_ids(None, 1).unwrap()[0];
+            let read = first
+                .serializable_table_state_read(&table)
+                .unwrap()
+                .unwrap();
+            let snapshot = table
+                .vector_indexes
+                .read()
+                .get("embedding")
+                .unwrap()
+                .snapshot()
+                .unwrap();
+            let observed = uqa_execution::serializable::vector::observe_snapshot(
+                Some(&read),
+                &table.columns.read(),
+                "embedding",
+                snapshot,
+            )
+            .unwrap();
+            let control = first.query_retention_control().unwrap();
+            let source = observed.diskann_read_snapshot(&control).unwrap().unwrap();
+            let changes =
+                DiskANNReadChanges::capture([Ok((document, Some(source)))], &control).unwrap();
+            let projected = observed
+                .snapshot_with_diskann_changes(&changes, &control)
+                .unwrap()
+                .unwrap()
+                .snapshot()
+                .unwrap();
+            assert_eq!(projected.index_kind(), "diskann");
+            assert_eq!(projected.count().unwrap(), 2);
+            assert!(projected.contains_document(document).unwrap());
+            match mode {
+                "metadata" => (),
+                "zero" => assert!(projected.search_knn(&[1.0, 0.0], 0).unwrap().is_empty()),
+                "knn" => assert_eq!(projected.search_knn(&[1.0, 0.0], 1).unwrap().len(), 1),
+                "threshold" => assert_eq!(
+                    projected.search_threshold(&[1.0, 0.0], 0.0).unwrap().len(),
+                    1
+                ),
+                _ => unreachable!(),
+            }
+            sql(&second, "SELECT v FROM t");
+            sql(&first, "UPDATE t SET v=2");
+            sql(
+                &second,
+                "UPDATE diskann_docs SET embedding=ARRAY[1.0,0.0] WHERE id=2",
+            );
+            let outcomes = [first.commit(), second.commit()];
+            if matches!(mode, "knn" | "threshold") {
+                assert!(
+                    outcomes.iter().any(Result::is_err),
+                    "projected candidate cycle committed: {provider}/{mode}"
+                );
+                for error in outcomes.into_iter().filter_map(Result::err) {
+                    assert_eq!(error.sqlstate(), Some("40001"), "{error}");
+                }
+            } else {
+                assert!(
+                    outcomes.iter().all(Result::is_ok),
+                    "metadata observed a query: {provider}/{mode}: {outcomes:?}"
+                );
+            }
+        }
+    }
+}

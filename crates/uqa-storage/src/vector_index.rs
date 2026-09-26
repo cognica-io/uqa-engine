@@ -205,6 +205,25 @@ pub trait VectorIndex: Send + Sync {
         self.snapshot()
     }
 
+    /// Borrow an opaque retained `DiskANN` canonical source for evaluated document replacements. Capturing metadata does not execute or observe a vector query; other physical methods leave this capability absent.
+    fn diskann_read_snapshot(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::diskann_index::DiskANNReadSnapshot>> {
+        control.check()?;
+        Ok(None)
+    }
+
+    /// Retain this physical `DiskANN` generation with the selected actual canonical replacements. Wrappers preserve their original read observation and retention boundary on the returned index. Unsupported methods return None without changing physical selection.
+    fn snapshot_with_diskann_changes(
+        &self,
+        _changes: &crate::diskann_index::DiskANNReadChanges,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<Arc<dyn VectorIndex>>> {
+        control.check()?;
+        Ok(None)
+    }
+
     /// Independent writable copy used by in-memory engine rollback. The
     /// default keeps third-party and persistent implementations source
     /// compatible; only indexes hosted by a memory engine need to support it.
