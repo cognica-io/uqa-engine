@@ -103,9 +103,8 @@ impl Engine {
                         && table.persistence != uqa_sql::ast::RelationPersistence::Temporary)
             });
             for (name, table_snapshot) in &snapshot.tables {
-                tables
-                    .entry(name.clone())
-                    .or_insert_with(|| table_snapshot.state.clone());
+                // DROP followed by same-name CREATE installs another object; undo must restore the captured incarnation as well as its contents.
+                tables.insert(name.clone(), table_snapshot.state.clone());
             }
         }
         for table_snapshot in snapshot.tables.values() {
