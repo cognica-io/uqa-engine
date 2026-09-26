@@ -396,6 +396,10 @@ impl KeyValueStore for VersionedKeyValueStore {
                 "vacuum requires an inactive logical session".into(),
             ));
         }
+        let control = self.write_control();
+        let source: Arc<dyn KeyValueStore> =
+            Arc::new(self.new_session_with_cancellation(control.cancellation()));
+        crate::key_value::KeyValueDiskANNMaintenance::run(&source, &control)?;
         self.reclaim_versions().map(|_| ())
     }
 

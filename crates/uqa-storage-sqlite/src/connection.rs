@@ -651,6 +651,21 @@ impl ManagedConnection {
             return Err(SQLiteError::TransactionAlreadyActive);
         }
         if let Some(logical) = self.session.logical.get() {
+            let source: Arc<dyn KeyValueStore> = if let Some(namespace) = logical.native {
+                Arc::new(crate::diskann::Records::new(
+                    logical.store.clone(),
+                    namespace,
+                    self.auxiliary_encryption_key(),
+                )?)
+            } else {
+                logical.store.clone()
+            };
+            let retained = logical.retention_control();
+            let control = uqa_storage::read_control::StorageReadControl::new(
+                retained.memory(),
+                &self.write_cancellation(),
+            );
+            uqa_storage::key_value::KeyValueDiskANNMaintenance::run(&source, &control)?;
             logical.reclaim_versions()?;
         }
         let connection = self.pool.checkout()?;

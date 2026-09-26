@@ -31,8 +31,9 @@ mod catalog;
 pub use catalog::KeyValueCatalog;
 mod diskann;
 pub use diskann::{
-    publication, DiskANNStageStatus, KeyValueDiskANNPruner, KeyValueDiskANNSource,
-    KeyValueDiskANNStage, KeyValueDiskANNStore,
+    publication, DiskANNMaintenanceStatus, DiskANNMaintenanceStep, DiskANNStageStatus,
+    KeyValueDiskANNMaintenance, KeyValueDiskANNPruner, KeyValueDiskANNSource, KeyValueDiskANNStage,
+    KeyValueDiskANNStore,
 };
 mod graph_commit;
 mod table_owners;

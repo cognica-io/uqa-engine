@@ -86,11 +86,10 @@ pub fn verify_diskann_reclamation_bounds(
         &0,
         "cleanup releases its bounded key workspace",
     )?;
-    store.vacuum()?;
     expect_eq(
         &held.get(keys.key(Kind::Record(DiskANNRecordKey::Codes(0))).as_ref())?,
         &Some(payload),
-        "retained payload survives cleanup and history reclamation",
+        "retained payload survives bounded deletion before cold reopen",
     )?;
     Ok(generation)
 }

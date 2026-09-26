@@ -121,6 +121,13 @@ impl KeyValueStore for Records {
         self.inner.write_cancellation()
     }
     fn vacuum(&self) -> StorageBackendResult<()> {
+        if self.inner.in_transaction() {
+            return self.inner.vacuum();
+        }
+        let cancellation = self.inner.write_cancellation().unwrap_or_default();
+        let control = StorageReadControl::new(self.control.memory(), &cancellation);
+        let source = self.wrap(self.inner.open_session_with_cancellation(&cancellation)?)?;
+        uqa_storage::key_value::KeyValueDiskANNMaintenance::run(&source, &control)?;
         self.inner.vacuum()
     }
 

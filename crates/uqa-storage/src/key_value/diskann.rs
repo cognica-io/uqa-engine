@@ -26,6 +26,7 @@ mod build;
 pub(super) mod conformance;
 mod identity;
 mod keys;
+mod maintenance;
 mod ownership;
 mod pruning;
 pub mod publication;
@@ -39,6 +40,9 @@ pub(super) const READ_PREFIX: &[u8] = keys::ROOT;
 use keys::{database_key, Keys};
 use state::{data_identity, fixed};
 
+pub use maintenance::{
+    DiskANNMaintenanceStatus, DiskANNMaintenanceStep, KeyValueDiskANNMaintenance,
+};
 pub use pruning::KeyValueDiskANNPruner;
 pub use source::KeyValueDiskANNSource;
 pub use staging::KeyValueDiskANNStage;

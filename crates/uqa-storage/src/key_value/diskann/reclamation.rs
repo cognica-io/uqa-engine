@@ -17,6 +17,19 @@ use super::staging::load_state;
 use super::state::{StageOwner, State};
 use super::{invalid, DiskANNStageStatus, KeyValueDiskANNStore};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Reclamation {
+    Complete,
+    More,
+    Retained,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ReclamationMode {
+    Explicit,
+    Maintenance,
+}
+
 impl KeyValueDiskANNStore {
     /// Reclaim an unpublished generation only after exclusively acquiring its abandoned physical owner. A live build, retained sealed source or uncertain original attempt returns `false` without deleting anything. Each successful step deletes at most 64 payload records; partial cleanup persists Discarding and can resume through either reclamation method. Current published heads are always rejected.
     pub fn reclaim_abandoned_step(
@@ -25,6 +38,17 @@ impl KeyValueDiskANNStore {
         max_records: usize,
         control: &StorageReadControl,
     ) -> StorageBackendResult<bool> {
+        self.reclaim_generation(generation, max_records, ReclamationMode::Explicit, control)
+            .map(|result| result == Reclamation::Complete)
+    }
+
+    pub(super) fn reclaim_generation(
+        &self,
+        generation: DiskANNGeneration,
+        max_records: usize,
+        mode: ReclamationMode,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Reclamation> {
         control.check()?;
         if max_records == 0 {
             return Err(invalid("reclamation requires a positive record limit"));
@@ -39,14 +63,21 @@ impl KeyValueDiskANNStore {
             })?;
         }
         let Some(state) = observed else {
-            return self.reclaim_retired_step(generation, max_records, control);
+            return self
+                .reclaim_retired_step(generation, max_records, control)
+                .map(Reclamation::from);
         };
         match state.status {
             DiskANNStageStatus::Published => {
-                return Err(invalid("published generation cannot be abandoned"))
+                if mode == ReclamationMode::Maintenance {
+                    return Ok(Reclamation::Retained);
+                }
+                return Err(invalid("published generation cannot be abandoned"));
             }
             DiskANNStageStatus::Retired | DiskANNStageStatus::Discarding => {
-                return self.reclaim_retired_step(generation, max_records, control);
+                return self
+                    .reclaim_retired_step(generation, max_records, control)
+                    .map(Reclamation::from);
             }
             DiskANNStageStatus::Writing
             | DiskANNStageStatus::Frozen
@@ -55,7 +86,7 @@ impl KeyValueDiskANNStore {
         let lease = match state.owner {
             StageOwner::Legacy(_) => {
                 let Some(legacy) = self.legacy_guard(control)? else {
-                    return Ok(false);
+                    return Ok(Reclamation::Retained);
                 };
                 let lease = self.reserve_owner(control)?;
                 Self::retain_transition(&lease, legacy, control)?
@@ -67,15 +98,18 @@ impl KeyValueDiskANNStore {
                     control,
                 )?
                 else {
-                    return Ok(false);
+                    return Ok(Reclamation::Retained);
                 };
                 lease
             }
         };
         let keys = Keys::new(generation);
-        let mut complete = false;
+        let mut result = Reclamation::Retained;
         self.mutate_owned(Some(&lease), control, &mut |read, batch| {
             if load_state(read, generation, control)? != Some(state) {
+                if mode == ReclamationMode::Maintenance {
+                    return Ok(());
+                }
                 return Err(invalid(
                     "generation changed during abandoned-owner acquisition",
                 ));
@@ -87,7 +121,7 @@ impl KeyValueDiskANNStore {
             {
                 return Err(invalid("abandonment requires a committed state revision"));
             }
-            complete = delete_page(
+            result = Reclamation::from(delete_page(
                 read,
                 batch,
                 keys,
@@ -97,10 +131,10 @@ impl KeyValueDiskANNStore {
                 },
                 max_records,
                 control,
-            )?;
+            )?);
             Ok(())
         })?;
-        Ok(complete)
+        Ok(result)
     }
 
     /// Delete at most 64 payload records from a durably retired generation. The final step removes its state. Current heads and unpublished builds cannot be reclaimed here. Retained sources keep the historical pages through ordinary MVCC leases; version reclamation remains separate. Resolve an uncertain original attempt before calling again.
@@ -142,6 +176,16 @@ impl KeyValueDiskANNStore {
             Ok(())
         })?;
         Ok(complete)
+    }
+}
+
+impl From<bool> for Reclamation {
+    fn from(complete: bool) -> Self {
+        if complete {
+            Self::Complete
+        } else {
+            Self::More
+        }
     }
 }
 

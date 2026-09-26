@@ -247,3 +247,11 @@ fn diskann_build_ownership_protects_live_and_retained_sources() {
     uqa_storage::key_value::conformance::verify_diskann_build_ownership(&store).unwrap();
     uqa_storage::key_value::conformance::verify_diskann_publication_ownership(&store).unwrap();
 }
+
+#[test]
+fn diskann_maintenance_uses_finite_key_only_discovery_and_vacuum() {
+    let directory = tempfile::tempdir().unwrap();
+    let owner = crate::RedbStorage::open(directory.path().join("maintenance.redb")).unwrap();
+    let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
+    uqa_storage::key_value::conformance::verify_diskann_maintenance(&store).unwrap();
+}

@@ -30,8 +30,10 @@ const MAX_RECORD: usize = 65_536;
 
 mod build;
 pub use build::{verify_diskann_built_generation, verify_diskann_built_reopen};
+mod maintenance;
 mod ownership;
 mod reclamation;
+pub use maintenance::verify_diskann_maintenance;
 pub use ownership::verify_diskann_build_ownership;
 pub use reclamation::{verify_diskann_reclamation_bounds, verify_diskann_reclamation_reopen};
 

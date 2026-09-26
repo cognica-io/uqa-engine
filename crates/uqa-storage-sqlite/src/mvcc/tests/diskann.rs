@@ -300,3 +300,15 @@ fn diskann_build_ownership_protects_live_and_retained_sources() {
         uqa_storage::key_value::conformance::verify_diskann_publication_ownership(&store).unwrap();
     }
 }
+
+#[test]
+fn diskann_maintenance_uses_finite_key_only_discovery_and_vacuum() {
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let store: Arc<dyn KeyValueStore> = Arc::new(
+            SQLiteKeyValueStore::new(connection(&directory.path().join("maintenance.db"), mode))
+                .unwrap(),
+        );
+        uqa_storage::key_value::conformance::verify_diskann_maintenance(&store).unwrap();
+    }
+}

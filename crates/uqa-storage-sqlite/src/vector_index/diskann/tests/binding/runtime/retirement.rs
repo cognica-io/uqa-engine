@@ -137,10 +137,23 @@ fn native_diskann_runtime_retirement_preserves_undo_recreation_and_cold_reopen()
             Some(DiskANNStageStatus::Retired)
         );
         assert_eq!(selected(&connection, &control), replacement);
+        connection.vacuum().unwrap();
+        assert!(repository.resume_stage(first, &control).is_err());
         scores(
             &runtime(&connection, &temporary, &control),
             &[(1, 1.0), (2, 0.0)],
         );
+    }
+}
+
+#[test]
+fn native_diskann_maintenance_uses_finite_key_only_discovery_and_vacuum() {
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let connection = open(&directory.path().join("maintenance.db"), mode);
+        let store: Arc<dyn uqa_storage::KeyValueStore> =
+            Arc::new(connection.native_diskann_records().unwrap());
+        uqa_storage::key_value::conformance::verify_diskann_maintenance(&store).unwrap();
     }
 }
 

@@ -98,6 +98,8 @@ use uqa_storage::key_value::{DiskANNStageStatus, KeyValueDiskANNStore};
 mod identity;
 #[path = "diskann/live.rs"]
 mod live;
+#[path = "diskann/maintenance.rs"]
+mod maintenance;
 #[path = "diskann/pruning.rs"]
 mod pruning;
 #[path = "diskann/publication.rs"]
