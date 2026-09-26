@@ -14,6 +14,16 @@ use uqa_storage::key_value::conformance::{verify_diskann_generations, verify_dis
 use uqa_storage::KeyValueStore;
 
 #[test]
+fn diskann_catalog_binding_checks_actual_redb_definitions_and_publication_races() {
+    let directory = tempfile::tempdir().unwrap();
+    let owner = crate::RedbStorage::open(directory.path().join("binding.redb")).unwrap();
+    let foreign = crate::RedbStorage::open(directory.path().join("foreign.redb")).unwrap();
+    let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
+    let other: Arc<dyn KeyValueStore> = Arc::new(foreign.store());
+    uqa_storage::key_value::conformance::verify_diskann_catalog_binding(&store, &other).unwrap();
+}
+
+#[test]
 fn diskann_canonical_origins_and_tensors_reopen_through_redb() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("origins.redb");

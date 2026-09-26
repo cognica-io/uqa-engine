@@ -37,6 +37,11 @@ where
         self.with_prefixes(prefixes, |encoded| self.inner.revision(encoded))
     }
 
+    fn record_revision(&self, key: &[u8]) -> StorageBackendResult<Option<KeyValueReadRevision>> {
+        self.inner
+            .record_revision(&self.mapping.key(key, self.control())?)
+    }
+
     fn retain(
         &self,
         prefixes: &[&[u8]],

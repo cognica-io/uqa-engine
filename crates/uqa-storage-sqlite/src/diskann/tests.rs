@@ -258,9 +258,11 @@ fn native_diskann_compound_retention_preserves_binary_scope_and_private_revision
     store.put(b"outside", b"unrelated").unwrap();
     let mut retained = None;
     let mut revision = None;
+    let mut record_revision = None;
     store
         .with_read_view(&mut |read| {
             revision = Some(read.revision(&[b"\0"])?);
+            record_revision = read.record_revision(b"\0point")?;
             retained = Some(read.retain(&[b"\0"])?);
             Ok(())
         })
@@ -276,6 +278,8 @@ fn native_diskann_compound_retention_preserves_binary_scope_and_private_revision
         Some(b"original".as_slice())
     );
     assert!(retained.revision(&[b"\0"]).unwrap() == revision.unwrap());
+    assert!(retained.record_revision(b"\0point").unwrap() == record_revision);
+    assert!(retained.record_revision(b"\0missing").unwrap().is_none());
     let control = StorageReadControl::with_limit(4096);
     let mut keys = Vec::new();
     retained

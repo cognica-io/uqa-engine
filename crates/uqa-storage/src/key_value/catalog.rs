@@ -37,6 +37,7 @@ use super::{
 };
 
 mod analyzers;
+pub(super) mod diskann;
 mod foreign;
 mod graph_access;
 mod graph_guards;

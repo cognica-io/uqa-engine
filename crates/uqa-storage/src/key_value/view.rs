@@ -62,6 +62,13 @@ pub type KeyValueVersionedMutation<'a> = dyn FnMut(
 pub trait KeyValueRead {
     fn control(&self) -> &StorageReadControl;
     fn revision(&self, prefixes: &[&[u8]]) -> StorageBackendResult<KeyValueReadRevision>;
+    /// Identity of one live record on this fixed view. Unlike a view revision, unrelated commits do not change it. Compare identities only for the same logical key; missing records and tombstones return `None`. Providers without exact committed/private record provenance must reject this capability.
+    fn record_revision(&self, _key: &[u8]) -> StorageBackendResult<Option<KeyValueReadRevision>> {
+        self.control().check()?;
+        Err(super::codec::other_error(
+            "individual record revisions are not supported",
+        ))
+    }
     /// Retain this committed/private boundary after the callback returns. Callers may only read the selected prefixes. The default copies selected bytes under this reader's allowance; versioned providers retain their existing visibility owners without loading values.
     fn retain(
         &self,
