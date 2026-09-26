@@ -39,7 +39,7 @@ fn empty(control: &StorageReadControl) -> PreparedRecordCommit {
 
 #[test]
 fn value_format_upgrade_preserves_receipt_capacity_acknowledgement_and_live_ownership() {
-    for predecessor in [44, 45, 46, 47] {
+    for predecessor in [44, 45, 46, 47, 48] {
         let connection = ManagedConnection::open_in_memory().unwrap();
         let control = control();
         let store = SQLiteRecordStore::new(&connection).unwrap();

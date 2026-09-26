@@ -218,10 +218,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--old-ref", required=True, help="Git revision of the previous development record format")
     parser.add_argument("--offline", action="store_true", help="Use only locally cached dependencies")
+    parser.add_argument("--target-dir", type=Path, default=Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")), help="Reuse this Cargo target directory (default: CARGO_TARGET_DIR or workspace target)")
     parser.add_argument("--provider", action="append", choices=("native", "key-value", "redb"), help="Verify only the named provider; repeat for multiple providers (default: all)")
     args = parser.parse_args()
     revision = subprocess.check_output(["git", "rev-parse", "--verify", "--end-of-options", args.old_ref + "^{commit}"], cwd=ROOT, text=True).strip()
-    target = ROOT / "target/record-format-probe"
+    target = args.target_dir.resolve()
     with tempfile.TemporaryDirectory(prefix="uqa-record-format-") as temporary:
         directory = Path(temporary)
         source = directory / "previous-source"
