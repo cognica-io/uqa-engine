@@ -16,6 +16,7 @@ use crate::read_control::StorageReadControl;
 /// Verify on fresh disposable persistence. Histories, deleted-snapshot revisions and original receipts survive until their own retention boundaries; only enrolled physical tombstones disappear.
 pub fn verify_tombstone_reclamation(store: &dyn VersionedPersistence) -> VersionResult<()> {
     let control = StorageReadControl::with_limit(1 << 20);
+    verify_reserved_identifiers(store, &control)?;
     let empty = store.snapshot(&control)?;
     assert_eq!(empty.reclamation_epoch(), Some(0));
     let writes = [RecordWrite {
@@ -93,7 +94,51 @@ pub fn verify_tombstone_reclamation(store: &dyn VersionedPersistence) -> Version
         store.reclaim_tombstones(&request, &control)?,
         TombstoneReclamationStep::Complete { removed: 1 }
     ));
+    verify_reserved_identifiers(store, &control)?;
     verify_reclaimed_observations(store, &first, &stale, receipt, deleted.sequence, &control)
+}
+
+fn verify_reserved_identifiers(
+    store: &dyn VersionedPersistence,
+    control: &StorageReadControl,
+) -> VersionResult<()> {
+    use crate::mvcc::{IdentifierRequest, RECLAMATION_DOMAIN_PREFIX, RECLAMATION_EPOCH_NAMESPACE};
+    let before = store.snapshot(control)?.reclamation_epoch();
+    let domain = [RECLAMATION_DOMAIN_PREFIX, b"retired/"].concat();
+    for namespace in [
+        RECLAMATION_EPOCH_NAMESPACE,
+        RECLAMATION_DOMAIN_PREFIX,
+        &domain,
+    ] {
+        assert!(matches!(
+            store.identifier_watermark(namespace, control),
+            Err(VersionError::InvalidEncoding(_))
+        ));
+        for request in [
+            IdentifierRequest::Observe(0),
+            IdentifierRequest::Observe(u64::MAX),
+            IdentifierRequest::Reserve {
+                minimum: 0,
+                maximum: u64::MAX,
+                count: std::num::NonZeroU64::new(1).unwrap(),
+            },
+        ] {
+            assert!(matches!(
+                store.allocate_identifiers(namespace, request, control),
+                Err(VersionError::InvalidEncoding(_))
+            ));
+        }
+    }
+    let ordinary = b"\0uqa-reclamation-epoch-v1-neighbor\0";
+    assert_eq!(
+        store
+            .allocate_identifiers(ordinary, IdentifierRequest::Observe(7), control)?
+            .watermark(),
+        7
+    );
+    assert_eq!(store.identifier_watermark(ordinary, control)?, Some(7));
+    assert_eq!(store.snapshot(control)?.reclamation_epoch(), before);
+    Ok(())
 }
 
 fn verify_reclaimed_observations(
