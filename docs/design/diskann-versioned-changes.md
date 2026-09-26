@@ -1,6 +1,6 @@
 # DiskANN versioned changes
 
-Status: The Key/Value change journal and retained document cursor merged in PR #174; native SQLite changes and their retained cursor merged in PR #176. [Retained build membership](diskann-build-coverage.md) merged in PR #177, followed by catalog binding and durable origin artifacts in PRs #178–#181 and atomic publication in PR #182. [Bounded covered/obsolete pruning](diskann-journal-pruning.md) is implemented in PR #183. Paged query merging and retained index reads are implemented in PRs #185–#186. Bound persistent mutation/query handles are implemented for review; automatic maintenance, SSI observations and public DiskANN routing remain pending in the [implementation plan](../plans/0014-diskann-vector-index.md).
+Status: The Key/Value change journal and retained document cursor merged in PR #174; native SQLite changes and their retained cursor merged in PR #176. [Retained build membership](diskann-build-coverage.md) merged in PR #177, followed by catalog binding and durable origin artifacts in PRs #178–#181 and atomic publication in PR #182. [Bounded covered/obsolete pruning](diskann-journal-pruning.md) is implemented in PR #183. Paged query merging and retained index reads are implemented in PRs #185–#186. Bound persistent mutation/query handles are implemented; automatic maintenance, SSI observations and public DiskANN routing remain pending in the [implementation plan](../plans/0014-diskann-vector-index.md).
 
 ## Ownership and atomicity
 

@@ -256,7 +256,12 @@ fn definition_guards(
                     .load_tables()?
                     .into_iter()
                     .find(|table| table.relation.qualified_name() == TABLE)
-                    .expect("fixture table");
+                    .ok_or_else(|| {
+                        crate::StorageBackendError::Other(
+                            "KeyValue conformance failed: missing live DiskANN fixture table"
+                                .into(),
+                        )
+                    })?;
                 table.storage_generation = [81; 16];
                 catalog.save_table(&table)?;
             }
