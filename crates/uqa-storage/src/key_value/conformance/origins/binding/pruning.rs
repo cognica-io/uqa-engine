@@ -343,7 +343,56 @@ pub fn verify_diskann_pruning_reopen(
         &1,
         "cold reopen retains bounded physical deletion",
     )?;
-    finite_discovery(store, &control)
+    finite_discovery(store, &control)?;
+    clear_racing_pruning(store, &control)
+}
+
+fn clear_racing_pruning(
+    store: &Arc<dyn KeyValueStore>,
+    control: &StorageReadControl,
+) -> StorageBackendResult<()> {
+    use crate::{diskann_index::build::DiskANNTemporaryBudget, VectorIndex};
+    let temporary = DiskANNTemporaryBudget::new(1 << 20);
+    let canonical = KeyValueDiskANNCanonical::new(store.clone(), TABLE, FIELD, 2)?;
+    for refresh in [false, true] {
+        canonical.replace(0, &[], control)?;
+        canonical.replace(0, &[], control)?;
+        let peer = store.open_controlled_session(control)?;
+        let pruner = KeyValueDiskANNCanonical::new(peer.clone(), TABLE, FIELD, 2)?.journal_pruner(
+            &row([91; 16])?.relation,
+            Arc::new(Resolver),
+            8192,
+            control,
+        )?;
+        let mut index = super::runtime::runtime(store, &temporary, control)?;
+        let retained = index.snapshot()?;
+        let previous_count = retained.count()?;
+        store.begin_transaction()?;
+        index.clear()?;
+        peer.begin_transaction()?;
+        expect(
+            pruner.prune(page(64), control)?.removed > 0,
+            "peer pruned an evaluated clear key",
+        )?;
+        peer.commit_transaction()?;
+        if refresh {
+            store.refresh_transaction_snapshot(control.cancellation())?;
+        }
+        store.commit_transaction()?;
+        expect_eq(&index.count()?, &0, "clear commits after journal pruning")?;
+        expect_eq(
+            &retained.count()?,
+            &previous_count,
+            "clear preserves retained canonical data",
+        )?;
+        expect(
+            store
+                .scan_prefix(&journal::prefix(TABLE, FIELD)?)?
+                .is_empty(),
+            "clear removes the remaining journal",
+        )?;
+    }
+    Ok(())
 }
 
 fn finite_discovery(

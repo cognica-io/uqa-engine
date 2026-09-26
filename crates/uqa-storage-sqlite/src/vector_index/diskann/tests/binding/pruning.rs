@@ -277,6 +277,43 @@ fn verify_reopen(connection: &ManagedConnection, generation: DiskANNGeneration) 
     );
     assert_eq!(change_count(connection), 1);
     finite_discovery(connection, &control);
+    clear_racing_pruning(connection, &control);
+}
+
+fn clear_racing_pruning(connection: &ManagedConnection, control: &StorageReadControl) {
+    use uqa_storage::{diskann_index::build::DiskANNTemporaryBudget, VectorIndex};
+    let temporary = DiskANNTemporaryBudget::new(1 << 20);
+    for refresh in [false, true] {
+        let canonical = canonical(connection, TABLE, FIELD, 2);
+        canonical.replace(0, &[], control).unwrap();
+        canonical.replace(0, &[], control).unwrap();
+        let peer = connection.new_controlled_session(control).unwrap();
+        let pruner = super::canonical(&peer, TABLE, FIELD, 2)
+            .journal_pruner(
+                &row().relation,
+                std::sync::Arc::new(Resolver),
+                8192,
+                control,
+            )
+            .unwrap();
+        let mut index = super::runtime::runtime(connection, &temporary, control);
+        let retained = index.snapshot().unwrap();
+        let previous_count = retained.count().unwrap();
+        connection.begin_transaction().unwrap();
+        index.clear().unwrap();
+        peer.begin_transaction().unwrap();
+        assert!(pruner.prune(page(64), control).unwrap().removed > 0);
+        peer.commit_transaction().unwrap();
+        if refresh {
+            connection
+                .refresh_transaction_snapshot(control.cancellation())
+                .unwrap();
+        }
+        connection.commit_transaction().unwrap();
+        assert_eq!(index.count().unwrap(), 0);
+        assert_eq!(retained.count().unwrap(), previous_count);
+        assert_eq!(change_count(connection), 0);
+    }
 }
 
 fn finite_discovery(connection: &ManagedConnection, control: &StorageReadControl) {

@@ -62,7 +62,11 @@ pub(super) fn clear(
 ) -> StorageBackendResult<()> {
     batch.reset_occurrences(name)?;
     for prefix in row_prefixes(name)? {
-        batch.delete_prefix(&prefix)?;
+        if prefix.starts_with(super::super::vector_index::origin::journal::ROOT) {
+            batch.delete_prefix_allow_absent(&prefix)?;
+        } else {
+            batch.delete_prefix(&prefix)?;
+        }
     }
     if analyzers {
         for prefix in analyzer_prefixes(name)? {

@@ -230,6 +230,7 @@ impl Transaction {
                 | RecordWriteKind::HNSWPreview
                 | RecordWriteKind::Marker
                 | RecordWriteKind::StatisticsMaintenance
+                | RecordWriteKind::IdempotentDelete
         ) && self.changes.write_kind(key, control)? == Some(RecordWriteKind::Canonical)
         {
             RecordWriteKind::Canonical

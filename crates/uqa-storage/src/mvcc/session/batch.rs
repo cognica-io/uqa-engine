@@ -422,6 +422,13 @@ impl KeyValueBatch for Batch<'_> {
         ))?;
         Ok(())
     }
+    fn delete_prefix_allow_absent(&mut self, prefix: &[u8]) -> StorageBackendResult<()> {
+        self.operations.push(Operation::DeletePrefix(
+            self.copy(prefix)?,
+            RecordWriteKind::IdempotentDelete,
+        ))?;
+        Ok(())
+    }
     fn replace_occurrence_record(
         &mut self,
         key: &[u8],

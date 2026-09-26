@@ -77,7 +77,7 @@ fn canonical(store: &Arc<dyn KeyValueStore>) -> StorageBackendResult<KeyValueDis
     KeyValueDiskANNCanonical::new(store.clone(), TABLE, FIELD, 2)
 }
 
-fn runtime(
+pub(super) fn runtime(
     store: &Arc<dyn KeyValueStore>,
     temporary: &DiskANNTemporaryBudget,
     control: &StorageReadControl,

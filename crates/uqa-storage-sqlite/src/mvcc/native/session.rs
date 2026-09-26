@@ -313,9 +313,13 @@ impl NativeSnapshot {
     ) -> Result<()> {
         self.observe_graph_definition_delete(batch, family, owner, prefix)?;
         self.observe_graph_labels_delete(batch, family, owner, prefix)?;
-        batch.delete_prefix(
-            &NativeRecordIdentity::new(family, owner)?.encode_prefix(prefix, &self.control)?,
-        )?;
+        let prefix =
+            NativeRecordIdentity::new(family, owner)?.encode_prefix(prefix, &self.control)?;
+        if family == Family::VectorChanges {
+            batch.delete_prefix_allow_absent(&prefix)?;
+        } else {
+            batch.delete_prefix(&prefix)?;
+        }
         Ok(())
     }
 }
