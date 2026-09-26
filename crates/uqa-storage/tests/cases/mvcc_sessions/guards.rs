@@ -182,6 +182,12 @@ fn requirements_and_markers_survive_combined_graph_vector_and_occurrence_resolut
         key.extend_from_slice(name.as_bytes());
         expected.push(key);
     }
+    let mut vector_lifetime = b"\0uqa-vector-field-guards-v1\0\0v".to_vec();
+    for name in ["docs", "v"] {
+        vector_lifetime.extend_from_slice(&u32::try_from(name.len()).unwrap().to_be_bytes());
+        vector_lifetime.extend_from_slice(name.as_bytes());
+    }
+    expected.push(vector_lifetime);
     assert_eq!(persistence.state.lock().required_keys, expected);
     assert_eq!(vectors.count().unwrap(), 1);
     assert_eq!(occurrences.doc_count().unwrap(), 1);
