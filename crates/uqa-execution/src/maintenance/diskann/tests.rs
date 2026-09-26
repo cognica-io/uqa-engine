@@ -16,6 +16,11 @@ use uqa_storage::{
     StorageSavepointId,
 };
 
+enum RollbackFailure {
+    Active,
+    Closed,
+}
+
 struct State {
     active: bool,
     evaluations: usize,
@@ -25,7 +30,7 @@ struct State {
     failures: VecDeque<Option<TransactionOutcome>>,
     reject_page: bool,
     removed: usize,
-    rollback_failures: usize,
+    rollback_failures: VecDeque<RollbackFailure>,
     close_on_error: bool,
 }
 
@@ -42,7 +47,7 @@ impl Backend {
             failures: failures.into(),
             reject_page,
             removed: 2,
-            rollback_failures: 0,
+            rollback_failures: VecDeque::new(),
             close_on_error: false,
         })))
     }
@@ -133,8 +138,8 @@ impl PersistentStorageBackend for Backend {
         let mut state = self.0.lock();
         assert!(state.active);
         state.rollbacks += 1;
-        if state.rollback_failures != 0 {
-            state.rollback_failures -= 1;
+        if let Some(failure) = state.rollback_failures.pop_front() {
+            state.active = matches!(failure, RollbackFailure::Active);
             return Err(StorageBackendError::Other(
                 "rollback cleanup failure".into(),
             ));
@@ -224,7 +229,7 @@ fn diskann_maintenance_read_only_pages_wait_for_cleanup_without_publishing() {
     {
         let mut state = backend.0.lock();
         state.removed = 0;
-        state.rollback_failures = 1;
+        state.rollback_failures.push_back(RollbackFailure::Active);
     }
     let mut job = Job::new(backend.clone(), Box::new(Pruner(backend.clone())));
     let control = StorageReadControl::with_limit(1 << 20);
@@ -254,4 +259,76 @@ fn diskann_maintenance_records_confirmed_commit_after_session_cleanup_error() {
     assert!(job.finished());
     assert!(!job.pending());
     assert_eq!(job.take_completed().unwrap().removed, 2);
+}
+
+#[test]
+fn diskann_maintenance_page_errors_survive_rollback_failures() {
+    for closes in [false, true] {
+        let backend = Backend::new(vec![], true);
+        {
+            let mut state = backend.0.lock();
+            state.rollback_failures.push_back(if closes {
+                RollbackFailure::Closed
+            } else {
+                RollbackFailure::Active
+            });
+        }
+        let mut job = Job::new(backend.clone(), Box::new(Pruner(backend.clone())));
+        let control = StorageReadControl::with_limit(1 << 20);
+        assert!(
+            matches!(job.step(&control), Err(StorageBackendError::Other(message)) if message == "rejected page")
+        );
+        assert_eq!(job.finished(), closes);
+        assert_eq!(job.pending(), !closes);
+        assert!(job.take_completed().is_none());
+        control.cancellation().cancel();
+        job.step(&control).unwrap();
+        assert!(job.finished());
+        assert!(!job.pending());
+        assert!(job.take_completed().is_none());
+        let state = backend.0.lock();
+        assert_eq!(
+            (
+                state.begins,
+                state.evaluations,
+                state.commits,
+                state.rollbacks
+            ),
+            (1, 1, 0, if closes { 1 } else { 2 })
+        );
+    }
+}
+
+#[test]
+fn diskann_maintenance_closed_rollback_failure_releases_the_original_attempt() {
+    for failure in [None, Some(TransactionOutcome::Aborted(transaction()))] {
+        let backend = Backend::new(vec![failure], false);
+        {
+            let mut state = backend.0.lock();
+            state.rollback_failures.push_back(RollbackFailure::Closed);
+        }
+        let mut job = Job::new(backend.clone(), Box::new(Pruner(backend.clone())));
+        let control = StorageReadControl::with_limit(1 << 20);
+        assert!(job.step(&control).is_err());
+        assert!(job.pending());
+        assert!(job.take_completed().is_none());
+        control.cancellation().cancel();
+        assert!(
+            matches!(job.step(&control), Err(StorageBackendError::Other(message)) if message == "rollback cleanup failure")
+        );
+        assert!(job.finished());
+        assert!(!job.pending());
+        job.step(&control).unwrap();
+        assert!(job.take_completed().is_none());
+        let state = backend.0.lock();
+        assert_eq!(
+            (
+                state.begins,
+                state.evaluations,
+                state.commits,
+                state.rollbacks
+            ),
+            (1, 1, 1, 1)
+        );
+    }
 }

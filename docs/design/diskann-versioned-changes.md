@@ -52,7 +52,7 @@ For ALTER COLUMN TYPE, Execution retires the original generation and selects a c
 
 Execution's serializable snapshot wrapper forwards controlled KNN and threshold searches to the selected physical owner, preserving its original allowance and the independent invocation cancellation. Positive-k and threshold searches observe the entire canonical candidate field before searching. Every canonical document-write key lies in that range, independently of which graph nodes expand, which pages are cached or which candidates reach the result. Nested snapshots retain the original participant and range. Therefore a change to an unvisited candidate still contributes its read/write dependency; a reverse dependency on another relation forms a serialization cycle. Direct zero-k and EXPLAIN without execution add no candidate observation. SQL still rejects a non-positive k.
 
-This runtime path merged in PR #189. SQL/planner acceptance, final physical metadata reclamation, automatic pruning and full public operator/binding acceptance remain required before release. Local Engine SQL tests cover the listed memory/native SQLite/SQLite Key/Value/redb paths; they do not establish completion of those remaining gates.
+This runtime path merged in PR #189. SQL/planner acceptance, final physical metadata reclamation, automatic graph rebuilding and full public operator/binding acceptance remain required before release. Local Engine SQL tests cover the listed memory/native SQLite/SQLite Key/Value/redb paths; they do not establish completion of those remaining gates.
 
 ## Predecessor writer negotiation
 

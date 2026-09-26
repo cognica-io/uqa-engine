@@ -91,8 +91,8 @@ impl Job {
                 }
                 Err(error) => {
                     self.attempt = Attempt::Rollback;
-                    // Preserve a failed cleanup attempt for the next step; never start another transaction on this session.
-                    self.finish()?;
+                    // Preserve the page failure and retain any still-active cleanup attempt for the next step.
+                    let _ = self.finish();
                     return Err(error);
                 }
             }
@@ -137,7 +137,12 @@ impl Job {
                 }
             },
             Attempt::Rollback => {
-                self.backend.rollback_transaction()?;
+                if let Err(error) = self.backend.rollback_transaction() {
+                    if !self.backend.in_transaction() {
+                        self.attempt = Attempt::Finished;
+                    }
+                    return Err(error);
+                }
                 self.attempt = Attempt::Finished;
             }
             Attempt::Ready | Attempt::Finished => {}
