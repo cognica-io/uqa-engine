@@ -107,6 +107,13 @@ fn native_diskann_upgrade_keeps_data_namespace_independent_from_history() {
     assert_eq!(upgraded.database_id(), history);
     assert_eq!(upgraded.native_namespace(), Some(data));
     assert_eq!(preserved(&connection), before);
+    drop(upgraded);
+    connection
+        .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
+        .unwrap();
+    let captured = connection.native_snapshot().unwrap().unwrap();
+    assert_eq!(captured.history, history);
+    assert_eq!(captured.database, data);
 }
 
 #[test]

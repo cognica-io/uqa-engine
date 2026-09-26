@@ -174,6 +174,7 @@ pub struct KeyValueReadRevision(Revision);
 #[derive(Clone)]
 enum Revision {
     Memory(Arc<()>),
+    Record(crate::mvcc::VisibleRecordRevision),
     Records {
         database: DatabaseId,
         committed: CommitSequence,
@@ -186,6 +187,7 @@ impl KeyValueReadRevision {
     pub fn has_private_changes(&self) -> bool {
         match &self.0 {
             Revision::Memory(_) => true,
+            Revision::Record(revision) => revision.is_private(),
             Revision::Records { private, .. } => private.is_some(),
         }
     }
@@ -197,6 +199,10 @@ impl KeyValueReadRevision {
 
     pub(crate) fn memory(identity: &Arc<()>) -> Self {
         Self(Revision::Memory(Arc::clone(identity)))
+    }
+
+    pub(crate) fn record(revision: crate::mvcc::VisibleRecordRevision) -> Self {
+        Self(Revision::Record(revision))
     }
 
     pub(crate) fn records(
@@ -216,6 +222,7 @@ impl PartialEq for KeyValueReadRevision {
     fn eq(&self, other: &Self) -> bool {
         match (&self.0, &other.0) {
             (Revision::Memory(a), Revision::Memory(b)) => Arc::ptr_eq(a, b),
+            (Revision::Record(a), Revision::Record(b)) => a == b,
             (
                 Revision::Records {
                     database: a,

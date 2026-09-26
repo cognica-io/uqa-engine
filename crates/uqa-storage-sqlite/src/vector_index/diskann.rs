@@ -136,6 +136,15 @@ impl SQLiteDiskANNCanonical {
     ) -> StorageBackendResult<RetainedSQLiteDiskANNCanonical> {
         RetainedSQLiteDiskANNCanonical::capture(&self.index, control)
     }
+
+    /// Capture the actual native table-name owner, table definition and index definition on the canonical source's fixed view.
+    pub fn retain_for_index(
+        &self,
+        index: &uqa_storage::RelationIdentity,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<RetainedSQLiteDiskANNCanonical> {
+        RetainedSQLiteDiskANNCanonical::capture_for_index(&self.index, index, control)
+    }
 }
 
 fn invalid(message: &'static str) -> uqa_storage::StorageBackendError {

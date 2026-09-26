@@ -10,6 +10,7 @@ use std::path::Path;
 use uqa_storage::diskann_index::{DiskANNCanonicalRead, DiskANNCanonicalScorer};
 use uqa_storage::mvcc::{CommitStatus, VersionedPersistence, VersionedSessionOptions};
 
+mod binding;
 mod changes;
 mod corpus;
 mod coverage;

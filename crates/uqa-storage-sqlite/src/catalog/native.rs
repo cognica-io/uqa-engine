@@ -9,6 +9,7 @@
 mod analyzers;
 mod cache_revisions;
 mod columns;
+pub(super) mod diskann;
 mod foreign;
 pub(super) mod graph;
 mod indexes;

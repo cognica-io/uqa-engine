@@ -38,12 +38,29 @@ pub struct RetainedSQLiteDiskANNCanonical {
     field: BudgetedVec<u8>,
     dimensions: u32,
     control: StorageReadControl,
+    binding: Option<crate::catalog::DiskANNCatalogBinding>,
     _memory: MemoryReservation,
 }
 
 impl RetainedSQLiteDiskANNCanonical {
     pub(super) fn capture(
         index: &SQLiteVectorIndex,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        Self::capture_selected(index, None, control)
+    }
+
+    pub(super) fn capture_for_index(
+        index: &SQLiteVectorIndex,
+        catalog_index: &uqa_storage::RelationIdentity,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        Self::capture_selected(index, Some(catalog_index), control)
+    }
+
+    fn capture_selected(
+        index: &SQLiteVectorIndex,
+        catalog_index: Option<&uqa_storage::RelationIdentity>,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         control.check()?;
@@ -54,7 +71,23 @@ impl RetainedSQLiteDiskANNCanonical {
             .conn
             .native_snapshot()?
             .ok_or_else(|| invalid("native canonical source requires a bound session"))?;
-        let owner = snapshot.table_owner_controlled(&index.table, control)?;
+        let binding = catalog_index
+            .map(|catalog_index| {
+                crate::catalog::DiskANNCatalogBinding::capture(
+                    &snapshot,
+                    &index.table,
+                    &index.field,
+                    index.dimensions,
+                    catalog_index,
+                    control,
+                )
+            })
+            .transpose()?;
+        let owner = if let Some(binding) = &binding {
+            Some(binding.owner)
+        } else {
+            snapshot.table_owner_controlled(&index.table, control)?
+        };
         let mut table = BudgetedVec::new(control.memory());
         table.extend_from_slice(index.table.as_bytes())?;
         let mut field = BudgetedVec::new(control.memory());
@@ -67,8 +100,28 @@ impl RetainedSQLiteDiskANNCanonical {
             field,
             dimensions: index.dimensions,
             control: control.clone(),
+            binding,
             _memory: memory,
         })
+    }
+
+    pub fn index_parameters(&self) -> Option<uqa_storage::vector_index::DiskANNIndexParams> {
+        self.binding.as_ref().map(|binding| binding.parameters)
+    }
+
+    /// Recheck the captured native definitions and stage committed requirements on one publication command's raw record reader/batch. This does not publish a generation or complete the caller's transaction.
+    pub fn require_current_index(
+        &self,
+        read: &dyn uqa_storage::key_value::KeyValueRead,
+        batch: &mut dyn uqa_storage::KeyValueBatch,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<()> {
+        self.check(control)?;
+        self.binding
+            .as_ref()
+            .ok_or_else(|| invalid("native canonical source has no index binding"))?
+            .require_current(read, batch, control)?;
+        self.check(control)
     }
 
     /// Return an origin only after verifying its complete contiguous native canonical ordinal set. An origin with zero ordinals denotes an explicit empty replacement.

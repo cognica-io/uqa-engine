@@ -11,10 +11,25 @@ use crate::read_control::{KeyReadVisitor, KeyValueReadVisitor, StorageReadContro
 use crate::{read_control::ValueReadVisitor, StorageBackendResult};
 use uqa_core::memory::BudgetedVec;
 
-pub(super) struct RecordRead<'a> {
+/// Borrowed Key/Value adapter over an already captured committed/private record view. It does not open or advance a session.
+pub struct RecordRead<'a> {
     pub(super) view: &'a MergedRecordSnapshot,
     pub(super) database: DatabaseId,
     pub(super) control: &'a StorageReadControl,
+}
+
+impl<'a> RecordRead<'a> {
+    pub fn new(
+        view: &'a MergedRecordSnapshot,
+        database: DatabaseId,
+        control: &'a StorageReadControl,
+    ) -> Self {
+        Self {
+            view,
+            database,
+            control,
+        }
+    }
 }
 
 impl KeyValueRead for RecordRead<'_> {
@@ -53,31 +68,10 @@ impl KeyValueRead for RecordRead<'_> {
     }
 
     fn record_revision(&self, key: &[u8]) -> StorageBackendResult<Option<KeyValueReadRevision>> {
-        self.control.check()?;
-        let metadata = self
-            .view
-            .metadata(key, self.control)
-            .map_err(VersionError::into_storage_error)?;
-        let Some(metadata) = metadata.filter(|record| record.live) else {
-            self.control.check()?;
-            return Ok(None);
-        };
-        let private = self
-            .view
-            .private_keys(key, None, 1, self.control)
-            .map_err(VersionError::into_storage_error)?;
-        let private = private
-            .first()
-            .filter(|record| record.key() == key)
-            .map(crate::mvcc::PrivateRecordKey::revision);
-        self.control.check()?;
-        Ok(Some(KeyValueReadRevision::records(
-            self.database,
-            metadata
-                .revision
-                .unwrap_or(crate::mvcc::CommitSequence::INITIAL),
-            private,
-        )))
+        self.view
+            .record_revision(self.database, key, self.control)
+            .map(|revision| revision.map(KeyValueReadRevision::record))
+            .map_err(VersionError::into_storage_error)
     }
 
     fn retain(

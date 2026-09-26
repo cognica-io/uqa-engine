@@ -192,6 +192,7 @@ impl ManagedConnection {
                         view,
                         control,
                         database,
+                        history: origin.transaction().database(),
                     },
                     batch,
                 )

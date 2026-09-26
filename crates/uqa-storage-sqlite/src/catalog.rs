@@ -50,6 +50,7 @@ mod graph_access;
 mod migration;
 mod models_scoring;
 mod native;
+pub(crate) use native::diskann::DiskANNCatalogBinding;
 mod path_index_data;
 mod role_security;
 mod schema_tables;
