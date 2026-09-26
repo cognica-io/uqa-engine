@@ -485,7 +485,7 @@ pub struct SetConstraintName {
     pub name: String,
 }
 
-/// One parser-normalized `VACUUM` option. Keeping the parsed value in the SQL AST lets execution enforce `PostgreSQL`'s transaction-block error before validating command options.
+/// One parser-normalized `VACUUM` option. Execution validates options before rejecting transaction blocks, then resolves relation targets, matching `PostgreSQL`'s diagnostic order.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VacuumOption {
     pub name: String,
@@ -644,7 +644,7 @@ pub enum Statement {
     Analyze {
         table: Option<String>,
     },
-    /// `VACUUM [options] [relations]`. Execution enforces `PostgreSQL`'s transaction-block restriction before validating options and dispatching storage maintenance.
+    /// `VACUUM [options] [relations]`. Execution validates options, rejects transaction blocks, then resolves targets and dispatches storage maintenance in `PostgreSQL` order.
     Vacuum(VacuumStmt),
     /// `LOCK [TABLE] [ONLY] name [IN mode MODE] [NOWAIT]`.
     LockTable(LockTableStmt),

@@ -113,6 +113,10 @@ impl KeyValueStore for SQLiteKeyValueStore {
         self.conn.vacuum().map_err(Into::into)
     }
 
+    fn reclaim_obsolete(&self) -> StorageBackendResult<()> {
+        self.conn.reclaim_obsolete().map_err(Into::into)
+    }
+
     fn write_cancellation(&self) -> Option<uqa_core::CancellationToken> {
         self.records.write_cancellation()
     }

@@ -82,7 +82,7 @@ pub fn verify_diskann_maintenance(store: &Arc<dyn KeyValueStore>) -> StorageBack
         &0,
         "closed pass releases its allowance",
     )?;
-    store.vacuum()?;
+    store.reclaim_obsolete()?;
     for reclaimed in [generation, earlier, later] {
         expect(
             store

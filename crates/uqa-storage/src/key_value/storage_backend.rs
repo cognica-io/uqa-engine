@@ -49,6 +49,10 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         self.store.serializable_session()
     }
 
+    fn reclaim_obsolete(&self) -> StorageBackendResult<()> {
+        self.store.reclaim_obsolete()
+    }
+
     fn vacuum(&self) -> StorageBackendResult<()> {
         self.store.vacuum()
     }

@@ -389,7 +389,7 @@ impl KeyValueStore for VersionedKeyValueStore {
             .map(|_| self as &dyn SerializableSession)
     }
 
-    fn vacuum(&self) -> StorageBackendResult<()> {
+    fn reclaim_obsolete(&self) -> StorageBackendResult<()> {
         let active = self.active.lock();
         if active.is_some() {
             return Err(StorageBackendError::Other(

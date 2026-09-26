@@ -431,6 +431,10 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         Ok(())
     }
 
+    fn reclaim_obsolete(&self) -> StorageBackendResult<()> {
+        self.conn.reclaim_obsolete().map_err(Into::into)
+    }
+
     fn begin_transaction(&self) -> StorageBackendResult<()> {
         self.conn.begin_transaction()?;
         Ok(())

@@ -10,6 +10,8 @@ use uqa_sql::{ast::VacuumStmt, maintenance::ResolvedVacuumTarget, SQLError, SQLR
 use uqa_storage::StorageBackendError;
 pub mod analyze;
 mod context;
+#[cfg(test)]
+mod tests;
 pub use context::*;
 fn vacuum_storage_error(context: &str, error: impl std::fmt::Display) -> StorageBackendError {
     StorageBackendError::Other(format!("{context}: {error}"))
@@ -45,7 +47,7 @@ fn rewrite_full_vacuum_targets(
             Ok(())
         }))
         .and_then(|()| context.storage.vacuum())
-        .map_err(|error| SQLError::Internal(format!("VACUUM FULL failed: {error}")));
+        .map_err(|error| crate::storage_errors::storage_error("VACUUM FULL", &error));
     context.locks.release_session();
     result
 }
@@ -111,6 +113,7 @@ pub fn run_vacuum(
     context: &VacuumContext<'_>,
     statement: &VacuumStmt,
 ) -> Result<SQLResult, SQLError> {
+    let execution = uqa_sql::maintenance::analyze_vacuum(statement)?;
     if context.transactions.depth() != 0 {
         return Err(SQLError::Routine {
             sqlstate: "25001".into(),
@@ -118,7 +121,6 @@ pub fn run_vacuum(
         });
     }
 
-    let execution = uqa_sql::maintenance::analyze_vacuum(statement)?;
     let resolved_targets =
         uqa_sql::maintenance::bind_vacuum_targets(context.catalog, context.privileges, statement)?;
 
@@ -131,10 +133,15 @@ pub fn run_vacuum(
             context
                 .storage
                 .vacuum()
-                .map_err(|error| SQLError::Internal(format!("VACUUM failed: {error}")))?;
+                .map_err(|error| crate::storage_errors::storage_error("VACUUM", &error))?;
         } else {
             rewrite_full_vacuum_targets(context, &resolved_targets)?;
         }
+    } else {
+        context
+            .storage
+            .reclaim_obsolete()
+            .map_err(|error| crate::storage_errors::storage_error("VACUUM", &error))?;
     }
 
     if execution.analyze() {

@@ -529,7 +529,17 @@ pub trait PersistentStorageBackend: Send + Sync {
         Ok(())
     }
 
-    /// Reclaim backend-owned storage outside a transaction. Backends whose logical stores eagerly remove obsolete values may keep the no-op default; durable backends with file-level compaction should override it.
+    /// Reclaim obsolete logical records and history outside a transaction without rewriting the whole physical database. Versioned providers must implement this capability; stores that eagerly remove obsolete values may keep the default.
+    fn reclaim_obsolete(&self) -> StorageBackendResult<()> {
+        if self.transaction_model().is_versioned() {
+            return Err(StorageBackendError::Other(
+                "versioned storage reclamation is not implemented by this backend".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Reclaim backend-owned storage and compact the physical database outside a transaction. Backends whose logical stores eagerly remove obsolete values may keep the no-op default; durable backends with file-level compaction should override it.
     fn vacuum(&self) -> StorageBackendResult<()> {
         Ok(())
     }
