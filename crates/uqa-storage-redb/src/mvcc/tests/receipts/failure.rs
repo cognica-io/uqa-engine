@@ -251,7 +251,7 @@ fn failed_receipt_format_upgrade_reopens_as_one_complete_format_with_manual_owne
         let metadata = read.open_table(METADATA).unwrap();
         match codec::read_u64(&metadata, "format").unwrap() {
             42 => assert!(metadata.get("receipt_limit").unwrap().is_none()),
-            49 => assert_eq!(
+            50 => assert_eq!(
                 codec::receipt_limit(&metadata).unwrap(),
                 DEFAULT_RECEIPT_RETENTION_LIMIT
             ),

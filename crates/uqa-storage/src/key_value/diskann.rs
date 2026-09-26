@@ -24,6 +24,7 @@ use super::{KeyValueMutation, KeyValueRead};
 
 mod build;
 pub(super) mod conformance;
+pub mod identifiers;
 mod identity;
 mod keys;
 mod maintenance;
@@ -149,19 +150,27 @@ impl KeyValueDiskANNStore {
         let database = stored_data_identity(&*self.owner.store, control)?;
         let provisional = DiskANNGeneration::new(database, table, index, 1)?;
         let keys = Keys::new(provisional);
-        let allocation = self
+        let allocator = self
             .owner
             .store
             .identifier_allocator()
-            .ok_or_else(|| invalid("durable generation identifiers are unavailable"))?
-            .allocate_identifiers(
-                keys.allocation_namespace(),
-                IdentifierRequest::Reserve {
-                    minimum: 1,
-                    maximum: u64::MAX,
-                    count: std::num::NonZeroU64::MIN,
-                },
-            )?;
+            .ok_or_else(|| invalid("durable generation identifiers are unavailable"))?;
+        // Custom versioned stores may retain predecessor reservations. Preserve
+        // their per-index floor even when no provider format migration ran.
+        let minimum = match allocator.identifier_watermark(keys.legacy_allocation_namespace())? {
+            Some(previous) => previous.checked_add(1).ok_or_else(|| {
+                crate::mvcc::VersionError::IdentifiersExhausted.into_storage_error()
+            })?,
+            None => 1,
+        };
+        let allocation = allocator.allocate_identifiers(
+            identifiers::NAMESPACE,
+            IdentifierRequest::Reserve {
+                minimum,
+                maximum: u64::MAX,
+                count: std::num::NonZeroU64::MIN,
+            },
+        )?;
         let generation = DiskANNGeneration::new(database, table, index, allocation.watermark())?;
         Ok(KeyValueDiskANNStage::reserved(
             self.clone(),

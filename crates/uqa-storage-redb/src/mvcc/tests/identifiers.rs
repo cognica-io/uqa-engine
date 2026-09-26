@@ -9,6 +9,8 @@
 use super::*;
 use uqa_storage::mvcc::IdentifierRequest;
 
+mod diskann;
+
 fn reserve(count: u64) -> IdentifierRequest {
     IdentifierRequest::Reserve {
         minimum: 1,
