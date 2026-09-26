@@ -8,6 +8,8 @@
 
 #[path = "commit_resolution/conflicts.rs"]
 mod conflicts;
+#[path = "commit_resolution/diskann.rs"]
+mod diskann;
 #[path = "commit_resolution/notifications.rs"]
 mod notifications;
 #[path = "commit_resolution/serializable.rs"]
@@ -22,8 +24,8 @@ use uqa_core::Value;
 use uqa_engine::{Engine, SQLFunctionOptions, SQLFunctionVolatility};
 use uqa_sql::SQLError;
 use uqa_storage::mvcc::{
-    CommitFailure, CommitResult, CommitStatus, CommittedRecordSnapshot, DatabaseId,
-    PreparedRecordCommit, StorageTransactionId, VersionResult, VersionedKeyValueStore,
+    CommitFailure, CommitFingerprint, CommitResult, CommitStatus, CommittedRecordSnapshot,
+    DatabaseId, PreparedRecordCommit, StorageTransactionId, VersionResult, VersionedKeyValueStore,
     VersionedPersistence, VersionedSessionOptions,
 };
 use uqa_storage::read_control::StorageReadControl;
@@ -77,6 +79,7 @@ struct FaultPersistence {
     foreground: std::thread::ThreadId,
     foreground_transaction_allocations: AtomicUsize,
     foreground_record_commits: AtomicUsize,
+    last_foreground_record_commit: Mutex<Option<(StorageTransactionId, CommitFingerprint)>>,
     attempt: Mutex<Option<StorageTransactionId>>,
     aborts: AtomicUsize,
 }
@@ -192,6 +195,8 @@ impl VersionedPersistence for FaultPersistence {
         if std::thread::current().id() == self.foreground {
             self.foreground_record_commits
                 .fetch_add(1, Ordering::AcqRel);
+            *self.last_foreground_record_commit.lock().unwrap() =
+                Some((transaction, prepared.fingerprint()));
         }
         let fault = self.fault_for(transaction);
         if let Some(error) = rejected_commit_error(fault) {
@@ -293,6 +298,7 @@ fn fixtures() -> (tempfile::TempDir, Vec<Arc<FaultPersistence>>) {
                     foreground: std::thread::current().id(),
                     foreground_transaction_allocations: AtomicUsize::new(0),
                     foreground_record_commits: AtomicUsize::new(0),
+                    last_foreground_record_commit: Mutex::new(None),
                     attempt: Mutex::new(None),
                     aborts: AtomicUsize::new(0),
                 })

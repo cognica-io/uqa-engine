@@ -170,7 +170,10 @@ pub fn verify_diskann_restore_source(
     Ok(generation)
 }
 
-fn rows(backend: &dyn PersistentStorageBackend, changed: bool) -> StorageBackendResult<()> {
+pub(super) fn rows(
+    backend: &dyn PersistentStorageBackend,
+    changed: bool,
+) -> StorageBackendResult<()> {
     let documents = backend.document_store(TABLE);
     for (id, expected) in [
         (1, Some(11)),

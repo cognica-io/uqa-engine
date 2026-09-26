@@ -7,6 +7,8 @@
 use std::sync::Arc;
 
 mod corruption;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod recovery;
 mod restore;
 
 use uqa_storage::key_value::conformance::{

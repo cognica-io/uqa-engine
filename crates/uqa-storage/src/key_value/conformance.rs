@@ -33,6 +33,11 @@ pub use origins::verify_diskann_runtime_adoption_conflicts;
 pub use origins::verify_diskann_selected_corruption;
 pub use origins::verify_vector_field_guard_attempts;
 pub use origins::verify_vector_field_guard_reclamation;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use origins::{
+    diskann_rebuild_until_process_loss, kill_diskann_publication_owner,
+    verify_diskann_recovered_publication,
+};
 pub use origins::{
     diskann_restore_records, verify_diskann_restore_source, verify_diskann_restored,
     verify_diskann_restored_rebuild, verify_diskann_restored_writes, DiskANNRestoreRecords,
@@ -70,7 +75,7 @@ mod read_limits;
 pub use super::diskann::conformance::{
     verify_diskann_build_ownership, verify_diskann_built_generation, verify_diskann_built_reopen,
     verify_diskann_generations, verify_diskann_maintenance, verify_diskann_reclamation_bounds,
-    verify_diskann_reclamation_reopen, verify_diskann_reopen,
+    verify_diskann_reclamation_reopen, verify_diskann_recovered_records, verify_diskann_reopen,
 };
 pub use publication_build::{build_diskann_memory_fixture, build_diskann_publication_fixture};
 pub use read_limits::verify_bounded_value_reads;

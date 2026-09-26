@@ -41,6 +41,25 @@ pub use maintenance::verify_diskann_maintenance;
 pub use ownership::verify_diskann_build_ownership;
 pub use reclamation::{verify_diskann_reclamation_bounds, verify_diskann_reclamation_reopen};
 
+/// After releasing every query/build owner and reclaiming a disposable recovery fixture, only the selected generation may retain visible physical payloads or state.
+pub fn verify_diskann_recovered_records(
+    store: &dyn KeyValueStore,
+    generation: DiskANNGeneration,
+) -> StorageBackendResult<()> {
+    let records = store.scan_prefix(&super::keys::generation_prefix(generation.database()))?;
+    expect(
+        !records.is_empty(),
+        "selected generation retains its artifacts",
+    )?;
+    let keys = Keys::new(generation);
+    expect(
+        records
+            .iter()
+            .all(|(key, _)| key.starts_with(keys.prefix())),
+        "dead unpublished and retired generations leave no visible payloads or state",
+    )
+}
+
 /// Exercise real physical streams, conditional staging, bounded discard and retained reads on a disposable versioned provider. Returns a sealed generation for a subsequent cold reopen check.
 pub fn verify_diskann_generations(
     store: &Arc<dyn KeyValueStore>,
