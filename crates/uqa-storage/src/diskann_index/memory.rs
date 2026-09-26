@@ -70,7 +70,7 @@ impl Clock {
     }
 }
 
-/// A writable memory index over the same sealed-page search as persistent providers. Ordinary mutations replace canonical tensors and current changes atomically; only explicit initialization rebuilds the physical representation. Writable snapshots retain independent roots under the same original allowance.
+/// A writable memory index over the same sealed-page search as persistent providers. Ordinary mutations replace canonical tensors and current changes atomically; explicit initialization and clear construct replacement physical generations. Writable snapshots retain independent roots under the same original allowance.
 pub struct DiskANNMemoryIndex {
     index: RetainedDiskANNIndex<Canonical>,
     clock: Arc<Budgeted<Clock>>,
