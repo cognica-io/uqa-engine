@@ -11,6 +11,7 @@ mod canonical;
 pub mod catalog;
 pub mod changes;
 pub mod format;
+mod memory;
 mod metric;
 pub mod pages;
 mod pq;
@@ -21,6 +22,7 @@ pub mod search;
 mod vamana;
 
 pub use canonical::{DiskANNCanonicalCorpusVisitor, DiskANNCanonicalRead, DiskANNQueryRead};
+pub use memory::{DiskANNMemoryIndex, DiskANNMemoryOptions};
 pub use metric::{ExactVectorReason, NavigationInput, NavigationVector, SquaredNavigationDistance};
 pub use pq::{
     PQCodebook, PQDistance, PQLookupTable, PQTrainer, PQTrainingOptions, PQTrainingSummary,

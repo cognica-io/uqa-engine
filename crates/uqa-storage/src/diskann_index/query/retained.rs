@@ -74,6 +74,32 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> RetainedDiskANNIndex<S> {
         self.retained.reader.manifest()
     }
 
+    pub(in crate::diskann_index) fn canonical(&self) -> &S {
+        &self.retained.canonical
+    }
+
+    /// Advance canonical visibility within the same storage-owned lineage while sharing its prepared physical generation. Only the lifecycle owner may establish this association.
+    pub(in crate::diskann_index) fn with_canonical(
+        &self,
+        canonical: S,
+    ) -> StorageBackendResult<Self> {
+        self.check()?;
+        canonical.check_control(&self.retained.control)?;
+        if canonical.dimensions() != self.dimensions() {
+            return Err(invalid("replacement canonical dimensions differ"));
+        }
+        let retained = Retained {
+            canonical,
+            reader: self.retained.reader.clone(),
+            origins: self.retained.origins.clone(),
+            control: self.retained.control.clone(),
+        };
+        let retained = Budgeted::new(retained, self.retained.control.memory().empty_reservation())
+            .into_shared()?;
+        self.check()?;
+        Ok(Self { retained })
+    }
+
     fn check(&self) -> StorageBackendResult<()> {
         self.retained.control.check()?;
         self.retained
