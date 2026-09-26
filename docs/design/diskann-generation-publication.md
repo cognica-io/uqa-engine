@@ -1,6 +1,6 @@
 # DiskANN generation publication
 
-Storage owns the atomic selection of a physically sealed generation and its complete document-origin coverage. Key/Value canonical sources and native SQLite supply actual retained catalog and input views; native SQLite maps generation records through its existing family 57 while keeping catalog guards and generation changes in the same caller transaction. Public DiskANN SQL, query routing, journal pruning and reclamation are still unfinished.
+Storage owns the atomic selection of a physically sealed generation and its complete document-origin coverage. Key/Value canonical sources and native SQLite supply actual retained catalog and input views; native SQLite maps generation records through its existing family 57 while keeping catalog guards and generation changes in the same caller transaction. The [bounded journal pruner](diskann-journal-pruning.md) consumes that selected coverage. Public DiskANN SQL, query routing and physical-generation reclamation are still unfinished.
 
 ## Publication evidence
 
@@ -22,6 +22,6 @@ The logical head key is the physical binary root `\0uqa-diskann-v1\0`, tag 5, an
 
 State bytes retain revision 1 and their original staging owner. Status values 4 and 5 represent Published and Retired; values 0 through 3 retain their previous meanings. Complete physical generations remain readable through retained sources. The staging discard operation rejects Sealed, Published and Retired states. Selected-head inspection validates the corresponding mappings and Published state on the same view.
 
-Head selection makes the already sealed complete origin artifact logically reachable in one atomic step; it does not copy a document map or delete the journal during publication. Physical covered-key pruning must be bounded, resumable and conditional on the unchanged selected head. Retained snapshots, unresolved receipts, abandoned candidates and retired-generation cleanup still require their owning lifecycle work.
+Head selection makes the already sealed complete origin artifact logically reachable in one atomic step; it does not copy a document map or delete the journal during publication. The bounded journal pruner checks the unchanged selected head and removes exact covered or committed-obsolete keys in resumable pages. Retained snapshots, unresolved receipts, abandoned candidates and retired-generation cleanup still require their owning lifecycle work.
 
 Query integration must retain a head and its physical source together. Committed selection cannot open a fresh source after reading an older head; a private head may refer to staging artifacts newer than the transaction's data snapshot and must retain its verified physical source. The current publication mutation does not implement that query resource adapter or enable public search.

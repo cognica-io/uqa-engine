@@ -1,6 +1,6 @@
 # DiskANN physical generations
 
-The Storage-owned `KeyValueDiskANNStore` persists physical DiskANN generations through existing versioned Key/Value sessions. SQLite Key/Value, redb and native SQLite share staging, physical sealing and retained page sources. Bound canonical sources use the [generation publication contract](diskann-generation-publication.md) to select a sealed generation and its complete coverage atomically; query routing, journal pruning, reclamation and SQL creation remain unfinished.
+The Storage-owned `KeyValueDiskANNStore` persists physical DiskANN generations through existing versioned Key/Value sessions. SQLite Key/Value, redb and native SQLite share staging, physical sealing and retained page sources. Bound canonical sources use the [generation publication contract](diskann-generation-publication.md) to select a sealed generation and its complete coverage atomically; the [bounded journal pruner](diskann-journal-pruning.md) consumes that coverage under the same provider transaction. Query routing, reclamation and SQL creation remain unfinished.
 
 ## Ownership and identities
 

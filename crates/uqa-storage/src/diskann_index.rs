@@ -9,6 +9,7 @@
 pub mod build;
 mod canonical;
 pub mod catalog;
+pub mod changes;
 pub mod format;
 mod metric;
 pub mod pages;

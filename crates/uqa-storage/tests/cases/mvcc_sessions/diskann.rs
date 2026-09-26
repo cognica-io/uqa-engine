@@ -22,6 +22,8 @@ use uqa_storage::key_value::{DiskANNStageStatus, KeyValueDiskANNStore};
 
 #[path = "diskann/identity.rs"]
 mod identity;
+#[path = "diskann/pruning.rs"]
+mod pruning;
 #[path = "diskann/publication.rs"]
 mod publication;
 
@@ -164,4 +166,12 @@ fn diskann_lost_start_reply_keeps_reserved_identity_and_independent_caller_state
     let mut resumed = repository.resume_stage(generation, &control).unwrap();
     assert!(resumed.discard_step(1, &control).unwrap());
     assert!(stage.start(&control).is_err());
+}
+
+#[test]
+fn diskann_pruning_preserves_committed_and_retained_session_views() {
+    let persistence = Persistence::new();
+    let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+    let generation = uqa_storage::key_value::conformance::verify_diskann_pruning(&store).unwrap();
+    uqa_storage::key_value::conformance::verify_diskann_pruning_reopen(&store, generation).unwrap();
 }

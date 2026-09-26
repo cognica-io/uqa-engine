@@ -115,3 +115,20 @@ fn diskann_bounded_build_seals_and_reopens_complete_redb_artifacts() {
     let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
     verify_diskann_built_reopen(&store, generation).unwrap();
 }
+
+#[test]
+fn diskann_pruning_preserves_late_changes_and_reopens_in_redb() {
+    use uqa_storage::key_value::conformance::{
+        verify_diskann_pruning, verify_diskann_pruning_reopen,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("pruning.redb");
+    let generation = {
+        let owner = crate::RedbStorage::open(&path).unwrap();
+        let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
+        verify_diskann_pruning(&store).unwrap()
+    };
+    let owner = crate::RedbStorage::open(&path).unwrap();
+    let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
+    verify_diskann_pruning_reopen(&store, generation).unwrap();
+}

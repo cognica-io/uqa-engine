@@ -148,3 +148,22 @@ fn diskann_bounded_build_seals_and_reopens_complete_sqlite_key_value_artifacts()
         Arc::new(SQLiteKeyValueStore::new(connection(&path, 0)).unwrap());
     verify_diskann_built_reopen(&store, generation).unwrap();
 }
+
+#[test]
+fn diskann_pruning_preserves_late_changes_and_reopens_in_sqlite_modes() {
+    use uqa_storage::key_value::conformance::{
+        verify_diskann_pruning, verify_diskann_pruning_reopen,
+    };
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("pruning.db");
+        let generation = {
+            let store: Arc<dyn KeyValueStore> =
+                Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+            verify_diskann_pruning(&store).unwrap()
+        };
+        let store: Arc<dyn KeyValueStore> =
+            Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+        verify_diskann_pruning_reopen(&store, generation).unwrap();
+    }
+}

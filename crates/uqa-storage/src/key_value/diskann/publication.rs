@@ -179,7 +179,7 @@ fn transition(
     batch.put(key.as_ref(), &State { status, ..state }.encode())
 }
 
-fn head_key(scope: &DiskANNIndexScope) -> [u8; HEAD_PREFIX.len() + 48] {
+pub(super) fn head_key(scope: &DiskANNIndexScope) -> [u8; HEAD_PREFIX.len() + 48] {
     let mut key = [0; HEAD_PREFIX.len() + 48];
     key[..HEAD_PREFIX.len()].copy_from_slice(HEAD_PREFIX);
     for (i, id) in [scope.table, scope.storage, scope.index].iter().enumerate() {

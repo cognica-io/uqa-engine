@@ -18,6 +18,7 @@ use uqa_core::DocId;
 pub use crate::diskann_index::DiskANNCanonicalVectorVisitor;
 
 mod changes;
+mod pruning;
 mod publication;
 
 /// A fixed canonical view. Visitors borrow one decoded vector at a time and must not reenter the source from inside a callback. Any failure invalidates the caller's partial result.
@@ -159,32 +160,76 @@ impl RetainedDiskANNCanonical {
         document: DocId,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Option<Record>> {
+        self.record_on(&*self.read, document, control)
+    }
+
+    fn record_on(
+        &self,
+        read: &dyn KeyValueRead,
+        document: DocId,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<Record>> {
         self.control.check()?;
         control.check()?;
         let key = append(&self.origins, &document.to_be_bytes(), control)?;
         let mut selected = None;
-        self.read
-            .visit_value_bounded(&key, BYTES, control, &mut |value| {
+        let mut seen = false;
+        let mut failure = None;
+        let outcome = read.visit_value_bounded(&key, BYTES, control, &mut |value| {
+            let result = (|| {
+                self.check_control(control)?;
+                if seen || failure.is_some() {
+                    return Err(invalid("canonical origin returned repeatedly"));
+                }
+                seen = true;
                 selected = value
                     .map(|value| Record::decode(value, self.dimensions))
                     .transpose()?;
                 Ok(())
-            })?;
+            })();
+            if let Err(error) = result {
+                if failure.is_none() {
+                    failure = Some(error);
+                }
+                return Err(invalid("canonical origin consumer rejected data"));
+            }
+            Ok(())
+        });
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        outcome?;
+        if !seen {
+            return Err(invalid("canonical origin was not returned"));
+        }
         let prefix = append(&self.vectors, &document.to_be_bytes(), control)?;
         let expected = selected.map_or(0, Record::count);
         let mut count = 0_u64;
-        self.read
-            .visit_keys_after(&prefix, None, usize::MAX, control, &mut |key| {
-                self.control.check()?;
-                control.check()?;
-                if count >= expected
+        let mut failure = None;
+        let outcome = read.visit_keys_after(&prefix, None, usize::MAX, control, &mut |key| {
+            let result = (|| {
+                self.check_control(control)?;
+                if failure.is_some()
+                    || count >= expected
                     || key.strip_prefix(&*prefix) != Some(count.to_be_bytes().as_slice())
                 {
                     return Err(invalid("canonical origins or ordinal coverage mismatch"));
                 }
                 count += 1;
                 Ok(())
-            })?;
+            })();
+            if let Err(error) = result {
+                if failure.is_none() {
+                    failure = Some(error);
+                }
+                return Err(invalid("canonical ordinal consumer rejected data"));
+            }
+            Ok(())
+        });
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        outcome?;
         if count != expected {
             return Err(invalid("canonical replacement count mismatch"));
         }

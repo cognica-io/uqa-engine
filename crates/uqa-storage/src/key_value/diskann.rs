@@ -25,6 +25,7 @@ use super::{KeyValueMutation, KeyValueRead};
 pub(super) mod conformance;
 mod identity;
 mod keys;
+mod pruning;
 pub mod publication;
 mod source;
 mod staging;
@@ -33,6 +34,7 @@ mod state;
 use keys::{database_key, Keys};
 use state::{data_identity, fixed};
 
+pub use pruning::KeyValueDiskANNPruner;
 pub use source::KeyValueDiskANNSource;
 pub use staging::KeyValueDiskANNStage;
 pub use state::DiskANNStageStatus;

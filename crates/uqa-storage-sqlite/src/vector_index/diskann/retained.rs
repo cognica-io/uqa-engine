@@ -7,6 +7,7 @@
 //! Bounded canonical reads borrow native rows and preserve their original visibility and controls.
 
 mod changes;
+mod pruning;
 mod publication;
 
 use super::invalid;
@@ -202,13 +203,23 @@ impl RetainedSQLiteDiskANNCanonical {
         document: DocId,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Option<DiskANNCanonicalOrigin>> {
+        self.record_on(&self.snapshot, document, control)
+    }
+
+    fn record_on(
+        &self,
+        snapshot: &NativeSnapshot,
+        document: DocId,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DiskANNCanonicalOrigin>> {
         self.check(control)?;
         let document = encode_doc_id(document)?;
         let Some(owner) = self.owner else {
             return Ok(None);
         };
         let mut record = None;
-        self.read_payload(
+        self.read_payload_on(
+            snapshot,
             document,
             None,
             CANONICAL_ORIGIN_BYTES,
@@ -230,7 +241,7 @@ impl RetainedSQLiteDiskANNCanonical {
             .map_err(VersionError::into_storage_error)?;
         let expected = record.map_or(0, DiskANNCanonicalOrigin::count);
         let mut count = 0;
-        self.snapshot
+        snapshot
             .view
             .visit_keys(&prefix, None, usize::MAX, control, &mut |key, metadata| {
                 self.check(control).map_err(VersionError::Storage)?;
@@ -265,6 +276,18 @@ impl RetainedSQLiteDiskANNCanonical {
         control: &StorageReadControl,
         visit: &mut dyn FnMut(Option<&[u8]>) -> StorageBackendResult<()>,
     ) -> StorageBackendResult<()> {
+        self.read_payload_on(&self.snapshot, document, ordinal, max_bytes, control, visit)
+    }
+
+    fn read_payload_on(
+        &self,
+        snapshot: &NativeSnapshot,
+        document: i64,
+        ordinal: Option<u64>,
+        max_bytes: usize,
+        control: &StorageReadControl,
+        visit: &mut dyn FnMut(Option<&[u8]>) -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<()> {
         self.check(control)?;
         let Some(owner) = self.owner else {
             return visit(None);
@@ -293,7 +316,7 @@ impl RetainedSQLiteDiskANNCanonical {
             ordinal.is_some(),
         )
         .map_err(VersionError::into_storage_error)?;
-        self.snapshot
+        snapshot
             .view
             .visit_value_bounded(&key, limit, control, &mut |record| {
                 self.check(control).map_err(VersionError::Storage)?;
