@@ -15,6 +15,19 @@ use super::invalid;
 
 const PREFIX: &[u8] = b"UNR\x01";
 
+/// Exact envelope bound for a row containing only TEXT/BLOB fields, before materializing its encoded bytes.
+pub(crate) fn variable_fields_limit(lengths: &[usize]) -> VersionResult<usize> {
+    u16::try_from(lengths.len()).map_err(|_| invalid("native row has too many columns"))?;
+    lengths.iter().try_fold(PREFIX.len() + 2, |total, &bytes| {
+        u32::try_from(bytes)
+            .map_err(|_| invalid("native field exceeds the record format length"))?;
+        total
+            .checked_add(1 + 4)
+            .and_then(|total| total.checked_add(bytes))
+            .ok_or_else(|| invalid("native row length overflow"))
+    })
+}
+
 /// Upper bound for a two-BLOB row before fetching it. Saturation only caps an unrepresentable upper bound at the address-space limit; each field still has the codec's u32 length limit.
 pub(crate) fn binary_pair_limit(key_bytes: usize, value_bytes: usize) -> VersionResult<usize> {
     u32::try_from(key_bytes).map_err(|_| invalid("native key exceeds the record format length"))?;

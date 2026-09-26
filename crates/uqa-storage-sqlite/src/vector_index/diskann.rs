@@ -15,7 +15,7 @@ pub use retained::RetainedSQLiteDiskANNCanonical;
 use rusqlite::types::ValueRef;
 use uqa_core::{memory::BudgetedVec, DocId};
 use uqa_storage::{
-    diskann_index::format::{DiskANNCanonicalOrigin, DiskANNVectorVersion},
+    diskann_index::format::{DiskANNCanonicalOrigin, DiskANNChangeIdentity, DiskANNVectorVersion},
     mvcc::VersionError,
     read_control::StorageReadControl,
     vector_index::validate_vector_values_controlled,
@@ -108,6 +108,19 @@ impl SQLiteDiskANNCanonical {
                         ValueRef::Text(self.index.table.as_bytes()),
                         field,
                         ValueRef::Integer(document),
+                        ValueRef::Blob(&record.encode()),
+                    ],
+                )?;
+                snapshot.put_row(
+                    batch,
+                    Family::VectorChanges,
+                    owner,
+                    &[
+                        ValueRef::Text(self.index.table.as_bytes()),
+                        field,
+                        ValueRef::Blob(
+                            &DiskANNChangeIdentity::new(document as DocId, version).encode(),
+                        ),
                         ValueRef::Blob(&record.encode()),
                     ],
                 )?;

@@ -8,7 +8,7 @@
 
 mod capture;
 mod diskann;
-pub(crate) use row::{binary_pair_limit, vector_row_limit};
+pub(crate) use row::{binary_pair_limit, variable_fields_limit, vector_row_limit};
 mod family;
 mod format;
 mod graph_cache;

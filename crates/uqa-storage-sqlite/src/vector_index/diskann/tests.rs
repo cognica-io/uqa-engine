@@ -10,6 +10,7 @@ use std::path::Path;
 use uqa_storage::diskann_index::{DiskANNCanonicalRead, DiskANNCanonicalScorer};
 use uqa_storage::mvcc::{CommitStatus, VersionedPersistence, VersionedSessionOptions};
 
+mod changes;
 mod corpus;
 mod lifecycle;
 mod validation;
@@ -49,6 +50,32 @@ fn canonical(
     dimensions: u32,
 ) -> SQLiteDiskANNCanonical {
     SQLiteDiskANNCanonical::new(connection.clone(), table, field, dimensions).unwrap()
+}
+
+fn assert_change(
+    source: &RetainedSQLiteDiskANNCanonical,
+    document: DocId,
+    version: DiskANNVectorVersion,
+    control: &StorageReadControl,
+) {
+    assert_eq!(
+        source
+            .next_change_after(document.checked_sub(1), control)
+            .unwrap(),
+        Some(DiskANNChangeIdentity::new(document, version))
+    );
+}
+
+fn change_count(connection: &ManagedConnection) -> i64 {
+    connection
+        .with_physical(|sqlite| {
+            Ok(sqlite.query_row(
+                "SELECT count(*) FROM _uqa_mvcc_native_vector_changes",
+                [],
+                |row| row.get(0),
+            )?)
+        })
+        .unwrap()
 }
 
 fn assert_tensor(
@@ -100,6 +127,7 @@ fn native_diskann_canonical_tensors_retain_private_origins_and_reopen_in_all_fil
                 CommitStatus::Committed(_)
             ));
             let retained = source.retain(&control).unwrap();
+            assert_change(&retained, 1, version, &control);
             assert_eq!(
                 assert_tensor(&retained, 1, &tensor, &control),
                 Some(version)
@@ -117,45 +145,13 @@ fn native_diskann_canonical_tensors_retain_private_origins_and_reopen_in_all_fil
                 Some(empty)
             );
             connection.rollback_transaction().unwrap();
+            assert_change(&private, 1, changed, &control);
+            assert_eq!(change_count(&connection), 2);
             assert_eq!(
                 assert_tensor(&private, 1, &[vec![3.0, 4.0]], &control),
                 Some(changed)
             );
-            connection
-                .with_physical(|sqlite| {
-                    assert_eq!(
-                        sqlite.query_row("SELECT count(*) FROM _vectors", [], |r| r
-                            .get::<_, i64>(0))?,
-                        2
-                    );
-                    assert_eq!(
-                        sqlite.query_row(
-                            "SELECT count(*) FROM _uqa_mvcc_native_vector_origins",
-                            [],
-                            |r| r.get::<_, i64>(0)
-                        )?,
-                        2
-                    );
-                    assert_eq!(
-                        sqlite.query_row(
-                            "SELECT count(*) FROM _uqa_mvcc_native_diskann_records",
-                            [],
-                            |r| r.get::<_, i64>(0)
-                        )?,
-                        0
-                    );
-                    let raw: Vec<u8> = sqlite.query_row(
-                        "SELECT vector FROM _vectors WHERE doc_id=1 AND vector_ordinal=0",
-                        [],
-                        |r| r.get(0),
-                    )?;
-                    assert_eq!(raw, [0, 0, 0, 128, 255, 255, 127, 127]);
-                    assert!(sqlite
-                        .execute("DELETE FROM _uqa_mvcc_native_vector_origins", [])
-                        .is_err());
-                    Ok(())
-                })
-                .unwrap();
+            assert_canonical_physical_rows(&connection);
             drop(persistence);
             drop(source);
             drop(connection);
@@ -172,8 +168,52 @@ fn native_diskann_canonical_tensors_retain_private_origins_and_reopen_in_all_fil
             .retain(&control)
             .unwrap();
         assert_eq!(assert_tensor(&source, 1, &tensor, &control), Some(version));
+        assert_change(&source, 1, version, &control);
+        assert_change(
+            &source,
+            2,
+            source.origin(2, &control).unwrap().unwrap(),
+            &control,
+        );
         assert!(source.origin(2, &control).unwrap().is_some());
     }
+}
+
+fn assert_canonical_physical_rows(connection: &ManagedConnection) {
+    connection
+        .with_physical(|sqlite| {
+            assert_eq!(
+                sqlite.query_row("SELECT count(*) FROM _vectors", [], |r| r.get::<_, i64>(0))?,
+                2
+            );
+            assert_eq!(
+                sqlite.query_row(
+                    "SELECT count(*) FROM _uqa_mvcc_native_vector_origins",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                2
+            );
+            assert_eq!(
+                sqlite.query_row(
+                    "SELECT count(*) FROM _uqa_mvcc_native_diskann_records",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                0
+            );
+            let raw: Vec<u8> = sqlite.query_row(
+                "SELECT vector FROM _vectors WHERE doc_id=1 AND vector_ordinal=0",
+                [],
+                |r| r.get(0),
+            )?;
+            assert_eq!(raw, [0, 0, 0, 128, 255, 255, 127, 127]);
+            assert!(sqlite
+                .execute("DELETE FROM _uqa_mvcc_native_vector_origins", [])
+                .is_err());
+            Ok(())
+        })
+        .unwrap();
 }
 
 #[test]
@@ -200,13 +240,22 @@ fn native_diskann_canonical_writers_keep_disjoint_commits_and_reject_same_docume
         let read = a.retain(&control).unwrap();
         assert_eq!(read.origin(1, &control).unwrap(), Some(av));
         assert_eq!(read.origin(2, &control).unwrap(), Some(bv));
+        assert_change(&read, 1, av, &control);
+        assert_change(&read, 2, bv, &control);
         connection.begin_transaction().unwrap();
         peer.begin_transaction().unwrap();
-        a.replace(1, &[], &control).unwrap();
-        b.replace(1, &[vec![2.0, 0.0]], &control).unwrap();
+        let empty = a.replace(1, &[], &control).unwrap();
+        let populated = b.replace(1, &[vec![2.0, 0.0]], &control).unwrap();
         first.commit_transaction().unwrap();
         assert!(last.commit_transaction().is_err());
         last.rollback_transaction().unwrap();
+        assert_change(
+            &a.retain(&control).unwrap(),
+            1,
+            if reverse { populated } else { empty },
+            &control,
+        );
+        assert_eq!(change_count(&connection), 4);
         assert_tensor(&read, 1, &[vec![1.0, 0.0]], &control);
     }
 }

@@ -36,3 +36,16 @@ pub(super) const ORIGINS_LAYOUT: NativeRecordLayout = NativeRecordLayout {
     identity_columns: &[1, 2],
     object_owned: true,
 };
+
+pub(super) const CHANGES_SQL: &str = "CREATE TABLE _uqa_mvcc_native_vector_changes (table_name TEXT NOT NULL, field TEXT NOT NULL, identity BLOB NOT NULL CHECK(typeof(identity) = 'blob' AND length(identity) = 40), origin BLOB NOT NULL CHECK(typeof(origin) = 'blob' AND length(origin) = 56), PRIMARY KEY (table_name, field, identity)) WITHOUT ROWID";
+
+pub(super) const CHANGES_LAYOUT: NativeRecordLayout = NativeRecordLayout {
+    family: NativeRecordFamily::VectorChanges,
+    table: "_uqa_mvcc_native_vector_changes",
+    columns: &["table_name", "field", "identity", "origin"],
+    column_types: &[Text, Text, Blob, Blob],
+    nullable: &[false; 4],
+    primary_key: &[0, 1, 2],
+    identity_columns: &[1, 2],
+    object_owned: true,
+};
