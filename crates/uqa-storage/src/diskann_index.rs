@@ -25,7 +25,7 @@ pub use metric::{ExactVectorReason, NavigationInput, NavigationVector, SquaredNa
 pub use pq::{
     PQCodebook, PQDistance, PQLookupTable, PQTrainer, PQTrainingOptions, PQTrainingSummary,
 };
-pub use query::{DiskANNQuery, DiskANNQueryResult};
+pub use query::{DiskANNQuery, DiskANNQueryResult, RetainedDiskANNIndex};
 pub use scoring::{DiskANNCanonicalScorer, DiskANNDocumentScore};
 pub use vamana::{VamanaGraph, VamanaPoint};
 

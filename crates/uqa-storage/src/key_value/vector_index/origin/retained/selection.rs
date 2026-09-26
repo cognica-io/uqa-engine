@@ -7,13 +7,32 @@
 use super::{invalid, RetainedDiskANNCanonical};
 use crate::diskann_index::{catalog::DiskANNIndexResolver, DiskANNCanonicalRead};
 use crate::diskann_index::{
-    format::DiskANNChangeIdentity, pages::DiskANNReadLimits, DiskANNQuery, DiskANNQueryRead,
+    format::{DiskANNCanonicalOrigin, DiskANNChangeIdentity},
+    pages::DiskANNReadLimits,
+    DiskANNQuery, DiskANNQueryRead, RetainedDiskANNIndex,
 };
 use crate::key_value::KeyValueDiskANNSource;
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 use std::sync::Arc;
 
 impl RetainedDiskANNCanonical {
+    /// Consume this actual canonical/catalog view into an owned read-only `VectorIndex`, preserving its physical generation and original controls across nested snapshots and source-session closure.
+    pub fn into_vector_index(
+        self,
+        resolver: &dyn DiskANNIndexResolver,
+        limits: DiskANNReadLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<RetainedDiskANNIndex<Self>>> {
+        self.selected_source(resolver, control)?
+            .map(|source| {
+                let parameters = self
+                    .index_parameters()
+                    .ok_or_else(|| invalid("missing index parameters"))?;
+                RetainedDiskANNIndex::open(self, source, parameters, limits, control)
+            })
+            .transpose()
+    }
+
     /// Prepare reusable document search from this actual selected generation and canonical view. Missing publication remains None; malformed selection or unavailable resources fail without substituting an exact index.
     pub fn query(
         &self,
@@ -60,6 +79,14 @@ impl RetainedDiskANNCanonical {
 }
 
 impl DiskANNQueryRead for RetainedDiskANNCanonical {
+    fn document_origin(
+        &self,
+        document: uqa_core::DocId,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DiskANNCanonicalOrigin>> {
+        self.record(document, control)
+    }
+
     fn next_change_after(
         &self,
         after: Option<uqa_core::DocId>,

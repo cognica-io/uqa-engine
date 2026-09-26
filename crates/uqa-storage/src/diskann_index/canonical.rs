@@ -7,7 +7,7 @@
 //! Ordered canonical observations on a retained provider boundary, independent of graph coverage.
 
 use super::{
-    format::{DiskANNChangeIdentity, DiskANNVectorVersion},
+    format::{DiskANNCanonicalOrigin, DiskANNChangeIdentity, DiskANNVectorVersion},
     DiskANNCanonicalVectorVisitor,
 };
 use crate::{mvcc::VersionError, read_control::StorageReadControl, StorageBackendResult};
@@ -19,6 +19,13 @@ pub type DiskANNCanonicalCorpusVisitor<'a> =
 
 /// A retained canonical source with the actual versioned change journal on that same view. The lifecycle owner must establish complete coverage before opening a query; absence from this journal alone is not proof of build membership.
 pub trait DiskANNQueryRead: DiskANNCanonicalRead {
+    /// Return the selected mutation and complete tensor cardinality after validating its ordinal-key coverage. This metadata probe must not decode coordinate values or inspect graph pages; empty replacements return Some with count zero.
+    fn document_origin(
+        &self,
+        document: DocId,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DiskANNCanonicalOrigin>>;
+
     /// Return current journaled documents in strictly increasing order, including empty replacements. Validate the immutable change envelope against its current canonical origin; skip obsolete versions without loading their values.
     fn next_change_after(
         &self,

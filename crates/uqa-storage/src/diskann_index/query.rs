@@ -20,6 +20,8 @@ use crate::{
 };
 
 mod candidates;
+mod retained;
+pub use retained::RetainedDiskANNIndex;
 #[cfg(test)]
 mod tests;
 

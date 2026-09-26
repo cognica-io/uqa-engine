@@ -7,7 +7,9 @@
 use super::{invalid, RetainedSQLiteDiskANNCanonical};
 use std::sync::Arc;
 use uqa_storage::diskann_index::{
-    format::DiskANNChangeIdentity, pages::DiskANNReadLimits, DiskANNQuery, DiskANNQueryRead,
+    format::{DiskANNCanonicalOrigin, DiskANNChangeIdentity},
+    pages::DiskANNReadLimits,
+    DiskANNQuery, DiskANNQueryRead, RetainedDiskANNIndex,
 };
 use uqa_storage::{
     diskann_index::catalog::DiskANNIndexResolver, key_value::KeyValueDiskANNSource,
@@ -15,6 +17,23 @@ use uqa_storage::{
 };
 
 impl RetainedSQLiteDiskANNCanonical {
+    /// Consume the retained native view into the common read-only `VectorIndex` owner without copying canonical vectors or reconstructing the graph.
+    pub fn into_vector_index(
+        self,
+        resolver: &dyn DiskANNIndexResolver,
+        limits: DiskANNReadLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<RetainedDiskANNIndex<Self>>> {
+        self.selected_source(resolver, control)?
+            .map(|source| {
+                let parameters = self
+                    .index_parameters()
+                    .ok_or_else(|| invalid("missing index parameters"))?;
+                RetainedDiskANNIndex::open(self, source, parameters, limits, control)
+            })
+            .transpose()
+    }
+
     /// Prepare the common Storage document search on this native canonical/catalog view and its selected physical source.
     pub fn query(
         &self,
@@ -63,6 +82,14 @@ impl RetainedSQLiteDiskANNCanonical {
 }
 
 impl DiskANNQueryRead for RetainedSQLiteDiskANNCanonical {
+    fn document_origin(
+        &self,
+        document: uqa_core::DocId,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DiskANNCanonicalOrigin>> {
+        self.record(document, control)
+    }
+
     fn next_change_after(
         &self,
         after: Option<uqa_core::DocId>,

@@ -6,6 +6,9 @@
 
 //! Consolidated operator integration tests.
 
+#[path = "cases/diskann.rs"]
+mod diskann;
+
 #[path = "adaptive_fusion_coverage.rs"]
 mod adaptive_fusion_coverage;
 #[path = "attention_fusion_coverage.rs"]

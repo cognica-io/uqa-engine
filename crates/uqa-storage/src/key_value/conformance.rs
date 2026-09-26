@@ -53,7 +53,7 @@ pub use super::diskann::conformance::{
     verify_diskann_built_generation, verify_diskann_built_reopen, verify_diskann_generations,
     verify_diskann_reopen,
 };
-pub use publication_build::build_diskann_publication_fixture;
+pub use publication_build::{build_diskann_memory_fixture, build_diskann_publication_fixture};
 pub use read_limits::verify_bounded_value_reads;
 mod occurrence_accelerators;
 mod occurrence_changes;

@@ -8,14 +8,17 @@ use super::{
     canonical, capture, identity::Resolver, open, publication::build, row, setup,
     ManagedConnection, RetainedSQLiteDiskANNCanonical, StorageReadControl, FIELD, TABLE,
 };
+use std::sync::Arc;
 use uqa_storage::diskann_index::{
     format::{DiskANNGeneration, DiskANNVectorVersion, PAGE_BYTES},
     pages::{DiskANNOriginReader, DiskANNPageSource, DiskANNReadLimits},
-    DiskANNCanonicalScorer,
+    DiskANNCanonicalRead, DiskANNCanonicalScorer,
 };
+use uqa_storage::VectorIndex;
 
 struct Held {
     view: RetainedSQLiteDiskANNCanonical,
+    index: Arc<dyn VectorIndex>,
     generation: DiskANNGeneration,
     version: DiskANNVectorVersion,
 }
@@ -70,7 +73,61 @@ impl Held {
                 .collect::<Vec<_>>()
         };
         assert_eq!(bits(&actual), bits(&exact));
+        let fresh = StorageReadControl::with_limit(1);
+        let nested = self
+            .index
+            .snapshot_with_control(&fresh)
+            .unwrap()
+            .snapshot_with_control(&fresh)
+            .unwrap();
+        assert_eq!(nested.index_kind(), "diskann");
+        assert_eq!(
+            bits(&nested.search_knn(&[1.0, 0.0], 10).unwrap()),
+            bits(&exact)
+        );
+        let expected = DiskANNCanonicalScorer::new(&self.view, &[1.0, 0.0], control)
+            .unwrap()
+            .search_threshold(0.0)
+            .unwrap();
+        assert_eq!(
+            bits(&nested.search_threshold(&[1.0, 0.0], 0.0).unwrap()),
+            bits(&expected)
+        );
+        let mut after = None;
+        let mut ordinals = 0;
+        while let Some(document) = self.view.next_document_after(after, control).unwrap() {
+            self.view
+                .visit_document(document, control, &mut |_, _, _| {
+                    ordinals += 1;
+                    Ok(())
+                })
+                .unwrap();
+            after = Some(document);
+        }
+        assert_eq!(nested.count().unwrap(), ordinals);
+        assert!(nested.contains_document(1).unwrap());
+        assert!(!nested.contains_document(2).unwrap());
+        assert!(!nested.contains_document(99).unwrap());
+        assert_eq!(fresh.memory().used(), 0);
     }
+}
+
+fn owned(connection: &ManagedConnection, control: &StorageReadControl) -> Arc<dyn VectorIndex> {
+    Arc::new(
+        capture(connection, control)
+            .into_vector_index(
+                &Resolver,
+                DiskANNReadLimits {
+                    resident_bytes: 65_536,
+                    cache_bytes: PAGE_BYTES,
+                    max_in_flight_page_bytes: 2 * PAGE_BYTES,
+                    max_record_bytes: 8192,
+                },
+                control,
+            )
+            .unwrap()
+            .unwrap(),
+    )
 }
 
 #[test]
@@ -108,6 +165,7 @@ fn native_diskann_query_views_keep_private_pages_after_undo_and_old_pages_after_
         let connection = open(&path, mode);
         let held = capture(&connection, &control);
         Held {
+            index: owned(&connection, &control),
             version: held.origin(1, &control).unwrap().unwrap(),
             view: held,
             generation,
@@ -133,6 +191,7 @@ fn private_view(
         .unwrap();
     let generation = stage.generation();
     let held = Held {
+        index: owned(connection, control),
         view: capture(connection, control),
         generation,
         version,
@@ -156,6 +215,7 @@ fn private_view(
         .refresh_transaction_snapshot(control.cancellation())
         .unwrap();
     Held {
+        index: owned(connection, control),
         view: capture(connection, control),
         generation,
         version,
@@ -171,6 +231,7 @@ fn private_view(
         .rollback_to_savepoint("published_generation")
         .unwrap();
     Held {
+        index: owned(connection, control),
         view: capture(connection, control),
         generation,
         version,
@@ -203,6 +264,7 @@ fn committed_view(
         .unwrap();
     let view = capture(connection, control);
     let held = Held {
+        index: owned(connection, control),
         version: view.origin(1, control).unwrap().unwrap(),
         view,
         generation: first_stage.generation(),
