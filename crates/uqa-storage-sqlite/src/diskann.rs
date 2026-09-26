@@ -87,6 +87,10 @@ impl Records {
 }
 
 impl KeyValueStore for Records {
+    fn resource_leases(&self) -> Option<&dyn uqa_storage::mvcc::ResourceLeaseProvider> {
+        self.inner.resource_leases()
+    }
+
     fn auxiliary_encryption_key(&self) -> Option<StorageEncryptionKey> {
         self.encryption.clone()
     }

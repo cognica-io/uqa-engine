@@ -29,15 +29,30 @@ impl DiskANNStageStatus {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum StageOwner {
+    Legacy([u8; 16]),
+    Leased(u64),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) struct State {
     pub(super) status: DiskANNStageStatus,
-    pub(super) owner: [u8; 16],
+    pub(super) owner: StageOwner,
 }
 
 impl State {
     pub(super) fn encode(self) -> [u8; STATE_BYTES] {
         let mut bytes = [0; STATE_BYTES];
-        bytes[0] = 1;
+        match self.owner {
+            StageOwner::Legacy(owner) => {
+                bytes[0] = 1;
+                bytes[2..].copy_from_slice(&owner);
+            }
+            StageOwner::Leased(allocation) => {
+                bytes[0] = 2;
+                bytes[10..].copy_from_slice(&allocation.to_be_bytes());
+            }
+        }
         bytes[1] = match self.status {
             DiskANNStageStatus::Writing => 0,
             DiskANNStageStatus::Frozen => 1,
@@ -46,15 +61,24 @@ impl State {
             DiskANNStageStatus::Published => 4,
             DiskANNStageStatus::Retired => 5,
         };
-        bytes[2..].copy_from_slice(&self.owner);
         bytes
     }
 
     pub(super) fn decode(bytes: [u8; STATE_BYTES]) -> StorageBackendResult<Self> {
-        let owner = bytes[2..].try_into().expect("fixed staging identity");
-        if bytes[0] != 1 || owner == [0; 16] {
-            return Err(invalid("invalid staging revision or owner"));
-        }
+        let owner = match bytes[0] {
+            1 if bytes[2..] != [0; 16] => {
+                StageOwner::Legacy(bytes[2..].try_into().expect("fixed staging identity"))
+            }
+            2 if bytes[2..10] == [0; 8] => {
+                let allocation =
+                    u64::from_be_bytes(bytes[10..].try_into().expect("fixed owner allocation"));
+                if !(2..=u64::MAX / 2).contains(&allocation) {
+                    return Err(invalid("invalid staging owner allocation"));
+                }
+                StageOwner::Leased(allocation)
+            }
+            _ => return Err(invalid("invalid staging revision or owner")),
+        };
         let status = match bytes[1] {
             0 => DiskANNStageStatus::Writing,
             1 => DiskANNStageStatus::Frozen,
@@ -115,6 +139,27 @@ mod tests {
     use super::*;
     use crate::StorageBackendError;
     use uqa_core::memory::MemoryError;
+
+    #[test]
+    fn diskann_owner_encoding_rejects_reserved_and_overflowed_resource_tags() {
+        for allocation in [0, 1, u64::MAX / 2 + 1, u64::MAX] {
+            let encoded = State {
+                status: DiskANNStageStatus::Writing,
+                owner: StageOwner::Leased(allocation),
+            }
+            .encode();
+            assert!(State::decode(encoded).is_err());
+        }
+        let valid = State {
+            status: DiskANNStageStatus::Sealed,
+            owner: StageOwner::Leased(u64::MAX / 2),
+        }
+        .encode();
+        assert!(State::decode(valid).is_ok());
+        let mut corrupt = valid;
+        corrupt[2] = 1;
+        assert!(State::decode(corrupt).is_err());
+    }
 
     #[test]
     fn diskann_metadata_preserves_provider_quota_before_any_completion() {

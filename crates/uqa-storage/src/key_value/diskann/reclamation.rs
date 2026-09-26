@@ -14,10 +14,95 @@ use crate::{KeyValueBatch, StorageBackendResult};
 use super::keys::{database_key, Keys, Kind};
 use super::source::{key_page, KEY_PAGE_LIMIT};
 use super::staging::load_state;
-use super::state::State;
+use super::state::{StageOwner, State};
 use super::{invalid, DiskANNStageStatus, KeyValueDiskANNStore};
 
 impl KeyValueDiskANNStore {
+    /// Reclaim an unpublished generation only after exclusively acquiring its abandoned physical owner. A live build, retained sealed source or uncertain original attempt returns `false` without deleting anything. Each successful step deletes at most 64 payload records; partial cleanup persists Discarding and can resume through either reclamation method. Current published heads are always rejected.
+    pub fn reclaim_abandoned_step(
+        &self,
+        generation: DiskANNGeneration,
+        max_records: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        control.check()?;
+        if max_records == 0 {
+            return Err(invalid("reclamation requires a positive record limit"));
+        }
+        let mut observed = None;
+        {
+            let _writer = self.owner.writer.lock();
+            self.idle(control)?;
+            self.owner.store.with_read_view(&mut |read| {
+                observed = load_state(read, generation, control)?;
+                Ok(())
+            })?;
+        }
+        let Some(state) = observed else {
+            return self.reclaim_retired_step(generation, max_records, control);
+        };
+        match state.status {
+            DiskANNStageStatus::Published => {
+                return Err(invalid("published generation cannot be abandoned"))
+            }
+            DiskANNStageStatus::Retired | DiskANNStageStatus::Discarding => {
+                return self.reclaim_retired_step(generation, max_records, control);
+            }
+            DiskANNStageStatus::Writing
+            | DiskANNStageStatus::Frozen
+            | DiskANNStageStatus::Sealed => {}
+        }
+        let lease = match state.owner {
+            StageOwner::Legacy(_) => {
+                let Some(legacy) = self.legacy_guard(control)? else {
+                    return Ok(false);
+                };
+                let lease = self.reserve_owner(control)?;
+                Self::retain_transition(&lease, legacy, control)?
+            }
+            StageOwner::Leased(_) => {
+                let Some(lease) = self.acquire_owner(
+                    state.owner,
+                    crate::mvcc::ResourceLeaseRequest::Recover,
+                    control,
+                )?
+                else {
+                    return Ok(false);
+                };
+                lease
+            }
+        };
+        let keys = Keys::new(generation);
+        let mut complete = false;
+        self.mutate_owned(Some(&lease), control, &mut |read, batch| {
+            if load_state(read, generation, control)? != Some(state) {
+                return Err(invalid(
+                    "generation changed during abandoned-owner acquisition",
+                ));
+            }
+            if read
+                .record_revision(keys.key(Kind::State).as_ref())?
+                .and_then(|revision| revision.observed_commit(self.owner.database))
+                .is_none()
+            {
+                return Err(invalid("abandonment requires a committed state revision"));
+            }
+            complete = delete_page(
+                read,
+                batch,
+                keys,
+                State {
+                    owner: StageOwner::Leased(lease.id().allocation()),
+                    ..state
+                },
+                max_records,
+                control,
+            )?;
+            Ok(())
+        })?;
+        Ok(complete)
+    }
+
     /// Delete at most 64 payload records from a durably retired generation. The final step removes its state. Current heads and unpublished builds cannot be reclaimed here. Retained sources keep the historical pages through ordinary MVCC leases; version reclamation remains separate. Resolve an uncertain original attempt before calling again.
     pub fn reclaim_retired_step(
         &self,

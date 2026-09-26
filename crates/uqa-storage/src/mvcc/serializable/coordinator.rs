@@ -20,6 +20,17 @@ pub use local::LocalSerializableState;
 
 /// Provider-authoritative liveness while shared SSI admission is held. Lease destruction must not acquire this admission or resolve a logical transaction. Admission retains its physical owner independently of every participant.
 pub trait SerializableLeases {
+    /// Share an already retained transport owner without admitting another graph participant. Local resource ownership uses this under the same admission as `retain`; providers without sharing must reject it.
+    fn retain_shared(
+        &self,
+        _id: SerializableTransactionId,
+        _control: &StorageReadControl,
+    ) -> VersionResult<SerializableParticipant> {
+        Err(VersionError::InvalidEncoding(
+            "shared participant transport is unavailable",
+        ))
+    }
+
     fn retain(
         &self,
         id: SerializableTransactionId,

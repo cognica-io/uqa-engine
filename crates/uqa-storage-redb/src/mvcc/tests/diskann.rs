@@ -238,3 +238,12 @@ fn diskann_pruning_preserves_late_changes_and_reopens_in_redb() {
     let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
     verify_diskann_pruning_reopen(&store, generation).unwrap();
 }
+
+#[test]
+fn diskann_build_ownership_protects_live_and_retained_sources() {
+    let directory = tempfile::tempdir().unwrap();
+    let owner = crate::RedbStorage::open(directory.path().join("ownership.redb")).unwrap();
+    let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
+    uqa_storage::key_value::conformance::verify_diskann_build_ownership(&store).unwrap();
+    uqa_storage::key_value::conformance::verify_diskann_publication_ownership(&store).unwrap();
+}

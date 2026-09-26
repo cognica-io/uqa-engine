@@ -369,6 +369,10 @@ impl super::IdentifierAllocator for VersionedKeyValueStore {
 }
 
 impl KeyValueStore for VersionedKeyValueStore {
+    fn resource_leases(&self) -> Option<&dyn super::ResourceLeaseProvider> {
+        self.persistence.resource_leases()
+    }
+
     fn retention_control(&self) -> Option<StorageReadControl> {
         Some(Self::retention_control(self))
     }

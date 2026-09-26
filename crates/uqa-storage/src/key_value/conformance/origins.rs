@@ -16,7 +16,10 @@ pub use binding::{
 };
 pub use binding::{verify_diskann_live_reopen, verify_diskann_live_writes};
 pub use binding::{verify_diskann_pruning, verify_diskann_pruning_reopen};
-pub use binding::{verify_diskann_publication, verify_diskann_publication_reopen};
+pub use binding::{
+    verify_diskann_publication, verify_diskann_publication_ownership,
+    verify_diskann_publication_reopen,
+};
 pub use binding::{verify_diskann_query_reopen, verify_diskann_query_views};
 mod catalog;
 pub use binding::verify_diskann_catalog_binding;

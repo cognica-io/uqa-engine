@@ -107,7 +107,22 @@ fn restore_process_helper() {
     let request = DatabaseRestore::from_identities(identity(SOURCE), identity(TARGET)).unwrap();
     let action = std::env::var(ACTION).unwrap();
     let control = control();
-    if action == "owner" {
+    if action == "resource" {
+        use uqa_storage::mvcc::{ResourceLeaseId, ResourceLeaseProvider, ResourceLeaseRequest};
+        let connection = open(path, mode).unwrap();
+        let store = records(&connection, false);
+        let lease = store
+            .try_acquire_resource(
+                ResourceLeaseId::new(request.source(), 7777).unwrap(),
+                ResourceLeaseRequest::Claim,
+                &control,
+            )
+            .unwrap()
+            .unwrap();
+        drop((store, connection));
+        ready();
+        drop(lease);
+    } else if action == "owner" {
         let connection = open(path, mode).unwrap();
         let store = records(&connection, false);
         let (participant, snapshot) = store
@@ -139,6 +154,23 @@ fn process_death_releases_detached_owners_before_restoration() {
         let path = directory.path().join("owner.db");
         let backup = seed(&path, mode, false);
         let peer = ReadyPeer::start(&path, mode, "owner", backup.request);
+        assert!(matches!(
+            restored(&path, mode, backup.request, &control()),
+            Err(SQLiteError::DatabaseRestoreBusy)
+        ));
+        peer.crash();
+        let connection = restored(&path, mode, backup.request, &control()).unwrap();
+        verify(&connection, &backup, false);
+    }
+}
+
+#[test]
+fn process_death_releases_detached_resource_owners_before_restoration() {
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("resource-owner.db");
+        let backup = seed(&path, mode, false);
+        let peer = ReadyPeer::start(&path, mode, "resource", backup.request);
         assert!(matches!(
             restored(&path, mode, backup.request, &control()),
             Err(SQLiteError::DatabaseRestoreBusy)

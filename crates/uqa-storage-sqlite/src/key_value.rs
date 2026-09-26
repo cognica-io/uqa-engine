@@ -87,6 +87,10 @@ impl uqa_storage::mvcc::IdentifierAllocator for SQLiteKeyValueStore {
 }
 
 impl KeyValueStore for SQLiteKeyValueStore {
+    fn resource_leases(&self) -> Option<&dyn uqa_storage::mvcc::ResourceLeaseProvider> {
+        self.records.resource_leases()
+    }
+
     fn auxiliary_encryption_key(&self) -> Option<uqa_storage::StorageEncryptionKey> {
         self.conn.auxiliary_encryption_key()
     }

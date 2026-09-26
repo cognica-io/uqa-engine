@@ -9,11 +9,11 @@
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use uqa_core::memory::Budgeted;
+use uqa_core::memory::{Budgeted, BudgetedVec};
 
 use crate::catalog::new_nonzero_catalog_identity;
 use crate::diskann_index::format::DiskANNGeneration;
-use crate::mvcc::{DatabaseId, IdentifierRequest};
+use crate::mvcc::{DatabaseId, IdentifierRequest, ResourceLease, WeakResourceLease};
 use crate::read_control::StorageReadControl;
 use crate::{
     KeyValueStore, StorageBackendError, StorageBackendResult, StorageSessionAffinity,
@@ -26,6 +26,7 @@ mod build;
 pub(super) mod conformance;
 mod identity;
 mod keys;
+mod ownership;
 mod pruning;
 pub mod publication;
 mod reclamation;
@@ -47,7 +48,8 @@ struct Owner {
     store: Arc<dyn KeyValueStore>,
     database: DatabaseId,
     affinity: StorageSessionAffinity,
-    writer: Mutex<()>,
+    writer: Mutex<Option<ResourceLease>>,
+    leases: Mutex<BudgetedVec<WeakResourceLease>>,
 }
 
 /// A dedicated physical staging session. Its completion methods resolve existing evaluated attempts; they never replay a mutation or complete the caller's SQL transaction.
@@ -82,9 +84,12 @@ impl KeyValueDiskANNStore {
         let database = versioned_database(&**source)?;
         let store = source.open_session_with_cancellation(control.cancellation())?;
         let affinity = validate_session(&**source, &*store)?;
-        if store.in_transaction() || store.identifier_allocator().is_none() {
+        if store.in_transaction()
+            || store.identifier_allocator().is_none()
+            || store.resource_leases().is_none()
+        {
             return Err(invalid(
-                "staging requires an inactive session and durable identifiers",
+                "staging requires an inactive session, durable identifiers and resource leases",
             ));
         }
         // Verify retained reads before any initialization writes. The temporary lease does not enumerate records.
@@ -96,7 +101,8 @@ impl KeyValueDiskANNStore {
                 store,
                 database,
                 affinity,
-                writer: Mutex::new(()),
+                writer: Mutex::new(None),
+                leases: Mutex::new(BudgetedVec::new(control.memory())),
             },
             control.memory().empty_reservation(),
         )
@@ -156,7 +162,7 @@ impl KeyValueDiskANNStore {
         Ok(KeyValueDiskANNStage::reserved(
             self.clone(),
             generation,
-            new_nonzero_catalog_identity("DiskANN", "staging owner")?,
+            self.reserve_owner(control)?,
         ))
     }
 
@@ -179,20 +185,30 @@ impl KeyValueDiskANNStore {
 
     /// Finish the exact retained attempt, including acknowledgement after a durable commit with a lost reply.
     pub fn commit_pending(&self) -> StorageBackendResult<()> {
-        let _writer = self.owner.writer.lock();
-        if self.owner.store.in_transaction() {
-            self.owner.store.commit_transaction()?;
+        let mut writer = self.owner.writer.lock();
+        let result = if self.owner.store.in_transaction() {
+            self.owner.store.commit_transaction()
+        } else {
+            Ok(())
+        };
+        if !self.owner.store.in_transaction() {
+            *writer = None;
         }
-        Ok(())
+        result
     }
 
     /// Resolve or abort the exact retained attempt. A confirmed durable commit remains a committed outcome from the underlying session.
     pub fn rollback_pending(&self) -> StorageBackendResult<()> {
-        let _writer = self.owner.writer.lock();
-        if self.owner.store.in_transaction() {
-            self.owner.store.rollback_transaction()?;
+        let mut writer = self.owner.writer.lock();
+        let result = if self.owner.store.in_transaction() {
+            self.owner.store.rollback_transaction()
+        } else {
+            Ok(())
+        };
+        if !self.owner.store.in_transaction() {
+            *writer = None;
         }
-        Ok(())
+        result
     }
 
     fn idle(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
@@ -215,12 +231,26 @@ impl KeyValueDiskANNStore {
         control: &StorageReadControl,
         operation: &mut KeyValueMutation<'_>,
     ) -> StorageBackendResult<()> {
-        let _writer = self.owner.writer.lock();
+        self.mutate_owned(None, control, operation)
+    }
+
+    fn mutate_owned(
+        &self,
+        lease: Option<&ResourceLease>,
+        control: &StorageReadControl,
+        operation: &mut KeyValueMutation<'_>,
+    ) -> StorageBackendResult<()> {
+        let mut writer = self.owner.writer.lock();
         self.idle(control)?;
-        self.owner.store.with_mutation(&mut |read, batch| {
+        *writer = lease.cloned();
+        let result = self.owner.store.with_mutation(&mut |read, batch| {
             operation(read, batch)?;
             control.check()
-        })
+        });
+        if !self.owner.store.in_transaction() {
+            *writer = None;
+        }
+        result
     }
 }
 

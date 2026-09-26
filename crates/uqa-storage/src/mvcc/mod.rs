@@ -27,6 +27,7 @@ mod persistence;
 mod projection;
 mod receipts;
 mod resolution;
+mod resources;
 mod restore;
 mod retention;
 mod serializable;
@@ -61,6 +62,11 @@ pub use persistence::{
 pub use receipts::{
     receipt_lease_id, ReceiptAcknowledgement, RetainedTransactionAllocation,
     DEFAULT_RECEIPT_RETENTION_LIMIT,
+};
+pub(crate) use resources::WeakResourceLease;
+pub use resources::{
+    retain_local_resource, ResourceLease, ResourceLeaseId, ResourceLeaseProvider,
+    ResourceLeaseRequest,
 };
 pub use restore::DatabaseRestore;
 pub use retention::{

@@ -304,6 +304,11 @@ pub trait KeyValueBatch {
 
 /// Ordered byte-key storage used by Key/Value catalog and index backends.
 pub trait KeyValueStore: Send + Sync {
+    /// Physical resource ownership for retained builds and recovery. Versioned wrappers must forward this capability.
+    fn resource_leases(&self) -> Option<&dyn crate::mvcc::ResourceLeaseProvider> {
+        None
+    }
+
     /// Credential for database-owned auxiliary files. Wrappers over an encrypted store must forward it; `None` permits unencrypted auxiliary storage.
     fn auxiliary_encryption_key(&self) -> Option<crate::StorageEncryptionKey> {
         None

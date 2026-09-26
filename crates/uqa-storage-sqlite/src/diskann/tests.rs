@@ -330,3 +330,13 @@ fn native_diskann_conditions_keep_original_commit_errors_and_reject_stale_evalua
         Some(b"after".as_slice())
     );
 }
+
+#[test]
+fn diskann_build_ownership_protects_live_and_retained_sources() {
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let connection = open(&directory.path().join("ownership.db"), mode);
+        let store = bind(&connection);
+        uqa_storage::key_value::conformance::verify_diskann_build_ownership(&store).unwrap();
+    }
+}

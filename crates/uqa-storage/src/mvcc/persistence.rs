@@ -161,6 +161,11 @@ pub type CommitResult = Result<CommitReceipt, CommitFailure>;
 pub trait VersionedPersistence: Send + Sync {
     fn database_id(&self) -> DatabaseId;
 
+    /// Exclusive resource ownership for this physical database, separate from SQL participants. Wrappers must forward the capability.
+    fn resource_leases(&self) -> Option<&dyn super::ResourceLeaseProvider> {
+        None
+    }
+
     /// Shared participant admission and recovery for this exact physical database. Wrappers must forward the capability; its presence alone does not enable public SQL SSI.
     fn serializable_coordinator(&self) -> Option<&dyn super::SerializableCoordinator> {
         None

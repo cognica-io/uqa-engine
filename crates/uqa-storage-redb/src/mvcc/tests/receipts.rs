@@ -38,7 +38,7 @@ fn count(store: &RedbRecordStore) -> u64 {
 
 #[test]
 fn value_format_upgrade_preserves_receipt_capacity_acknowledgement_and_live_ownership() {
-    for predecessor in [43_u64, 44, 45, 46, 47] {
+    for predecessor in [43_u64, 44, 45, 46, 47, 48] {
         let store = memory();
         let control = StorageReadControl::with_limit(1 << 20);
         store.set_receipt_retention_limit(7, &control).unwrap();

@@ -31,7 +31,10 @@ mod selection;
 pub use identity::{verify_diskann_catalog_identity, verify_diskann_catalog_identity_reopen};
 pub use live::{verify_diskann_live_reopen, verify_diskann_live_writes};
 pub use pruning::{verify_diskann_pruning, verify_diskann_pruning_reopen};
-pub use publication::{verify_diskann_publication, verify_diskann_publication_reopen};
+pub use publication::{
+    verify_diskann_publication, verify_diskann_publication_ownership,
+    verify_diskann_publication_reopen,
+};
 pub use runtime::{
     diskann_runtime_fixture_options, verify_diskann_runtime_lifecycle,
     verify_diskann_runtime_reclaimed_reopen, verify_diskann_runtime_reclamation,

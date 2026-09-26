@@ -17,6 +17,9 @@ use crate::connection::ManagedConnection;
 use crate::key_value::SQLiteKeyValueStore;
 use crate::SQLiteCompressionOptions;
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod ownership;
+
 #[test]
 fn diskann_runtime_reclamation_preserves_sqlite_undo_recreation_and_cold_reopen() {
     use uqa_storage::key_value::conformance::{
@@ -282,5 +285,18 @@ fn diskann_pruning_preserves_late_changes_and_reopens_in_sqlite_modes() {
         let store: Arc<dyn KeyValueStore> =
             Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
         verify_diskann_pruning_reopen(&store, generation).unwrap();
+    }
+}
+
+#[test]
+fn diskann_build_ownership_protects_live_and_retained_sources() {
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let store: Arc<dyn KeyValueStore> = Arc::new(
+            SQLiteKeyValueStore::new(connection(&directory.path().join("ownership.db"), mode))
+                .unwrap(),
+        );
+        uqa_storage::key_value::conformance::verify_diskann_build_ownership(&store).unwrap();
+        uqa_storage::key_value::conformance::verify_diskann_publication_ownership(&store).unwrap();
     }
 }

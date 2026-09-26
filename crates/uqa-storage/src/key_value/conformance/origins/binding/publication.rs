@@ -281,3 +281,36 @@ pub fn verify_diskann_publication_reopen(
     }
     Ok(())
 }
+
+/// Private publication and retained private snapshots own the sealed build after its staging adapters close.
+pub fn verify_diskann_publication_ownership(
+    store: &Arc<dyn KeyValueStore>,
+) -> StorageBackendResult<()> {
+    let control = StorageReadControl::with_limit(1 << 20);
+    let canonical = setup(store)?;
+    KeyValueCatalog::new(store.clone()).save_catalog_index_row(&row([91; 16])?)?;
+    canonical.replace(1, &[vec![1.0, 0.0]], &control)?;
+    let repository = KeyValueDiskANNStore::connect(store, &control)?;
+    repository.initialize(&control)?;
+    let (coverage, stage) = build(&canonical, &repository, &control)?;
+    let generation = stage.generation();
+    store.begin_transaction()?;
+    publish(store, &coverage, &control)?;
+    drop((coverage, stage, repository, canonical));
+    let cleaner = KeyValueDiskANNStore::connect(store, &control)?;
+    expect(
+        !cleaner.reclaim_abandoned_step(generation, 64, &control)?,
+        "private publication retains the actual sealed source",
+    )?;
+    let held = store.open_retained_read_session(control.cancellation())?;
+    store.rollback_transaction()?;
+    expect(
+        !cleaner.reclaim_abandoned_step(generation, 64, &control)?,
+        "retained private snapshot still owns the source after rollback",
+    )?;
+    drop(held);
+    expect(
+        cleaner.reclaim_abandoned_step(generation, 64, &control)?,
+        "final private owner release admits orphan cleanup",
+    )
+}
