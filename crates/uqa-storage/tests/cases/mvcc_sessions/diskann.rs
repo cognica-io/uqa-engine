@@ -8,6 +8,57 @@ use super::*;
 use uqa_storage::diskann_index::pages::DiskANNRecordKey;
 
 #[test]
+fn diskann_runtime_reclamation_preserves_private_undo_and_recreation() {
+    use uqa_storage::key_value::conformance::{
+        verify_diskann_reclamation_bounds, verify_diskann_reclamation_reopen,
+        verify_diskann_runtime_reclaimed_reopen, verify_diskann_runtime_reclamation,
+    };
+    for private in [false, true] {
+        let persistence = Persistence::new();
+        let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+        let generations = verify_diskann_runtime_reclamation(&store, private).unwrap();
+        let partial = verify_diskann_reclamation_bounds(&store).unwrap();
+        drop(store);
+        let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+        verify_diskann_runtime_reclaimed_reopen(&store, generations).unwrap();
+        verify_diskann_reclamation_reopen(&store, partial).unwrap();
+    }
+}
+
+#[test]
+fn diskann_runtime_retirement_preserves_private_undo_and_recreation() {
+    use uqa_storage::key_value::conformance::{
+        verify_diskann_runtime_retirement, verify_diskann_runtime_retirement_reopen,
+    };
+    for private in [false, true] {
+        let persistence = Persistence::new();
+        let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+        let generations = verify_diskann_runtime_retirement(&store, private).unwrap();
+        drop(store);
+        let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+        verify_diskann_runtime_retirement_reopen(&store, generations).unwrap();
+    }
+}
+
+#[test]
+fn diskann_runtime_adoption_rejects_ordinal_gaps_and_conflicting_insertions() {
+    let persistence = Persistence::new();
+    let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+    uqa_storage::key_value::conformance::verify_diskann_runtime_adoption_conflicts(&store).unwrap();
+}
+
+#[test]
+fn diskann_runtime_lifecycle_preserves_transactions_and_reopen() {
+    let persistence = Persistence::new();
+    let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+    let generation =
+        uqa_storage::key_value::conformance::verify_diskann_runtime_lifecycle(&store).unwrap();
+    drop(store);
+    let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+    uqa_storage::key_value::conformance::verify_diskann_runtime_reopen(&store, generation).unwrap();
+}
+
+#[test]
 fn diskann_live_writes_keep_actual_catalog_visibility_and_reopen() {
     let persistence = Persistence::new();
     let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
@@ -47,10 +98,14 @@ use uqa_storage::key_value::{DiskANNStageStatus, KeyValueDiskANNStore};
 mod identity;
 #[path = "diskann/live.rs"]
 mod live;
+#[path = "diskann/maintenance.rs"]
+mod maintenance;
 #[path = "diskann/pruning.rs"]
 mod pruning;
 #[path = "diskann/publication.rs"]
 mod publication;
+#[path = "diskann/reclamation.rs"]
+mod reclamation;
 #[path = "diskann/selection.rs"]
 mod selection;
 
@@ -112,11 +167,6 @@ fn diskann_staging_resolves_original_commit_attempt_without_replaying_writes() {
 
 #[test]
 fn diskann_freeze_and_discard_fence_a_previously_evaluated_writer() {
-    use uqa_storage::diskann_index::format::{
-        DiskANNArtifactDigests, DiskANNCoverageBuilder, DiskANNManifest, DiskANNManifestInput,
-    };
-    use uqa_storage::vector_index::DiskANNIndexParams;
-
     for discard in [false, true] {
         let persistence = Persistence::new();
         let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
@@ -132,23 +182,28 @@ fn diskann_freeze_and_discard_fence_a_previously_evaluated_writer() {
             .is_err());
 
         let other = KeyValueDiskANNStore::connect(&store, &control).unwrap();
-        let mut resumed = other.resume_stage(generation, &control).unwrap();
-        if discard {
-            assert!(resumed.discard_step(1, &control).unwrap());
-        } else {
-            let manifest = DiskANNManifest::new(DiskANNManifestInput {
-                generation,
-                dimensions: 2,
-                parameters: DiskANNIndexParams::for_dimensions(2).unwrap(),
-                nodes: 0,
-                side_vectors: 0,
-                entry_node: None,
-                coverage: DiskANNCoverageBuilder::new(generation, 2).unwrap().finish(),
-                artifacts: DiskANNArtifactDigests::empty(),
+        assert!(other.resume_stage(generation, &control).is_err());
+        assert!(!other
+            .reclaim_abandoned_step(generation, 64, &control)
+            .unwrap());
+        // Inject a physical metadata change below the staging API. Ordinary peers above cannot steal the pending writer's owner; original record guards must still reject changed state.
+        let (state_key, mut state_bytes) = store
+            .scan_prefix(b"\0uqa-diskann-v1\0\x01")
+            .unwrap()
+            .into_iter()
+            .find(|(_, value)| value.len() == 18)
+            .unwrap();
+        assert_eq!(state_bytes[1], 0);
+        state_bytes[1] = 1;
+        store
+            .with_mutation(&mut |_, batch| {
+                if discard {
+                    batch.delete(&state_key)
+                } else {
+                    batch.put(&state_key, &state_bytes)
+                }
             })
             .unwrap();
-            resumed.seal(manifest, 4096, &control).unwrap();
-        }
         let error = writer.commit_pending().unwrap_err();
         assert!(matches!(
             error.commit_outcome(),
@@ -170,7 +225,7 @@ fn diskann_freeze_and_discard_fence_a_previously_evaluated_writer() {
         writer.rollback_pending().unwrap();
         assert_eq!(
             stage.status(&control).unwrap(),
-            (!discard).then_some(DiskANNStageStatus::Sealed)
+            (!discard).then_some(DiskANNStageStatus::Frozen)
         );
     }
 }
@@ -201,4 +256,12 @@ fn diskann_pruning_preserves_committed_and_retained_session_views() {
     let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
     let generation = uqa_storage::key_value::conformance::verify_diskann_pruning(&store).unwrap();
     uqa_storage::key_value::conformance::verify_diskann_pruning_reopen(&store, generation).unwrap();
+}
+
+#[test]
+fn diskann_build_ownership_protects_live_and_retained_sources() {
+    let persistence = Persistence::new();
+    let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+    uqa_storage::key_value::conformance::verify_diskann_build_ownership(&store).unwrap();
+    uqa_storage::key_value::conformance::verify_diskann_publication_ownership(&store).unwrap();
 }

@@ -17,6 +17,92 @@ use crate::connection::ManagedConnection;
 use crate::key_value::SQLiteKeyValueStore;
 use crate::SQLiteCompressionOptions;
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod ownership;
+
+#[test]
+fn diskann_runtime_reclamation_preserves_sqlite_undo_recreation_and_cold_reopen() {
+    use uqa_storage::key_value::conformance::{
+        verify_diskann_reclamation_bounds, verify_diskann_reclamation_reopen,
+        verify_diskann_runtime_reclaimed_reopen, verify_diskann_runtime_reclamation,
+    };
+    for (mode, private) in (0..4).flat_map(|mode| [false, true].map(|private| (mode, private))) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("reclamation.db");
+        let (generations, partial) = {
+            let store: Arc<dyn KeyValueStore> =
+                Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+            let generations = verify_diskann_runtime_reclamation(&store, private).unwrap();
+            let partial = verify_diskann_reclamation_bounds(&store).unwrap();
+            (generations, partial)
+        };
+        let current = connection(&path, mode);
+        let store: Arc<dyn KeyValueStore> =
+            Arc::new(SQLiteKeyValueStore::new(current.clone()).unwrap());
+        verify_diskann_runtime_reclaimed_reopen(&store, generations).unwrap();
+        verify_diskann_reclamation_reopen(&store, partial).unwrap();
+        current
+            .with_physical(|sqlite| {
+                let retained: i64 = sqlite.query_row(
+                    "SELECT count(*) FROM _uqa_mvcc_versions WHERE length(value) >= 32768",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert_eq!(
+                    retained, 0,
+                    "final-reader release reclaims large historical payloads"
+                );
+                Ok(())
+            })
+            .unwrap();
+    }
+}
+
+#[test]
+fn diskann_runtime_retirement_preserves_sqlite_undo_recreation_and_cold_reopen() {
+    use uqa_storage::key_value::conformance::{
+        verify_diskann_runtime_retirement, verify_diskann_runtime_retirement_reopen,
+    };
+    for (mode, private) in (0..4).flat_map(|mode| [false, true].map(|private| (mode, private))) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("retirement.db");
+        let generations = {
+            let store: Arc<dyn KeyValueStore> =
+                Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+            verify_diskann_runtime_retirement(&store, private).unwrap()
+        };
+        let store: Arc<dyn KeyValueStore> =
+            Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+        verify_diskann_runtime_retirement_reopen(&store, generations).unwrap();
+    }
+}
+
+#[test]
+fn diskann_runtime_adoption_rejects_sqlite_ordinal_gaps_and_conflicting_insertions() {
+    let directory = tempfile::tempdir().unwrap();
+    let store: Arc<dyn KeyValueStore> = Arc::new(
+        SQLiteKeyValueStore::new(connection(&directory.path().join("adoption.db"), 0)).unwrap(),
+    );
+    uqa_storage::key_value::conformance::verify_diskann_runtime_adoption_conflicts(&store).unwrap();
+}
+
+#[test]
+fn diskann_runtime_lifecycle_preserves_sqlite_transactions_and_cold_reopen() {
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("runtime.db");
+        let generation = {
+            let store: Arc<dyn KeyValueStore> =
+                Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+            uqa_storage::key_value::conformance::verify_diskann_runtime_lifecycle(&store).unwrap()
+        };
+        let store: Arc<dyn KeyValueStore> =
+            Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+        uqa_storage::key_value::conformance::verify_diskann_runtime_reopen(&store, generation)
+            .unwrap();
+    }
+}
+
 #[test]
 fn diskann_live_writes_keep_actual_catalog_visibility_and_sqlite_cold_reopen() {
     for mode in 0..4 {
@@ -199,5 +285,30 @@ fn diskann_pruning_preserves_late_changes_and_reopens_in_sqlite_modes() {
         let store: Arc<dyn KeyValueStore> =
             Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
         verify_diskann_pruning_reopen(&store, generation).unwrap();
+    }
+}
+
+#[test]
+fn diskann_build_ownership_protects_live_and_retained_sources() {
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let store: Arc<dyn KeyValueStore> = Arc::new(
+            SQLiteKeyValueStore::new(connection(&directory.path().join("ownership.db"), mode))
+                .unwrap(),
+        );
+        uqa_storage::key_value::conformance::verify_diskann_build_ownership(&store).unwrap();
+        uqa_storage::key_value::conformance::verify_diskann_publication_ownership(&store).unwrap();
+    }
+}
+
+#[test]
+fn diskann_maintenance_uses_finite_key_only_discovery_and_vacuum() {
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let store: Arc<dyn KeyValueStore> = Arc::new(
+            SQLiteKeyValueStore::new(connection(&directory.path().join("maintenance.db"), mode))
+                .unwrap(),
+        );
+        uqa_storage::key_value::conformance::verify_diskann_maintenance(&store).unwrap();
     }
 }

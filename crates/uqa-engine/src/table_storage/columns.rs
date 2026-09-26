@@ -135,17 +135,59 @@ impl Engine {
         else {
             return Ok(false);
         };
-        let Some(t) = self.try_table(table)? else {
-            return Ok(false);
-        };
-        if let Some(mut idx) = t.vector_indexes.write().live_mut()?.remove(column) {
-            idx.clear()?;
-        }
-        for index_name in self.vector_catalog_index_names_for_column(&table_name, column)? {
-            self.try_drop_catalog_index(&index_name)?;
-        }
-        self.try_save_table_schema(&table_name, &t)?;
+        uqa_execution::catalog::index::vectors::remove_for_column_conversion(
+            &self.index_registry_context(),
+            &table_name,
+            column,
+            || {
+                let state = self
+                    .try_table(&table_name)?
+                    .ok_or_else(|| table_not_found(&table_name))?;
+                let dimensions = state
+                    .vector_indexes
+                    .read()
+                    .get(column)
+                    .map(uqa_storage::VectorIndex::dimensions);
+                if let Some(dimensions) = dimensions {
+                    self.prepare_vector_column_rewrite(&table_name, column, dimensions)?;
+                    state.vector_indexes.write().live_mut()?.remove(column);
+                }
+                self.try_save_table_schema(&table_name, &state)
+            },
+        )?;
         Ok(true)
+    }
+
+    pub(crate) fn prepare_vector_column_rewrite(
+        &self,
+        table: &str,
+        column: &str,
+        dimensions: u32,
+    ) -> StorageBackendResult<()> {
+        let table_name = self
+            .try_resolve_table_name(table)?
+            .ok_or_else(|| table_not_found(table))?;
+        let state = self
+            .try_table(&table_name)?
+            .ok_or_else(|| table_not_found(&table_name))?;
+        uqa_execution::schema::indexes::diskann::retire_column(
+            &self.index_registry_context(),
+            &table_name,
+            column,
+        )?;
+        let canonical = self.build_vector_index_with_mode(
+            &table_name,
+            column,
+            dimensions,
+            VectorIndexSpec::BruteForce,
+            uqa_storage::VectorIndexOpenMode::Create,
+        )?;
+        uqa_execution::catalog::index::vectors::prepare_column_rewrite(
+            &mut state.vector_indexes.write(),
+            column,
+            canonical,
+        )?;
+        Ok(())
     }
 
     pub(crate) fn try_rebuild_vector_index_for_column(
@@ -171,16 +213,23 @@ impl Engine {
         let spec = self
             .vector_index_spec_for_column(&table_name, column)?
             .unwrap_or(VectorIndexSpec::BruteForce);
+        let t = self
+            .try_table(&table_name)?
+            .ok_or_else(|| table_not_found(&table_name))?;
+        self.try_save_table_schema(&table_name, &t)?;
+        if uqa_execution::schema::indexes::diskann::create_column(
+            &self.index_registry_context(),
+            &table_name,
+            column,
+        )? {
+            return Ok(true);
+        }
         let rebuilt = self.rebuild_vector_field_with_spec(&table_name, column, dimensions, spec)?;
         if !rebuilt {
             return Err(StorageBackendError::Other(format!(
                 "failed to rebuild vector index for `{table_name}`.`{column}`"
             )));
         }
-        let t = self
-            .try_table(&table_name)?
-            .ok_or_else(|| table_not_found(&table_name))?;
-        self.try_save_table_schema(&table_name, &t)?;
         Ok(true)
     }
 
@@ -238,6 +287,29 @@ impl Engine {
                 self.rewrite_document_for_schema_change(table_name, doc_id, doc)
                     .map_err(|err| StorageBackendError::Other(err.to_string()))?;
             }
+        }
+        Ok(())
+    }
+
+    fn bind_renamed_vector_field(
+        &self,
+        table: &str,
+        field: &str,
+        dimensions: u32,
+        restore: bool,
+    ) -> StorageBackendResult<()> {
+        let Some(spec) = self.vector_index_spec_for_column(table, field)? else {
+            return Ok(());
+        };
+        let bound = if restore {
+            self.restore_vector_field_index(table, field, dimensions, spec)?
+        } else {
+            self.rebuild_vector_field_with_spec(table, field, dimensions, spec)?
+        };
+        if !bound {
+            return Err(StorageBackendError::Other(format!(
+                "failed to bind renamed vector index for `{table}`.`{field}`"
+            )));
         }
         Ok(())
     }
@@ -303,16 +375,13 @@ impl Engine {
             binding.install(to, t.inverted_index.write().as_mut())?;
         }
         self.rename_column_analyzer_assignments(&table_name, from, to);
-        let vector_dimensions = {
-            let mut vectors = t.vector_indexes.write();
-            if let Some(mut idx) = vectors.live_mut()?.remove(from) {
-                let dimensions = idx.dimensions();
-                idx.clear()?;
-                Some(dimensions)
-            } else {
-                None
-            }
-        };
+        let vector_rename = uqa_execution::catalog::index::vectors::detach_for_column_rename(
+            &mut t.vector_indexes.write(),
+            from,
+        )?;
+        let vector_dimensions = vector_rename.as_ref().map(|rename| rename.dimensions);
+        let retained_vector = vector_rename.and_then(|rename| rename.retained);
+        let restore_vector = retained_vector.is_some();
         self.rename_document_fields(&table_name, &t, from, to)?;
         if analyzer_binding.is_some() {
             t.inverted_index
@@ -320,7 +389,12 @@ impl Engine {
                 .remove_field_analyzers(from)
                 .map_err(StorageBackendError::Other)?;
         }
-        if let Some(dimensions) = vector_dimensions {
+        if let Some(index) = retained_vector {
+            t.vector_indexes
+                .write()
+                .live_mut()?
+                .insert(to.into(), index);
+        } else if let Some(dimensions) = vector_dimensions {
             self.create_vector_field(&table_name, to, dimensions)?;
         }
         self.rename_catalog_index_column_refs(&table_name, from, to)?;
@@ -328,16 +402,10 @@ impl Engine {
             if let Some(catalog) = self.storage.catalog.as_ref() {
                 catalog.rename_column_data(&table_name, from, to)?;
             }
-            if let Some(dimensions) = vector_dimensions {
-                if let Some(spec) = self.vector_index_spec_for_column(&table_name, to)? {
-                    if !self.rebuild_vector_field_with_spec(&table_name, to, dimensions, spec)? {
-                        return Err(StorageBackendError::Other(format!(
-                            "failed to rebuild vector index for `{table_name}`.`{to}`"
-                        )));
-                    }
-                }
-            }
             self.try_save_table_schema(&table_name, &t)?;
+            if let Some(dimensions) = vector_dimensions {
+                self.bind_renamed_vector_field(&table_name, to, dimensions, restore_vector)?;
+            }
         }
         let relation = Self::resolved_relation_identity(&table_name)?;
         self.rewrite_routine_column_references(&relation, from, to)

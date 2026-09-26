@@ -132,7 +132,12 @@ fn pg18_vacuum_runs_outside_transactions_and_preserves_error_precedence() {
     assert_pg18_vacuum_validation_errors(&eng);
 
     eng.sql("BEGIN", &[]).unwrap();
-    let inside = eng.sql("VACUUM (NOT_A_PG18_OPTION)", &[]).unwrap_err();
+    let invalid = eng.sql("VACUUM (NOT_A_PG18_OPTION)", &[]).unwrap_err();
+    assert_eq!(invalid.sqlstate(), Some("42601"), "{invalid}");
+    eng.sql("ROLLBACK", &[]).unwrap();
+
+    eng.sql("BEGIN", &[]).unwrap();
+    let inside = eng.sql("VACUUM vacuum_target", &[]).unwrap_err();
     assert_eq!(inside.sqlstate(), Some("25001"), "{inside}");
     assert!(inside
         .to_string()

@@ -9,6 +9,8 @@
 mod liveness;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(in crate::mvcc) use liveness::lease_file;
+#[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
+pub(in crate::mvcc) use liveness::local_file_registry;
 
 use rusqlite::Connection;
 use uqa_core::memory::BudgetedVec;

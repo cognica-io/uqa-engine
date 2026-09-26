@@ -11,12 +11,12 @@ use uqa_core::memory::BudgetedVec;
 use crate::diskann_index::format::{DiskANNGeneration, DiskANNManifest, PAGE_BYTES};
 use crate::diskann_index::pages::{read_record, DiskANNArtifactSealer, DiskANNRecordKey};
 use crate::key_value::KeyValueRead;
+use crate::mvcc::{ResourceLease, ResourceLeaseRequest};
 use crate::read_control::StorageReadControl;
 use crate::{KeyValueBatch, StorageBackendResult};
 
 use super::keys::{database_key, Keys, Kind};
-use super::source::{key_page, KEY_PAGE_LIMIT};
-use super::state::{fixed, State, STATE_BYTES};
+use super::state::{fixed, StageOwner, State, STATE_BYTES};
 use super::{
     invalid, read_data_identity, DiskANNStageStatus, KeyValueDiskANNSource, KeyValueDiskANNStore,
 };
@@ -25,7 +25,8 @@ use super::{
 pub struct KeyValueDiskANNStage {
     repository: KeyValueDiskANNStore,
     generation: DiskANNGeneration,
-    owner: [u8; 16],
+    owner: StageOwner,
+    pub(super) lease: Option<ResourceLease>,
     attempted: bool,
 }
 
@@ -33,12 +34,13 @@ impl KeyValueDiskANNStage {
     pub(super) fn reserved(
         repository: KeyValueDiskANNStore,
         generation: DiskANNGeneration,
-        owner: [u8; 16],
+        lease: ResourceLease,
     ) -> Self {
         Self {
             repository,
             generation,
-            owner,
+            owner: StageOwner::Leased(lease.id().allocation()),
+            lease: Some(lease),
             attempted: false,
         }
     }
@@ -57,13 +59,57 @@ impl KeyValueDiskANNStage {
                 Ok(())
             })?;
         }
-        let state = state.ok_or_else(|| invalid("cannot resume an absent generation"))?;
-        Ok(Self {
+        let mut state = state.ok_or_else(|| invalid("cannot resume an absent generation"))?;
+        let lease = if matches!(
+            state.status,
+            DiskANNStageStatus::Published
+                | DiskANNStageStatus::Retired
+                | DiskANNStageStatus::Discarding
+        ) {
+            None
+        } else if matches!(state.owner, StageOwner::Legacy(_)) {
+            let legacy = repository
+                .legacy_guard(control)?
+                .ok_or_else(|| invalid("legacy staging ownership transition is still alive"))?;
+            let lease = repository.reserve_owner(control)?;
+            let transition = KeyValueDiskANNStore::retain_transition(&lease, legacy, control)?;
+            let upgraded = State {
+                owner: StageOwner::Leased(lease.id().allocation()),
+                ..state
+            };
+            repository.mutate_owned(Some(&transition), control, &mut |read, batch| {
+                if load_state(read, generation, control)? != Some(state) {
+                    return Err(invalid(
+                        "legacy staging state changed during ownership upgrade",
+                    ));
+                }
+                batch.require_unchanged(&database_key())?;
+                let key = Keys::new(generation).key(Kind::State);
+                batch.require_unchanged(key.as_ref())?;
+                batch.put(key.as_ref(), &upgraded.encode())
+            })?;
+            state = upgraded;
+            Some(lease)
+        } else {
+            Some(
+                repository
+                    .acquire_owner(state.owner, ResourceLeaseRequest::Claim, control)?
+                    .ok_or_else(|| invalid("generation staging owner is still alive"))?,
+            )
+        };
+        let handle = Self {
             repository,
             generation,
             owner: state.owner,
+            lease,
             attempted: true,
-        })
+        };
+        if handle.status(control)?.is_none() {
+            return Err(invalid(
+                "generation was discarded before ownership acquisition",
+            ));
+        }
+        Ok(handle)
     }
 
     pub fn generation(&self) -> DiskANNGeneration {
@@ -88,28 +134,29 @@ impl KeyValueDiskANNStage {
         let create = !self.attempted;
         self.attempted = true;
         let keys = Keys::new(self.generation);
-        self.repository.mutate(control, &mut |read, batch| {
-            match self.state(read, control)? {
-                Some(state) if state.status == DiskANNStageStatus::Writing => return Ok(()),
-                Some(_) => return Err(invalid("generation is no longer writable")),
-                None if !create => {
-                    return Err(invalid("a consumed generation cannot be recreated"))
+        self.repository
+            .mutate_owned(self.lease.as_ref(), control, &mut |read, batch| {
+                match self.state(read, control)? {
+                    Some(state) if state.status == DiskANNStageStatus::Writing => return Ok(()),
+                    Some(_) => return Err(invalid("generation is no longer writable")),
+                    None if !create => {
+                        return Err(invalid("a consumed generation cannot be recreated"))
+                    }
+                    None => {}
                 }
-                None => {}
-            }
-            if read.contains_prefix_budgeted(keys.prefix(), control)? {
-                return Err(invalid("generation has orphaned records"));
-            }
-            batch.require_unchanged(&database_key())?;
-            batch.put(
-                keys.key(Kind::State).as_ref(),
-                &State {
-                    status: DiskANNStageStatus::Writing,
-                    owner: self.owner,
+                if read.contains_prefix_budgeted(keys.prefix(), control)? {
+                    return Err(invalid("generation has orphaned records"));
                 }
-                .encode(),
-            )
-        })
+                batch.require_unchanged(&database_key())?;
+                batch.put(
+                    keys.key(Kind::State).as_ref(),
+                    &State {
+                        status: DiskANNStageStatus::Writing,
+                        owner: self.owner,
+                    }
+                    .encode(),
+                )
+            })
     }
 
     /// Store one already encoded batch. The provider's existing private-write allowance owns its retained copy.
@@ -149,18 +196,19 @@ impl KeyValueDiskANNStage {
         control: &StorageReadControl,
     ) -> StorageBackendResult<()> {
         let keys = Keys::new(self.generation);
-        self.repository.mutate(control, &mut |read, batch| {
-            let state = self.require_state(read, control)?;
-            if state.status != DiskANNStageStatus::Writing {
-                return Err(invalid("generation is no longer writable"));
-            }
-            let key = keys.key(kind);
-            if read.contains_prefix_budgeted(key.as_ref(), control)? {
-                return Err(invalid("staging records cannot be replaced"));
-            }
-            self.fence(batch)?;
-            batch.put(key.as_ref(), bytes)
-        })
+        self.repository
+            .mutate_owned(self.lease.as_ref(), control, &mut |read, batch| {
+                let state = self.require_state(read, control)?;
+                if state.status != DiskANNStageStatus::Writing {
+                    return Err(invalid("generation is no longer writable"));
+                }
+                let key = keys.key(kind);
+                if read.contains_prefix_budgeted(key.as_ref(), control)? {
+                    return Err(invalid("staging records cannot be replaced"));
+                }
+                self.fence(batch)?;
+                batch.put(key.as_ref(), bytes)
+            })
     }
 
     /// Freeze immutable records, validate every stored stream, then mark their physical seal. This does not publish a catalog or establish canonical snapshot coverage.
@@ -179,27 +227,30 @@ impl KeyValueDiskANNStage {
         let keys = Keys::new(self.generation);
         let manifest_key = keys.key(Kind::Record(DiskANNRecordKey::Manifest));
         let mut already_sealed = false;
-        self.repository.mutate(control, &mut |read, batch| {
-            let state = self.require_state(read, control)?;
-            match state.status {
-                DiskANNStageStatus::Writing => {
-                    if read.contains_prefix_budgeted(manifest_key.as_ref(), control)? {
-                        return Err(invalid("writable generation already has a manifest"));
+        self.repository
+            .mutate_owned(self.lease.as_ref(), control, &mut |read, batch| {
+                let state = self.require_state(read, control)?;
+                match state.status {
+                    DiskANNStageStatus::Writing => {
+                        if read.contains_prefix_budgeted(manifest_key.as_ref(), control)? {
+                            return Err(invalid("writable generation already has a manifest"));
+                        }
+                        self.fence(batch)?;
+                        batch.put(manifest_key.as_ref(), &bytes)?;
+                        self.set_status(batch, DiskANNStageStatus::Frozen)
                     }
-                    self.fence(batch)?;
-                    batch.put(manifest_key.as_ref(), &bytes)?;
-                    self.set_status(batch, DiskANNStageStatus::Frozen)
+                    DiskANNStageStatus::Frozen | DiskANNStageStatus::Sealed => {
+                        verify_manifest(read, keys, &bytes, control)?;
+                        already_sealed = state.status == DiskANNStageStatus::Sealed;
+                        Ok(())
+                    }
+                    DiskANNStageStatus::Discarding
+                    | DiskANNStageStatus::Published
+                    | DiskANNStageStatus::Retired => {
+                        Err(invalid("generation is no longer staging"))
+                    }
                 }
-                DiskANNStageStatus::Frozen | DiskANNStageStatus::Sealed => {
-                    verify_manifest(read, keys, &bytes, control)?;
-                    already_sealed = state.status == DiskANNStageStatus::Sealed;
-                    Ok(())
-                }
-                DiskANNStageStatus::Discarding
-                | DiskANNStageStatus::Published
-                | DiskANNStageStatus::Retired => Err(invalid("generation is no longer staging")),
-            }
-        })?;
+            })?;
         if already_sealed {
             return self.repository.open_source(self.generation, control);
         }
@@ -210,22 +261,23 @@ impl KeyValueDiskANNStage {
             control,
         )?;
         verify_streams(&source, &manifest, max_record_bytes, control)?;
-        self.repository.mutate(control, &mut |read, batch| {
-            let state = self.require_state(read, control)?;
-            if !matches!(
-                state.status,
-                DiskANNStageStatus::Frozen | DiskANNStageStatus::Sealed
-            ) {
-                return Err(invalid("generation changed during physical verification"));
-            }
-            verify_manifest(read, keys, &bytes, control)?;
-            if state.status == DiskANNStageStatus::Frozen {
-                self.fence(batch)?;
-                batch.require_unchanged(manifest_key.as_ref())?;
-                self.set_status(batch, DiskANNStageStatus::Sealed)?;
-            }
-            Ok(())
-        })?;
+        self.repository
+            .mutate_owned(self.lease.as_ref(), control, &mut |read, batch| {
+                let state = self.require_state(read, control)?;
+                if !matches!(
+                    state.status,
+                    DiskANNStageStatus::Frozen | DiskANNStageStatus::Sealed
+                ) {
+                    return Err(invalid("generation changed during physical verification"));
+                }
+                verify_manifest(read, keys, &bytes, control)?;
+                if state.status == DiskANNStageStatus::Frozen {
+                    self.fence(batch)?;
+                    batch.require_unchanged(manifest_key.as_ref())?;
+                    self.set_status(batch, DiskANNStageStatus::Sealed)?;
+                }
+                Ok(())
+            })?;
         self.repository.open_source(self.generation, control)
     }
 
@@ -240,36 +292,32 @@ impl KeyValueDiskANNStage {
             return Err(invalid("discard requires a positive record limit"));
         }
         self.attempted = true;
-        let limit = max_records.min(KEY_PAGE_LIMIT);
         let keys = Keys::new(self.generation);
-        let state_key = keys.key(Kind::State);
         let mut complete = false;
-        self.repository.mutate(control, &mut |read, batch| {
-            let Some(state) = self.state(read, control)? else {
-                if read.contains_prefix_budgeted(keys.prefix(), control)? {
-                    return Err(invalid("generation has orphaned records"));
+        self.repository
+            .mutate_owned(self.lease.as_ref(), control, &mut |read, batch| {
+                let Some(state) = self.state(read, control)? else {
+                    if read.contains_prefix_budgeted(keys.prefix(), control)? {
+                        return Err(invalid("generation has orphaned records"));
+                    }
+                    complete = true;
+                    return Ok(());
+                };
+                if state.status.is_complete() {
+                    return Err(invalid(
+                        "sealed generation requires catalog-owned reclamation",
+                    ));
                 }
-                complete = true;
-                return Ok(());
-            };
-            if state.status.is_complete() {
-                return Err(invalid(
-                    "sealed generation requires catalog-owned reclamation",
-                ));
-            }
-            let page = key_page(read, keys, Some(state_key.as_ref()), limit, control)?;
-            self.fence(batch)?;
-            for (key, _) in page.iter() {
-                batch.delete(key.as_ref())?;
-            }
-            complete = page.len() < limit;
-            if complete {
-                batch.delete(state_key.as_ref())?;
-            } else {
-                self.set_status(batch, DiskANNStageStatus::Discarding)?;
-            }
-            Ok(())
-        })?;
+                complete = super::reclamation::delete_page(
+                    read,
+                    batch,
+                    keys,
+                    state,
+                    max_records,
+                    control,
+                )?;
+                Ok(())
+            })?;
         Ok(complete)
     }
 

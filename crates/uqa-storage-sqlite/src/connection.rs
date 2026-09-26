@@ -639,6 +639,15 @@ impl ManagedConnection {
 
     /// Rewrite the `SQLite` database into its minimum-sized file. `SQLite` requires `VACUUM` to run in autocommit mode, so the session write gate makes the transaction check and maintenance command one atomic session operation.
     pub fn vacuum(&self) -> Result<()> {
+        self.maintain_storage(true)
+    }
+
+    /// Reclaim obsolete logical records and history without executing a physical `SQLite` `VACUUM`.
+    pub fn reclaim_obsolete(&self) -> Result<()> {
+        self.maintain_storage(false)
+    }
+
+    fn maintain_storage(&self, compact: bool) -> Result<()> {
         self.surface_cleanup_failure()?;
         let _gate = self.session.gate.write();
         if self.session.transaction.lock().is_some()
@@ -651,10 +660,27 @@ impl ManagedConnection {
             return Err(SQLiteError::TransactionAlreadyActive);
         }
         if let Some(logical) = self.session.logical.get() {
+            let source: Arc<dyn KeyValueStore> = if let Some(namespace) = logical.native {
+                Arc::new(crate::diskann::Records::new(
+                    logical.store.clone(),
+                    namespace,
+                    self.auxiliary_encryption_key(),
+                )?)
+            } else {
+                logical.store.clone()
+            };
+            let retained = logical.retention_control();
+            let control = uqa_storage::read_control::StorageReadControl::new(
+                retained.memory(),
+                &self.write_cancellation(),
+            );
+            uqa_storage::key_value::KeyValueDiskANNMaintenance::run(&source, &control)?;
             logical.reclaim_versions()?;
         }
-        let connection = self.pool.checkout()?;
-        connection.connection()?.execute_batch("VACUUM")?;
+        if compact {
+            let connection = self.pool.checkout()?;
+            connection.connection()?.execute_batch("VACUUM")?;
+        }
         Ok(())
     }
 

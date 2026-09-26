@@ -113,6 +113,23 @@ fn vacuum_reclaims_free_pages_and_requires_autocommit() {
         .with(|sqlite| Ok(sqlite.pragma_query_value(None, "page_count", |row| row.get(0))?))
         .unwrap();
 
+    let schema_version: i64 = connection
+        .with(|sqlite| Ok(sqlite.pragma_query_value(None, "schema_version", |row| row.get(0))?))
+        .unwrap();
+    connection.reclaim_obsolete().unwrap();
+    connection
+        .with(|sqlite| {
+            assert_eq!(
+                sqlite.pragma_query_value(None, "page_count", |row| row.get::<_, i64>(0))?,
+                before
+            );
+            assert_eq!(
+                sqlite.pragma_query_value(None, "schema_version", |row| row.get::<_, i64>(0))?,
+                schema_version
+            );
+            Ok(())
+        })
+        .unwrap();
     connection.vacuum().unwrap();
 
     let after: i64 = connection
@@ -124,6 +141,10 @@ fn vacuum_reclaims_free_pages_and_requires_autocommit() {
     );
 
     connection.begin_transaction().unwrap();
+    assert!(matches!(
+        connection.reclaim_obsolete(),
+        Err(SQLiteError::TransactionAlreadyActive)
+    ));
     assert!(matches!(
         connection.vacuum(),
         Err(SQLiteError::TransactionAlreadyActive)

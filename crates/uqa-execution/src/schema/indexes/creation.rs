@@ -24,6 +24,13 @@ pub trait IndexCreationNamespace {
 }
 /// Physical publication joins the caller's active statement or initial-restoration transaction.
 pub trait IndexCreationPublication {
+    fn create_diskann_field(
+        &self,
+        row: &uqa_storage::CatalogIndexRow,
+        field: &str,
+        dimensions: u32,
+        parameters: uqa_storage::vector_index::DiskANNIndexParams,
+    ) -> Result<(), SQLError>;
     fn add_text_field(
         &self,
         table: &str,
@@ -102,8 +109,14 @@ pub fn run_create_index(
     )?;
     super::validate_index_keys(&context.unique, &c, &name, &definition.key_types)?;
 
+    if am == "diskann" {
+        super::diskann::prepare(context.vectors, &mut c)?;
+    }
+
     context.creation.reserve_name(&relation.qualified_name())?;
-    build_physical_index(context.vectors, context.publication, &c, &am)?;
+    if am != "diskann" {
+        build_physical_index(context.vectors, context.publication, &c, &am)?;
+    }
     // Publish the original option values and bound key metadata so reopening restores the same physical index.
     let catalog_index_type = if am.is_empty() { "btree" } else { &am };
     context.publication.register_index(

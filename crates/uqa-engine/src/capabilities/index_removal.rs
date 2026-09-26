@@ -67,6 +67,14 @@ impl IndexRemovalReferrers for Engine {
     }
 }
 impl IndexRemovalPublication for Engine {
+    fn retire_diskann_index(
+        &self,
+        row: &CatalogIndexRow,
+        field: &str,
+        dimensions: u32,
+    ) -> StorageBackendResult<()> {
+        self.retire_catalog_diskann_index(row, field, dimensions)
+    }
     fn drop_catalog_index_relation(
         &self,
         relation: &RelationIdentity,

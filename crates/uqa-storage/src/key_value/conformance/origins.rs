@@ -7,9 +7,19 @@
 //! Actual publication identities, undo branches and bounded canonical views on disposable providers.
 
 mod binding;
+pub use binding::verify_diskann_runtime_adoption_conflicts;
+pub use binding::{
+    diskann_runtime_fixture_options, verify_diskann_runtime_lifecycle,
+    verify_diskann_runtime_reclaimed_reopen, verify_diskann_runtime_reclamation,
+    verify_diskann_runtime_reopen, verify_diskann_runtime_retirement,
+    verify_diskann_runtime_retirement_reopen,
+};
 pub use binding::{verify_diskann_live_reopen, verify_diskann_live_writes};
 pub use binding::{verify_diskann_pruning, verify_diskann_pruning_reopen};
-pub use binding::{verify_diskann_publication, verify_diskann_publication_reopen};
+pub use binding::{
+    verify_diskann_publication, verify_diskann_publication_ownership,
+    verify_diskann_publication_reopen,
+};
 pub use binding::{verify_diskann_query_reopen, verify_diskann_query_views};
 mod catalog;
 pub use binding::verify_diskann_catalog_binding;

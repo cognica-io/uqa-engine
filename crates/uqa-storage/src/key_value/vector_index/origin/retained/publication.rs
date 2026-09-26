@@ -10,6 +10,19 @@ use crate::key_value::{publication, KeyValueRead};
 use crate::{read_control::StorageReadControl, KeyValueBatch, StorageBackendResult};
 
 impl RetainedDiskANNCanonical {
+    /// Retire this captured head before its SQL catalog row is removed. A competing publication or definition invalidates the operation; retained snapshots remain readable.
+    pub fn retire_generation(
+        &self,
+        resolver: &dyn DiskANNIndexResolver,
+        read: &dyn KeyValueRead,
+        batch: &mut dyn KeyValueBatch,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<crate::diskann_index::format::DiskANNGeneration> {
+        self.require_current_index(read, batch, control)?;
+        let scope = self.index_scope(resolver, control)?;
+        publication::retire_captured_generation(&scope, &*self.read, read, batch, control)
+    }
+
     /// Publish a completed build in the supplied caller mutation. The read and batch must belong to the same `with_mutation` callback; this method never completes that transaction. The SQL lifecycle must supersede the effect if later private DDL invalidates the index.
     pub fn publish_generation(
         coverage: &DiskANNCanonicalCoverage<Self>,

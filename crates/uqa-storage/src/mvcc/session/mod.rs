@@ -369,6 +369,10 @@ impl super::IdentifierAllocator for VersionedKeyValueStore {
 }
 
 impl KeyValueStore for VersionedKeyValueStore {
+    fn resource_leases(&self) -> Option<&dyn super::ResourceLeaseProvider> {
+        self.persistence.resource_leases()
+    }
+
     fn retention_control(&self) -> Option<StorageReadControl> {
         Some(Self::retention_control(self))
     }
@@ -385,13 +389,17 @@ impl KeyValueStore for VersionedKeyValueStore {
             .map(|_| self as &dyn SerializableSession)
     }
 
-    fn vacuum(&self) -> StorageBackendResult<()> {
+    fn reclaim_obsolete(&self) -> StorageBackendResult<()> {
         let active = self.active.lock();
         if active.is_some() {
             return Err(StorageBackendError::Other(
                 "vacuum requires an inactive logical session".into(),
             ));
         }
+        let control = self.write_control();
+        let source: Arc<dyn KeyValueStore> =
+            Arc::new(self.new_session_with_cancellation(control.cancellation()));
+        crate::key_value::KeyValueDiskANNMaintenance::run(&source, &control)?;
         self.reclaim_versions().map(|_| ())
     }
 

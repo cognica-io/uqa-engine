@@ -6,6 +6,8 @@
 
 //! Native live writes guard catalog records on the evaluated canonical boundary.
 
+mod runtime;
+
 use super::{invalid, RetainedSQLiteDiskANNCanonical, SQLiteDiskANNCanonical};
 use std::sync::Arc;
 use uqa_core::{memory::MemoryReservation, DocId};
@@ -112,6 +114,12 @@ impl SQLiteDiskANNHandle {
     pub fn snapshot(
         &self,
     ) -> StorageBackendResult<RetainedDiskANNIndex<RetainedSQLiteDiskANNCanonical>> {
+        self.retain_current()?
+            .into_vector_index(&*self.resolver, self.limits, &self.control)?
+            .ok_or_else(|| invalid("live native index has no published generation"))
+    }
+
+    fn retain_current(&self) -> StorageBackendResult<RetainedSQLiteDiskANNCanonical> {
         self.control.check()?;
         let source = self
             .canonical
@@ -123,9 +131,7 @@ impl SQLiteDiskANNHandle {
                 .index_parameters()
                 .ok_or_else(|| invalid("live native index has no bound parameters"))?,
         )?;
-        source
-            .into_vector_index(&*self.resolver, self.limits, &self.control)?
-            .ok_or_else(|| invalid("live native index has no published generation"))
+        Ok(source)
     }
 
     fn validate(

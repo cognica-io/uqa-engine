@@ -16,6 +16,7 @@ pub mod native;
 mod read;
 pub(crate) mod receipts;
 mod reclamation;
+mod resources;
 pub(crate) mod restore;
 mod retention;
 mod runs;
@@ -227,6 +228,10 @@ impl SQLiteRecordStore {
 }
 
 impl VersionedPersistence for SQLiteRecordStore {
+    fn resource_leases(&self) -> Option<&dyn uqa_storage::mvcc::ResourceLeaseProvider> {
+        Some(self)
+    }
+
     fn serializable_coordinator(&self) -> Option<&dyn uqa_storage::mvcc::SerializableCoordinator> {
         Some(self)
     }

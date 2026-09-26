@@ -7,6 +7,7 @@
 //! `DiskANN` origins accompany the existing canonical vector keys, without a duplicate corpus.
 
 pub(in crate::key_value) mod journal;
+mod lifecycle;
 mod live;
 mod retained;
 #[cfg(test)]

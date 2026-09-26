@@ -6,13 +6,14 @@
 
 //! Physical-index selection and create-versus-restore mode.
 
-use super::{HNSWIndexParams, IVFIndexParams};
+use super::{DiskANNIndexParams, HNSWIndexParams, IVFIndexParams};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VectorIndexSpec {
     BruteForce,
     IVF(IVFIndexParams),
     HNSW(HNSWIndexParams),
+    DiskANN(DiskANNIndexParams),
 }
 
 impl VectorIndexSpec {
@@ -21,6 +22,7 @@ impl VectorIndexSpec {
             Self::BruteForce => "bruteforce",
             Self::IVF(_) => "ivf",
             Self::HNSW(_) => "hnsw",
+            Self::DiskANN(_) => "diskann",
         }
     }
 }

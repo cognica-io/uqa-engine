@@ -108,7 +108,7 @@ impl SerializableLeases for NativeLeases<'_> {
 }
 
 #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
-fn local_file_registry(
+pub(in crate::mvcc) fn local_file_registry(
     path: &std::path::Path,
 ) -> VersionResult<std::sync::Arc<uqa_storage::mvcc::LocalSerializableState>> {
     use parking_lot::Mutex;

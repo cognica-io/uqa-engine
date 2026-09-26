@@ -27,6 +27,12 @@ pub trait IndexRemovalReferrers {
     fn referrers_to(&self, table: &str) -> StorageBackendResult<Vec<(String, ForeignKey)>>;
 }
 pub trait IndexRemovalPublication {
+    fn retire_diskann_index(
+        &self,
+        row: &CatalogIndexRow,
+        field: &str,
+        dimensions: u32,
+    ) -> StorageBackendResult<()>;
     fn drop_catalog_index_relation(
         &self,
         relation: &RelationIdentity,

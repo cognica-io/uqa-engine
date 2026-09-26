@@ -487,6 +487,18 @@ impl Engine {
         // it up in the already-loaded registry is essential during catalog
         // restoration: a normal `try_table` lookup would recursively enter
         // catalog synchronization while its mutex is already held.
+        if let VectorIndexSpec::DiskANN(parameters) = spec {
+            let row = uqa_execution::catalog::index::vectors::field_index(
+                self.durable.catalog_indexes.read().values(),
+                table,
+                field,
+            )?
+            .cloned()
+            .ok_or_else(|| {
+                StorageBackendError::Other("DiskANN field has no catalog index".into())
+            })?;
+            return self.build_catalog_diskann_index(&row, field, dimensions, parameters, mode);
+        }
         let relation =
             RelationIdentity::from_legacy_name(table).map_err(StorageBackendError::Other)?;
         let temporary = self
@@ -509,6 +521,11 @@ impl Engine {
         spec: VectorIndexSpec,
     ) -> StorageBackendResult<Box<dyn VectorIndex>> {
         let index: Box<dyn VectorIndex> = match spec {
+            VectorIndexSpec::DiskANN(_) => {
+                return Err(StorageBackendError::Other(
+                    "DiskANN requires its retained resource and catalog binding".into(),
+                ))
+            }
             VectorIndexSpec::BruteForce => Box::new(MemoryVectorIndex::new(dimensions)),
             VectorIndexSpec::IVF(params) => Box::new(IVFIndex::with_params(
                 dimensions,
@@ -827,3 +844,4 @@ impl Engine {
         self.create_table(name, standard_analyzer("english"), fts_fields)
     }
 }
+mod diskann;

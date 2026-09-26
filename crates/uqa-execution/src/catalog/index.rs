@@ -29,3 +29,4 @@ pub use enforcement::enforced_keys;
 pub mod diskann;
 pub mod physical;
 pub mod value;
+pub mod vectors;

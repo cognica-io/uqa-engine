@@ -28,6 +28,7 @@ impl Engine {
             identities: self.catalog_identity_reservation_context(),
             publication: self,
             builds: self,
+            retirement: self,
             vectors: self,
             tables: self,
             locks: self,
@@ -154,6 +155,17 @@ impl VectorIndexCatalog for Engine {
     }
 }
 impl IndexCreationPublication for Engine {
+    fn create_diskann_field(
+        &self,
+        row: &CatalogIndexRow,
+        field: &str,
+        dimensions: u32,
+        parameters: uqa_storage::vector_index::DiskANNIndexParams,
+    ) -> Result<(), SQLError> {
+        self.prepare_explicit_transaction_writer()?;
+        self.install_catalog_diskann_index(row, field, dimensions, parameters)
+            .map_err(|error| storage_error("CREATE INDEX diskann", &error))
+    }
     fn add_text_field(
         &self,
         table: &str,

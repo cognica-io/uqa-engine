@@ -128,6 +128,7 @@ struct Persistence {
     store: MemoryVersionStore,
     state: Mutex<State>,
     serializable: Mutex<serializable::Fixture>,
+    resources: Arc<LocalSerializableState>,
 }
 
 impl Persistence {
@@ -135,6 +136,7 @@ impl Persistence {
         Arc::new(Self {
             store: MemoryVersionStore::new(&MemoryBudget::new(1 << 24)),
             serializable: Mutex::new(serializable::Fixture::new()),
+            resources: Arc::new(LocalSerializableState::default()),
             state: Mutex::new(State {
                 next: 0,
                 identifiers: BTreeMap::new(),
@@ -158,7 +160,28 @@ impl Persistence {
     }
 }
 
+impl ResourceLeaseProvider for Persistence {
+    fn try_acquire_resource(
+        &self,
+        id: ResourceLeaseId,
+        request: ResourceLeaseRequest,
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<ResourceLease>> {
+        if id.database() != self.database_id() {
+            return Err(VersionError::WrongDatabase);
+        }
+        self.resources
+            .with_admission(&Arc::new(self.store.clone()), control, |leases| {
+                retain_local_resource(leases, id, request, control)
+            })
+    }
+}
+
 impl VersionedPersistence for Persistence {
+    fn resource_leases(&self) -> Option<&dyn ResourceLeaseProvider> {
+        Some(self)
+    }
+
     fn acknowledge_transaction(
         &self,
         acknowledgement: ReceiptAcknowledgement,

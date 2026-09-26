@@ -90,6 +90,17 @@ impl<T> Drop for LocalLeaseOwner<T> {
 pub struct LocalSerializableLeases(Mutex<BudgetedVec<LocalEntry>>);
 
 impl LocalSerializableLeases {
+    pub(super) fn shared(&self, id: SerializableTransactionId) -> Option<SerializableParticipant> {
+        let entries = self.0.lock();
+        let position = entries
+            .binary_search_by_key(&key(id), |entry| key(entry.id))
+            .ok()?;
+        entries[position]
+            .lease
+            .upgrade()
+            .map(SerializableParticipant)
+    }
+
     pub fn new(memory: &MemoryBudget) -> Self {
         Self(Mutex::new(BudgetedVec::new(memory)))
     }

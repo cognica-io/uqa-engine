@@ -44,6 +44,7 @@ pub trait VacuumLocks {
     fn release_session(&self);
 }
 pub trait VacuumStorage {
+    fn reclaim_obsolete(&self) -> StorageBackendResult<()>;
     fn vacuum(&self) -> StorageBackendResult<()>;
     fn clear_btree_indexes(&self, table: &str) -> StorageBackendResult<()>;
 }

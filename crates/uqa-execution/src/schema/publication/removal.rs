@@ -75,6 +75,7 @@ pub trait ColumnDropSequences: crate::schema::sequences::removal::SequenceRemova
     ) -> StorageBackendResult<BTreeSet<String>>;
 }
 pub struct ColumnDropPublicationContext<'a> {
+    pub registry: crate::schema::indexes::registry::IndexRegistryContext<'a>,
     pub catalog: &'a dyn ColumnDropCatalog,
     pub indexes: &'a dyn ColumnDropIndexes,
     pub rows: &'a dyn ColumnDropRows,
@@ -120,6 +121,7 @@ pub fn drop_column(
         .owned_by_column(state.object_id(), column_object_id)?;
     preflight_dependencies(context, &table_name, column)?;
     let prepared_rule_drop = context.rules.prepare(&table_name, column)?;
+    crate::schema::indexes::diskann::retire_column(&context.registry, &table_name, column)?;
     state.clear_value_indexes();
     removal_metadata::remove_column_declarations(&mut state.write_columns(), column);
     removal_metadata::remove_column_checks(&mut state.write_checks(), column);
@@ -130,7 +132,9 @@ pub fn drop_column(
     {
         let mut vectors = state.write_vector_indexes();
         if let Some(mut index) = vectors.live_mut()?.remove(column) {
-            index.clear()?;
+            if index.index_kind() != "diskann" {
+                index.clear()?;
+            }
         }
     }
     remove_catalog_indexes(context.indexes, &table_name, column)?;

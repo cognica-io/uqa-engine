@@ -24,6 +24,41 @@ use uqa_sql::{
 };
 use uqa_storage::StorageBackendError;
 use uqa_storage::StorageBackendResult;
+
+fn assert_recreated_table_undo(engine: &Engine, temporary: bool) {
+    let sql = |statement: &str| engine.sql(statement, &[]).unwrap();
+    let persistence = if temporary { "TEMP" } else { "" };
+    sql(&format!("CREATE {persistence} TABLE replacement_undo(v integer); INSERT INTO replacement_undo VALUES(1)"));
+    let original = engine.try_table("replacement_undo").unwrap().unwrap();
+    for ending in ["ROLLBACK TO kept; COMMIT", "ROLLBACK"] {
+        sql(&format!("BEGIN; SAVEPOINT kept; DROP TABLE replacement_undo; CREATE {persistence} TABLE replacement_undo(other text); INSERT INTO replacement_undo VALUES('replacement')"));
+        assert_ne!(
+            original.object_id(),
+            engine
+                .try_table("replacement_undo")
+                .unwrap()
+                .unwrap()
+                .object_id()
+        );
+        sql(ending);
+        let restored = engine.try_table("replacement_undo").unwrap().unwrap();
+        assert!(std::sync::Arc::ptr_eq(&original, &restored));
+        assert_eq!(
+            sql("SELECT v FROM replacement_undo").rows[0]["v"],
+            uqa_core::Value::Int(1)
+        );
+    }
+}
+
+#[test]
+fn rollback_restores_original_table_incarnation_after_same_name_recreation() {
+    assert_recreated_table_undo(&Engine::new(), false);
+    for provider in 0..3 {
+        let (_directory, engine, _peer) = crate::tests::relation_lock_support::sessions(provider);
+        assert_recreated_table_undo(&engine, true);
+    }
+}
+
 #[test]
 fn hierarchy_inputs_retain_the_actual_registry_and_table_metadata_guards() {
     let engine = Engine::new();

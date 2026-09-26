@@ -17,10 +17,7 @@ use crate::{
     StorageBackendResult, VectorIndex,
 };
 use std::sync::Arc;
-use uqa_core::{
-    memory::{Budgeted, MemoryError},
-    DocId, PostingList,
-};
+use uqa_core::{memory::Budgeted, DocId, PostingList};
 
 struct Retained<S> {
     canonical: S,
@@ -170,40 +167,22 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> VectorIndex for RetainedDiskAN
 
     fn count(&self) -> StorageBackendResult<usize> {
         self.check()?;
-        let mut after = None;
-        let mut count = 0_usize;
-        while let Some(document) = self
+        let count = self
             .retained
             .canonical
-            .next_document_after(after, &self.retained.control)?
-        {
-            self.check()?;
-            if after.is_some_and(|previous| document <= previous) {
-                return Err(invalid("retained vector count cursor did not advance"));
-            }
-            let origin = self
-                .retained
-                .canonical
-                .document_origin(document, &self.retained.control)?
-                .ok_or_else(|| invalid("enumerated vector document has no origin"))?;
-            let vectors = usize::try_from(origin.count()).map_err(|_| MemoryError::SizeOverflow)?;
-            count = count
-                .checked_add(vectors)
-                .ok_or(MemoryError::SizeOverflow)?;
-            after = Some(document);
-        }
+            .vector_count(&self.retained.control)?;
         self.check()?;
         Ok(count)
     }
 
     fn contains_document(&self, document: DocId) -> StorageBackendResult<bool> {
         self.check()?;
-        let origin = self
+        let contains = self
             .retained
             .canonical
-            .document_origin(document, &self.retained.control)?;
+            .contains_vectors(document, &self.retained.control)?;
         self.check()?;
-        Ok(origin.is_some_and(|origin| origin.count() != 0))
+        Ok(contains)
     }
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {

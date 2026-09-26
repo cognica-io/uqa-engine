@@ -87,6 +87,10 @@ impl Records {
 }
 
 impl KeyValueStore for Records {
+    fn resource_leases(&self) -> Option<&dyn uqa_storage::mvcc::ResourceLeaseProvider> {
+        self.inner.resource_leases()
+    }
+
     fn auxiliary_encryption_key(&self) -> Option<StorageEncryptionKey> {
         self.encryption.clone()
     }
@@ -116,8 +120,15 @@ impl KeyValueStore for Records {
     fn write_cancellation(&self) -> Option<CancellationToken> {
         self.inner.write_cancellation()
     }
-    fn vacuum(&self) -> StorageBackendResult<()> {
-        self.inner.vacuum()
+    fn reclaim_obsolete(&self) -> StorageBackendResult<()> {
+        if self.inner.in_transaction() {
+            return self.inner.reclaim_obsolete();
+        }
+        let cancellation = self.inner.write_cancellation().unwrap_or_default();
+        let control = StorageReadControl::new(self.control.memory(), &cancellation);
+        let source = self.wrap(self.inner.open_session_with_cancellation(&cancellation)?)?;
+        uqa_storage::key_value::KeyValueDiskANNMaintenance::run(&source, &control)?;
+        self.inner.reclaim_obsolete()
     }
 
     fn open_session(&self) -> StorageBackendResult<Arc<dyn KeyValueStore>> {

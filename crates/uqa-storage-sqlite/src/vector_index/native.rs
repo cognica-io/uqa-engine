@@ -23,6 +23,7 @@ use crate::mvcc::native::{
 };
 use crate::{Result, SQLiteError};
 
+mod guards;
 pub(in crate::vector_index) mod publication;
 pub(in crate::vector_index) mod records;
 
@@ -210,6 +211,8 @@ impl<'a> NativeVectorRead<'a> {
             Some(owner) => owner,
             None => self.snapshot.ensure_table_owner(&self.index.table, batch)?,
         };
+        self.snapshot
+            .coordinate_vector_field(batch, owner, self.field(), false)?;
         self.snapshot.delete_prefix(
             batch,
             Family::VectorOrigins,
@@ -241,6 +244,8 @@ impl<'a> NativeVectorRead<'a> {
 
     pub(super) fn delete(&self, batch: &mut dyn KeyValueBatch, doc_id: i64) -> Result<()> {
         if let Some(owner) = self.owner {
+            self.snapshot
+                .coordinate_vector_field(batch, owner, self.field(), false)?;
             self.snapshot.delete_prefix(
                 batch,
                 Family::VectorOrigins,
@@ -260,6 +265,8 @@ impl<'a> NativeVectorRead<'a> {
     pub(super) fn clear_family(&self, batch: &mut dyn KeyValueBatch, family: Family) -> Result<()> {
         if let Some(owner) = self.owner {
             if family == Family::Vectors {
+                self.snapshot
+                    .coordinate_vector_field(batch, owner, self.field(), true)?;
                 for related in [Family::VectorOrigins, Family::VectorChanges] {
                     self.snapshot
                         .delete_prefix(batch, related, owner, &[self.field()])?;

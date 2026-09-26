@@ -41,6 +41,7 @@ pub struct IndexRegistryContext<'a> {
     pub identities: CatalogIdentityReservationContext<'a>,
     pub publication: &'a dyn IndexRegistryPublication,
     pub builds: &'a dyn super::creation::IndexCreationPublication,
+    pub retirement: &'a dyn super::removal::IndexRemovalPublication,
     pub vectors: &'a dyn uqa_sql::schema::indexes::vectors::VectorIndexCatalog,
     pub tables: &'a dyn crate::schema::publication::TableSchemaCatalog,
     pub locks: &'a dyn crate::row_locks::binding::RelationLockSession,
@@ -71,7 +72,7 @@ pub struct IndexRegistryChange {
     pub upserts: Vec<CatalogIndexRow>,
     pub removals: Vec<CatalogIndexRow>,
     schema: Vec<schema::OwnerChange>,
-    derived_builds: Vec<CatalogIndexRow>,
+    physical_builds: Vec<CatalogIndexRow>,
 }
 
 impl IndexRegistryChange {
@@ -92,7 +93,11 @@ impl IndexRegistryChange {
     pub fn publish(self, context: &IndexRegistryContext<'_>) -> StorageBackendResult<()> {
         let publication = context.publication;
         let mut tables = BTreeSet::new();
-        for row in &self.derived_builds {
+        for row in self
+            .physical_builds
+            .iter()
+            .filter(|row| !row.index_type.eq_ignore_ascii_case("diskann"))
+        {
             builds::build(context, row)?;
         }
         for change in &self.schema {
@@ -107,6 +112,13 @@ impl IndexRegistryChange {
         for row in &self.upserts {
             publication.persist_index(row)?;
             tables.insert(row.table_name.clone());
+        }
+        for row in self
+            .physical_builds
+            .iter()
+            .filter(|row| row.index_type.eq_ignore_ascii_case("diskann"))
+        {
+            builds::build(context, row)?;
         }
         for change in self.schema {
             let state = change.current(context.tables)?;
@@ -227,7 +239,7 @@ fn difference(
             .map(|(_, row)| row.clone())
             .collect(),
         schema: Vec::new(),
-        derived_builds: builds::new_descendants(previous, rows)?,
+        physical_builds: builds::new_physical_indexes(previous, rows)?,
     })
 }
 

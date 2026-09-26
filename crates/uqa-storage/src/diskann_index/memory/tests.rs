@@ -6,8 +6,12 @@
 
 use super::*;
 use crate::diskann_index::{
-    format::PAGE_BYTES, DiskANNCanonicalRead, DiskANNQueryRead, PQTrainingOptions,
+    build::{DiskANNGenerationOptions, DiskANNMergeOptions, DiskANNPartitionOptions},
+    format::PAGE_BYTES,
+    pages::DiskANNReadLimits,
+    DiskANNCanonicalRead, DiskANNQueryRead, PQTrainingOptions,
 };
+use crate::vector_index::DiskANNIndexParams;
 
 fn options(dimensions: u32) -> DiskANNMemoryOptions {
     let training = PQTrainingOptions {

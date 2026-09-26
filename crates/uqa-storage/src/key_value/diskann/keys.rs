@@ -13,6 +13,43 @@ pub(super) const ROOT: &[u8] = b"\0uqa-diskann-v1\0";
 pub(super) const PREFIX_BYTES: usize = ROOT.len() + 1 + 40;
 pub(super) const KEY_BYTES: usize = PREFIX_BYTES + 9;
 
+pub(super) fn generation_prefix(database: [u8; 16]) -> [u8; ROOT.len() + 17] {
+    let mut bytes = [0; ROOT.len() + 17];
+    bytes[..ROOT.len()].copy_from_slice(ROOT);
+    bytes[ROOT.len()] = 1;
+    bytes[ROOT.len() + 1..].copy_from_slice(&database);
+    bytes
+}
+
+pub(super) fn state_generation(key: &[u8]) -> StorageBackendResult<DiskANNGeneration> {
+    if key.len() != PREFIX_BYTES + 1
+        || key[..ROOT.len()] != *ROOT
+        || key[ROOT.len()] != 1
+        || key[PREFIX_BYTES] != 0
+    {
+        return Err(invalid(
+            "generation discovery requires a complete state key",
+        ));
+    }
+    let start = ROOT.len() + 1;
+    let database = key[start..start + 16]
+        .try_into()
+        .expect("fixed data identity");
+    let number = |offset| {
+        u64::from_be_bytes(
+            key[offset..offset + 8]
+                .try_into()
+                .expect("fixed generation identity"),
+        )
+    };
+    DiskANNGeneration::new(
+        database,
+        number(start + 16),
+        number(start + 24),
+        number(start + 32),
+    )
+}
+
 pub(super) fn database_key() -> [u8; ROOT.len() + 1] {
     let mut key = [0; ROOT.len() + 1];
     key[..ROOT.len()].copy_from_slice(ROOT);
@@ -70,6 +107,13 @@ impl Keys {
 
     pub(super) fn allocation_namespace(&self) -> &[u8] {
         &self.prefix[..PREFIX_BYTES - 8]
+    }
+
+    /// Every valid record tag sorts before this sentinel. Discovery validates the next returned state rather than scanning any graph or code keys.
+    pub(super) fn after_generation(self) -> Key {
+        let mut key = self.key(Kind::State);
+        key.bytes[PREFIX_BYTES] = u8::MAX;
+        key
     }
 
     pub(super) fn key(self, kind: Kind) -> Key {

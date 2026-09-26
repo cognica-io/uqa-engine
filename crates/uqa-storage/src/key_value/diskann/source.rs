@@ -23,6 +23,7 @@ use super::{
     invalid, read_data_identity, validate_session, DiskANNStageStatus, KeyValueDiskANNStore,
 };
 
+mod owned;
 mod selection;
 
 pub(super) const KEY_PAGE_LIMIT: usize = 64;
@@ -43,6 +44,43 @@ impl KeyValueDiskANNSource {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Arc<Self>> {
         control.check()?;
+        let mut state = None;
+        {
+            let _writer = repository.owner.writer.lock();
+            repository.idle(control)?;
+            repository.owner.store.with_read_view(&mut |read| {
+                state = super::staging::load_state(read, generation, control)?;
+                Ok(())
+            })?;
+        }
+        let state = state.ok_or_else(|| invalid("generation state is missing"))?;
+        if state.status != status
+            && !(status == DiskANNStageStatus::Sealed && state.status.is_complete())
+        {
+            return Err(invalid(
+                "generation has not reached the requested physical state",
+            ));
+        }
+        let lease = if matches!(
+            state.status,
+            DiskANNStageStatus::Published
+                | DiskANNStageStatus::Retired
+                | DiskANNStageStatus::Discarding
+        ) {
+            None
+        } else if matches!(state.owner, super::state::StageOwner::Legacy(_)) {
+            repository.resume_stage(generation, control)?.lease
+        } else {
+            Some(
+                repository
+                    .acquire_owner(
+                        state.owner,
+                        crate::mvcc::ResourceLeaseRequest::Share,
+                        control,
+                    )?
+                    .ok_or_else(|| invalid("generation recovery is still in progress"))?,
+            )
+        };
         let store = {
             let _writer = repository.owner.writer.lock();
             repository.idle(control)?;
@@ -58,13 +96,11 @@ impl KeyValueDiskANNSource {
             read = Some(view.retain(&[ROOT])?);
             Ok(())
         })?;
-        Self::from_read(
-            read.ok_or_else(|| invalid("source did not expose a read view"))?,
-            generation,
-            status,
-            None,
-            control,
-        )
+        let mut read = read.ok_or_else(|| invalid("source did not expose a read view"))?;
+        if let Some(lease) = lease {
+            read = owned::OwnedRead::retain(read, lease, control)?;
+        }
+        Self::from_read(read, generation, status, None, control)
     }
 
     fn from_read(

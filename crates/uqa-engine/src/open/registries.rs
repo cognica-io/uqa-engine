@@ -6,10 +6,7 @@
 
 //! Analyzer, FDW, view, index, path-index, and FTS registry restoration.
 
-use super::{
-    BTreeMap, CatalogFacade, Engine, IVFIndexParams, StorageBackendError, StorageBackendResult,
-};
-use crate::{HNSWIndexParams, VectorIndexSpec};
+use super::{BTreeMap, CatalogFacade, Engine, StorageBackendError, StorageBackendResult};
 
 impl Engine {
     /// Rehydrate analyzer, foreign-data, catalog-index, and path-index
@@ -120,14 +117,7 @@ impl Engine {
                     self.restore_fts_field_from_catalog(&row.table_name, col, analyzer)
                         .map_err(StorageBackendError::Other)?;
                 }
-            } else if row.index_type.eq_ignore_ascii_case("ivf")
-                || row.index_type.eq_ignore_ascii_case("hnsw")
-            {
-                let spec = if row.index_type.eq_ignore_ascii_case("ivf") {
-                    VectorIndexSpec::IVF(IVFIndexParams::from_catalog_map(&parameters)?)
-                } else {
-                    VectorIndexSpec::HNSW(HNSWIndexParams::from_catalog_map(&parameters)?)
-                };
+            } else if uqa_execution::catalog::index::vectors::is_vector_method(&row.index_type) {
                 for col in &columns {
                     let Some(
                         uqa_sql::ast::ColumnType::Vector(dim)
@@ -140,6 +130,7 @@ impl Engine {
                             row.table_name
                         )));
                     };
+                    let spec = uqa_execution::catalog::index::vectors::stored_spec(&row, dim)?;
                     if !self.restore_vector_field_index(&row.table_name, col, dim, spec)? {
                         return Err(StorageBackendError::Other(format!(
                             "failed to restore vector index `{}` for table `{}`",

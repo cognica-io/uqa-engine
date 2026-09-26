@@ -5,6 +5,7 @@
 //
 
 //! Validate SQL key ordering and uniqueness before publishing a B-tree index.
+pub mod diskann;
 use crate::mutation::constraints::{
     context::MutationRead,
     index_keys::{index_key_values, index_predicate_accepts, IndexExpressionContext},

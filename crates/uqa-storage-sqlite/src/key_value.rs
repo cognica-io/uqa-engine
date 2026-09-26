@@ -87,6 +87,10 @@ impl uqa_storage::mvcc::IdentifierAllocator for SQLiteKeyValueStore {
 }
 
 impl KeyValueStore for SQLiteKeyValueStore {
+    fn resource_leases(&self) -> Option<&dyn uqa_storage::mvcc::ResourceLeaseProvider> {
+        self.records.resource_leases()
+    }
+
     fn auxiliary_encryption_key(&self) -> Option<uqa_storage::StorageEncryptionKey> {
         self.conn.auxiliary_encryption_key()
     }
@@ -107,6 +111,10 @@ impl KeyValueStore for SQLiteKeyValueStore {
 
     fn vacuum(&self) -> StorageBackendResult<()> {
         self.conn.vacuum().map_err(Into::into)
+    }
+
+    fn reclaim_obsolete(&self) -> StorageBackendResult<()> {
+        self.conn.reclaim_obsolete().map_err(Into::into)
     }
 
     fn write_cancellation(&self) -> Option<uqa_core::CancellationToken> {

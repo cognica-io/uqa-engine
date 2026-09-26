@@ -49,6 +49,10 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         self.store.serializable_session()
     }
 
+    fn reclaim_obsolete(&self) -> StorageBackendResult<()> {
+        self.store.reclaim_obsolete()
+    }
+
     fn vacuum(&self) -> StorageBackendResult<()> {
         self.store.vacuum()
     }
@@ -133,6 +137,9 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         mode: VectorIndexOpenMode,
     ) -> StorageBackendResult<Box<dyn VectorIndex>> {
         match spec {
+            VectorIndexSpec::DiskANN(_) => Err(crate::StorageBackendError::Other(
+                "DiskANN requires an actual catalog binding".into(),
+            )),
             VectorIndexSpec::BruteForce => Ok(Box::new(KeyValueVectorIndex::new(
                 Arc::clone(&self.store),
                 table,
@@ -172,6 +179,52 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
                 )?)),
             },
         }
+    }
+
+    fn diskann_index(
+        &self,
+        binding: crate::diskann_index::DiskANNIndexBinding<'_>,
+        options: crate::diskann_index::DiskANNIndexOptions,
+        temporary: &crate::diskann_index::build::DiskANNTemporaryBudget,
+        mode: VectorIndexOpenMode,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        let canonical = super::KeyValueDiskANNCanonical::new(
+            self.store.clone(),
+            binding.table,
+            binding.field,
+            binding.dimensions,
+        )?;
+        if mode == VectorIndexOpenMode::Create {
+            canonical.create_index(
+                binding.index,
+                &*binding.resolver,
+                options,
+                temporary,
+                binding.control,
+            )?;
+        }
+        let handle = canonical.bind(
+            binding.index.clone(),
+            binding.resolver,
+            options.read,
+            binding.control,
+        )?;
+        Ok(Box::new(crate::diskann_index::PersistentDiskANNIndex::new(
+            handle, options, temporary,
+        )?))
+    }
+
+    fn retire_diskann_index(
+        &self,
+        binding: crate::diskann_index::DiskANNIndexBinding<'_>,
+    ) -> StorageBackendResult<()> {
+        super::KeyValueDiskANNCanonical::new(
+            self.store.clone(),
+            binding.table,
+            binding.field,
+            binding.dimensions,
+        )?
+        .retire_index(binding.index, &*binding.resolver, binding.control)
     }
 
     fn drop_vector_index_metadata(&self, table: &str, field: &str) -> StorageBackendResult<()> {

@@ -252,6 +252,13 @@ impl VacuumLocks for Engine {
     }
 }
 impl VacuumStorage for Engine {
+    fn reclaim_obsolete(&self) -> StorageBackendResult<()> {
+        if let Some(backend) = self.storage.backend.as_ref() {
+            backend.reclaim_obsolete()?;
+        }
+        Ok(())
+    }
+
     fn vacuum(&self) -> StorageBackendResult<()> {
         if let Some(backend) = self.storage.backend.as_ref() {
             backend.vacuum()?;

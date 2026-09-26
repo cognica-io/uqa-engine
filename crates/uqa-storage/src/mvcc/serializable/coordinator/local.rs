@@ -53,6 +53,18 @@ struct RetainedLeases<'a, O> {
 }
 
 impl<O: Send + Sync + 'static> SerializableLeases for RetainedLeases<'_, O> {
+    fn retain_shared(
+        &self,
+        id: SerializableTransactionId,
+        control: &StorageReadControl,
+    ) -> VersionResult<SerializableParticipant> {
+        control.check()?;
+        if let Some(lease) = self.registry.shared(id) {
+            return Ok(lease);
+        }
+        self.retain(id, control)
+    }
+
     fn retain(
         &self,
         id: SerializableTransactionId,

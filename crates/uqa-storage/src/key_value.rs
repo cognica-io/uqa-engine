@@ -31,8 +31,9 @@ mod catalog;
 pub use catalog::KeyValueCatalog;
 mod diskann;
 pub use diskann::{
-    publication, DiskANNStageStatus, KeyValueDiskANNPruner, KeyValueDiskANNSource,
-    KeyValueDiskANNStage, KeyValueDiskANNStore,
+    publication, DiskANNMaintenanceStatus, DiskANNMaintenanceStep, DiskANNStageStatus,
+    KeyValueDiskANNMaintenance, KeyValueDiskANNPruner, KeyValueDiskANNSource, KeyValueDiskANNStage,
+    KeyValueDiskANNStore,
 };
 mod graph_commit;
 mod table_owners;
@@ -304,6 +305,11 @@ pub trait KeyValueBatch {
 
 /// Ordered byte-key storage used by Key/Value catalog and index backends.
 pub trait KeyValueStore: Send + Sync {
+    /// Physical resource ownership for retained builds and recovery. Versioned wrappers must forward this capability.
+    fn resource_leases(&self) -> Option<&dyn crate::mvcc::ResourceLeaseProvider> {
+        None
+    }
+
     /// Credential for database-owned auxiliary files. Wrappers over an encrypted store must forward it; `None` permits unencrypted auxiliary storage.
     fn auxiliary_encryption_key(&self) -> Option<crate::StorageEncryptionKey> {
         None
@@ -326,14 +332,19 @@ pub trait KeyValueStore: Send + Sync {
         None
     }
 
-    /// Reclaim committed history outside this session's transaction. Versioned wrappers must forward maintenance; serialized stores that eagerly remove obsolete values may keep the default.
-    fn vacuum(&self) -> StorageBackendResult<()> {
+    /// Reclaim obsolete records and committed history without a whole-file rewrite. Versioned wrappers must forward maintenance; serialized stores that eagerly remove obsolete values may keep the default.
+    fn reclaim_obsolete(&self) -> StorageBackendResult<()> {
         if self.transaction_model().is_versioned() {
             return Err(StorageBackendError::Other(
                 "versioned KeyValue maintenance is not implemented by this store".into(),
             ));
         }
         Ok(())
+    }
+
+    /// Reclaim obsolete records and compact physical storage where supported, outside this session's transaction.
+    fn vacuum(&self) -> StorageBackendResult<()> {
+        self.reclaim_obsolete()
     }
 
     /// Token shared with the execution that owns this session's writes. Cancellation must not prevent rollback cleanup or diagnostic reads. Versioned wrappers must forward this capability.

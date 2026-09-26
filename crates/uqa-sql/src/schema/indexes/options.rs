@@ -26,7 +26,10 @@ pub struct HNSWIndexOptions {
 }
 pub fn index_access_method(statement: &crate::ast::CreateIndex) -> Result<String, SQLError> {
     let am = statement.access_method.to_ascii_lowercase();
-    if !matches!(am.as_str(), "" | "btree" | "gin" | "ivf" | "hnsw") {
+    if !matches!(
+        am.as_str(),
+        "" | "btree" | "gin" | "ivf" | "hnsw" | "diskann"
+    ) {
         return Err(SQLError::Unsupported(format!(
             "CREATE INDEX access method `{}` is not supported",
             statement.access_method

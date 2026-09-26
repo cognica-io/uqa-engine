@@ -12,6 +12,7 @@ mod migration;
 mod read;
 mod receipts;
 mod reclamation;
+mod resources;
 pub(crate) mod restore;
 mod retention;
 mod serializable;
@@ -74,7 +75,7 @@ impl RedbRecordStore {
                 .map(|value| codec::decode_u64(value.value()))
                 .transpose()?;
             if let Some(format) = initialized {
-                if !matches!(format, 1..=47) {
+                if !matches!(format, 1..=49) {
                     return Err(VersionError::InvalidEncoding("unknown record format"));
                 }
                 if present != if format < 5 { 15 } else { 31 } {
@@ -103,9 +104,9 @@ impl RedbRecordStore {
                         )
                         .map_err(redb_error)?;
                 }
-                if format < 47 {
+                if format < 49 {
                     metadata
-                        .insert("format", 47_u64.to_be_bytes().as_slice())
+                        .insert("format", 49_u64.to_be_bytes().as_slice())
                         .map_err(redb_error)?;
                 }
                 codec::receipt_limit(&metadata)?;
@@ -252,6 +253,10 @@ impl RedbRecordStore {
 }
 
 impl VersionedPersistence for RedbRecordStore {
+    fn resource_leases(&self) -> Option<&dyn uqa_storage::mvcc::ResourceLeaseProvider> {
+        Some(self)
+    }
+
     fn serializable_coordinator(&self) -> Option<&dyn uqa_storage::mvcc::SerializableCoordinator> {
         Some(self)
     }
@@ -424,7 +429,7 @@ fn initialize_record_metadata(
         .insert("database", bytes.as_slice())
         .map_err(redb_error)?;
     metadata
-        .insert("format", 47_u64.to_be_bytes().as_slice())
+        .insert("format", 49_u64.to_be_bytes().as_slice())
         .map_err(redb_error)?;
     metadata
         .insert("allocated", 0_u64.to_be_bytes().as_slice())

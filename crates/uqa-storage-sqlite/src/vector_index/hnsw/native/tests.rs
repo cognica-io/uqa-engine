@@ -196,12 +196,15 @@ fn intervening_native_recreation_rejects_the_obsolete_candidate_without_replayin
     });
     let error: uqa_storage::StorageBackendError = result.unwrap_err().into();
     let uqa_storage::StorageBackendError::Backend { source, .. } = error else {
-        panic!("expected the original record conflict");
+        panic!("expected the original field lifetime conflict");
     };
-    assert!(matches!(
-        source.downcast_ref::<uqa_storage::mvcc::VersionError>(),
-        Some(uqa_storage::mvcc::VersionError::WriteConflict { .. })
-    ));
+    assert!(
+        matches!(
+            source.downcast_ref::<uqa_storage::mvcc::VersionError>(),
+            Some(uqa_storage::mvcc::VersionError::ReadConflict { .. })
+        ),
+        "{source:?}"
+    );
     assert_eq!(calls, 1);
     assert!(connection.in_transaction());
     let observer = SQLiteHNSWIndex::new(other, "docs", "embedding", 2);

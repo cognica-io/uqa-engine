@@ -27,6 +27,14 @@ pub use graph_retry::verify_graph_admission_retry;
 mod compound;
 pub use compound::{verify_compound_concurrency, verify_compound_mutations};
 mod origins;
+pub use origins::verify_diskann_publication_ownership;
+pub use origins::verify_diskann_runtime_adoption_conflicts;
+pub use origins::{
+    diskann_runtime_fixture_options, verify_diskann_runtime_lifecycle,
+    verify_diskann_runtime_reclaimed_reopen, verify_diskann_runtime_reclamation,
+    verify_diskann_runtime_reopen, verify_diskann_runtime_retirement,
+    verify_diskann_runtime_retirement_reopen,
+};
 pub use origins::{
     verify_diskann_canonical_origins, verify_diskann_canonical_reopen,
     verify_diskann_catalog_binding, verify_diskann_catalog_identity,
@@ -51,8 +59,9 @@ pub use vector_snapshots::{verify_exact_snapshot_concurrency, verify_vector_snap
 mod publication_build;
 mod read_limits;
 pub use super::diskann::conformance::{
-    verify_diskann_built_generation, verify_diskann_built_reopen, verify_diskann_generations,
-    verify_diskann_reopen,
+    verify_diskann_build_ownership, verify_diskann_built_generation, verify_diskann_built_reopen,
+    verify_diskann_generations, verify_diskann_maintenance, verify_diskann_reclamation_bounds,
+    verify_diskann_reclamation_reopen, verify_diskann_reopen,
 };
 pub use publication_build::{build_diskann_memory_fixture, build_diskann_publication_fixture};
 pub use read_limits::verify_bounded_value_reads;

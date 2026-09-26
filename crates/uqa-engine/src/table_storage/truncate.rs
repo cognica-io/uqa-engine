@@ -134,14 +134,18 @@ impl Engine {
             }
             self.note_row_deleted(table_name, doc_id)?;
         }
-        // Retire old rows under their original generation before selecting the new allocator namespace.
-        *t.storage_generation.write() = crate::new_table_storage_generation().map_err(|error| {
-            SQLError::Internal(format!("rotate TRUNCATE storage generation: {error}"))
+        uqa_execution::schema::indexes::diskann::replace_table_storage(
+            &self.index_registry_context(),
+            table_name,
+            || {
+                // Retire old rows under their original generation before selecting the new allocator namespace.
+                *t.storage_generation.write() = crate::new_table_storage_generation()?;
+                self.try_save_table_schema(table_name, &t)
+            },
+        )
+        .map_err(|error| {
+            uqa_execution::storage_errors::storage_error("replace TRUNCATE storage", &error)
         })?;
-        self.try_save_table_schema(table_name, &t)
-            .map_err(|error| {
-                SQLError::Internal(format!("persist TRUNCATE storage generation: {error}"))
-            })?;
         if restart_identity {
             *t.next_id.lock() = 1;
             self.persist_next_id(table_name).map_err(|error| {
