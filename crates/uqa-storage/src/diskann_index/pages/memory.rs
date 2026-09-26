@@ -97,6 +97,7 @@ impl DiskANNMemoryBuilder {
                 DiskANNRecordKey::Codebook => sealer.codebook(bytes)?,
                 DiskANNRecordKey::Codes(first) => sealer.code_batch(*first, bytes)?,
                 DiskANNRecordKey::Side(first) => sealer.side_batch(*first, bytes)?,
+                DiskANNRecordKey::Origins(first) => sealer.origin_batch(*first, bytes)?,
                 DiskANNRecordKey::Manifest => {
                     return Err(invalid("staged manifest before sealing"))
                 }

@@ -26,6 +26,7 @@ Root tag 2 followed by the data identity, 16-byte table object and 16-byte stora
 | Tag 3 + big-endian 64-bit first node | Independently addressed encoded code batch |
 | Tag 4 + big-endian 64-bit first position | Independently addressed encoded numeric-side batch |
 | Tag 5 + big-endian 64-bit page ID | Exactly 4,096 encoded graph-page bytes |
+| Tag 6 + big-endian 64-bit first document position | Complete encoded document-origin batch for manifest revision 3 |
 
 Unknown tags, extra key bytes, unsupported state revisions and absent required records fail closed. The existing [generation](diskann-generation-format.md) and [page](diskann-vector-index.md#node-and-page-encoding) codecs own payload validation. Metadata, staging records and pages remain inside the original provider's encryption and backup domain; no sidecar payload files or unrelated SQLite connections are opened.
 
@@ -40,7 +41,7 @@ Unknown tags, extra key bytes, unsupported state revisions and absent required r
 | Sealed | Open retained sources and verify repeated sealing requests against the same manifest |
 | Discarding | Continue bounded deletion until the namespace and state are gone |
 
-Each append requires the unchanged database marker and staging-state revision at commit. Freezing changes the state revision, fencing even writes evaluated before freezing. Records cannot be replaced through the staging API. Verification scans at most 64 fixed keys per page, releases the key visitor, copies one bounded record or graph page, then invokes the common artifact sealer. It validates every ordered code/side/page stream and its final digest. An incomplete or corrupt generation remains Frozen and unavailable to ordinary readers.
+Each append requires the unchanged database marker and staging-state revision at commit. Freezing changes the state revision, fencing even writes evaluated before freezing. Records cannot be replaced through the staging API. Verification scans at most 64 fixed keys per page, releases the key visitor, copies one bounded record or graph page, then invokes the common artifact sealer. It validates every ordered code/side/page stream and its final digest. Revision-3 generations additionally require complete ordered origin batches, including empty tensors, and matching total tensor cardinality and digest. All logical origin records use the same native binary mapping and encryption domain; no native family or schema change is needed. An incomplete or corrupt generation remains Frozen and unavailable to ordinary readers.
 
 The final Sealed transition conditionally requires the original owner, Frozen state and unchanged manifest. Sealed means complete physical artifacts; it is not a graph-connectivity proof, a canonical snapshot-coverage token or permission to route a public index to that generation. The later publication owner must establish those properties.
 

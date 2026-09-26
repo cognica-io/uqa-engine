@@ -1,15 +1,15 @@
 # DiskANN generation metadata format
 
-This document specifies metadata codecs in `uqa-storage::diskann_index::format`: manifest envelopes 1 and 2, with codebook, code and side envelopes remaining at revision 1. The [DiskANN design](diskann-vector-index.md#node-and-page-encoding) defines node/page bytes, canonical scores and ownership; the [implementation plan](../plans/0014-diskann-vector-index.md) tracks runtime delivery. Codecs validate physical records; [generation construction](diskann-generation-build.md) and provider sealing consume them without granting SQL publication or MVCC visibility. All fields below use little-endian integers and IEEE-754 bit patterns. Offset ranges exclude their end.
+This document specifies metadata codecs in `uqa-storage::diskann_index::format`: manifest envelopes 1, 2 and 3, with codebook, code, side and origin envelopes at revision 1. The [DiskANN design](diskann-vector-index.md#node-and-page-encoding) defines node/page bytes, canonical scores and ownership; the [implementation plan](../plans/0014-diskann-vector-index.md) tracks runtime delivery. Codecs validate physical records; [generation construction](diskann-generation-build.md) and provider sealing consume them without granting SQL publication or MVCC visibility. All fields below use little-endian integers and IEEE-754 bit patterns. Offset ranges exclude their end.
 
 ## Record envelope
 
-Manifests, codebooks, code batches and numeric side batches use the same 96-byte envelope with distinct magic values. Graph pages retain their separate 4 KiB format. No native Rust structure layout is persisted.
+Manifests, codebooks, code batches, numeric side batches and document-origin batches use the same 96-byte envelope with distinct magic values. Graph pages retain their separate 4 KiB format. No native Rust structure layout is persisted.
 
 | Byte offsets | Contents |
 | --- | --- |
 | 0–8 | Magic: `UQADNMF\0`, `UQADNPQ\0`, `UQADNCD\0` or `UQADNSD\0` |
-| 8–12, 12–16 | Record revision and header size 96 (`u32` each); manifests accept 1 or 2, other metadata accepts 1 |
+| 8–12, 12–16 | Record revision and header size 96 (`u32` each); manifests accept 1, 2 or 3, other metadata accepts 1 |
 | 16–32 | Persistent data incarnation |
 | 32–40, 40–48, 48–56 | Table incarnation, index incarnation, generation (`u64` each) |
 | 56–64 | Exact body length (`u64`) |
@@ -100,3 +100,11 @@ The 32-byte body prefix stores dimensions (`u32`), classification revision 1 (`u
 ## Independent evidence
 
 The [compact metadata fixture](../../crates/uqa-storage/tests/fixtures/diskann/README.md#generation-metadata-bytes) derives byte layouts from Python `struct` and SHA-256, rational PQ expectations, a simple fixed graph, and explicit raw-vector bits. Storage tests compare exact digests and header bytes, reconstruct codebooks without changing codes or lookup values, reject rechecksummed invalid inner metadata, preserve empty/all-side states, and exercise failure cleanup and cancellation. These codec results are separate from provider, MVCC, reader and runtime DiskANN acceptance.
+
+## Complete document origins
+
+Manifest envelope revision 3 has a 584-byte body: the unchanged 288-byte base, the unchanged 256-byte build provenance and a 40-byte origin descriptor. The descriptor contains a document count (`u64`) followed by SHA-256 of every encoded 64-byte origin entry in ascending document order. Its empty digest must be SHA-256 of the empty string, and a zero-document descriptor cannot accompany any graph/side vectors. This integrity descriptor does not establish membership authority without the actual captured source at publication. Revision-1 and revision-2 encodings remain unchanged and have no complete-origin artifact.
+
+An origin batch uses magic `UQADNOR\0`, record envelope revision 1 and the common generation-bound checksum. Its 32-byte body prefix stores dimensions (`u32`), fixed batch capacity 64 (`u32`), total document count (`u64`), first dense document position (`u64`) and actual entry count (`u64`). Each following 64-byte entry is a document ID (`u64`) plus the existing 56-byte canonical-origin envelope, retaining full writer history, allocation, mutation, dimensions and tensor cardinality. Zero cardinality is an explicit empty replacement, not an absent document. Batch starts must be multiples of 64; the count must equal the smaller of 64 and the remaining documents. A full encoded batch is 4,224 bytes.
+
+Decoders validate exact widths, dimensions, generation, revision, checksums, positive writer allocation/mutation, bounded tensor cardinality and strictly increasing document IDs. Sealing additionally validates global order across batches, exact stream completeness, the final digest and the sum of tensor cardinalities against the manifest vector count. All arithmetic checks precede dynamic buffer growth. The independently packed single-empty-tensor fixture in the codec tests fixes its complete envelope bytes and entry digest without reading Rust output. [Build coverage](diskann-build-coverage.md#durable-origin-artifacts) defines capture and reopened lookup ownership.

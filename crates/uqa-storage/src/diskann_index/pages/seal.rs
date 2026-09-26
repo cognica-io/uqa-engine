@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 use uqa_core::memory::BudgetedVec;
 
 use super::invalid;
+use super::origins::OriginVerifier;
 use crate::diskann_index::format::{
     decode_codebook, decode_page, DiskANNManifest, DiskANNNode, DiskANNQuantizationIdentity,
     DiskANNSideLayout, PAGE_HEADER_BYTES,
@@ -42,6 +43,7 @@ pub struct DiskANNArtifactSealer {
     slot: BudgetedVec<u8>,
     failed: bool,
     control: StorageReadControl,
+    origins: Option<OriginVerifier>,
 }
 
 impl DiskANNArtifactSealer {
@@ -71,6 +73,10 @@ impl DiskANNArtifactSealer {
             slot: BudgetedVec::new(control.memory()),
             failed: false,
             control: control.clone(),
+            origins: manifest
+                .origins()
+                .map(|_| OriginVerifier::new(&manifest))
+                .transpose()?,
         })
     }
 
@@ -192,6 +198,17 @@ impl DiskANNArtifactSealer {
         Ok(())
     }
 
+    pub fn origin_batch(&mut self, first: u64, bytes: &[u8]) -> StorageBackendResult<()> {
+        self.begin()?;
+        self.origins
+            .as_mut()
+            .ok_or_else(|| invalid("unexpected origin artifact"))?
+            .batch(first, bytes, &self.control)?;
+        self.control.check()?;
+        self.failed = false;
+        Ok(())
+    }
+
     fn node(&mut self, node: &DiskANNNode) -> StorageBackendResult<()> {
         let key = (node.doc_id(), node.ordinal());
         if self.last_node.is_some_and(|last| last >= key) {
@@ -233,6 +250,9 @@ impl DiskANNArtifactSealer {
 
     pub fn finish(self) -> StorageBackendResult<DiskANNArtifactSeal> {
         self.control.check()?;
+        if let Some(origins) = self.origins {
+            origins.finish()?;
+        }
         let input = self.manifest.input();
         if self.failed
             || self.next_page != self.manifest.layout().page_count()

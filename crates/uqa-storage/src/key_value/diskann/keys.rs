@@ -80,6 +80,7 @@ impl Keys {
             Kind::Record(DiskANNRecordKey::Codes(first)) => (3, Some(first)),
             Kind::Record(DiskANNRecordKey::Side(first)) => (4, Some(first)),
             Kind::Graph(page) => (5, Some(page)),
+            Kind::Record(DiskANNRecordKey::Origins(first)) => (6, Some(first)),
         };
         let mut bytes = [0; KEY_BYTES];
         bytes[..PREFIX_BYTES].copy_from_slice(&self.prefix);
@@ -102,12 +103,13 @@ impl Keys {
             [0] => Ok(Kind::State),
             [1] => Ok(Kind::Record(DiskANNRecordKey::Manifest)),
             [2] => Ok(Kind::Record(DiskANNRecordKey::Codebook)),
-            [tag @ 3..=5, suffix @ ..] if suffix.len() == 8 => {
+            [tag @ 3..=6, suffix @ ..] if suffix.len() == 8 => {
                 let position = u64::from_be_bytes(suffix.try_into().expect("eight-byte position"));
                 Ok(match tag {
                     3 => Kind::Record(DiskANNRecordKey::Codes(position)),
                     4 => Kind::Record(DiskANNRecordKey::Side(position)),
-                    _ => Kind::Graph(position),
+                    5 => Kind::Graph(position),
+                    _ => Kind::Record(DiskANNRecordKey::Origins(position)),
                 })
             }
             _ => Err(invalid("unknown record kind or key length")),

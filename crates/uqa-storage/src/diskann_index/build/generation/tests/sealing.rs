@@ -35,6 +35,7 @@ fn replay(
                 DiskANNRecordKey::Codebook => seal.codebook(bytes),
                 DiskANNRecordKey::Codes(first) => seal.code_batch(first, bytes),
                 DiskANNRecordKey::Side(first) => seal.side_batch(first, bytes),
+                DiskANNRecordKey::Origins(first) => seal.origin_batch(first, bytes),
                 DiskANNRecordKey::Manifest => unreachable!(),
             },
         )?;

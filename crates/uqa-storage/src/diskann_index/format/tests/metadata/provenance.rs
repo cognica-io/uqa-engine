@@ -63,7 +63,10 @@ fn versioned_build_manifest_matches_independent_bytes_and_retains_legacy_records
     let build = provenance(&bundle, bundle.book.training().options);
     let manifest = bundle.manifest.with_build_provenance(build).unwrap();
     let encoded = manifest.encode(&control).unwrap();
-    assert_eq!(encoded.len(), DiskANNManifest::MAX_ENCODED_BYTES);
+    assert_eq!(
+        encoded.len(),
+        DiskANNManifest::ENCODED_BYTES + DiskANNBuildProvenance::ENCODED_BYTES
+    );
     assert_eq!(hex(&encoded[384..]), expected["provenance_hex"]);
     assert_eq!(hex(&encoded[64..96]), expected["manifest_checksum"]);
     assert_eq!(
