@@ -8,6 +8,7 @@ use super::{sessions, sql, Arc, Engine, Value};
 
 mod observations;
 mod renaming;
+mod types;
 
 fn assert_search(engine: &Engine, expected: &[(i64, f64)]) {
     let result = sql(engine, "SELECT id, _score FROM diskann_docs WHERE knn_match(embedding, ARRAY[1.0,0.0], 10) ORDER BY _score DESC, id");

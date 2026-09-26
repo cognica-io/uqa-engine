@@ -120,6 +120,25 @@ pub fn retire_column(
     retire_fields(context, table, Some(column)).map(|_| ())
 }
 
+/// Reconstruct the field after its canonical rewrite and new table schema have been persisted. The original catalog identity and effective parameters remain authoritative.
+pub fn create_column(
+    context: &super::registry::IndexRegistryContext<'_>,
+    table: &str,
+    column: &str,
+) -> StorageBackendResult<bool> {
+    let catalog = context.identities.catalog.current_catalog_snapshot();
+    let row = crate::catalog::index::vectors::field_index(
+        catalog.snapshot().definitions.catalog_indexes.values(),
+        table,
+        column,
+    )?;
+    let Some(row) = row.filter(|row| row.index_type.eq_ignore_ascii_case("diskann")) else {
+        return Ok(false);
+    };
+    build(context.vectors, context.builds, row)?;
+    Ok(true)
+}
+
 fn retire_fields(
     context: &super::registry::IndexRegistryContext<'_>,
     table: &str,

@@ -21,6 +21,12 @@ use uqa_storage::{StorageBackendError, StorageBackendResult};
 /// Physical field index lifecycle used when a column changes storage type.
 pub trait ColumnIndexChanges {
     fn drop_vector_indexes(&self, table: &str, column: &str) -> StorageBackendResult<bool>;
+    fn prepare_vector_rewrite(
+        &self,
+        table: &str,
+        column: &str,
+        dimensions: u32,
+    ) -> StorageBackendResult<()>;
     fn rebuild_vector_index(
         &self,
         table: &str,
@@ -174,19 +180,23 @@ pub fn alter_type<S: Clone + 'static>(
         })?
         .ok_or_else(|| SQLError::UnknownColumn(format!("{table}.{name}")))?;
     let old_was_vector = matches!(&old_ty, ColumnType::Vector(_) | ColumnType::Tensor(_));
-    let new_is_vector = matches!(ty, ColumnType::Vector(_) | ColumnType::Tensor(_));
-    // Detach vector indexes before scalar conversion so row publication cannot feed a scalar into the old index; the enclosing transaction restores physical and catalog state on failure.
-    if old_was_vector && !new_is_vector {
+    // Row conversion writes canonical vectors with the target dimensions before rebuilding physical indexes. The enclosing transaction restores the old catalog, canonical data and generation on failure.
+    if let ColumnType::Vector(dimensions) | ColumnType::Tensor(dimensions) = ty {
+        context
+            .indexes
+            .prepare_vector_rewrite(table, name, *dimensions)
+            .map_err(|error| ddl_storage_error("ALTER TABLE ALTER COLUMN", error))?;
+    } else if old_was_vector {
         context
             .indexes
             .drop_vector_indexes(table, name)
             .map_err(|error| ddl_storage_error("ALTER TABLE ALTER COLUMN", error))?;
     }
+    publish_property(context.transactions, table, name, ColumnProperty::Type(ty))
+        .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?;
     if target_generated_kind.is_none() {
         super::rewrite_column_values_to_type(&context.rewrite, table, name, &old_ty, ty, using)?;
     }
-    publish_property(context.transactions, table, name, ColumnProperty::Type(ty))
-        .map_err(|error| ddl_storage_error("ALTER COLUMN TYPE", error))?;
     match ty {
         ColumnType::Text if target_generated_kind != Some(GeneratedColumnKind::Virtual) => {
             context.fields.add_text_field(table, name.to_string())?;

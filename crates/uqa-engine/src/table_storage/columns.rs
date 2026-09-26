@@ -135,17 +135,59 @@ impl Engine {
         else {
             return Ok(false);
         };
-        let Some(t) = self.try_table(table)? else {
-            return Ok(false);
-        };
-        if let Some(mut idx) = t.vector_indexes.write().live_mut()?.remove(column) {
-            idx.clear()?;
-        }
-        for index_name in self.vector_catalog_index_names_for_column(&table_name, column)? {
-            self.try_drop_catalog_index(&index_name)?;
-        }
-        self.try_save_table_schema(&table_name, &t)?;
+        uqa_execution::catalog::index::vectors::remove_for_column_conversion(
+            &self.index_registry_context(),
+            &table_name,
+            column,
+            || {
+                let state = self
+                    .try_table(&table_name)?
+                    .ok_or_else(|| table_not_found(&table_name))?;
+                let dimensions = state
+                    .vector_indexes
+                    .read()
+                    .get(column)
+                    .map(uqa_storage::VectorIndex::dimensions);
+                if let Some(dimensions) = dimensions {
+                    self.prepare_vector_column_rewrite(&table_name, column, dimensions)?;
+                    state.vector_indexes.write().live_mut()?.remove(column);
+                }
+                self.try_save_table_schema(&table_name, &state)
+            },
+        )?;
         Ok(true)
+    }
+
+    pub(crate) fn prepare_vector_column_rewrite(
+        &self,
+        table: &str,
+        column: &str,
+        dimensions: u32,
+    ) -> StorageBackendResult<()> {
+        let table_name = self
+            .try_resolve_table_name(table)?
+            .ok_or_else(|| table_not_found(table))?;
+        let state = self
+            .try_table(&table_name)?
+            .ok_or_else(|| table_not_found(&table_name))?;
+        uqa_execution::schema::indexes::diskann::retire_column(
+            &self.index_registry_context(),
+            &table_name,
+            column,
+        )?;
+        let canonical = self.build_vector_index_with_mode(
+            &table_name,
+            column,
+            dimensions,
+            VectorIndexSpec::BruteForce,
+            uqa_storage::VectorIndexOpenMode::Create,
+        )?;
+        uqa_execution::catalog::index::vectors::prepare_column_rewrite(
+            &mut state.vector_indexes.write(),
+            column,
+            canonical,
+        )?;
+        Ok(())
     }
 
     pub(crate) fn try_rebuild_vector_index_for_column(
@@ -171,16 +213,23 @@ impl Engine {
         let spec = self
             .vector_index_spec_for_column(&table_name, column)?
             .unwrap_or(VectorIndexSpec::BruteForce);
+        let t = self
+            .try_table(&table_name)?
+            .ok_or_else(|| table_not_found(&table_name))?;
+        self.try_save_table_schema(&table_name, &t)?;
+        if uqa_execution::schema::indexes::diskann::create_column(
+            &self.index_registry_context(),
+            &table_name,
+            column,
+        )? {
+            return Ok(true);
+        }
         let rebuilt = self.rebuild_vector_field_with_spec(&table_name, column, dimensions, spec)?;
         if !rebuilt {
             return Err(StorageBackendError::Other(format!(
                 "failed to rebuild vector index for `{table_name}`.`{column}`"
             )));
         }
-        let t = self
-            .try_table(&table_name)?
-            .ok_or_else(|| table_not_found(&table_name))?;
-        self.try_save_table_schema(&table_name, &t)?;
         Ok(true)
     }
 

@@ -80,6 +80,51 @@ pub fn detach_for_column_rename(
     }))
 }
 
+/// Use the canonical writer with the target dimensions during a type rewrite. The catalog owner must retire any `DiskANN` generation before this call; clearing that retired live handle would incorrectly try to publish another generation.
+pub fn prepare_column_rewrite(
+    indexes: &mut uqa_storage::vector_index::VectorIndexes,
+    field: &str,
+    mut canonical: Box<dyn VectorIndex>,
+) -> StorageBackendResult<()> {
+    let indexes = indexes.live_mut()?;
+    if let Some(mut old) = indexes.remove(field) {
+        if old.index_kind() != "diskann" {
+            old.clear()?;
+        }
+    }
+    canonical.clear()?;
+    indexes.insert(field.into(), canonical);
+    Ok(())
+}
+
+/// Acquire every index definition lock while the original generation is still readable, then remove its canonical data and catalog rows within the caller's transaction.
+pub fn remove_for_column_conversion(
+    context: &crate::schema::indexes::registry::IndexRegistryContext<'_>,
+    table: &str,
+    column: &str,
+    clear: impl FnOnce() -> StorageBackendResult<()>,
+) -> StorageBackendResult<()> {
+    use crate::schema::indexes::registry::{binding, lifecycle};
+    let catalog = context.identities.catalog.current_catalog_snapshot();
+    let mut rows = Vec::new();
+    for row in catalog.catalog_indexes() {
+        if row.table_name == table
+            && is_vector_method(&row.index_type)
+            && super::index_references_column(row, column)?
+        {
+            rows.push(row.relation.clone());
+        }
+    }
+    for relation in &rows {
+        binding::removal(context, relation)?;
+    }
+    clear()?;
+    for relation in rows {
+        lifecycle::remove(context, &relation, false)?;
+    }
+    Ok(())
+}
+
 /// Populate a newly selected memory index from one fixed document view, preserving SQL tensor extraction and the index owner's initialization contract.
 pub fn populate(
     index: &mut dyn VectorIndex,

@@ -211,6 +211,16 @@ impl uqa_execution::schema::columns::alteration::ColumnIndexChanges for Engine {
     fn drop_vector_indexes(&self, table: &str, column: &str) -> StorageBackendResult<bool> {
         self.try_drop_vector_indexes_for_column(table, column)
     }
+    fn prepare_vector_rewrite(
+        &self,
+        table: &str,
+        column: &str,
+        dimensions: u32,
+    ) -> StorageBackendResult<()> {
+        self.with_implicit_storage_transaction(|engine| {
+            engine.prepare_vector_column_rewrite(table, column, dimensions)
+        })
+    }
     fn rebuild_vector_index(
         &self,
         table: &str,
