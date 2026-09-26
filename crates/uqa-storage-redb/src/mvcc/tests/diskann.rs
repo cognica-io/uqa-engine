@@ -14,6 +14,28 @@ use uqa_storage::key_value::conformance::{verify_diskann_generations, verify_dis
 use uqa_storage::KeyValueStore;
 
 #[test]
+fn diskann_runtime_adoption_conflicts_with_redb_unstamped_insertions() {
+    let directory = tempfile::tempdir().unwrap();
+    let owner = crate::RedbStorage::open(directory.path().join("adoption.redb")).unwrap();
+    let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
+    uqa_storage::key_value::conformance::verify_diskann_runtime_adoption_conflicts(&store).unwrap();
+}
+
+#[test]
+fn diskann_runtime_lifecycle_preserves_redb_transactions_and_cold_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("runtime.redb");
+    let generation = {
+        let owner = crate::RedbStorage::open(&path).unwrap();
+        let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
+        uqa_storage::key_value::conformance::verify_diskann_runtime_lifecycle(&store).unwrap()
+    };
+    let owner = crate::RedbStorage::open(&path).unwrap();
+    let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
+    uqa_storage::key_value::conformance::verify_diskann_runtime_reopen(&store, generation).unwrap();
+}
+
+#[test]
 fn diskann_live_writes_keep_actual_catalog_visibility_and_redb_cold_reopen() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("live.redb");

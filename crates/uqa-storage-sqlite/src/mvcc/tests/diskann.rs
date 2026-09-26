@@ -18,6 +18,32 @@ use crate::key_value::SQLiteKeyValueStore;
 use crate::SQLiteCompressionOptions;
 
 #[test]
+fn diskann_runtime_adoption_conflicts_with_sqlite_unstamped_insertions() {
+    let directory = tempfile::tempdir().unwrap();
+    let store: Arc<dyn KeyValueStore> = Arc::new(
+        SQLiteKeyValueStore::new(connection(&directory.path().join("adoption.db"), 0)).unwrap(),
+    );
+    uqa_storage::key_value::conformance::verify_diskann_runtime_adoption_conflicts(&store).unwrap();
+}
+
+#[test]
+fn diskann_runtime_lifecycle_preserves_sqlite_transactions_and_cold_reopen() {
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("runtime.db");
+        let generation = {
+            let store: Arc<dyn KeyValueStore> =
+                Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+            uqa_storage::key_value::conformance::verify_diskann_runtime_lifecycle(&store).unwrap()
+        };
+        let store: Arc<dyn KeyValueStore> =
+            Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+        uqa_storage::key_value::conformance::verify_diskann_runtime_reopen(&store, generation)
+            .unwrap();
+    }
+}
+
+#[test]
 fn diskann_live_writes_keep_actual_catalog_visibility_and_sqlite_cold_reopen() {
     for mode in 0..4 {
         let directory = tempfile::tempdir().unwrap();

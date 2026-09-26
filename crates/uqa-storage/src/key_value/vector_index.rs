@@ -6,6 +6,7 @@
 
 //! Vector-index adapter over an ordered key/value store.
 
+mod guards;
 pub(in crate::key_value) mod origin;
 mod read;
 pub use origin::{
@@ -71,6 +72,7 @@ impl KeyValueVectorIndex {
             self.validate_dimensions(vector)?;
         }
         validate_vector_ordinal_count(usize_to_u64(vectors.len(), "vector count")?)?;
+        self.coordinate_field(batch, false)?;
         batch.delete(&origin::key(&self.table, &self.field, doc_id)?)?;
         batch.delete_prefix(&vector_doc_prefix(&self.table, &self.field, doc_id)?)?;
         for (ordinal, vector) in vectors.iter().enumerate() {
@@ -85,6 +87,7 @@ impl KeyValueVectorIndex {
     }
 
     pub(super) fn stage_clear(&self, batch: &mut dyn KeyValueBatch) -> StorageBackendResult<()> {
+        self.coordinate_field(batch, true)?;
         batch.delete_prefix(&origin::prefix(&self.table, &self.field)?)?;
         batch.delete_prefix(&origin::journal::prefix(&self.table, &self.field)?)?;
         batch.delete_prefix(&vector_field_prefix(&self.table, &self.field)?)

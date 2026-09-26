@@ -6,6 +6,8 @@
 
 //! Session-bound mutations and fresh query snapshots use actual catalog incarnations.
 
+mod runtime;
+
 use super::{invalid, KeyValueDiskANNCanonical, RetainedDiskANNCanonical};
 use crate::diskann_index::{
     catalog::{DiskANNIndexResolver, DiskANNIndexScope},
@@ -106,6 +108,12 @@ impl KeyValueDiskANNHandle {
 
     /// Prepare one current query view. The returned `VectorIndex` can be reused and nested without rereading resident PQ data, and keeps its captured generation after this handle advances or closes.
     pub fn snapshot(&self) -> StorageBackendResult<RetainedDiskANNIndex<RetainedDiskANNCanonical>> {
+        self.retain_current()?
+            .into_vector_index(&*self.resolver, self.limits, &self.control)?
+            .ok_or_else(|| invalid("live index has no published generation"))
+    }
+
+    fn retain_current(&self) -> StorageBackendResult<RetainedDiskANNCanonical> {
         self.control.check()?;
         let source = self
             .canonical
@@ -117,9 +125,7 @@ impl KeyValueDiskANNHandle {
                 .index_parameters()
                 .ok_or_else(|| invalid("live index has no bound parameters"))?,
         )?;
-        source
-            .into_vector_index(&*self.resolver, self.limits, &self.control)?
-            .ok_or_else(|| invalid("live index has no published generation"))
+        Ok(source)
     }
 
     fn validate(

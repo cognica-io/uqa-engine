@@ -8,6 +8,24 @@ use super::*;
 use uqa_storage::diskann_index::pages::DiskANNRecordKey;
 
 #[test]
+fn diskann_runtime_adoption_conflicts_with_unstamped_insertions() {
+    let persistence = Persistence::new();
+    let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+    uqa_storage::key_value::conformance::verify_diskann_runtime_adoption_conflicts(&store).unwrap();
+}
+
+#[test]
+fn diskann_runtime_lifecycle_preserves_transactions_and_reopen() {
+    let persistence = Persistence::new();
+    let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+    let generation =
+        uqa_storage::key_value::conformance::verify_diskann_runtime_lifecycle(&store).unwrap();
+    drop(store);
+    let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+    uqa_storage::key_value::conformance::verify_diskann_runtime_reopen(&store, generation).unwrap();
+}
+
+#[test]
 fn diskann_live_writes_keep_actual_catalog_visibility_and_reopen() {
     let persistence = Persistence::new();
     let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));

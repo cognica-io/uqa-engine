@@ -27,6 +27,11 @@ pub use graph_retry::verify_graph_admission_retry;
 mod compound;
 pub use compound::{verify_compound_concurrency, verify_compound_mutations};
 mod origins;
+pub use origins::verify_diskann_runtime_adoption_conflicts;
+pub use origins::{
+    diskann_runtime_fixture_options, verify_diskann_runtime_lifecycle,
+    verify_diskann_runtime_reopen,
+};
 pub use origins::{
     verify_diskann_canonical_origins, verify_diskann_canonical_reopen,
     verify_diskann_catalog_binding, verify_diskann_catalog_identity,

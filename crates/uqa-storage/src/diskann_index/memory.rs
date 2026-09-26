@@ -12,18 +12,13 @@ mod source;
 mod tests;
 
 use super::{
-    build::{
-        DiskANNGenerationOptions, DiskANNMergeOptions, DiskANNPartitionOptions,
-        DiskANNTemporaryBudget,
-    },
+    build::DiskANNTemporaryBudget,
     format::{DiskANNGeneration, DiskANNManifest, DiskANNVectorVersion},
-    pages::DiskANNReadLimits,
     RetainedDiskANNIndex,
 };
 use crate::{
     mvcc::{DatabaseId, StorageTransactionId},
     read_control::StorageReadControl,
-    vector_index::DiskANNIndexParams,
     StorageBackendError, StorageBackendResult, VectorIndex,
 };
 use source::Canonical;
@@ -36,15 +31,8 @@ use uqa_core::{
     DocId, PostingList,
 };
 
-/// Explicit host construction and read settings. Every allocation, including simultaneous old/new generations, also shares the owner's memory allowance.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DiskANNMemoryOptions {
-    pub parameters: DiskANNIndexParams,
-    pub read: DiskANNReadLimits,
-    pub partitions: DiskANNPartitionOptions,
-    pub merge: DiskANNMergeOptions,
-    pub generation: DiskANNGenerationOptions,
-}
+/// Memory construction uses the same host settings as persistent generation construction.
+pub type DiskANNMemoryOptions = super::DiskANNIndexOptions;
 
 struct Clock {
     database: DatabaseId,

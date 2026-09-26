@@ -19,6 +19,46 @@ pub type DiskANNCanonicalCorpusVisitor<'a> =
 
 /// A retained canonical source with the actual versioned change journal on that same view. The lifecycle owner must establish complete coverage before opening a query; absence from this journal alone is not proof of build membership.
 pub trait DiskANNQueryRead: DiskANNCanonicalRead {
+    /// Count visible ordinals from complete origin metadata without decoding coordinates or preparing a graph reader.
+    fn vector_count(&self, control: &StorageReadControl) -> StorageBackendResult<usize> {
+        self.check_control(control)?;
+        let mut after = None;
+        let mut count = 0_usize;
+        while let Some(document) = self.next_document_after(after, control)? {
+            self.check_control(control)?;
+            if after.is_some_and(|previous| document <= previous) {
+                return Err(VersionError::InvalidEncoding(
+                    "canonical vector count cursor did not advance",
+                )
+                .into_storage_error());
+            }
+            let origin = self.document_origin(document, control)?.ok_or_else(|| {
+                VersionError::InvalidEncoding("enumerated vector document has no origin")
+                    .into_storage_error()
+            })?;
+            let vectors = usize::try_from(origin.count())
+                .map_err(|_| uqa_core::memory::MemoryError::SizeOverflow)?;
+            count = count
+                .checked_add(vectors)
+                .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+            after = Some(document);
+        }
+        self.check_control(control)?;
+        Ok(count)
+    }
+
+    /// Test nonempty membership using complete canonical metadata on this exact view.
+    fn contains_vectors(
+        &self,
+        document: DocId,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<bool> {
+        self.check_control(control)?;
+        let origin = self.document_origin(document, control)?;
+        self.check_control(control)?;
+        Ok(origin.is_some_and(|origin| origin.count() != 0))
+    }
+
     /// Return the selected mutation and complete tensor cardinality after validating its ordinal-key coverage. This metadata probe must not decode coordinate values or inspect graph pages; empty replacements return Some with count zero.
     fn document_origin(
         &self,

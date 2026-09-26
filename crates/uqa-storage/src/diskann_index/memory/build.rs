@@ -31,19 +31,10 @@ pub(super) fn prepare(
         temporary,
         control,
     )?;
-    let runs = capture.input().build_partitions(
-        directory.path(),
-        options.parameters,
-        options.partitions,
-    )?;
-    let graph = capture
-        .input()
-        .merge_partitions(runs, directory.path(), options.merge)?;
     let mut sink = DiskANNMemoryBuilder::new(generation, control.memory());
-    let manifest = capture.write_generation(&graph, options.generation, &mut sink)?;
+    let manifest = options.write_generation(&capture, directory.path(), &mut sink)?;
     let physical = sink.finish(manifest, control)?;
     drop(capture.finish(&manifest, control)?);
-    drop(graph);
     // Clear only the candidate's changes after complete construction and sealing. A failure before replacement leaves the live root and every earlier reader intact.
     RetainedDiskANNIndex::open(
         source.covered(),

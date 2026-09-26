@@ -44,10 +44,14 @@ fn independent_hnsw_writers_merge_shared_node_ids_and_preserve_serial_topology()
         serial
             .add_many(101, vec![vec![1.0, 0.0], vec![0.0, 1.0]])
             .unwrap();
-        assert_eq!(
-            a.scan_prefix(b"").unwrap(),
-            reference.scan_prefix(b"").unwrap()
-        );
+        let mut expected = reference.scan_prefix(b"").unwrap();
+        // The versioned owner also persists this immutable field revision. Keep the complete graph and canonical-byte comparison against the serial algorithm.
+        expected.push((
+            b"\0uqa-vector-field-guards-v1\0\x01v\0\0\0\x07vectors\0\0\0\x01v".to_vec(),
+            vec![1],
+        ));
+        expected.sort();
+        assert_eq!(a.scan_prefix(b"").unwrap(), expected);
         assert_eq!(left.count().unwrap(), seed as usize + 3);
         assert_eq!(right.count().unwrap(), seed as usize + 3);
         assert_eq!(baseline.count().unwrap(), seed as usize);

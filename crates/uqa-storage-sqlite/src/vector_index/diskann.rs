@@ -6,6 +6,7 @@
 
 //! Native canonical tensors and origins share one evaluated publishing mutation.
 
+mod lifecycle;
 mod live;
 mod retained;
 #[cfg(test)]
@@ -85,6 +86,7 @@ impl SQLiteDiskANNCanonical {
                 guard(snapshot, batch)?;
                 let owner = snapshot.ensure_table_owner(&self.index.table, batch)?;
                 let field = ValueRef::Text(self.index.field.as_bytes());
+                snapshot.coordinate_vector_field(batch, owner, field, false)?;
                 let version = DiskANNVectorVersion::new(origin.transaction(), origin.revision())?;
                 let record = DiskANNCanonicalOrigin::new(version, self.index.dimensions, count)?;
                 snapshot.delete_prefix(

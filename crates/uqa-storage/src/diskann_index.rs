@@ -13,7 +13,9 @@ pub mod changes;
 pub mod format;
 mod memory;
 mod metric;
+mod options;
 pub mod pages;
+mod persistent;
 mod pq;
 mod query;
 mod random;
@@ -24,6 +26,8 @@ mod vamana;
 pub use canonical::{DiskANNCanonicalCorpusVisitor, DiskANNCanonicalRead, DiskANNQueryRead};
 pub use memory::{DiskANNMemoryIndex, DiskANNMemoryOptions};
 pub use metric::{ExactVectorReason, NavigationInput, NavigationVector, SquaredNavigationDistance};
+pub use options::DiskANNIndexOptions;
+pub use persistent::{DiskANNPersistentOwner, PersistentDiskANNIndex};
 pub use pq::{
     PQCodebook, PQDistance, PQLookupTable, PQTrainer, PQTrainingOptions, PQTrainingSummary,
 };

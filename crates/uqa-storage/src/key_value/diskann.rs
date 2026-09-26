@@ -22,6 +22,7 @@ use crate::{
 
 use super::{KeyValueMutation, KeyValueRead};
 
+mod build;
 pub(super) mod conformance;
 mod identity;
 mod keys;
