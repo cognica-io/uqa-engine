@@ -10,6 +10,7 @@ use uqa_sql::{ast::VacuumStmt, maintenance::ResolvedVacuumTarget, SQLError, SQLR
 use uqa_storage::StorageBackendError;
 pub mod analyze;
 mod context;
+pub mod diskann;
 #[cfg(test)]
 mod tests;
 pub use context::*;
