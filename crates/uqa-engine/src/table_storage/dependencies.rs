@@ -12,10 +12,10 @@ mod routines;
 use super::{
     rename_schema_expr_column, rename_schema_expr_qualified_column, rename_schema_expr_relation,
     schema_expr_references_column, schema_expr_references_relation,
-    stored_relation_reference_matches, table_not_found, Arc, BTreeMap, CatalogIndexRow, Engine,
-    IVFIndexParams, RelationIdentity, StorageBackendError, StorageBackendResult, TableState,
+    stored_relation_reference_matches, table_not_found, Arc, CatalogIndexRow, Engine,
+    RelationIdentity, StorageBackendError, StorageBackendResult, TableState,
 };
-use crate::{HNSWIndexParams, VectorIndexSpec};
+use crate::VectorIndexSpec;
 
 impl Engine {
     pub(crate) fn generated_columns_referencing_column(
@@ -417,30 +417,25 @@ impl Engine {
         table: &str,
         column: &str,
     ) -> StorageBackendResult<Option<VectorIndexSpec>> {
-        let mut found = None;
-        for row in self.durable.catalog_indexes.read().values() {
-            let is_vector_index = row.index_type.eq_ignore_ascii_case("ivf")
-                || row.index_type.eq_ignore_ascii_case("hnsw");
-            if row.table_name == table
-                && is_vector_index
-                && Self::catalog_index_references_column(row, column)?
-            {
-                let parameters: BTreeMap<String, String> =
-                    serde_json::from_str(&row.parameters_json)
-                        .map_err(StorageBackendError::from)?;
-                let spec = if row.index_type.eq_ignore_ascii_case("ivf") {
-                    VectorIndexSpec::IVF(IVFIndexParams::from_catalog_map(&parameters)?)
-                } else {
-                    VectorIndexSpec::HNSW(HNSWIndexParams::from_catalog_map(&parameters)?)
-                };
-                if found.replace(spec).is_some() {
-                    return Err(StorageBackendError::Other(format!(
-                        "multiple physical vector indexes target `{table}`.`{column}`"
-                    )));
-                }
-            }
-        }
-        Ok(found)
+        let row = uqa_execution::catalog::index::vectors::field_index(
+            self.durable.catalog_indexes.read().values(),
+            table,
+            column,
+        )?
+        .cloned();
+        row.map(|row| {
+            let Some(
+                uqa_sql::ast::ColumnType::Vector(dimensions)
+                | uqa_sql::ast::ColumnType::Tensor(dimensions),
+            ) = self.column_type(table, column)?
+            else {
+                return Err(StorageBackendError::Other(
+                    "physical vector index has no typed vector field".into(),
+                ));
+            };
+            uqa_execution::catalog::index::vectors::stored_spec(&row, dimensions)
+        })
+        .transpose()
     }
 
     pub(crate) fn vector_catalog_index_names_for_column(
@@ -451,8 +446,7 @@ impl Engine {
         let mut names = Vec::new();
         for row in self.durable.catalog_indexes.read().values() {
             if row.table_name == table
-                && (row.index_type.eq_ignore_ascii_case("ivf")
-                    || row.index_type.eq_ignore_ascii_case("hnsw"))
+                && uqa_execution::catalog::index::vectors::is_vector_method(&row.index_type)
                 && Self::catalog_index_references_column(row, column)?
             {
                 names.push(row.relation.qualified_name());

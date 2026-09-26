@@ -159,6 +159,7 @@ impl TableRemovalContext<'_> {
             return Err(table_not_found(name));
         }
         self.events.drop_relation_events_inner(&relation)?;
+        crate::schema::indexes::diskann::retire_table(&self.indexes, name)?;
         self.publication.remove_state(name, &relation)
     }
 }

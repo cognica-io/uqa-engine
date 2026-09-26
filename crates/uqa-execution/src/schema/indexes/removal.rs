@@ -119,9 +119,7 @@ fn drop_index_side_effects(
 ) -> Result<(), SQLError> {
     if row.index_type.eq_ignore_ascii_case("gin") {
         drop_gin_index_side_effects(context, row, survivors, removed_fields)?;
-    } else if row.index_type.eq_ignore_ascii_case("ivf")
-        || row.index_type.eq_ignore_ascii_case("hnsw")
-    {
+    } else if crate::catalog::index::vectors::is_vector_method(&row.index_type) {
         drop_vector_index_side_effects(context, row)?;
     }
     Ok(())
@@ -228,6 +226,12 @@ fn drop_vector_index_side_effects(
             &col,
             column_type,
         )?;
+        if row.index_type.eq_ignore_ascii_case("diskann") {
+            context
+                .publication
+                .retire_diskann_index(row, &col, dim)
+                .map_err(|error| ddl_storage_error("DROP INDEX diskann", error))?;
+        }
         if !context
             .publication
             .drop_vector_field_index(&row.table_name, col.clone(), dim)

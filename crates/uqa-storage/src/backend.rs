@@ -397,6 +397,28 @@ pub trait PersistentStorageBackend: Send + Sync {
         mode: VectorIndexOpenMode,
     ) -> StorageBackendResult<Box<dyn VectorIndex>>;
 
+    /// Open a catalog-bound `DiskANN` owner on this exact backend session. Creation joins the active catalog transaction and returns an initialized index; restoration never builds missing state.
+    fn diskann_index(
+        &self,
+        _binding: crate::diskann_index::DiskANNIndexBinding<'_>,
+        _options: crate::diskann_index::DiskANNIndexOptions,
+        _temporary: &crate::diskann_index::build::DiskANNTemporaryBudget,
+        _mode: VectorIndexOpenMode,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        Err(StorageBackendError::Other(
+            "this backend does not support catalog-bound DiskANN indexes".into(),
+        ))
+    }
+
+    fn retire_diskann_index(
+        &self,
+        _binding: crate::diskann_index::DiskANNIndexBinding<'_>,
+    ) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "this backend does not support DiskANN retirement".into(),
+        ))
+    }
+
     fn drop_vector_index_metadata(&self, _table: &str, _field: &str) -> StorageBackendResult<()> {
         Ok(())
     }

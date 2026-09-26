@@ -4,14 +4,14 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Build newly materialized partition fields before publishing their catalog rows.
+//! Select newly allocated physical indexes and preserve their catalog/build ordering.
 
 use super::{
     index_definition, BTreeMap, BTreeSet, CatalogIndexRow, IndexRegistryContext, RelationIdentity,
     StorageBackendError, StorageBackendResult,
 };
 
-pub(in crate::schema::indexes) fn new_descendants(
+pub(in crate::schema::indexes) fn new_physical_indexes(
     previous: &BTreeMap<RelationIdentity, CatalogIndexRow>,
     rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
 ) -> StorageBackendResult<Vec<CatalogIndexRow>> {
@@ -26,7 +26,8 @@ pub(in crate::schema::indexes) fn new_descendants(
     let mut builds = Vec::new();
     for row in rows.values() {
         let definition = index_definition(row)?;
-        if definition.relationships.parent_index.is_some()
+        if (definition.relationships.parent_index.is_some()
+            || row.index_type.eq_ignore_ascii_case("diskann"))
             && !identities.contains(
                 &definition
                     .catalog
@@ -43,6 +44,9 @@ pub(super) fn build(
     context: &IndexRegistryContext<'_>,
     row: &CatalogIndexRow,
 ) -> StorageBackendResult<()> {
+    if row.index_type.eq_ignore_ascii_case("diskann") {
+        return super::super::diskann::build(context.vectors, context.builds, row);
+    }
     let statement = uqa_sql::catalog::index::stored::declaration(row)?;
     super::super::creation::build_physical_index(
         context.vectors,

@@ -14,6 +14,16 @@ use crate::{
 use std::sync::Arc;
 use uqa_core::{memory::MemoryReservation, DocId, PostingList};
 
+/// Actual SQL catalog address and the caller's retained allowance. Providers resolve immutable ownership from the stored definition through the supplied SQL owner.
+pub struct DiskANNIndexBinding<'a> {
+    pub table: &'a str,
+    pub field: &'a str,
+    pub dimensions: u32,
+    pub index: &'a crate::RelationIdentity,
+    pub resolver: Arc<dyn super::catalog::DiskANNIndexResolver + Send + Sync>,
+    pub control: &'a StorageReadControl,
+}
+
 /// Provider boundary for a bound mutable index. Structural operations preserve the active caller transaction and restore their own private effects on failure.
 pub trait DiskANNPersistentOwner: Send + Sync {
     type Snapshot: VectorIndex + 'static;

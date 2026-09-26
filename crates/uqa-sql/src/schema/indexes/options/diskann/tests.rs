@@ -105,7 +105,7 @@ fn numeric_options_reject_nonfinite_signed_and_out_of_range_values() {
 }
 
 #[test]
-fn diskann_descriptors_do_not_enable_public_access_method_routing() {
+fn diskann_descriptors_preserve_raw_options_for_execution_resolution() {
     let statement = crate::compiler::compile(
         "CREATE INDEX items_diskann ON items USING diskann (embedding) WITH (alpha = 1.2, pq_bytes = 7)",
     ).unwrap().remove(0);
@@ -114,10 +114,10 @@ fn diskann_descriptors_do_not_enable_public_access_method_routing() {
     };
     let parsed = parse_diskann_index_options(&statement.options).unwrap();
     assert_eq!((parsed.alpha, parsed.pq_bytes), (Some(1.2), Some(7)));
-    let error = super::super::index_access_method(&statement).unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("access method `diskann` is not supported"));
+    assert_eq!(
+        super::super::index_access_method(&statement).unwrap(),
+        "diskann"
+    );
 }
 
 #[test]

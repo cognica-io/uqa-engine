@@ -107,7 +107,7 @@ pub fn restore(
         storage.set_metadata(REGISTRY_VERSION, "2")?;
     }
     let builds = if legacy {
-        crate::schema::indexes::registry::builds::new_descendants(
+        crate::schema::indexes::registry::builds::new_physical_indexes(
             &stored
                 .into_iter()
                 .map(|row| (row.relation.clone(), row))

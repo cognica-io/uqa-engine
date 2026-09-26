@@ -27,7 +27,7 @@ pub use canonical::{DiskANNCanonicalCorpusVisitor, DiskANNCanonicalRead, DiskANN
 pub use memory::{DiskANNMemoryIndex, DiskANNMemoryOptions};
 pub use metric::{ExactVectorReason, NavigationInput, NavigationVector, SquaredNavigationDistance};
 pub use options::DiskANNIndexOptions;
-pub use persistent::{DiskANNPersistentOwner, PersistentDiskANNIndex};
+pub use persistent::{DiskANNIndexBinding, DiskANNPersistentOwner, PersistentDiskANNIndex};
 pub use pq::{
     PQCodebook, PQDistance, PQLookupTable, PQTrainer, PQTrainingOptions, PQTrainingSummary,
 };

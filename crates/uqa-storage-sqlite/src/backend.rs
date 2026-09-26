@@ -210,6 +210,11 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         mode: VectorIndexOpenMode,
     ) -> StorageBackendResult<Box<dyn VectorIndex>> {
         let index: Box<dyn VectorIndex> = match spec {
+            VectorIndexSpec::DiskANN(_) => {
+                return Err(uqa_storage::StorageBackendError::Other(
+                    "DiskANN requires an actual catalog binding".into(),
+                ))
+            }
             VectorIndexSpec::BruteForce => Box::new(SQLiteVectorIndex::new(
                 self.conn.clone(),
                 table,
@@ -264,6 +269,52 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
             }
         };
         Ok(index)
+    }
+
+    fn diskann_index(
+        &self,
+        binding: uqa_storage::diskann_index::DiskANNIndexBinding<'_>,
+        options: uqa_storage::diskann_index::DiskANNIndexOptions,
+        temporary: &uqa_storage::diskann_index::build::DiskANNTemporaryBudget,
+        mode: VectorIndexOpenMode,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        let canonical = crate::vector_index::SQLiteDiskANNCanonical::new(
+            self.conn.clone(),
+            binding.table,
+            binding.field,
+            binding.dimensions,
+        )?;
+        if mode == VectorIndexOpenMode::Create {
+            canonical.create_index(
+                binding.index,
+                &*binding.resolver,
+                options,
+                temporary,
+                binding.control,
+            )?;
+        }
+        let handle = canonical.bind(
+            binding.index.clone(),
+            binding.resolver,
+            options.read,
+            binding.control,
+        )?;
+        Ok(Box::new(
+            uqa_storage::diskann_index::PersistentDiskANNIndex::new(handle, options, temporary)?,
+        ))
+    }
+
+    fn retire_diskann_index(
+        &self,
+        binding: uqa_storage::diskann_index::DiskANNIndexBinding<'_>,
+    ) -> StorageBackendResult<()> {
+        crate::vector_index::SQLiteDiskANNCanonical::new(
+            self.conn.clone(),
+            binding.table,
+            binding.field,
+            binding.dimensions,
+        )?
+        .retire_index(binding.index, &*binding.resolver, binding.control)
     }
 
     fn drop_vector_index_metadata(&self, table: &str, field: &str) -> StorageBackendResult<()> {

@@ -25,6 +25,7 @@ use uqa_storage::{document_store::Document, StorageBackendResult, ValueIndexKey}
 impl Engine {
     pub(crate) fn column_drop_publication_context(&self) -> ColumnDropPublicationContext<'_> {
         ColumnDropPublicationContext {
+            registry: self.index_registry_context(),
             catalog: self,
             indexes: self,
             rows: self,
