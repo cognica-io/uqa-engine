@@ -32,6 +32,23 @@ fn connection(path: &Path, mode: u8) -> ManagedConnection {
 }
 
 #[test]
+fn diskann_catalog_binding_checks_actual_sqlite_definitions_in_all_file_modes() {
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let store: Arc<dyn KeyValueStore> = Arc::new(
+            SQLiteKeyValueStore::new(connection(&directory.path().join("binding.db"), mode))
+                .unwrap(),
+        );
+        let other: Arc<dyn KeyValueStore> = Arc::new(
+            SQLiteKeyValueStore::new(connection(&directory.path().join("foreign.db"), mode))
+                .unwrap(),
+        );
+        uqa_storage::key_value::conformance::verify_diskann_catalog_binding(&store, &other)
+            .unwrap();
+    }
+}
+
+#[test]
 fn diskann_canonical_origins_and_tensors_reopen_in_sqlite_key_value_modes() {
     for mode in 0..4 {
         let directory = tempfile::tempdir().unwrap();

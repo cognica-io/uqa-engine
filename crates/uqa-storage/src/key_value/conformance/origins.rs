@@ -6,7 +6,9 @@
 
 //! Actual publication identities, undo branches and bounded canonical views on disposable providers.
 
+mod binding;
 mod catalog;
+pub use binding::verify_diskann_catalog_binding;
 mod changes;
 mod corpus;
 mod coverage;

@@ -27,6 +27,7 @@ pub struct RetainedDiskANNCanonical {
     changes: BudgetedVec<u8>,
     dimensions: u32,
     control: StorageReadControl,
+    pub(super) binding: Option<crate::key_value::catalog::diskann::Binding>,
 }
 
 impl RetainedDiskANNCanonical {
@@ -45,7 +46,28 @@ impl RetainedDiskANNCanonical {
             changes: append(changes, &[], control)?,
             dimensions,
             control: control.clone(),
+            binding: None,
         })
+    }
+
+    /// The persisted, validated build parameters of the captured index, if this source was retained through `retain_for_index`.
+    pub fn index_parameters(&self) -> Option<crate::vector_index::DiskANNIndexParams> {
+        self.binding.as_ref().map(|binding| binding.parameters)
+    }
+
+    /// Validate this source's captured catalog records against the publication command and add commit-time definition requirements to its batch. The reader and batch must come from the same `with_mutation` callback. Generation selection, physical sealing and change retirement remain the publication owner's obligations.
+    pub fn require_current_index(
+        &self,
+        read: &dyn KeyValueRead,
+        batch: &mut dyn crate::KeyValueBatch,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<()> {
+        self.check_control(control)?;
+        self.binding
+            .as_ref()
+            .ok_or_else(|| invalid("canonical source has no captured index binding"))?
+            .require_current(read, batch, control)?;
+        self.check_control(control)
     }
 
     /// Return a document's origin only after checking that its complete contiguous canonical ordinal set agrees with the stored replacement count. A zero-count record is an explicit empty replacement.

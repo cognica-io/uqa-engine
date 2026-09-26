@@ -22,7 +22,7 @@ use crate::diskann_index::format::{
 use crate::key_value::{codec, KeyValueRead};
 use crate::mvcc::VersionError;
 use crate::read_control::StorageReadControl;
-use crate::{KeyValueStore, StorageBackendResult};
+use crate::{KeyValueStore, RelationIdentity, StorageBackendResult};
 use uqa_core::DocId;
 
 const ROOT: &[u8] = b"\0uqa-diskann-canonical-v1\0";
@@ -97,6 +97,23 @@ impl KeyValueDiskANNCanonical {
         &self,
         control: &StorageReadControl,
     ) -> StorageBackendResult<RetainedDiskANNCanonical> {
+        self.retain_selected(None, control)
+    }
+
+    /// Capture the real table/index definitions with canonical input on one fixed view. Ordinary unbound sources cannot authorize a later catalog publication.
+    pub fn retain_for_index(
+        &self,
+        index: &RelationIdentity,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<RetainedDiskANNCanonical> {
+        self.retain_selected(Some(index), control)
+    }
+
+    fn retain_selected(
+        &self,
+        index: Option<&RelationIdentity>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<RetainedDiskANNCanonical> {
         control.check()?;
         let _workspace = control.memory().reserve(self.workspace_bytes(false)?)?;
         let vectors = codec::vector_field_prefix(&self.index.table, &self.index.field)?;
@@ -106,14 +123,34 @@ impl KeyValueDiskANNCanonical {
         self.index
             .store
             .with_read_view(&mut |read: &dyn KeyValueRead| {
-                selected = Some(RetainedDiskANNCanonical::new(
-                    read.retain(&[&vectors, &origins, &changes])?,
+                let binding = index
+                    .map(|index| {
+                        crate::key_value::catalog::diskann::Binding::capture(
+                            read,
+                            &self.index.table,
+                            &self.index.field,
+                            self.index.dimensions,
+                            index,
+                            control,
+                        )
+                    })
+                    .transpose()?;
+                let mut prefixes = uqa_core::memory::BudgetedVec::new(control.memory());
+                prefixes.extend_from_slice(&[&*vectors, &*origins, &*changes])?;
+                if let Some(binding) = &binding {
+                    prefixes.extend_from_slice(&binding.prefixes())?;
+                }
+                let mut source = RetainedDiskANNCanonical::new(
+                    read.retain(&prefixes)?,
                     &vectors,
                     &origins,
                     &changes,
                     self.index.dimensions,
                     control,
-                )?);
+                )?;
+                drop(prefixes);
+                source.binding = binding;
+                selected = Some(source);
                 Ok(())
             })?;
         selected.ok_or_else(|| invalid("canonical read did not execute"))

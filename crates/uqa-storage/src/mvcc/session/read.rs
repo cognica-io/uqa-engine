@@ -52,6 +52,34 @@ impl KeyValueRead for RecordRead<'_> {
         ))
     }
 
+    fn record_revision(&self, key: &[u8]) -> StorageBackendResult<Option<KeyValueReadRevision>> {
+        self.control.check()?;
+        let metadata = self
+            .view
+            .metadata(key, self.control)
+            .map_err(VersionError::into_storage_error)?;
+        let Some(metadata) = metadata.filter(|record| record.live) else {
+            self.control.check()?;
+            return Ok(None);
+        };
+        let private = self
+            .view
+            .private_keys(key, None, 1, self.control)
+            .map_err(VersionError::into_storage_error)?;
+        let private = private
+            .first()
+            .filter(|record| record.key() == key)
+            .map(crate::mvcc::PrivateRecordKey::revision);
+        self.control.check()?;
+        Ok(Some(KeyValueReadRevision::records(
+            self.database,
+            metadata
+                .revision
+                .unwrap_or(crate::mvcc::CommitSequence::INITIAL),
+            private,
+        )))
+    }
+
     fn retain(
         &self,
         _prefixes: &[&[u8]],
@@ -211,6 +239,9 @@ impl KeyValueRead for RetainedRecordRead {
     }
     fn revision(&self, prefixes: &[&[u8]]) -> StorageBackendResult<KeyValueReadRevision> {
         self.read().revision(prefixes)
+    }
+    fn record_revision(&self, key: &[u8]) -> StorageBackendResult<Option<KeyValueReadRevision>> {
+        self.read().record_revision(key)
     }
     fn retain(
         &self,
