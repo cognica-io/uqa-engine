@@ -12,6 +12,7 @@ use uqa_storage::mvcc::{CommitStatus, VersionedPersistence, VersionedSessionOpti
 
 mod changes;
 mod corpus;
+mod coverage;
 mod lifecycle;
 mod validation;
 

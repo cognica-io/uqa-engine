@@ -9,6 +9,7 @@
 mod catalog;
 mod changes;
 mod corpus;
+mod coverage;
 mod lifecycle;
 pub use lifecycle::verify_mutation_origins;
 
@@ -113,6 +114,7 @@ pub fn verify_diskann_canonical_origins(
     catalog::verify(store, &control)?;
     corpus::verify(store)?;
     changes::verify(store)?;
+    coverage::verify(store)?;
     let tiny = StorageReadControl::with_limit(1);
     expect(
         fresh
