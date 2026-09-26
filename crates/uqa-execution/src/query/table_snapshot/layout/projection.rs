@@ -95,7 +95,7 @@ impl RowLayout {
         StorageBackendError::backend("query row layout", error)
     }
 
-    fn source_name(&self, field: &str) -> Option<&str> {
+    pub(in crate::query::table_snapshot) fn source_name(&self, field: &str) -> Option<&str> {
         self.source
             .iter()
             .find(|(_, target)| target.as_deref() == Some(field))

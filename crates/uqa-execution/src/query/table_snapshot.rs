@@ -22,9 +22,11 @@ use uqa_storage::{
 mod documents;
 mod layout;
 mod vector_metadata;
+mod vectors;
 use super::document_changes::DocumentChanges;
 use layout::RowLayout;
 pub use vector_metadata::{retain_vector_indexes, VectorDimensions};
+use vectors::{SnapshotVector, VectorSources};
 
 #[cfg(test)]
 mod tests;
@@ -46,7 +48,7 @@ pub struct MaterializedTable {
 
 struct SnapshotBuilder {
     text: RetainedInvertedIndexBuilder,
-    vectors: BudgetedVec<(FieldName, RetainedVectorIndexBuilder, MemoryReservation)>,
+    vectors: BudgetedVec<(FieldName, SnapshotVector, MemoryReservation)>,
     control: StorageReadControl,
 }
 
@@ -58,27 +60,46 @@ pub fn retain(
     changes: DocumentChanges,
     control: &StorageReadControl,
 ) -> Result<MaterializedTable, SQLError> {
+    retain_with_vector_indexes(source, source_columns, schema, changes, None, control)
+}
+
+/// Retain compatible physical indexes from the fixed source while applying the actual canonical sources captured with evaluated private rows. Other methods and changed column types retain the existing reconstruction path.
+pub fn retain_with_vector_indexes(
+    source: Arc<dyn DocumentStore>,
+    source_columns: &[ColumnDef],
+    schema: &SnapshotSchema<'_>,
+    changes: DocumentChanges,
+    base_vectors: Option<&dyn VectorDimensions>,
+    control: &StorageReadControl,
+) -> Result<MaterializedTable, SQLError> {
     let cancellation = control.cancellation();
     cancellation.check()?;
     let columns = RetainedColumns::capture(&schema.columns, control.memory(), cancellation)?;
+    let layout = RowLayout::new(source_columns, columns.clone(), control)
+        .map_err(|error| snapshot_error("base row layout", &error))?;
+    let sources = base_vectors.map(|indexes| VectorSources {
+        indexes,
+        columns: source_columns,
+        layout: &layout,
+        changes: &changes,
+    });
+    let mut result = SnapshotBuilder::with_vector_sources(schema, sources.as_ref(), control)?;
     let documents = documents::RetainedDocuments::new(
         source,
-        RowLayout::new(source_columns, columns.clone(), control)
-            .map_err(|error| snapshot_error("base row layout", &error))?,
+        layout,
         RowLayout::new(&schema.columns, columns, control)
             .map_err(|error| snapshot_error("private row layout", &error))?,
         changes,
         control,
     )
     .map_err(|error| snapshot_error("retained documents", &error))?;
-    let mut result = SnapshotBuilder::new(schema, control)?;
     let document_count = u64::try_from(
         documents
             .len()
             .map_err(|error| snapshot_error("document count", &error))?,
     )
     .map_err(|_| SQLError::Internal("query snapshot document count overflow".into()))?;
-    let fields = index_fields(schema, control)?;
+    let fields = index_fields_for_reconstruction(schema, Some(&result), control)?;
     if fields.is_empty() {
         return result.finish(Box::new(documents), document_count);
     }
@@ -98,8 +119,17 @@ pub fn retain(
     result.finish(Box::new(documents), document_count)
 }
 
+#[cfg(test)]
 fn index_fields<'a>(
     schema: &'a SnapshotSchema<'_>,
+    control: &StorageReadControl,
+) -> Result<BudgetedVec<&'a str>, SQLError> {
+    index_fields_for_reconstruction(schema, None, control)
+}
+
+fn index_fields_for_reconstruction<'a>(
+    schema: &'a SnapshotSchema<'_>,
+    builder: Option<&SnapshotBuilder>,
     control: &StorageReadControl,
 ) -> Result<BudgetedVec<&'a str>, SQLError> {
     control.cancellation().check()?;
@@ -112,6 +142,13 @@ fn index_fields<'a>(
     }
     schema.vector_dimensions.visit(&mut |field, _| {
         control.cancellation().check()?;
+        if builder.is_some_and(|builder| {
+            builder.vectors.iter().any(|(name, index, _)| {
+                name == field && matches!(index, SnapshotVector::Physical(_))
+            })
+        }) {
+            return Ok(());
+        }
         selected
             .insert(field, ())
             .map_err(|error| snapshot_error("index field selection", &error.into()))?;
@@ -211,6 +248,14 @@ pub fn empty(
 
 impl SnapshotBuilder {
     fn new(schema: &SnapshotSchema<'_>, control: &StorageReadControl) -> Result<Self, SQLError> {
+        Self::with_vector_sources(schema, None, control)
+    }
+
+    fn with_vector_sources(
+        schema: &SnapshotSchema<'_>,
+        sources: Option<&VectorSources<'_>>,
+        control: &StorageReadControl,
+    ) -> Result<Self, SQLError> {
         control.cancellation().check()?;
         let revisions = schema.text_fields.iter().map(|field| {
             control.check()?;
@@ -236,12 +281,20 @@ impl SnapshotBuilder {
                 .reserve(1)
                 .map_err(|error| snapshot_error("vector metadata", &error.into()))?;
             let (name, memory) = vector_metadata::copy_field(field, control)?;
+            let physical = sources
+                .map(|sources| sources.retain(field, dimensions, schema, control))
+                .transpose()?
+                .flatten();
+            let index = physical.map_or_else(
+                || {
+                    SnapshotVector::Reconstructed(RetainedVectorIndexBuilder::new(
+                        dimensions, control,
+                    ))
+                },
+                SnapshotVector::Physical,
+            );
             vectors
-                .push((
-                    name,
-                    RetainedVectorIndexBuilder::new(dimensions, control),
-                    memory,
-                ))
+                .push((name, index, memory))
                 .map_err(|error| snapshot_error("vector metadata", &error.into()))?;
             Ok(())
         })?;
@@ -261,12 +314,20 @@ impl SnapshotBuilder {
         let mut vectors = RetainedVectorIndexesBuilder::new(&self.control);
         for (field, index, memory) in builders {
             self.control.cancellation().check()?;
-            let index = index
-                .finish()
-                .map_err(|error| snapshot_error("vector index", &error))?;
-            vectors
-                .insert_admitted(field, index, memory)
-                .map_err(|error| snapshot_error("vector index metadata", &error))?;
+            match index {
+                SnapshotVector::Reconstructed(index) => {
+                    let index = index
+                        .finish()
+                        .map_err(|error| snapshot_error("vector index", &error))?;
+                    vectors.insert_admitted(field, index, memory)
+                }
+                SnapshotVector::Physical(index) => vectors.insert_admitted(
+                    field,
+                    uqa_storage::ReadOnlySnapshot::new(index),
+                    memory,
+                ),
+            }
+            .map_err(|error| snapshot_error("vector index metadata", &error))?;
         }
         Ok(MaterializedTable {
             documents,
@@ -333,6 +394,9 @@ impl SnapshotBuilder {
             .add_document(id, fields)
             .map_err(|error| snapshot_error("inverted index", &error))?;
         for (field, index, _) in self.vectors.iter_mut() {
+            let SnapshotVector::Reconstructed(index) = index else {
+                continue;
+            };
             let Some(value) = value_for(field) else {
                 continue;
             };

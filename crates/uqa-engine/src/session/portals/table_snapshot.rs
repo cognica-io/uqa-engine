@@ -10,6 +10,19 @@ use super::{DocumentStore, Engine, InvertedIndex, SQLError, TableState};
 use uqa_storage::ReadOnlySnapshot;
 
 impl Engine {
+    pub(super) fn capture_session_portal_catalog_snapshot(
+        &self,
+        dependencies: &super::SessionPortalTableDependencies,
+    ) -> Result<super::SessionPortalCatalogSnapshot, SQLError> {
+        if let Some(snapshot) = &self.query_catalog_snapshot {
+            return Ok(std::sync::Arc::clone(snapshot));
+        }
+        let mut snapshot = self.durable.snapshot();
+        snapshot.graphs = self
+            .freeze_graph_read_handles(dependencies.graphs.as_ref(), dependencies.graph_catalog)?;
+        Ok(std::sync::Arc::new(snapshot))
+    }
+
     pub(crate) fn query_retention_control(
         &self,
     ) -> Result<uqa_storage::read_control::StorageReadControl, SQLError> {
@@ -46,11 +59,13 @@ impl Engine {
         let control = self.query_retention_control()?;
         let source = table.document_store.read();
         if self.storage.backend.is_none() || self.versioned_backend_transactions() {
-            DocumentChanges::default().with_retained(
+            DocumentChanges::default().with_retained_vectors(
                 source
                     .snapshot()
                     .map_err(|error| storage_error("capture private document source", &error))?,
                 desired,
+                &table.columns.read(),
+                &*table.vector_indexes.read(),
                 &control,
             )
         } else {

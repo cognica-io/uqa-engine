@@ -20,6 +20,8 @@ mod projection;
 pub use desired::DocumentSelection;
 mod selection;
 use selection::Selection;
+mod vectors;
+use vectors::CapturedRows;
 
 #[cfg(test)]
 mod tests;
@@ -29,29 +31,39 @@ enum Change {
     Deleted,
     Fields(RetainedDocumentFields, DocumentMetadata),
     Retained(Arc<dyn DocumentStore>),
+    Captured(Arc<uqa_core::memory::Budgeted<CapturedRows>>, bool),
 }
 
 impl Change {
     fn present(&self) -> bool {
-        !matches!(self, Self::Deleted)
+        !matches!(self, Self::Deleted | Self::Captured(_, false))
     }
 
     fn fields(&self) -> Option<&Document> {
         match self {
             Self::Fields(fields, _) => Some(fields),
-            Self::Deleted | Self::Retained(_) => None,
+            Self::Deleted | Self::Retained(_) | Self::Captured(_, _) => None,
         }
     }
 
     fn into_stored(self, id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
         Ok(match self {
-            Self::Deleted => None,
+            Self::Deleted | Self::Captured(_, false) => None,
             Self::Fields(fields, metadata) => Some(StoredDocument::with_metadata(
                 fields.into_document(),
                 metadata,
             )),
             Self::Retained(source) => return source.get_stored(id),
+            Self::Captured(source, true) => return source.documents.get_stored(id),
         })
+    }
+
+    fn retained_source(&self) -> Option<&Arc<dyn DocumentStore>> {
+        match self {
+            Self::Retained(source) => Some(source),
+            Self::Captured(source, true) => Some(&source.documents),
+            Self::Deleted | Self::Fields(_, _) | Self::Captured(_, false) => None,
+        }
     }
 }
 
@@ -270,12 +282,13 @@ impl DocumentChanges {
         ids: &[DocId],
         start: usize,
     ) -> Option<(usize, &'a Arc<dyn DocumentStore>)> {
-        let Change::Retained(source) = self.get(ids[start])? else {
-            return None;
-        };
+        let source = self.get(ids[start])?.retained_source()?;
         let mut end = start + 1;
         while end < ids.len()
-            && matches!(self.get(ids[end]), Some(Change::Retained(next)) if Arc::ptr_eq(source, next))
+            && self
+                .get(ids[end])
+                .and_then(Change::retained_source)
+                .is_some_and(|next| Arc::ptr_eq(source, next))
         {
             end += 1;
         }
@@ -368,8 +381,10 @@ impl DocumentStore for DocumentChanges {
                             *metadata,
                         ))
                     }
-                    Some(Change::Deleted) | None => None,
-                    Some(Change::Retained(_)) => unreachable!("retained source run"),
+                    Some(Change::Deleted | Change::Captured(_, false)) | None => None,
+                    Some(Change::Retained(_) | Change::Captured(_, true)) => {
+                        unreachable!("retained source run")
+                    }
                 };
                 rows.push(row)?;
                 index += 1;
@@ -383,7 +398,8 @@ impl DocumentStore for DocumentChanges {
         Ok(match self.get(id) {
             Some(Change::Fields(_, metadata)) => Some(*metadata),
             Some(Change::Retained(source)) => return source.get_metadata(id),
-            Some(Change::Deleted) | None => None,
+            Some(Change::Captured(source, true)) => return source.documents.get_metadata(id),
+            Some(Change::Deleted | Change::Captured(_, false)) | None => None,
         })
     }
 
@@ -395,15 +411,15 @@ impl DocumentStore for DocumentChanges {
         visitor: &mut dyn FnMut(Option<&Value>) -> StorageBackendResult<()>,
     ) -> StorageBackendResult<()> {
         control.check()?;
-        match self.get(id) {
-            Some(Change::Retained(source)) => {
-                source.with_field_ref_controlled(id, field, control, visitor)?;
-            }
-            change => visitor(
+        let change = self.get(id);
+        if let Some(source) = change.and_then(Change::retained_source) {
+            source.with_field_ref_controlled(id, field, control, visitor)?;
+        } else {
+            visitor(
                 change
                     .and_then(Change::fields)
                     .and_then(|fields| fields.get(field)),
-            )?,
+            )?;
         }
         control.check()
     }
@@ -449,9 +465,10 @@ impl DocumentStore for DocumentChanges {
     }
 
     fn get_field(&self, id: DocId, field: &str) -> StorageBackendResult<Option<Value>> {
-        match self.get(id) {
-            Some(Change::Retained(source)) => source.get_field(id, field),
-            change => Ok(change
+        let change = self.get(id);
+        match change.and_then(Change::retained_source) {
+            Some(source) => source.get_field(id, field),
+            None => Ok(change
                 .and_then(Change::fields)
                 .and_then(|fields| fields.get(field))
                 .cloned()),
