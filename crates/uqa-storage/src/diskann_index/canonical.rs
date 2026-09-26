@@ -6,13 +6,26 @@
 
 //! Ordered canonical observations on a retained provider boundary, independent of graph coverage.
 
-use super::{format::DiskANNVectorVersion, DiskANNCanonicalVectorVisitor};
+use super::{
+    format::{DiskANNChangeIdentity, DiskANNVectorVersion},
+    DiskANNCanonicalVectorVisitor,
+};
 use crate::{mvcc::VersionError, read_control::StorageReadControl, StorageBackendResult};
 use uqa_core::DocId;
 
 /// Borrow one canonical ordinal in document order. Failure invalidates the consumer's partial output.
 pub type DiskANNCanonicalCorpusVisitor<'a> =
     dyn FnMut(DocId, u32, DiskANNVectorVersion, &[f32]) -> StorageBackendResult<()> + 'a;
+
+/// A retained canonical source with the actual versioned change journal on that same view. The lifecycle owner must establish complete coverage before opening a query; absence from this journal alone is not proof of build membership.
+pub trait DiskANNQueryRead: DiskANNCanonicalRead {
+    /// Return current journaled documents in strictly increasing order, including empty replacements. Validate the immutable change envelope against its current canonical origin; skip obsolete versions without loading their values.
+    fn next_change_after(
+        &self,
+        after: Option<DocId>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DiskANNChangeIdentity>>;
+}
 
 /// One fixed committed/private canonical source. Implementations retain their original visibility and controls; callbacks must not reenter the source.
 pub trait DiskANNCanonicalRead {

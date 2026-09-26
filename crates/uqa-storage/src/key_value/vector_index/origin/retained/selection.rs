@@ -6,11 +6,35 @@
 
 use super::{invalid, RetainedDiskANNCanonical};
 use crate::diskann_index::{catalog::DiskANNIndexResolver, DiskANNCanonicalRead};
+use crate::diskann_index::{
+    format::DiskANNChangeIdentity, pages::DiskANNReadLimits, DiskANNQuery, DiskANNQueryRead,
+};
 use crate::key_value::KeyValueDiskANNSource;
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 use std::sync::Arc;
 
 impl RetainedDiskANNCanonical {
+    /// Prepare reusable document search from this actual selected generation and canonical view. Missing publication remains None; malformed selection or unavailable resources fail without substituting an exact index.
+    pub fn query(
+        &self,
+        resolver: &dyn DiskANNIndexResolver,
+        limits: DiskANNReadLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DiskANNQuery<'_>>> {
+        self.selected_source(resolver, control)?
+            .map(|source| {
+                DiskANNQuery::open(
+                    self,
+                    source,
+                    self.index_parameters()
+                        .ok_or_else(|| invalid("missing index parameters"))?,
+                    limits,
+                    control,
+                )
+            })
+            .transpose()
+    }
+
     /// Keep the selected immutable generation with this exact canonical/catalog view. A retained private publication survives savepoint undo and session closure; an absent head remains absent. No vectors, graph pages or PQ batches are loaded by capture.
     pub fn selected_source(
         &self,
@@ -32,5 +56,15 @@ impl RetainedDiskANNCanonical {
         )?;
         self.check_control(control)?;
         Ok(source)
+    }
+}
+
+impl DiskANNQueryRead for RetainedDiskANNCanonical {
+    fn next_change_after(
+        &self,
+        after: Option<uqa_core::DocId>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DiskANNChangeIdentity>> {
+        self.next_change_after(after, control)
     }
 }

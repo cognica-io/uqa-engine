@@ -10,7 +10,8 @@ use super::{
 };
 use uqa_storage::diskann_index::{
     format::{DiskANNGeneration, DiskANNVectorVersion, PAGE_BYTES},
-    pages::{DiskANNOriginReader, DiskANNPageSource},
+    pages::{DiskANNOriginReader, DiskANNPageSource, DiskANNReadLimits},
+    DiskANNCanonicalScorer,
 };
 
 struct Held {
@@ -43,6 +44,32 @@ impl Held {
             })
             .unwrap();
         assert_eq!(count, 1);
+        let query = self
+            .view
+            .query(
+                &Resolver,
+                DiskANNReadLimits {
+                    resident_bytes: 65_536,
+                    cache_bytes: 0,
+                    max_in_flight_page_bytes: 2 * PAGE_BYTES,
+                    max_record_bytes: 8192,
+                },
+                control,
+            )
+            .unwrap()
+            .unwrap();
+        let actual = query.search_knn(&[1.0, 0.0], 10, control).unwrap().postings;
+        let exact = DiskANNCanonicalScorer::new(&self.view, &[1.0, 0.0], control)
+            .unwrap()
+            .search_exact_knn(10)
+            .unwrap();
+        let bits = |postings: &uqa_core::PostingList| {
+            postings
+                .iter()
+                .map(|posting| (posting.doc_id, posting.payload.score.to_bits()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(bits(&actual), bits(&exact));
     }
 }
 
