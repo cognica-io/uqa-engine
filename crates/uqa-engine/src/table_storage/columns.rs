@@ -211,7 +211,7 @@ impl Engine {
             .try_resolve_table_name(table)?
             .ok_or_else(|| table_not_found(table))?;
         let spec = self
-            .vector_index_spec_for_column(&table_name, column)?
+            .vector_index_spec_for_column(&table_name, column, dimensions)?
             .unwrap_or(VectorIndexSpec::BruteForce);
         let t = self
             .try_table(&table_name)?
@@ -298,7 +298,7 @@ impl Engine {
         dimensions: u32,
         restore: bool,
     ) -> StorageBackendResult<()> {
-        let Some(spec) = self.vector_index_spec_for_column(table, field)? else {
+        let Some(spec) = self.vector_index_spec_for_column(table, field, dimensions)? else {
             return Ok(());
         };
         let bound = if restore {

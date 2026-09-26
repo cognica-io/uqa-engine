@@ -49,7 +49,7 @@ impl Engine {
         let mut rebound = BTreeMap::new();
         for (field, dimensions) in vector_fields {
             let spec = self
-                .vector_index_spec_for_column(table_name, &field)?
+                .vector_index_spec_for_column(table_name, &field, dimensions)?
                 .unwrap_or(VectorIndexSpec::BruteForce);
             let idx = self.build_vector_index_for_restore(table_name, &field, dimensions, spec)?;
             rebound.insert(field, idx);
