@@ -260,12 +260,10 @@ impl<'a> NativeVectorRead<'a> {
     pub(super) fn clear_family(&self, batch: &mut dyn KeyValueBatch, family: Family) -> Result<()> {
         if let Some(owner) = self.owner {
             if family == Family::Vectors {
-                self.snapshot.delete_prefix(
-                    batch,
-                    Family::VectorOrigins,
-                    owner,
-                    &[self.field()],
-                )?;
+                for related in [Family::VectorOrigins, Family::VectorChanges] {
+                    self.snapshot
+                        .delete_prefix(batch, related, owner, &[self.field()])?;
+                }
             }
             self.snapshot
                 .delete_prefix(batch, family, owner, &[self.field()])?;

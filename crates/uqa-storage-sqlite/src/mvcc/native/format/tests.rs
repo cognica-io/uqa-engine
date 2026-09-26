@@ -7,6 +7,7 @@
 use super::*;
 use crate::{Catalog, ManagedConnection, SQLiteRecordStore};
 
+mod changes;
 mod diskann;
 
 fn retired_search_layout(connection: &ManagedConnection) {

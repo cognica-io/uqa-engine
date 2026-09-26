@@ -6,6 +6,8 @@
 
 //! Bounded canonical reads borrow native rows and preserve their original visibility and controls.
 
+mod changes;
+
 use super::invalid;
 use crate::mvcc::native::{
     decode_record, NativeRecordFamily as Family, NativeRecordIdentity as Identity,

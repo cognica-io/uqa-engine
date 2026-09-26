@@ -28,6 +28,7 @@ pub(in crate::mvcc::native) fn remove_empty_table(
 pub(in crate::mvcc::native) fn remove_empty_origins(
     sqlite: &rusqlite::Connection,
 ) -> crate::Result<()> {
+    remove_empty_changes(sqlite)?;
     assert_eq!(
         sqlite.query_row(
             "SELECT count(*) FROM _uqa_mvcc_native_vector_origins",
@@ -37,6 +38,21 @@ pub(in crate::mvcc::native) fn remove_empty_origins(
         0
     );
     sqlite.execute_batch("DROP TABLE _uqa_mvcc_native_vector_origins")?;
+    Ok(())
+}
+
+pub(in crate::mvcc::native) fn remove_empty_changes(
+    sqlite: &rusqlite::Connection,
+) -> crate::Result<()> {
+    assert_eq!(
+        sqlite.query_row(
+            "SELECT count(*) FROM _uqa_mvcc_native_vector_changes",
+            [],
+            |row| row.get::<_, i64>(0)
+        )?,
+        0
+    );
+    sqlite.execute_batch("DROP TABLE _uqa_mvcc_native_vector_changes")?;
     Ok(())
 }
 
@@ -126,6 +142,9 @@ fn native_diskann_blob_records_preserve_bytes_snapshots_guards_and_cold_reopen()
 #[test]
 fn native_diskann_family_is_distinct_from_standalone_graph_and_keeps_stable_ids() {
     assert_eq!(NativeRecordFamily::DiskANNRecords.id(), 57);
+    assert_eq!(NativeRecordFamily::VectorOrigins.id(), 58);
+    assert_eq!(NativeRecordFamily::VectorChanges.id(), 59);
+    assert!(NativeRecordFamily::VectorChanges.layout().object_owned);
     assert_eq!(NativeRecordFamily::StandaloneGraphLookups.id(), 56);
     assert!(!NativeRecordFamily::DiskANNRecords.is_standalone_graph());
     assert_eq!(

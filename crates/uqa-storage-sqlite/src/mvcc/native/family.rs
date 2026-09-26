@@ -69,6 +69,7 @@ pub enum NativeRecordFamily {
     StandaloneGraphLookups = 56,
     DiskANNRecords = 57,
     VectorOrigins = 58,
+    VectorChanges = 59,
 }
 
 impl NativeRecordFamily {
@@ -77,6 +78,9 @@ impl NativeRecordFamily {
     }
 
     pub fn from_id(id: u16) -> Option<Self> {
+        if id == Self::VectorChanges.id() {
+            return Some(Self::VectorChanges);
+        }
         if id == Self::VectorOrigins.id() {
             return Some(Self::VectorOrigins);
         }
@@ -96,6 +100,9 @@ impl NativeRecordFamily {
     }
 
     pub fn layout(self) -> &'static NativeRecordLayout {
+        if self == Self::VectorChanges {
+            return &super::diskann::CHANGES_LAYOUT;
+        }
         if self == Self::VectorOrigins {
             return &super::diskann::ORIGINS_LAYOUT;
         }
@@ -115,6 +122,6 @@ impl NativeRecordFamily {
     }
 
     pub fn all() -> impl ExactSizeIterator<Item = Self> {
-        (1..=Self::VectorOrigins.id()).map(|id| Self::from_id(id).expect("assigned native family"))
+        (1..=Self::VectorChanges.id()).map(|id| Self::from_id(id).expect("assigned native family"))
     }
 }

@@ -7,10 +7,7 @@
 use super::*;
 use uqa_storage::vector_index::VectorIndex;
 
-#[test]
-fn native_diskann_canonical_origins_follow_catalog_renames_cleanup_and_undo() {
-    let connection = memory();
-    let control = StorageReadControl::with_limit(1 << 22);
+fn catalog_with_docs(connection: &ManagedConnection) -> Catalog {
     let catalog = Catalog::open(connection.clone()).unwrap();
     catalog.save_schema("public").unwrap();
     catalog
@@ -26,6 +23,14 @@ fn native_diskann_canonical_origins_follow_catalog_renames_cleanup_and_undo() {
             constraints_json: "{}".into(),
         })
         .unwrap();
+    catalog
+}
+
+#[test]
+fn native_diskann_canonical_origins_follow_catalog_renames_cleanup_and_undo() {
+    let connection = memory();
+    let control = StorageReadControl::with_limit(1 << 22);
+    let catalog = catalog_with_docs(&connection);
     let original = canonical(&connection, "public.docs", "before", 2);
     let version = original.replace(1, &[vec![1.0, -0.0]], &control).unwrap();
     original.replace(2, &[], &control).unwrap();
@@ -34,6 +39,7 @@ fn native_diskann_canonical_origins_follow_catalog_renames_cleanup_and_undo() {
         .rename_column_data("public.docs", "before", "after")
         .unwrap();
     let field = canonical(&connection, "public.docs", "after", 2);
+    assert_change(&field.retain(&control).unwrap(), 1, version, &control);
     assert_eq!(
         field.retain(&control).unwrap().origin(1, &control).unwrap(),
         Some(version)
@@ -48,6 +54,7 @@ fn native_diskann_canonical_origins_follow_catalog_renames_cleanup_and_undo() {
         .rename_table_data("public.docs", "public.renamed")
         .unwrap();
     let renamed = canonical(&connection, "public.renamed", "after", 2);
+    assert_change(&renamed.retain(&control).unwrap(), 1, version, &control);
     assert_eq!(
         renamed
             .retain(&control)
@@ -85,6 +92,7 @@ fn native_diskann_canonical_origins_follow_catalog_renames_cleanup_and_undo() {
         Some(version)
     );
     catalog.drop_column_data("public.renamed", "after").unwrap();
+    assert_eq!(change_count(&connection), 1);
     assert!(renamed
         .retain(&control)
         .unwrap()
@@ -100,12 +108,14 @@ fn native_diskann_canonical_origins_follow_catalog_renames_cleanup_and_undo() {
             catalog.purge_table_data("public.renamed").unwrap();
         }
         let read = renamed.retain(&control).unwrap();
+        assert_eq!(change_count(&connection), 1);
         assert!(read.origin(1, &control).unwrap().is_none());
         assert!(read.origin(2, &control).unwrap().is_none());
     }
     let recreated = renamed.replace(1, &[vec![4.0, 5.0]], &control).unwrap();
     assert_ne!(recreated, version);
     assert_tensor(&retained, 1, &[vec![1.0, -0.0]], &control);
+    assert_change(&retained, 1, version, &control);
     assert!(retained.origin(2, &control).unwrap().is_some());
 }
 
@@ -154,6 +164,7 @@ fn native_diskann_canonical_origins_are_invalidated_by_each_legacy_vector_owner(
             .is_none());
         source.replace(2, &[], &control).unwrap();
         legacy.clear().unwrap();
+        assert_eq!(change_count(&connection), 0);
         assert!(source
             .retain(&control)
             .unwrap()

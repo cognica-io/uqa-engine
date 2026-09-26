@@ -118,6 +118,9 @@ fn native_diskann_reopen_rejects_missing_tables_guards_and_changed_layouts() {
         "DROP TABLE _uqa_mvcc_native_vector_origins",
         "DROP TRIGGER _uqa_mvcc_native_capture_58_UPDATE",
         "ALTER TABLE _uqa_mvcc_native_vector_origins ADD COLUMN unexpected BLOB",
+        "DROP TABLE _uqa_mvcc_native_vector_changes",
+        "DROP TRIGGER _uqa_mvcc_native_capture_59_UPDATE",
+        "ALTER TABLE _uqa_mvcc_native_vector_changes ADD COLUMN unexpected BLOB",
     ] {
         let connection = ManagedConnection::open_in_memory().unwrap();
         let control = StorageReadControl::with_limit(1 << 22);
@@ -205,7 +208,7 @@ fn native_canonical_origin_upgrade_from_ten_is_atomic_and_preserves_existing_his
     );
     assert_eq!(preserved(&connection), before);
     with(&connection, |sqlite| {
-        validate_format(sqlite, 11)?;
+        validate_format(sqlite, CURRENT_VERSION)?;
         assert!(check_mapping_version(sqlite, 10).is_err());
         Ok(())
     });

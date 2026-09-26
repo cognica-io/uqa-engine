@@ -1,6 +1,6 @@
 # DiskANN canonical origins
 
-Status: Common MVCC and Key/Value origins merged in PR #170; native SQLite canonical sources merged in PR #171; ordered corpus reads and retained-source build capture merged in PR #172. [Canonical document scoring](diskann-canonical-scoring.md) merged in PR #173. The [Key/Value change journal](diskann-versioned-changes.md) is implemented for review. Changed-vector coverage, paged query integration and public DiskANN routing remain pending in the [implementation plan](../plans/0014-diskann-vector-index.md).
+Status: Common MVCC and Key/Value origins merged in PR #170; native SQLite canonical sources merged in PR #171; ordered corpus reads and retained-source build capture merged in PR #172. [Canonical document scoring](diskann-canonical-scoring.md) merged in PR #173 and the [Key/Value change journal](diskann-versioned-changes.md) in PR #174. Native change journaling is implemented for review. Changed-vector coverage, paged query integration and public DiskANN routing remain pending in the [implementation plan](../plans/0014-diskann-vector-index.md).
 
 ## Ownership and identity
 
@@ -35,6 +35,8 @@ The original database incarnation is retained as provenance across data restorat
 ## Native SQLite format and lifecycle
 
 `SQLiteDiskANNCanonical` retains raw little-endian coordinates in the existing `_vectors` family (42). Native mapping format 11 adds object-owned family 58, `_uqa_mvcc_native_vector_origins(table_name, field, doc_id, origin)`. Its identity is the existing stable table object/generation followed by field and document; the BLOB stores the same 56-byte origin envelope. Zero-count replacements have a row even without canonical ordinals. Generation page family 57 stores no duplicate canonical values.
+
+Mapping 12 preserves that origin layout and adds the [native change journal](diskann-versioned-changes.md#native-representation) in family 59. Canonical replacement writes coordinates, origin and immutable change identity in one native batch. Upgrading an origin-only predecessor preserves those origins without fabricating changes or coverage.
 
 Initialization and predecessor upgrades create the origin table, its write/capture guards and the new format marker in one physical transaction. Earlier record families, histories, receipts, counters and the independent data namespace remain unchanged. The marker fences older native writers; malformed current layouts or missing guards reject reopening. Ordinary native exact/IVF/HNSW replacements and deletion invalidate origins in the same evaluated batch; clearing vectors removes empty origins too. Generic table/column lifecycle processing includes the declared origin family, preserving versions through rename and removing them on drop/purge. A retained source still sees its original owner and names after mutation or closure.
 
