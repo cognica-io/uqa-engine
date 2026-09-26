@@ -140,6 +140,12 @@ impl KeyValueStore for Records {
     ) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
         self.wrap(self.inner.open_session_with_cancellation(cancellation)?)
     }
+    fn open_controlled_session(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
+        self.wrap(self.inner.open_controlled_session(control)?)
+    }
     fn open_retained_read_session(
         &self,
         cancellation: &CancellationToken,

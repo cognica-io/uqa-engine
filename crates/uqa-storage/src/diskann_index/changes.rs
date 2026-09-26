@@ -11,7 +11,7 @@ use super::pages::DiskANNOriginReader;
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 use uqa_core::DocId;
 
-/// Continuation within one selected generation. Advance it only after the enclosing mutation commits; restart a new pass after reaching the end to discover later insertions before this key.
+/// Continuation within one selected generation. A page with deletions advances only after commit; a zero-deletion page may advance after confirmed rollback. Restart a new pass after reaching the end to discover later insertions before this key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DiskANNPruneCursor {
     generation: DiskANNGeneration,
@@ -33,6 +33,15 @@ pub struct DiskANNPruneResult {
     pub next: Option<DiskANNPruneCursor>,
 }
 
+/// One finite journal-discovery snapshot bound to the original catalog, selected generation and backend session. Each page evaluates current committed origins in the caller's active transaction. Deletions require confirmed commit before cursor advancement; a zero-deletion page permits confirmed rollback. Later journal keys wait for the next pass, and already-deleted keys still count toward the page limit.
+pub trait DiskANNJournalPruner: Send + Sync {
+    fn prune(
+        &self,
+        request: DiskANNPruneRequest,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<DiskANNPruneResult>;
+}
+
 /// Provider adapter over one fixed committed canonical/journal view and its evaluated mutation batch. The provider guards the real catalog and selected head in that same batch before pruning. Keys are immutable mutation identities; callbacks must not advance the view.
 pub trait DiskANNChangeJournal {
     fn next_after(
@@ -40,11 +49,12 @@ pub trait DiskANNChangeJournal {
         after: Option<DiskANNChangeIdentity>,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Option<DiskANNChangeIdentity>>;
+    /// Read the current committed value. A key discovered on an older fixed view may already have been removed by another maintenance transaction.
     fn change(
         &self,
         identity: DiskANNChangeIdentity,
         control: &StorageReadControl,
-    ) -> StorageBackendResult<DiskANNCanonicalOrigin>;
+    ) -> StorageBackendResult<Option<DiskANNCanonicalOrigin>>;
     fn current_origin(
         &self,
         document: DocId,
@@ -88,7 +98,15 @@ pub(crate) fn prune(
         if after.is_some_and(|last| last.encode() >= identity.encode()) {
             return Err(invalid("journal pruning cursor did not advance"));
         }
-        let change = journal.change(identity, control)?;
+        result.examined += 1;
+        after = Some(identity);
+        result.next = Some(DiskANNPruneCursor {
+            generation,
+            after: identity,
+        });
+        let Some(change) = journal.change(identity, control)? else {
+            continue;
+        };
         if change.version() != identity.version() {
             return Err(invalid(
                 "journal payload differs from its mutation identity",
@@ -111,12 +129,6 @@ pub(crate) fn prune(
             journal.remove(identity, control)?;
             result.removed += 1;
         }
-        result.examined += 1;
-        after = Some(identity);
-        result.next = Some(DiskANNPruneCursor {
-            generation,
-            after: identity,
-        });
     }
     control.check()?;
     Ok(result)

@@ -117,6 +117,7 @@ mod sql_registry;
 mod state;
 mod statistics;
 pub use statistics::AutomaticStatisticsStatus;
+pub use uqa_execution::maintenance::diskann::DiskANNMaintenanceStatus;
 mod row_locks;
 mod statement_cache;
 mod table_storage;

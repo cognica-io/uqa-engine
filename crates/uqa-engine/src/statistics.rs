@@ -69,6 +69,10 @@ impl Engine {
         self.statistics.automatic_statistics.status.lock().clone()
     }
 
+    pub fn automatic_diskann_maintenance_status(&self) -> crate::DiskANNMaintenanceStatus {
+        self.statistics.diskann.lock().clone()
+    }
+
     pub(crate) fn record_statistics_change(
         &self,
         name: &str,
@@ -197,7 +201,7 @@ impl Engine {
         let cancellation = uqa_core::CancellationToken::new();
         let worker_cancellation = cancellation.clone();
         match std::thread::Builder::new()
-            .name("uqa-auto-analyze".into())
+            .name("uqa-maintenance".into())
             .spawn(move || {
                 worker::run(
                     &provider,

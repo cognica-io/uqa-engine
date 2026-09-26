@@ -189,6 +189,16 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         Ok(PersistentStorageSession::new(catalog, backend))
     }
 
+    fn open_controlled_session(
+        &self,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<PersistentStorageSession> {
+        let connection = self.conn.new_controlled_session(control)?;
+        let catalog: Arc<dyn CatalogFacade> = Arc::new(Catalog::open(connection.clone())?);
+        let backend: Arc<dyn PersistentStorageBackend> = Arc::new(Self::new(connection));
+        Ok(PersistentStorageSession::new(catalog, backend))
+    }
+
     fn supports_concurrent_pinned_read_and_write(&self) -> bool {
         self.conn.supports_concurrent_pinned_read_and_write()
     }
@@ -302,6 +312,26 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         Ok(Box::new(
             uqa_storage::diskann_index::PersistentDiskANNIndex::new(handle, options, temporary)?,
         ))
+    }
+
+    fn diskann_journal_pruner(
+        &self,
+        binding: uqa_storage::diskann_index::DiskANNIndexBinding<'_>,
+        max_record_bytes: usize,
+    ) -> StorageBackendResult<Box<dyn uqa_storage::diskann_index::changes::DiskANNJournalPruner>>
+    {
+        crate::vector_index::SQLiteDiskANNCanonical::new(
+            self.conn.clone(),
+            binding.table,
+            binding.field,
+            binding.dimensions,
+        )?
+        .journal_pruner(
+            binding.index,
+            binding.resolver,
+            max_record_bytes,
+            binding.control,
+        )
     }
 
     fn retire_diskann_index(

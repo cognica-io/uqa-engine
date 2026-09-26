@@ -15,6 +15,7 @@ pub(crate) struct StatisticsCoordinator {
     // Retain the coordination identity while this shared statistics state exists.
     _identity: Arc<RowLockManager>,
     pub(super) automatic_statistics: AutomaticStatistics,
+    pub(super) diskann: Mutex<uqa_execution::maintenance::diskann::DiskANNMaintenanceStatus>,
     pub(crate) statistics_snapshots: StatisticsSnapshots,
 }
 
@@ -32,6 +33,7 @@ pub(crate) fn shared_statistics(identity: &Arc<RowLockManager>) -> Arc<Statistic
     let coordinator = Arc::new(StatisticsCoordinator {
         _identity: Arc::clone(identity),
         automatic_statistics: AutomaticStatistics::default(),
+        diskann: Mutex::default(),
         statistics_snapshots: StatisticsSnapshots::default(),
     });
     coordinators.insert(key, Arc::downgrade(&coordinator));

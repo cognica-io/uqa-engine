@@ -276,4 +276,31 @@ fn verify_reopen(connection: &ManagedConnection, generation: DiskANNGeneration) 
         9
     );
     assert_eq!(change_count(connection), 1);
+    finite_discovery(connection, &control);
+}
+
+fn finite_discovery(connection: &ManagedConnection, control: &StorageReadControl) {
+    let original = StorageReadControl::new(control.memory(), &uqa_core::CancellationToken::new());
+    let pruner = canonical(connection, TABLE, FIELD, 2)
+        .journal_pruner(
+            &row().relation,
+            std::sync::Arc::new(Resolver),
+            8192,
+            &original,
+        )
+        .unwrap();
+    assert!(pruner.prune(page(64), control).is_err());
+    let canonical = canonical(connection, TABLE, FIELD, 2);
+    let retained = canonical.retain(control).unwrap();
+    canonical.replace(9, &[], control).unwrap();
+    connection.begin_transaction().unwrap();
+    let result = pruner.prune(page(64), control).unwrap();
+    assert_eq!((result.examined, result.removed, result.next), (1, 1, None));
+    connection.commit_transaction().unwrap();
+    assert_eq!(change_count(connection), 1);
+    assert!(retained.next_change_after(None, control).unwrap().is_some());
+    original.cancellation().cancel();
+    connection.begin_transaction().unwrap();
+    assert!(pruner.prune(page(64), control).is_err());
+    connection.rollback_transaction().unwrap();
 }

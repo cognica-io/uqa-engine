@@ -8,6 +8,7 @@
 
 mod lifecycle;
 mod live;
+mod maintenance;
 mod retained;
 #[cfg(test)]
 mod tests;

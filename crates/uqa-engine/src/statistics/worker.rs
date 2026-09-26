@@ -33,6 +33,7 @@ pub(super) fn run(
         return;
     };
     let mut session = None;
+    let mut diskann = None;
     loop {
         let pass_started = Instant::now();
         if cancellation.is_cancelled() {
@@ -78,6 +79,10 @@ pub(super) fn run(
                     status.last_error = Some(error.to_string());
                 }
             }
+            drop(status);
+            if let Err(error) = step_diskann(engine, &mut diskann) {
+                statistics.diskann.lock().last_error = Some(error.to_string());
+            }
         }
         drop(statistics);
         drop(manager);
@@ -85,6 +90,37 @@ pub(super) fn run(
             return;
         }
     }
+}
+
+fn step_diskann(
+    engine: &Engine,
+    maintenance: &mut Option<uqa_execution::maintenance::diskann::DiskANNJournalMaintenance>,
+) -> StorageBackendResult<()> {
+    let Some(backend) = engine.storage.backend.as_deref() else {
+        return Ok(());
+    };
+    if maintenance.is_none() {
+        let control = engine.query_retention_control().map_err(|error| {
+            uqa_storage::StorageBackendError::backend("DiskANN maintenance resources", error)
+        })?;
+        *maintenance =
+            Some(uqa_execution::maintenance::diskann::DiskANNJournalMaintenance::new(&control)?);
+    }
+    let maintenance = maintenance.as_mut().expect("maintenance was initialized");
+    let version = backend.change_version()?.map(|_| {
+        engine
+            .epochs
+            .seen_storage_change_version
+            .load(Ordering::Acquire)
+    });
+    let result = maintenance.step(
+        engine.durable.catalog_indexes.snapshot(),
+        version,
+        engine,
+        backend,
+    );
+    *engine.statistics.diskann.lock() = maintenance.status();
+    result
 }
 
 fn wait_until(

@@ -5,6 +5,7 @@
 //
 
 use super::*;
+mod automatic;
 use std::{path::Path, sync::atomic::Ordering};
 use uqa_storage::{
     diskann_index::pages::DiskANNRecordKey, key_value::KeyValueDiskANNStore,
