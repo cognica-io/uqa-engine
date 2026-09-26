@@ -11,6 +11,7 @@ mod canonical;
 pub mod catalog;
 pub mod changes;
 pub mod format;
+pub mod maintenance;
 mod memory;
 mod metric;
 mod options;

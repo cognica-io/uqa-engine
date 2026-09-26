@@ -334,6 +334,27 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         )
     }
 
+    fn diskann_maintenance_source(
+        &self,
+        binding: uqa_storage::diskann_index::DiskANNIndexBinding<'_>,
+        max_record_bytes: usize,
+    ) -> StorageBackendResult<
+        Box<dyn uqa_storage::diskann_index::maintenance::DiskANNMaintenanceSource>,
+    > {
+        crate::vector_index::SQLiteDiskANNCanonical::new(
+            self.conn.clone(),
+            binding.table,
+            binding.field,
+            binding.dimensions,
+        )?
+        .maintenance_source(
+            binding.index,
+            binding.resolver,
+            max_record_bytes,
+            binding.control,
+        )
+    }
+
     fn retire_diskann_index(
         &self,
         binding: uqa_storage::diskann_index::DiskANNIndexBinding<'_>,

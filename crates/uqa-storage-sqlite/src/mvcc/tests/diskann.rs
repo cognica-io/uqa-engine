@@ -289,6 +289,26 @@ fn diskann_pruning_preserves_late_changes_and_reopens_in_sqlite_modes() {
 }
 
 #[test]
+fn diskann_maintenance_source_preserves_census_builds_and_reopens_in_sqlite_modes() {
+    use uqa_storage::key_value::{
+        conformance::{verify_diskann_maintenance_reopen, verify_diskann_maintenance_source},
+        KeyValueStorageBackend,
+    };
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("maintenance-source.db");
+        let generation = {
+            let store: Arc<dyn KeyValueStore> =
+                Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+            verify_diskann_maintenance_source(&KeyValueStorageBackend::new(store)).unwrap()
+        };
+        let store: Arc<dyn KeyValueStore> =
+            Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+        verify_diskann_maintenance_reopen(&KeyValueStorageBackend::new(store), generation).unwrap();
+    }
+}
+
+#[test]
 fn diskann_build_ownership_protects_live_and_retained_sources() {
     for mode in 0..4 {
         let directory = tempfile::tempdir().unwrap();

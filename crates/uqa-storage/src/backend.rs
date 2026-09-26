@@ -431,6 +431,18 @@ pub trait PersistentStorageBackend: Send + Sync {
         ))
     }
 
+    /// Retain one actual committed canonical/catalog view for exact change accounting, pruning and one evaluated rebuild. Construction never completes this session's enclosing transaction or reloads the old resident graph.
+    fn diskann_maintenance_source(
+        &self,
+        _binding: crate::diskann_index::DiskANNIndexBinding<'_>,
+        _max_record_bytes: usize,
+    ) -> StorageBackendResult<Box<dyn crate::diskann_index::maintenance::DiskANNMaintenanceSource>>
+    {
+        Err(StorageBackendError::Other(
+            "this backend does not support DiskANN rebuild maintenance".into(),
+        ))
+    }
+
     fn retire_diskann_index(
         &self,
         _binding: crate::diskann_index::DiskANNIndexBinding<'_>,

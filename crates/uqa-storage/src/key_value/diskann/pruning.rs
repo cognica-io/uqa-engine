@@ -7,7 +7,8 @@
 use super::{identity::validate_mapping, invalid, publication, KeyValueDiskANNSource};
 use crate::diskann_index::{
     catalog::DiskANNIndexScope,
-    changes::{DiskANNChangeJournal, DiskANNPruneRequest, DiskANNPruneResult},
+    changes::{DiskANNChangeJournal, DiskANNChangeRead, DiskANNPruneRequest, DiskANNPruneResult},
+    maintenance::{DiskANNStatisticsPage, DiskANNStatisticsRequest},
     pages::DiskANNOriginReader,
 };
 use crate::key_value::KeyValueRead;
@@ -22,6 +23,20 @@ pub struct KeyValueDiskANNPruner {
 }
 
 impl KeyValueDiskANNPruner {
+    /// Examine exact outstanding changes on the provider's single captured canonical/journal view under this selected generation. This does not stage writes or grant publication authority.
+    pub fn statistics(
+        &self,
+        journal: &dyn DiskANNChangeRead,
+        request: DiskANNStatisticsRequest,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<DiskANNStatisticsPage> {
+        self.control.check()?;
+        let page =
+            crate::diskann_index::maintenance::measure(&self.origins, journal, request, control)?;
+        self.control.check()?;
+        Ok(page)
+    }
+
     pub fn open(
         source: Arc<KeyValueDiskANNSource>,
         maximum: usize,
