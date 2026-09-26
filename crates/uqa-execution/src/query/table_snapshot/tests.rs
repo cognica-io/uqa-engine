@@ -26,6 +26,7 @@ mod owned_defaults;
 mod owned_fields;
 mod owned_generated;
 mod owned_rows;
+mod physical_vectors;
 mod retained;
 
 fn columns(sql: &str) -> Vec<ColumnDef> {

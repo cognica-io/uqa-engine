@@ -19,6 +19,11 @@ use super::snapshot_error;
 
 /// Borrow each registered vector field and its dimensions from the selected catalog boundary. Implementations visit each field once and stop on the first visitor failure.
 pub trait VectorDimensions {
+    /// Lend the selected physical index when the catalog adapter retains one.
+    fn index(&self, _field: &str) -> Option<&dyn VectorIndex> {
+        None
+    }
+
     fn visit<'a>(
         &'a self,
         visitor: &mut dyn FnMut(&'a str, u32) -> Result<(), SQLError>,
@@ -38,6 +43,9 @@ impl VectorDimensions for BTreeMap<FieldName, u32> {
 }
 
 impl VectorDimensions for BTreeMap<FieldName, Box<dyn VectorIndex>> {
+    fn index(&self, field: &str) -> Option<&dyn VectorIndex> {
+        self.get(field).map(Box::as_ref)
+    }
     fn visit<'a>(
         &'a self,
         visitor: &mut dyn FnMut(&'a str, u32) -> Result<(), SQLError>,
@@ -50,6 +58,9 @@ impl VectorDimensions for BTreeMap<FieldName, Box<dyn VectorIndex>> {
 }
 
 impl VectorDimensions for VectorIndexes {
+    fn index(&self, field: &str) -> Option<&dyn VectorIndex> {
+        self.get(field)
+    }
     fn visit<'a>(
         &'a self,
         visitor: &mut dyn FnMut(&'a str, u32) -> Result<(), SQLError>,

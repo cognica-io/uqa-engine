@@ -79,12 +79,7 @@ impl Engine {
         drop(snapshot_gate);
         let table_snapshots =
             self.detach_session_portal_table_snapshots(table_sources, transaction_overlay)?;
-        let mut catalog_snapshot = self.durable.snapshot();
-        catalog_snapshot.graphs = self.freeze_graph_read_handles(
-            table_dependencies.graphs.as_ref(),
-            table_dependencies.graph_catalog,
-        )?;
-        let catalog_snapshot = std::sync::Arc::new(catalog_snapshot);
+        let catalog_snapshot = self.capture_session_portal_catalog_snapshot(&table_dependencies)?;
         let view_snapshots = std::sync::Arc::clone(&catalog_snapshot.views);
         let sql_function_snapshots = std::sync::Arc::clone(&catalog_snapshot.sql_user_functions);
         let restart = holdable.then(|| SessionPortalRestart {
@@ -329,6 +324,19 @@ impl Engine {
         fixed_snapshot: Option<&crate::FixedTransactionSnapshot>,
         dependencies: &SessionPortalTableDependencies,
     ) -> Vec<SessionPortalTableSource> {
+        if let Some(snapshots) = &self.query_table_snapshots {
+            return snapshots
+                .iter()
+                .filter(|(relation, _)| dependencies.includes(relation))
+                .map(|(relation, table)| {
+                    (
+                        relation.clone(),
+                        std::sync::Arc::clone(table),
+                        std::sync::Arc::clone(table),
+                    )
+                })
+                .collect();
+        }
         let live_tables = self
             .storage
             .tables
@@ -357,7 +365,9 @@ impl Engine {
         for (relation, data, metadata) in sources {
             let canonical = relation.qualified_name();
             // A live source already includes this session's evaluated private writes.
-            let changes = if std::sync::Arc::ptr_eq(&data, &metadata) {
+            let changes = if self.query_table_snapshots.is_none()
+                && std::sync::Arc::ptr_eq(&data, &metadata)
+            {
                 None
             } else {
                 transaction_overlay.remove(&canonical)
@@ -405,15 +415,22 @@ impl Engine {
         }
         let source_columns = data.columns.snapshot();
         let source = data.document_store.read();
+        let base_vectors =
+            (!std::sync::Arc::ptr_eq(data, metadata)).then(|| data.vector_indexes.read());
         let storage = Self::with_query_snapshot_schema(metadata, |schema| {
             if self.storage.backend.is_none() || self.versioned_backend_transactions() {
-                return uqa_execution::query::table_snapshot::retain(
+                return uqa_execution::query::table_snapshot::retain_with_vector_indexes(
                     source
                         .snapshot()
                         .map_err(|error| portal_snapshot_error("documents", &error))?,
                     &source_columns,
                     schema,
                     changes.unwrap_or_default(),
+                    Some(
+                        base_vectors
+                            .as_deref()
+                            .map_or(schema.vector_dimensions, |indexes| indexes),
+                    ),
                     &control,
                 );
             }
@@ -457,6 +474,16 @@ impl Engine {
         &self,
         sources: &[SessionPortalTableSource],
     ) -> Result<std::collections::BTreeMap<String, DocumentChanges>, SQLError> {
+        if self.query_table_snapshots.is_some() {
+            let mut overlay = std::collections::BTreeMap::new();
+            for (relation, _, _) in sources {
+                let name = relation.qualified_name();
+                if let Some(changes) = self.fixed_transaction_row_changes(&name)? {
+                    overlay.insert(name, changes);
+                }
+            }
+            return Ok(overlay);
+        }
         let relation_names = sources
             .iter()
             .filter(|(_, data, metadata)| !std::sync::Arc::ptr_eq(data, metadata))
