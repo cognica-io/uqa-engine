@@ -9,7 +9,8 @@
 pub(in crate::key_value) mod origin;
 mod read;
 pub use origin::{
-    DiskANNCanonicalVectorVisitor, KeyValueDiskANNCanonical, RetainedDiskANNCanonical,
+    DiskANNCanonicalVectorVisitor, KeyValueDiskANNCanonical, KeyValueDiskANNHandle,
+    RetainedDiskANNCanonical,
 };
 
 use crate::vector_index::RetainedVectorIndex;

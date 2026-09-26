@@ -7,9 +7,11 @@
 //! `DiskANN` origins accompany the existing canonical vector keys, without a duplicate corpus.
 
 pub(in crate::key_value) mod journal;
+mod live;
 mod retained;
 #[cfg(test)]
 mod tests;
+pub use live::KeyValueDiskANNHandle;
 pub use retained::{DiskANNCanonicalVectorVisitor, RetainedDiskANNCanonical};
 
 use std::sync::Arc;
@@ -56,6 +58,16 @@ impl KeyValueDiskANNCanonical {
         vectors: &[Vec<f32>],
         control: &StorageReadControl,
     ) -> StorageBackendResult<DiskANNVectorVersion> {
+        self.replace_guarded(document, vectors, control, &mut |_, _| Ok(()))
+    }
+
+    fn replace_guarded(
+        &self,
+        document: DocId,
+        vectors: &[Vec<f32>],
+        control: &StorageReadControl,
+        guard: &mut crate::key_value::KeyValueMutation<'_>,
+    ) -> StorageBackendResult<DiskANNVectorVersion> {
         control.check()?;
         for vector in vectors {
             crate::vector_index::validate_vector_values_controlled(
@@ -71,8 +83,9 @@ impl KeyValueDiskANNCanonical {
         let mut version = None;
         self.index
             .store
-            .with_versioned_mutation(&mut |origin, _, batch| {
+            .with_versioned_mutation(&mut |origin, read, batch| {
                 control.check()?;
+                guard(read, batch)?;
                 let current = DiskANNVectorVersion::new(origin.transaction(), origin.revision())?;
                 let record = Record::new(current, self.index.dimensions, count)?;
                 self.index.stage_replace(batch, document, vectors)?;

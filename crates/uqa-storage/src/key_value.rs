@@ -628,8 +628,8 @@ pub use ivf_index::KeyValueIVFIndex;
 pub use memory_store::MemoryKeyValueStore;
 pub use storage_backend::KeyValueStorageBackend;
 pub use vector_index::{
-    DiskANNCanonicalVectorVisitor, KeyValueDiskANNCanonical, KeyValueVectorIndex,
-    RetainedDiskANNCanonical,
+    DiskANNCanonicalVectorVisitor, KeyValueDiskANNCanonical, KeyValueDiskANNHandle,
+    KeyValueVectorIndex, RetainedDiskANNCanonical,
 };
 
 #[cfg(test)]

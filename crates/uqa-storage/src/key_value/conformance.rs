@@ -33,6 +33,7 @@ pub use origins::{
     verify_diskann_catalog_identity_reopen, verify_diskann_publication,
     verify_diskann_publication_reopen, verify_mutation_origins,
 };
+pub use origins::{verify_diskann_live_reopen, verify_diskann_live_writes};
 pub use origins::{verify_diskann_pruning, verify_diskann_pruning_reopen};
 pub use origins::{verify_diskann_query_reopen, verify_diskann_query_views};
 mod physical_vectors;
