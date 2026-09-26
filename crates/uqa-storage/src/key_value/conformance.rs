@@ -30,6 +30,8 @@ mod origins;
 pub use origins::verify_diskann_canonical_reclamation;
 pub use origins::verify_diskann_publication_ownership;
 pub use origins::verify_diskann_runtime_adoption_conflicts;
+pub use origins::verify_vector_field_guard_attempts;
+pub use origins::verify_vector_field_guard_reclamation;
 pub use origins::{
     diskann_runtime_fixture_options, verify_diskann_runtime_lifecycle,
     verify_diskann_runtime_reclaimed_reopen, verify_diskann_runtime_reclamation,

@@ -9,7 +9,67 @@
 use super::{KeyValueBatch, KeyValueVectorIndex, StorageBackendResult};
 use uqa_core::memory::{BudgetedVec, MemoryError};
 
-const ROOT: &[u8] = b"\0uqa-vector-field-guards-v1\0";
+pub(crate) const ROOT: &[u8] = b"\0uqa-vector-field-guards-v1\0";
+
+pub struct KeyValueVectorFieldGuards;
+
+impl crate::mvcc::VectorFieldGuardLayout for KeyValueVectorFieldGuards {
+    fn prefix(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> crate::mvcc::VersionResult<BudgetedVec<u8>> {
+        let mut prefix = BudgetedVec::new(control.memory());
+        prefix.extend_from_slice(ROOT)?;
+        Ok(prefix)
+    }
+
+    fn reference(
+        &self,
+        key: &[u8],
+        control: &crate::read_control::StorageReadControl,
+    ) -> crate::mvcc::VersionResult<Option<crate::mvcc::VectorFieldGuard>> {
+        use crate::key_value::codec::read_segment;
+        use crate::mvcc::{VectorFieldGuard, VersionError};
+
+        control.check()?;
+        let suffix = key
+            .strip_prefix(ROOT)
+            .ok_or(VersionError::InvalidEncoding("foreign vector field guard"))?;
+        let (&kind, vectors) = suffix.split_first().ok_or(VersionError::InvalidEncoding(
+            "truncated vector field guard",
+        ))?;
+        if kind > 1 || vectors.first() != Some(&crate::key_value::TAG_VECTOR) {
+            return Err(VersionError::InvalidEncoding("invalid vector field guard"));
+        }
+        let mut offset = 1;
+        for _ in 0..2 {
+            std::str::from_utf8(read_segment(vectors, &mut offset)?).map_err(|_| {
+                VersionError::InvalidEncoding("vector field guard name is not UTF-8")
+            })?;
+        }
+        if offset != vectors.len() {
+            return Err(VersionError::InvalidEncoding(
+                "vector field guard has trailing bytes",
+            ));
+        }
+        if kind == 0 {
+            return Ok(None);
+        }
+        let copy = |bytes: &[u8]| -> crate::mvcc::VersionResult<BudgetedVec<u8>> {
+            let mut output = BudgetedVec::new(control.memory());
+            output.extend_from_slice(bytes)?;
+            Ok(output)
+        };
+        let mut lifetime = copy(key)?;
+        lifetime[ROOT.len()] = 0;
+        Ok(Some(VectorFieldGuard {
+            lifetime,
+            references: copy(key)?,
+            reference_value: copy(&[1])?,
+            vectors: copy(vectors)?,
+        }))
+    }
+}
 
 impl KeyValueVectorIndex {
     pub(super) fn coordinate_field(

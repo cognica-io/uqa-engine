@@ -389,7 +389,13 @@ impl VersionedPersistence for SQLiteRecordStore {
             let prefix = native::NativeRecordIdentity::family_prefix(family, control)?;
             uqa_storage::mvcc::reclaim_tombstone_prefix(self, &prefix, control)?;
         }
+        let prefix = self.vector_field_guard_layout().prefix(control)?;
+        uqa_storage::mvcc::reclaim_tombstone_prefix(self, &prefix, control)?;
         Ok(())
+    }
+
+    fn vector_field_guard_layout(&self) -> &dyn uqa_storage::mvcc::VectorFieldGuardLayout {
+        self
     }
 
     fn commit(

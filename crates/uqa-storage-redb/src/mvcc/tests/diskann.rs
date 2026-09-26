@@ -14,6 +14,43 @@ use uqa_storage::key_value::conformance::{verify_diskann_generations, verify_dis
 use uqa_storage::KeyValueStore;
 
 #[test]
+fn vector_field_guard_reclamation_bounds_deleted_tables_and_preserves_writers() {
+    use redb::ReadableDatabase;
+    let directory = tempfile::tempdir().unwrap();
+    let owner = crate::RedbStorage::open(directory.path().join("field-guards.redb")).unwrap();
+    let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
+    uqa_storage::key_value::conformance::verify_vector_field_guard_reclamation(&store).unwrap();
+    let records = owner.record_store().unwrap();
+    let read = records.database.begin_read().unwrap();
+    let lower = b"\0uqa-vector-field-guards-v1\0".as_slice();
+    let upper = b"\0uqa-vector-field-guards-v1\x01".as_slice();
+    assert_eq!(
+        read.open_table(super::super::HEADS)
+            .unwrap()
+            .range(lower..upper)
+            .unwrap()
+            .count(),
+        1
+    );
+    assert_eq!(
+        read.open_table(super::super::VERSIONS)
+            .unwrap()
+            .range((lower, 0)..(upper, 0))
+            .unwrap()
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn vector_field_guard_reclamation_preserves_original_attempts_and_rejects_stale_absence() {
+    let directory = tempfile::tempdir().unwrap();
+    let owner = crate::RedbStorage::open(directory.path().join("guard-attempts.redb")).unwrap();
+    let records = Arc::new(owner.record_store().unwrap());
+    uqa_storage::key_value::conformance::verify_vector_field_guard_attempts(records).unwrap();
+}
+
+#[test]
 fn diskann_canonical_reclamation_releases_origins_and_journal_identities_without_a_graph() {
     use redb::ReadableDatabase;
     let directory = tempfile::tempdir().unwrap();

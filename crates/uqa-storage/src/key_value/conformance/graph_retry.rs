@@ -70,6 +70,10 @@ impl VersionedPersistence for InterleavingPersistence {
         self.inner.reclaim_versions(control)
     }
 
+    fn vector_field_guard_layout(&self) -> &dyn crate::mvcc::VectorFieldGuardLayout {
+        self.inner.vector_field_guard_layout()
+    }
+
     fn reclaim_diskann_tombstones(&self, control: &StorageReadControl) -> VersionResult<()> {
         self.inner.reclaim_diskann_tombstones(control)
     }

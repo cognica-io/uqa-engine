@@ -165,6 +165,10 @@ impl VersionedPersistence for FaultPersistence {
         self.inner.reclaim_diskann_tombstones(control)
     }
 
+    fn vector_field_guard_layout(&self) -> &dyn uqa_storage::mvcc::VectorFieldGuardLayout {
+        self.inner.vector_field_guard_layout()
+    }
+
     fn reclaim_tombstones(
         &self,
         request: &uqa_storage::mvcc::TombstoneReclamationRequest<'_>,

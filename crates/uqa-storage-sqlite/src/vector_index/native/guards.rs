@@ -32,7 +32,7 @@ impl NativeSnapshot {
         let mut memory = self.control.memory().reserve(bytes)?;
         let mut name = String::with_capacity(bytes);
         memory.grow(name.capacity().saturating_sub(bytes))?;
-        name.push_str("vector_field_guard::");
+        name.push_str(crate::mvcc::native::VECTOR_FIELD_GUARD_PREFIX);
         for byte in prefix.iter() {
             write!(name, "{byte:02x}").expect("formatting into a string");
         }

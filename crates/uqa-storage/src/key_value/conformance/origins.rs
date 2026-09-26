@@ -29,8 +29,11 @@ mod changes;
 pub use changes::verify_diskann_canonical_reclamation;
 mod corpus;
 mod coverage;
+mod guards;
+pub use guards::verify_vector_field_guard_reclamation;
 mod lifecycle;
 pub use lifecycle::verify_mutation_origins;
+pub use lifecycle::verify_vector_field_guard_attempts;
 
 use super::{expect, expect_eq};
 use crate::diskann_index::{

@@ -21,6 +21,47 @@ use crate::SQLiteCompressionOptions;
 mod ownership;
 
 #[test]
+fn vector_field_guard_reclamation_bounds_deleted_tables_and_preserves_writers() {
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("field-guards.db");
+        let connection = connection(&path, mode);
+        let store: Arc<dyn KeyValueStore> =
+            Arc::new(SQLiteKeyValueStore::new(connection.clone()).unwrap());
+        uqa_storage::key_value::conformance::verify_vector_field_guard_reclamation(&store).unwrap();
+        connection
+            .with_physical(|sqlite| {
+                for table in ["_uqa_mvcc_heads", "_uqa_mvcc_versions"] {
+                    let count: i64 = sqlite.query_row(
+                        &format!("SELECT count(*) FROM {table} WHERE key >= ?1 AND key < ?2"),
+                        rusqlite::params![
+                            b"\0uqa-vector-field-guards-v1\0".as_slice(),
+                            b"\0uqa-vector-field-guards-v1\x01".as_slice()
+                        ],
+                        |row| row.get(0),
+                    )?;
+                    assert_eq!(
+                        count, 1,
+                        "only the final populated field retains a guard in {table}"
+                    );
+                }
+                Ok(())
+            })
+            .unwrap();
+    }
+}
+
+#[test]
+fn vector_field_guard_reclamation_preserves_original_attempts_and_rejects_stale_absence() {
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let connection = connection(&directory.path().join("guard-attempts.db"), mode);
+        let records = Arc::new(crate::SQLiteRecordStore::new(&connection).unwrap());
+        uqa_storage::key_value::conformance::verify_vector_field_guard_attempts(records).unwrap();
+    }
+}
+
+#[test]
 fn diskann_canonical_reclamation_releases_origins_and_journal_identities_without_a_graph() {
     for mode in 0..4 {
         let directory = tempfile::tempdir().unwrap();
