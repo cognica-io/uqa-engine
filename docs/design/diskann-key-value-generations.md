@@ -1,6 +1,6 @@
 # DiskANN physical generations
 
-The Storage-owned `KeyValueDiskANNStore` persists physical DiskANN generations through existing versioned Key/Value sessions. SQLite Key/Value, redb and native SQLite share this implementation. It supplies staging, physical sealing and retained page sources; canonical MVCC coverage, catalog publication, search and SQL creation remain separate implementation units.
+The Storage-owned `KeyValueDiskANNStore` persists physical DiskANN generations through existing versioned Key/Value sessions. SQLite Key/Value, redb and native SQLite share staging, physical sealing and retained page sources. Bound canonical sources use the [generation publication contract](diskann-generation-publication.md) to select a sealed generation and its complete coverage atomically; query routing, journal pruning, reclamation and SQL creation remain unfinished.
 
 ## Ownership and identities
 
@@ -40,10 +40,12 @@ Unknown tags, extra key bytes, unsupported state revisions and absent required r
 | Frozen | Read and verify complete physical streams; move to Sealed only after successful verification; discard |
 | Sealed | Open retained sources and verify repeated sealing requests against the same manifest |
 | Discarding | Continue bounded deletion until the namespace and state are gone |
+| Published | Remain selected by the logical head; atomically become Retired when a verified replacement publishes |
+| Retired | Remain readable under retained ownership; await separate lifecycle reclamation |
 
 Each append requires the unchanged database marker and staging-state revision at commit. Freezing changes the state revision, fencing even writes evaluated before freezing. Records cannot be replaced through the staging API. Verification scans at most 64 fixed keys per page, releases the key visitor, copies one bounded record or graph page, then invokes the common artifact sealer. It validates every ordered code/side/page stream and its final digest. Revision-3 generations additionally require complete ordered origin batches, including empty tensors, and matching total tensor cardinality and digest. All logical origin records use the same native binary mapping and encryption domain; no native family or schema change is needed. An incomplete or corrupt generation remains Frozen and unavailable to ordinary readers.
 
-The final Sealed transition conditionally requires the original owner, Frozen state and unchanged manifest. Sealed means complete physical artifacts; it is not a graph-connectivity proof, a canonical snapshot-coverage token or permission to route a public index to that generation. The later publication owner must establish those properties.
+The final Sealed transition conditionally requires the original owner, Frozen state and unchanged manifest. Sealed means complete physical artifacts; bound publication additionally validates exact captured coverage, catalog parameters/incarnations, expected head and physical mappings. Public query routing and SQL lifecycle integration remain separate obligations.
 
 `discard_step` accepts a positive record count capped at 64. It fences later writers and deletes at most that many payload records in one atomic mutation, retaining Discarding until the final empty/partial page removes the state. Cleanup is explicit and resumable, never a fallible destructor operation. Sealed-generation reclamation is rejected because only the future catalog/retention owner can authorize it.
 

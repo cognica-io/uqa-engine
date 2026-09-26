@@ -6,10 +6,24 @@
 
 use super::*;
 use uqa_storage::diskann_index::pages::DiskANNRecordKey;
+
+#[test]
+fn diskann_publication_is_atomic_on_shared_memory_sessions() {
+    let persistence = Persistence::new();
+    let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+    let generation =
+        uqa_storage::key_value::conformance::verify_diskann_publication(&store).unwrap();
+    drop(store);
+    let reopened: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
+    uqa_storage::key_value::conformance::verify_diskann_publication_reopen(&reopened, generation)
+        .unwrap();
+}
 use uqa_storage::key_value::{DiskANNStageStatus, KeyValueDiskANNStore};
 
 #[path = "diskann/identity.rs"]
 mod identity;
+#[path = "diskann/publication.rs"]
+mod publication;
 
 #[test]
 fn diskann_generations_preserve_shared_mvcc_and_reopen_contracts() {

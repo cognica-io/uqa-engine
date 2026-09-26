@@ -56,6 +56,25 @@ fn diskann_catalog_identity_handles_survive_sqlite_key_value_cold_reopen() {
 }
 
 #[test]
+fn diskann_publication_is_atomic_and_reopens_in_sqlite_key_value_modes() {
+    use uqa_storage::key_value::conformance::{
+        verify_diskann_publication, verify_diskann_publication_reopen,
+    };
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("publication.db");
+        let generation = {
+            let store: Arc<dyn KeyValueStore> =
+                Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+            verify_diskann_publication(&store).unwrap()
+        };
+        let store: Arc<dyn KeyValueStore> =
+            Arc::new(SQLiteKeyValueStore::new(connection(&path, mode)).unwrap());
+        verify_diskann_publication_reopen(&store, generation).unwrap();
+    }
+}
+
+#[test]
 fn diskann_catalog_binding_checks_actual_sqlite_definitions_in_all_file_modes() {
     for mode in 0..4 {
         let directory = tempfile::tempdir().unwrap();

@@ -1,6 +1,6 @@
 # DiskANN build coverage
 
-Status: Retained build capture and exact source membership merged in PR #177. Key/Value catalog binding merged in PR #178; native SQLite catalog binding merged in PR #179. Catalog incarnation resolution and durable physical-handle mapping merged in PR #180. Complete origin artifacts and bounded reopened lookup are implemented for review. Atomic generation publication and covered/obsolete journal retirement remain required in the [implementation plan](../plans/0014-diskann-vector-index.md). This contract does not enable public DiskANN queries.
+Status: Retained build capture and exact source membership merged in PR #177. Key/Value catalog binding merged in PR #178; native SQLite catalog binding merged in PR #179. Catalog incarnation resolution and durable physical-handle mapping merged in PR #180. Complete origin artifacts and bounded reopened lookup merged in PR #181. Atomic generation publication is implemented in PR #182 and described in the [publication contract](diskann-generation-publication.md); covered/obsolete journal retirement remains required in the [implementation plan](../plans/0014-diskann-vector-index.md). This contract does not enable public DiskANN queries.
 
 ## Capture and membership
 
@@ -37,6 +37,8 @@ The authorized publication transaction must atomically install the generation an
 The token is process-owned evidence. Losing its retained source before publication invalidates the unfinished authority; a manifest hash cannot reconstruct it. Existing staged-generation recovery must preserve the previously published index and discard or otherwise resolve the unpublished candidate under its ownership rules. Normal open must eventually validate the published generation and outstanding journal together; it must not rebuild an index as a substitute for missing publication evidence.
 
 ## Verification
+
+The [generation publication adapter](diskann-generation-publication.md) compares the exact completed manifest and full origin summary against an actually sealed generation, guards the original catalog records, and selects a head using the captured source's expected head. It rejects changed private input and carries independently sealed metadata into the caller's transaction without refreshing the SQL data snapshot. Journal pruning, final private-DDL scheduling and retained query routing remain unfinished.
 
 Storage tests distinguish equal zero-vector fingerprints with different empty-origin membership, reject foreign capture metadata and changed navigation/side classification, and exercise source/build/query cancellation and temporary-file release. Actual SQLite Key/Value and redb conformance constructs and physically seals generations from real canonical origins, then checks late commits, replacements, private undo and empty tensors. Native SQLite tests keep both committed and undone sources after closing their original plain/encrypted/compressed connections. Verification uses bounded owned workspace, with no timing or RSS acceptance claim.
 

@@ -7,6 +7,7 @@
 //! Actual publication identities, undo branches and bounded canonical views on disposable providers.
 
 mod binding;
+pub use binding::{verify_diskann_publication, verify_diskann_publication_reopen};
 mod catalog;
 pub use binding::verify_diskann_catalog_binding;
 pub use binding::{verify_diskann_catalog_identity, verify_diskann_catalog_identity_reopen};

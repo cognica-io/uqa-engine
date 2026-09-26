@@ -183,6 +183,21 @@ enum Revision {
 }
 
 impl KeyValueReadRevision {
+    pub(crate) fn observed_commit(&self, database: DatabaseId) -> Option<CommitSequence> {
+        match &self.0 {
+            Revision::Record(revision) => revision.committed(database),
+            _ => None,
+        }
+    }
+
+    /// Compare private changes for the same selected prefixes, independently of intervening committed writes. Unversioned or individual-record identities cannot establish this property.
+    pub fn same_private_changes(&self, other: &Self) -> bool {
+        matches!((&self.0, &other.0), (
+            Revision::Records { database: a, private: ap, .. },
+            Revision::Records { database: b, private: bp, .. }
+        ) if a == b && ap == bp)
+    }
+
     pub(crate) fn record_database(&self) -> Option<DatabaseId> {
         match &self.0 {
             Revision::Record(revision) => Some(revision.database()),

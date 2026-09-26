@@ -195,7 +195,9 @@ impl KeyValueDiskANNStage {
                     already_sealed = state.status == DiskANNStageStatus::Sealed;
                     Ok(())
                 }
-                DiskANNStageStatus::Discarding => Err(invalid("generation is being discarded")),
+                DiskANNStageStatus::Discarding
+                | DiskANNStageStatus::Published
+                | DiskANNStageStatus::Retired => Err(invalid("generation is no longer staging")),
             }
         })?;
         if already_sealed {
@@ -250,7 +252,7 @@ impl KeyValueDiskANNStage {
                 complete = true;
                 return Ok(());
             };
-            if state.status == DiskANNStageStatus::Sealed {
+            if state.status.is_complete() {
                 return Err(invalid(
                     "sealed generation requires catalog-owned reclamation",
                 ));
@@ -313,7 +315,7 @@ impl KeyValueDiskANNStage {
     }
 }
 
-fn load_state(
+pub(super) fn load_state(
     read: &dyn KeyValueRead,
     generation: DiskANNGeneration,
     control: &StorageReadControl,

@@ -240,21 +240,72 @@ impl Transaction {
     ) -> VersionResult<()> {
         self.writable()?;
         control.check()?;
+        let expected = self
+            .view()?
+            .metadata(key, control)?
+            .and_then(|record| record.revision);
         for requirement in self.requirements.iter() {
             control.cancellation().check()?;
             if requirement.key.bytes() == key {
-                return Ok(());
+                return if requirement.expected == expected {
+                    Ok(())
+                } else {
+                    Err(VersionError::InvalidEncoding(
+                        "record requirements disagree",
+                    ))
+                };
             }
         }
-        let expected = self
-            .committed
-            .metadata(key, control)?
-            .and_then(|record| record.revision);
         self.requirements.push(RecordRequirement {
             key: RecordKey::new(key, control.memory())?,
             expected,
         })?;
         Ok(())
+    }
+
+    pub(super) fn require_observed(
+        &mut self,
+        key: &RecordKey,
+        expected: CommitSequence,
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        self.writable()?;
+        control.check()?;
+        if self.changes.write_kind(key.bytes(), control)?.is_some() {
+            return Err(VersionError::InvalidEncoding(
+                "observed metadata already has a private replacement",
+            ));
+        }
+        for requirement in self.requirements.iter() {
+            control.check()?;
+            if requirement.key.bytes() == key.bytes() {
+                return if requirement.expected == Some(expected) {
+                    Ok(())
+                } else {
+                    Err(VersionError::InvalidEncoding(
+                        "observed metadata preconditions disagree",
+                    ))
+                };
+            }
+        }
+        self.requirements.push(RecordRequirement {
+            key: key.clone(),
+            expected: Some(expected),
+        })?;
+        Ok(())
+    }
+
+    pub(super) fn write_observed(
+        &mut self,
+        key: &RecordKey,
+        value: &SharedRecordValue,
+        expected: CommitSequence,
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        self.require_observed(key, expected, control)?;
+        let write =
+            PreparedRecordWrite::from_shared(key.clone(), Some(expected), Some(value.clone()));
+        self.changes.apply_owned(&[write], control)
     }
 
     pub(super) fn vector_mutation(&mut self, mutation: &OwnedVectorMutation) -> VersionResult<()> {

@@ -352,6 +352,21 @@ impl KeyValueBatch for SQLiteKeyValueBatch<'_> {
     fn require_unchanged(&mut self, key: &[u8]) -> StorageBackendResult<()> {
         self.batch.require_unchanged(key)
     }
+    fn require_observed(
+        &mut self,
+        key: &[u8],
+        revision: &uqa_storage::key_value::KeyValueReadRevision,
+    ) -> StorageBackendResult<()> {
+        self.batch.require_observed(key, revision)
+    }
+    fn put_observed(
+        &mut self,
+        key: &[u8],
+        value: &[u8],
+        revision: &uqa_storage::key_value::KeyValueReadRevision,
+    ) -> StorageBackendResult<()> {
+        self.batch.put_observed(key, value, revision)
+    }
     fn touch_marker(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
         self.batch.touch_marker(key, value)
     }

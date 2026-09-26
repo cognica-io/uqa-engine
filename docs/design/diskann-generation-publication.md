@@ -1,0 +1,27 @@
+# DiskANN generation publication
+
+Storage owns the atomic selection of a physically sealed generation and its complete document-origin coverage. Key/Value canonical sources and native SQLite supply actual retained catalog and input views; native SQLite maps generation records through its existing family 57 while keeping catalog guards and generation changes in the same caller transaction. Public DiskANN SQL, query routing, journal pruning and reclamation are still unfinished.
+
+## Publication evidence
+
+`DiskANNCanonicalCoverage` retains its exact completed manifest and original source/build controls. Publication requires revision-3 complete origins, the captured catalog parameters, the actual immutable physical manifest, and the durable table/index handles mapped from all three 128-bit catalog incarnations. A physically sealed stream or a caller-provided digest alone does not establish this authority. Legacy manifests cannot publish complete coverage.
+
+The expected head comes from the build source's retained committed/private view. Bound Key/Value capture retains the logical head namespace with its canonical and catalog prefixes; native capture already retains the complete native view. Publication never replaces that expectation with a later head. This prevents an old build from overwriting a newer generation after the newer generation's covered journal entries have been removed. Missing and present heads are both conditional commit inputs.
+
+Actual table/index record identities must still match the source on the publication command's view, and their committed preconditions survive until commit. If the build included private canonical changes, the selected field's private revision must remain unchanged at publication; undoing or replacing that input invalidates the candidate. Independent committed data changes remain eligible and outside the older build's exact coverage. Later private DDL requires lifecycle cancellation or supersession of this effect; these internal adapters do not yet implement that SQL scheduling.
+
+## Independently staged records
+
+Physical staging uses an independent session, so a seal can be newer than the caller's fixed SQL snapshot. Publication reads that seal through an actual retained physical source, validates its history and data identity, and records its committed metadata revisions. `KeyValueBatch::require_observed` and `put_observed` carry these explicit preconditions into the evaluated caller batch without advancing its data snapshot. Unversioned, private and foreign-history revisions are rejected. Existing private replacements and contradictory requirements also fail. Native adapters translate the logical key/value while preserving the original physical record revision.
+
+Observed requirements and replacements use the existing MVCC write set, savepoint undo, fingerprint, conflict detection and receipt resolution. No callback is replayed to resolve a lost reply. Read-only conditions on the marker, physical mappings and immutable manifest accompany the conditional Sealed-to-Published state replacement. The head and previous Published-to-Retired state change enter that same transaction. A rejected commit leaves the previous selected generation unchanged and the new candidate sealed.
+
+## Persistent head and lifetime
+
+The logical head key is the physical binary root `\0uqa-diskann-v1\0`, tag 5, and the full 16-byte table object, storage generation and index object, in that order. It does not require physical handles to have existed when the source was captured. Its 41-byte value is revision 1, the 16-byte physical data identity, and three nonzero big-endian `u64` values: table handle, index handle and generation. Unsupported revisions, malformed lengths and invalid identities fail closed.
+
+State bytes retain revision 1 and their original staging owner. Status values 4 and 5 represent Published and Retired; values 0 through 3 retain their previous meanings. Complete physical generations remain readable through retained sources. The staging discard operation rejects Sealed, Published and Retired states. Selected-head inspection validates the corresponding mappings and Published state on the same view.
+
+Head selection makes the already sealed complete origin artifact logically reachable in one atomic step; it does not copy a document map or delete the journal during publication. Physical covered-key pruning must be bounded, resumable and conditional on the unchanged selected head. Retained snapshots, unresolved receipts, abandoned candidates and retired-generation cleanup still require their owning lifecycle work.
+
+Query integration must retain a head and its physical source together. Committed selection cannot open a fresh source after reading an older head; a private head may refer to staging artifacts newer than the transaction's data snapshot and must retain its verified physical source. The current publication mutation does not implement that query resource adapter or enable public search.

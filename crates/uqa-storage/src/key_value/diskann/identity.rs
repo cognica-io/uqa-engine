@@ -20,6 +20,46 @@ use super::{
 
 const PREFIX: usize = ROOT.len() + 1 + 16;
 
+pub(super) fn require_mapping(
+    scope: &DiskANNIndexScope,
+    generation: crate::diskann_index::format::DiskANNGeneration,
+    read: &dyn KeyValueRead,
+    batch: &mut dyn crate::KeyValueBatch,
+    control: &StorageReadControl,
+) -> StorageBackendResult<()> {
+    validate_mapping(scope, generation, read, control)?;
+    let key = database_key();
+    let keys = Keys::new(generation.database(), scope);
+    for key in [&key[..], &keys.table[..], &keys.index[..]] {
+        super::publication::require_observed(read, key, batch)?;
+    }
+    Ok(())
+}
+
+pub(super) fn validate_mapping(
+    scope: &DiskANNIndexScope,
+    generation: crate::diskann_index::format::DiskANNGeneration,
+    read: &dyn KeyValueRead,
+    control: &StorageReadControl,
+) -> StorageBackendResult<()> {
+    let key = database_key();
+    let history = read
+        .record_revision(&key)?
+        .and_then(|revision| revision.record_database())
+        .ok_or_else(|| invalid("physical data marker has no versioned identity"))?;
+    scope.check(history, control)?;
+    if read_data_identity(read, control)? != Some(generation.database()) {
+        return Err(invalid("publication belongs to another data identity"));
+    }
+    let keys = Keys::new(generation.database(), scope);
+    if keys.read(read, control)? != [Some(generation.table()), Some(generation.index())] {
+        return Err(invalid(
+            "publication does not match catalog physical handles",
+        ));
+    }
+    Ok(())
+}
+
 struct Keys {
     table: [u8; PREFIX + 32],
     index: [u8; PREFIX + 48],

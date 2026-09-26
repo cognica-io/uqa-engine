@@ -18,7 +18,7 @@ use crate::{
 };
 
 // Fixture-only interpretation: provider conformance treats SQL definitions as opaque.
-struct Resolver;
+pub(super) struct Resolver;
 
 impl DiskANNIndexResolver for Resolver {
     fn resolve(
@@ -33,7 +33,7 @@ impl DiskANNIndexResolver for Resolver {
     }
 }
 
-fn row(identity: [u8; 16]) -> StorageBackendResult<CatalogIndexRow> {
+pub(super) fn row(identity: [u8; 16]) -> StorageBackendResult<CatalogIndexRow> {
     let mut row = definition()?;
     row.definition_json = Some(serde_json::to_string(&identity)?);
     Ok(row)

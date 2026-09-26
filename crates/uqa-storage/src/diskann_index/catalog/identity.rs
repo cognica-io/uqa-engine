@@ -32,6 +32,13 @@ pub struct DiskANNIndexScope {
 }
 
 impl DiskANNIndexScope {
+    pub(crate) fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
+        for source in &self.source {
+            source.check()?;
+        }
+        self.control.check()?;
+        control.check()
+    }
     pub fn table_object(&self) -> [u8; 16] {
         self.table
     }
@@ -49,11 +56,7 @@ impl DiskANNIndexScope {
         database: DatabaseId,
         control: &StorageReadControl,
     ) -> StorageBackendResult<()> {
-        for source in &self.source {
-            source.check()?;
-        }
-        self.control.check()?;
-        control.check()?;
+        self.check_control(control)?;
         if self.revision.record_database() != Some(database) {
             return Err(invalid(
                 "physical session belongs to another transaction history",

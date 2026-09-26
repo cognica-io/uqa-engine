@@ -8,7 +8,7 @@ use super::*;
 use uqa_storage::diskann_index::catalog::DiskANNIndexResolver;
 use uqa_storage::StorageBackendResult;
 
-struct Resolver;
+pub(super) struct Resolver;
 
 impl DiskANNIndexResolver for Resolver {
     fn resolve(

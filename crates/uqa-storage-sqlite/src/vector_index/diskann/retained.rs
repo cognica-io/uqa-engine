@@ -7,6 +7,7 @@
 //! Bounded canonical reads borrow native rows and preserve their original visibility and controls.
 
 mod changes;
+mod publication;
 
 use super::invalid;
 use crate::mvcc::native::{
