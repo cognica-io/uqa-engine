@@ -11,6 +11,7 @@ use std::path::Path;
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod process;
+mod tombstones;
 
 pub(super) fn open(path: &Path, mode: usize) -> ManagedConnection {
     match mode {

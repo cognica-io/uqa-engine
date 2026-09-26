@@ -6,6 +6,7 @@
 
 //! Private evaluated changes and provider-independent revision validation.
 
+mod reclamation;
 mod requirements;
 pub(super) use requirements::RecordRequirement;
 
@@ -125,6 +126,7 @@ pub struct PreparedRecordCommit {
     pub(super) notification: Option<Arc<super::notifications::NotificationEffect>>,
     pub(super) resolved_at: Option<CommitSequence>,
     requirements: Option<Arc<BudgetedVec<RecordRequirement>>>,
+    reclamation_epoch: Option<u64>,
 }
 
 impl PreparedRecordCommit {
@@ -223,6 +225,7 @@ impl PreparedRecordCommit {
             notification: None,
             resolved_at: None,
             requirements: None,
+            reclamation_epoch: None,
         })
     }
 
@@ -305,6 +308,7 @@ impl PreparedRecordCommit {
         self.fingerprint = original.fingerprint;
         self.resolved_at = Some(sequence);
         self.requirements.clone_from(&original.requirements);
+        self.reclamation_epoch = original.reclamation_epoch;
         self
     }
 

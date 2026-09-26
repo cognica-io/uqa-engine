@@ -304,6 +304,14 @@ pub trait KeyValueBatch {
     fn commit(self: Box<Self>) -> StorageBackendResult<()>;
 }
 
+pub(crate) fn diskann_tombstone_prefixes() -> [&'static [u8]; 3] {
+    [
+        diskann::READ_PREFIX,
+        vector_index::origin::ROOT,
+        vector_index::origin::journal::ROOT,
+    ]
+}
+
 /// Ordered byte-key storage used by Key/Value catalog and index backends.
 pub trait KeyValueStore: Send + Sync {
     /// Physical resource ownership for retained builds and recovery. Versioned wrappers must forward this capability.

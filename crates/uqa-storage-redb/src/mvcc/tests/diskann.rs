@@ -14,6 +14,36 @@ use uqa_storage::key_value::conformance::{verify_diskann_generations, verify_dis
 use uqa_storage::KeyValueStore;
 
 #[test]
+fn diskann_canonical_reclamation_releases_origins_and_journal_identities_without_a_graph() {
+    use redb::ReadableDatabase;
+    let directory = tempfile::tempdir().unwrap();
+    let owner =
+        crate::RedbStorage::open(directory.path().join("canonical-retention.redb")).unwrap();
+    let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
+    for _ in 0..3 {
+        uqa_storage::key_value::conformance::verify_diskann_canonical_reclamation(&store).unwrap();
+        let records = owner.record_store().unwrap();
+        let read = records.database.begin_read().unwrap();
+        assert_eq!(
+            read.open_table(super::super::HEADS)
+                .unwrap()
+                .range(b"\0uqa-diskann-".as_slice()..b"\0uqa-diskann.".as_slice())
+                .unwrap()
+                .count(),
+            0
+        );
+        assert_eq!(
+            read.open_table(super::super::VERSIONS)
+                .unwrap()
+                .range((b"\0uqa-diskann-".as_slice(), 0)..(b"\0uqa-diskann.".as_slice(), 0))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
+}
+
+#[test]
 fn diskann_runtime_reclamation_preserves_redb_undo_recreation_and_cold_reopen() {
     use redb::{ReadableDatabase, ReadableTable};
     use uqa_storage::key_value::conformance::{
@@ -268,8 +298,24 @@ fn diskann_build_ownership_protects_live_and_retained_sources() {
 
 #[test]
 fn diskann_maintenance_uses_finite_key_only_discovery_and_vacuum() {
+    use redb::{ReadableDatabase, ReadableTableMetadata};
     let directory = tempfile::tempdir().unwrap();
     let owner = crate::RedbStorage::open(directory.path().join("maintenance.redb")).unwrap();
     let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());
-    uqa_storage::key_value::conformance::verify_diskann_maintenance(&store).unwrap();
+    for _ in 0..3 {
+        uqa_storage::key_value::conformance::verify_diskann_maintenance(&store).unwrap();
+        let records = owner.record_store().unwrap();
+        let read = records.database.begin_read().unwrap();
+        assert_eq!(
+            read.open_table(super::super::HEADS).unwrap().len().unwrap(),
+            2
+        );
+        assert_eq!(
+            read.open_table(super::super::VERSIONS)
+                .unwrap()
+                .len()
+                .unwrap(),
+            2
+        );
+    }
 }

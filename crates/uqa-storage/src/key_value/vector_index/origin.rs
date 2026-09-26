@@ -29,7 +29,7 @@ use crate::read_control::StorageReadControl;
 use crate::{KeyValueStore, RelationIdentity, StorageBackendResult};
 use uqa_core::DocId;
 
-const ROOT: &[u8] = b"\0uqa-diskann-canonical-v1\0";
+pub(in crate::key_value) const ROOT: &[u8] = b"\0uqa-diskann-canonical-v1\0";
 
 /// Canonical tensor mutation owner for the Key/Value layout. Public `DiskANN` catalog routing remains unavailable until publication and recovery are integrated.
 pub struct KeyValueDiskANNCanonical {

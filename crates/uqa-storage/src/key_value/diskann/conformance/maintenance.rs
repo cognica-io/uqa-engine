@@ -110,6 +110,8 @@ pub fn verify_diskann_maintenance(store: &Arc<dyn KeyValueStore>) -> StorageBack
             .is_empty(),
         "a subsequent pass observes last-owner release",
     )?;
+    super::mappings::verify(store, &control)?;
+    store.reclaim_obsolete()?;
     Ok(())
 }
 

@@ -21,6 +21,39 @@ use crate::SQLiteCompressionOptions;
 mod ownership;
 
 #[test]
+fn diskann_canonical_reclamation_releases_origins_and_journal_identities_without_a_graph() {
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let connection = connection(&directory.path().join("canonical-retention.db"), mode);
+        let store: Arc<dyn KeyValueStore> =
+            Arc::new(SQLiteKeyValueStore::new(connection.clone()).unwrap());
+        for _ in 0..3 {
+            uqa_storage::key_value::conformance::verify_diskann_canonical_reclamation(&store)
+                .unwrap();
+            connection
+                .with_physical(|sqlite| {
+                    for table in ["_uqa_mvcc_heads", "_uqa_mvcc_versions"] {
+                        let count: i64 = sqlite.query_row(
+                            &format!("SELECT count(*) FROM {table} WHERE key >= ?1 AND key < ?2"),
+                            rusqlite::params![
+                                b"\0uqa-diskann-".as_slice(),
+                                b"\0uqa-diskann.".as_slice()
+                            ],
+                            |row| row.get(0),
+                        )?;
+                        assert_eq!(
+                            count, 0,
+                            "cleared canonical/journal identities remain in {table}"
+                        );
+                    }
+                    Ok(())
+                })
+                .unwrap();
+        }
+    }
+}
+
+#[test]
 fn diskann_runtime_reclamation_preserves_sqlite_undo_recreation_and_cold_reopen() {
     use uqa_storage::key_value::conformance::{
         verify_diskann_reclamation_bounds, verify_diskann_reclamation_reopen,
@@ -325,10 +358,17 @@ fn diskann_build_ownership_protects_live_and_retained_sources() {
 fn diskann_maintenance_uses_finite_key_only_discovery_and_vacuum() {
     for mode in 0..4 {
         let directory = tempfile::tempdir().unwrap();
-        let store: Arc<dyn KeyValueStore> = Arc::new(
-            SQLiteKeyValueStore::new(connection(&directory.path().join("maintenance.db"), mode))
-                .unwrap(),
-        );
-        uqa_storage::key_value::conformance::verify_diskann_maintenance(&store).unwrap();
+        let connection = connection(&directory.path().join("maintenance.db"), mode);
+        let store: Arc<dyn KeyValueStore> =
+            Arc::new(SQLiteKeyValueStore::new(connection.clone()).unwrap());
+        for _ in 0..3 {
+            uqa_storage::key_value::conformance::verify_diskann_maintenance(&store).unwrap();
+            connection.with_physical(|sqlite| {
+                for (table, expected) in [("_uqa_mvcc_heads", 2), ("_uqa_mvcc_versions", 1), ("_uqa_mvcc_runs", 0)] {
+                    assert_eq!(sqlite.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| row.get::<_, i64>(0))?, expected, "only the data marker and unrelated fixture tombstone remain in {table}");
+                }
+                Ok(())
+            }).unwrap();
+        }
     }
 }

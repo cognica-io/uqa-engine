@@ -19,6 +19,35 @@ fn index(store: &Arc<dyn KeyValueStore>) -> StorageBackendResult<KeyValueDiskANN
     KeyValueDiskANNCanonical::new(store.clone(), "diskann-changes", "embedding", 2)
 }
 
+/// Exercise canonical and journal cleanup without initializing any physical graph namespace. A deleted last field must still release its physical identities after the final reader closes.
+pub fn verify_diskann_canonical_reclamation(
+    store: &Arc<dyn KeyValueStore>,
+) -> StorageBackendResult<()> {
+    let control = StorageReadControl::with_limit(1 << 20);
+    let canonical = index(store)?;
+    let original = canonical.replace(0, &[vec![1.0, -0.0]], &control)?;
+    let held = canonical.retain(&control)?;
+    for document in 0..4 {
+        canonical.replace(document, &[vec![0.0, 1.0]], &control)?;
+    }
+    let mut ordinary = KeyValueVectorIndex::new(store.clone(), "diskann-changes", "embedding", 2);
+    ordinary.clear()?;
+    store.reclaim_obsolete()?;
+    expect_eq(
+        &held.origin(0, &control)?,
+        &Some(original),
+        "retained canonical origin survives maintenance",
+    )?;
+    values(&held, 0, &[vec![1.0, -0.0]], &control)?;
+    drop(held);
+    store.reclaim_obsolete()?;
+    expect_eq(
+        &canonical.retain(&control)?.origin(0, &control)?,
+        &None,
+        "cleared canonical origin stays absent",
+    )
+}
+
 pub(super) fn verify(store: &Arc<dyn KeyValueStore>) -> StorageBackendResult<()> {
     let control = StorageReadControl::with_limit(1 << 20);
     let canonical = index(store)?;

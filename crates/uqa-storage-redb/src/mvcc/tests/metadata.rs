@@ -11,7 +11,7 @@ use uqa_storage::mvcc::{IdentifierRequest, RecordWrite};
 
 #[test]
 fn predecessor_format_upgrade_preserves_records_allocations_and_receipts() {
-    for predecessor in 29_u64..=50 {
+    for predecessor in 29_u64..=51 {
         let database = Arc::new(
             Database::builder()
                 .create_with_backend(InMemoryBackend::new())
@@ -77,7 +77,7 @@ fn predecessor_format_upgrade_preserves_records_allocations_and_receipts() {
         let transaction = database.begin_read().unwrap();
         assert_eq!(
             read_u64(&transaction.open_table(METADATA).unwrap(), "format").unwrap(),
-            51
+            52
         );
     }
 }
@@ -129,96 +129,103 @@ fn retained_records_and_snapshots_revalidate_format_and_incarnation_before_acces
         ("format", 46_u64.to_be_bytes().to_vec()),
         ("format", 47_u64.to_be_bytes().to_vec()),
         ("format", 48_u64.to_be_bytes().to_vec()),
+        ("format", 49_u64.to_be_bytes().to_vec()),
+        ("format", 50_u64.to_be_bytes().to_vec()),
+        ("format", 51_u64.to_be_bytes().to_vec()),
         ("format", 99_u64.to_be_bytes().to_vec()),
         ("database", vec![0x7f; 16]),
     ] {
-        let replaced = field == "database";
-        let database = Arc::new(
-            Database::builder()
-                .create_with_backend(InMemoryBackend::new())
-                .unwrap(),
-        );
-        let store = RedbRecordStore::new(database.clone()).unwrap();
-        store.migrate_key_value().unwrap();
-        let control = StorageReadControl::with_limit(1 << 20);
-        let batch = |key: &[u8]| {
-            PreparedRecordCommit::new(
-                &[RecordWrite {
-                    key,
-                    expected: None,
-                    value: Some(b"original"),
-                }],
-                &control,
-            )
-            .unwrap()
-        };
-        let initial = batch(b"a");
-        let first = store.allocate_transaction(&control).unwrap();
-        let receipt = store.commit(first, &initial, &control).unwrap();
-        let pending = store.allocate_transaction(&control).unwrap();
-        let next = batch(b"b");
-        let retained = store.snapshot(&control).unwrap();
-        store
-            .allocate_identifiers(b"rows", IdentifierRequest::Observe(7), &control)
-            .unwrap();
+        verify_metadata_rejection(field, &replacement);
+    }
+}
+
+fn verify_metadata_rejection(field: &str, replacement: &[u8]) {
+    let replaced = field == "database";
+    let database = Arc::new(
+        Database::builder()
+            .create_with_backend(InMemoryBackend::new())
+            .unwrap(),
+    );
+    let store = RedbRecordStore::new(database.clone()).unwrap();
+    store.migrate_key_value().unwrap();
+    let control = StorageReadControl::with_limit(1 << 20);
+    let batch = |key: &[u8]| {
+        PreparedRecordCommit::new(
+            &[RecordWrite {
+                key,
+                expected: None,
+                value: Some(b"original"),
+            }],
+            &control,
+        )
+        .unwrap()
+    };
+    let initial = batch(b"a");
+    let first = store.allocate_transaction(&control).unwrap();
+    let receipt = store.commit(first, &initial, &control).unwrap();
+    let pending = store.allocate_transaction(&control).unwrap();
+    let next = batch(b"b");
+    let retained = store.snapshot(&control).unwrap();
+    store
+        .allocate_identifiers(b"rows", IdentifierRequest::Observe(7), &control)
+        .unwrap();
+    let old = {
+        let transaction = physical_writer(&database).unwrap();
         let old = {
-            let transaction = physical_writer(&database).unwrap();
-            let old = {
-                let mut metadata = transaction.open_table(METADATA).unwrap();
-                let old = metadata.get(field).unwrap().unwrap().value().to_vec();
-                metadata.insert(field, replacement.as_slice()).unwrap();
-                old
-            };
-            transaction.commit().unwrap();
+            let mut metadata = transaction.open_table(METADATA).unwrap();
+            let old = metadata.get(field).unwrap().unwrap().value().to_vec();
+            metadata.insert(field, replacement).unwrap();
             old
         };
-
-        rejected(store.snapshot(&control), replaced);
-        rejected(store.allocate_transaction(&control), replaced);
-        rejected(store.commit_status(first, &control), replaced);
-        rejected(store.abort(pending, &control), replaced);
-        rejected(store.migrate_key_value(), replaced);
-        rejected(store.identifier_watermark(b"rows", &control), replaced);
-        rejected(
-            store.allocate_identifiers(b"rows", IdentifierRequest::Observe(8), &control),
-            replaced,
-        );
-        for (id, writes) in [(first, &initial), (pending, &next)] {
-            let Err(CommitFailure::Rejected(error)) = store.commit(id, writes, &control) else {
-                panic!("a commit accepted incompatible metadata");
-            };
-            rejected::<()>(Err(error), replaced);
-        }
-        reject_snapshot_access(&*retained, &control, replaced);
-
-        let transaction = physical_writer(&database).unwrap();
-        {
-            let mut metadata = transaction.open_table(METADATA).unwrap();
-            assert_eq!(
-                read_u64(&metadata, "allocated").unwrap(),
-                pending.allocation()
-            );
-            assert_eq!(
-                read_u64(&metadata, "sequence").unwrap(),
-                receipt.sequence.as_u64()
-            );
-            metadata.insert(field, old.as_slice()).unwrap();
-        }
         transaction.commit().unwrap();
-        assert_eq!(
-            store.commit_status(first, &control).unwrap(),
-            CommitStatus::Committed(receipt)
-        );
-        assert_eq!(
-            store.commit_status(pending, &control).unwrap(),
-            CommitStatus::Pending
-        );
-        assert_eq!(
-            store.identifier_watermark(b"rows", &control).unwrap(),
-            Some(7)
-        );
-        assert!(retained.get(b"b", &control).unwrap().is_none());
-        assert_eq!(store.commit(first, &initial, &control).unwrap(), receipt);
-        store.commit(pending, &next, &control).unwrap();
+        old
+    };
+
+    rejected(store.snapshot(&control), replaced);
+    rejected(store.allocate_transaction(&control), replaced);
+    rejected(store.commit_status(first, &control), replaced);
+    rejected(store.abort(pending, &control), replaced);
+    rejected(store.migrate_key_value(), replaced);
+    rejected(store.identifier_watermark(b"rows", &control), replaced);
+    rejected(
+        store.allocate_identifiers(b"rows", IdentifierRequest::Observe(8), &control),
+        replaced,
+    );
+    for (id, writes) in [(first, &initial), (pending, &next)] {
+        let Err(CommitFailure::Rejected(error)) = store.commit(id, writes, &control) else {
+            panic!("a commit accepted incompatible metadata");
+        };
+        rejected::<()>(Err(error), replaced);
     }
+    reject_snapshot_access(&*retained, &control, replaced);
+
+    let transaction = physical_writer(&database).unwrap();
+    {
+        let mut metadata = transaction.open_table(METADATA).unwrap();
+        assert_eq!(
+            read_u64(&metadata, "allocated").unwrap(),
+            pending.allocation()
+        );
+        assert_eq!(
+            read_u64(&metadata, "sequence").unwrap(),
+            receipt.sequence.as_u64()
+        );
+        metadata.insert(field, old.as_slice()).unwrap();
+    }
+    transaction.commit().unwrap();
+    assert_eq!(
+        store.commit_status(first, &control).unwrap(),
+        CommitStatus::Committed(receipt)
+    );
+    assert_eq!(
+        store.commit_status(pending, &control).unwrap(),
+        CommitStatus::Pending
+    );
+    assert_eq!(
+        store.identifier_watermark(b"rows", &control).unwrap(),
+        Some(7)
+    );
+    assert!(retained.get(b"b", &control).unwrap().is_none());
+    assert_eq!(store.commit(first, &initial, &control).unwrap(), receipt);
+    store.commit(pending, &next, &control).unwrap();
 }

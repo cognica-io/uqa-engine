@@ -27,6 +27,7 @@ pub use graph_retry::verify_graph_admission_retry;
 mod compound;
 pub use compound::{verify_compound_concurrency, verify_compound_mutations};
 mod origins;
+pub use origins::verify_diskann_canonical_reclamation;
 pub use origins::verify_diskann_publication_ownership;
 pub use origins::verify_diskann_runtime_adoption_conflicts;
 pub use origins::{

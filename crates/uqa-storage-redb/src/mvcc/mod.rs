@@ -18,6 +18,7 @@ mod retention;
 mod serializable;
 #[cfg(test)]
 mod tests;
+mod tombstones;
 
 use std::sync::Arc;
 
@@ -75,7 +76,7 @@ impl RedbRecordStore {
                 .map(|value| codec::decode_u64(value.value()))
                 .transpose()?;
             if let Some(format) = initialized {
-                if !matches!(format, 1..=51) {
+                if !matches!(format, 1..=52) {
                     return Err(VersionError::InvalidEncoding("unknown record format"));
                 }
                 if present != if format < 5 { 15 } else { 31 } {
@@ -104,10 +105,10 @@ impl RedbRecordStore {
                         )
                         .map_err(redb_error)?;
                 }
-                if format < 51 {
+                if format < 52 {
                     identifiers::consolidate_diskann_generations(&mut identifiers)?;
                     metadata
-                        .insert("format", 51_u64.to_be_bytes().as_slice())
+                        .insert("format", 52_u64.to_be_bytes().as_slice())
                         .map_err(redb_error)?;
                 }
                 codec::receipt_limit(&metadata)?;
@@ -163,6 +164,13 @@ impl RedbRecordStore {
         let mut heads = transaction.open_table(HEADS).map_err(redb_error)?;
         let current = CommitSequence::from_u64(read_u64(&metadata, "sequence")?);
         prepared.validate_snapshot(current)?;
+        tombstones::validate(
+            &transaction
+                .open_table(identifiers::TABLE)
+                .map_err(redb_error)?,
+            prepared,
+            control,
+        )?;
         prepared.validate(control.cancellation(), |key| {
             Ok(heads
                 .get(key)
@@ -294,10 +302,16 @@ impl VersionedPersistence for RedbRecordStore {
         control: &StorageReadControl,
     ) -> VersionResult<Arc<dyn CommittedRecordSnapshot>> {
         control.cancellation().check()?;
+        let mut reclamation_epoch = 0;
         let lease = self.snapshots.capture(control, || {
             let transaction = self.database.begin_read().map_err(redb_error)?;
             let metadata = transaction.open_table(METADATA).map_err(redb_error)?;
             codec::validate_metadata(&metadata, self.identity)?;
+            reclamation_epoch = tombstones::epoch(
+                &transaction
+                    .open_table(identifiers::TABLE)
+                    .map_err(redb_error)?,
+            )?;
             Ok(CommitSequence::from_u64(read_u64(&metadata, "sequence")?))
         })?;
         uqa_storage::mvcc::retain_record_snapshot(
@@ -305,6 +319,7 @@ impl VersionedPersistence for RedbRecordStore {
                 database: Arc::clone(&self.database),
                 identity: self.identity,
                 sequence: lease.sequence(),
+                reclamation_epoch,
                 _lease: lease,
             },
             control,
@@ -314,6 +329,20 @@ impl VersionedPersistence for RedbRecordStore {
     fn reclaim_versions(&self, control: &StorageReadControl) -> VersionResult<u64> {
         self.snapshots.reclaim(control, |oldest| {
             reclamation::reclaim(self, oldest, control)
+        })
+    }
+
+    fn reclaim_tombstones(
+        &self,
+        request: &uqa_storage::mvcc::TombstoneReclamationRequest<'_>,
+        control: &StorageReadControl,
+    ) -> VersionResult<uqa_storage::mvcc::TombstoneReclamationStep> {
+        request.validate(control)?;
+        self.snapshots.reclaim(control, |oldest| {
+            if oldest.is_some() {
+                return Ok(uqa_storage::mvcc::TombstoneReclamationStep::Retained);
+            }
+            tombstones::reclaim(self, request, control)
         })
     }
 
@@ -406,7 +435,7 @@ fn initialize_record_metadata(
         .insert("database", bytes.as_slice())
         .map_err(redb_error)?;
     metadata
-        .insert("format", 51_u64.to_be_bytes().as_slice())
+        .insert("format", 52_u64.to_be_bytes().as_slice())
         .map_err(redb_error)?;
     metadata
         .insert("allocated", 0_u64.to_be_bytes().as_slice())

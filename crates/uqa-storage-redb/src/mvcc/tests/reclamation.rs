@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod tombstones;
+
 #[test]
 fn reclamation_preserves_live_views_tombstones_and_receipts_across_reopen() {
     let directory = tempfile::tempdir().unwrap();

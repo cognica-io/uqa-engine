@@ -89,9 +89,15 @@ impl VersionedKeyValueStore {
 
     /// Reclaim committed history without changing an active transaction or its retained readers. The persistence owner supplies atomic snapshot admission and physical deletion.
     pub fn reclaim_versions(&self) -> StorageBackendResult<u64> {
+        let control = self.write_control();
+        let removed = self
+            .persistence
+            .reclaim_versions(&control)
+            .map_err(VersionError::into_storage_error)?;
         self.persistence
-            .reclaim_versions(&self.write_control())
-            .map_err(VersionError::into_storage_error)
+            .reclaim_diskann_tombstones(&control)
+            .map_err(VersionError::into_storage_error)?;
+        Ok(removed)
     }
 
     /// Autonomous watermark visibility follows physical reservations, including reservations made after this session pinned its record snapshot. No write capability is required and no logical transaction is started or finished.

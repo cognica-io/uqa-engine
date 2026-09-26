@@ -32,6 +32,7 @@ mod restore;
 mod retention;
 mod serializable;
 mod session;
+mod tombstones;
 mod types;
 mod vector;
 mod view;
@@ -83,6 +84,12 @@ pub use serializable::{
 pub use session::{
     RecordRead, SerializableReadContext, SerializableSession, SerializableSnapshotCapture,
     SerializableSnapshotOptions, VersionedKeyValueStore, VersionedSessionOptions,
+};
+pub use tombstones::{
+    reclaim_key_value_diskann_tombstones, reclaim_tombstone_prefix, verify_tombstone_reclamation,
+    verify_tombstone_reclamation_pages, TombstoneReclamationPage, TombstoneReclamationRequest,
+    TombstoneReclamationStep, RECLAMATION_DOMAIN_PREFIX, RECLAMATION_EPOCH_NAMESPACE,
+    TOMBSTONE_RECLAMATION_PAGE,
 };
 pub use types::{CommitSequence, RecordWrite, VersionError, VersionResult};
 pub use view::{

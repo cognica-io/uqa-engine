@@ -589,7 +589,11 @@ impl Transaction {
             .with_requirements(&self.requirements, control)?
             .with_graph_effects(self.committed.sequence(), &self.graph, control)?
             .with_vector_effects(self.committed.sequence(), &self.vector, control)
-            .map(|prepared| prepared.with_notification_effect(self.notification.as_ref()))
+            .map(|prepared| {
+                prepared
+                    .with_notification_effect(self.notification.as_ref())
+                    .with_reclamation_epoch(self.committed.reclamation_epoch())
+            })
     }
 
     fn prepare_effects(

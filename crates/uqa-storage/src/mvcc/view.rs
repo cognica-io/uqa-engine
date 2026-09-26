@@ -72,6 +72,11 @@ pub type RecordKeyVisitor<'a> = dyn FnMut(&[u8], RecordMetadata) -> VersionResul
 pub trait CommittedRecordSnapshot: Send + Sync {
     fn sequence(&self) -> CommitSequence;
 
+    /// The provider's tombstone-reclamation epoch captured under the same admission as this snapshot. `None` means this provider does not supply reclamation-aware observations. Wrappers must forward the original value, never refresh it from current storage.
+    fn reclamation_epoch(&self) -> Option<u64> {
+        None
+    }
+
     /// Read a revision and tombstone marker without materializing its value when the provider supports key-only access.
     fn metadata(
         &self,
@@ -213,6 +218,9 @@ pub fn retain_record_snapshot<T: CommittedRecordSnapshot + 'static>(
 impl<T: CommittedRecordSnapshot> CommittedRecordSnapshot for RetainedSnapshot<T> {
     fn sequence(&self) -> CommitSequence {
         self.snapshot.sequence()
+    }
+    fn reclamation_epoch(&self) -> Option<u64> {
+        self.snapshot.reclamation_epoch()
     }
     fn metadata(
         &self,

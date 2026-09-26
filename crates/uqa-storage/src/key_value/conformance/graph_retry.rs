@@ -70,6 +70,18 @@ impl VersionedPersistence for InterleavingPersistence {
         self.inner.reclaim_versions(control)
     }
 
+    fn reclaim_diskann_tombstones(&self, control: &StorageReadControl) -> VersionResult<()> {
+        self.inner.reclaim_diskann_tombstones(control)
+    }
+
+    fn reclaim_tombstones(
+        &self,
+        request: &crate::mvcc::TombstoneReclamationRequest<'_>,
+        control: &StorageReadControl,
+    ) -> VersionResult<crate::mvcc::TombstoneReclamationStep> {
+        self.inner.reclaim_tombstones(request, control)
+    }
+
     fn snapshot(
         &self,
         control: &StorageReadControl,

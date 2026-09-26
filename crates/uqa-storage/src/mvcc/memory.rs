@@ -21,6 +21,8 @@ use super::{
     RecordWrite, ScannedRecord, SharedRecordValue, VersionResult,
 };
 
+mod reclamation;
+
 type History = RecordHistory<SharedRecordValue>;
 
 struct RecordEntry {
@@ -33,6 +35,8 @@ struct State {
     sequence: CommitSequence,
     records: BTreeMap<RecordKey, RecordEntry>,
     snapshots: BTreeMap<CommitSequence, usize>,
+    reclamation_epoch: u64,
+    reclamation_domains: BTreeMap<RecordKey, (u64, MemoryReservation)>,
 }
 
 struct Database {
@@ -72,6 +76,7 @@ impl MemoryVersionStore {
         Ok(MemoryRecordSnapshot {
             database: Arc::clone(&self.database),
             sequence,
+            reclamation_epoch: state.reclamation_epoch,
             _memory: memory,
         })
     }
@@ -98,6 +103,14 @@ impl MemoryVersionStore {
         let values = self.retain_values(commit, control)?;
         let mut state = self.database.state.lock();
         commit.validate_snapshot(state.sequence)?;
+        for (prefix, (minimum, _)) in &state.reclamation_domains {
+            commit.validate_reclamation_epoch(
+                prefix.bytes(),
+                *minimum,
+                state.reclamation_epoch,
+                control.cancellation(),
+            )?;
+        }
         let writes = commit.records();
         let validate = || {
             commit.validate(control.cancellation(), |key| {
@@ -193,6 +206,7 @@ impl MemoryVersionStore {
 pub struct MemoryRecordSnapshot {
     database: Arc<Database>,
     sequence: CommitSequence,
+    reclamation_epoch: u64,
     _memory: MemoryReservation,
 }
 
@@ -255,6 +269,9 @@ impl MemoryRecordSnapshot {
 }
 
 impl CommittedRecordSnapshot for MemoryRecordSnapshot {
+    fn reclamation_epoch(&self) -> Option<u64> {
+        Some(self.reclamation_epoch)
+    }
     fn sequence(&self) -> CommitSequence {
         Self::sequence(self)
     }

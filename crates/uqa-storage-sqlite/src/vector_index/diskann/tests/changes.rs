@@ -124,7 +124,29 @@ fn native_diskann_changes_skip_deleted_documents_and_clear_their_field_namespace
         .is_none());
     connection.commit_transaction().unwrap();
     assert_eq!(change_count(&connection), 0);
+    connection.reclaim_obsolete().unwrap();
     assert_change(&retained, 1, old, &control);
+    drop(retained);
+    connection.reclaim_obsolete().unwrap();
+    for family in [Family::VectorOrigins, Family::VectorChanges] {
+        let prefix = NativeRecordIdentity::family_prefix(family, &control).unwrap();
+        connection
+            .with_physical(|sqlite| {
+                for table in ["_uqa_mvcc_heads", "_uqa_mvcc_versions"] {
+                    let count: i64 = sqlite.query_row(
+                        &format!("SELECT count(*) FROM {table} WHERE substr(key, 1, ?1) = ?2"),
+                        rusqlite::params![i64::try_from(prefix.len()).unwrap(), &*prefix],
+                        |row| row.get(0),
+                    )?;
+                    assert_eq!(
+                        count, 0,
+                        "cleared native origins/journal retain physical metadata"
+                    );
+                }
+                Ok(())
+            })
+            .unwrap();
+    }
 }
 
 #[test]
