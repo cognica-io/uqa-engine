@@ -34,8 +34,14 @@ pub(super) fn run(
     };
     let mut session = None;
     let mut diskann = None;
+    let mut poll_at = Instant::now();
     loop {
         let pass_started = Instant::now();
+        let refresh_due = pass_started >= poll_at;
+        if refresh_due {
+            poll_at = pass_started + POLL;
+        }
+        let mut continue_diskann = false;
         if cancellation.is_cancelled() {
             return;
         }
@@ -67,26 +73,33 @@ pub(super) fn run(
             }
         }
         if let Some(engine) = session.as_ref() {
-            statistics.automatic_statistics.status.lock().running = true;
-            let result = refresh_due_tables(engine);
-            let mut status = statistics.automatic_statistics.status.lock();
-            status.running = false;
-            match result {
-                Ok(()) => {
-                    status.last_error = None;
-                }
-                Err(error) => {
-                    status.last_error = Some(error.to_string());
+            // Finite DiskANN pages share the worker without restarting the
+            // whole-catalog statistics pass before its next poll.
+            if refresh_due {
+                statistics.automatic_statistics.status.lock().running = true;
+                let result = refresh_due_tables(engine);
+                let mut status = statistics.automatic_statistics.status.lock();
+                status.running = false;
+                match result {
+                    Ok(()) => {
+                        status.last_error = None;
+                    }
+                    Err(error) => {
+                        status.last_error = Some(error.to_string());
+                    }
                 }
             }
-            drop(status);
-            if let Err(error) = step_diskann(engine, &mut diskann) {
-                statistics.diskann.lock().last_error = Some(error.to_string());
+            match step_diskann(engine, &mut diskann) {
+                Ok(pending) => continue_diskann = pending,
+                Err(error) => statistics.diskann.lock().last_error = Some(error.to_string()),
             }
         }
         drop(statistics);
         drop(manager);
-        if !wait_until(receiver, cancellation, pass_started + POLL) {
+        if continue_diskann {
+            continue;
+        }
+        if !wait_until(receiver, cancellation, poll_at) {
             return;
         }
     }
@@ -95,18 +108,24 @@ pub(super) fn run(
 fn step_diskann(
     engine: &Engine,
     maintenance: &mut Option<uqa_execution::maintenance::diskann::DiskANNJournalMaintenance>,
-) -> StorageBackendResult<()> {
+) -> StorageBackendResult<bool> {
     let Some(backend) = engine.storage.backend.as_deref() else {
-        return Ok(());
+        return Ok(false);
     };
     if maintenance.is_none() {
         let control = engine.query_retention_control().map_err(|error| {
             uqa_storage::StorageBackendError::backend("DiskANN maintenance resources", error)
         })?;
-        *maintenance =
-            Some(uqa_execution::maintenance::diskann::DiskANNJournalMaintenance::new(&control)?);
+        *maintenance = Some(
+            uqa_execution::maintenance::diskann::DiskANNJournalMaintenance::with_rebuilds(
+                &control,
+                &engine.session.diskann_temporary,
+                engine.diskann_rebuild_policy(),
+            )?,
+        );
     }
     let maintenance = maintenance.as_mut().expect("maintenance was initialized");
+    maintenance.set_rebuild_policy(engine.diskann_rebuild_policy())?;
     let version = backend.change_version()?.map(|_| {
         engine
             .epochs
@@ -120,7 +139,7 @@ fn step_diskann(
         backend,
     );
     *engine.statistics.diskann.lock() = maintenance.status();
-    result
+    result.map(|()| maintenance.has_pending_work())
 }
 
 fn wait_until(

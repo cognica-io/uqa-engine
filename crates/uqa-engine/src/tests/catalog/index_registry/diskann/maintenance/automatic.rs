@@ -15,7 +15,7 @@ use uqa_storage::{
     PersistentStorageBackend, RelationIdentity,
 };
 
-fn stop(engine: &Engine) {
+pub(super) fn stop(engine: &Engine) {
     engine.release_automatic_statistics_client();
     engine
         .session

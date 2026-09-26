@@ -73,6 +73,17 @@ impl Engine {
         self.statistics.diskann.lock().clone()
     }
 
+    /// Database-shared, process-local rebuild thresholds for future maintenance admissions.
+    pub fn diskann_rebuild_policy(&self) -> crate::DiskANNRebuildPolicy {
+        *self.statistics.diskann_policy.lock()
+    }
+
+    /// Wake the existing worker and revisit pending changes under this policy. Current builds retain their admitted policy and resource limits; this setting is not persisted.
+    pub fn set_diskann_rebuild_policy(&self, policy: crate::DiskANNRebuildPolicy) {
+        *self.statistics.diskann_policy.lock() = policy;
+        self.wake_automatic_statistics();
+    }
+
     pub(crate) fn record_statistics_change(
         &self,
         name: &str,

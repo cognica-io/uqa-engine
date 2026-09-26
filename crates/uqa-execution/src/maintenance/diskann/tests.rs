@@ -5,6 +5,7 @@
 //
 
 use super::*;
+mod rebuild;
 use parking_lot::Mutex;
 use std::collections::VecDeque;
 use uqa_storage::{
@@ -24,6 +25,8 @@ enum RollbackFailure {
 struct State {
     active: bool,
     evaluations: usize,
+    rebuilds: usize,
+    censuses: usize,
     begins: usize,
     commits: usize,
     rollbacks: usize,
@@ -41,6 +44,8 @@ impl Backend {
         Arc::new(Self(Mutex::new(State {
             active: false,
             evaluations: 0,
+            rebuilds: 0,
+            censuses: 0,
             begins: 0,
             commits: 0,
             rollbacks: 0,
@@ -158,6 +163,13 @@ impl PersistentStorageBackend for Backend {
     }
 }
 
+fn completed_page(job: &mut Job) -> DiskANNPruneResult {
+    let Some(Completed::Pruned(page)) = job.take_completed() else {
+        panic!("expected confirmed pruning");
+    };
+    page
+}
+
 fn transaction() -> TransactionOutcomeId {
     TransactionOutcomeId::Records(
         StorageTransactionId::new(DatabaseId::from_bytes([7; 16]), 1).unwrap(),
@@ -181,7 +193,7 @@ fn diskann_maintenance_resolves_original_commit_without_replaying_even_after_can
         assert!(job.take_completed().is_none());
         job.step(&control).unwrap();
         assert!(job.finished());
-        assert_eq!(job.take_completed().unwrap().removed, 2);
+        assert_eq!(completed_page(&mut job).removed, 2);
         let state = backend.0.lock();
         assert_eq!(
             (
@@ -238,7 +250,7 @@ fn diskann_maintenance_read_only_pages_wait_for_cleanup_without_publishing() {
     assert!(job.take_completed().is_none());
     control.cancellation().cancel();
     job.step(&control).unwrap();
-    assert_eq!(job.take_completed().unwrap().removed, 0);
+    assert_eq!(completed_page(&mut job).removed, 0);
     assert!(job.finished());
     let state = backend.0.lock();
     assert_eq!(
@@ -258,7 +270,7 @@ fn diskann_maintenance_records_confirmed_commit_after_session_cleanup_error() {
     assert!(job.step(&StorageReadControl::with_limit(1 << 20)).is_err());
     assert!(job.finished());
     assert!(!job.pending());
-    assert_eq!(job.take_completed().unwrap().removed, 2);
+    assert_eq!(completed_page(&mut job).removed, 2);
 }
 
 #[test]
