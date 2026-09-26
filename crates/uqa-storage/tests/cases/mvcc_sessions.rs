@@ -42,6 +42,8 @@ mod occurrences;
 mod read_limits;
 #[path = "mvcc_sessions/retained.rs"]
 mod retained;
+#[path = "mvcc_sessions/retained_sources.rs"]
+mod retained_sources;
 #[path = "mvcc_sessions/sequences.rs"]
 mod sequences;
 #[path = "mvcc_sessions/serializable.rs"]

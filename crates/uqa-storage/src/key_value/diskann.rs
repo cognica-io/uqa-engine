@@ -31,6 +31,8 @@ mod source;
 mod staging;
 mod state;
 
+pub(super) const READ_PREFIX: &[u8] = keys::ROOT;
+
 use keys::{database_key, Keys};
 use state::{data_identity, fixed};
 

@@ -69,6 +69,14 @@ pub trait KeyValueRead {
             "individual record revisions are not supported",
         ))
     }
+    /// Read source attached to this exact private metadata replacement. Absence never authorizes opening a newer snapshot. Committed values have no attachment; provider wrappers translate the metadata key but preserve the source's own key space and controls.
+    fn retained_source(
+        &self,
+        _key: &[u8],
+    ) -> StorageBackendResult<Option<Arc<dyn KeyValueRead + Send + Sync>>> {
+        self.control().check()?;
+        Ok(None)
+    }
     /// Retain this committed/private boundary after the callback returns. Callers may only read the selected prefixes. The default copies selected bytes under this reader's allowance; versioned providers retain their existing visibility owners without loading values.
     fn retain(
         &self,

@@ -15,20 +15,23 @@ use crate::diskann_index::pages::{
 };
 use crate::key_value::KeyValueRead;
 use crate::read_control::StorageReadControl;
-use crate::{KeyValueStore, StorageBackendResult};
+use crate::StorageBackendResult;
 
-use super::keys::{Key, Keys, Kind};
+use super::keys::{Key, Keys, Kind, ROOT};
 use super::state::{fixed, State, STATE_BYTES};
 use super::{
-    invalid, stored_data_identity, validate_session, DiskANNStageStatus, KeyValueDiskANNStore,
+    invalid, read_data_identity, validate_session, DiskANNStageStatus, KeyValueDiskANNStore,
 };
+
+mod selection;
 
 pub(super) const KEY_PAGE_LIMIT: usize = 64;
 
 /// A physical generation pinned to an existing MVCC lease. Opening it reads only fixed metadata; pages and record batches remain lazy.
 pub struct KeyValueDiskANNSource {
-    pub(super) store: Arc<dyn KeyValueStore>,
+    pub(in crate::key_value::diskann) read: Arc<dyn KeyValueRead + Send + Sync>,
     generation: DiskANNGeneration,
+    query_control: Option<StorageReadControl>,
     _memory: MemoryReservation,
 }
 
@@ -40,7 +43,6 @@ impl KeyValueDiskANNSource {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Arc<Self>> {
         control.check()?;
-        let memory = control.memory().reserve(std::mem::size_of::<Self>())?;
         let store = {
             let _writer = repository.owner.writer.lock();
             repository.idle(control)?;
@@ -51,12 +53,39 @@ impl KeyValueDiskANNSource {
             validate_session(&*repository.owner.store, &*retained)?;
             retained
         };
-        if stored_data_identity(&*store, control)? != generation.database() {
+        let mut read = None;
+        store.with_read_view(&mut |view| {
+            read = Some(view.retain(&[ROOT])?);
+            Ok(())
+        })?;
+        Self::from_read(
+            read.ok_or_else(|| invalid("source did not expose a read view"))?,
+            generation,
+            status,
+            None,
+            control,
+        )
+    }
+
+    fn from_read(
+        read: Arc<dyn KeyValueRead + Send + Sync>,
+        generation: DiskANNGeneration,
+        status: DiskANNStageStatus,
+        original: Option<&StorageReadControl>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Arc<Self>> {
+        if let Some(original) = original {
+            original.check()?;
+        }
+        read.control().check()?;
+        control.check()?;
+        let memory = control.memory().reserve(std::mem::size_of::<Self>())?;
+        if read_data_identity(&*read, control)? != Some(generation.database()) {
             return Err(invalid("source belongs to another data identity"));
         }
         let key = Keys::new(generation).key(Kind::State);
         let state = fixed(control, |visit| {
-            store.visit_value_bounded(key.as_ref(), STATE_BYTES, control, visit)
+            read.visit_value_bounded(key.as_ref(), STATE_BYTES, control, visit)
         })?
         .map(State::decode)
         .transpose()?
@@ -70,8 +99,9 @@ impl KeyValueDiskANNSource {
         }
         control.check()?;
         Ok(Arc::new(Self {
-            store,
+            read,
             generation,
+            query_control: original.cloned(),
             _memory: memory,
         }))
     }
@@ -81,18 +111,16 @@ impl KeyValueDiskANNSource {
         after: Option<&[u8]>,
         control: &StorageReadControl,
     ) -> StorageBackendResult<BudgetedVec<(Key, Kind)>> {
-        let mut result = None;
-        self.store.with_read_view(&mut |read| {
-            result = Some(key_page(
-                read,
-                Keys::new(self.generation),
-                after,
-                KEY_PAGE_LIMIT,
-                control,
-            )?);
-            Ok(())
-        })?;
-        result.ok_or_else(|| invalid("source did not expose a read view"))
+        self.check(control)?;
+        let result = key_page(
+            &*self.read,
+            Keys::new(self.generation),
+            after,
+            KEY_PAGE_LIMIT,
+            control,
+        )?;
+        self.check(control)?;
+        Ok(result)
     }
 
     pub(super) fn value(
@@ -102,12 +130,12 @@ impl KeyValueDiskANNSource {
         control: &StorageReadControl,
         visit: &mut DiskANNRecordVisitor<'_>,
     ) -> StorageBackendResult<()> {
-        control.check()?;
+        self.check(control)?;
         let key = Keys::new(self.generation).key(kind);
         let mut seen = false;
         let mut failure = None;
         let source = self
-            .store
+            .read
             .visit_value_bounded(key.as_ref(), maximum, control, &mut |value| {
                 if failure.is_some() {
                     return Err(invalid("record visitor already failed"));
@@ -134,6 +162,17 @@ impl KeyValueDiskANNSource {
         if !seen {
             return Err(invalid("record was not returned"));
         }
+        self.check(control)
+    }
+
+    pub(in crate::key_value::diskann) fn check(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<()> {
+        if let Some(original) = &self.query_control {
+            original.check()?;
+        }
+        self.read.control().check()?;
         control.check()
     }
 }
@@ -160,7 +199,7 @@ impl DiskANNPageSource for KeyValueDiskANNSource {
         control: &StorageReadControl,
         visit: &mut DiskANNPageVisitor<'_>,
     ) -> StorageBackendResult<()> {
-        control.check()?;
+        self.check(control)?;
         if pages.len() > self.capabilities().max_batch_pages()
             || pages
                 .iter()
@@ -179,7 +218,7 @@ impl DiskANNPageSource for KeyValueDiskANNSource {
                 visit(id, bytes)
             })?;
         }
-        control.check()
+        self.check(control)
     }
 }
 

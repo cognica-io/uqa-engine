@@ -183,6 +183,22 @@ impl Transaction {
         self.changes.apply_owned(&[write], control)
     }
 
+    pub(super) fn write_with_retained_source(
+        &mut self,
+        key: &RecordKey,
+        value: &SharedRecordValue,
+        source: Arc<dyn crate::key_value::KeyValueRead + Send + Sync>,
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        let (expected, kind) = self
+            .record_condition(key.bytes(), false, RecordWriteKind::Canonical, control)?
+            .expect("metadata replacement is a write");
+        let write = PreparedRecordWrite::from_shared(key.clone(), expected, Some(value.clone()))
+            .with_kind(kind);
+        self.changes
+            .apply_with_retained_source(write, source, control)
+    }
+
     fn record_condition(
         &self,
         key: &[u8],

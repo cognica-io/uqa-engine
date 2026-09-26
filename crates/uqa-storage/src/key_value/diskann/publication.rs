@@ -22,7 +22,7 @@ use super::{
     identity::require_mapping,
     invalid,
     keys::{Keys, Kind},
-    staging::load_state,
+    staging::{load_state, read_state},
     state::{fixed, State},
     DiskANNStageStatus, KeyValueDiskANNSource,
 };
@@ -59,9 +59,9 @@ pub fn publish_captured_generation<S: DiskANNCanonicalRead>(
     if sealed.generation() != manifest.input().generation {
         return Err(invalid("sealed source belongs to another generation"));
     }
-    sealed
-        .store
-        .with_read_view(&mut |physical| install(coverage, scope, &mut views, physical, control))
+    sealed.check(control)?;
+    install(coverage, scope, &mut views, &*sealed.read, control)?;
+    sealed.check(control)
 }
 
 fn install<S: DiskANNCanonicalRead>(
@@ -109,7 +109,7 @@ fn install<S: DiskANNCanonicalRead>(
                 "previous head has a different physical incarnation",
             ));
         }
-        let previous = load_state(views.current, old, control)?
+        let previous = read_state(views.current, old, control)?
             .filter(|state| state.status == DiskANNStageStatus::Published)
             .ok_or_else(|| invalid("previous head has no published generation"))?;
         transition(views.batch, old, previous, DiskANNStageStatus::Retired)?;
@@ -129,7 +129,11 @@ fn install<S: DiskANNCanonicalRead>(
         .encode(),
         &revision,
     )?;
-    views.batch.put(&key, &encode_head(generation))?;
+    views.batch.put_with_retained_source(
+        &key,
+        &encode_head(generation),
+        views.sealed.read.clone(),
+    )?;
     views.captured.control().check()?;
     views.current.control().check()?;
     coverage.check_control(control)
@@ -156,11 +160,33 @@ pub fn selected_generation(
     read.control().check()?;
     let selected = read_head(read, &head_key(scope), control)?;
     if let Some(generation) = selected {
-        super::identity::validate_mapping(scope, generation, read, control)?;
-        if load_state(read, generation, control)?.map(|state| state.status)
-            != Some(DiskANNStageStatus::Published)
+        let key = head_key(scope);
+        let state = read_state(read, generation, control)?
+            .filter(|state| state.status == DiskANNStageStatus::Published)
+            .ok_or_else(|| invalid("selected generation is not published"))?;
+        if read
+            .record_revision(&key)?
+            .is_some_and(|revision| revision.has_private_changes())
         {
-            return Err(invalid("selected generation is not published"));
+            let source = read
+                .retained_source(&key)?
+                .ok_or_else(|| invalid("private head has no retained physical source"))?;
+            source.control().check()?;
+            super::identity::validate_mapping(scope, generation, &*source, control)?;
+            load_state(&*source, generation, control)?
+                .filter(|sealed| {
+                    sealed.status == DiskANNStageStatus::Sealed && sealed.owner == state.owner
+                })
+                .ok_or_else(|| invalid("private publication does not retain its original seal"))?;
+            let state_key = Keys::new(generation).key(Kind::State);
+            if read
+                .record_revision(state_key.as_ref())?
+                .is_none_or(|revision| !revision.has_private_changes())
+            {
+                return Err(invalid("private head has no private state transition"));
+            }
+        } else {
+            super::identity::validate_mapping(scope, generation, read, control)?;
         }
     }
     read.control().check()?;

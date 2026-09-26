@@ -139,7 +139,7 @@ impl KeyValueDiskANNCanonical {
                 prefixes.extend_from_slice(&[&*vectors, &*origins, &*changes])?;
                 if let Some(binding) = &binding {
                     prefixes.extend_from_slice(&binding.prefixes())?;
-                    prefixes.push(crate::key_value::publication::HEAD_PREFIX)?;
+                    prefixes.push(crate::key_value::diskann::READ_PREFIX)?;
                 }
                 let mut source = RetainedDiskANNCanonical::new(
                     read.retain(&prefixes)?,

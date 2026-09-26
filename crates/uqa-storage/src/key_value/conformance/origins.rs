@@ -9,6 +9,7 @@
 mod binding;
 pub use binding::{verify_diskann_pruning, verify_diskann_pruning_reopen};
 pub use binding::{verify_diskann_publication, verify_diskann_publication_reopen};
+pub use binding::{verify_diskann_query_reopen, verify_diskann_query_views};
 mod catalog;
 pub use binding::verify_diskann_catalog_binding;
 pub use binding::{verify_diskann_catalog_identity, verify_diskann_catalog_identity_reopen};

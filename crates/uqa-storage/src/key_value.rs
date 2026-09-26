@@ -155,6 +155,17 @@ pub trait KeyValueBatch {
             "observed metadata replacements are not supported".into(),
         ))
     }
+    /// Replace metadata and retain its independently staged read source in the same evaluated private write. The source follows savepoint undo, retained views and original receipt resolution; replacing or deleting the key releases it from the new view. Only the bytes are persisted. Capable wrappers must forward the source unchanged.
+    fn put_with_retained_source(
+        &mut self,
+        _key: &[u8],
+        _value: &[u8],
+        _source: Arc<dyn KeyValueRead + Send + Sync>,
+    ) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "private metadata read sources are not supported".into(),
+        ))
+    }
     /// Publish a new revision of an immutable marker, merging concurrent touches of the same value. Structural changes fence the marker and replace their definition; data changes require the definition and touch the marker. The payload must contain only immutable owner/format data. Capable wrappers must forward this operation.
     fn touch_marker(&mut self, _key: &[u8], _value: &[u8]) -> StorageBackendResult<()> {
         Err(StorageBackendError::Other(

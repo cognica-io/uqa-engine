@@ -18,6 +18,9 @@ use crate::StorageSavepointId;
 use super::key::RecordKey;
 use super::{PreparedRecordCommit, PreparedRecordWrite, RecordWrite, VersionError, VersionResult};
 
+mod retained;
+use retained::Sources;
+
 struct Change {
     write: PreparedRecordWrite,
     identity: PrivateRecordRevision,
@@ -61,10 +64,12 @@ impl PrivateRecordKey {
 struct Savepoint {
     id: StorageSavepointId,
     records: Records,
+    sources: Sources,
 }
 
 struct State {
     records: Records,
+    sources: Sources,
     savepoints: BudgetedVec<Savepoint>,
 }
 
@@ -124,6 +129,7 @@ impl PrivateRecordChanges {
             owner: Arc::new(Owner {
                 state: Mutex::new(State {
                     records: Records::new(memory),
+                    sources: Sources::new(memory),
                     savepoints: BudgetedVec::new(memory),
                 }),
                 memory: memory.clone(),
@@ -164,7 +170,11 @@ impl PrivateRecordChanges {
             }
         }
         let identity = PrivateRecordRevision::allocate()?;
-        if let [write] = writes {
+        let invalidates_source = writes
+            .iter()
+            .any(|write| state.sources.get(write.key()).is_some_and(Option::is_some));
+        if writes.len() == 1 && !invalidates_source {
+            let write = &writes[0];
             control.cancellation().check()?;
             state.records.try_insert(
                 write.shared_key(),
@@ -176,6 +186,7 @@ impl PrivateRecordChanges {
             return Ok(());
         }
         let mut records = state.records.clone();
+        let mut sources = state.sources.clone();
         for write in writes {
             control.cancellation().check()?;
             records.try_insert(
@@ -185,10 +196,14 @@ impl PrivateRecordChanges {
                     identity,
                 },
             )?;
+            if sources.get(write.key()).is_some_and(Option::is_some) {
+                sources.try_insert(write.shared_key(), None)?;
+            }
         }
         control.cancellation().check()?;
         // Candidate roots own every reservation before this single atomic publication.
         state.records = records;
+        state.sources = sources;
         Ok(())
     }
 
@@ -201,8 +216,10 @@ impl PrivateRecordChanges {
             .owner
             .memory
             .reserve(std::mem::size_of::<PrivateRecordSnapshot>())?;
+        let state = self.owner.state.lock();
         Ok(PrivateRecordSnapshot {
-            records: self.owner.state.lock().records.clone(),
+            records: state.records.clone(),
+            sources: state.sources.clone(),
             _memory: memory,
         })
     }
@@ -210,7 +227,12 @@ impl PrivateRecordChanges {
     pub fn savepoint(&self, id: StorageSavepointId) -> VersionResult<()> {
         let mut state = self.owner.state.lock();
         let records = state.records.clone();
-        state.savepoints.push(Savepoint { id, records })?;
+        let sources = state.sources.clone();
+        state.savepoints.push(Savepoint {
+            id,
+            records,
+            sources,
+        })?;
         Ok(())
     }
 
@@ -227,6 +249,7 @@ impl PrivateRecordChanges {
         let mut state = self.owner.state.lock();
         let position = state.savepoint_position(id)?;
         state.records = state.savepoints[position].records.clone();
+        state.sources = state.savepoints[position].sources.clone();
         state.truncate_savepoints(position + 1);
         Ok(())
     }
@@ -234,6 +257,7 @@ impl PrivateRecordChanges {
     pub fn rollback(&self) -> VersionResult<()> {
         let mut state = self.owner.state.lock();
         state.records = Records::new(&self.owner.memory);
+        state.sources = Sources::new(&self.owner.memory);
         state.truncate_savepoints(0);
         Ok(())
     }
@@ -254,6 +278,7 @@ impl PrivateRecordChanges {
 /// Fixed private visibility for a command or retained source cursor; tombstones remain distinguishable from an unchanged key.
 pub struct PrivateRecordSnapshot {
     records: Records,
+    sources: Sources,
     _memory: MemoryReservation,
 }
 
@@ -263,6 +288,7 @@ impl PrivateRecordSnapshot {
         let memory = self.records.budget().reserve(std::mem::size_of::<Self>())?;
         Ok(Self {
             records: self.records.clone(),
+            sources: self.sources.clone(),
             _memory: memory,
         })
     }

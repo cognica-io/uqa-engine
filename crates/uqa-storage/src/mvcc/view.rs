@@ -330,6 +330,14 @@ pub struct MergedRecordSnapshot {
 }
 
 impl MergedRecordSnapshot {
+    pub(in crate::mvcc) fn retained_source(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<Arc<dyn crate::key_value::KeyValueRead + Send + Sync>>> {
+        self.private.retained_source(key, control)
+    }
+
     /// Select one live record's actual revision without materializing its payload. The owning provider supplies this snapshot's transaction-history identity, distinct from any restored data namespace.
     pub fn record_revision(
         &self,
