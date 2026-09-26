@@ -16,6 +16,7 @@ pub(crate) struct StatisticsCoordinator {
     _identity: Arc<RowLockManager>,
     pub(super) automatic_statistics: AutomaticStatistics,
     pub(super) diskann: Mutex<uqa_execution::maintenance::diskann::DiskANNMaintenanceStatus>,
+    pub(super) diskann_policy: Mutex<uqa_execution::maintenance::diskann::DiskANNRebuildPolicy>,
     pub(crate) statistics_snapshots: StatisticsSnapshots,
 }
 
@@ -34,6 +35,7 @@ pub(crate) fn shared_statistics(identity: &Arc<RowLockManager>) -> Arc<Statistic
         _identity: Arc::clone(identity),
         automatic_statistics: AutomaticStatistics::default(),
         diskann: Mutex::default(),
+        diskann_policy: Mutex::default(),
         statistics_snapshots: StatisticsSnapshots::default(),
     });
     coordinators.insert(key, Arc::downgrade(&coordinator));
