@@ -43,6 +43,22 @@ pub struct RetainedSQLiteDiskANNCanonical {
 }
 
 impl RetainedSQLiteDiskANNCanonical {
+    /// Resolve the index incarnation from this source's fixed native catalog view through the SQL owner.
+    pub fn index_scope(
+        &self,
+        resolver: &dyn uqa_storage::diskann_index::catalog::DiskANNIndexResolver,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_storage::diskann_index::catalog::DiskANNIndexScope> {
+        self.check(control)?;
+        let scope = self
+            .binding
+            .as_ref()
+            .ok_or_else(|| invalid("native canonical source has no index binding"))?
+            .scope(&self.snapshot, resolver, &self.control, control)?;
+        self.check(control)?;
+        Ok(scope)
+    }
+
     pub(super) fn capture(
         index: &SQLiteVectorIndex,
         control: &StorageReadControl,

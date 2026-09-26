@@ -35,6 +35,39 @@ struct Record {
 }
 
 impl DiskANNCatalogBinding {
+    pub(crate) fn scope(
+        &self,
+        snapshot: &NativeSnapshot,
+        resolver: &dyn catalog::DiskANNIndexResolver,
+        capture: &StorageReadControl,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<catalog::DiskANNIndexScope> {
+        let Owner::Object {
+            identity,
+            generation,
+        } = self.owner
+        else {
+            return Err(invalid("canonical table has no object incarnation"));
+        };
+        let record = &self.records[2];
+        record.read(snapshot, control, |row| {
+            let definition = if row[8] == ValueRef::Null {
+                None
+            } else {
+                Some(text(row[8])?)
+            };
+            catalog::resolve_scope(
+                resolver,
+                (identity, generation),
+                definition,
+                &record.revision,
+                &snapshot.control,
+                capture,
+                control,
+            )
+        })
+    }
+
     pub(crate) fn capture(
         snapshot: &NativeSnapshot,
         table: &str,

@@ -9,6 +9,7 @@
 mod binding;
 mod catalog;
 pub use binding::verify_diskann_catalog_binding;
+pub use binding::{verify_diskann_catalog_identity, verify_diskann_catalog_identity_reopen};
 mod changes;
 mod corpus;
 mod coverage;

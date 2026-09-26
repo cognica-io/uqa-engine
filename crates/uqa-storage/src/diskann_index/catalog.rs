@@ -10,6 +10,9 @@ use crate::read_control::StorageReadControl;
 use crate::vector_index::DiskANNIndexParams;
 use crate::{StorageBackendError, StorageBackendResult, VectorFieldSchema};
 
+mod identity;
+pub use identity::{resolve_scope, DiskANNIndexResolver, DiskANNIndexScope};
+
 pub fn validate_field(
     fields: &[VectorFieldSchema],
     field: &str,

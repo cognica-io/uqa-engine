@@ -10,6 +10,7 @@ use uqa_storage::{
     CatalogIndexRow, RelationIdentity, RelationSecurityRow, TableSchema, VectorFieldSchema,
 };
 
+mod identity;
 mod validation;
 
 const TABLE: &str = "public.native_binding";

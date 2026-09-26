@@ -9,7 +9,7 @@ use crate::StorageBackendResult;
 
 use super::invalid;
 
-const ROOT: &[u8] = b"\0uqa-diskann-v1\0";
+pub(super) const ROOT: &[u8] = b"\0uqa-diskann-v1\0";
 pub(super) const PREFIX_BYTES: usize = ROOT.len() + 1 + 40;
 pub(super) const KEY_BYTES: usize = PREFIX_BYTES + 9;
 

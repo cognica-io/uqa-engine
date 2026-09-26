@@ -21,6 +21,9 @@ const TABLE: &str = "public.diskann_binding";
 const FIELD: &str = "vector";
 const MARKER: &[u8] = b"diskann-binding-guarded-write";
 
+mod identity;
+pub use identity::{verify_diskann_catalog_identity, verify_diskann_catalog_identity_reopen};
+
 fn definition() -> StorageBackendResult<CatalogIndexRow> {
     Ok(CatalogIndexRow {
         relation: RelationIdentity::new("public", "diskann_binding_idx"),

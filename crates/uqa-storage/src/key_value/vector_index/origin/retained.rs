@@ -31,6 +31,22 @@ pub struct RetainedDiskANNCanonical {
 }
 
 impl RetainedDiskANNCanonical {
+    /// Resolve immutable catalog incarnations from this source's captured definition through its SQL owner. This never follows a later catalog view.
+    pub fn index_scope(
+        &self,
+        resolver: &dyn crate::diskann_index::catalog::DiskANNIndexResolver,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<crate::diskann_index::catalog::DiskANNIndexScope> {
+        self.check_control(control)?;
+        let scope = self
+            .binding
+            .as_ref()
+            .ok_or_else(|| invalid("canonical source has no captured index binding"))?
+            .scope(&*self.read, resolver, &self.control, control)?;
+        self.check_control(control)?;
+        Ok(scope)
+    }
+
     pub(super) fn new(
         read: Arc<dyn KeyValueRead + Send + Sync>,
         vectors: &[u8],

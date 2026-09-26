@@ -40,6 +40,10 @@ pub struct VisibleRecordRevision {
 }
 
 impl VisibleRecordRevision {
+    pub(crate) fn database(self) -> super::DatabaseId {
+        self.database
+    }
+
     pub fn is_private(self) -> bool {
         self.private.is_some()
     }

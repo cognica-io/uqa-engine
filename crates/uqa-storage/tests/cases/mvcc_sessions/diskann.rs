@@ -8,6 +8,9 @@ use super::*;
 use uqa_storage::diskann_index::pages::DiskANNRecordKey;
 use uqa_storage::key_value::{DiskANNStageStatus, KeyValueDiskANNStore};
 
+#[path = "diskann/identity.rs"]
+mod identity;
+
 #[test]
 fn diskann_generations_preserve_shared_mvcc_and_reopen_contracts() {
     let persistence = Persistence::new();
