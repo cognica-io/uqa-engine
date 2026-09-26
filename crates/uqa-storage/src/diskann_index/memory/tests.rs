@@ -13,6 +13,8 @@ use crate::diskann_index::{
 };
 use crate::vector_index::DiskANNIndexParams;
 
+mod selection;
+
 fn options(dimensions: u32) -> DiskANNMemoryOptions {
     let training = PQTrainingOptions {
         max_samples: 8,

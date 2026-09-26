@@ -119,6 +119,38 @@ impl<T: VectorIndex + ?Sized + 'static> VectorIndex for ReadOnlySnapshot<T> {
         Ok(Arc::new(self.clone()))
     }
 
+    fn diskann_read_snapshot(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::diskann_index::DiskANNReadSnapshot>> {
+        control.check()?;
+        if let Some(original) = &self.2 {
+            original.check()?;
+        }
+        self.0
+            .diskann_read_snapshot(self.2.as_ref().unwrap_or(control))?
+            .map(|source| source.with_guard(self.1.clone(), self.2.clone()))
+            .transpose()
+    }
+
+    fn snapshot_with_diskann_changes(
+        &self,
+        changes: &crate::diskann_index::DiskANNReadChanges,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<Arc<dyn VectorIndex>>> {
+        control.check()?;
+        if let Some(original) = &self.2 {
+            original.check()?;
+        }
+        Ok(self
+            .0
+            .snapshot_with_diskann_changes(changes, self.2.as_ref().unwrap_or(control))?
+            .map(|index| {
+                Arc::new(ReadOnlySnapshot(index, self.1.clone(), self.2.clone()))
+                    as Arc<dyn VectorIndex>
+            }))
+    }
+
     fn snapshot_with_control(
         &self,
         control: &crate::read_control::StorageReadControl,

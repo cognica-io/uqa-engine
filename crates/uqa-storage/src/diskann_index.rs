@@ -32,7 +32,9 @@ pub use persistent::{DiskANNIndexBinding, DiskANNPersistentOwner, PersistentDisk
 pub use pq::{
     PQCodebook, PQDistance, PQLookupTable, PQTrainer, PQTrainingOptions, PQTrainingSummary,
 };
-pub use query::{DiskANNQuery, DiskANNQueryResult, RetainedDiskANNIndex};
+pub use query::{
+    DiskANNQuery, DiskANNQueryResult, DiskANNReadChanges, DiskANNReadSnapshot, RetainedDiskANNIndex,
+};
 pub use scoring::{DiskANNCanonicalScorer, DiskANNDocumentScore};
 pub use vamana::{VamanaGraph, VamanaPoint};
 

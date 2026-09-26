@@ -21,7 +21,9 @@ use crate::{
 
 mod candidates;
 mod retained;
+mod selection;
 pub use retained::RetainedDiskANNIndex;
+pub use selection::{DiskANNReadChanges, DiskANNReadSnapshot};
 #[cfg(test)]
 mod tests;
 

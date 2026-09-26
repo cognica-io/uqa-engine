@@ -219,3 +219,45 @@ fn diskann_retained_views_reject_mutation_and_failed_open_releases_reservations(
         1.0
     );
 }
+
+#[test]
+fn diskann_private_projection_reuses_preparation_without_reading_the_canonical_corpus() {
+    use crate::diskann_index::DiskANNReadChanges;
+    let source = Source::new([(1, vec![vec![1.0, 0.0]]), (2, vec![vec![0.0, 1.0]])]);
+    let physical = Observed::new(&source);
+    let control = StorageReadControl::with_limit(65_536);
+    let index = RetainedDiskANNIndex::open(
+        source.clone(),
+        physical.clone(),
+        parameters(),
+        limits(),
+        &control,
+    )
+    .unwrap();
+    let mut private = source.clone();
+    private.replace(1, vec![vec![-1.0, 0.0]]);
+    let newer = index.with_canonical(private).unwrap();
+    source.reset();
+    let records = physical.records.load(Ordering::Relaxed);
+    let changes = DiskANNReadChanges::capture(
+        [Ok((
+            1,
+            newer.diskann_read_snapshot(&control).unwrap().unwrap(),
+        ))],
+        &control,
+    )
+    .unwrap();
+    let projected = index
+        .snapshot_with_diskann_changes(&changes, &control)
+        .unwrap()
+        .unwrap();
+    assert_eq!(projected.count().unwrap(), 2);
+    assert_eq!(physical.records.load(Ordering::Relaxed), records);
+    assert_eq!(physical.pages.load(Ordering::Relaxed), 0);
+    assert!(source.visits.lock().unwrap().is_empty());
+    assert!(projected
+        .search_threshold(&[1.0, 0.0], 0.5)
+        .unwrap()
+        .is_empty());
+    assert_eq!(ids(&index.search_threshold(&[1.0, 0.0], 0.5).unwrap()), [1]);
+}

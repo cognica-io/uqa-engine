@@ -6,6 +6,7 @@
 
 //! Owned vector-index snapshots keep canonical visibility and prepared physical readers together.
 
+use super::selection::{DiskANNReadChanges, DiskANNReadSnapshot, SelectedCanonical};
 use super::{invalid, DiskANNQuery};
 use crate::diskann_index::{
     format::DiskANNManifest,
@@ -195,6 +196,94 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> VectorIndex for RetainedDiskAN
     ) -> StorageBackendResult<Arc<dyn VectorIndex>> {
         control.check()?;
         self.snapshot()
+    }
+
+    fn diskann_read_snapshot(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DiskANNReadSnapshot>> {
+        control.check()?;
+        self.check()?;
+        Ok(Some(DiskANNReadSnapshot::new(
+            self.retained.clone(),
+            self.manifest().input().generation,
+            &self.retained.control,
+        )))
+    }
+
+    fn snapshot_with_diskann_changes(
+        &self,
+        changes: &DiskANNReadChanges,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<Arc<dyn VectorIndex>>> {
+        control.check()?;
+        self.check()?;
+        let base = DiskANNReadSnapshot::new(
+            self.retained.clone(),
+            self.manifest().input().generation,
+            &self.retained.control,
+        );
+        let canonical = SelectedCanonical::new(base, changes, control)?;
+        let retained = Retained {
+            canonical,
+            reader: self.retained.reader.clone(),
+            origins: self.retained.origins.clone(),
+            control: self.retained.control.clone(),
+        };
+        let retained = Budgeted::new(retained, self.retained.control.memory().empty_reservation())
+            .into_shared()?;
+        self.check()?;
+        control.check()?;
+        Ok(Some(Arc::new(RetainedDiskANNIndex { retained })))
+    }
+}
+
+impl<S: DiskANNQueryRead> crate::diskann_index::DiskANNCanonicalRead for Budgeted<Retained<S>> {
+    fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
+        self.control.check()?;
+        self.canonical.check_control(control)
+    }
+    fn dimensions(&self) -> u32 {
+        self.canonical.dimensions()
+    }
+    fn next_document_after(
+        &self,
+        after: Option<DocId>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DocId>> {
+        self.canonical.next_document_after(after, control)
+    }
+    fn origin(
+        &self,
+        document: DocId,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::diskann_index::format::DiskANNVectorVersion>> {
+        self.canonical.origin(document, control)
+    }
+    fn visit_document(
+        &self,
+        document: DocId,
+        control: &StorageReadControl,
+        visit: &mut crate::diskann_index::DiskANNCanonicalVectorVisitor<'_>,
+    ) -> StorageBackendResult<Option<crate::diskann_index::format::DiskANNVectorVersion>> {
+        self.canonical.visit_document(document, control, visit)
+    }
+}
+
+impl<S: DiskANNQueryRead> DiskANNQueryRead for Budgeted<Retained<S>> {
+    fn document_origin(
+        &self,
+        document: DocId,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::diskann_index::format::DiskANNCanonicalOrigin>> {
+        self.canonical.document_origin(document, control)
+    }
+    fn next_change_after(
+        &self,
+        after: Option<DocId>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::diskann_index::format::DiskANNChangeIdentity>> {
+        self.canonical.next_change_after(after, control)
     }
 }
 
