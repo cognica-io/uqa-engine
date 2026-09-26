@@ -70,7 +70,7 @@ fn diskann_runtime_retirement_preserves_redb_undo_recreation_and_cold_reopen() {
 }
 
 #[test]
-fn diskann_runtime_adoption_conflicts_with_redb_unstamped_insertions() {
+fn diskann_runtime_adoption_rejects_redb_ordinal_gaps_and_conflicting_insertions() {
     let directory = tempfile::tempdir().unwrap();
     let owner = crate::RedbStorage::open(directory.path().join("adoption.redb")).unwrap();
     let store: Arc<dyn KeyValueStore> = Arc::new(owner.store());

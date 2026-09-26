@@ -336,6 +336,7 @@ pub fn verify_diskann_runtime_adoption_conflicts(
     let options = diskann_runtime_fixture_options(2)?;
     let temporary = DiskANNTemporaryBudget::new(1 << 20);
     let control = StorageReadControl::with_limit(1 << 21);
+    verify_adoption_gaps(store, &control)?;
     let mut raw = KeyValueVectorIndex::new(store.clone(), TABLE, FIELD, 2);
     let mut late = KeyValueVectorIndex::new(peer.clone(), TABLE, FIELD, 2);
     for creator_first in [false, true] {
@@ -379,6 +380,58 @@ pub fn verify_diskann_runtime_adoption_conflicts(
                 "failed adoption publishes no head",
             )?;
         }
+    }
+    Ok(())
+}
+
+fn verify_adoption_gaps(
+    store: &Arc<dyn KeyValueStore>,
+    control: &StorageReadControl,
+) -> StorageBackendResult<()> {
+    let mut raw = KeyValueVectorIndex::new(store.clone(), TABLE, FIELD, 2);
+    raw.add(1, vec![1.0, 0.0])?;
+    raw.add_many(2, vec![vec![1.0, 0.0], vec![0.0, 1.0], vec![-1.0, 0.0]])?;
+    let peer = store.open_session()?;
+    for (missing, expected) in [
+        (
+            0,
+            "invalid persisted vector ordinal sequence for document 2: expected 0, found 1",
+        ),
+        (
+            1,
+            "invalid persisted vector ordinal sequence for document 2: expected 1, found 2",
+        ),
+    ] {
+        let key = crate::key_value::codec::vector_key(TABLE, FIELD, 2, missing)?;
+        let value = store.get(&key)?.expect("corrupt fixture starts complete");
+        store.delete(&key)?;
+        store.begin_transaction()?;
+        store.put(b"before-rejected-adoption", b"kept")?;
+        let before = store.scan_prefix(b"")?;
+        let result = canonical(store)?.create_index(
+            &row([91; 16])?.relation,
+            &Resolver,
+            diskann_runtime_fixture_options(2)?,
+            &DiskANNTemporaryBudget::new(1 << 20),
+            control,
+        );
+        expect_eq(
+            &result.as_ref().err().map(std::string::ToString::to_string),
+            &Some(expected.to_owned()),
+            "the shared canonical decoder rejects ordinal gaps during adoption",
+        )?;
+        expect_eq(
+            &store.scan_prefix(b"")?,
+            &before,
+            "failed adoption preserves all outer private records",
+        )?;
+        expect(
+            peer.scan_prefix_keys_after(b"\0uqa-diskann-v1\0", None, 1)?
+                .is_empty(),
+            "rejected adoption allocates no physical generation or data identity",
+        )?;
+        store.rollback_transaction()?;
+        store.put(&key, &value)?;
     }
     Ok(())
 }

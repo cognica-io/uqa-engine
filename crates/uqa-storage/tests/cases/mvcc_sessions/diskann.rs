@@ -41,7 +41,7 @@ fn diskann_runtime_retirement_preserves_private_undo_and_recreation() {
 }
 
 #[test]
-fn diskann_runtime_adoption_conflicts_with_unstamped_insertions() {
+fn diskann_runtime_adoption_rejects_ordinal_gaps_and_conflicting_insertions() {
     let persistence = Persistence::new();
     let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 22));
     uqa_storage::key_value::conformance::verify_diskann_runtime_adoption_conflicts(&store).unwrap();

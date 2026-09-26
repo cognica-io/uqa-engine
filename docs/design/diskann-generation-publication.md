@@ -1,6 +1,6 @@
 # DiskANN generation publication
 
-Storage owns the atomic selection of a physically sealed generation and its complete document-origin coverage. Key/Value canonical sources and native SQLite supply actual retained catalog and input views; native SQLite maps generation records through its existing family 57 while keeping catalog guards and generation changes in the same caller transaction. The [bounded journal pruner](diskann-journal-pruning.md) consumes that selected coverage. Retained query source selection follows the [query generation contract](diskann-query-generations.md); public DiskANN SQL, candidate merging and physical-generation reclamation are still unfinished.
+Storage owns the atomic selection of a physically sealed generation and its complete document-origin coverage. Key/Value canonical sources and native SQLite supply actual retained catalog and input views; native SQLite maps generation records through its existing family 57 while keeping catalog guards and generation changes in the same caller transaction. The [bounded journal pruner](diskann-journal-pruning.md) consumes that selected coverage. Retained query source selection follows the [query generation contract](diskann-query-generations.md). Candidate merging is implemented; the runtime branch connects SQL lifecycle operations, bounded retired/abandoned generation reclamation and finite provider-maintenance discovery. Background scheduling, obsolete mapping/head-tombstone retention and final public SQL acceptance remain unfinished.
 
 ## Publication evidence
 

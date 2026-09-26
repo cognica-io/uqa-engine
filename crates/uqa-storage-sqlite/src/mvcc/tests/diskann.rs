@@ -78,7 +78,7 @@ fn diskann_runtime_retirement_preserves_sqlite_undo_recreation_and_cold_reopen()
 }
 
 #[test]
-fn diskann_runtime_adoption_conflicts_with_sqlite_unstamped_insertions() {
+fn diskann_runtime_adoption_rejects_sqlite_ordinal_gaps_and_conflicting_insertions() {
     let directory = tempfile::tempdir().unwrap();
     let store: Arc<dyn KeyValueStore> = Arc::new(
         SQLiteKeyValueStore::new(connection(&directory.path().join("adoption.db"), 0)).unwrap(),
