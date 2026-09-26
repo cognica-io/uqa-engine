@@ -8,6 +8,7 @@
 
 mod binding;
 pub use binding::verify_diskann_runtime_adoption_conflicts;
+pub use binding::verify_diskann_selected_corruption;
 pub use binding::{
     diskann_restore_records, verify_diskann_restore_source, verify_diskann_restored,
     verify_diskann_restored_rebuild, verify_diskann_restored_writes, DiskANNRestoreRecords,
