@@ -25,6 +25,7 @@ use std::sync::{
 use uqa_core::{memory::MemoryBudget, DocId};
 
 mod failures;
+mod retained;
 
 #[derive(Clone)]
 struct Source {
@@ -119,6 +120,24 @@ impl DiskANNCanonicalRead for Source {
 }
 
 impl DiskANNQueryRead for Source {
+    fn document_origin(
+        &self,
+        document: DocId,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::diskann_index::format::DiskANNCanonicalOrigin>> {
+        self.check_control(control)?;
+        self.documents
+            .get(&document)
+            .map(|(revision, values)| {
+                crate::diskann_index::format::DiskANNCanonicalOrigin::new(
+                    version(*revision),
+                    2,
+                    values.len() as u64,
+                )
+            })
+            .transpose()
+    }
+
     fn next_change_after(
         &self,
         after: Option<DocId>,

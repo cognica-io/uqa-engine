@@ -6,9 +6,11 @@
 
 use crate::diskann_index::{
     build::{
-        DiskANNBuildCapture, DiskANNCanonicalCoverage, DiskANNGenerationOptions,
+        DiskANNBuildCapture, DiskANNBuildSink, DiskANNCanonicalCoverage, DiskANNGenerationOptions,
         DiskANNMergeOptions, DiskANNPartitionOptions, DiskANNTemporaryBudget,
     },
+    format::{DiskANNGeneration, DiskANNManifest},
+    pages::{DiskANNMemoryBuilder, DiskANNMemorySource},
     DiskANNCanonicalRead, PQTrainingOptions,
 };
 use crate::key_value::KeyValueDiskANNStage;
@@ -34,6 +36,36 @@ pub fn build_diskann_publication_fixture<S: DiskANNCanonicalRead>(
         &temporary,
         control,
     )?;
+    let manifest = write_fixture(&capture, directory.path(), parameters, stage)?;
+    drop(stage.seal(manifest, 8192, control)?);
+    capture.finish(&manifest, control)
+}
+
+/// Build and seal a small disposable in-memory generation for consumer conformance. It uses the same encrypted capture, bounded graph construction and verification as the publication fixture, without selecting a catalog head.
+pub fn build_diskann_memory_fixture<S: DiskANNCanonicalRead>(
+    generation: DiskANNGeneration,
+    source: S,
+    parameters: DiskANNIndexParams,
+    control: &StorageReadControl,
+) -> StorageBackendResult<DiskANNMemorySource> {
+    let directory = tempfile::tempdir()
+        .map_err(|error| crate::StorageBackendError::Other(error.to_string()))?;
+    let temporary = DiskANNTemporaryBudget::new(1 << 20);
+    let capture =
+        DiskANNBuildCapture::capture(generation, source, directory.path(), &temporary, control)?;
+    let mut sink = DiskANNMemoryBuilder::new(generation, control.memory());
+    let manifest = write_fixture(&capture, directory.path(), parameters, &mut sink)?;
+    let sealed = sink.finish(manifest, control)?;
+    drop(capture.finish(&manifest, control)?);
+    Ok(sealed)
+}
+
+fn write_fixture<S: DiskANNCanonicalRead>(
+    capture: &DiskANNBuildCapture<S>,
+    directory: &std::path::Path,
+    parameters: DiskANNIndexParams,
+    sink: &mut dyn DiskANNBuildSink,
+) -> StorageBackendResult<DiskANNManifest> {
     let training = PQTrainingOptions {
         max_samples: 8,
         max_centroids: 2,
@@ -41,7 +73,7 @@ pub fn build_diskann_publication_fixture<S: DiskANNCanonicalRead>(
         seed: 42,
     };
     let partitions = capture.input().build_partitions(
-        directory.path(),
+        directory,
         parameters,
         DiskANNPartitionOptions {
             max_partition_points: 8,
@@ -54,12 +86,12 @@ pub fn build_diskann_publication_fixture<S: DiskANNCanonicalRead>(
     )?;
     let graph = capture.input().merge_partitions(
         partitions,
-        directory.path(),
+        directory,
         DiskANNMergeOptions {
             sort_buffer_records: 8,
         },
     )?;
-    let manifest = capture.write_generation(
+    capture.write_generation(
         &graph,
         DiskANNGenerationOptions {
             training,
@@ -67,8 +99,6 @@ pub fn build_diskann_publication_fixture<S: DiskANNCanonicalRead>(
             side_batch_entries: 4,
             max_record_bytes: 8192,
         },
-        stage,
-    )?;
-    drop(stage.seal(manifest, 8192, control)?);
-    capture.finish(&manifest, control)
+        sink,
+    )
 }

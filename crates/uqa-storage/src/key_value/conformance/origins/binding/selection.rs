@@ -12,7 +12,7 @@ use super::{
 use crate::diskann_index::{
     format::{DiskANNCanonicalOrigin, DiskANNGeneration, DiskANNVectorVersion, PAGE_BYTES},
     pages::{DiskANNOriginReader, DiskANNPageSource, DiskANNReadLimits},
-    DiskANNCanonicalScorer,
+    DiskANNCanonicalScorer, RetainedDiskANNIndex,
 };
 use crate::key_value::{
     conformance::{expect, expect_eq},
@@ -20,7 +20,7 @@ use crate::key_value::{
 };
 use crate::{
     read_control::StorageReadControl, CatalogFacade, KeyValueCatalog, KeyValueStore,
-    StorageBackendResult,
+    StorageBackendResult, VectorIndex,
 };
 use std::sync::Arc;
 
@@ -29,6 +29,73 @@ fn capture(
     control: &StorageReadControl,
 ) -> StorageBackendResult<RetainedDiskANNCanonical> {
     canonical.retain_for_index(&row([91; 16])?.relation, control)
+}
+
+fn owned(
+    canonical: &KeyValueDiskANNCanonical,
+    control: &StorageReadControl,
+) -> StorageBackendResult<RetainedDiskANNIndex<RetainedDiskANNCanonical>> {
+    Ok(capture(canonical, control)?
+        .into_vector_index(
+            &Resolver,
+            DiskANNReadLimits {
+                resident_bytes: 65_536,
+                cache_bytes: PAGE_BYTES,
+                max_in_flight_page_bytes: 2 * PAGE_BYTES,
+                max_record_bytes: 8192,
+            },
+            control,
+        )?
+        .expect("published retained index"))
+}
+
+fn check_owned(
+    index: &dyn VectorIndex,
+    canonical: &RetainedDiskANNCanonical,
+    count: usize,
+    control: &StorageReadControl,
+) -> StorageBackendResult<()> {
+    let fresh = StorageReadControl::with_limit(1);
+    let nested = index
+        .snapshot_with_control(&fresh)?
+        .snapshot_with_control(&fresh)?;
+    expect_eq(
+        &nested.index_kind(),
+        &"diskann",
+        "nested snapshot retains the physical index",
+    )?;
+    expect_eq(&nested.count()?, &count, "retained tensor ordinal count")?;
+    expect(
+        nested.contains_document(1)?,
+        "retained nonempty tensor membership",
+    )?;
+    expect(
+        !nested.contains_document(2)?,
+        "empty tensor has no vector membership",
+    )?;
+    expect(
+        !nested.contains_document(99)?,
+        "absent document has no vector membership",
+    )?;
+    let exact =
+        DiskANNCanonicalScorer::new(canonical, &[1.0, 0.0], control)?.search_exact_knn(10)?;
+    expect_eq(
+        &nested.search_knn(&[1.0, 0.0], 10)?,
+        &exact,
+        "owned snapshot keeps raw canonical scores",
+    )?;
+    let threshold =
+        DiskANNCanonicalScorer::new(canonical, &[1.0, 0.0], control)?.search_threshold(0.0)?;
+    expect_eq(
+        &nested.search_threshold(&[1.0, 0.0], 0.0)?,
+        &threshold,
+        "owned snapshot keeps exact thresholds",
+    )?;
+    expect_eq(
+        &fresh.memory().used(),
+        &0,
+        "nested snapshot does not replace the original allowance",
+    )
 }
 
 fn check(
@@ -120,12 +187,14 @@ pub fn verify_diskann_query_views(
     let first_generation = stage.generation();
     let first_version = canonical.retain(&control)?.origin(1, &control)?.unwrap();
     let held = capture(&canonical, &control)?;
+    let held_index = owned(&canonical, &control)?;
     let second_version = canonical.replace(1, &[vec![0.0, 1.0]], &control)?;
     let (second, second_stage) = build(&canonical, &repository, &control)?;
     publish(store, &second, &control)?;
     let second_generation = second_stage.generation();
     drop((first, stage, second, second_stage, repository));
     check(&held, first_generation, first_version, &control)?;
+    check_owned(&held_index, &held, 2, &control)?;
     check(&private, private_generation, private_version, &control)?;
     check(
         &capture(&canonical, &control)?,
@@ -165,6 +234,7 @@ fn private_view(
     let (coverage, stage) = build(canonical, repository, control)?;
     publish(store, &coverage, control)?;
     let held = capture(canonical, control)?;
+    let held_index = owned(canonical, control)?;
     check(&held, stage.generation(), version, control)?;
     private_replacement(store, canonical, repository, &held, control)?;
     store.savepoint("published_generation")?;
@@ -213,6 +283,7 @@ fn private_view(
     store.rollback_transaction()?;
     let generation = stage.generation();
     drop((coverage, stage, peer_canonical, peer));
+    check_owned(&held_index, &held, 2, control)?;
     Ok((held, generation, version))
 }
 
@@ -319,5 +390,6 @@ pub fn verify_diskann_query_reopen(
     let canonical = KeyValueDiskANNCanonical::new(store.clone(), TABLE, FIELD, 2)?;
     let held = capture(&canonical, &control)?;
     let version = held.origin(1, &control)?.unwrap();
-    check(&held, generation, version, &control)
+    check(&held, generation, version, &control)?;
+    check_owned(&owned(&canonical, &control)?, &held, 2, &control)
 }
