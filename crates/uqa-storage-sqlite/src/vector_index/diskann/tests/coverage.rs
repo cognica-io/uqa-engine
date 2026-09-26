@@ -13,6 +13,8 @@ use uqa_storage::vector_index::DiskANNIndexParams;
 
 type Capture = DiskANNBuildCapture<RetainedSQLiteDiskANNCanonical>;
 
+mod durable;
+
 #[test]
 fn native_diskann_build_coverage_keeps_committed_and_undone_sources_in_all_file_modes() {
     let directory = tempfile::tempdir().unwrap();

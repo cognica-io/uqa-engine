@@ -111,8 +111,10 @@ impl DiskANNBuildInput {
         if sink.generation() != generation {
             return Err(invalid("artifact sink generation differs"));
         }
-        self.control
-            .check_value_size(DiskANNManifest::MAX_ENCODED_BYTES, options.max_record_bytes)?;
+        self.control.check_value_size(
+            DiskANNManifest::ENCODED_BYTES + DiskANNBuildProvenance::ENCODED_BYTES,
+            options.max_record_bytes,
+        )?;
         let provenance = DiskANNBuildProvenance::from_merge(
             graph.summary(),
             self.node_count(),

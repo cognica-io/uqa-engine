@@ -13,6 +13,8 @@ use crate::mvcc::{DatabaseId, StorageTransactionId};
 use crate::vector_index::DiskANNIndexParams;
 use uqa_core::DocId;
 
+mod durable;
+
 struct Source {
     revision: u64,
     documents: u64,

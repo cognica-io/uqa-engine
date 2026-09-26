@@ -13,10 +13,12 @@ use crate::{read_control::StorageReadControl, StorageBackendError, StorageBacken
 
 mod cache;
 mod memory;
+mod origins;
 mod reader;
 mod seal;
 
 pub use memory::{DiskANNMemoryBuilder, DiskANNMemorySource};
+pub use origins::DiskANNOriginReader;
 pub use reader::{DiskANNPageLease, DiskANNReader};
 pub use seal::{DiskANNArtifactSeal, DiskANNArtifactSealer};
 
@@ -28,6 +30,8 @@ pub enum DiskANNRecordKey {
     Codes(u64),
     /// Batch beginning at the given numeric-side stream position.
     Side(u64),
+    /// Fixed-capacity batch beginning at the given dense document position.
+    Origins(u64),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

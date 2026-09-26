@@ -9,7 +9,8 @@ use uqa_core::memory::BudgetedVec;
 
 use super::{
     field, invalid, record, DiskANNBuildCoverage, DiskANNBuildProvenance, DiskANNGeneration,
-    DiskANNNodeLayout, NODE_HEADER_BYTES, PAGE_BYTES, PAGE_FORMAT_REVISION, PAGE_HEADER_BYTES,
+    DiskANNNodeLayout, DiskANNOriginSummary, NODE_HEADER_BYTES, PAGE_BYTES, PAGE_FORMAT_REVISION,
+    PAGE_HEADER_BYTES,
 };
 use crate::vector_index::{DiskANNAlpha, DiskANNIndexParams};
 use crate::{read_control::StorageReadControl, StorageBackendResult};
@@ -56,12 +57,14 @@ pub struct DiskANNManifest {
     input: DiskANNManifestInput,
     layout: DiskANNNodeLayout,
     provenance: Option<DiskANNBuildProvenance>,
+    origins: Option<DiskANNOriginSummary>,
 }
 
 impl DiskANNManifest {
     pub const ENCODED_BYTES: usize = record::HEADER_BYTES + BODY_BYTES;
-    pub const MAX_ENCODED_BYTES: usize =
-        Self::ENCODED_BYTES + DiskANNBuildProvenance::ENCODED_BYTES;
+    pub const MAX_ENCODED_BYTES: usize = Self::ENCODED_BYTES
+        + DiskANNBuildProvenance::ENCODED_BYTES
+        + DiskANNOriginSummary::ENCODED_BYTES;
 
     pub fn new(input: DiskANNManifestInput) -> StorageBackendResult<Self> {
         input.parameters.validate(input.dimensions)?;
@@ -97,6 +100,7 @@ impl DiskANNManifest {
             input,
             layout,
             provenance: None,
+            origins: None,
         })
     }
 
@@ -114,6 +118,26 @@ impl DiskANNManifest {
         self.provenance.as_ref()
     }
 
+    /// Revision 3 carries the complete document-origin artifact, including empty tensors. Its digest does not establish source or publication authority.
+    pub(crate) fn with_origins(
+        mut self,
+        origins: DiskANNOriginSummary,
+    ) -> StorageBackendResult<Self> {
+        if self.provenance.is_none()
+            || (origins.documents() == 0 && self.input.coverage.vectors != 0)
+        {
+            return Err(invalid(
+                "origin metadata requires build provenance and complete documents",
+            ));
+        }
+        self.origins = Some(origins);
+        Ok(self)
+    }
+
+    pub fn origins(&self) -> Option<DiskANNOriginSummary> {
+        self.origins
+    }
+
     pub fn input(&self) -> &DiskANNManifestInput {
         &self.input
     }
@@ -124,7 +148,14 @@ impl DiskANNManifest {
     pub fn encode(self, control: &StorageReadControl) -> StorageBackendResult<BudgetedVec<u8>> {
         let input = self.input;
         let params = input.parameters;
-        let (revision, size) = if self.provenance.is_some() {
+        let (revision, size) = if self.origins.is_some() {
+            (
+                3,
+                BODY_BYTES
+                    + DiskANNBuildProvenance::ENCODED_BYTES
+                    + DiskANNOriginSummary::ENCODED_BYTES,
+            )
+        } else if self.provenance.is_some() {
             (2, BODY_BYTES + DiskANNBuildProvenance::ENCODED_BYTES)
         } else {
             (1, BODY_BYTES)
@@ -170,6 +201,10 @@ impl DiskANNManifest {
         if let Some(provenance) = self.provenance {
             provenance.encode(&mut bytes)?;
         }
+        if let Some(origins) = self.origins {
+            bytes.extend_from_slice(&origins.documents().to_le_bytes())?;
+            bytes.extend_from_slice(&origins.digest())?;
+        }
         record::finish(bytes, control)
     }
 
@@ -183,6 +218,11 @@ impl DiskANNManifest {
         let size = match revision {
             1 => BODY_BYTES,
             2 => BODY_BYTES + DiskANNBuildProvenance::ENCODED_BYTES,
+            3 => {
+                BODY_BYTES
+                    + DiskANNBuildProvenance::ENCODED_BYTES
+                    + DiskANNOriginSummary::ENCODED_BYTES
+            }
             _ => return Err(invalid("unsupported manifest envelope revision")),
         };
         let body = record::open_revision(MAGIC, revision, generation, bytes, control)?;
@@ -241,11 +281,18 @@ impl DiskANNManifest {
         if record::u64_at(body, 152)? != manifest.layout.page_count() {
             return Err(invalid("manifest page count differs from node layout"));
         }
-        if revision == 2 {
+        if revision >= 2 {
             manifest = manifest.with_build_provenance(DiskANNBuildProvenance::decode(
-                &body[BODY_BYTES..],
+                &body[BODY_BYTES..BODY_BYTES + DiskANNBuildProvenance::ENCODED_BYTES],
                 manifest.input.nodes,
                 parameters,
+            )?)?;
+        }
+        if revision == 3 {
+            let offset = BODY_BYTES + DiskANNBuildProvenance::ENCODED_BYTES;
+            manifest = manifest.with_origins(DiskANNOriginSummary::new(
+                record::u64_at(body, offset)?,
+                field(body, offset + 8)?,
             )?)?;
         }
         Ok(manifest)

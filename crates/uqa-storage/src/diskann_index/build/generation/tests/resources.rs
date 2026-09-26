@@ -53,7 +53,10 @@ fn invalid_options_and_foreign_owners_write_nothing_and_sink_failures_keep_their
             0 => options.code_batch_nodes = 0,
             1 => options.side_batch_entries = 0,
             2 => options.training.seed += 1,
-            _ => options.max_record_bytes = DiskANNManifest::MAX_ENCODED_BYTES - 1,
+            _ => {
+                options.max_record_bytes =
+                    DiskANNManifest::ENCODED_BYTES + DiskANNBuildProvenance::ENCODED_BYTES - 1;
+            }
         }
         assert!(input.write_generation(&graph, options, &mut sink).is_err());
         assert_eq!(sink.writes, 0);

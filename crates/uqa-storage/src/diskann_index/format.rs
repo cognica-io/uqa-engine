@@ -16,6 +16,7 @@ mod layout;
 mod manifest;
 mod node;
 mod origin;
+mod origins;
 mod page;
 mod provenance;
 mod quantization;
@@ -30,6 +31,10 @@ pub use layout::{DiskANNNodeAddress, DiskANNNodeLayout, DiskANNPageShape};
 pub use manifest::{DiskANNArtifactDigests, DiskANNManifest, DiskANNManifestInput};
 pub use node::{DiskANNNode, DiskANNNodeInput};
 pub use origin::{DiskANNCanonicalOrigin, CANONICAL_ORIGIN_BYTES};
+pub use origins::{
+    DiskANNOriginBatch, DiskANNOriginEntry, DiskANNOriginLayout, DiskANNOriginSummary,
+    ORIGIN_BATCH_DOCUMENTS, ORIGIN_ENTRY_BYTES,
+};
 pub use page::{decode_page, encode_page, DiskANNPage};
 pub(in crate::diskann_index) use provenance::adjacency_hash;
 pub use provenance::DiskANNBuildProvenance;

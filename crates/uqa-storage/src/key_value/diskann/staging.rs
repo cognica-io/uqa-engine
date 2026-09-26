@@ -387,6 +387,7 @@ fn verify_streams(
                         DiskANNRecordKey::Codebook => sealer.codebook(&bytes)?,
                         DiskANNRecordKey::Codes(first) => sealer.code_batch(*first, &bytes)?,
                         DiskANNRecordKey::Side(first) => sealer.side_batch(*first, &bytes)?,
+                        DiskANNRecordKey::Origins(first) => sealer.origin_batch(*first, &bytes)?,
                         DiskANNRecordKey::Manifest => unreachable!("handled above"),
                     }
                 }

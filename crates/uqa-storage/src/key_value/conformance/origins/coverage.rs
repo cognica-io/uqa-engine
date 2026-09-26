@@ -9,12 +9,15 @@
 use super::{expect, expect_eq};
 use crate::diskann_index::{
     build::{
-        DiskANNBuildCapture, DiskANNBuildInput, DiskANNGenerationOptions, DiskANNMergeOptions,
+        DiskANNBuildCapture, DiskANNGenerationOptions, DiskANNMergeOptions,
         DiskANNPartitionOptions, DiskANNTemporaryBudget,
     },
-    format::{DiskANNChangeIdentity, DiskANNGeneration, DiskANNManifest},
-    pages::DiskANNMemoryBuilder,
-    PQTrainingOptions,
+    format::{
+        DiskANNCanonicalOrigin, DiskANNChangeIdentity, DiskANNGeneration, DiskANNManifest,
+        DiskANNVectorVersion,
+    },
+    pages::{DiskANNMemoryBuilder, DiskANNOriginReader},
+    DiskANNCanonicalRead, PQTrainingOptions,
 };
 use crate::key_value::KeyValueDiskANNCanonical;
 use crate::read_control::StorageReadControl;
@@ -50,7 +53,12 @@ pub(super) fn verify(store: &Arc<dyn KeyValueStore>) -> StorageBackendResult<()>
         &build,
     )?;
     store.commit_transaction()?;
-    let manifest = complete(captured.input(), directory.path(), &build)?;
+    let manifest = complete(
+        &captured,
+        directory.path(),
+        &build,
+        &[(0, original), (5, empty), (9, early)],
+    )?;
     let coverage = captured.finish(&manifest, &query)?;
     drop((peer_index, peer));
     for (document, version, expected) in [
@@ -87,7 +95,12 @@ pub(super) fn verify(store: &Arc<dyn KeyValueStore>) -> StorageBackendResult<()>
     )?;
     store.rollback_to_savepoint("coverage")?;
     store.rollback_transaction()?;
-    let private_manifest = complete(private.input(), directory.path(), &build)?;
+    let private_manifest = complete(
+        &private,
+        directory.path(),
+        &build,
+        &[(0, undone), (5, empty), (7, late), (9, early)],
+    )?;
     let private_coverage = private.finish(&private_manifest, &query)?;
     expect(
         private_coverage.contains(DiskANNChangeIdentity::new(0, undone), &query)?,
@@ -116,11 +129,13 @@ pub(super) fn verify(store: &Arc<dyn KeyValueStore>) -> StorageBackendResult<()>
     )
 }
 
-fn complete(
-    input: &DiskANNBuildInput,
+fn complete<S: DiskANNCanonicalRead>(
+    captured: &DiskANNBuildCapture<S>,
     directory: &Path,
     control: &StorageReadControl,
+    expected: &[(u64, DiskANNVectorVersion)],
 ) -> StorageBackendResult<DiskANNManifest> {
+    let input = captured.input();
     let parameters = DiskANNIndexParams {
         max_degree: 2,
         build_list_size: 4,
@@ -156,7 +171,7 @@ fn complete(
     )?;
     let physical = MemoryBudget::new(64 << 10);
     let mut sink = DiskANNMemoryBuilder::new(input.coverage().generation(), &physical);
-    let manifest = input.write_generation(
+    let manifest = captured.write_generation(
         &graph,
         DiskANNGenerationOptions {
             training,
@@ -166,7 +181,22 @@ fn complete(
         },
         &mut sink,
     )?;
-    drop(sink.finish(manifest, control)?);
+    let source = Arc::new(sink.finish(manifest, control)?);
+    let reader = DiskANNOriginReader::open(source, 32 << 10, control)?;
+    for &(document, version) in expected {
+        expect_eq(
+            &reader
+                .origin(document, control)?
+                .map(DiskANNCanonicalOrigin::version),
+            &Some(version),
+            "persisted origins match the retained actual provider source",
+        )?;
+    }
+    expect(
+        reader.origin(99, control)?.is_none(),
+        "absent origin is not covered",
+    )?;
+    drop(reader);
     expect_eq(
         &physical.used(),
         &0,

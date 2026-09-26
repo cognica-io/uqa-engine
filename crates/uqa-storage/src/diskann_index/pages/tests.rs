@@ -248,6 +248,7 @@ impl Fixture {
                 DiskANNRecordKey::Codebook => seal.codebook(bytes).unwrap(),
                 DiskANNRecordKey::Codes(first) => seal.code_batch(*first, bytes).unwrap(),
                 DiskANNRecordKey::Side(first) => seal.side_batch(*first, bytes).unwrap(),
+                DiskANNRecordKey::Origins(first) => seal.origin_batch(*first, bytes).unwrap(),
                 DiskANNRecordKey::Manifest => unreachable!(),
             }
         }
