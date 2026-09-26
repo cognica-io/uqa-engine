@@ -41,6 +41,7 @@ pub(super) const READ_PREFIX: &[u8] = keys::ROOT;
 use keys::{database_key, Keys};
 use state::{data_identity, fixed};
 
+pub use identity::KeyValueDiskANNMappingMaintenance;
 pub use maintenance::{
     DiskANNMaintenanceStatus, DiskANNMaintenanceStep, KeyValueDiskANNMaintenance,
 };
@@ -64,21 +65,13 @@ pub struct KeyValueDiskANNStore {
 }
 
 impl KeyValueDiskANNStore {
-    /// Allocate a physical generation through durable mappings of the captured catalog incarnations. This only prepares staging; publication still requires the retained source's current-definition guard and complete build coverage.
+    /// Atomically establish catalog mappings and an owned Writing generation. Publication still requires the retained source's current-definition guard and complete build coverage; `start` remains idempotent.
     pub fn allocate_bound_stage(
         &self,
         scope: &crate::diskann_index::catalog::DiskANNIndexScope,
         control: &StorageReadControl,
     ) -> StorageBackendResult<KeyValueDiskANNStage> {
-        let (database, table, index) = self.catalog_handles(scope, control)?;
-        let stage = self.allocate_stage(table, index, control)?;
-        scope.check(self.owner.database, control)?;
-        if stage.generation().database() != database {
-            return Err(invalid(
-                "data identity changed during bound generation allocation",
-            ));
-        }
-        Ok(stage)
+        self.allocate_catalog_stage(scope, control)
     }
 
     pub fn connect(

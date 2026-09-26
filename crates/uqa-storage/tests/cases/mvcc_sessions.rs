@@ -103,6 +103,7 @@ enum CommitFault {
     CorruptReply,
     LoseBeforeCommit,
     ConcurrentCommit,
+    ReclaimDiskANNMapping,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -296,6 +297,27 @@ impl VersionedPersistence for Persistence {
                 }],
                 control,
             )?;
+        }
+        if state.commit_fault == CommitFault::ReclaimDiskANNMapping {
+            state.commit_fault = CommitFault::None;
+            let mapping = prepared
+                .required_keys()
+                .find(|key| key.starts_with(b"\0uqa-diskann-v1\0\x03"))
+                .expect("bound stage requires its index mapping")
+                .to_vec();
+            let mut guard = mapping.clone();
+            guard[b"\0uqa-diskann-v1\0".len()] = 7;
+            let snapshot = self.store.snapshot()?;
+            let keys = [mapping, guard];
+            let writes = keys
+                .iter()
+                .map(|key| RecordWrite {
+                    key,
+                    expected: snapshot.get(key).map(|record| record.sequence()),
+                    value: None,
+                })
+                .collect::<Vec<_>>();
+            self.store.commit(&writes, control)?;
         }
         if state.commit_fault == CommitFault::LoseBeforeCommit {
             state.commit_fault = CommitFault::None;
