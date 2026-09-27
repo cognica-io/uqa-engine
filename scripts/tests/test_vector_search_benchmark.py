@@ -504,6 +504,14 @@ class DiskANNCorrectnessTest(unittest.TestCase):
             self.checker.correctness_vectors(spec, root),
             ([[[1.0, 0.0]], [[-1.0, 0.0]]], [[1.0, 0.0], [-1.0, 0.0]]),
         )
+        workload = root / "workload"
+        workload.mkdir()
+        for manifest_path in ("../fixture.json", str(path)):
+            with self.subTest(manifest_path=manifest_path):
+                with self.assertRaisesRegex(self.checker.BenchmarkError, "escapes"):
+                    self.checker.correctness_vectors(
+                        {**spec, "fixture_manifest": manifest_path}, workload
+                    )
         (root / "vectors.f32").write_bytes(data[:-1])
         with self.assertRaisesRegex(self.checker.BenchmarkError, "bytes or hash"):
             self.checker.correctness_vectors(spec, root)

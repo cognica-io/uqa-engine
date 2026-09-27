@@ -446,8 +446,12 @@ def correctness_vectors(spec: dict[str, Any], root: pathlib.Path):
         ]
     elif generator == "frozen-f32-v1":
         path = (root / spec["fixture_manifest"]).resolve()
-        if not path.is_relative_to(root.resolve()):
-            raise BenchmarkError("fixture manifest escapes the workload directory")
+        try:
+            path.relative_to(root.resolve())
+        except ValueError as error:
+            raise BenchmarkError(
+                "fixture manifest escapes the workload directory"
+            ) from error
         raw = path.read_bytes()
         if hashlib.sha256(raw).hexdigest() != spec.get("fixture_manifest_sha256"):
             raise BenchmarkError("frozen fixture manifest hash differs")

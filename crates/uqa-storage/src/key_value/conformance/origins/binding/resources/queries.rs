@@ -18,19 +18,14 @@ pub(super) fn concurrent(
     owner: &StorageReadControl,
 ) -> StorageBackendResult<()> {
     let start = Barrier::new(3);
-    let ready = Barrier::new(3);
     let invoking = std::array::from_fn::<_, 3, _>(|_| StorageReadControl::with_limit(0));
     let results = std::thread::scope(|scope| {
         let mut workers = Vec::new();
         for (index, control) in indexes.into_iter().zip(&invoking) {
-            let (start, ready) = (&start, &ready);
+            let start = &start;
             workers.push(scope.spawn(move || {
                 start.wait();
-                let result =
-                    index.search_knn_with_statistics(&raw(4), DOCUMENTS as usize, Some(control));
-                // Every worker reaches both barriers even if its query returned an error.
-                ready.wait();
-                result
+                index.search_knn_with_statistics(&raw(4), DOCUMENTS as usize, Some(control))
             }));
         }
         workers

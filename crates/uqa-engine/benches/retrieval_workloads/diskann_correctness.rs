@@ -218,10 +218,13 @@ pub(super) fn run() {
     let executable_sha256 = format!("{:x}", sha2::Digest::finalize(hash));
     let observations = json!({"schema_version": 3, "mode": "correctness", "suite": suite,
         "manifest_sha256": digest(MANIFEST), "executable_sha256": executable_sha256, "fixtures": fixtures});
-    let output =
-        PathBuf::from(env::var_os(OUTPUT_ENV).unwrap_or_else(|| {
-            "target/benchmark-runs/diskann-correctness-observations.json".into()
-        }));
+    let output = env::var_os(OUTPUT_ENV).map_or_else(
+        || {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../target/benchmark-runs/diskann-correctness-observations.json")
+        },
+        PathBuf::from,
+    );
     fs::create_dir_all(output.parent().unwrap()).unwrap();
     fs::write(&output, serde_json::to_vec(&observations).unwrap()).unwrap();
     eprintln!("DiskANN correctness observations: {}", output.display());
