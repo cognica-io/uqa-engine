@@ -28,6 +28,7 @@
       "uqa-sql"
     ],
     "example-vector-knn": [
+      "uqa-core",
       "uqa-engine"
     ],
     "uqa": [
