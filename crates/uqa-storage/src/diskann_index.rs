@@ -26,7 +26,8 @@ pub mod search;
 mod vamana;
 
 pub use canonical::{
-    DiskANNCanonicalCorpusVisitor, DiskANNCanonicalCounts, DiskANNCanonicalRead, DiskANNQueryRead,
+    DiskANNCanonicalCorpusVisitor, DiskANNCanonicalCounts, DiskANNCanonicalRead,
+    DiskANNPopulationState, DiskANNPopulationWitness, DiskANNQueryRead,
 };
 pub use memory::{DiskANNMemoryIndex, DiskANNMemoryOptions};
 pub use metadata::DiskANNQueryMetadata;

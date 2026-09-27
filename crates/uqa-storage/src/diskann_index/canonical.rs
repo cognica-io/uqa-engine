@@ -16,7 +16,7 @@ use crate::{mvcc::VersionError, read_control::StorageReadControl, StorageBackend
 use uqa_core::DocId;
 
 mod populations;
-pub use populations::DiskANNCanonicalCounts;
+pub use populations::{DiskANNCanonicalCounts, DiskANNPopulationState, DiskANNPopulationWitness};
 
 /// Borrow one canonical ordinal in document order. Failure invalidates the consumer's partial output.
 pub type DiskANNCanonicalCorpusVisitor<'a> =
