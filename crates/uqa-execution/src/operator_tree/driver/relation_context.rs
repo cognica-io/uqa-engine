@@ -101,14 +101,33 @@ impl PhysicalRetrievalDriver<'_> {
         validate_vector_query(table.as_ref(), field, query_vector)
     }
 
+    fn with_vector_diagnostics(
+        &self,
+        mut context: uqa_operators::base::ExecutionContext,
+    ) -> DriverResult<uqa_operators::base::ExecutionContext> {
+        context.vector_observer = self
+            .diagnostics
+            .as_ref()
+            .map(|collector| {
+                crate::query::diagnostics::VectorDiagnostics::observer(collector, self.table)
+            })
+            .transpose()
+            .map_err(|error| {
+                crate::storage_errors::storage_error("bind vector diagnostics", &error)
+            })?;
+        Ok(context)
+    }
+
     pub(super) fn bridge_context(&self) -> DriverResult<uqa_operators::base::ExecutionContext> {
         if self.table.is_empty() {
             return Ok(uqa_operators::base::ExecutionContext::new());
         }
-        self.context
+        let context = self
+            .context
             .snapshots
             .snapshot_context(self.table)?
-            .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))
+            .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))?;
+        self.with_vector_diagnostics(context)
     }
 
     /// Build an operator context whose document snapshot materializes requested virtual generated columns and storage-owned tuple columns for only the candidate documents the consuming operator can visit.
@@ -147,10 +166,12 @@ impl PhysicalRetrievalDriver<'_> {
                 operator_execution_error("build projected operator snapshot", error)
             })?;
         }
-        self.context
+        let context = self
+            .context
             .snapshots
             .snapshot_context_with_document_store(self.table, std::sync::Arc::new(store))?
-            .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))
+            .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))?;
+        self.with_vector_diagnostics(context)
     }
 
     pub(super) fn facet_vector_inline(

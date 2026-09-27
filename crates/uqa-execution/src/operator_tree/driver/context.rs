@@ -112,6 +112,7 @@ pub trait PhysicalVectorRetrieval: Sync {
         field: &str,
         query: &[f32],
         k: usize,
+        diagnostics: Option<&crate::query::diagnostics::CapturedDiagnostics>,
     ) -> Result<Vec<ScoredEntry>, SQLError>;
 }
 

@@ -51,6 +51,7 @@ pub(crate) fn require_probability(probability: f64, operation: &str) -> StorageB
 /// remains a single virtual call.
 #[derive(Default, Clone)]
 pub struct ExecutionContext {
+    pub vector_observer: Option<Arc<dyn crate::vector::diagnostics::VectorSearchObserver>>,
     pub document_store: Option<Arc<dyn DocumentStore>>,
     pub inverted_index: Option<Arc<dyn InvertedIndex>>,
     pub vector_indexes: BTreeMap<FieldName, Arc<dyn VectorIndex>>,

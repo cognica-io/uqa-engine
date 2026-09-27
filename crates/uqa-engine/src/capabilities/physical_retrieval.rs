@@ -159,8 +159,9 @@ impl PhysicalVectorRetrieval for Engine {
         field: &str,
         query: &[f32],
         k: usize,
+        diagnostics: Option<&uqa_execution::query::diagnostics::CapturedDiagnostics>,
     ) -> Result<Vec<ScoredEntry>, SQLError> {
-        self.knn_search_leaf(table, field, query, k)
+        self.knn_search_leaf(table, field, query, k, diagnostics)
     }
 }
 

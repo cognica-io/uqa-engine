@@ -6,6 +6,7 @@
 
 //! Persistent directional query traversal over a session-owned worker task.
 use crate::query::consumer::{QueryConsumerControl, QueryRowConsumer};
+use crate::query::diagnostics::{InvocationRequest, QueryDiagnostics, RequestScope};
 use crate::{
     BackwardScanSupport, Batch, ExecError, ExecResult, PhysicalOperator, PhysicalRow,
     PhysicalScanDirection, RowSchema,
@@ -15,8 +16,8 @@ use uqa_core::Value;
 use uqa_sql::SQLError;
 
 enum DirectionalPlanRequest {
-    Step(PhysicalScanDirection),
-    Rewind,
+    Step(PhysicalScanDirection, Option<InvocationRequest>),
+    Rewind(Option<InvocationRequest>),
     Close,
 }
 
@@ -43,6 +44,7 @@ impl Drop for DirectionalPlanWorker {
 }
 
 struct DirectionalPlanRowConsumer {
+    diagnostics: RequestScope,
     requests: std::sync::mpsc::Receiver<DirectionalPlanRequest>,
     responses: std::sync::mpsc::Sender<DirectionalPlanResponse>,
     direction: Cell<PhysicalScanDirection>,
@@ -53,11 +55,15 @@ struct DirectionalPlanRowConsumer {
 impl DirectionalPlanRowConsumer {
     fn wait_for_request(&self) -> Result<QueryConsumerControl, SQLError> {
         match self.requests.recv() {
-            Ok(DirectionalPlanRequest::Step(direction)) => {
+            Ok(DirectionalPlanRequest::Step(direction, diagnostics)) => {
+                self.diagnostics.replace(diagnostics);
                 self.direction.set(direction);
                 Ok(QueryConsumerControl::Continue)
             }
-            Ok(DirectionalPlanRequest::Rewind) => Ok(QueryConsumerControl::Rewind),
+            Ok(DirectionalPlanRequest::Rewind(diagnostics)) => {
+                self.diagnostics.replace(diagnostics);
+                Ok(QueryConsumerControl::Rewind)
+            }
             Ok(DirectionalPlanRequest::Close) | Err(_) => {
                 self.closed.set(true);
                 Ok(QueryConsumerControl::Stop)
@@ -122,6 +128,7 @@ pub trait DirectionalQueryTask: Send {
 }
 
 pub struct DirectionalQueryPlanOperator {
+    diagnostics: Option<QueryDiagnostics>,
     schema: RowSchema,
     support: BackwardScanSupport,
     input: Option<Box<dyn DirectionalQueryTask>>,
@@ -135,11 +142,18 @@ impl DirectionalQueryPlanOperator {
         schema: RowSchema,
     ) -> Self {
         Self {
+            diagnostics: None,
             schema,
             support,
             input: Some(input),
             worker: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_diagnostics(mut self, diagnostics: QueryDiagnostics) -> Self {
+        self.diagnostics = Some(diagnostics);
+        self
     }
 
     fn start_worker(&mut self, direction: PhysicalScanDirection) -> ExecResult<()> {
@@ -150,9 +164,11 @@ impl DirectionalQueryPlanOperator {
         let (request_tx, request_rx) = std::sync::mpsc::channel();
         let (response_tx, response_rx) = std::sync::mpsc::channel();
         let schema = self.schema.clone();
+        let diagnostics = self.diagnostics.as_ref().map(QueryDiagnostics::request);
         let join = std::thread::spawn({
             move || {
                 let consumer = Rc::new(DirectionalPlanRowConsumer {
+                    diagnostics: QueryDiagnostics::request_scope(diagnostics),
                     requests: request_rx,
                     responses: response_tx.clone(),
                     direction: Cell::new(direction),
@@ -202,7 +218,10 @@ impl DirectionalQueryPlanOperator {
                 ExecError::Other("directional query branch stopped without a response".into())
             });
         }
-        self.request(DirectionalPlanRequest::Step(direction))
+        self.request(DirectionalPlanRequest::Step(
+            direction,
+            self.diagnostics.as_ref().map(QueryDiagnostics::request),
+        ))
     }
 }
 
@@ -247,7 +266,9 @@ impl PhysicalOperator for DirectionalQueryPlanOperator {
         if self.input.is_some() {
             return Ok(());
         }
-        match self.request(DirectionalPlanRequest::Rewind)? {
+        match self.request(DirectionalPlanRequest::Rewind(
+            self.diagnostics.as_ref().map(QueryDiagnostics::request),
+        ))? {
             DirectionalPlanResponse::Rewound => Ok(()),
             DirectionalPlanResponse::Error(error) => Err(ExecError::SQL(error)),
             DirectionalPlanResponse::Row(_) | DirectionalPlanResponse::Eof => {

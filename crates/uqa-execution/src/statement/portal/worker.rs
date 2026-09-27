@@ -9,6 +9,7 @@
 #[cfg(test)]
 mod tests;
 
+use crate::query::diagnostics::{InvocationRequest, QueryDiagnostics, RequestScope};
 use crate::{
     query::consumer::QueryConsumerControl, statement::context::queries::StatementQueryContexts,
 };
@@ -16,8 +17,8 @@ use uqa_core::Value;
 use uqa_sql::{plan::QueryPlan, SQLError, SQLParam};
 
 pub enum SessionPortalWorkerRequest {
-    Step(crate::PhysicalScanDirection),
-    Rewind,
+    Step(crate::PhysicalScanDirection, Option<InvocationRequest>),
+    Rewind(Option<InvocationRequest>),
     Close,
 }
 
@@ -48,6 +49,7 @@ impl Drop for SessionPortalWorker {
 }
 
 struct SessionPortalRowConsumer {
+    diagnostics: RequestScope,
     requests: std::sync::mpsc::Receiver<SessionPortalWorkerRequest>,
     responses: std::sync::mpsc::Sender<SessionPortalWorkerResponse>,
     direction: std::cell::Cell<crate::PhysicalScanDirection>,
@@ -59,14 +61,16 @@ struct SessionPortalRowConsumer {
 impl SessionPortalRowConsumer {
     fn wait_for_request(&self) -> Result<QueryConsumerControl, SQLError> {
         match self.requests.recv() {
-            Ok(SessionPortalWorkerRequest::Step(direction)) => {
+            Ok(SessionPortalWorkerRequest::Step(direction, diagnostics)) => {
+                self.diagnostics.replace(diagnostics);
                 self.direction.set(direction);
                 Ok(QueryConsumerControl::Continue)
             }
-            Ok(SessionPortalWorkerRequest::Rewind) if self.directional => {
+            Ok(SessionPortalWorkerRequest::Rewind(diagnostics)) if self.directional => {
+                self.diagnostics.replace(diagnostics);
                 Ok(QueryConsumerControl::Rewind)
             }
-            Ok(SessionPortalWorkerRequest::Rewind) => Err(SQLError::Internal(
+            Ok(SessionPortalWorkerRequest::Rewind(_)) => Err(SQLError::Internal(
                 "forward-only cursor worker received a rewind request".into(),
             )),
             Ok(SessionPortalWorkerRequest::Close) | Err(_) => {
@@ -145,10 +149,12 @@ pub fn run<S: Clone + Send + Sync + 'static>(
     request_rx: std::sync::mpsc::Receiver<SessionPortalWorkerRequest>,
     response_tx: std::sync::mpsc::Sender<SessionPortalWorkerResponse>,
 ) {
-    let first_direction = loop {
+    let (first_direction, diagnostics) = loop {
         match request_rx.recv() {
-            Ok(SessionPortalWorkerRequest::Step(direction)) => break direction,
-            Ok(SessionPortalWorkerRequest::Rewind) if directional => {
+            Ok(SessionPortalWorkerRequest::Step(direction, diagnostics)) => {
+                break (direction, diagnostics)
+            }
+            Ok(SessionPortalWorkerRequest::Rewind(_)) if directional => {
                 if response_tx
                     .send(SessionPortalWorkerResponse::Rewound)
                     .is_err()
@@ -156,12 +162,14 @@ pub fn run<S: Clone + Send + Sync + 'static>(
                     return;
                 }
             }
-            Ok(SessionPortalWorkerRequest::Rewind | SessionPortalWorkerRequest::Close) | Err(_) => {
+            Ok(SessionPortalWorkerRequest::Rewind(_) | SessionPortalWorkerRequest::Close)
+            | Err(_) => {
                 return;
             }
         }
     };
     let consumer = std::rc::Rc::new(SessionPortalRowConsumer {
+        diagnostics: QueryDiagnostics::request_scope(diagnostics),
         requests: request_rx,
         responses: response_tx.clone(),
         direction: std::cell::Cell::new(first_direction),

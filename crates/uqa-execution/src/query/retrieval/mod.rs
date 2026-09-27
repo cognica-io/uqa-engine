@@ -164,6 +164,7 @@ fn combine_probability_with_prior(probability: f64, prior: f64) -> f64 {
 
 pub fn run_calibrated_vector_match(
     vector: &dyn VectorPoolRetrieval,
+    diagnostics: Option<&crate::query::diagnostics::CapturedDiagnostics>,
     functions: &dyn uqa_sql::expr::EngineHook,
     table: &str,
     args: &[ScalarExpr],
@@ -178,7 +179,7 @@ pub fn run_calibrated_vector_match(
     } = uqa_sql::semantics::retrieval::calibrated_vector_arguments(args, &mut |expr| {
         eval_scalar(expr, &ctx)
     })?;
-    let mut out = vector.query_pool(table, &field, &query_vector, k)?;
+    let mut out = vector.query_pool(table, &field, &query_vector, k, diagnostics)?;
     out.retain(|entry| threshold.is_none_or(|minimum| entry.score >= minimum));
     out.sort_by(|a, b| {
         b.score

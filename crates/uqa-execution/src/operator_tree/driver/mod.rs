@@ -104,6 +104,7 @@ fn graph_execution_error(
 }
 
 pub struct PhysicalRetrievalDriver<'a> {
+    diagnostics: Option<crate::query::diagnostics::CapturedDiagnostics>,
     pub context: PhysicalDriverContext<'a>,
     pub table: &'a str,
     signal_table: &'a str,
@@ -119,6 +120,7 @@ impl<'a> PhysicalRetrievalDriver<'a> {
         params: &'a [SQLParam],
     ) -> Self {
         Self {
+            diagnostics: context.runtime.diagnostics.capture(),
             context,
             table,
             signal_table,
@@ -139,6 +141,18 @@ impl<'a> PhysicalRetrievalDriver<'a> {
             .bayesian_params_for_relation(self.table, self.signal_table, field)
     }
 
+    fn with_diagnostics<T>(&self, execute: impl FnOnce() -> DriverResult<T>) -> DriverResult<T> {
+        let _binding = self
+            .diagnostics
+            .as_ref()
+            .map(|collector| self.context.runtime.diagnostics.bind(collector))
+            .transpose()
+            .map_err(|error| {
+                crate::storage_errors::storage_error("bind vector diagnostics", &error)
+            })?;
+        execute()
+    }
+
     fn execute_posting_node(&self, op: &OperatorTree) -> DriverResult<PostingList> {
         match self.execute_node(op)? {
             OperatorOutput::Posting(result) => Ok(result),
@@ -156,7 +170,7 @@ impl<'a> PhysicalRetrievalDriver<'a> {
     ) -> DriverResult<Vec<PostingList>> {
         let workers: Vec<_> = branches
             .iter()
-            .map(|branch| || self.execute_posting_node(branch))
+            .map(|branch| || self.with_diagnostics(|| self.execute_posting_node(branch)))
             .collect();
         self.parallel
             .execute_branches(&workers)
@@ -170,7 +184,7 @@ impl<'a> PhysicalRetrievalDriver<'a> {
     ) -> DriverResult<Vec<OperatorOutput>> {
         let workers: Vec<_> = branches
             .iter()
-            .map(|branch| || self.execute_node(branch))
+            .map(|branch| || self.with_diagnostics(|| self.execute_node(branch)))
             .collect();
         self.parallel
             .execute_branches(&workers)
@@ -284,7 +298,13 @@ impl<'a> PhysicalRetrievalDriver<'a> {
         self.require_vector_query(field, query_vector)?;
         self.context
             .vector
-            .knn_search_leaf(self.table, field, query_vector, k)
+            .knn_search_leaf(
+                self.table,
+                field,
+                query_vector,
+                k,
+                self.diagnostics.as_ref(),
+            )
             .map(|rows| scored_to_posting_list(&rows))
     }
 

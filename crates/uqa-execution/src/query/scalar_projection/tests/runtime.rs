@@ -43,6 +43,7 @@ fn with_runtime(
     let aggregate_functions = RwLock::default();
     let notices = Mutex::default();
     run(QueryRuntimeView {
+        diagnostics: &crate::query::diagnostics::QueryDiagnostics::default(),
         settings,
         cancellation,
         scalar_functions: &scalar_functions,

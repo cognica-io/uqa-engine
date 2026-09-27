@@ -38,6 +38,10 @@ pub trait PhysicalExplainPlanning: Sync {
     ) -> Result<ExplainPhysicalPlan, SQLError>;
 }
 
+pub trait StatementDiagnostics: Sync {
+    fn diagnostics_scope(&self) -> Result<crate::query::diagnostics::DiagnosticsScope, SQLError>;
+}
+
 pub trait StatementEffects {
     fn query_effect_context(&self) -> QueryEffectContext<'_>;
 }
@@ -68,6 +72,7 @@ pub trait StatementMutationInputs<S: Clone + 'static> {
 
 #[derive(Clone)]
 pub struct StatementExecutionContext<'a, S: Clone + 'static> {
+    pub diagnostics: &'a dyn StatementDiagnostics,
     pub validation: StatementValidationContext<'a>,
     pub runtime: StatementRuntime<'a>,
     pub queries: &'a dyn queries::StatementQueryContexts<S>,

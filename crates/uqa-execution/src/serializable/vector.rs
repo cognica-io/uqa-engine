@@ -45,11 +45,33 @@ pub fn search_knn(
     query: &[f32],
     k: usize,
 ) -> StorageBackendResult<PostingList> {
+    search_knn_with_diagnostics(index, read, columns, field, query, k, None)
+}
+
+pub fn search_knn_with_diagnostics(
+    index: &dyn VectorIndex,
+    read: Option<&SerializableRelationRead>,
+    columns: &[ColumnDef],
+    field: &str,
+    query: &[f32],
+    k: usize,
+    diagnostics: Option<(&crate::query::diagnostics::CapturedDiagnostics, &str)>,
+) -> StorageBackendResult<PostingList> {
     if let Some(read) = read.filter(|_| k != 0) {
         validate_vector_values(index.dimensions(), query)?;
         VectorObservation::bind(read, columns, field)?.observe()?;
     }
-    index.search_knn(query, k)
+    let Some((collector, relation)) = diagnostics else {
+        return index.search_knn(query, k);
+    };
+    let result = index.search_knn_with_statistics(query, k, Some(collector.control()))?;
+    collector.record(
+        relation,
+        field,
+        uqa_core::vector_execution::VectorSearchOperation::KNN { k },
+        &result,
+    )?;
+    Ok(result.postings)
 }
 
 #[derive(Clone)]

@@ -252,6 +252,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             .physical_explain
             .physical_explain_plan(body, self.params)?;
         let analysis = if analyze {
+            let diagnostics = self.context.diagnostics.diagnostics_scope()?;
             let started = std::time::Instant::now();
             let mut executor = UnifiedPlanExecutor::new_nested(self.context.clone(), self.params);
             executor
@@ -261,6 +262,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             let rows = u64::try_from(result.rows.len())
                 .map_err(|_| SQLError::Internal("EXPLAIN ANALYZE row count exceeds u64".into()))?;
             Some(uqa_sql::result::ExplainAnalysis {
+                vector_searches: diagnostics.finish()?,
                 elapsed: started.elapsed(),
                 rows,
                 affected_rows: result.affected_rows,

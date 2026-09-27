@@ -194,20 +194,10 @@ fn can_evaluate(
 }
 
 fn index_node(stats: &DiskANNIndexStats) -> Json {
-    use std::fmt::Write as _;
     let population = stats.populations;
     let reads = stats.reads;
-    let mut database = String::with_capacity(32);
-    for byte in stats.generation.database {
-        let _ = write!(database, "{byte:02x}");
-    }
     json!({
-        "Generation": {
-            "Database": database,
-            "Table": stats.generation.table,
-            "Index": stats.generation.index,
-            "Generation": stats.generation.generation,
-        },
+        "Generation": super::super::render_generation(stats.generation),
         "Configuration": {
             "Dimensions": stats.dimensions,
             "Maximum Degree": stats.max_degree,

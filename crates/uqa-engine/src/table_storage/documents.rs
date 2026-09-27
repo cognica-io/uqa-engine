@@ -161,14 +161,26 @@ impl Engine {
         top_k: usize,
     ) -> Result<Vec<crate::ScoredEntry>, SQLError> {
         if self.storage.provider.is_none() {
-            return self.knn_search_leaf(table, field, query_vector, top_k);
+            return self.knn_search_leaf(
+                table,
+                field,
+                query_vector,
+                top_k,
+                self.runtime.diagnostics.capture().as_ref(),
+            );
         }
         let session = self.new_internal_read_session().map_err(|error| {
             SQLError::Internal(format!(
                 "open independent session to recheck vector retrieval on `{table}`: {error}"
             ))
         })?;
-        session.knn_search_leaf(table, field, query_vector, top_k)
+        session.knn_search_leaf(
+            table,
+            field,
+            query_vector,
+            top_k,
+            self.runtime.diagnostics.capture().as_ref(),
+        )
     }
 
     /// Fetch complete physical documents while materializing only the virtual generated or storage-owned tuple columns named by `projection`; projected execution paths use this boundary so unrelated virtual expressions remain deferred.

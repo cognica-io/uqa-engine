@@ -23,6 +23,7 @@ fn channels(
     let (responses, response_rx) = mpsc::channel();
     (
         SessionPortalRowConsumer {
+            diagnostics: QueryDiagnostics::request_scope(None),
             requests,
             responses,
             direction: Cell::new(PhysicalScanDirection::Forward),
@@ -107,6 +108,7 @@ fn directional_requests_preserve_reverse_steps_and_rewind_handshake() {
     requests
         .send(SessionPortalWorkerRequest::Step(
             PhysicalScanDirection::Backward,
+            None,
         ))
         .unwrap();
     assert!(matches!(
@@ -118,7 +120,9 @@ fn directional_requests_preserve_reverse_steps_and_rewind_handshake() {
         SessionPortalWorkerResponse::Eof
     ));
     assert_eq!(consumer.scan_direction(), PhysicalScanDirection::Backward);
-    requests.send(SessionPortalWorkerRequest::Rewind).unwrap();
+    requests
+        .send(SessionPortalWorkerRequest::Rewind(None))
+        .unwrap();
     assert!(matches!(
         consumer.wait_for_request().unwrap(),
         QueryConsumerControl::Rewind
@@ -137,7 +141,9 @@ fn directional_requests_preserve_reverse_steps_and_rewind_handshake() {
 #[test]
 fn forward_only_rewind_is_an_error_and_disconnect_stops_the_consumer() {
     let (consumer, requests, responses) = channels(false);
-    requests.send(SessionPortalWorkerRequest::Rewind).unwrap();
+    requests
+        .send(SessionPortalWorkerRequest::Rewind(None))
+        .unwrap();
     let error = consumer.wait_for_request().err().expect("rewind must fail");
     assert!(
         matches!(error, SQLError::Internal(message) if message == "forward-only cursor worker received a rewind request")
@@ -197,7 +203,9 @@ impl StatementQueryContexts<()> for UnopenedQuery {
 fn unopened_worker(directional: bool) -> Vec<SessionPortalWorkerResponse> {
     let (requests, request_rx) = mpsc::channel();
     let (response_tx, responses) = mpsc::channel();
-    requests.send(SessionPortalWorkerRequest::Rewind).unwrap();
+    requests
+        .send(SessionPortalWorkerRequest::Rewind(None))
+        .unwrap();
     requests.send(SessionPortalWorkerRequest::Close).unwrap();
     let UnifiedPlan::Query(query) =
         UnifiedPlan::lower(uqa_sql::compile("SELECT 1").unwrap().remove(0))

@@ -44,8 +44,9 @@ impl VectorPoolRetrieval for Engine {
         field: &str,
         query_vector: &[f32],
         k: usize,
+        diagnostics: Option<&uqa_execution::query::diagnostics::CapturedDiagnostics>,
     ) -> Result<Vec<ScoredEntry>, SQLError> {
-        self.query_pool_vector_search_leaf(table, field, query_vector, k)
+        self.query_pool_vector_search_leaf(table, field, query_vector, k, diagnostics)
     }
 }
 

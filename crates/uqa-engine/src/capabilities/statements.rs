@@ -16,6 +16,7 @@ impl Engine {
     ) -> StatementExecutionContext<'_, StatementReadSnapshot> {
         let runtime = self.query_runtime_view();
         StatementExecutionContext {
+            diagnostics: self,
             validation: StatementValidationContext {
                 session: self,
                 rules: self,
@@ -125,5 +126,18 @@ impl Engine {
             planning: self,
             statements: self,
         }
+    }
+}
+
+impl context::StatementDiagnostics for Engine {
+    fn diagnostics_scope(
+        &self,
+    ) -> Result<uqa_execution::query::diagnostics::DiagnosticsScope, uqa_sql::SQLError> {
+        self.runtime
+            .diagnostics
+            .enter(self.query_retention_control()?)
+            .map_err(|error| {
+                uqa_execution::storage_errors::storage_error("retain EXPLAIN diagnostics", &error)
+            })
     }
 }

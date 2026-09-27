@@ -6,6 +6,8 @@
 
 //! Vector similarity and KNN operators.
 
+pub mod diagnostics;
+
 use std::sync::Arc;
 
 use uqa_core::{FieldName, IndexStats, Payload, PostingEntry, PostingList};
@@ -44,10 +46,17 @@ impl Operator for VectorSimilarityOperator {
                 self.threshold
             )));
         }
-        ctx.vector_indexes
+        let index = ctx
+            .vector_indexes
             .get(&self.field)
-            .ok_or_else(|| missing_backend("vector-index", "vector similarity"))?
-            .search_threshold(&self.query_vector, self.threshold)
+            .ok_or_else(|| missing_backend("vector-index", "vector similarity"))?;
+        diagnostics::search_threshold(
+            index.as_ref(),
+            &self.field,
+            &self.query_vector,
+            self.threshold,
+            ctx.vector_observer.as_deref(),
+        )
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {
@@ -77,10 +86,17 @@ impl KNNOperator {
 impl Operator for KNNOperator {
     fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
         validate_vector_query(&self.query_vector, "KNN search")?;
-        ctx.vector_indexes
+        let index = ctx
+            .vector_indexes
             .get(&self.field)
-            .ok_or_else(|| missing_backend("vector-index", "KNN search"))?
-            .search_knn(&self.query_vector, self.k)
+            .ok_or_else(|| missing_backend("vector-index", "KNN search"))?;
+        diagnostics::search_knn(
+            index.as_ref(),
+            &self.field,
+            &self.query_vector,
+            self.k,
+            ctx.vector_observer.as_deref(),
+        )
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {

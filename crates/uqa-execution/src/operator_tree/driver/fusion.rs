@@ -173,6 +173,7 @@ impl PhysicalRetrievalDriver<'_> {
         }
         crate::query::retrieval::run_calibrated_vector_match(
             self.context.vector_pool,
+            self.diagnostics.as_ref(),
             self.context.functions,
             self.table,
             &args,
@@ -379,7 +380,7 @@ impl PhysicalRetrievalDriver<'_> {
     ) -> DriverResult<Vec<(PostingList, Option<f64>)>> {
         let workers: Vec<_> = signals
             .iter()
-            .map(|signal| || self.execute_fusion_signal(signal))
+            .map(|signal| || self.with_diagnostics(|| self.execute_fusion_signal(signal)))
             .collect();
         self.parallel
             .execute_branches(&workers)

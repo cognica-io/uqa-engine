@@ -430,6 +430,7 @@ impl Drop for DelegatedStatementGate<'_> {
 }
 
 pub(super) struct QueryRuntime {
+    pub(super) diagnostics: uqa_execution::query::diagnostics::QueryDiagnostics,
     pub(super) statement_gate: Arc<StatementGate>,
     pub(super) sql_execution_depth: AtomicUsize,
     pub(super) cancellation: uqa_core::CancellationToken,
@@ -452,6 +453,7 @@ impl QueryRuntime {
         cancellation: uqa_core::CancellationToken,
     ) -> Self {
         Self {
+            diagnostics: uqa_execution::query::diagnostics::QueryDiagnostics::default(),
             statement_gate: Arc::new(StatementGate::new()),
             sql_execution_depth: AtomicUsize::new(0),
             cancellation,
