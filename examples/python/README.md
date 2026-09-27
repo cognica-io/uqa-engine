@@ -7,7 +7,7 @@ For Nori-specific artifact verification, run `python -m pytest -q tests/python` 
 | Example | Coverage |
 | --- | --- |
 | [`unified_search.py`](unified_search.py) | Raw and Bayesian text retrieval, vector KNN, exact and robust fusion, cross-relation typed operator joins, a scalar callback, and Cypher over shared identities |
-| [`vector_knn.py`](vector_knn.py) | Exact, HNSW, and IVF vector access plus relational filtering |
+| [`vector_knn.py`](vector_knn.py) | Exact, HNSW, IVF and DiskANN access, canonical scores, filtering, mutation, rollback and persistent reopen |
 | [`graph_cypher.py`](graph_cypher.py) | Named graph construction, mutation, traversal, and relational composition |
 | [`storage_transactions.py`](storage_transactions.py) | Persistent reopen, rollback, savepoints, and independent sessions |
 | [`extensibility.py`](extensibility.py) | Scalar, table, and aggregate Python callbacks |

@@ -14,6 +14,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { bindingFeatures, noriEnabled, runBindings } from "../parity/bindings.mjs";
 import { concurrentIsolationLevels, runConcurrentWriterCase } from "../parity/concurrent_transactions.mjs";
+import { runVectorKNN, verifyVectorKNNReopen } from "../../examples/javascript/vector-knn.mjs";
 
 const require = createRequire(import.meta.url);
 const packagePath = require.resolve(process.env.UQA_TEST_PACKAGE ? resolve(process.env.UQA_TEST_PACKAGE) : "../../crates/uqa-node");
@@ -247,6 +248,28 @@ test("CommonJS and ESM package exports agree", async () => {
   assert.equal(esm.HttpSQLStream, uqa.HttpSQLStream);
   assert.equal(esm.vector, uqa.vector);
   assert.equal(esm.JSFunctionVolatility, uqa.JSFunctionVolatility);
+});
+
+test("DiskANN example preserves canonical scores and committed rows through reopen", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "uqa-node-diskann-"));
+  const path = join(directory, "vectors.db");
+  try {
+    const engine = uqa.open(path);
+    let results;
+    try {
+      results = await runVectorKNN(engine, uqa.vector);
+    } finally {
+      engine.close();
+    }
+    const reopened = uqa.open(path);
+    try {
+      await verifyVectorKNNReopen(reopened, uqa.vector, results.afterCommit);
+    } finally {
+      reopened.close();
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("sql, params, vector, tensor, and cypher surfaces", async () => {

@@ -103,6 +103,9 @@ jobs:
             exit 1
           fi
           UQA_TEST_NORI=disabled UQA_TEST_KUROMOJI=disabled python -m pytest -q tests/python
+          for example in examples/python/*.py; do
+            python "$example"
+          done
           python tests/python/retained_analyzers.py reject target/morphology-retained-catalogs
           python -m pip install --force-reinstall target/morphology-binding-enabled/python/*.whl
           python tests/python/retained_analyzers.py verify target/morphology-retained-catalogs
