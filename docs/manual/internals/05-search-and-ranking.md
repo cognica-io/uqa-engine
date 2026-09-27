@@ -82,6 +82,8 @@ Vector dimension and finiteness are validated before execution. Tensor storage a
 
 `OperatorTree::VectorSimilarity` performs threshold retrieval with `cosine >= threshold` and returns raw cosine scores. Thresholds must be finite and in `[-1, 1]`. Intersecting two such operands adds their scores, so the planner retains both operands even when their fields and query vectors are identical. Replacing them with one maximum-threshold leaf would discard a score contribution; approximately equal query vectors can also have different document support at a threshold boundary. Optimization preserves these results and validation errors. The deprecated `TreeOptimizerConfig::enable_merge_vector_thresholds` field is retained for source compatibility and has no effect, including when set to `true`. SQL `knn_match(field, vector, k)` uses the separate `KNN` operator.
 
+Cost-based intersection ordering applies only when every operand produces membership with default payloads. Intersections containing vector scores or other decorated postings retain operand order and grouping, preserving rounded score accumulation, colliding payload fields and empty-result short circuits. Changing an index's estimated cost cannot reorder those contributions; the [preservation argument](../../design/architecture.md#ordered-decorated-intersections) describes the applicable carrier and assumptions.
+
 IVF and HNSW have separate catalog identities, persistence, construction, and mutation logic. They are not aliases of a generic approximate index. See the [vector index design](../../design/vector-indexes.md).
 
 ## Vector calibration

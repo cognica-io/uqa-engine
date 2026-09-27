@@ -221,6 +221,18 @@ The first optimizer pass performs idempotence and absorption through address-ind
 
 Ordinary, aggregation, fusion, and deep-fusion nodes produce `PostingList`; graph nodes retain `GraphPostingList` through homogeneous graph set operations; graph/document combinations insert an explicit Phi codec boundary; and join nodes preserve tuples as `GeneralizedPostingList`.
 
+### Ordered decorated intersections
+
+[Intersection cost ordering](../../crates/uqa-planner/src/query_optimizer/reorder.rs) uses the same exhaustive `OperatorTree::is_membership_only` classification. An intersection containing any scored or decorated operand retains the order and grouping of its operands. The rule applies to complete posting values rather than only their document support, independently of the physical method or its estimated cost.
+
+Let $P_i$ be the posting result of the already optimized child $i$, and let $\mu$ be the existing collision merge. An ordered intersection evaluates the left fold $F(P_1,\ldots,P_n)=\mu(\cdots\mu(P_1,P_2),\ldots,P_n)$ on shared document identities, stopping when the accumulated support becomes empty. A decorated merge adds binary64 scores and gives the right operand precedence for ordinary colliding fields. Neither arbitrary permutations of the floating-point fold nor exchanged field precedence preserve the full result. For example, scores $1,2^{-54},-1$ yield $(1\oplus2^{-54})\oplus(-1)=0$, whereas $(1\oplus(-1))\oplus2^{-54}=2^{-54}$, where $\oplus$ denotes the actual rounded binary64 addition. The document support is identical in both cases.
+
+For decorated operands the cost-ordering pass now emits the identical sequence of already optimized children. Induction on that sequence gives the same initial accumulator, collision operands, rounded score, field precedence and next accumulator at every step. It therefore preserves the complete posting result, the point at which an empty accumulator stops evaluation, and which child validation errors are reached, assuming the unchanged child executions have the same results and effects. It introduces no new operator, raw-score transform or candidate selection.
+
+On the existing membership-only domain each child emits the default payload, and merging two such payloads gives the default payload: $\mu(0,0)=0$. Thus the result is the intersection of the finite document supports with that same decoration, independent of permutation. Cost ordering remains enabled for that domain; this correction neither expands its scope nor adds a claim about reordering fallible storage reads. Scored children are not projected onto membership to obtain this law.
+
+Owning Planner tests execute the real Storage and Operators implementations. [Vector cases](../../crates/uqa-planner/src/query_optimizer/tests/vector_thresholds.rs) assert the independent rounded-score example and empty-result/invalid-threshold ordering; [payload cases](../../crates/uqa-planner/src/query_optimizer/tests/intersection_order.rs) require literal right-biased facet fields and prove that cheaper membership-only operands still move first. These regressions exercise the proof obligations but do not replace the preservation argument.
+
 ## Relational physical execution
 
 Relational operators use pull-based batches and dynamic `Value` instances, so the execution model remains row-oriented rather than a fully vectorized typed-column engine. Rows are nevertheless positional rather than map-backed.
