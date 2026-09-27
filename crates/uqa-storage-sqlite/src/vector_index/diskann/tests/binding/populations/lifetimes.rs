@@ -8,6 +8,65 @@ use super::*;
 use crate::Catalog;
 
 #[test]
+fn native_diskann_population_raw_writers_preserve_selected_counts_and_retirement() {
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let connection = open(&directory.path().join("population-raw-writers.db"), mode);
+        let control = StorageReadControl::with_limit(1 << 22);
+        seed(&connection, &control);
+        let index = live(&connection, &control);
+        for kind in 0..3 {
+            let mut raw: Box<dyn VectorIndex> = match kind {
+                0 => Box::new(crate::SQLiteVectorIndex::new(
+                    connection.clone(),
+                    TABLE,
+                    FIELD,
+                    2,
+                )),
+                1 => Box::new(crate::SQLiteIVFIndex::new(
+                    connection.clone(),
+                    TABLE,
+                    FIELD,
+                    2,
+                )),
+                _ => Box::new(crate::SQLiteHNSWIndex::new(
+                    connection.clone(),
+                    TABLE,
+                    FIELD,
+                    2,
+                )),
+            };
+            let before = super::rename::image(&connection);
+            for operation in 0..5 {
+                let result = match operation {
+                    0 => raw.add(1, vec![0.0, 1.0]),
+                    1 => raw.add_many(1, vec![vec![0.0, 1.0], vec![1.0, 0.0]]),
+                    2 => raw.delete(2),
+                    3 => raw.delete(3),
+                    _ => raw.add(4, vec![1.0, 0.0]),
+                };
+                assert!(
+                    result.is_err(),
+                    "raw owner {kind} accepted operation {operation}"
+                );
+                assert_eq!(super::rename::image(&connection), before);
+                counts(&index, 3, 0);
+                assert_eq!(raw.count().unwrap(), 3);
+            }
+        }
+        connection.begin_transaction().unwrap();
+        canonical(&connection, TABLE, FIELD, 2)
+            .retire_index(&row().relation, &Resolver, &control)
+            .unwrap();
+        let mut raw = crate::SQLiteVectorIndex::new(connection.clone(), TABLE, FIELD, 2);
+        raw.add(1, vec![0.0, 1.0]).unwrap();
+        raw.delete(2).unwrap();
+        connection.rollback_transaction().unwrap();
+        counts(&index, 3, 0);
+    }
+}
+
+#[test]
 fn native_diskann_population_structural_movement_preserves_mutations_undo_and_old_readers() {
     for mode in 0..4 {
         let directory = tempfile::tempdir().unwrap();

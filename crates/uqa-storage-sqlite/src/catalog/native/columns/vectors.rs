@@ -65,7 +65,10 @@ impl NativeSnapshot {
     ) -> Result<bool> {
         for &family in families {
             let mut occupied = false;
-            self.visit_field_keys(family, owner, 1, field, None, |_| {
+            let column = super::field_column(family).ok_or(VersionError::InvalidEncoding(
+                "vector record layout has no field column",
+            ))?;
+            self.visit_field_keys(family, owner, column, field, None, |_| {
                 occupied = true;
                 Ok(false)
             })?;

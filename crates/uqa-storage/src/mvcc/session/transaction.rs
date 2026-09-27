@@ -237,7 +237,8 @@ impl Transaction {
                 | RecordWriteKind::IdempotentDelete
                 | RecordWriteKind::DiskANNOrigin
                 | RecordWriteKind::DiskANNPopulationPreview
-        ) && self.changes.write_kind(key, control)? == Some(RecordWriteKind::Canonical)
+        ) && !(kind == RecordWriteKind::DiskANNOrigin && deleted)
+            && self.changes.write_kind(key, control)? == Some(RecordWriteKind::Canonical)
         {
             RecordWriteKind::Canonical
         } else {

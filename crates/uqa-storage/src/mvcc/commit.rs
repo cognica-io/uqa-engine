@@ -45,6 +45,7 @@ pub(crate) enum RecordWriteKind {
     Marker,
     StatisticsMaintenance,
     IdempotentDelete,
+    // A value is a complete typed replacement; absence is a raw invalidation that must not leave a stale population.
     DiskANNOrigin,
     DiskANNPopulationPreview,
 }

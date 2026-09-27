@@ -463,6 +463,19 @@ impl KeyValueBatch for Batch<'_> {
         self.typed_record(key, Some(value), RecordWriteKind::DiskANNOrigin)
     }
 
+    fn invalidate_diskann_origin(&mut self, key: &[u8]) -> StorageBackendResult<()> {
+        if self
+            .store
+            .persistence
+            .diskann_population_record_layout()
+            .is_some()
+        {
+            self.typed_record(key, None, RecordWriteKind::DiskANNOrigin)
+        } else {
+            self.delete(key)
+        }
+    }
+
     fn publish_diskann_population(
         &mut self,
         key: &[u8],

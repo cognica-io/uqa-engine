@@ -25,6 +25,8 @@ const FIELD: &str = "vector";
 
 #[path = "populations/failures.rs"]
 mod failures;
+#[path = "populations/raw_writers.rs"]
+mod raw_writers;
 
 fn field() -> Vec<u8> {
     let mut key = vec![b'v'];

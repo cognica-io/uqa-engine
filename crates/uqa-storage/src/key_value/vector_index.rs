@@ -70,7 +70,7 @@ impl KeyValueVectorIndex {
         vectors: &[Vec<f32>],
     ) -> StorageBackendResult<()> {
         self.stage_replace_values(batch, doc_id, vectors)?;
-        batch.delete(&origin::key(&self.table, &self.field, doc_id)?)
+        batch.invalidate_diskann_origin(&origin::key(&self.table, &self.field, doc_id)?)
     }
 
     /// Keep the origin mutation with its owner so a typed canonical replacement retains its MVCC effect.

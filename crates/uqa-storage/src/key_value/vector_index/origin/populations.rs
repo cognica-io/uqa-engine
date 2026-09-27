@@ -44,19 +44,21 @@ impl DiskANNPopulationRecordLayout for KeyValueDiskANNPopulationRecords {
         control: &StorageReadControl,
     ) -> VersionResult<DiskANNPopulationOrigin> {
         control.check()?;
-        let raw = key
-            .strip_prefix(super::ROOT)
-            .ok_or(invalid("population input is not a canonical origin"))?;
-        let end = field_len(raw)?;
-        if raw.len() != end + 8 {
-            return Err(invalid("invalid canonical origin key width"));
-        }
+        let (field, document) = keys::origin_parts(key)?;
         let origin = DiskANNCanonicalOrigin::decode(value, dimensions(value, 40)?)?;
         Ok(DiskANNPopulationOrigin {
-            field: concatenate(&[&raw[..end]], control)?,
-            document: u64::from_be_bytes(raw[end..].try_into().expect("validated width")),
+            field: concatenate(&[field], control)?,
+            document,
             origin,
         })
+    }
+
+    fn origin_header_prefix(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<BudgetedVec<u8>> {
+        self.header_prefix(keys::origin_parts(key)?.0, control)
     }
 
     fn header_prefix(

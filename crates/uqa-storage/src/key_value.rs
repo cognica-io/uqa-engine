@@ -182,6 +182,11 @@ pub trait KeyValueBatch {
         ))
     }
 
+    /// Remove the canonical origin invalidated by a raw writer. Concurrent stores reject an existing population unless their complete publication census validates the final canonical view. Validation follows private application, command refresh and final publication, including an originally absent origin. Capable wrappers must forward this operation.
+    fn invalidate_diskann_origin(&mut self, key: &[u8]) -> StorageBackendResult<()> {
+        self.delete(key)
+    }
+
     /// Retain already verified complete build origins for one authorized generation publication. The template supplies physical row encoding, not trusted counts; common MVCC computes the private and committed census on their actual canonical views. The catalog/head owner must authorize and guard this publication in the same batch.
     fn publish_diskann_population(
         &mut self,

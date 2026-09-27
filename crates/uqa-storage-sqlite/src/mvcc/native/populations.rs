@@ -103,6 +103,14 @@ impl DiskANNPopulationRecordLayout for NativeRecordNamespace {
         })
     }
 
+    fn origin_header_prefix(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<BudgetedVec<u8>> {
+        records::origin_header_prefix(key, control)
+    }
+
     fn header_prefix(
         &self,
         field: &[u8],

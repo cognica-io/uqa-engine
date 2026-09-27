@@ -12,7 +12,7 @@ use uqa_storage::key_value::{conformance::build_diskann_publication_fixture, Key
 
 const DESTINATION: &str = "occupied_vector";
 
-fn image(connection: &ManagedConnection) -> Vec<(Vec<u8>, Vec<u8>)> {
+pub(super) fn image(connection: &ManagedConnection) -> Vec<(Vec<u8>, Vec<u8>)> {
     let snapshot = connection.native_snapshot().unwrap().unwrap();
     let mut rows = Vec::new();
     snapshot

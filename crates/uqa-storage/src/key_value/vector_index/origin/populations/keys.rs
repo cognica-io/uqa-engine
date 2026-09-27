@@ -55,6 +55,20 @@ pub(super) fn field_len(field: &[u8]) -> VersionResult<usize> {
     Ok(offset)
 }
 
+pub(super) fn origin_parts(key: &[u8]) -> VersionResult<(&[u8], u64)> {
+    let raw = key
+        .strip_prefix(super::super::ROOT)
+        .ok_or(invalid("population input is not a canonical origin"))?;
+    let end = field_len(raw)?;
+    if raw.len() != end + 8 {
+        return Err(invalid("invalid canonical origin key width"));
+    }
+    Ok((
+        &raw[..end],
+        u64::from_be_bytes(raw[end..].try_into().expect("validated width")),
+    ))
+}
+
 pub(super) fn parts(key: &[u8], kind: u8) -> VersionResult<(&[u8], DiskANNGeneration)> {
     let body = key
         .strip_prefix(ROOT)

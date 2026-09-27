@@ -23,6 +23,26 @@ pub(super) fn invalid() -> VersionError {
     VersionError::InvalidEncoding("native DiskANN population identity or payload mismatch")
 }
 
+pub(super) fn origin_header_prefix(
+    key: &[u8],
+    control: &StorageReadControl,
+) -> VersionResult<BudgetedVec<u8>> {
+    let mut field = BudgetedVec::new(control.memory());
+    let identity = Identity::visit_key_components(key, control, |position, value| {
+        match position {
+            0 => field.extend_from_slice(value.as_str().map_err(|_| invalid())?.as_bytes())?,
+            1 if value.as_i64().is_ok_and(|document| document >= 0) => {}
+            _ => return Err(invalid()),
+        }
+        Ok(())
+    })?;
+    if identity.family() != Family::VectorOrigins {
+        return Err(invalid());
+    }
+    Identity::new(Family::VectorPopulations, identity.owner())?
+        .encode_prefix(&[ValueRef::Text(&field)], control)
+}
+
 pub(super) fn bytes(value: ValueRef<'_>) -> VersionResult<&[u8]> {
     value.as_blob().map_err(|_| invalid())
 }
