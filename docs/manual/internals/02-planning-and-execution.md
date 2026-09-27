@@ -48,6 +48,8 @@ sequenceDiagram
 
 Retrieval function calls remain syntax expressions until the engine and planner can resolve table fields, indexes, parameters, and execution capabilities.
 
+Index declaration binding and option diagnostics belong to `uqa-sql`. Expression names/types are bound before method checks; predicate immutability precedes options, and key immutability/column validation follows options. `uqa-execution/src/schema/indexes/creation.rs` then validates partition/vector declarations before handling an occupied name. Row enumeration, uniqueness checks over existing data, physical index availability and construction run only for an actual new index. Engine supplies the original catalog, authorization and transaction adapters. This ordering lets a valid `IF NOT EXISTS` preserve physical state while retaining definition errors.
+
 ## UnifiedPlan
 
 The plan owns read queries and physical command bodies. Relational query blocks cover CTEs, set operations, joins, values and function sources, subqueries, filters, scalar projection, aggregation, windows, ordering, distinctness, offset, and limit. Mutation plans own sources, scalar assignments, conflict behavior, conditions, CTEs, and `RETURNING` expressions.

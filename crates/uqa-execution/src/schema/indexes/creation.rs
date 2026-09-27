@@ -11,7 +11,7 @@ use uqa_sql::{
     schema::indexes::{
         keys::require_column_key,
         names::{allocate_default_index_name, IndexNameCatalog},
-        vectors::{resolve_vector_index_target, VectorIndexCatalog},
+        vectors::{resolve_vector_index_columns, resolve_vector_index_target, VectorIndexCatalog},
     },
     schema::SchemaExpressionCatalog,
     semantics::conflict::InferenceBindingScope,
@@ -75,7 +75,6 @@ pub fn run_create_index(
         .ok_or_else(|| SQLError::UnknownTable(c.table.clone()))?;
     context.namespace.ensure_table_owner(&c.table)?;
     context.creation.ensure_existing_create(&c.table)?;
-    let am = uqa_sql::schema::indexes::options::index_access_method(&c)?;
 
     let table_relation = uqa_core::RelationIdentity::from_legacy_name(&c.table)
         .map_err(|error| SQLError::Internal(format!("resolve index table: {error}")))?;
@@ -85,6 +84,26 @@ pub fn run_create_index(
         allocate_default_index_name(context.names, &table_relation, &c.columns)?
     };
     let relation = uqa_core::RelationIdentity::new(&table_relation.schema, &name);
+    let definition = uqa_sql::schema::indexes::keys::prepare_index_definition(
+        context.schema,
+        context.bindings,
+        &mut c,
+    )?;
+    let am = uqa_sql::schema::indexes::options::index_access_method(&c)?;
+    super::validate_index_declaration(context.unique.catalog, &c)?;
+    match am.as_str() {
+        "diskann" => super::diskann::prepare(context.vectors, &mut c)?,
+        "ivf" | "hnsw" => {
+            vector_index_spec(&am, &c.options)?;
+            resolve_vector_index_columns(context.vectors, &c, &am)?;
+        }
+        "gin" => {
+            for key in &c.columns {
+                require_column_key(key, &am)?;
+            }
+        }
+        _ => {}
+    }
     if context
         .namespace
         .relation_exists(&relation.qualified_name())?
@@ -102,15 +121,9 @@ pub fn run_create_index(
         });
     }
 
-    let definition = uqa_sql::schema::indexes::keys::prepare_index_definition(
-        context.schema,
-        context.bindings,
-        &mut c,
-    )?;
-    super::validate_index_keys(&context.unique, &c, &name, &definition.key_types)?;
-
+    super::validate_index_rows(&context.unique, &c, &name, &definition.key_types)?;
     if am == "diskann" {
-        super::diskann::prepare(context.vectors, &mut c)?;
+        resolve_vector_index_target(context.vectors, &c, &am)?;
     }
 
     context.creation.reserve_name(&relation.qualified_name())?;
