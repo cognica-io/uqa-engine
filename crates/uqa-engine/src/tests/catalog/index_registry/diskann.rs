@@ -7,6 +7,7 @@
 use super::{sessions, sql, Arc, Engine, Value};
 
 mod consumers;
+mod definitions;
 mod isolation;
 mod maintenance;
 mod metadata;

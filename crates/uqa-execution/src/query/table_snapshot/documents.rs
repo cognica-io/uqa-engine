@@ -30,6 +30,7 @@ struct State {
     private_layout: RowLayout,
     changes: DocumentChanges,
     count: usize,
+    all_rows_changed: bool,
     control: StorageReadControl,
 }
 
@@ -75,9 +76,15 @@ impl RetainedDocuments {
     ) -> StorageBackendResult<Self> {
         control.check()?;
         let mut count = source.len()?;
+        let mut unselected = count;
         for (id, replacement) in changes.changes() {
             control.check()?;
             let present = source.contains_doc_id(id)?;
+            if present {
+                unselected = unselected.checked_sub(1).ok_or_else(|| {
+                    StorageBackendError::Other("query base document count underflow".into())
+                })?;
+            }
             count = match (present, replacement) {
                 (true, false) => count.checked_sub(1),
                 (false, true) => count.checked_add(1),
@@ -92,11 +99,26 @@ impl RetainedDocuments {
             private_layout,
             changes,
             count,
+            all_rows_changed: unselected == 0,
             control: control.clone(),
         };
         Ok(Self(
             Budgeted::new(state, control.memory().empty_reservation()).into_shared()?,
         ))
+    }
+
+    pub(super) fn vector_sources<'a>(
+        &'a self,
+        indexes: &'a dyn super::VectorDimensions,
+        columns: &'a [uqa_sql::ast::ColumnDef],
+    ) -> super::VectorSources<'a> {
+        super::VectorSources {
+            indexes,
+            columns,
+            layout: &self.0.layout,
+            changes: &self.0.changes,
+            all_rows_changed: self.0.all_rows_changed,
+        }
     }
 
     fn visit_ids(

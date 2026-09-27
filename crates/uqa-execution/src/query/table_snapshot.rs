@@ -63,7 +63,7 @@ pub fn retain(
     retain_with_vector_indexes(source, source_columns, schema, changes, None, control)
 }
 
-/// Retain compatible physical indexes from the fixed source while applying the actual canonical sources captured with evaluated private rows. Other methods and changed column types retain the existing reconstruction path.
+/// Retain compatible physical indexes from the fixed source, or the selected new definition when every base row has an evaluated replacement or deletion. Canonical sources stay with their evaluated rows; unsupported selections retain the existing reconstruction path.
 pub fn retain_with_vector_indexes(
     source: Arc<dyn DocumentStore>,
     source_columns: &[ColumnDef],
@@ -77,13 +77,6 @@ pub fn retain_with_vector_indexes(
     let columns = RetainedColumns::capture(&schema.columns, control.memory(), cancellation)?;
     let layout = RowLayout::new(source_columns, columns.clone(), control)
         .map_err(|error| snapshot_error("base row layout", &error))?;
-    let sources = base_vectors.map(|indexes| VectorSources {
-        indexes,
-        columns: source_columns,
-        layout: &layout,
-        changes: &changes,
-    });
-    let mut result = SnapshotBuilder::with_vector_sources(schema, sources.as_ref(), control)?;
     let documents = documents::RetainedDocuments::new(
         source,
         layout,
@@ -93,6 +86,8 @@ pub fn retain_with_vector_indexes(
         control,
     )
     .map_err(|error| snapshot_error("retained documents", &error))?;
+    let sources = base_vectors.map(|indexes| documents.vector_sources(indexes, source_columns));
+    let mut result = SnapshotBuilder::with_vector_sources(schema, sources.as_ref(), control)?;
     let document_count = u64::try_from(
         documents
             .len()

@@ -159,6 +159,81 @@ fn diskann_private_selection_rejects_unrelated_lineages_and_unordered_identities
 }
 
 #[test]
+fn diskann_complete_selection_masks_unselected_base_and_journal_documents() {
+    let control = StorageReadControl::with_limit(1 << 20);
+    let mut index = new(&control);
+    for id in [1, 2, 3, DocId::MAX] {
+        index.add(id, vec![1.0, 0.0]).unwrap();
+    }
+    index.initialize().unwrap();
+    index.add(1, vec![-1.0, 0.0]).unwrap();
+    index
+        .add_many(4, vec![vec![0.0, 1.0], vec![1.0, 0.0]])
+        .unwrap();
+    let source = index.diskann_read_snapshot(&control).unwrap().unwrap();
+    let changes = DiskANNReadChanges::capture(
+        [
+            Ok((1, Some(source.clone()))),
+            Ok((3, None)),
+            Ok((4, Some(source))),
+        ],
+        &control,
+    )
+    .unwrap()
+    .without_unselected_documents();
+    index.add(1, vec![0.0, 1.0]).unwrap();
+    index.add(5, vec![1.0, 0.0]).unwrap();
+    index.initialize().unwrap();
+    index.add(6, vec![1.0, 0.0]).unwrap();
+    let projected = index
+        .snapshot_with_diskann_changes(&changes, &control)
+        .unwrap()
+        .unwrap();
+    assert_eq!(projected.index_kind(), "diskann");
+    assert_eq!(scores(&*projected), [(1, -1.0), (4, 1.0)]);
+    assert_eq!(projected.count().unwrap(), 3);
+    for id in [2, 3, 5, 6, DocId::MAX] {
+        assert!(!projected.contains_document(id).unwrap());
+    }
+    assert_eq!(
+        projected
+            .search_threshold(&[1.0, 0.0], 0.0)
+            .unwrap()
+            .doc_ids()
+            .collect::<Vec<_>>(),
+        [4]
+    );
+    let newer = selection(&index, &[2], &control);
+    let nested = projected
+        .snapshot_with_diskann_changes(&newer, &control)
+        .unwrap()
+        .unwrap();
+    assert_eq!(scores(&*nested), [(1, -1.0), (2, 1.0), (4, 1.0)]);
+    let empty_changes = DiskANNReadChanges::capture([], &control)
+        .unwrap()
+        .without_unselected_documents();
+    let empty = index
+        .snapshot_with_diskann_changes(&empty_changes, &control)
+        .unwrap()
+        .unwrap();
+    assert!(scores(&*empty).is_empty());
+    assert_eq!(empty.count().unwrap(), 0);
+    let retained = projected.snapshot().unwrap();
+    drop((
+        index,
+        projected,
+        changes,
+        newer,
+        nested,
+        empty,
+        empty_changes,
+    ));
+    assert_eq!(scores(&*retained), [(1, -1.0), (4, 1.0)]);
+    drop(retained);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn diskann_private_selection_reserves_original_allowances_and_releases_failures() {
     let control = StorageReadControl::with_limit(1 << 20);
     let mut base = new(&control);

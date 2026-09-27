@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Compatible physical vector copies retain evaluated private canonical sources by column incarnation.
+//! Physical vector copies retain evaluated canonical sources by column incarnation and complete row selection.
 
 use super::{snapshot_error, DocumentChanges, RowLayout, SnapshotSchema, VectorDimensions};
 use std::sync::Arc;
@@ -23,6 +23,7 @@ pub(super) struct VectorSources<'a> {
     pub columns: &'a [ColumnDef],
     pub layout: &'a RowLayout,
     pub changes: &'a DocumentChanges,
+    pub all_rows_changed: bool,
 }
 
 impl VectorSources<'_> {
@@ -34,6 +35,21 @@ impl VectorSources<'_> {
         control: &StorageReadControl,
     ) -> Result<Option<Arc<dyn VectorIndex>>, SQLError> {
         let column = schema.columns.iter().find(|column| column.name == field);
+        if self.all_rows_changed {
+            let retained = (|| {
+                let Some(selected) = schema.vector_dimensions.index(field) else {
+                    return Ok(None);
+                };
+                let Some(changes) = self.changes.diskann_read_changes(field, column, control)?
+                else {
+                    return Ok(None);
+                };
+                selected
+                    .snapshot_with_diskann_changes(&changes.without_unselected_documents(), control)
+            })();
+            return retained
+                .map_err(|error| snapshot_error("complete physical vector selection", &error));
+        }
         let Some(source_field) = self
             .layout
             .source_name(field)

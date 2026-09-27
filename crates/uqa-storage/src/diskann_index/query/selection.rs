@@ -28,6 +28,7 @@ type SelectedSources = Arc<Budgeted<BudgetedVec<(DocId, Option<DiskANNReadSnapsh
 pub struct DiskANNReadChanges {
     sources: SelectedSources,
     control: StorageReadControl,
+    complete: bool,
 }
 
 impl DiskANNReadChanges {
@@ -59,7 +60,14 @@ impl DiskANNReadChanges {
         Ok(Self {
             sources,
             control: control.clone(),
+            complete: false,
         })
+    }
+
+    /// Select only these evaluated documents, masking every unselected document in the receiver. The caller must establish that this is the complete visible row selection; source lineage and width are still validated against the retained physical index.
+    pub fn without_unselected_documents(mut self) -> Self {
+        self.complete = true;
+        self
     }
 
     fn source(&self, document: DocId) -> Option<&Option<DiskANNReadSnapshot>> {
@@ -109,9 +117,10 @@ impl SelectedCanonical {
     }
 
     fn source(&self, document: DocId) -> Option<&DiskANNReadSnapshot> {
-        self.changes
-            .source(document)
-            .map_or(Some(&self.base), Option::as_ref)
+        self.changes.source(document).map_or_else(
+            || (!self.changes.complete).then_some(&self.base),
+            Option::as_ref,
+        )
     }
 }
 
@@ -132,7 +141,11 @@ impl DiskANNCanonicalRead for SelectedCanonical {
     ) -> StorageBackendResult<Option<DocId>> {
         loop {
             self.check_control(control)?;
-            let base = self.base.next_document_after(after, control)?;
+            let base = if self.changes.complete {
+                None
+            } else {
+                self.base.next_document_after(after, control)?
+            };
             let selected = self.changes.next(after);
             let Some(document) = first(base, selected) else {
                 return Ok(None);
@@ -195,7 +208,11 @@ impl DiskANNQueryRead for SelectedCanonical {
     ) -> StorageBackendResult<Option<DiskANNChangeIdentity>> {
         loop {
             self.check_control(control)?;
-            let base = self.base.next_change_after(after, control)?;
+            let base = if self.changes.complete {
+                None
+            } else {
+                self.base.next_change_after(after, control)?
+            };
             let selected = self.changes.next(after);
             let Some(document) = first(base.map(DiskANNChangeIdentity::document), selected) else {
                 return Ok(None);
