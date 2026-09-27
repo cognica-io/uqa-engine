@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::DiskANNQueryMetadata;
+use super::{DiskANNCanonicalCounts, DiskANNQueryMetadata};
 use crate::diskann_index::{
     format::PAGE_BYTES,
     metric::{exact_reason, norms},
@@ -90,8 +90,12 @@ impl DiskANNQueryMetadata {
                 base_vectors: input.coverage.vector_count(),
                 graph_nodes: input.nodes,
                 side_vectors: input.side_vectors,
-                current_vectors: None,
-                changed_vectors: None,
+                current_vectors: self
+                    .canonical_counts
+                    .map(DiskANNCanonicalCounts::current_vectors),
+                changed_vectors: self
+                    .canonical_counts
+                    .map(DiskANNCanonicalCounts::changed_vectors),
             },
             reads: VectorReadStats {
                 resident_bytes: self.read_limits.resident_bytes,

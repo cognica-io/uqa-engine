@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Maintain exact current and changed DiskANN vector counts on immutable memory roots, including complete tensor replacements, retained readers, independent forks and rebuilds. Planning and EXPLAIN read these counts without enumerating the corpus or change journal; unavailable provider statistics remain unknown.
 - Show retained DiskANN field/generation settings and physical work estimates in TEXT and JSON EXPLAIN, including logical page work, provider dispatch, PQ, exact numeric routes and tensor reranking. Static diagnostics leave dynamic arguments unevaluated; ANALYZE keeps one actual execution. Unknown selected-view current/change populations remain explicit, and the displayed work is estimated rather than measured I/O.
 
 ### Changed

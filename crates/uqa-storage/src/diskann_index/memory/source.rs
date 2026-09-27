@@ -11,8 +11,10 @@ use uqa_core::{
 };
 
 use crate::diskann_index::{
-    format::{DiskANNCanonicalOrigin, DiskANNChangeIdentity, DiskANNVectorVersion},
-    DiskANNCanonicalRead, DiskANNCanonicalVectorVisitor, DiskANNQueryRead,
+    format::{
+        DiskANNCanonicalOrigin, DiskANNChangeIdentity, DiskANNGeneration, DiskANNVectorVersion,
+    },
+    DiskANNCanonicalCounts, DiskANNCanonicalRead, DiskANNCanonicalVectorVisitor, DiskANNQueryRead,
 };
 use crate::{
     read_control::StorageReadControl, vector_index::validate_vector_values_controlled,
@@ -29,6 +31,8 @@ pub(super) struct Tensor {
 pub(super) struct Canonical {
     documents: BudgetedSharedMap<DocId, Tensor>,
     changes: BudgetedSharedMap<DocId, DiskANNVectorVersion>,
+    counts: DiskANNCanonicalCounts,
+    covered_generation: Option<DiskANNGeneration>,
     dimensions: u32,
     control: StorageReadControl,
     revision: Option<DiskANNVectorVersion>,
@@ -39,6 +43,8 @@ impl Canonical {
         Self {
             documents: BudgetedSharedMap::new(control.memory()),
             changes: BudgetedSharedMap::new(control.memory()),
+            counts: DiskANNCanonicalCounts::default(),
+            covered_generation: None,
             dimensions,
             control: control.clone(),
             revision: None,
@@ -55,6 +61,13 @@ impl Canonical {
         self.control.check()?;
         let count = u64::try_from(values.len()).map_err(|_| MemoryError::SizeOverflow)?;
         let origin = DiskANNCanonicalOrigin::new(version, self.dimensions, count)?;
+        let counts = self.counts.replaced(
+            self.documents
+                .get(&document)
+                .map_or(0, |tensor| tensor.origin.count()),
+            self.changes.get(&document).is_some(),
+            count,
+        )?;
         let mut bytes = values
             .capacity()
             .checked_mul(size_of::<Vec<f32>>())
@@ -81,19 +94,32 @@ impl Canonical {
         Ok(Self {
             documents,
             changes,
+            counts,
+            covered_generation: self.covered_generation,
             dimensions: self.dimensions,
             control: self.control.clone(),
             revision: Some(version),
         })
     }
 
-    pub(super) fn covered(mut self) -> Self {
+    pub(super) fn covered(mut self, generation: DiskANNGeneration) -> Self {
         self.changes = BudgetedSharedMap::new(self.control.memory());
+        self.counts = self.counts.covered();
+        self.covered_generation = Some(generation);
         self
     }
 }
 
 impl DiskANNCanonicalRead for Canonical {
+    fn population_counts(
+        &self,
+        generation: DiskANNGeneration,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DiskANNCanonicalCounts>> {
+        self.check_control(control)?;
+        Ok((self.covered_generation == Some(generation)).then_some(self.counts))
+    }
+
     fn corpus_fingerprint(
         &self,
         control: &StorageReadControl,

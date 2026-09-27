@@ -4,12 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Calibration metadata describes the actual retained physical and canonical selection.
+//! Metadata describes the actual retained physical and canonical selection.
 
 use super::{
     format::DiskANNManifest,
     pages::{read_manifest, DiskANNPageSource, DiskANNReadCapabilities, DiskANNReadLimits},
-    DiskANNCanonicalRead,
+    DiskANNCanonicalCounts, DiskANNCanonicalRead,
 };
 use crate::{
     read_control::StorageReadControl, vector_index::DiskANNIndexParams, StorageBackendResult,
@@ -23,12 +23,14 @@ pub struct DiskANNQueryMetadata {
     pub manifest: DiskANNManifest,
     /// None is an unverifiable canonical selection, never permission to trust a caller's version label.
     pub corpus_fingerprint: Option<[u8; 32]>,
+    /// Exact selected-view populations when maintained by the canonical owner; absence is not a measured zero.
+    pub canonical_counts: Option<DiskANNCanonicalCounts>,
     pub read_limits: DiskANNReadLimits,
     pub read_capabilities: DiskANNReadCapabilities,
 }
 
 impl DiskANNQueryMetadata {
-    /// Read only the bounded manifest and canonical identity from an already associated provider view. This validates the selected definition, not graph/PQ/origin bodies; opening an executable reader retains its complete validation. No vector query or logical observation is performed.
+    /// Read the bounded manifest, canonical identity and maintained counts from an already associated provider view. This validates the selected definition, not graph/PQ/origin bodies; opening an executable reader retains its complete validation. No vector query or logical observation is performed.
     pub fn capture(
         canonical: &dyn DiskANNCanonicalRead,
         source: &dyn DiskANNPageSource,
@@ -45,10 +47,12 @@ impl DiskANNQueryMetadata {
             control,
         )?;
         let corpus_fingerprint = canonical.corpus_fingerprint(control)?;
+        let canonical_counts = canonical.population_counts(manifest.input().generation, control)?;
         canonical.check_control(control)?;
         Ok(Self {
             manifest,
             corpus_fingerprint,
+            canonical_counts,
             read_limits: limits,
             read_capabilities: source.capabilities(),
         })

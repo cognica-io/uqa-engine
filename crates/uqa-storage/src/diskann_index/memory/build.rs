@@ -37,7 +37,7 @@ pub(super) fn prepare(
     drop(capture.finish(&manifest, control)?);
     // Clear only the candidate's changes after complete construction and sealing. A failure before replacement leaves the live root and every earlier reader intact.
     RetainedDiskANNIndex::open(
-        source.covered(),
+        source.covered(generation),
         Arc::new(physical),
         options.parameters,
         options.read,

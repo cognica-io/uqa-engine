@@ -10,7 +10,7 @@ use crate::diskann_index::{
     format::{
         DiskANNCanonicalOrigin, DiskANNChangeIdentity, DiskANNGeneration, DiskANNVectorVersion,
     },
-    DiskANNCanonicalRead, DiskANNCanonicalVectorVisitor, DiskANNQueryRead,
+    DiskANNCanonicalCounts, DiskANNCanonicalRead, DiskANNCanonicalVectorVisitor, DiskANNQueryRead,
 };
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 use std::sync::Arc;
@@ -90,6 +90,16 @@ impl DiskANNReadSnapshot {
 }
 
 impl DiskANNCanonicalRead for DiskANNReadSnapshot {
+    fn population_counts(
+        &self,
+        generation: DiskANNGeneration,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DiskANNCanonicalCounts>> {
+        self.read(control, || {
+            self.canonical.population_counts(generation, control)
+        })
+    }
+
     fn corpus_fingerprint(
         &self,
         control: &StorageReadControl,
