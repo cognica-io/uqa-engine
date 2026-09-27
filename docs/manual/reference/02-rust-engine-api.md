@@ -240,6 +240,33 @@ SQL and typed operations use the same durable state and indexes. Applications ca
 
 Direct document insertion, replacement, field updates and deletion register changed persistent row identities with the active SERIALIZABLE transaction, independently of text, value or vector index changes. Field updates, patches and deletion observe their selected persistent row before fetching it, including an absent row. An absent target registers a point read without registering a row write, so it participates in serialization conflicts even when no document changes. Statement and savepoint rollback discard write intents together with the private changes; read observations and dependencies already established with other transactions remain. Whole-transaction rollback releases that transaction's read observations too.
 
+## Fixed-model DiskANN calibration
+
+`Engine::diskann_calibration_target(table, field, embedding_model_id, embedding_model_version, candidate_k)` returns a `uqa_scoring::VectorCalibrationTarget` for the actual selected DiskANN index. Table and field are direct-API names; the two embedding identifiers must be nonempty and remain the application's identity contract. `candidate_k` must be positive. The target includes resolved table/field names, dimensions, index kind, requested document count and opaque corpus/index versions verified by Storage.
+
+Use that target when fitting a reusable model, then pass the same model and target to `calibrated_vector_search_with_model`. Execution retains one index snapshot, checks its actual canonical view and physical generation, and searches that same snapshot. Changed vector data, private writes, recreation, rebuilds and changed search settings invalidate an incompatible target. Unrelated table or model-catalog writes do not change the vector version. Rollback and retained readers use their selected earlier versions. Unknown metadata and mismatches are errors; they never trigger model refitting or select SQL's query-pool estimator.
+
+The following assumes `docs.embedding` already has a two-dimensional DiskANN index. Its transform is a numerical fixture; applications supply independently fitted parameters and the corresponding fit sample count.
+
+```rust
+use uqa_scoring::{VectorCalibrationModel, VectorCalibrationProvenance, VectorProbabilityTransform};
+
+let target = engine.diskann_calibration_target("docs", "embedding", "fixture", "1", 3)?;
+let model = VectorCalibrationModel::new(
+    VectorProbabilityTransform::new(0.0, 1.0, 1.0, 0.5)?,
+    VectorCalibrationProvenance {
+        model_version: "fixed-fixture".into(),
+        target: target.clone(),
+        fit_sample_count: 100,
+    },
+)?;
+let rows = engine.calibrated_vector_search_with_model(
+    "docs", "embedding", [1.0, 0.0], &model, &target,
+)?;
+```
+
+The target lookup enters the ordinary direct-table read transaction and retains its relation lock, but does not execute KNN or register a serializable vector predicate. The actual model search retains normal vector read observations. Private target versions belong to the original view/process, and restored storage history can invalidate a previous target. Other index methods retain their existing caller-controlled version contract. Saving a model does not automatically apply it to `calibrated_vector_match` or hybrid SQL. See the [identity and preservation argument](../../design/diskann-calibration-identity.md).
+
 ## Analyzer APIs
 
 Persistent custom analyzers are managed with `register_named_analyzer`, `list_named_analyzers`, `set_table_field_analyzer`, `table_field_analyzer`, `get_table_analyzer`, and `drop_named_analyzer`. Compatibility aliases use the shorter create, set, and drop names. An index-time or both-phase assignment rebuilds current postings; a search-only assignment changes query analysis without a rebuild.

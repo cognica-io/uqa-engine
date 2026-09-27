@@ -86,7 +86,7 @@ IVF and HNSW have separate catalog identities, persistence, construction, and mu
 
 ## Vector calibration
 
-Model-based vector calibration records schema and model versions plus corpus, index, embedding model, dimensions, and candidate-K provenance. Execution validates provenance before applying a fixed transform.
+Model-based vector calibration records schema and model versions plus corpus, index, embedding model, dimensions, and candidate-K provenance. Execution validates provenance before applying a fixed transform. For DiskANN, Storage exposes the selected manifest and canonical field fingerprint, including committed and private marker inputs; Execution compares those actual versions with the model target. Engine retains one physical/canonical snapshot for both validation and KNN, and Scoring applies the fixed transform to its raw cosine postings. See the [identity contract and proof](../../design/diskann-calibration-identity.md) and [Rust API](../reference/02-rust-engine-api.md#fixed-model-diskann-calibration).
 
 The compatibility pool transform is explicitly query-local and unsupervised. It must not be reported as an identified probability model.
 

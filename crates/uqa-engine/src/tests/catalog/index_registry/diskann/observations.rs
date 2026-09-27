@@ -95,7 +95,7 @@ fn diskann_sql_serializable_snapshot_preserves_invocation_controls() {
 #[test]
 fn diskann_sql_serializable_reads_cover_nonreturned_candidates_but_not_zero_k_or_explain() {
     for provider in 0..3 {
-        for mode in ["zero", "explain", "search"] {
+        for mode in ["zero", "explain", "calibration_metadata", "search"] {
             let (_directory, first, second) = sessions(provider);
             sql(&first, "CREATE TABLE diskann_docs(id int PRIMARY KEY, embedding vector(2)); INSERT INTO diskann_docs VALUES(1,ARRAY[0.0,1.0]),(2,ARRAY[-1.0,0.0]); CREATE INDEX diskann_idx ON diskann_docs USING diskann(embedding)");
             sql(&first, "BEGIN ISOLATION LEVEL SERIALIZABLE");
@@ -107,6 +107,10 @@ fn diskann_sql_serializable_reads_cover_nonreturned_candidates_but_not_zero_k_or
                     .is_empty());
             } else if mode == "explain" {
                 sql(&first, "EXPLAIN SELECT id FROM diskann_docs WHERE knn_match(embedding,ARRAY[1.0,0.0],1)");
+            } else if mode == "calibration_metadata" {
+                first
+                    .diskann_calibration_target("diskann_docs", "embedding", "fixture", "1", 1)
+                    .unwrap();
             } else {
                 let found = sql(
                     &first,
