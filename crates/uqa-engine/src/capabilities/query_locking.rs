@@ -45,7 +45,7 @@ impl LockingCatalog for Engine {
         table: &str,
         descendants: bool,
     ) -> Result<Vec<String>, SQLError> {
-        Engine::hierarchy_scan_tables(self, table, descendants)
+        Engine::query_hierarchy_scan_tables(self, table, descendants)
     }
     fn resolve_relation(
         &self,

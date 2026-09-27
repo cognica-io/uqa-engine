@@ -33,7 +33,7 @@ impl PhysicalRetrievalDriver<'_> {
         let Some(table_state) = self
             .context
             .indexes
-            .table_indexes(self.table)
+            .query_table_indexes(self.table)
             .map_err(|error| operator_execution_error("resolve attention table", error))?
         else {
             return Err(SQLError::UnknownTable(self.table.to_string()));
@@ -92,76 +92,13 @@ impl PhysicalRetrievalDriver<'_> {
         field: &str,
         query_vector: &[f32],
     ) -> DriverResult<()> {
-        if !self
-            .context
-            .relations
-            .has_table(self.table)
-            .map_err(|error| operator_execution_error("resolve vector table", error))?
-        {
-            return Err(SQLError::UnknownTable(self.table.to_string()));
-        }
-        let declared_type = self
-            .context
-            .relations
-            .column_type(self.table, field)
-            .map_err(|error| operator_execution_error("resolve vector column", error))?;
-        if let Some(column_type) = declared_type.as_ref() {
-            if !matches!(column_type, ColumnType::Vector(_) | ColumnType::Tensor(_)) {
-                return Err(SQLError::TypeMismatch(format!(
-                    "vector search requires a VECTOR or TENSOR field, but {field:?} is {column_type:?}"
-                )));
-            }
-        }
         let table = self
             .context
             .indexes
-            .table_indexes(self.table)
+            .query_table_indexes(self.table)
             .map_err(|error| operator_execution_error("resolve vector table", error))?
             .ok_or_else(|| SQLError::UnknownTable(self.table.to_string()))?;
-        let indexes = table.vector_indexes();
-        let index = indexes
-            .get(field)
-            .ok_or_else(|| match declared_type.as_ref() {
-                Some(ColumnType::Vector(_) | ColumnType::Tensor(_)) => SQLError::Unsupported(
-                    format!("vector field {field:?} has no physical vector index"),
-                ),
-                Some(column_type) => SQLError::Internal(format!(
-                    "non-vector field {field:?} with type {column_type:?} passed vector validation"
-                )),
-                None => SQLError::UnknownColumn(field.to_string()),
-            })?;
-        let indexed_dimensions = index.dimensions() as usize;
-        let expected_dimensions = match declared_type.as_ref() {
-            Some(ColumnType::Vector(dimensions) | ColumnType::Tensor(dimensions)) => {
-                *dimensions as usize
-            }
-            Some(column_type) => {
-                return Err(SQLError::Internal(format!(
-                    "non-vector field {field:?} with type {column_type:?} passed vector validation"
-                )))
-            }
-            // `create_default_table` is the intentionally schema-less
-            // embedded API. In that mode the registered vector index is
-            // the field's durable schema declaration.
-            None => indexed_dimensions,
-        };
-        if expected_dimensions != indexed_dimensions {
-            return Err(SQLError::Internal(format!(
-                "vector schema for {field:?} declares {expected_dimensions} dimensions but its index has {indexed_dimensions}"
-            )));
-        }
-        if query_vector.len() != expected_dimensions {
-            return Err(SQLError::TypeMismatch(format!(
-                "vector query for {field:?} has {} dimensions, expected {expected_dimensions}",
-                query_vector.len()
-            )));
-        }
-        if query_vector.iter().any(|value| !value.is_finite()) {
-            return Err(SQLError::TypeMismatch(format!(
-                "vector query for {field:?} must contain only finite values"
-            )));
-        }
-        Ok(())
+        validate_vector_query(table.as_ref(), field, query_vector)
     }
 
     pub(super) fn bridge_context(&self) -> DriverResult<uqa_operators::base::ExecutionContext> {
@@ -290,3 +227,67 @@ impl PhysicalRetrievalDriver<'_> {
         Ok(PostingList::from_sorted_unchecked(entries))
     }
 }
+
+fn validate_vector_query(
+    table: &dyn super::context::RetrievalIndexState,
+    field: &str,
+    query_vector: &[f32],
+) -> DriverResult<()> {
+    let columns = table.columns();
+    let declared_type = columns
+        .iter()
+        .find(|column| column.name == field)
+        .map(|column| &column.ty);
+    if let Some(column_type) = declared_type {
+        if !matches!(column_type, ColumnType::Vector(_) | ColumnType::Tensor(_)) {
+            return Err(SQLError::TypeMismatch(format!(
+                "vector search requires a VECTOR or TENSOR field, but {field:?} is {column_type:?}"
+            )));
+        }
+    }
+    let indexes = table.vector_indexes();
+    let index = indexes.get(field).ok_or_else(|| match declared_type {
+        Some(ColumnType::Vector(_) | ColumnType::Tensor(_)) => SQLError::Unsupported(format!(
+            "vector field {field:?} has no physical vector index"
+        )),
+        Some(column_type) => SQLError::Internal(format!(
+            "non-vector field {field:?} with type {column_type:?} passed vector validation"
+        )),
+        None => SQLError::UnknownColumn(field.to_string()),
+    })?;
+    let indexed_dimensions = index.dimensions() as usize;
+    let expected_dimensions = match declared_type {
+        Some(ColumnType::Vector(dimensions) | ColumnType::Tensor(dimensions)) => {
+            *dimensions as usize
+        }
+        Some(column_type) => {
+            return Err(SQLError::Internal(format!(
+                "non-vector field {field:?} with type {column_type:?} passed vector validation"
+            )))
+        }
+        // `create_default_table` is the intentionally schema-less
+        // embedded API. In that mode the registered vector index is
+        // the field's durable schema declaration.
+        None => indexed_dimensions,
+    };
+    if expected_dimensions != indexed_dimensions {
+        return Err(SQLError::Internal(format!(
+            "vector schema for {field:?} declares {expected_dimensions} dimensions but its index has {indexed_dimensions}"
+        )));
+    }
+    if query_vector.len() != expected_dimensions {
+        return Err(SQLError::TypeMismatch(format!(
+            "vector query for {field:?} has {} dimensions, expected {expected_dimensions}",
+            query_vector.len()
+        )));
+    }
+    if query_vector.iter().any(|value| !value.is_finite()) {
+        return Err(SQLError::TypeMismatch(format!(
+            "vector query for {field:?} must contain only finite values"
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests;

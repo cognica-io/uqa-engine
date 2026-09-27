@@ -193,7 +193,7 @@ impl Engine {
             .collect())
     }
 
-    /// Return the canonical relation followed by each direct ancestor in breadth-first declaration order. Physical row identity stays attached to the relation that stores the row; this list is only for discovering constraints declared against a logical ancestor.
+    /// Return the current mutation relation followed by each direct ancestor in breadth-first declaration order. Statistics invalidation and referential actions use live hierarchy metadata without resolving a retained query view or reading column definitions. Physical row identity stays attached to the relation that stores the row.
     pub(crate) fn hierarchy_ancestor_tables(&self, table: &str) -> Result<Vec<String>, SQLError> {
         let table = self
             .try_resolve_table_name(table)
@@ -206,9 +206,15 @@ impl Engine {
             if !visited.insert(candidate.clone()) {
                 continue;
             }
-            let hierarchy = self
-                .try_table_hierarchy(&candidate)
-                .map_err(|error| SQLError::Internal(format!("read table hierarchy: {error}")))?;
+            let state = self
+                .try_table(&candidate)
+                .map_err(|error| SQLError::Internal(format!("read table hierarchy: {error}")))?
+                .ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "read table hierarchy: table `{candidate}` does not exist"
+                    ))
+                })?;
+            let hierarchy = state.hierarchy.read().clone();
             output.push(candidate);
             pending.extend(hierarchy.parents);
         }
