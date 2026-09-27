@@ -165,6 +165,10 @@ jobs:
           for name in unified-search vector-knn graph-cypher storage-transactions extensibility; do
             node "examples/browser/${name}.mjs"
           done
+      - name: Verify browser examples and DiskANN page reload
+        run: |
+          python3 scripts/tests/test_examples_browser.py
+          python3 scripts/verify-examples-browser.py --output output/playwright/examples-enabled/report.json
       - name: Build and test the WASM package without morphology dictionaries
         run: |
           set -euo pipefail
@@ -182,6 +186,8 @@ jobs:
           for language in nori kuromoji; do
             python3 scripts/verify-morphology-browser.py --language "$language" --feature disabled --bundle target/morphology-binding-disabled/wasm/index.mjs --output "output/playwright/${language}-disabled/report.json"
           done
+      - name: Verify browser examples without morphology dictionaries
+        run: python3 scripts/verify-examples-browser.py --bundle target/morphology-binding-disabled/wasm/index.mjs --output output/playwright/examples-disabled/report.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -191,3 +197,5 @@ jobs:
             output/playwright/nori-disabled/report.json
             output/playwright/kuromoji-enabled/report.json
             output/playwright/kuromoji-disabled/report.json
+            output/playwright/examples-enabled/report.json
+            output/playwright/examples-disabled/report.json
