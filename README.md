@@ -33,7 +33,7 @@ The release also corrects PostgreSQL numeric and JSONB ordering, TIME/TIMETZ com
 
 Opening a supported older database upgrades its persistent formats; earlier binaries cannot reopen the upgraded database. Keep a pre-upgrade backup made with all database owners closed, update processes sharing a database together, and read the [MVCC upgrade requirements](docs/manual/reference/10-upgrading.md#040-mvcc-writer-compatibility), [backup restoration contract](docs/manual/reference/04-storage-and-security.md#backups-and-copies), and [0.4.0 release history](HISTORY.md#040---2026-09-25) before upgrading. Rust users must update their dependency requirements from `0.3` to `0.4` and apply the documented API changes.
 
-Current development sources also support native DiskANN through memory, native SQLite, SQLite Key/Value and redb. It is unreleased; see the [SQL configuration and score contract](docs/manual/sql/02-ddl.md#diskann-vector-indexes), [matching Rust, Python, Node.js and browser examples](examples/README.md), and [remaining acceptance gates](docs/plans/0014-diskann-vector-index.md#dependency-order-and-progress-ledger).
+Current development sources also support native DiskANN through memory, native SQLite, SQLite Key/Value and redb. It is unreleased; see the [SQL configuration and score contract](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/sql/02-ddl.md#diskann-vector-indexes), [matching Rust, Python, Node.js and browser examples](https://github.com/cognica-io/uqa-engine/blob/main/examples/README.md), and [remaining acceptance gates](https://github.com/cognica-io/uqa-engine/blob/main/docs/plans/0014-diskann-vector-index.md#dependency-order-and-progress-ledger).
 
 ## Mathematical foundation
 
@@ -326,7 +326,7 @@ Contributor checks, benchmark build gates, and repository conventions are docume
 | [Runnable examples](examples/README.md) | Comparing the same search, vector, graph, storage, and extension scenarios across Rust, Python, Node.js, and Browser WASM |
 | [Design documentation index](docs/design/README.md) | Finding the right technical contract or architecture document |
 | [System architecture](docs/design/architecture.md) | Crate boundaries, query planning, carriers, execution, storage, and extension points |
-| [Vector indexes](docs/design/vector-indexes.md) | Brute-force, IVF, HNSW and development DiskANN behavior, parameters, persistence and correctness contracts |
+| [Vector indexes](https://github.com/cognica-io/uqa-engine/blob/main/docs/design/vector-indexes.md) | Brute-force, IVF, HNSW and development DiskANN behavior, parameters, persistence and correctness contracts |
 | [Vector-search benchmark](benchmarks/vector-search/README.md) | Reproducing vector latency, throughput, construction cost, recall, and accuracy reports |
 | [Engine state ownership](docs/design/engine-state-ownership.md) | Session isolation, locks, epochs, and publication rules |
 | [Concurrent storage transactions](https://github.com/cognica-io/uqa-engine/blob/main/docs/design/concurrent-storage-transactions.md) | Overlapping logical writes, snapshots, conflicts, atomic publication, and provider ownership |
