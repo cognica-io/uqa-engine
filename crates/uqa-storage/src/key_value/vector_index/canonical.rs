@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Raw vector handles retain the ordered provider view without loading its complete corpus.
+//! Raw vector handles retain ordered provider visibility independently of mutation origins.
 
 use super::{read_view, vector_field_prefix, KeyValueVectorIndex};
 use crate::{
