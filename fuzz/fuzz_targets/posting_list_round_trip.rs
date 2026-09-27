@@ -37,6 +37,8 @@ fuzz_target!(|seeds: Vec<EntrySeed>| {
         .collect();
     let pl = PostingList::from_unsorted(entries);
     let ids: Vec<u64> = pl.doc_ids().collect();
-    assert!(ids.windows(2).all(|w| w[0] < w[1]),
-        "from_unsorted produced unsorted or duplicate doc_ids: {ids:?}");
+    assert!(
+        ids.windows(2).all(|w| w[0] < w[1]),
+        "from_unsorted produced unsorted or duplicate doc_ids: {ids:?}"
+    );
 });
