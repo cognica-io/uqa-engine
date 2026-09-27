@@ -181,3 +181,9 @@ pub struct ExplainAnalysis {
     pub rows: u64,
     pub affected_rows: u64,
 }
+
+/// Structured physical-plan output captured before execution. Method-specific properties are rendered by the owning planner; execution only carries this diagnostic result to the renderer.
+#[derive(Debug, Clone, Default)]
+pub struct ExplainPhysicalPlan {
+    pub nodes: Vec<serde_json::Value>,
+}

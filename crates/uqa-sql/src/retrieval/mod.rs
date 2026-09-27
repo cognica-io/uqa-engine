@@ -9,6 +9,7 @@
 mod binding;
 mod calls;
 mod constants;
+mod description;
 mod fusion;
 mod graph;
 mod ir;
@@ -19,6 +20,7 @@ use crate::semantics::graph_functions::{
 };
 use crate::{ast::BinaryOp, SQLError, SQLParam, ScalarExpr};
 pub use binding::{lower_sql_function_bound, lower_where_bound};
+pub use description::{describe_vector_call, VectorCallDescription};
 pub use ir::{AttentionSpec, MultiStageEntry, RetrievalExpr, TextScoringMode};
 pub use joins::lower_operator_join_table_function;
 use std::collections::BTreeSet;
