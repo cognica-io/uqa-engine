@@ -1,10 +1,10 @@
 # Native DiskANN vector index
 
-Status: Implementation in progress, tracked in the [implementation plan](../plans/0014-diskann-vector-index.md). The original design baseline is main `ae51060754813b716bea1cd5438214dfde9c9830`, inspected on 2026-09-25. Configuration, numerical primitives and physical formats/readers are internal foundations; the complete DiskANN runtime and SQL access method are not enabled. Later API and SQL examples remain proposed contracts. This document specifies a direct Rust implementation and its integration; it contains algorithm definitions and validation criteria, not mathematical proofs or performance claims.
+Status: Implemented in the current unreleased development source through memory, native SQLite, SQLite Key/Value and redb, including SQL and Rust/Python/Node.js/WASM integration. The [implementation plan](../plans/0014-diskann-vector-index.md) records source-scoped acceptance evidence, and the [manual](../manual/sql/02-ddl.md#diskann-vector-indexes) defines the supported public configuration. This document describes the native algorithms and ownership contracts; its owner-specific links provide preservation proofs. No released package, general recall floor or measured speedup is inferred. The original design baseline is main `ae51060754813b716bea1cd5438214dfde9c9830`, inspected on 2026-09-25.
 
 Primary reference: Subramanya et al., [DiskANN: Fast Accurate Billion-point Nearest Neighbor Search on a Single Node, NeurIPS 2019](https://proceedings.neurips.cc/paper_files/paper/2019/file/09853c7fb1d3f8ee67a61b6bf4a7f8e6-Paper.pdf), especially Algorithms 1-3 and Section 3. The paper combines a Vamana graph with memory-resident product-quantized vectors, disk-resident full vectors and adjacency, batched frontier reads, and caching. Its overlapping build partitions are combined into a graph rather than independently searched at query time. The paper evaluates Euclidean distance; UQA's public vector score is cosine similarity. Its reported hardware results are not UQA acceptance thresholds.
 
-The [official project](https://github.com/microsoft/DiskANN) now includes newer algorithms and a Rust implementation. UQA will implement its own algorithms, just as it implements HNSW and IVF; it will not wrap that library, link its C++ implementation, or call it as a service. Legacy reference code is pinned to `78256bbab4685e1774e78d331e081a153be26823` for supplemental algorithm/codec checks. A newer implementation is not assumed to reproduce the 2019 paper exactly. Transactional updates, SQL integration, and the storage decisions below are UQA design choices.
+The [official project](https://github.com/microsoft/DiskANN) now includes newer algorithms and a Rust implementation. UQA implements its own algorithms, just as it implements HNSW and IVF; it does not wrap that library, link its C++ implementation, or call it as a service. Legacy reference code is pinned to `78256bbab4685e1774e78d331e081a153be26823` for supplemental algorithm/codec checks. A newer implementation is not assumed to reproduce the 2019 paper exactly. Transactional updates, SQL integration, and the storage decisions below are UQA design choices.
 
 ## Objective and boundaries
 
@@ -488,7 +488,7 @@ Full reports, raw traces, reference binaries, and temporary databases stay in ig
 
 ## Implementation units
 
-The [implementation plan](../plans/0014-diskann-vector-index.md) expands these contracts into ordered, owner-scoped work units with prerequisites, exit evidence, and a progress ledger. Its source-scoped evidence distinguishes implemented foundations from pending runtime delivery.
+The [implementation plan](../plans/0014-diskann-vector-index.md) expands these contracts into ordered, owner-scoped work units with prerequisites, exit evidence, and a progress ledger. Its source-scoped evidence identifies the implemented owners and verifies runtime delivery, bindings and integrated quality/resource boundaries.
 
 Implementation is split by the owning contracts below, with logical commits and small reviewed PRs. Internal prerequisites do not expose `USING diskann` until the required storage and public behavior work together.
 
