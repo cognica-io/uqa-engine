@@ -96,3 +96,22 @@ fn diskann_planning_preserves_retained_cancellation_sqlstate() {
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("57014"));
 }
+
+#[test]
+fn diskann_planning_preserves_vector_dimension_diagnostics() {
+    let engine = Engine::new();
+    sql(&engine, "CREATE TABLE diskann_docs(id int, embedding vector(2)); INSERT INTO diskann_docs VALUES(1,ARRAY[1.0,0.0])");
+    let query = "SELECT id FROM diskann_docs WHERE knn_match(embedding,ARRAY[1.0],1)";
+    let original = engine.sql(query, &[]).unwrap_err();
+    assert_eq!(original.sqlstate(), Some("42804"));
+    assert!(
+        matches!(&original, uqa_sql::SQLError::TypeMismatch(message) if message == "vector query for \"embedding\" has 1 dimensions, expected 2")
+    );
+    sql(
+        &engine,
+        "CREATE INDEX diskann_idx ON diskann_docs USING diskann(embedding)",
+    );
+    let physical = engine.sql(query, &[]).unwrap_err();
+    assert_eq!(physical.sqlstate(), original.sqlstate());
+    assert_eq!(physical.to_string(), original.to_string());
+}

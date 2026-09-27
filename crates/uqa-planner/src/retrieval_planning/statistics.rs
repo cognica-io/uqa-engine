@@ -18,6 +18,9 @@ use uqa_core::{IndexStats, Value, Vertex};
 use uqa_operators::{tree::collect_graph_names, OperatorTree};
 use uqa_sql::SQLError;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn index_stats(
     catalog: &dyn RetrievalPlanningCatalog,
     table: &str,
@@ -116,10 +119,20 @@ fn vector_statistics(
     vector_queries: Vec<(String, Vec<f32>)>,
 ) -> PlanningResult<()> {
     for (field, query) in vector_queries {
+        let indexed_dimensions = vector_indexes.dimensions(&field);
+        let query_dimensions = u32::try_from(query.len()).ok();
         stats.dimensions = stats
             .dimensions
-            .max(vector_indexes.dimensions(&field).unwrap_or(0))
-            .max(u32::try_from(query.len()).unwrap_or(0));
+            .max(indexed_dimensions.unwrap_or(0))
+            .max(query_dimensions.unwrap_or(0));
+        // Unusable cost inputs keep the generic estimate. Execution owns reached validation and its SQL diagnostics; do not preempt it with a physical metadata or norm error.
+        if indexed_dimensions.is_none()
+            || indexed_dimensions != query_dimensions
+            || query.is_empty()
+            || query.iter().any(|component| !component.is_finite())
+        {
+            continue;
+        }
         if stats.diskann_query(&field, &query).is_none() {
             if let Some(physical) = vector_indexes.diskann_query_statistics(&field, &query)? {
                 stats.set_diskann_query(field, &query, physical);
