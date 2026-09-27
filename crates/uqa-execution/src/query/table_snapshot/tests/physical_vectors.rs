@@ -47,6 +47,14 @@ impl DocumentStore for ProjectionProbe {
     fn next_doc_ids(&self, after: Option<DocId>, limit: usize) -> StorageBackendResult<Vec<DocId>> {
         self.source.next_doc_ids(after, limit)
     }
+    fn next_doc_ids_controlled(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<DocId>> {
+        self.source.next_doc_ids_controlled(after, limit, control)
+    }
     fn len(&self) -> StorageBackendResult<usize> {
         self.source.len()
     }
@@ -267,5 +275,99 @@ fn diskann_private_sources_follow_column_incarnations_and_keep_each_capture() {
     control.cancellation().cancel();
     assert!(changes.diskann_read_changes("v", None, &control).is_err());
     drop((index, selected, changes, base, live));
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn diskann_complete_row_replacements_keep_the_selected_definition_without_projection() {
+    let control = StorageReadControl::with_limit(64 << 20);
+    let columns = columns("CREATE TABLE t (v VECTOR(2))");
+    let base = indexes(&control);
+    let mut rows = MemoryDocumentStore::new();
+    for (id, value) in [
+        (1, vector(1.0, 0.0)),
+        (2, vector(0.0, 1.0)),
+        (3, vector(-1.0, 0.0)),
+    ] {
+        rows.put_stored(id, document(&[("v", value)], 41)).unwrap();
+    }
+    let probe = ProjectionProbe {
+        source: rows.snapshot().unwrap(),
+        projections: Arc::default(),
+    };
+    let mut live = indexes(&control);
+    let index = live.get_mut("v").unwrap();
+    index.add(1, vec![-1.0, 0.0]).unwrap();
+    index.add(2, vec![1.0, 0.0]).unwrap();
+    index.add(4, vec![1.0, 0.0]).unwrap();
+    rows.put_stored(1, document(&[("v", vector(-1.0, 0.0))], 42))
+        .unwrap();
+    rows.put_stored(4, document(&[("v", vector(1.0, 0.0))], 42))
+        .unwrap();
+    let changes = DocumentChanges::default()
+        .with_retained_vectors(
+            rows.snapshot().unwrap(),
+            desired(&[(1, true), (2, false), (3, false), (4, true)], &control),
+            &columns,
+            &live,
+            &control,
+        )
+        .unwrap();
+    let partial = DocumentChanges::default()
+        .with_retained_vectors(
+            rows.snapshot().unwrap(),
+            desired(&[(1, true), (3, false), (4, true)], &control),
+            &columns,
+            &live,
+            &control,
+        )
+        .unwrap();
+    // The selected index also contains rows outside this fixed query and a later version of row 1.
+    live.get_mut("v").unwrap().add(1, vec![0.0, 1.0]).unwrap();
+    let text = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
+    let mut selected = schema(&columns, &text);
+    selected.vector_dimensions = &live;
+    let table = retain_with_vector_indexes(
+        probe.snapshot().unwrap(),
+        &columns,
+        &selected,
+        changes,
+        Some(&base),
+        &control,
+    )
+    .unwrap();
+    assert_eq!(probe.projections.load(Ordering::Relaxed), 0);
+    let index = table.vectors.get("v").unwrap();
+    assert_eq!(index.index_kind(), "diskann");
+    assert_eq!(scores(index), [(1, -1.0), (4, 1.0)]);
+    assert_eq!(table.document_count, 2);
+    assert_eq!(
+        table.documents.get_field(1, "v").unwrap(),
+        Some(vector(-1.0, 0.0))
+    );
+    assert!(!table.documents.contains_doc_id(2).unwrap());
+    assert!(!table.documents.contains_doc_id(3).unwrap());
+    let nested = VectorIndexes::capture(&table.vectors, &control).unwrap();
+    let partial = retain_with_vector_indexes(
+        probe.snapshot().unwrap(),
+        &columns,
+        &selected,
+        partial,
+        Some(&base),
+        &control,
+    )
+    .unwrap();
+    assert_eq!(
+        scores(partial.vectors.get("v").unwrap()),
+        [(1, -1.0), (2, 0.0), (4, 1.0)]
+    );
+    assert_eq!(
+        partial.documents.get_field(2, "v").unwrap(),
+        Some(vector(0.0, 1.0))
+    );
+    drop(partial);
+    drop((table, rows, base, live, probe));
+    assert_eq!(scores(nested.get("v").unwrap()), [(1, -1.0), (4, 1.0)]);
+    drop(nested);
     assert_eq!(control.memory().used(), 0);
 }
