@@ -7,6 +7,7 @@
 //! Key/Value population addresses share the original canonical field and generation identities.
 
 mod keys;
+pub(in crate::key_value) use keys::{field_prefixes, table_prefixes, ROOT};
 
 use crate::diskann_index::{
     format::{DiskANNCanonicalOrigin, DiskANNGeneration},
@@ -18,7 +19,7 @@ use crate::mvcc::{
     MergedRecordSnapshot, RecordRead, VersionResult,
 };
 use crate::read_control::StorageReadControl;
-use keys::{concatenate, dimensions, field_len, invalid, parts, HEADER, ROOT, WITNESS};
+use keys::{concatenate, dimensions, field_len, invalid, parts, HEADER, WITNESS};
 use uqa_core::{memory::BudgetedVec, DocId};
 
 /// Physical population mapping for a versioned Key/Value provider that has enabled the corresponding writer format.

@@ -69,12 +69,22 @@ impl KeyValueVectorIndex {
         doc_id: DocId,
         vectors: &[Vec<f32>],
     ) -> StorageBackendResult<()> {
+        self.stage_replace_values(batch, doc_id, vectors)?;
+        batch.delete(&origin::key(&self.table, &self.field, doc_id)?)
+    }
+
+    /// Keep the origin mutation with its owner so a typed canonical replacement retains its MVCC effect.
+    pub(super) fn stage_replace_values(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        doc_id: DocId,
+        vectors: &[Vec<f32>],
+    ) -> StorageBackendResult<()> {
         for vector in vectors {
             self.validate_dimensions(vector)?;
         }
         validate_vector_ordinal_count(usize_to_u64(vectors.len(), "vector count")?)?;
         self.coordinate_field(batch, false)?;
-        batch.delete(&origin::key(&self.table, &self.field, doc_id)?)?;
         batch.delete_prefix(&vector_doc_prefix(&self.table, &self.field, doc_id)?)?;
         for (ordinal, vector) in vectors.iter().enumerate() {
             let ordinal = u32::try_from(ordinal)
@@ -91,6 +101,9 @@ impl KeyValueVectorIndex {
         self.coordinate_field(batch, true)?;
         batch.delete_prefix(&origin::prefix(&self.table, &self.field)?)?;
         batch.delete_prefix_allow_absent(&origin::journal::prefix(&self.table, &self.field)?)?;
+        for prefix in origin::populations::field_prefixes(&self.table, &self.field)? {
+            batch.delete_prefix(&prefix)?;
+        }
         batch.delete_prefix(&vector_field_prefix(&self.table, &self.field)?)
     }
 

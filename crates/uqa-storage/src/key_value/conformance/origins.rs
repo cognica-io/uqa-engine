@@ -24,6 +24,11 @@ pub use binding::{
     verify_diskann_runtime_reopen, verify_diskann_runtime_retirement,
     verify_diskann_runtime_retirement_reopen,
 };
+pub use binding::{
+    seed_diskann_population_upgrade, verify_diskann_population_late_publication,
+    verify_diskann_population_lifetimes, verify_diskann_population_upgrade,
+    verify_diskann_population_upgrade_reopen, verify_diskann_population_writers,
+};
 pub use binding::{verify_diskann_live_reopen, verify_diskann_live_writes};
 pub use binding::{verify_diskann_maintenance_reopen, verify_diskann_maintenance_source};
 pub use binding::{verify_diskann_pruning, verify_diskann_pruning_reopen};

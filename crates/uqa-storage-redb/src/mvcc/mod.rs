@@ -76,7 +76,7 @@ impl RedbRecordStore {
                 .map(|value| codec::decode_u64(value.value()))
                 .transpose()?;
             if let Some(format) = initialized {
-                if !matches!(format, 1..=52) {
+                if !matches!(format, 1..=53) {
                     return Err(VersionError::InvalidEncoding("unknown record format"));
                 }
                 if present != if format < 5 { 15 } else { 31 } {
@@ -105,10 +105,10 @@ impl RedbRecordStore {
                         )
                         .map_err(redb_error)?;
                 }
-                if format < 52 {
+                if format < 53 {
                     identifiers::consolidate_diskann_generations(&mut identifiers)?;
                     metadata
-                        .insert("format", 52_u64.to_be_bytes().as_slice())
+                        .insert("format", 53_u64.to_be_bytes().as_slice())
                         .map_err(redb_error)?;
                 }
                 codec::receipt_limit(&metadata)?;
@@ -238,6 +238,12 @@ impl RedbRecordStore {
 }
 
 impl VersionedPersistence for RedbRecordStore {
+    fn diskann_population_record_layout(
+        &self,
+    ) -> Option<&dyn uqa_storage::mvcc::DiskANNPopulationRecordLayout> {
+        Some(&uqa_storage::key_value::KeyValueDiskANNPopulationRecords)
+    }
+
     fn resource_leases(&self) -> Option<&dyn uqa_storage::mvcc::ResourceLeaseProvider> {
         Some(self)
     }
@@ -435,7 +441,7 @@ fn initialize_record_metadata(
         .insert("database", bytes.as_slice())
         .map_err(redb_error)?;
     metadata
-        .insert("format", 52_u64.to_be_bytes().as_slice())
+        .insert("format", 53_u64.to_be_bytes().as_slice())
         .map_err(redb_error)?;
     metadata
         .insert("allocated", 0_u64.to_be_bytes().as_slice())

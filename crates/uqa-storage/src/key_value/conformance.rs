@@ -49,6 +49,11 @@ pub use origins::{
     verify_diskann_runtime_retirement_reopen,
 };
 pub use origins::{
+    seed_diskann_population_upgrade, verify_diskann_population_late_publication,
+    verify_diskann_population_lifetimes, verify_diskann_population_upgrade,
+    verify_diskann_population_upgrade_reopen, verify_diskann_population_writers,
+};
+pub use origins::{
     verify_diskann_canonical_origins, verify_diskann_canonical_reopen,
     verify_diskann_catalog_binding, verify_diskann_catalog_identity,
     verify_diskann_catalog_identity_reopen, verify_diskann_publication,

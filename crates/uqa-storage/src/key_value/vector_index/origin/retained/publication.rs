@@ -20,7 +20,10 @@ impl RetainedDiskANNCanonical {
     ) -> StorageBackendResult<crate::diskann_index::format::DiskANNGeneration> {
         self.require_current_index(read, batch, control)?;
         let scope = self.index_scope(resolver, control)?;
-        publication::retire_captured_generation(&scope, &*self.read, read, batch, control)
+        let generation =
+            publication::retire_captured_generation(&scope, &*self.read, read, batch, control)?;
+        self.retire_population(generation, batch, control)?;
+        Ok(generation)
     }
 
     /// Publish a completed build in the supplied caller mutation. The read and batch must belong to the same `with_mutation` callback; this method never completes that transaction. The SQL lifecycle must supersede the effect if later private DDL invalidates the index.
@@ -45,6 +48,7 @@ impl RetainedDiskANNCanonical {
             ));
         }
         let scope = source.index_scope(resolver, control)?;
+        let previous = publication::selected_generation(&scope, &*source.read, control)?;
         publication::publish_captured_generation(
             coverage,
             &scope,
@@ -58,6 +62,10 @@ impl RetainedDiskANNCanonical {
                 sealed,
             },
             control,
-        )
+        )?;
+        if let Some(previous) = previous {
+            source.retire_population(previous, batch, control)?;
+        }
+        source.publish_population(sealed, batch, control)
     }
 }

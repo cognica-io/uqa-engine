@@ -20,6 +20,7 @@ use crate::key_value::SQLiteKeyValueStore;
 use crate::SQLiteCompressionOptions;
 
 mod corruption;
+mod populations;
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod ownership;

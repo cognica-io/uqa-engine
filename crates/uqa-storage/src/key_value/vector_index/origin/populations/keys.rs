@@ -10,9 +10,36 @@ use crate::mvcc::{VersionError, VersionResult};
 use crate::read_control::StorageReadControl;
 use uqa_core::memory::BudgetedVec;
 
-pub(super) const ROOT: &[u8] = b"\0uqa-diskann-populations-v1\0";
+pub(in crate::key_value) const ROOT: &[u8] = b"\0uqa-diskann-populations-v1\0";
 pub(super) const HEADER: u8 = b'h';
 pub(super) const WITNESS: u8 = b'w';
+
+pub(in crate::key_value) fn field_prefixes(
+    table: &str,
+    field: &str,
+) -> crate::StorageBackendResult<[Vec<u8>; 2]> {
+    prefixes(&codec::vector_field_prefix(table, field)?)
+}
+
+pub(in crate::key_value) fn table_prefixes(
+    table: &str,
+) -> crate::StorageBackendResult<[Vec<u8>; 2]> {
+    prefixes(&codec::vector_key_prefix(table)?)
+}
+
+fn prefixes(field: &[u8]) -> crate::StorageBackendResult<[Vec<u8>; 2]> {
+    let prefix = |kind| -> crate::StorageBackendResult<Vec<u8>> {
+        let mut output = Vec::new();
+        output
+            .try_reserve_exact(ROOT.len() + 1 + field.len())
+            .map_err(uqa_core::memory::MemoryError::from)?;
+        output.extend_from_slice(ROOT);
+        output.push(kind);
+        output.extend_from_slice(field);
+        Ok(output)
+    };
+    Ok([prefix(HEADER)?, prefix(WITNESS)?])
+}
 
 pub(super) fn field_len(field: &[u8]) -> VersionResult<usize> {
     if field.first() != Some(&TAG_VECTOR) {

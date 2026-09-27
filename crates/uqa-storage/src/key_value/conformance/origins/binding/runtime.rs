@@ -29,6 +29,12 @@ use crate::{
 };
 use std::sync::Arc;
 
+mod populations;
+pub use populations::{
+    seed_diskann_population_upgrade, verify_diskann_population_late_publication,
+    verify_diskann_population_lifetimes, verify_diskann_population_upgrade,
+    verify_diskann_population_upgrade_reopen, verify_diskann_population_writers,
+};
 mod retirement;
 pub use retirement::{verify_diskann_runtime_retirement, verify_diskann_runtime_retirement_reopen};
 mod reclamation;
@@ -123,6 +129,24 @@ fn scores(index: &dyn VectorIndex, expected: &[(u64, f64)]) -> StorageBackendRes
             .map(|&(id, score)| (id, score.to_bits()))
             .collect::<Vec<_>>(),
         "runtime literal complete tensor scores",
+    )
+}
+
+fn population(
+    index: &dyn VectorIndex,
+    current: u64,
+    changed: u64,
+    control: &StorageReadControl,
+) -> StorageBackendResult<()> {
+    expect_eq(
+        &index
+            .diskann_query_metadata(control)?
+            .expect("DiskANN metadata")
+            .canonical_counts,
+        &Some(crate::diskann_index::DiskANNCanonicalCounts::new(
+            current, changed,
+        )?),
+        "runtime metadata preserves complete canonical populations",
     )
 }
 
@@ -299,6 +323,7 @@ pub fn verify_diskann_runtime_lifecycle(
     scores(&index, &[(1, 1.0), (2, 1.0), (3, -1.0)])?;
     expect_eq(&index.count()?, &4, "adoption preserves complete tensors")?;
     let first = generation(store, &control)?;
+    population(&index, 4, 0, &control)?;
     let held = index.snapshot()?;
     let metadata = capture_metadata(store, &index, &*held, &temporary, &control)?;
     store.savepoint("runtime-user")?;
@@ -306,6 +331,8 @@ pub fn verify_diskann_runtime_lifecycle(
     index.delete(2)?;
     index.add(4, vec![0.0, 1.0])?;
     changed_metadata(&index, &*held, &metadata, &control)?;
+    population(&index, 3, 2, &control)?;
+    population(&*held, 4, 0, &control)?;
     expect_eq(
         &generation(store, &control)?,
         &first,
@@ -317,9 +344,11 @@ pub fn verify_diskann_runtime_lifecycle(
         "initialize publishes a replacement base",
     )?;
     let rebuilt = index.snapshot()?;
+    population(&index, 3, 0, &control)?;
     scores(&*rebuilt, &[(1, -1.0), (3, -1.0), (4, 0.0)])?;
     index.clear()?;
     let empty = index.snapshot()?;
+    population(&index, 0, 0, &control)?;
     expect_eq(
         &empty.count()?,
         &0,
@@ -336,6 +365,8 @@ pub fn verify_diskann_runtime_lifecycle(
     )?;
     store.rollback_to_savepoint("runtime-user")?;
     require_metadata(&index, &metadata, &control)?;
+    population(&*rebuilt, 3, 0, &control)?;
+    population(&*empty, 0, 0, &control)?;
     scores(&index, &[(1, 1.0), (2, 1.0), (3, -1.0)])?;
     scores(&*rebuilt, &[(1, -1.0), (3, -1.0), (4, 0.0)])?;
     expect_eq(&empty.count()?, &0, "undone empty snapshot remains valid")?;
@@ -354,22 +385,7 @@ pub fn verify_diskann_runtime_lifecycle(
         "rebuild requires a caller transaction",
     )?;
     store.begin_transaction()?;
-    let mut bad = options;
-    bad.generation.max_record_bytes = 1;
-    let mut constrained = PersistentDiskANNIndex::new(
-        canonical(store)?.bind(
-            definition.relation.clone(),
-            Arc::new(Resolver),
-            bad.read,
-            &control,
-        )?,
-        bad,
-        &temporary,
-    )?;
-    expect(
-        constrained.clear().is_err(),
-        "failed empty build restores its own clear",
-    )?;
+    reject_failed_clear(store, &temporary, &control)?;
     scores(&index, &[(1, 1.0), (2, 1.0), (3, -1.0)])?;
     expect_eq(
         &generation(store, &control)?,
@@ -381,6 +397,7 @@ pub fn verify_diskann_runtime_lifecycle(
     index.initialize()?;
     store.commit_transaction()?;
     scores(&index, &[(5, 1.0)])?;
+    population(&index, 1, 0, &control)?;
     scores(&*held, &[(1, 1.0), (2, 1.0), (3, -1.0)])?;
     let final_generation = generation(store, &control)?;
     expect_eq(
@@ -389,6 +406,29 @@ pub fn verify_diskann_runtime_lifecycle(
         "finished builds release encrypted temporary input",
     )?;
     Ok(final_generation)
+}
+
+fn reject_failed_clear(
+    store: &Arc<dyn KeyValueStore>,
+    temporary: &DiskANNTemporaryBudget,
+    control: &StorageReadControl,
+) -> StorageBackendResult<()> {
+    let mut bad = diskann_runtime_fixture_options(2)?;
+    bad.generation.max_record_bytes = 1;
+    let mut constrained = PersistentDiskANNIndex::new(
+        canonical(store)?.bind(
+            row([91; 16])?.relation,
+            Arc::new(Resolver),
+            bad.read,
+            control,
+        )?,
+        bad,
+        temporary,
+    )?;
+    expect(
+        constrained.clear().is_err(),
+        "failed empty build restores its own clear",
+    )
 }
 
 /// Reopen the actual provider after all original owners have been dropped.
@@ -406,6 +446,7 @@ pub fn verify_diskann_runtime_reopen(
     )?;
     scores(&index, &[(5, 1.0)])?;
     index.add(6, vec![0.0, 1.0])?;
+    population(&index, 2, 1, &control)?;
     scores(&index, &[(5, 1.0), (6, 0.0)])?;
     expect_eq(
         &generation(store, &control)?,

@@ -6,9 +6,12 @@
 
 //! Metadata, schema, table, column, and owned-data lifecycle.
 
+use super::super::vector_index::origin::populations;
 use super::analyzers::field_binding_key;
 use super::occurrence_lifecycle::{drop_occurrence_field, rename_occurrence_field};
-use super::physical_indexes::{drop_field_indexes, rename_field_indexes};
+use super::physical_indexes::{
+    drop_field_indexes, reject_diskann_field_merge, rename_field_indexes, rename_vector_data,
+};
 use super::{
     apply_relation_migrations, batch_put_or_keep_existing, batch_rekey_prefix_or_keep_existing,
     catalog_index_references_column, catalog_index_rename_column, collect_relation_migrations,
@@ -292,6 +295,9 @@ impl KeyValueCatalog {
             table_name,
             column_name,
         )?)?;
+        for prefix in populations::field_prefixes(table_name, column_name)? {
+            batch.delete_prefix(&prefix)?;
+        }
         drop_field_indexes(batch.as_mut(), table_name, column_name)?;
         batch.delete_prefix(&table_field_analyzer_field_prefix(table_name, column_name)?)?;
         batch.delete(&field_binding_key(table_name, column_name)?)?;
@@ -347,6 +353,11 @@ impl KeyValueCatalog {
         from: &str,
         to: &str,
     ) -> StorageBackendResult<()> {
+        if from == to {
+            return Ok(());
+        }
+        let indexes = self.load_catalog_indexes()?;
+        reject_diskann_field_merge(self.store.as_ref(), table_name, from, to, &indexes)?;
         let mut batch = self.store.batch();
         for (key, value) in self.store.scan_prefix(&document_key_prefix(table_name)?)? {
             let mut document = decode_stored_document_value(&value)?;
@@ -379,24 +390,7 @@ impl KeyValueCatalog {
             &field_stats_key(table_name, from)?,
             &field_stats_key(table_name, to)?,
         )?;
-        batch_rekey_prefix_or_keep_existing(
-            self.store.as_ref(),
-            batch.as_mut(),
-            &vector_field_prefix(table_name, from)?,
-            &vector_field_prefix(table_name, to)?,
-        )?;
-        batch_rekey_prefix_or_keep_existing(
-            self.store.as_ref(),
-            batch.as_mut(),
-            &super::super::vector_index::origin::prefix(table_name, from)?,
-            &super::super::vector_index::origin::prefix(table_name, to)?,
-        )?;
-        batch_rekey_prefix_or_keep_existing(
-            self.store.as_ref(),
-            batch.as_mut(),
-            &super::super::vector_index::origin::journal::prefix(table_name, from)?,
-            &super::super::vector_index::origin::journal::prefix(table_name, to)?,
-        )?;
+        rename_vector_data(self.store.as_ref(), batch.as_mut(), table_name, from, to)?;
         rename_field_indexes(self.store.as_ref(), batch.as_mut(), table_name, from, to)?;
         batch_rekey_prefix_or_keep_existing(
             self.store.as_ref(),
@@ -424,7 +418,7 @@ impl KeyValueCatalog {
         }
         rename_occurrence_field(self.store.as_ref(), batch.as_mut(), table_name, from, to)?;
         rename_document_scoped_fts_fields(self, batch.as_mut(), table_name, from, to)?;
-        for row in self.load_catalog_indexes()? {
+        for row in indexes {
             if row.table_name != table_name {
                 continue;
             }

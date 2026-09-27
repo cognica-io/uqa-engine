@@ -17,7 +17,9 @@ use super::{
     table_field_analyzer_prefix, vector_key_prefix, KeyValueBatch, StorageBackendResult,
 };
 
-fn row_prefixes(name: &str) -> StorageBackendResult<[Vec<u8>; 13]> {
+fn row_prefixes(name: &str) -> StorageBackendResult<[Vec<u8>; 15]> {
+    let [populations, witnesses] =
+        super::super::vector_index::origin::populations::table_prefixes(name)?;
     Ok([
         document_key_prefix(name)?,
         posting_key_prefix(name)?,
@@ -31,6 +33,8 @@ fn row_prefixes(name: &str) -> StorageBackendResult<[Vec<u8>; 13]> {
         vector_key_prefix(name)?,
         super::super::vector_index::origin::table_prefix(name)?,
         super::super::vector_index::origin::journal::table_prefix(name)?,
+        populations,
+        witnesses,
         column_stats_prefix(name)?,
     ])
 }

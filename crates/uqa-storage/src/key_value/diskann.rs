@@ -34,7 +34,7 @@ pub mod publication;
 mod reclamation;
 mod source;
 mod staging;
-mod state;
+pub(in crate::key_value) mod state;
 
 pub(super) const READ_PREFIX: &[u8] = keys::ROOT;
 

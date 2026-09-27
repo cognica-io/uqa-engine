@@ -113,6 +113,12 @@ impl FaultPersistence {
 }
 
 impl VersionedPersistence for FaultPersistence {
+    fn diskann_population_record_layout(
+        &self,
+    ) -> Option<&dyn uqa_storage::mvcc::DiskANNPopulationRecordLayout> {
+        self.inner.diskann_population_record_layout()
+    }
+
     fn serializable_coordinator(&self) -> Option<&dyn uqa_storage::mvcc::SerializableCoordinator> {
         Some(self)
     }

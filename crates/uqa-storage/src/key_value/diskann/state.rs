@@ -100,7 +100,7 @@ pub(super) fn data_identity(bytes: [u8; 17]) -> StorageBackendResult<[u8; 16]> {
     Ok(identity)
 }
 
-pub(super) fn fixed<const N: usize>(
+pub(in crate::key_value) fn fixed<const N: usize>(
     control: &StorageReadControl,
     read: impl FnOnce(&mut ValueReadVisitor<'_>) -> StorageBackendResult<()>,
 ) -> StorageBackendResult<Option<[u8; N]>> {

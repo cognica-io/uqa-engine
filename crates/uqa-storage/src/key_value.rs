@@ -336,12 +336,13 @@ pub trait KeyValueBatch {
 
 pub use vector_index::guards::KeyValueVectorFieldGuards;
 
-pub(crate) fn diskann_tombstone_prefixes() -> [&'static [u8]; 4] {
+pub(crate) fn diskann_tombstone_prefixes() -> [&'static [u8]; 5] {
     [
         diskann::READ_PREFIX,
         vector_index::origin::ROOT,
         vector_index::origin::journal::ROOT,
         vector_index::guards::ROOT,
+        vector_index::origin::populations::ROOT,
     ]
 }
 

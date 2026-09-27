@@ -18,6 +18,7 @@ use uqa_core::DocId;
 pub use crate::diskann_index::DiskANNCanonicalVectorVisitor;
 
 mod changes;
+mod populations;
 mod pruning;
 mod publication;
 mod selection;
@@ -278,6 +279,14 @@ impl RetainedDiskANNCanonical {
 }
 
 impl DiskANNCanonicalRead for RetainedDiskANNCanonical {
+    fn population_counts(
+        &self,
+        generation: crate::diskann_index::format::DiskANNGeneration,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::diskann_index::DiskANNCanonicalCounts>> {
+        self.read_population(generation, control)
+    }
+
     fn corpus_fingerprint(
         &self,
         control: &StorageReadControl,

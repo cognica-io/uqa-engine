@@ -229,6 +229,14 @@ impl SQLiteRecordStore {
 }
 
 impl VersionedPersistence for SQLiteRecordStore {
+    fn diskann_population_record_layout(
+        &self,
+    ) -> Option<&dyn uqa_storage::mvcc::DiskANNPopulationRecordLayout> {
+        self.native
+            .is_none()
+            .then_some(&uqa_storage::key_value::KeyValueDiskANNPopulationRecords)
+    }
+
     fn resource_leases(&self) -> Option<&dyn uqa_storage::mvcc::ResourceLeaseProvider> {
         Some(self)
     }
