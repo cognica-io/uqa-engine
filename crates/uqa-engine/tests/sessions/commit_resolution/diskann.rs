@@ -173,16 +173,19 @@ fn exercise(persistence: &Arc<FaultPersistence>, action: Action, fault: u8, roll
     root.sql("DROP TABLE diskann_docs", &[]).unwrap();
 }
 
-#[test]
-fn diskann_publication_receipt_recovery_preserves_catalog_queries_and_original_attempts() {
-    let (_directory, fixtures) = fixtures();
-    for persistence in fixtures {
-        for action in [Action::Create, Action::Rebuild, Action::Drop] {
-            for fault in [LOSE_COMMITTED_REPLY, LOSE_UNCOMMITTED_REPLY] {
-                for rollback in [false, true] {
-                    exercise(&persistence, action, fault, rollback);
-                }
-            }
-        }
-    }
+#[rstest::rstest]
+#[case::plain("plain")]
+#[case::encrypted("encrypted")]
+#[case::compressed("compressed")]
+#[case::compressed_encrypted("compressed-encrypted")]
+#[case::redb("redb")]
+fn diskann_publication_receipt_recovery_preserves_catalog_queries_and_original_attempts(
+    #[case] provider: &str,
+    #[values(Action::Create, Action::Rebuild, Action::Drop)] action: Action,
+    #[values(LOSE_COMMITTED_REPLY, LOSE_UNCOMMITTED_REPLY)] fault: u8,
+    #[values(false, true)] rollback: bool,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let persistence = fixture(directory.path(), provider);
+    exercise(&persistence, action, fault, rollback);
 }
