@@ -197,6 +197,7 @@ use cross_process::{
     CrossProcessRegistryTransaction, ListenerLease,
 };
 use parking_lot::{Condvar, Mutex, MutexGuard};
+pub use uqa_core::notifications::SQLNotification;
 use uqa_sql::SQLError;
 pub(crate) use uqa_storage::notifications::PendingNotification;
 #[cfg(test)]
@@ -207,17 +208,6 @@ use uqa_storage::notifications::{
 };
 
 const NOTIFICATION_QUEUE_WARNING_INTERVAL: Duration = Duration::from_secs(5);
-
-/// One committed SQL notification waiting for this session.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SQLNotification {
-    /// Stable backend process identifier of the sending SQL session.
-    pub process_id: i32,
-    /// Subscribed SQL channel that received the message.
-    pub channel: String,
-    /// Sender-provided payload, or the empty string when `NOTIFY` omitted it.
-    pub payload: String,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PendingListenAction {
