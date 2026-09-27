@@ -181,6 +181,14 @@ fn diskann_private_table_copies_retain_evaluated_sources_without_vector_projecti
     assert_eq!(scores(index), [(1, -1.0), (2, 0.0), (4, 1.0)]);
     assert_eq!(index.count().unwrap(), 3);
     assert_eq!(
+        index
+            .diskann_query_metadata(&control)
+            .unwrap()
+            .unwrap()
+            .canonical_counts,
+        Some(uqa_storage::diskann_index::DiskANNCanonicalCounts::new(3, 2).unwrap()),
+    );
+    assert_eq!(
         table.documents.get_field(1, "v").unwrap(),
         Some(vector(-1.0, 0.0))
     );
@@ -259,6 +267,14 @@ fn diskann_private_sources_follow_column_incarnations_and_keep_each_capture() {
         .unwrap()
         .unwrap();
     assert_eq!(scores(&*index), [(1, -1.0), (2, 1.0), (3, -1.0)]);
+    assert_eq!(
+        index
+            .diskann_query_metadata(&control)
+            .unwrap()
+            .unwrap()
+            .canonical_counts,
+        Some(uqa_storage::diskann_index::DiskANNCanonicalCounts::new(3, 2).unwrap()),
+    );
     columns[0].object_id = Some([9; 16]);
     assert!(changes
         .diskann_read_changes("v", Some(&columns[0]), &control)

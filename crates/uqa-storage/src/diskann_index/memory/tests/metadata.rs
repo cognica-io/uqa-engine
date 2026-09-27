@@ -6,7 +6,7 @@
 
 use super::*;
 
-fn populations(index: &dyn VectorIndex) -> (u64, u64) {
+pub(super) fn populations(index: &dyn VectorIndex) -> (u64, u64) {
     let control = StorageReadControl::with_limit(0);
     let statistics = index
         .diskann_query_metadata(&control)

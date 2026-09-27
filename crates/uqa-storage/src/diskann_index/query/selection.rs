@@ -6,13 +6,17 @@
 
 //! Sparse document selections compose actual retained canonical sources without replacing the physical reader.
 
+mod populations;
 mod source;
 pub use source::DiskANNReadSnapshot;
 
 use super::invalid;
 use crate::diskann_index::{
-    format::{DiskANNCanonicalOrigin, DiskANNChangeIdentity, DiskANNVectorVersion},
-    DiskANNCanonicalRead, DiskANNCanonicalVectorVisitor, DiskANNQueryRead,
+    format::{
+        DiskANNCanonicalOrigin, DiskANNChangeIdentity, DiskANNGeneration, DiskANNVectorVersion,
+    },
+    pages::DiskANNOriginReader,
+    DiskANNCanonicalCounts, DiskANNCanonicalRead, DiskANNCanonicalVectorVisitor, DiskANNQueryRead,
 };
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 use std::sync::Arc;
@@ -23,7 +27,7 @@ use uqa_core::{
 
 type SelectedSources = Arc<Budgeted<BudgetedVec<(DocId, Option<DiskANNReadSnapshot>)>>>;
 
-/// Immutable, ordered replacements selected from actual `DiskANN` snapshots. None selects an evaluated deletion independently of retained source membership. A selected document absent from its source is also deleted; a zero-ordinal origin remains an explicit empty replacement. None of these cases reads the original document. Clones share the sparse directory and its original allowance.
+/// Immutable, ordered replacements selected from actual `DiskANN` snapshots. None selects an evaluated deletion independently of retained source membership. A selected document absent from its source is also deleted; a zero-ordinal origin remains an explicit empty replacement. None of these cases falls through to the original tensor. Clones share the sparse directory and its original allowance.
 #[derive(Clone)]
 pub struct DiskANNReadChanges {
     sources: SelectedSources,
@@ -88,12 +92,15 @@ impl DiskANNReadChanges {
 pub(super) struct SelectedCanonical {
     base: DiskANNReadSnapshot,
     changes: DiskANNReadChanges,
+    generation: DiskANNGeneration,
+    counts: Option<DiskANNCanonicalCounts>,
 }
 
 impl SelectedCanonical {
     pub(super) fn new(
         base: DiskANNReadSnapshot,
         changes: &DiskANNReadChanges,
+        built: &DiskANNOriginReader,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         base.check_control(control)?;
@@ -110,9 +117,12 @@ impl SelectedCanonical {
                 ));
             }
         }
+        let counts = populations::capture(&base, changes, built, control)?;
         Ok(Self {
             base,
             changes: changes.clone(),
+            generation: built.manifest().input().generation,
+            counts,
         })
     }
 
@@ -125,6 +135,25 @@ impl SelectedCanonical {
 }
 
 impl DiskANNCanonicalRead for SelectedCanonical {
+    fn population_counts(
+        &self,
+        generation: DiskANNGeneration,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DiskANNCanonicalCounts>> {
+        self.check_control(control)?;
+        for source in self
+            .changes
+            .sources
+            .iter()
+            .filter_map(|(_, source)| source.as_ref())
+        {
+            source.check_control(control)?;
+        }
+        Ok((generation == self.generation)
+            .then_some(self.counts)
+            .flatten())
+    }
+
     fn corpus_fingerprint(
         &self,
         control: &StorageReadControl,

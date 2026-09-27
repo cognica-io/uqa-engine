@@ -44,21 +44,43 @@ impl DiskANNCanonicalCounts {
         previous_changed: bool,
         replacement_vectors: u64,
     ) -> StorageBackendResult<Self> {
-        let current_vectors = self
-            .current_vectors
-            .checked_sub(previous_vectors)
-            .and_then(|count| count.checked_add(replacement_vectors))
-            .ok_or_else(invalid)?;
-        let changed_vectors = self
-            .changed_vectors
-            .checked_sub(if previous_changed {
-                previous_vectors
-            } else {
-                0
-            })
-            .and_then(|count| count.checked_add(replacement_vectors))
-            .ok_or_else(invalid)?;
-        Self::new(current_vectors, changed_vectors)
+        self.substituted(
+            Self::new(
+                previous_vectors,
+                if previous_changed {
+                    previous_vectors
+                } else {
+                    0
+                },
+            )?,
+            Self::new(replacement_vectors, replacement_vectors)?,
+        )
+    }
+
+    /// Substitute one document's old and new contributions relative to the same build. Validate the remaining subset before adding the replacement, so new covered vectors cannot hide an inconsistent removal.
+    pub(crate) fn substituted(
+        self,
+        previous: Self,
+        replacement: Self,
+    ) -> StorageBackendResult<Self> {
+        let remaining = Self::new(
+            self.current_vectors
+                .checked_sub(previous.current_vectors)
+                .ok_or_else(invalid)?,
+            self.changed_vectors
+                .checked_sub(previous.changed_vectors)
+                .ok_or_else(invalid)?,
+        )?;
+        Self::new(
+            remaining
+                .current_vectors
+                .checked_add(replacement.current_vectors)
+                .ok_or_else(invalid)?,
+            remaining
+                .changed_vectors
+                .checked_add(replacement.changed_vectors)
+                .ok_or_else(invalid)?,
+        )
     }
 
     pub(crate) fn covered(self) -> Self {
@@ -90,5 +112,39 @@ mod tests {
         assert!(counts.replaced(2, true, 0).is_err());
         assert!(counts.replaced(3, false, 0).is_err());
         assert_eq!(counts.covered(), DiskANNCanonicalCounts::new(3, 0).unwrap());
+    }
+
+    #[test]
+    fn diskann_population_substitution_validates_remaining_support_before_replacement() {
+        let counts = DiskANNCanonicalCounts::new(3, 1).unwrap();
+        assert!(counts
+            .substituted(
+                DiskANNCanonicalCounts::new(3, 0).unwrap(),
+                DiskANNCanonicalCounts::new(100, 0).unwrap(),
+            )
+            .is_err());
+        assert!(counts
+            .substituted(
+                DiskANNCanonicalCounts::new(2, 2).unwrap(),
+                DiskANNCanonicalCounts::default(),
+            )
+            .is_err());
+        assert!(DiskANNCanonicalCounts::new(u64::MAX, 0)
+            .unwrap()
+            .substituted(
+                DiskANNCanonicalCounts::default(),
+                DiskANNCanonicalCounts::new(1, 0).unwrap(),
+            )
+            .is_err());
+        assert_eq!(
+            DiskANNCanonicalCounts::new(5, 3)
+                .unwrap()
+                .substituted(
+                    DiskANNCanonicalCounts::new(3, 3).unwrap(),
+                    DiskANNCanonicalCounts::new(2, 0).unwrap(),
+                )
+                .unwrap(),
+            DiskANNCanonicalCounts::new(4, 0).unwrap(),
+        );
     }
 }
