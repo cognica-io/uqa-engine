@@ -171,6 +171,10 @@ The adapter sends heartbeat comments, such as `: keepalive`, at the advertised i
 
 After readiness, a known failure is an `error` event containing only the two identities, a stable `code` and a Boolean `retryable`, followed by closure. Codes contain 1 to 64 uppercase ASCII letters, digits or underscores. Examples include `NOTIFICATION_AUTHORITY_REVOKED`, `NOTIFICATION_BACKPRESSURE` and `NOTIFICATION_SOURCE_UNAVAILABLE`. A planned server shutdown may emit `closed` containing only the two identities and `reason: "server_draining"`. Neither terminal frame proves receipt of earlier events. If the connection is already unusable, recording and returning the original local failure takes precedence over attempting another diagnostic write.
 
+### JSON nesting envelope
+
+Protocol version 1 permits at most two levels of JSON object/array nesting. The root object has depth one; entering any child object or array increases depth by one. Scalars and delimiters inside escaped JSON strings do not increase depth. The request's `channels` array is at depth two; its elements must be strings. Every defined SSE event is a flat object at depth one, so schema validation still rejects a container where a scalar field is required even when the depth is within the shared envelope. Enforce the depth bound while scanning bounded input, before recursive materialization; an object or array at depth three is a protocol error. Conformance fixtures must accept a valid two-level subscription request, reject a three-level request, and distinguish escaped braces/brackets in opaque payload strings from structural nesting.
+
 ## 6. Delivery and transaction contract
 
 Delivery is live and ordered within an intact subscription. It is not exactly-once application processing or a durable message queue. Existing Engine semantics remain authoritative: outgoing notifications become visible after successful outer commit, rollback discards the corresponding notifications, and duplicate channel/payload pairs collapse within the same transaction. The SSE adapter forwards committed notifications and never republishes them to recover a transport failure.
