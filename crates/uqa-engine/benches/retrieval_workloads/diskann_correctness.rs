@@ -7,6 +7,7 @@
 //! Functional SQL observations. Dispatch happens before Criterion initialization.
 
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::path::PathBuf;
 use std::{env, fs};
 
@@ -204,9 +205,19 @@ pub(super) fn run() {
         .iter()
         .map(|spec| exercise(suite, spec, &transform))
         .collect();
-    let executable = fs::read(env::current_exe().unwrap()).unwrap();
+    let mut executable = fs::File::open(env::current_exe().unwrap()).unwrap();
+    let mut hash = sha2::Sha256::default();
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let size = executable.read(&mut buffer).unwrap();
+        if size == 0 {
+            break;
+        }
+        sha2::Digest::update(&mut hash, &buffer[..size]);
+    }
+    let executable_sha256 = format!("{:x}", sha2::Digest::finalize(hash));
     let observations = json!({"schema_version": 3, "mode": "correctness", "suite": suite,
-        "manifest_sha256": digest(MANIFEST), "executable_sha256": digest(&executable), "fixtures": fixtures});
+        "manifest_sha256": digest(MANIFEST), "executable_sha256": executable_sha256, "fixtures": fixtures});
     let output =
         PathBuf::from(env::var_os(OUTPUT_ENV).unwrap_or_else(|| {
             "target/benchmark-runs/diskann-correctness-observations.json".into()
