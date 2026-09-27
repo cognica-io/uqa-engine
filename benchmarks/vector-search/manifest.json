@@ -150,4 +150,167 @@
     "mean_top_1_similarity_loss": "Mean exact-best SQL score minus candidate-best SQL score.",
     "max_shared_score_abs_error": "Maximum SQL _score error for a row returned by both exact and candidate search."
   }
+,
+  "correctness": {
+    "name": "diskann-correctness-v1",
+    "schema_version": 1,
+    "storage": {
+      "backend": "sqlite",
+      "persistent": true,
+      "reopened_before_each_query_phase": true
+    },
+    "execution": {
+      "api": "Engine::sql",
+      "fixed_transform_api": "VectorProbabilityTransform::calibrate_one"
+    },
+    "seeds": [
+      7,
+      42,
+      101
+    ],
+    "search_list_sizes": [
+      32,
+      128
+    ],
+    "index_parameters": {
+      "max_degree": 16,
+      "build_list_size": 64,
+      "alpha": 1.2,
+      "beam_width": 4
+    },
+    "fixed_transform": {
+      "mu_match": 0.0,
+      "mu_random": 1.0,
+      "sigma": 1.0,
+      "base_rate": 0.5
+    },
+    "empirical_calibration": false,
+    "fixtures": [
+      {
+        "name": "synthetic256-v1",
+        "generator": "lcg-uniform-signed-f32-v1",
+        "corpus_size": 256,
+        "dimensions": 32,
+        "query_count": 16,
+        "corpus_seed_start": 1,
+        "query_seed_start": 1000001,
+        "candidate_ks": [
+          10,
+          32
+        ],
+        "pq_bytes": 8,
+        "minimum_quality": {
+          "recall_at_k": 0.9,
+          "top_1_accuracy": 0.9,
+          "result_count_rate": 1.0
+        },
+        "maximum_quality": {
+          "max_shared_score_abs_error": 1e-06,
+          "max_oracle_score_abs_error": 1e-06,
+          "max_probability_abs_error": 1e-10
+        }
+      },
+      {
+        "name": "scifact-minilm-prefix512-v1",
+        "generator": "frozen-f32-v1",
+        "fixture_manifest": "fixtures/scifact-minilm-prefix512-v1/manifest.json",
+        "fixture_manifest_sha256": "64ea6966fe1e885309d922860c7152b22cbd263a7a970b8f1e9fc988b5a7378b",
+        "corpus_size": 512,
+        "dimensions": 384,
+        "query_count": 32,
+        "candidate_ks": [
+          10,
+          32
+        ],
+        "pq_bytes": 32,
+        "minimum_quality": {
+          "recall_at_k": 0.9,
+          "top_1_accuracy": 0.9,
+          "result_count_rate": 1.0
+        },
+        "maximum_quality": {
+          "max_shared_score_abs_error": 1e-06,
+          "max_oracle_score_abs_error": 1e-06,
+          "max_probability_abs_error": 1e-10
+        }
+      },
+      {
+        "name": "tensor-max-v1",
+        "generator": "literal-tensor-v1",
+        "corpus_size": 6,
+        "dimensions": 2,
+        "query_count": 3,
+        "corpus": [
+          [
+            [
+              1,
+              0
+            ],
+            [
+              0,
+              1
+            ]
+          ],
+          [
+            [
+              0,
+              1
+            ],
+            [
+              -1,
+              0
+            ]
+          ],
+          [
+            [
+              -1,
+              0
+            ]
+          ],
+          [
+            [
+              0,
+              0
+            ]
+          ],
+          [
+            [
+              1,
+              0
+            ]
+          ],
+          null
+        ],
+        "queries": [
+          [
+            1,
+            0
+          ],
+          [
+            0,
+            1
+          ],
+          [
+            -1,
+            0
+          ]
+        ],
+        "candidate_ks": [
+          2,
+          5
+        ],
+        "pq_bytes": 1,
+        "minimum_quality": {
+          "recall_at_k": 1.0,
+          "top_1_accuracy": 1.0,
+          "result_count_rate": 1.0
+        },
+        "maximum_quality": {
+          "max_shared_score_abs_error": 1e-06,
+          "max_oracle_score_abs_error": 1e-06,
+          "max_probability_abs_error": 1e-10
+        }
+      }
+    ]
+  }
 }
