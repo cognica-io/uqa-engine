@@ -27,6 +27,7 @@ use crate::{
 use std::sync::Arc;
 
 mod lifetimes;
+mod rename;
 pub use lifetimes::verify_diskann_population_lifetimes;
 
 fn handle(

@@ -18,6 +18,7 @@ pub fn verify_diskann_population_lifetimes(
 ) -> StorageBackendResult<()> {
     let control = StorageReadControl::with_limit(1 << 22);
     let generation = seed(store, &control)?;
+    super::rename::reject_destinations(store, generation, &control)?;
     corruption(store, generation, &control)?;
     structural(store, generation, &control)?;
     store.vacuum()?;
