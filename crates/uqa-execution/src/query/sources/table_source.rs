@@ -256,6 +256,12 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     })
                     .transpose()?
                     .flatten();
+                // Successful specialization applies this complete predicate inside the view; retrieval leaves cannot be evaluated again as scalar functions.
+                let filters = if specialized_plan.is_some() {
+                    None
+                } else {
+                    filters
+                };
                 let propagated_plan = inherited_lock.as_ref().map(|target| {
                     let mut plan = specialized_plan.clone().unwrap_or_else(|| plan.clone());
                     apply_propagated_view_lock(&mut plan, target);

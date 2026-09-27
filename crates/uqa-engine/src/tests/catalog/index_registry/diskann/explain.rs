@@ -188,9 +188,9 @@ fn diskann_explain_does_not_substitute_builtins_for_host_callbacks() {
         )
         .unwrap();
     let plan = explain(&engine, query);
-    assert_ne!(
+    assert_eq!(
         nodes(&plan)[0]["Candidate K"],
-        1,
+        Json::Null,
         "a shadowed builtin is not the selected implementation"
     );
 }
@@ -217,6 +217,14 @@ fn diskann_explain_follows_join_operands_views_and_mutation_inputs() {
         "SELECT id FROM picked WHERE knn_match(embedding,ARRAY[1.0,0.0],1)",
     );
     assert_eq!(nodes(&view).len(), 1);
+    let shadowed_query = "WITH diskann_docs AS MATERIALIZED (SELECT -1 AS id, ARRAY[0.0,1.0] AS embedding) SELECT picked.id FROM picked CROSS JOIN diskann_docs d WHERE knn_match(picked.embedding,ARRAY[1.0,0.0],1)";
+    let shadowed = explain(&engine, shadowed_query);
+    assert_eq!(nodes(&shadowed).len(), 1);
+    assert_eq!(
+        nodes(&shadowed)[0]["Generation"],
+        nodes(&view)[0]["Generation"]
+    );
+    assert_eq!(sql(&engine, shadowed_query).rows[0]["id"], Value::Int(1));
     let update = explain(
         &engine,
         "UPDATE diskann_docs SET id=id+10 WHERE knn_match(embedding,ARRAY[1.0,0.0],1)",

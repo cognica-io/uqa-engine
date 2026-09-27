@@ -100,7 +100,7 @@ impl Collector<'_> {
                 };
                 self.query(
                     specialized.as_ref().unwrap_or(&view.query),
-                    scope,
+                    &Scope::new(),
                     &format!("{path}/View {name}"),
                 )?;
             }
