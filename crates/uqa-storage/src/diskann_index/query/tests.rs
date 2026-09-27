@@ -27,6 +27,7 @@ use uqa_core::{memory::MemoryBudget, DocId};
 mod failures;
 mod metadata;
 mod retained;
+mod statistics;
 
 #[derive(Clone)]
 struct Source {

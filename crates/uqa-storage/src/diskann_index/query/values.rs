@@ -8,7 +8,7 @@
 
 use super::invalid;
 use crate::{
-    diskann_index::scoring::selection::TopK,
+    diskann_index::{scoring::selection::TopK, DiskANNScoringStats},
     read_control::StorageReadControl,
     vector_index::{
         cosine_similarity_controlled,
@@ -42,7 +42,7 @@ pub(super) fn score(
     document: DocId,
     query: &[f32],
     control: &StorageReadControl,
-) -> StorageBackendResult<Option<f32>> {
+) -> StorageBackendResult<(Option<f32>, u64)> {
     source.check_control(control)?;
     let count = source.document_vector_count(document, control)?;
     if count > u64::from(u32::MAX) + 1 {
@@ -62,7 +62,7 @@ pub(super) fn score(
         }
     }
     source.check_control(control)?;
-    Ok(best)
+    Ok((best, count))
 }
 
 pub(super) fn exact(
@@ -70,15 +70,18 @@ pub(super) fn exact(
     query: &[f32],
     k: usize,
     control: &StorageReadControl,
-) -> StorageBackendResult<PostingList> {
+) -> StorageBackendResult<(PostingList, DiskANNScoringStats)> {
     let mut selected = TopK::new(k, control);
+    let mut stats = DiskANNScoringStats::default();
     visit(source, control, &mut |document| {
-        if let Some(score) = score(source, document, query, control)? {
+        let (score, vectors) = score(source, document, query, control)?;
+        stats.record(vectors)?;
+        if let Some(score) = score {
             selected.offer_raw(document, score)?;
         }
         Ok(())
     })?;
-    selected.finish(control)
+    Ok((selected.finish(control)?, stats))
 }
 
 pub(super) fn threshold(
@@ -86,18 +89,22 @@ pub(super) fn threshold(
     query: &[f32],
     threshold: f32,
     control: &StorageReadControl,
-) -> StorageBackendResult<PostingList> {
+) -> StorageBackendResult<(PostingList, DiskANNScoringStats)> {
     validate_threshold(threshold)?;
     let mut scores = VectorQueryBuffer::new(Some(control));
+    let mut stats = DiskANNScoringStats::default();
     visit(source, control, &mut |document| {
-        if let Some(score) =
-            score(source, document, query, control)?.filter(|score| *score >= threshold)
-        {
+        let (score, vectors) = score(source, document, query, control)?;
+        stats.record(vectors)?;
+        if let Some(score) = score.filter(|score| *score >= threshold) {
             scores.push((document, score))?;
         }
         Ok(())
     })?;
-    postings_from_unique_scores(scores, None, Some(control))
+    Ok((
+        postings_from_unique_scores(scores, None, Some(control))?,
+        stats,
+    ))
 }
 
 pub(super) fn count(

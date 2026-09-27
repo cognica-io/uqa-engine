@@ -16,11 +16,13 @@ mod memory;
 mod origins;
 mod reader;
 mod seal;
+mod statistics;
 
 pub use memory::{DiskANNMemoryBuilder, DiskANNMemorySource};
 pub use origins::DiskANNOriginReader;
 pub use reader::{DiskANNPageLease, DiskANNReader};
 pub use seal::{DiskANNArtifactSeal, DiskANNArtifactSealer};
+pub use statistics::DiskANNPageReadStats;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DiskANNRecordKey {

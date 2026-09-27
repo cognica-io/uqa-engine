@@ -38,9 +38,10 @@ pub use pq::{
     PQCodebook, PQDistance, PQLookupTable, PQTrainer, PQTrainingOptions, PQTrainingSummary,
 };
 pub use query::{
-    DiskANNQuery, DiskANNQueryResult, DiskANNReadChanges, DiskANNReadSnapshot, RetainedDiskANNIndex,
+    DiskANNQuery, DiskANNQueryResult, DiskANNQueryWork, DiskANNReadChanges, DiskANNReadSnapshot,
+    RetainedDiskANNIndex,
 };
-pub use scoring::{DiskANNCanonicalScorer, DiskANNDocumentScore};
+pub use scoring::{DiskANNCanonicalScorer, DiskANNDocumentScore, DiskANNScoringStats};
 pub use vamana::{VamanaGraph, VamanaPoint};
 
 /// Borrow one canonical tensor ordinal on a fixed source. A failed visit invalidates the caller's partial result.

@@ -20,6 +20,7 @@ use crate::vector_index::DiskANNIndexParams;
 mod faults;
 mod nodes;
 mod resources;
+mod statistics;
 
 fn generation() -> DiskANNGeneration {
     DiskANNGeneration::new([2; 16], 3, 4, 5).unwrap()
@@ -259,6 +260,7 @@ impl Fixture {
 struct Counted {
     source: DiskANNMemorySource,
     graph_reads: AtomicUsize,
+    graph_batches: AtomicUsize,
     records: AtomicUsize,
     largest_batch: AtomicUsize,
 }
@@ -268,6 +270,7 @@ impl Counted {
         Self {
             source,
             graph_reads: AtomicUsize::new(0),
+            graph_batches: AtomicUsize::new(0),
             records: AtomicUsize::new(0),
             largest_batch: AtomicUsize::new(0),
         }
@@ -298,6 +301,7 @@ impl DiskANNPageSource for Counted {
         visit: &mut DiskANNPageVisitor<'_>,
     ) -> StorageBackendResult<()> {
         self.graph_reads.fetch_add(pages.len(), Ordering::Relaxed);
+        self.graph_batches.fetch_add(1, Ordering::Relaxed);
         self.largest_batch.fetch_max(pages.len(), Ordering::Relaxed);
         self.source.read_graph_pages(pages, control, visit)
     }

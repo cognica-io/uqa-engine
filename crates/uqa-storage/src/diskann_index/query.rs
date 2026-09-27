@@ -23,9 +23,11 @@ mod candidates;
 mod matching;
 mod retained;
 mod selection;
+mod statistics;
 mod values;
 pub use retained::RetainedDiskANNIndex;
 pub use selection::{DiskANNReadChanges, DiskANNReadSnapshot};
+pub use statistics::DiskANNQueryWork;
 #[cfg(test)]
 mod tests;
 
@@ -34,6 +36,7 @@ pub struct DiskANNQueryResult {
     pub postings: PostingList,
     pub exact_reason: Option<ExactVectorReason>,
     pub traversal: DiskANNTraversalStats,
+    pub work: DiskANNQueryWork,
 }
 
 /// A reusable prepared generation on one fixed canonical/catalog view. Opening verifies resident PQ and complete origins once; later queries reuse those owners and load graph pages lazily. Execution owns logical read observations before invoking this storage algorithm.
@@ -91,21 +94,27 @@ impl<'a> DiskANNQuery<'a> {
                 PostingList::new(),
                 None,
                 DiskANNTraversalStats::default(),
+                DiskANNQueryWork::default(),
             ));
         }
         let navigation =
             match NavigationInput::from_raw(self.canonical.dimensions(), query, control)? {
                 NavigationInput::Exact(reason) => {
-                    let postings = if let Some(source) = self.canonical.unversioned_vectors() {
-                        values::exact(&**source, query, k, control)?
-                    } else {
-                        scorer.search_exact_knn(k)?
-                    };
+                    let (postings, exact) =
+                        if let Some(source) = self.canonical.unversioned_vectors() {
+                            values::exact(&**source, query, k, control)?
+                        } else {
+                            scorer.search_exact_knn_with_stats(k)?
+                        };
                     self.check(control)?;
                     return Ok(result(
                         postings,
                         Some(reason),
                         DiskANNTraversalStats::default(),
+                        DiskANNQueryWork {
+                            exact,
+                            ..DiskANNQueryWork::default()
+                        },
                     ));
                 }
                 NavigationInput::Navigable(navigation) => navigation,
@@ -127,8 +136,9 @@ impl<'a> DiskANNQuery<'a> {
             values::visit(&**source, control, &mut |document| {
                 self.check(control)?;
                 if self.canonical.origin(document, control)?.is_none() {
-                    if let Some(score) = values::score(&**source, document, query, control)? {
-                        candidates.offer_unversioned(document, score)?;
+                    let (score, vectors) = values::score(&**source, document, query, control)?;
+                    if let Some(score) = score {
+                        candidates.offer_unversioned(document, score, vectors)?;
                     }
                 }
                 Ok(())
@@ -142,9 +152,11 @@ impl<'a> DiskANNQuery<'a> {
             }
             candidates.nodes(&nodes)?;
         }
+        let mut work = candidates.work();
+        work.pages = traversal.page_stats();
         let postings = candidates.finish()?;
         self.check(control)?;
-        Ok(result(postings, None, traversal.stats()))
+        Ok(result(postings, None, traversal.stats(), work))
     }
 
     /// Exact threshold evaluation streams all visible canonical tensors, including changes and empty replacements, independently of ANN membership.
@@ -154,15 +166,34 @@ impl<'a> DiskANNQuery<'a> {
         threshold: f32,
         control: &StorageReadControl,
     ) -> StorageBackendResult<PostingList> {
+        self.search_threshold_with_stats(query, threshold, control)
+            .map(|result| result.postings)
+    }
+
+    /// Return threshold results and scoring work from their one exact invocation, without a second scan.
+    pub fn search_threshold_with_stats(
+        &self,
+        query: &[f32],
+        threshold: f32,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<DiskANNQueryResult> {
         self.check(control)?;
         let scorer = DiskANNCanonicalScorer::new(self, query, control)?;
-        let result = if let Some(source) = self.canonical.unversioned_vectors() {
+        let (postings, exact) = if let Some(source) = self.canonical.unversioned_vectors() {
             values::threshold(&**source, query, threshold, control)?
         } else {
-            scorer.search_threshold(threshold)?
+            scorer.search_threshold_with_stats(threshold)?
         };
         self.check(control)?;
-        Ok(result)
+        Ok(result(
+            postings,
+            None,
+            DiskANNTraversalStats::default(),
+            DiskANNQueryWork {
+                exact,
+                ..DiskANNQueryWork::default()
+            },
+        ))
     }
 
     fn check(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
@@ -220,11 +251,13 @@ fn result(
     postings: PostingList,
     exact_reason: Option<ExactVectorReason>,
     traversal: DiskANNTraversalStats,
+    work: DiskANNQueryWork,
 ) -> DiskANNQueryResult {
     DiskANNQueryResult {
         postings,
         exact_reason,
         traversal,
+        work,
     }
 }
 
