@@ -36,8 +36,10 @@ pub use recovery::{
     diskann_rebuild_until_process_loss, kill_diskann_publication_owner,
     verify_diskann_recovered_publication,
 };
+mod resources;
 mod restore;
 mod runtime;
+pub use resources::{verify_diskann_resource_reopen, verify_diskann_resource_source};
 pub use restore::{
     diskann_restore_records, verify_diskann_restore_source, verify_diskann_restored,
     verify_diskann_restored_rebuild, verify_diskann_restored_writes, DiskANNRestoreRecords,
@@ -86,6 +88,13 @@ fn setup(store: &Arc<dyn KeyValueStore>) -> StorageBackendResult<KeyValueDiskANN
 }
 
 fn setup_catalog(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
+    setup_catalog_dimensions(catalog, 2)
+}
+
+fn setup_catalog_dimensions(
+    catalog: &dyn CatalogFacade,
+    dimensions: u32,
+) -> StorageBackendResult<()> {
     catalog.save_schema("public")?;
     catalog.save_table(&TableSchema {
         relation: RelationIdentity::new("public", "diskann_binding"),
@@ -96,7 +105,7 @@ fn setup_catalog(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
         fts_fields: vec![],
         vector_fields: vec![VectorFieldSchema {
             field: FIELD.into(),
-            dimensions: 2,
+            dimensions,
         }],
         columns_json: "[]".into(),
         constraints_json: "{}".into(),
