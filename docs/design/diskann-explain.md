@@ -1,6 +1,6 @@
 # DiskANN physical EXPLAIN
 
-Status: static diagnostics implemented; source-scoped verification is recorded in the implementation plan. This document defines static diagnostics within the existing [SQL integration unit](../plans/0014-diskann-vector-index.md#sql-lifecycle-and-planning). Invocation counters and authoritative selected-view current/change populations remain required; static rendering does not complete those obligations.
+Status: static diagnostics implemented; source-scoped verification is recorded in the implementation plan. This document defines static diagnostics within the existing [SQL integration unit](../plans/0014-diskann-vector-index.md#sql-lifecycle-and-planning). [Invocation counters](diskann-execution-statistics.md) and [maintained or observed populations](diskann-population-statistics.md) retain their separate owning contracts. Unobserved raw populations remain unknown when static diagnostics are captured.
 
 ## Ownership and invocation
 

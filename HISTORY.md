@@ -8,16 +8,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Retain exact current and uncovered vector populations observed by a successful ordinary DiskANN ANN query over a fixed raw view. Later planning reuses that view's counts without another scan; new or unobserved raw selections keep their unknown statistics.
+- Resolve catalog owner names with PostgreSQL-compatible `pg_get_userbyid(oid)`, including NULL, missing OIDs, role rename/deletion and its stable `name` return type.
 - Include actual DiskANN search invocations in TEXT and JSON `EXPLAIN ANALYZE`, separately from physical estimates. Report the executed generation, route, traversal, logical page work and tensor scoring while preserving single execution, nested callbacks, session isolation and DML transaction effects.
 - Expose DiskANN query work alongside storage query results: logical graph-page requests, actual cache hits/provider batches and complete-tensor scoring by rerank, change, raw or exact route. Counters belong to the original invocation and preserve the existing posting-only APIs. The common vector-index interface also returns the actual generation and execution route through live, retained and serializable readers; unsupported providers report absence instead of zero work.
 - Maintain exact current and changed DiskANN vector counts on immutable memory roots, including complete tensor replacements, retained readers, independent forks and rebuilds. Planning and EXPLAIN read these counts without enumerating the corpus or change journal; unavailable provider statistics remain unknown.
-- Maintain exact DiskANN populations in native SQLite, SQLite Key/Value and redb transactions, including disjoint writers, generation replacement, retained views and rollback. Raw exact/IVF/HNSW aliases cannot invalidate a selected population. Existing generations initialize derived counts during writable binding. SQLite main format 54, native mapping 13 and redb main format 53 exclude incompatible writers; actual-origin composed sources retain counts relative to their receiving generation; cross-definition raw matching remains unknown. See the [upgrade contract](docs/manual/reference/10-upgrading.md#unreleased-diskann-keyvalue-populations).
+- Maintain exact DiskANN populations in native SQLite, SQLite Key/Value and redb transactions, including disjoint writers, generation replacement, retained views and rollback. Raw exact/IVF/HNSW aliases cannot invalidate a selected population. Existing generations initialize derived counts during writable binding. SQLite main format 54, native mapping 13 and redb main format 53 exclude incompatible writers; actual-origin composed sources retain counts relative to their receiving generation; unobserved cross-definition raw views remain unknown. See the [upgrade contract](docs/manual/reference/10-upgrading.md#unreleased-diskann-keyvalue-populations).
 - Show retained DiskANN field/generation settings and physical work estimates in TEXT and JSON EXPLAIN, including logical page work, provider dispatch, PQ, exact numeric routes and tensor reranking. Static diagnostics leave dynamic arguments unevaluated; ANALYZE keeps one actual execution. Unknown selected-view current/change populations remain explicit, and the displayed work is estimated rather than measured I/O.
 
 ### Changed
 
 - Advance native SQLite mapping to format 13 for guarded binary DiskANN generations, canonical mutation provenance and exact population metadata, reusing the common staging, sealing and retained-reader lifecycle across plain, encrypted and compressed owners. Atomic upgrades preserve existing data and history; older native binaries reject the new mapping. SQL creation/querying is connected to memory and persistent providers; remaining integration acceptance is tracked in the [implementation plan](docs/plans/0014-diskann-vector-index.md). See the [development upgrade contract](docs/manual/reference/10-upgrading.md#development-native-sqlite-mapping).
 - Have parent processes kill prepared notification crash fixtures without running Rust destructors or C exit handlers. Preserve the original recovery deadline, forced-termination checks, durable messages, sender identity and encrypted-file assertions while avoiding OpenSSL cleanup racing an intentionally live recovery worker.
+
+### Fixed
+
+- Match PostgreSQL 18's `42P17` diagnostic when a generated expression calls a non-immutable function.
 
 ## [0.4.0] - 2026-09-25
 

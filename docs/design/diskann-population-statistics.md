@@ -1,6 +1,6 @@
 # DiskANN canonical population statistics
 
-The shared count contract, immutable memory roots and versioned native SQLite, SQLite Key/Value and redb owners provide exact populations without reconstructing them during planning. Actual-origin sparse and complete selections maintain their own populations as described below. Cross-definition raw readers retain exact observations from a completed ordinary ANN query on that same fixed view; before such an observation their populations remain unknown. The [SQL integration unit](../plans/0014-diskann-vector-index.md#sql-lifecycle-and-planning) also requires final shared-DDL acceptance.
+The shared count contract, immutable memory roots and versioned native SQLite, SQLite Key/Value and redb owners provide exact populations without reconstructing them during planning. Actual-origin sparse and complete selections maintain their own populations as described below. Cross-definition raw readers retain exact observations from a completed ordinary ANN query on that same fixed view; before such an observation their populations remain unknown. The [SQL acceptance map](../plans/0014-diskann-vector-index.md#sql-lifecycle-and-planning-acceptance) records the completed provider and shared-DDL evidence.
 
 ## Definitions and ownership
 
