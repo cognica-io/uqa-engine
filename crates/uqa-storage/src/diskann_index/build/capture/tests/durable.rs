@@ -28,6 +28,7 @@ use crate::diskann_index::{
 use crate::{read_control::StorageReadControl, vector_index::DiskANNIndexParams};
 
 mod failures;
+mod populations;
 
 fn options() -> DiskANNGenerationOptions {
     DiskANNGenerationOptions {

@@ -8,6 +8,9 @@
 
 use crate::{mvcc::VersionError, StorageBackendResult};
 
+mod persistent;
+pub use persistent::{DiskANNPopulationState, DiskANNPopulationWitness};
+
 /// Complete current ordinals and the subset whose origins are not covered by the selected physical generation. Empty tensors contribute zero to both populations.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DiskANNCanonicalCounts {
