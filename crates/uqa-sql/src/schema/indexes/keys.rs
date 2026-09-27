@@ -82,12 +82,51 @@ pub fn prepare_index_keys(
     context: &SchemaBindingContext<'_, '_>,
     statement: &mut CreateIndex,
 ) -> Result<Vec<ColumnType>, SQLError> {
+    let expressions = bind_index_keys(context, statement)?;
+    finish_index_keys(context, statement, &expressions)
+}
+
+fn bind_index_keys(
+    context: &SchemaBindingContext<'_, '_>,
+    statement: &mut CreateIndex,
+) -> Result<Vec<Option<ColumnType>>, SQLError> {
+    statement
+        .columns
+        .iter_mut()
+        .map(|key| {
+            let IndexKey::Expression(expression) = key else {
+                return Ok(None);
+            };
+            let ty = super::bind_index_expression(
+                context.catalog,
+                context.binding,
+                &statement.table,
+                expression,
+                false,
+            )?;
+            if let Some(ty) = ty {
+                return Ok(Some(ty));
+            }
+            **expression = Expr::Cast {
+                expr: expression.clone(),
+                ty: "text".into(),
+            };
+            Ok(Some(ColumnType::Text))
+        })
+        .collect()
+}
+
+fn finish_index_keys(
+    context: &SchemaBindingContext<'_, '_>,
+    statement: &mut CreateIndex,
+    expressions: &[Option<ColumnType>],
+) -> Result<Vec<ColumnType>, SQLError> {
     let definitions = context
         .catalog
         .schema_expression_columns(&statement.table)?
         .ok_or_else(|| SQLError::UnknownTable(statement.table.clone()))?;
     let mut types = Vec::with_capacity(statement.columns.len());
-    for key in &mut statement.columns {
+    for (key, analyzed) in statement.columns.iter_mut().zip(expressions) {
         match key {
             IndexKey::Column(name) => {
                 let Some(column) = definitions.iter().find(|column| column.name == *name) else {
@@ -125,12 +164,16 @@ pub fn prepare_index_keys(
                         )));
                     }
                 }
-                let ty = super::prepare_index_expression(
+                super::validate_index_expression_immutability(
                     context.catalog,
-                    context.binding,
                     &statement.table,
                     expression,
+                    false,
                 )?;
+                let ty = analyzed
+                    .as_ref()
+                    .expect("analyzed index expression")
+                    .clone();
                 let column = match expression.as_ref() {
                     crate::ast::Expr::Column(name) => Some(name.clone()),
                     crate::ast::Expr::Cast { expr, .. } => {
@@ -196,22 +239,29 @@ pub fn prepare_index_definition(
         .collect::<Vec<_>>();
     let key_names = key_names(&attribute_keys);
     let binding = bindings.binding_scope()?;
-    let key_types = prepare_index_keys(
-        &SchemaBindingContext {
-            catalog,
-            binding: &binding.context(),
-        },
-        c,
-    )?;
+    let scope = binding.context();
+    let context = SchemaBindingContext {
+        catalog,
+        binding: &scope,
+    };
+    let expressions = bind_index_keys(&context, c)?;
     if let Some(predicate) = c.predicate.as_deref_mut() {
-        let binding = bindings.binding_scope()?;
-        crate::schema::indexes::prepare_index_predicate(
-            catalog,
-            &binding.context(),
-            &c.table,
-            predicate,
-        )?;
+        super::bind_index_predicate(catalog, &scope, &c.table, predicate)?;
     }
+    super::options::index_access_method(c)?;
+    if c.unique {
+        super::unique::validate_unique_index_method(c)?;
+    }
+    if !c.included_columns.is_empty() && c.access_method.eq_ignore_ascii_case("gin") {
+        return Err(SQLError::Unsupported(
+            "access method \"gin\" does not support included columns".into(),
+        ));
+    }
+    if let Some(predicate) = c.predicate.as_deref_mut() {
+        super::validate_index_expression_immutability(catalog, &c.table, predicate, true)?;
+    }
+    super::options::validate_index_options(c)?;
+    let key_types = finish_index_keys(&context, c, &expressions)?;
     Ok(crate::catalog::index::IndexDefinition {
         catalog: None,
         relationships: crate::catalog::index::IndexRelationships::default(),

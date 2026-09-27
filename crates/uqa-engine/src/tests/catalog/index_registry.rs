@@ -17,6 +17,7 @@ mod name_reservations;
 mod physical;
 mod renaming;
 mod restoration;
+mod validation;
 
 fn definition(engine: &Engine, name: &str) -> IndexDefinition {
     crate::catalog_indexes::index_definition(&engine.catalog_index(name).unwrap().unwrap()).unwrap()

@@ -35,11 +35,32 @@ pub fn validate_index_keys(
     name: &str,
     key_types: &[uqa_sql::ast::ColumnType],
 ) -> Result<(), SQLError> {
+    validate_index_declaration(context.catalog, statement)?;
+    validate_index_rows(context, statement, name, key_types)
+}
+
+/// Declaration errors precede name collisions; existing row validation belongs to a real build.
+pub fn validate_index_declaration(
+    catalog: &dyn IndexBuildCatalog,
+    statement: &CreateIndex,
+) -> Result<(), SQLError> {
     if statement.unique {
         validate_unique_index_method(statement)?;
-    } else if !key_types
-        .iter()
-        .any(uqa_sql::expr::type_comparison_can_fail)
+        validate_unique_partition_columns(statement, &catalog.table_hierarchy(&statement.table)?)?;
+    }
+    Ok(())
+}
+
+pub(super) fn validate_index_rows(
+    context: &IndexBuildContext<'_>,
+    statement: &CreateIndex,
+    name: &str,
+    key_types: &[uqa_sql::ast::ColumnType],
+) -> Result<(), SQLError> {
+    if !statement.unique
+        && !key_types
+            .iter()
+            .any(uqa_sql::expr::type_comparison_can_fail)
     {
         return Ok(());
     }
@@ -48,9 +69,6 @@ pub fn validate_index_keys(
         return Ok(());
     }
     let hierarchy = context.catalog.table_hierarchy(&statement.table)?;
-    if statement.unique {
-        validate_unique_partition_columns(statement, &hierarchy)?;
-    }
     let tables = if hierarchy.partition_spec.is_some() {
         context.catalog.scan_tables(&statement.table)?
     } else {
@@ -84,6 +102,8 @@ mod binding;
 mod build_keys;
 pub mod constraint_names;
 pub mod creation;
+#[cfg(test)]
+mod declaration_tests;
 pub mod renaming;
 
 pub mod registration;

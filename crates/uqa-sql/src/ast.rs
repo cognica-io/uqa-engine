@@ -106,6 +106,9 @@ pub struct CreateIndex {
     /// known keys (`analyzer`, `lists`, `probes`, ...)
     /// are interpreted by the engine.
     pub options: Vec<(String, String)>,
+    /// Explicit option namespaces retained for declaration-time validation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub option_namespaces: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

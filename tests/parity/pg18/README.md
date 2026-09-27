@@ -9,6 +9,10 @@ The [official upstream regression harness](upstream/README.md) separately import
 - `sqlstate-mismatch`: both engines reject, but with different SQLSTATE codes.
 - `value-mismatch`: both answer, values differ after normalization (boolean display and numerically equivalent float formatting are normalized; JSON and JSONB output text is compared exactly).
 
+## Index declaration reference
+
+The [index declaration reference](index_definition_order.expected.json) separately captures 56 PostgreSQL 18.4 index-definition, option and error-order cases. The [SQL probe](index_definition_order_oracle.sql) rolls back every attempted index and its temporary setup. SQL owner tests check option parsing and diagnostics; Engine tests execute the complete statements against the independently captured results and assert that rollback retains the original index. Regenerate into an ignored output directory with `python3 tests/parity/pg18/capture_index_definition_order.py --container uqa-pg18 --output target/index-definition-order.reference.json`, then review the difference before changing the committed expectation.
+
 ## Numeric comparison reference
 
 The compact [`pg18.json`](../../../crates/uqa-sql/src/expr/binary/comparison/pg18.json) records 44 operand pairs across six comparison operators, plus typed-column filters, grouping, joins and unique constraints. Expectations come from PostgreSQL 18.4, including SQLSTATEs and result types, and retain the Docker image identity. Core's internal exact numeric ordering is checked separately from SQL's operator-selected casts; Planner tests check constant folding, Execution tests exercise SQL binding and both scalar evaluators, and Engine tests exercise public SQL without starting Docker. Engine tests compare scans, indexes and reopened native SQLite, SQLite Key/Value and redb databases.

@@ -11,7 +11,7 @@ use uqa_sql::{
     schema::indexes::{
         keys::require_column_key,
         options::parse_diskann_index_options,
-        vectors::{resolve_vector_index_target, VectorIndexCatalog},
+        vectors::{resolve_vector_index_columns, VectorIndexCatalog},
     },
     SQLError,
 };
@@ -25,7 +25,7 @@ pub(super) fn prepare(
     statement: &mut CreateIndex,
 ) -> Result<(), SQLError> {
     let parsed = parse_diskann_index_options(&statement.options)?;
-    let target = resolve_vector_index_target(catalog, statement, "diskann")?;
+    let target = resolve_vector_index_columns(catalog, statement, "diskann")?;
     if target.fields.len() != 1 {
         return Err(SQLError::Unsupported(
             "CREATE INDEX USING diskann requires exactly one vector or tensor column".into(),

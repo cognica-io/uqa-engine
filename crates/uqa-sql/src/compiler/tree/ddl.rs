@@ -765,6 +765,7 @@ pub(in crate::compiler) fn compile_create_index(
         Some(stmt.idxname.clone())
     };
     let mut options = Vec::new();
+    let mut option_namespaces = Vec::new();
     for opt in &stmt.options {
         let inner = opt
             .node
@@ -776,21 +777,21 @@ pub(in crate::compiler) fn compile_create_index(
             )));
         };
         let key = elem.defname.clone();
+        if !elem.defnamespace.is_empty() {
+            option_namespaces.push(elem.defnamespace.clone());
+        }
         let value = match elem.arg.as_ref().and_then(|node| node.node.as_ref()) {
             Some(NodeEnum::String(value)) => value.sval.clone(),
             Some(NodeEnum::Integer(value)) => value.ival.to_string(),
             Some(NodeEnum::Float(value)) => value.fval.clone(),
+            Some(NodeEnum::Boolean(value)) => value.boolval.to_string(),
             Some(NodeEnum::TypeName(value)) => extract_strings(&value.names)?.join("."),
             Some(other) => {
                 return Err(SQLError::Unsupported(format!(
                     "CREATE INDEX option `{key}` value {other:?}"
                 )));
             }
-            None => {
-                return Err(SQLError::Internal(format!(
-                    "CREATE INDEX option `{key}` has no value"
-                )));
-            }
+            None => "true".into(),
         };
         options.push((key, value));
     }
@@ -821,6 +822,7 @@ pub(in crate::compiler) fn compile_create_index(
         nulls_not_distinct: stmt.nulls_not_distinct,
         if_not_exists: stmt.if_not_exists,
         options,
+        option_namespaces,
     })
 }
 
