@@ -37,6 +37,23 @@ pub struct KeyValueDiskANNSource {
 }
 
 impl KeyValueDiskANNSource {
+    /// Retain and fully validate this exact generation's origin stream without reopening a newer provider view or dropping its build lease.
+    pub fn origin_reader(
+        &self,
+        maximum: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<crate::diskann_index::pages::DiskANNOriginReader> {
+        self.check(control)?;
+        let source = Self::from_read(
+            self.read.clone(),
+            self.generation,
+            DiskANNStageStatus::Sealed,
+            self.query_control.as_ref(),
+            control,
+        )?;
+        crate::diskann_index::pages::DiskANNOriginReader::open(source, maximum, control)
+    }
+
     pub(super) fn capture(
         repository: &KeyValueDiskANNStore,
         generation: DiskANNGeneration,

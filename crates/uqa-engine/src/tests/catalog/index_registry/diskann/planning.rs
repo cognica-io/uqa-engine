@@ -90,7 +90,7 @@ fn diskann_planning_retains_per_field_and_query_facts_on_all_providers() {
     check(&Engine::new(), Some((3, 0)));
     for provider in 0..3 {
         let (_directory, engine, _peer) = sessions(provider);
-        check(&engine, None);
+        check(&engine, (provider != 0).then_some((3, 0)));
     }
 }
 

@@ -324,6 +324,12 @@ struct Faults {
 }
 
 impl VersionedPersistence for Faults {
+    fn diskann_population_record_layout(
+        &self,
+    ) -> Option<&dyn crate::mvcc::DiskANNPopulationRecordLayout> {
+        self.inner.diskann_population_record_layout()
+    }
+
     fn resource_leases(&self) -> Option<&dyn crate::mvcc::ResourceLeaseProvider> {
         self.inner.resource_leases()
     }

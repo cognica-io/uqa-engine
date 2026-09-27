@@ -43,6 +43,11 @@ pub use restore::{
     verify_diskann_restored_rebuild, verify_diskann_restored_writes, DiskANNRestoreRecords,
 };
 pub use runtime::verify_diskann_runtime_adoption_conflicts;
+pub use runtime::{
+    seed_diskann_population_upgrade, verify_diskann_population_late_publication,
+    verify_diskann_population_lifetimes, verify_diskann_population_upgrade,
+    verify_diskann_population_upgrade_reopen, verify_diskann_population_writers,
+};
 mod selection;
 pub use identity::{verify_diskann_catalog_identity, verify_diskann_catalog_identity_reopen};
 pub use live::{verify_diskann_live_reopen, verify_diskann_live_writes};

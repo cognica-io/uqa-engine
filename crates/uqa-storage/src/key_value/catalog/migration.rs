@@ -462,6 +462,7 @@ pub(super) fn table_data_prefixes(table_name: &str) -> StorageBackendResult<Vec<
         table_field_analyzer_prefix(table_name)?,
         field_binding_prefix(table_name)?,
     ];
+    prefixes.extend(super::super::vector_index::origin::populations::table_prefixes(table_name)?);
     prefixes.extend(table_index_prefixes(table_name)?);
     Ok(prefixes)
 }
