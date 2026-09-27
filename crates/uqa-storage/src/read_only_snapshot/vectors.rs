@@ -108,6 +108,44 @@ impl<T: VectorIndex + ?Sized + 'static> VectorIndex for ReadOnlySnapshot<T> {
         }
     }
 
+    fn search_knn_with_statistics(
+        &self,
+        query: &[f32],
+        k: usize,
+        control: Option<&StorageReadControl>,
+    ) -> StorageBackendResult<crate::vector_index::VectorQueryResult> {
+        if let Some(control) = control {
+            control.check()?;
+        }
+        let result = self
+            .0
+            .search_knn_with_statistics(query, k, self.2.as_ref().or(control))?;
+        if let Some(control) = control {
+            control.check()?;
+        }
+        Ok(result)
+    }
+
+    fn search_threshold_with_statistics(
+        &self,
+        query: &[f32],
+        threshold: f32,
+        control: Option<&StorageReadControl>,
+    ) -> StorageBackendResult<crate::vector_index::VectorQueryResult> {
+        if let Some(control) = control {
+            control.check()?;
+        }
+        let result = self.0.search_threshold_with_statistics(
+            query,
+            threshold,
+            self.2.as_ref().or(control),
+        )?;
+        if let Some(control) = control {
+            control.check()?;
+        }
+        Ok(result)
+    }
+
     fn count(&self) -> StorageBackendResult<usize> {
         if let Some(control) = &self.2 {
             control.check()?;

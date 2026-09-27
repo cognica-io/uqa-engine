@@ -137,6 +137,32 @@ impl<P: DiskANNPersistentOwner> VectorIndex for PersistentDiskANNIndex<P> {
             .snapshot()?
             .search_threshold_with_control(query, threshold, control)
     }
+    fn search_knn_with_statistics(
+        &self,
+        query: &[f32],
+        k: usize,
+        control: Option<&StorageReadControl>,
+    ) -> StorageBackendResult<crate::vector_index::VectorQueryResult> {
+        if let Some(control) = control {
+            control.check()?;
+        }
+        self.owner
+            .snapshot()?
+            .search_knn_with_statistics(query, k, control)
+    }
+    fn search_threshold_with_statistics(
+        &self,
+        query: &[f32],
+        threshold: f32,
+        control: Option<&StorageReadControl>,
+    ) -> StorageBackendResult<crate::vector_index::VectorQueryResult> {
+        if let Some(control) = control {
+            control.check()?;
+        }
+        self.owner
+            .snapshot()?
+            .search_threshold_with_statistics(query, threshold, control)
+    }
     fn count(&self) -> StorageBackendResult<usize> {
         self.owner.count()
     }

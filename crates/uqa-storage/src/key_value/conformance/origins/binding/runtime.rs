@@ -29,6 +29,9 @@ use crate::{
 };
 use std::sync::Arc;
 
+mod statistics;
+pub use statistics::verify_diskann_vector_statistics;
+
 mod populations;
 pub use populations::{
     seed_diskann_population_upgrade, verify_diskann_population_late_publication,
@@ -324,6 +327,7 @@ pub fn verify_diskann_runtime_lifecycle(
     expect_eq(&index.count()?, &4, "adoption preserves complete tensors")?;
     let first = generation(store, &control)?;
     population(&index, 4, 0, &control)?;
+    verify_diskann_vector_statistics(&index, first, (3, 4), (0, 0))?;
     let held = index.snapshot()?;
     let metadata = capture_metadata(store, &index, &*held, &temporary, &control)?;
     store.savepoint("runtime-user")?;
@@ -332,6 +336,8 @@ pub fn verify_diskann_runtime_lifecycle(
     index.add(4, vec![0.0, 1.0])?;
     changed_metadata(&index, &*held, &metadata, &control)?;
     population(&index, 3, 2, &control)?;
+    verify_diskann_vector_statistics(&index, first, (1, 1), (2, 2))?;
+    verify_diskann_vector_statistics(&*held, first, (3, 4), (0, 0))?;
     population(&*held, 4, 0, &control)?;
     expect_eq(
         &generation(store, &control)?,
@@ -349,6 +355,7 @@ pub fn verify_diskann_runtime_lifecycle(
     index.clear()?;
     let empty = index.snapshot()?;
     population(&index, 0, 0, &control)?;
+    verify_diskann_vector_statistics(&*empty, generation(store, &control)?, (0, 0), (0, 0))?;
     expect_eq(
         &empty.count()?,
         &0,
@@ -400,6 +407,8 @@ pub fn verify_diskann_runtime_lifecycle(
     population(&index, 1, 0, &control)?;
     scores(&*held, &[(1, 1.0), (2, 1.0), (3, -1.0)])?;
     let final_generation = generation(store, &control)?;
+    verify_diskann_vector_statistics(&index, final_generation, (1, 1), (0, 0))?;
+    verify_diskann_vector_statistics(&*held, first, (3, 4), (0, 0))?;
     expect_eq(
         &temporary.used(),
         &0,

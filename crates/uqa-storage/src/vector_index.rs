@@ -23,6 +23,7 @@ mod config;
 mod cosine;
 mod memory_snapshot;
 pub mod query;
+pub use query::statistics::{DiskANNExecutionRoute, DiskANNExecutionStats, VectorQueryResult};
 pub(crate) mod retained;
 
 pub(crate) use canonical::{copy_vector, ordinal_count, selected_fingerprint};
@@ -186,6 +187,32 @@ pub trait VectorIndex: Send + Sync {
     ) -> StorageBackendResult<PostingList> {
         control.check()?;
         self.search_threshold(query, threshold)
+    }
+    /// Run one KNN invocation and retain its measured work when supported. An optional invoking control preserves the existing controlled-search boundary; absence preserves ordinary provider dispatch. Unsupported providers execute once and return no report.
+    fn search_knn_with_statistics(
+        &self,
+        query: &[f32],
+        k: usize,
+        control: Option<&crate::read_control::StorageReadControl>,
+    ) -> StorageBackendResult<VectorQueryResult> {
+        match control {
+            Some(control) => self.search_knn_with_control(query, k, control),
+            None => self.search_knn(query, k),
+        }
+        .map(VectorQueryResult::unmeasured)
+    }
+    /// Return exact threshold results and optional work from their one invocation. Report support must not introduce an additional scan or weaken the original provider's controls.
+    fn search_threshold_with_statistics(
+        &self,
+        query: &[f32],
+        threshold: f32,
+        control: Option<&crate::read_control::StorageReadControl>,
+    ) -> StorageBackendResult<VectorQueryResult> {
+        match control {
+            Some(control) => self.search_threshold_with_control(query, threshold, control),
+            None => self.search_threshold(query, threshold),
+        }
+        .map(VectorQueryResult::unmeasured)
     }
     fn count(&self) -> StorageBackendResult<usize>;
 

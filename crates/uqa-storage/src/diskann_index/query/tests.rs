@@ -26,6 +26,7 @@ use uqa_core::{memory::MemoryBudget, DocId};
 
 mod failures;
 mod metadata;
+mod reports;
 mod retained;
 mod statistics;
 

@@ -10,6 +10,7 @@ mod buffer;
 mod centroids;
 mod containers;
 mod scores;
+pub mod statistics;
 
 #[cfg(test)]
 mod tests;

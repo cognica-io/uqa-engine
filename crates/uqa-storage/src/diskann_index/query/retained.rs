@@ -11,11 +11,12 @@ use super::{invalid, DiskANNQuery};
 use crate::diskann_index::{
     format::{DiskANNGeneration, DiskANNManifest},
     pages::{DiskANNOriginReader, DiskANNPageSource, DiskANNReadLimits, DiskANNReader},
-    DiskANNCanonicalCounts, DiskANNQueryRead,
+    DiskANNCanonicalCounts, DiskANNQueryRead, ExactVectorReason,
 };
 use crate::{
-    read_control::StorageReadControl, vector_index::DiskANNIndexParams, StorageBackendError,
-    StorageBackendResult, VectorIndex,
+    read_control::StorageReadControl,
+    vector_index::{DiskANNExecutionRoute, DiskANNIndexParams, VectorQueryResult},
+    StorageBackendError, StorageBackendResult, VectorIndex,
 };
 use std::sync::Arc;
 use uqa_core::{memory::Budgeted, DocId, PostingList};
@@ -173,10 +174,8 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> VectorIndex for RetainedDiskAN
         k: usize,
         control: &StorageReadControl,
     ) -> StorageBackendResult<PostingList> {
-        Ok(self
-            .query(control)
-            .search_knn(query, k, &self.retained.control)?
-            .postings)
+        self.search_knn_with_statistics(query, k, Some(control))
+            .map(|result| result.postings)
     }
     fn search_threshold_with_control(
         &self,
@@ -184,8 +183,49 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> VectorIndex for RetainedDiskAN
         threshold: f32,
         control: &StorageReadControl,
     ) -> StorageBackendResult<PostingList> {
-        self.query(control)
-            .search_threshold(query, threshold, &self.retained.control)
+        self.search_threshold_with_statistics(query, threshold, Some(control))
+            .map(|result| result.postings)
+    }
+
+    fn search_knn_with_statistics(
+        &self,
+        query: &[f32],
+        k: usize,
+        control: Option<&StorageReadControl>,
+    ) -> StorageBackendResult<VectorQueryResult> {
+        let result = self
+            .query(control.unwrap_or(&self.retained.control))
+            .search_knn(query, k, &self.retained.control)?;
+        let route = if k == 0 {
+            DiskANNExecutionRoute::EmptyK
+        } else {
+            match result.exact_reason {
+                None => DiskANNExecutionRoute::Approximate,
+                Some(ExactVectorReason::ZeroNorm) => DiskANNExecutionRoute::ExactZeroNorm,
+                Some(ExactVectorReason::NonFiniteNorm) => DiskANNExecutionRoute::ExactNonFiniteNorm,
+            }
+        };
+        Ok(VectorQueryResult::measured(
+            result,
+            self.manifest().input().generation,
+            route,
+        ))
+    }
+
+    fn search_threshold_with_statistics(
+        &self,
+        query: &[f32],
+        threshold: f32,
+        control: Option<&StorageReadControl>,
+    ) -> StorageBackendResult<VectorQueryResult> {
+        let result = self
+            .query(control.unwrap_or(&self.retained.control))
+            .search_threshold_with_stats(query, threshold, &self.retained.control)?;
+        Ok(VectorQueryResult::measured(
+            result,
+            self.manifest().input().generation,
+            DiskANNExecutionRoute::ExactThreshold,
+        ))
     }
 
     fn count(&self) -> StorageBackendResult<usize> {
