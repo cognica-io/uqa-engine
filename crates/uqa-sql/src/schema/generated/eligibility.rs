@@ -43,7 +43,7 @@ pub(crate) fn validate_builtin_name(name: &str) -> Result<(), SQLError> {
             | "to_date"
             | "to_number"
     ) {
-        return Err(non_immutable_function(name));
+        return Err(non_immutable_function());
     }
     if matches!(
         name,
@@ -81,6 +81,7 @@ pub(crate) fn fixed_builtin_is_non_immutable(name: &str) -> bool {
             | "pg_get_indexdef"
             | "format_type"
             | "pg_has_role"
+            | "pg_get_userbyid"
             | "has_table_privilege"
             | "has_column_privilege"
             | "has_database_privilege"
@@ -96,12 +97,10 @@ pub(crate) fn fixed_builtin_is_non_immutable(name: &str) -> bool {
     )
 }
 
-pub(crate) fn non_immutable_function(name: &str) -> SQLError {
+pub(crate) fn non_immutable_function() -> SQLError {
     SQLError::Routine {
         sqlstate: "42P17".into(),
-        message: format!(
-            "generation expression function `{name}` is not immutable for these argument types"
-        ),
+        message: "generation expression is not immutable".into(),
     }
 }
 
@@ -112,10 +111,9 @@ mod tests {
     #[test]
     fn generated_name_restrictions_keep_type_dependent_functions_with_the_validator() {
         for name in ["to_char", "format", "jsonb_build_array", "now", "to_json"] {
-            assert_eq!(
-                validate_builtin_name(name).unwrap_err().sqlstate(),
-                Some("42P17")
-            );
+            let error = validate_builtin_name(name).unwrap_err();
+            assert_eq!(error.sqlstate(), Some("42P17"));
+            assert_eq!(error.to_string(), "generation expression is not immutable");
         }
         for name in [
             "json_object_keys",

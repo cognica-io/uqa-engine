@@ -932,7 +932,7 @@ pub(in crate::schema) fn validate_bound_function(
         )));
     }
     if function.def.volatility != crate::ast::FunctionVolatility::Immutable {
-        return Err(non_immutable_function(&binding.name));
+        return Err(non_immutable_function());
     }
     let signature = function.def.signature_params();
     let mut positional = 0usize;

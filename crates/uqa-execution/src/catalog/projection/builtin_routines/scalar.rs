@@ -8,6 +8,21 @@ use super::{BuiltinRoutineCatalogEntry, FALSE_NODE};
 
 pub const ROUTINES: &[BuiltinRoutineCatalogEntry] = &[
     BuiltinRoutineCatalogEntry {
+        oid: 1642,
+        name: "pg_get_userbyid",
+        kind: "f",
+        strict: true,
+        volatility: "s",
+        parallel: "s",
+        leakproof: false,
+        return_type: 19,
+        argument_types: &[26],
+        argument_names: &[],
+        default_arguments: 0,
+        argument_defaults: None,
+        source: "pg_get_userbyid",
+    },
+    BuiltinRoutineCatalogEntry {
         oid: 2077,
         name: "current_setting",
         kind: "f",

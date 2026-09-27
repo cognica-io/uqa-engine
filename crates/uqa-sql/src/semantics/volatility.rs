@@ -129,6 +129,7 @@ pub fn function_volatility_with_binding(
                 | "pg_get_indexdef"
                 | "format_type"
                 | "pg_has_role"
+                | "pg_get_userbyid"
                 | "has_database_privilege"
                 | "has_schema_privilege"
                 | "has_sequence_privilege"

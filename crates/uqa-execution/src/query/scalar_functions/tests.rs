@@ -13,6 +13,7 @@ fn scalar_context_errors_preserve_argument_evaluation_order() {
     let args = [ScalarExpr::Literal(Value::Null)];
     for function in [
         "pg_get_expr",
+        "pg_get_userbyid",
         "pg_notify",
         "pg_get_sequence_data",
         "has_database_privilege",

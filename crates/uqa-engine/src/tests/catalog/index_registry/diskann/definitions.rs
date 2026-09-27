@@ -6,7 +6,9 @@
 
 use super::*;
 
-fn owners(mut run: impl FnMut(&Engine)) {
+mod populations;
+
+pub(super) fn owners(mut run: impl FnMut(&Engine)) {
     run(&Engine::new());
     for provider in 0..3 {
         let (_directory, engine, peer) = sessions(provider);
