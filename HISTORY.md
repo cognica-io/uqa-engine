@@ -6,9 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Show retained DiskANN field/generation settings and physical work estimates in TEXT and JSON EXPLAIN, including logical page work, provider dispatch, PQ, exact numeric routes and tensor reranking. Static diagnostics leave dynamic arguments unevaluated; ANALYZE keeps one actual execution. Unknown selected-view current/change populations remain explicit, and the displayed work is estimated rather than measured I/O.
+
 ### Changed
 
-- Advance native SQLite mapping to format 10 for guarded binary DiskANN generation records, reusing the common staging, sealing and retained-reader lifecycle across plain, encrypted and compressed owners. Atomic upgrades preserve existing data and history; older native binaries reject the new mapping. Public DiskANN index creation remains unavailable. See the [development upgrade contract](docs/manual/reference/10-upgrading.md#development-native-sqlite-mapping).
+- Advance native SQLite mapping to format 12 for guarded binary DiskANN generations and canonical mutation provenance, reusing the common staging, sealing and retained-reader lifecycle across plain, encrypted and compressed owners. Atomic upgrades preserve existing data and history; older native binaries reject the new mapping. SQL creation/querying is connected to memory and persistent providers; remaining integration acceptance is tracked in the [implementation plan](docs/plans/0014-diskann-vector-index.md). See the [development upgrade contract](docs/manual/reference/10-upgrading.md#development-native-sqlite-mapping).
 - Have parent processes kill prepared notification crash fixtures without running Rust destructors or C exit handlers. Preserve the original recovery deadline, forced-termination checks, durable messages, sender identity and encrypted-file assertions while avoiding OpenSSL cleanup racing an intentionally live recovery worker.
 
 ## [0.4.0] - 2026-09-25

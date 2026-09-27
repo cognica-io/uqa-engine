@@ -89,7 +89,24 @@ LIMIT 20;
 
 The `k` argument defines the support delivered by the vector leaf. A later relational predicate filters that support; it does not automatically increase the vector pool. Widen `k` when downstream filters or fusion need more candidates.
 
-With no vector index, KNN is an exact brute-force cosine scan. IVF and HNSW are approximate physical paths. A `TENSOR(n)` row uses its best element score.
+With no vector index, KNN is an exact brute-force cosine scan. IVF, HNSW and DiskANN are approximate physical paths. A `TENSOR(n)` row uses its best element score.
+
+### DiskANN plan diagnostics
+
+Use `EXPLAIN` or `EXPLAIN (FORMAT JSON)` on a KNN query to inspect its selected DiskANN field and generation, configured search list and beam width, PQ/page layout, stored populations and read limits. JSON adds a `Physical Plans` array to the existing result envelope; TEXT includes the same physical details. `Estimated Work` separates PQ work, logical page requests and bytes, dispatch rounds, side/change scans, tensor reranking and resident PQ payload. These are uncalibrated estimates, not measured physical I/O or elapsed time. Unavailable current/change counts are null.
+
+Static EXPLAIN retains the explained statement's relation locks until transaction end and does not execute the vector query or volatile argument functions. Available parameters can supply a concrete query and candidate count; arguments that must be evaluated later leave the route and work estimate unknown. Known invalid vector inputs retain normal execution validation. `EXPLAIN ANALYZE` executes the body once and reports the existing row counts and elapsed execution time; the DiskANN work fields remain estimates. A residual predicate filters the chosen candidate pool without refilling it.
+
+```sql execute
+CREATE TABLE explain_vectors(id INTEGER, embedding VECTOR(2));
+INSERT INTO explain_vectors VALUES (1, ARRAY[1.0, 0.0]), (2, ARRAY[0.0, 1.0]);
+CREATE INDEX explain_vectors_diskann ON explain_vectors USING diskann(embedding)
+WITH (max_degree=2, search_list_size=4, beam_width=2, pq_bytes=1);
+EXPLAIN (FORMAT JSON)
+SELECT id FROM explain_vectors WHERE knn_match(embedding, ARRAY[1.0, 0.0], 1);
+```
+
+See the [physical diagnostic contract](../../design/diskann-explain.md) for ownership, binding and preservation details.
 
 ## Automatic hybrid fusion
 

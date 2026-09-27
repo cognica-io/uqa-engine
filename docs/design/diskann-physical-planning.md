@@ -1,6 +1,6 @@
 # DiskANN physical planning
 
-DiskANN planning uses retained physical metadata instead of the generic dimension-times-log-population vector estimate. This document defines the implemented statistics and work estimate. Static EXPLAIN rendering, invocation counters, and exact selected-view current/change statistics remain required by the [implementation plan](../plans/0014-diskann-vector-index.md#sql-lifecycle-and-planning).
+DiskANN planning uses retained physical metadata instead of the generic dimension-times-log-population vector estimate. This document defines the implemented statistics and work estimate; [physical EXPLAIN](diskann-explain.md) defines their static diagnostic projection. Invocation counters and exact selected-view current/change statistics remain required by the [implementation plan](../plans/0014-diskann-vector-index.md#sql-lifecycle-and-planning).
 
 ## Ownership and selected inputs
 
