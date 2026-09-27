@@ -20,6 +20,8 @@ use crate::{
 use std::sync::Arc;
 use uqa_core::{memory::Budgeted, DocId, PostingList};
 
+mod values;
+
 struct Retained<S> {
     canonical: S,
     reader: DiskANNReader,
@@ -168,6 +170,9 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> VectorIndex for RetainedDiskAN
 
     fn count(&self) -> StorageBackendResult<usize> {
         self.check()?;
+        if let Some(source) = self.retained.canonical.unversioned_vectors() {
+            return super::values::count(&**source, &self.retained.control);
+        }
         let count = self
             .retained
             .canonical
@@ -178,6 +183,11 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> VectorIndex for RetainedDiskAN
 
     fn contains_document(&self, document: DocId) -> StorageBackendResult<bool> {
         self.check()?;
+        if let Some(source) = self.retained.canonical.unversioned_vectors() {
+            return source
+                .document_vector_count(document, &self.retained.control)
+                .map(|count| count != 0);
+        }
         let contains = self
             .retained
             .canonical
@@ -204,11 +214,48 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> VectorIndex for RetainedDiskAN
     ) -> StorageBackendResult<Option<DiskANNReadSnapshot>> {
         control.check()?;
         self.check()?;
+        if self.retained.canonical.unversioned_vectors().is_some() {
+            return Ok(None);
+        }
         Ok(Some(DiskANNReadSnapshot::new(
             self.retained.clone(),
             self.manifest().input().generation,
             &self.retained.control,
         )))
+    }
+
+    fn vector_read_snapshot(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::vector_index::VectorReadSnapshot>> {
+        control.check()?;
+        self.check()?;
+        Ok(Some(self.retained.clone()))
+    }
+
+    fn snapshot_with_vector_read(
+        &self,
+        source: crate::vector_index::VectorReadSnapshot,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<Arc<dyn VectorIndex>>> {
+        self.check()?;
+        let actual = DiskANNReadSnapshot::new(
+            self.retained.clone(),
+            self.manifest().input().generation,
+            &self.retained.control,
+        );
+        let canonical = super::matching::MatchingCanonical::new(actual, source, control)?;
+        let retained = Retained {
+            canonical,
+            reader: self.retained.reader.clone(),
+            origins: self.retained.origins.clone(),
+            control: self.retained.control.clone(),
+        };
+        let retained = Budgeted::new(retained, self.retained.control.memory().empty_reservation())
+            .into_shared()?;
+        self.check()?;
+        control.check()?;
+        Ok(Some(Arc::new(RetainedDiskANNIndex { retained })))
     }
 
     fn snapshot_with_diskann_changes(
@@ -218,6 +265,9 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> VectorIndex for RetainedDiskAN
     ) -> StorageBackendResult<Option<Arc<dyn VectorIndex>>> {
         control.check()?;
         self.check()?;
+        if self.retained.canonical.unversioned_vectors().is_some() {
+            return Ok(None);
+        }
         let base = DiskANNReadSnapshot::new(
             self.retained.clone(),
             self.manifest().input().generation,
@@ -267,6 +317,16 @@ impl<S: DiskANNQueryRead> crate::diskann_index::DiskANNCanonicalRead for Budgete
         visit: &mut crate::diskann_index::DiskANNCanonicalVectorVisitor<'_>,
     ) -> StorageBackendResult<Option<crate::diskann_index::format::DiskANNVectorVersion>> {
         self.canonical.visit_document(document, control, visit)
+    }
+
+    fn read_vector(
+        &self,
+        document: DocId,
+        ordinal: u32,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_core::memory::BudgetedVec<f32>>> {
+        self.control.check()?;
+        self.canonical.read_vector(document, ordinal, control)
     }
 }
 

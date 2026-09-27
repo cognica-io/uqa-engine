@@ -186,6 +186,19 @@ impl DiskANNCanonicalRead for SelectedCanonical {
             .transpose()
             .map(Option::flatten)
     }
+
+    fn read_vector(
+        &self,
+        document: DocId,
+        ordinal: u32,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_core::memory::BudgetedVec<f32>>> {
+        self.check_control(control)?;
+        self.source(document)
+            .map(|source| source.read_vector(document, ordinal, control))
+            .transpose()
+            .map(Option::flatten)
+    }
 }
 
 impl DiskANNQueryRead for SelectedCanonical {

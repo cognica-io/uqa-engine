@@ -20,6 +20,7 @@ use crate::vector_index::{
 use crate::{StorageBackendError, StorageBackendResult};
 
 mod builder;
+mod canonical;
 pub use builder::RetainedVectorIndexBuilder;
 
 pub(crate) type VectorEntries = Vec<(DocId, u32, Vec<f32>)>;
@@ -146,6 +147,17 @@ impl VectorIndex for RetainedVectorIndex {
     }
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
         Ok(Arc::new(self.clone()))
+    }
+
+    fn vector_read_snapshot(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<super::VectorReadSnapshot>> {
+        self.control.check()?;
+        control.check()?;
+        Ok(Some(
+            Budgeted::new(self.clone(), self.control.memory().empty_reservation()).into_shared()?,
+        ))
     }
 }
 

@@ -98,6 +98,25 @@ impl KeyValueRead for RetainedRead {
         control.check()
     }
 
+    fn visit_value_bounded(
+        &self,
+        key: &[u8],
+        max_bytes: usize,
+        control: &StorageReadControl,
+        visit: &mut ValueReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.control.check()?;
+        self.visit_value_budgeted(key, control, &mut |value| {
+            self.control.check()?;
+            if let Some(value) = value {
+                control.check_value_size(value.len(), max_bytes)?;
+            }
+            visit(value)
+        })?;
+        self.control.check()?;
+        control.check()
+    }
+
     fn visit_prefix_after(
         &self,
         prefix: &[u8],

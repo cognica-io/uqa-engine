@@ -62,6 +62,15 @@ impl<'a, 's> Candidates<'a, 's> {
         self.selected.len()
     }
 
+    pub(super) fn offer_unversioned(
+        &mut self,
+        document: DocId,
+        score: f32,
+    ) -> StorageBackendResult<()> {
+        self.query.check(self.control)?;
+        self.selected.offer_raw(document, score)
+    }
+
     fn candidate(&self, document: DocId) -> StorageBackendResult<Candidate> {
         self.query.check(self.control)?;
         let origin = self

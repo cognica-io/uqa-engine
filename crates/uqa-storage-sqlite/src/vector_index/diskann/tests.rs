@@ -16,6 +16,7 @@ mod corpus;
 mod coverage;
 mod field_guards;
 mod lifecycle;
+mod raw_values;
 mod validation;
 
 fn open(path: &Path, mode: u8) -> ManagedConnection {

@@ -11,6 +11,8 @@ use crate::diskann_index::pages::{
 use crate::read_control::CancellationToken;
 use crate::vector_index::VectorIndexes;
 
+mod definitions;
+
 struct Observed {
     source: Arc<DiskANNMemorySource>,
     records: AtomicUsize,

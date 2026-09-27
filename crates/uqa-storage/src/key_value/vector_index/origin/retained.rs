@@ -313,6 +313,23 @@ impl DiskANNCanonicalRead for RetainedDiskANNCanonical {
         self.origin(document, control)
     }
 
+    fn read_vector(
+        &self,
+        document: DocId,
+        ordinal: u32,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<BudgetedVec<f32>>> {
+        super::super::canonical::read_vector(
+            &*self.read,
+            &self.vectors,
+            document,
+            ordinal,
+            self.dimensions,
+            &self.control,
+            control,
+        )
+    }
+
     fn visit_document(
         &self,
         document: DocId,

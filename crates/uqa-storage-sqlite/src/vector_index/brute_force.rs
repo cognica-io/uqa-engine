@@ -305,4 +305,10 @@ impl VectorIndex for SQLiteVectorIndex {
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
         Ok(Arc::new(self.retained_snapshot()?))
     }
+    fn vector_read_snapshot(
+        &self,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_storage::vector_index::VectorReadSnapshot>> {
+        super::native::canonical::capture(self, control)
+    }
 }

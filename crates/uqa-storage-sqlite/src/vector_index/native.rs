@@ -23,6 +23,7 @@ use crate::mvcc::native::{
 };
 use crate::{Result, SQLiteError};
 
+pub(super) mod canonical;
 mod guards;
 pub(in crate::vector_index) mod publication;
 pub(in crate::vector_index) mod records;

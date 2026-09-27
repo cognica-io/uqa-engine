@@ -47,6 +47,35 @@ fn copied(engine: &Engine) -> Engine {
 }
 
 #[test]
+fn diskann_fixed_copy_retains_an_index_created_after_snapshot_capture() {
+    owners(|engine| {
+        create(engine, false);
+        sql(
+            engine,
+            "CREATE INDEX diskann_idx ON diskann_docs USING diskann(embedding)",
+        );
+        let reader = copied(engine);
+        sql(engine, "ROLLBACK");
+        let nested = copied(&reader);
+        drop(reader);
+        assert_search(&nested, &[(1, 1.0), (2, 0.0)]);
+    });
+}
+
+#[test]
+fn diskann_fixed_copy_retains_a_replaced_index_definition() {
+    owners(|engine| {
+        create(engine, true);
+        sql(engine, "DROP INDEX diskann_idx; CREATE INDEX diskann_idx ON diskann_docs USING diskann(embedding) WITH(max_degree=2,search_list_size=2,beam_width=1)");
+        let reader = copied(engine);
+        sql(engine, "ROLLBACK");
+        let nested = copied(&reader);
+        drop(reader);
+        assert_search(&nested, &[(1, 1.0), (2, 0.0)]);
+    });
+}
+
+#[test]
 fn diskann_complete_row_rewrite_retains_an_index_created_after_snapshot_capture() {
     owners(|engine| {
         create(engine, false);
@@ -59,6 +88,25 @@ fn diskann_complete_row_rewrite_retains_an_index_created_after_snapshot_capture(
         sql(engine, "ROLLBACK");
         assert_search(&reader, &[(1, -1.0), (2, -1.0)]);
     });
+}
+
+#[test]
+fn diskann_definition_copies_merge_private_rows_with_unchanged_fixed_rows() {
+    for indexed in [false, true] {
+        owners(|engine| {
+            create(engine, indexed);
+            sql(engine, "UPDATE diskann_docs SET embedding=ARRAY[-1.0,0.0] WHERE id=1; INSERT INTO diskann_docs VALUES(3,ARRAY[1.0,0.0])");
+            if indexed {
+                sql(engine, "DROP INDEX diskann_idx");
+            }
+            sql(engine, "CREATE INDEX diskann_idx ON diskann_docs USING diskann(embedding) WITH(max_degree=2,search_list_size=2,beam_width=1)");
+            let reader = copied(engine);
+            sql(engine, "ROLLBACK");
+            let nested = copied(&reader);
+            drop(reader);
+            assert_search(&nested, &[(3, 1.0), (2, 0.0), (1, -1.0)]);
+        });
+    }
 }
 
 #[test]
@@ -117,8 +165,7 @@ fn diskann_index_creation_preserves_fixed_query_rows_after_concurrent_writes() {
                 [(1, -1.0), (3, 1.0)]
             );
         }
-        let snapshot = engine.capture_statement_read_snapshot().unwrap();
-        let reader = engine.statement_read_snapshot_engine(&snapshot);
+        let reader = copied(&engine);
         sql(&engine, "ROLLBACK");
         assert_search(&reader, &[(1, 1.0), (2, 0.0)]);
     }

@@ -6,6 +6,7 @@
 
 //! Vector-index adapter over an ordered key/value store.
 
+mod canonical;
 pub(crate) mod guards;
 pub(in crate::key_value) mod origin;
 mod read;
@@ -180,5 +181,11 @@ impl VectorIndex for KeyValueVectorIndex {
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
         Ok(Arc::new(self.read_snapshot()?))
+    }
+    fn vector_read_snapshot(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::vector_index::VectorReadSnapshot>> {
+        canonical::capture(self, control).map(Some)
     }
 }

@@ -19,6 +19,11 @@ pub type DiskANNCanonicalCorpusVisitor<'a> =
 
 /// A retained canonical source with the actual versioned change journal on that same view. The lifecycle owner must establish complete coverage before opening a query; absence from this journal alone is not proof of build membership.
 pub trait DiskANNQueryRead: DiskANNCanonicalRead {
+    /// An independently retained complete value view used when an index definition changed. Origins exposed by this source cover only tensors verified equal to its actual versioned source; the remaining tensors join the ordinary uncovered-candidate stream without fabricated mutation versions.
+    fn unversioned_vectors(&self) -> Option<&crate::vector_index::VectorReadSnapshot> {
+        None
+    }
+
     /// Count visible ordinals from complete origin metadata without decoding coordinates or preparing a graph reader.
     fn vector_count(&self, control: &StorageReadControl) -> StorageBackendResult<usize> {
         self.check_control(control)?;
@@ -103,6 +108,29 @@ pub trait DiskANNCanonicalRead {
         control: &StorageReadControl,
         visit: &mut DiskANNCanonicalVectorVisitor<'_>,
     ) -> StorageBackendResult<Option<DiskANNVectorVersion>>;
+
+    /// Own one canonical ordinal so consumers can compare independent fixed sources without nested provider callbacks. Physical owners override this default with bounded point reads.
+    fn read_vector(
+        &self,
+        document: DocId,
+        ordinal: u32,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_core::memory::BudgetedVec<f32>>> {
+        let mut output = None;
+        self.visit_document(document, control, &mut |found, _, raw| {
+            if found == ordinal {
+                let mut vector = uqa_core::memory::BudgetedVec::new(control.memory());
+                for chunk in raw.chunks(1024) {
+                    self.check_control(control)?;
+                    vector.extend_from_slice(chunk)?;
+                }
+                output = Some(vector);
+            }
+            Ok(())
+        })?;
+        self.check_control(control)?;
+        Ok(output)
+    }
 
     /// Stream the entire fixed source in document/ordinal order without retaining a corpus directory. Empty replacements are validated but emit no vectors; unstamped values fail instead of disappearing from the corpus.
     fn visit_all(
