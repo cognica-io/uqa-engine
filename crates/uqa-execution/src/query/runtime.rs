@@ -23,6 +23,7 @@ pub trait QueryMemorySettings: Send + Sync {
 /// Borrowed runtime services with no catalog mutation, transaction, or storage publication access.
 #[derive(Clone, Copy)]
 pub struct QueryRuntimeView<'a> {
+    pub diagnostics: &'a super::diagnostics::QueryDiagnostics,
     pub cancellation: &'a CancellationToken,
     pub settings: &'a dyn QueryMemorySettings,
     pub scalar_functions:

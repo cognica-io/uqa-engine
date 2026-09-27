@@ -34,6 +34,7 @@ pub trait VectorPoolRetrieval {
         field: &str,
         query_vector: &[f32],
         k: usize,
+        diagnostics: Option<&crate::query::diagnostics::CapturedDiagnostics>,
     ) -> Result<Vec<ScoredEntry>, SQLError>;
 }
 

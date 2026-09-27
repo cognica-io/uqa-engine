@@ -224,7 +224,9 @@ impl Engine {
 
     /// Restore an independent internal read view without entering the source statement or acquiring another automatic-maintenance client lease.
     pub(crate) fn new_internal_read_session(&self) -> StorageBackendResult<Self> {
-        self.new_sibling_session(true, None)
+        let mut session = self.new_sibling_session(true, None)?;
+        session.runtime.diagnostics = self.runtime.diagnostics.fork();
+        Ok(session)
     }
 
     pub(crate) fn new_internal_retained_read_session(&self) -> StorageBackendResult<Self> {
@@ -233,7 +235,9 @@ impl Engine {
         })?;
         let storage_session =
             backend.open_retained_read_session(&uqa_core::CancellationToken::new())?;
-        self.new_sibling_session(true, Some(storage_session))
+        let mut session = self.new_sibling_session(true, Some(storage_session))?;
+        session.runtime.diagnostics = self.runtime.diagnostics.fork();
+        Ok(session)
     }
 
     fn new_sibling_session(

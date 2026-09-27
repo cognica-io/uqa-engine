@@ -591,6 +591,7 @@ impl Engine {
         let mut epochs = EpochCoordinator::new();
         epochs.share_published_from(&self.epochs);
         let mut runtime = QueryRuntime::new(self.sql_function_depth_limit());
+        runtime.diagnostics = self.runtime.diagnostics.fork();
         runtime.statement_gate = std::sync::Arc::clone(&self.runtime.statement_gate);
         runtime.cancellation = self.runtime.cancellation.clone();
         runtime.notices = std::sync::Arc::clone(&self.runtime.notices);

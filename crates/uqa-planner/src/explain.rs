@@ -17,7 +17,16 @@ pub use uqa_sql::result::ExplainAnalysis;
 use uqa_sql::result::ExplainPhysicalPlan;
 
 mod physical;
+mod vector;
 pub use physical::{physical_plan, PhysicalExplainContext};
+
+fn render_generation(generation: uqa_core::VectorGeneration) -> serde_json::Value {
+    let mut database = String::with_capacity(32);
+    for byte in generation.database {
+        let _ = write!(database, "{byte:02x}");
+    }
+    serde_json::json!({"Database": database, "Table": generation.table, "Index": generation.index, "Generation": generation.generation})
+}
 
 pub fn run_explain(
     body: &UnifiedPlan,
@@ -61,6 +70,9 @@ pub fn run_explain_with_physical(
         }
     }
     if let Some(analysis) = analysis {
+        if format == "text" {
+            vector::append_text(&mut plan_text, analysis)?;
+        }
         let _ = write!(
             plan_text,
             "\n  actual_rows={}\n  affected_rows={}\n  execution_time_ms={:.3}",
@@ -78,6 +90,15 @@ pub fn run_explain_with_physical(
             "Affected Rows": analysis.map(|value| value.affected_rows),
             "Execution Time (ms)": analysis.map(|value| value.elapsed.as_secs_f64() * 1_000.0),
         });
+        if let Some(analysis) = analysis {
+            payload["Vector Searches"] = serde_json::Value::Array(
+                analysis
+                    .vector_searches
+                    .iter()
+                    .map(|search| vector::record(search))
+                    .collect(),
+            );
+        }
         if !physical.nodes.is_empty() {
             payload["Physical Plans"] = serde_json::Value::Array(physical.nodes.clone());
         }

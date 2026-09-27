@@ -11,15 +11,7 @@ use crate::diskann_index::{
 };
 use uqa_core::PostingList;
 
-/// The route actually executed. Zero-k queries validate their arguments but perform no search; thresholds always use exact tensor scoring.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DiskANNExecutionRoute {
-    Approximate,
-    ExactZeroNorm,
-    ExactNonFiniteNorm,
-    ExactThreshold,
-    EmptyK,
-}
+pub use uqa_core::vector_execution::DiskANNExecutionRoute;
 
 /// Bounded observations from the same retained physical/canonical view that produced the result. Page counts describe logical storage work, not device I/O; no metadata probe or second query is needed to produce this report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

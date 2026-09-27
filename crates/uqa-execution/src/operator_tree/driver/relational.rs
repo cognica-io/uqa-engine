@@ -145,7 +145,7 @@ impl PhysicalRetrievalDriver<'_> {
         }
         let op = VectorSimilarityOperator::new(query_vector.to_vec(), threshold, field);
         op.execute(&self.bridge_context()?)
-            .map_err(|error| operator_execution_error("VectorSimilarity", error))
+            .map_err(|error| crate::storage_errors::storage_error("VectorSimilarity", &error))
     }
 
     pub(super) fn execute_aggregate(

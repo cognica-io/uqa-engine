@@ -9,15 +9,14 @@
 use crate::StorageBackendResult;
 use uqa_core::memory::MemoryError;
 
-/// Successful vector-bearing tensor scores and their actual cosine evaluations. Repeated scoring is repeated work, not a distinct-document census.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct DiskANNScoringStats {
-    pub documents: u64,
-    pub vectors: u64,
+pub use uqa_core::vector_execution::DiskANNScoringStats;
+
+pub(crate) trait ScoringStatsExt {
+    fn record(&mut self, vectors: u64) -> StorageBackendResult<()>;
 }
 
-impl DiskANNScoringStats {
-    pub(crate) fn record(&mut self, vectors: u64) -> StorageBackendResult<()> {
+impl ScoringStatsExt for DiskANNScoringStats {
+    fn record(&mut self, vectors: u64) -> StorageBackendResult<()> {
         *self = Self {
             documents: self
                 .documents

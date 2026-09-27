@@ -47,6 +47,13 @@ pub fn execute_query_plan_output<S: Clone + Send + Sync + 'static>(
     ctes: &mut CteScope<S>,
     output_mode: QueryOutputMode<S>,
 ) -> Result<QueryOutput, SQLError> {
+    let _diagnostics = context
+        .source
+        .relational
+        .runtime
+        .diagnostics
+        .bind_current()
+        .map_err(|error| crate::storage_errors::storage_error("bind query diagnostics", &error))?;
     if plan.ctes.iter().any(|cte| cte.body.modifies_data()) {
         analyze_query_plan_schema(context.source.ctes.routines, plan, params, ctes, None)?;
         if ctes.command_cte_snapshot().is_none() {

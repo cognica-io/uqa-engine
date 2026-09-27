@@ -55,15 +55,18 @@ impl Engine {
     ) -> Result<Box<dyn PhysicalOperator>, SQLError> {
         let engine = self.fork_session_portal_worker_engine()?;
         let support = query_plan_backward_scan_support(&engine, &engine, &plan, &params, &scope)?;
-        Ok(Box::new(DirectionalQueryPlanOperator::new(
-            Box::new(DirectionalSessionQuery {
-                engine,
-                plan,
-                params,
-                scope,
-            }),
-            support,
-            schema,
-        )))
+        Ok(Box::new(
+            DirectionalQueryPlanOperator::new(
+                Box::new(DirectionalSessionQuery {
+                    engine,
+                    plan,
+                    params,
+                    scope,
+                }),
+                support,
+                schema,
+            )
+            .with_diagnostics(self.runtime.diagnostics.fork()),
+        ))
     }
 }

@@ -10,6 +10,7 @@ pub mod scope;
 pub use scope::CteScope;
 
 pub mod binding;
+pub mod diagnostics;
 pub mod runtime;
 
 pub mod ordering;

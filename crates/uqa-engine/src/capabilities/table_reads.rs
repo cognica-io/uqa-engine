@@ -84,7 +84,13 @@ impl RetrievalAccess for Engine {
         if committed {
             self.committed_knn_entries(table, field, query, top_k)
         } else {
-            self.knn_search_leaf(table, field, query, top_k)
+            self.knn_search_leaf(
+                table,
+                field,
+                query,
+                top_k,
+                self.runtime.diagnostics.capture().as_ref(),
+            )
         }
     }
     fn retrieval_entries(

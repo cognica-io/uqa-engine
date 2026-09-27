@@ -174,9 +174,11 @@ mod tests {
 }
 
 pub mod completion;
+pub mod vector;
 
 /// Execution measurements supplied to EXPLAIN rendering.
 pub struct ExplainAnalysis {
+    pub vector_searches: vector::ExplainVectorSearches,
     pub elapsed: std::time::Duration,
     pub rows: u64,
     pub affected_rows: u64,

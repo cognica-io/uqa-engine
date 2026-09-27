@@ -45,6 +45,7 @@ fn diagnostic_execution_reads_live_limits_and_preserves_cancellation() {
     let aggregate_functions = RwLock::default();
     let notices = Mutex::default();
     let runtime = QueryRuntimeView {
+        diagnostics: &crate::query::diagnostics::QueryDiagnostics::default(),
         settings: &settings,
         cancellation: &cancellation,
         scalar_functions: &scalar_functions,

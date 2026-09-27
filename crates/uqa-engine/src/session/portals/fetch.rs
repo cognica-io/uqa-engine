@@ -141,6 +141,7 @@ fn stream_next_portal_row(
         .requests
         .send(crate::SessionPortalWorkerRequest::Step(
             uqa_execution::PhysicalScanDirection::Forward,
+            Some(engine.runtime.diagnostics.request()),
         ));
     loop {
         match worker.responses.recv() {
@@ -211,7 +212,10 @@ fn stream_directional_portal_row(
     engine.cancellation_token().check()?;
     worker
         .requests
-        .send(crate::SessionPortalWorkerRequest::Step(direction))
+        .send(crate::SessionPortalWorkerRequest::Step(
+            direction,
+            Some(engine.runtime.diagnostics.request()),
+        ))
         .map_err(|_| SQLError::Internal("cursor worker stopped before a row request".into()))?;
     loop {
         match worker.responses.recv() {
@@ -271,7 +275,9 @@ fn rewind_directional_portal(
     engine.cancellation_token().check()?;
     worker
         .requests
-        .send(crate::SessionPortalWorkerRequest::Rewind)
+        .send(crate::SessionPortalWorkerRequest::Rewind(Some(
+            engine.runtime.diagnostics.request(),
+        )))
         .map_err(|_| SQLError::Internal("cursor worker stopped before rewind".into()))?;
     match worker.responses.recv() {
         Ok(crate::SessionPortalWorkerResponse::Rewound) => {

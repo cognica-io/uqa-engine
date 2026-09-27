@@ -23,6 +23,7 @@ pub use origins::DiskANNOriginReader;
 pub use reader::{DiskANNPageLease, DiskANNReader};
 pub use seal::{DiskANNArtifactSeal, DiskANNArtifactSealer};
 pub use statistics::DiskANNPageReadStats;
+pub(crate) use statistics::PageReadStatsExt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DiskANNRecordKey {

@@ -323,6 +323,7 @@ impl Engine {
 
     pub(crate) fn query_runtime_view(&self) -> QueryRuntimeView<'_> {
         QueryRuntimeView {
+            diagnostics: &self.runtime.diagnostics,
             cancellation: &self.runtime.cancellation,
             settings: self.session.as_ref(),
             scalar_functions: &self.extensions.scalar_functions,

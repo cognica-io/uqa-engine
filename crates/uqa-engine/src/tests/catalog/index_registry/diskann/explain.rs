@@ -366,3 +366,5 @@ fn diskann_explain_preserves_recursive_and_shared_cte_placement() {
     );
     assert_eq!(nodes(&scalar).len(), 1);
 }
+
+mod analyze;

@@ -12,19 +12,12 @@ use uqa_core::memory::{BudgetedHashSet, BudgetedVec};
 
 use super::{
     format::DiskANNNode,
-    pages::{DiskANNPageReadStats, DiskANNReader},
+    pages::{DiskANNPageReadStats, DiskANNReader, PageReadStatsExt},
     NavigationVector, PQDistance, PQLookupTable,
 };
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 
-/// Counts of successful logical work, independent of cache hits or provider completion order. These are not physical I/O counters.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct DiskANNTraversalStats {
-    pub approximate_expansions: u64,
-    pub completion_expansions: u64,
-    pub pq_estimates: u64,
-    pub beams: u64,
-}
+pub use uqa_core::vector_execution::DiskANNTraversalStats;
 
 #[derive(Clone, Copy)]
 struct Candidate {

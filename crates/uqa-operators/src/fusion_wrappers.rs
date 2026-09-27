@@ -535,7 +535,13 @@ impl Operator for QueryPoolVectorScoreOperator {
         let Some(idx) = ctx.vector_indexes.get(&self.field) else {
             return Err(missing_backend("vector-index", "calibrated vector search"));
         };
-        let raw = idx.search_knn(&self.query_vector, self.k)?;
+        let raw = crate::vector::diagnostics::search_knn(
+            idx.as_ref(),
+            &self.field,
+            &self.query_vector,
+            self.k,
+            ctx.vector_observer.as_deref(),
+        )?;
         calibrate_query_pool_postings(&raw, self.split, self.base_rate)
     }
 }

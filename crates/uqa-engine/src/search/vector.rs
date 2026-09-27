@@ -16,6 +16,7 @@ impl Engine {
         field: &str,
         query_vector: impl AsRef<[f32]>,
         top_k: usize,
+        diagnostics: Option<&uqa_execution::query::diagnostics::CapturedDiagnostics>,
     ) -> Result<Vec<ScoredEntry>, SQLError> {
         if top_k == 0 {
             return Ok(Vec::new());
@@ -30,13 +31,14 @@ impl Engine {
         let Some(index) = vector_indexes.get(field) else {
             return Err(SQLError::UnknownColumn(field.to_string()));
         };
-        let pl = uqa_execution::serializable::vector::search_knn(
+        let pl = uqa_execution::serializable::vector::search_knn_with_diagnostics(
             index,
             self.serializable_table_read(table)?.as_ref(),
             &t.columns.snapshot(),
             field,
             query_vector.as_ref(),
             top_k,
+            diagnostics.map(|collector| (collector, table)),
         )
         .map_err(|error| storage_sql_error("execute KNN search", error))?;
         Ok(uqa_scoring::rank_top_k(&pl, top_k))
@@ -49,6 +51,7 @@ impl Engine {
         field: &str,
         query_vector: impl AsRef<[f32]>,
         top_k: usize,
+        diagnostics: Option<&uqa_execution::query::diagnostics::CapturedDiagnostics>,
     ) -> Result<Vec<ScoredEntry>, SQLError> {
         let query_vector = query_vector.as_ref();
         if query_vector.is_empty() || query_vector.iter().any(|component| !component.is_finite()) {
@@ -69,13 +72,14 @@ impl Engine {
         let index = indexes
             .get(field)
             .ok_or_else(|| SQLError::UnknownColumn(field.to_string()))?;
-        let raw = uqa_execution::serializable::vector::search_knn(
+        let raw = uqa_execution::serializable::vector::search_knn_with_diagnostics(
             index,
             self.serializable_table_read(table)?.as_ref(),
             &table_state.columns.snapshot(),
             field,
             query_vector,
             top_k,
+            diagnostics.map(|collector| (collector, table)),
         )
         .map_err(|error| storage_sql_error("execute calibrated-vector KNN", error))?;
         let calibrated = uqa_operators::calibrate_query_pool_postings(
@@ -164,13 +168,15 @@ impl Engine {
             };
             let index = retained.as_deref().unwrap_or(index);
             uqa_execution::query::vector_calibration::validate_index(index, target, &control)?;
-            let raw = uqa_execution::serializable::vector::search_knn(
+            let captured = engine.runtime.diagnostics.capture();
+            let raw = uqa_execution::serializable::vector::search_knn_with_diagnostics(
                 index,
                 engine.serializable_table_state_read(table)?.as_ref(),
                 &table.columns.snapshot(),
                 field,
                 query_vector.as_ref(),
                 target.candidate_k,
+                captured.as_ref().map(|collector| (collector, table_name)),
             )
             .map_err(|error| storage_sql_error("execute calibrated-vector KNN", error))?;
             model

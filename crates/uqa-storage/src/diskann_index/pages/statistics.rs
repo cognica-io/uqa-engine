@@ -9,17 +9,14 @@
 use crate::StorageBackendResult;
 use uqa_core::memory::MemoryError;
 
-/// Logical graph-page work. Provider pages are complete uncompressed pages returned by the storage interface, not measured SSD operations or bytes. Cache hits are observed while retaining each actual lease.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct DiskANNPageReadStats {
-    pub page_requests: u64,
-    pub cache_hits: u64,
-    pub provider_pages: u64,
-    pub provider_batches: u64,
+pub use uqa_core::vector_execution::DiskANNPageReadStats;
+
+pub(crate) trait PageReadStatsExt {
+    fn merge(&mut self, other: Self) -> StorageBackendResult<()>;
 }
 
-impl DiskANNPageReadStats {
-    pub(crate) fn merge(&mut self, other: Self) -> StorageBackendResult<()> {
+impl PageReadStatsExt for DiskANNPageReadStats {
+    fn merge(&mut self, other: Self) -> StorageBackendResult<()> {
         let add = |a: u64, b: u64| a.checked_add(b).ok_or(MemoryError::SizeOverflow);
         *self = Self {
             page_requests: add(self.page_requests, other.page_requests)?,
