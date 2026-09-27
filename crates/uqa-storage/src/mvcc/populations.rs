@@ -43,6 +43,13 @@ pub trait DiskANNPopulationRecordLayout: Send + Sync {
         control: &StorageReadControl,
     ) -> VersionResult<DiskANNPopulationOrigin>;
 
+    /// Resolve a raw invalidation's owning field without requiring an existing origin value.
+    fn origin_header_prefix(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<BudgetedVec<u8>>;
+
     /// Select headers only, for every active generation associated with this exact field.
     fn header_prefix(
         &self,

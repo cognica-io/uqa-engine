@@ -79,6 +79,7 @@ pub fn verify_diskann_population_writers(
 ) -> StorageBackendResult<()> {
     let control = StorageReadControl::with_limit(1 << 22);
     seed(store, &control)?;
+    raw_writers(store, &control)?;
     let peer = store.open_session()?;
     let live = handle(store, &control)?;
     let other = handle(&peer, &control)?;
@@ -128,6 +129,66 @@ pub fn verify_diskann_population_writers(
     )?;
     peer.rollback_transaction()?;
     counts(&other, 2, 2)
+}
+
+fn raw_writers(
+    store: &Arc<dyn KeyValueStore>,
+    control: &StorageReadControl,
+) -> StorageBackendResult<()> {
+    use crate::key_value::{KeyValueHNSWIndex, KeyValueIVFIndex, KeyValueVectorIndex};
+    use crate::vector_index::{HNSWIndexParams, IVFIndexParams};
+    let live = handle(store, control)?;
+    for kind in 0..3 {
+        let mut raw: Box<dyn VectorIndex> = match kind {
+            0 => Box::new(KeyValueVectorIndex::new(store.clone(), TABLE, FIELD, 2)),
+            1 => Box::new(KeyValueIVFIndex::create(
+                store.clone(),
+                TABLE,
+                FIELD,
+                2,
+                IVFIndexParams::default(),
+            )?),
+            _ => Box::new(KeyValueHNSWIndex::create(
+                store.clone(),
+                TABLE,
+                FIELD,
+                2,
+                HNSWIndexParams::default(),
+            )?),
+        };
+        let before = store.scan_prefix(b"")?;
+        for operation in 0..5 {
+            let result = match operation {
+                0 => raw.add(1, vec![0.0, 1.0]),
+                1 => raw.add_many(1, vec![vec![0.0, 1.0], vec![1.0, 0.0]]),
+                2 => raw.delete(2),
+                3 => raw.delete(3),
+                _ => raw.add(4, vec![1.0, 0.0]),
+            };
+            expect(
+                result.is_err(),
+                "raw vector owner must not invalidate a selected population",
+            )?;
+            expect_eq(
+                &store.scan_prefix(b"")?,
+                &before,
+                "failed raw mutation preserves every record",
+            )?;
+            counts(&live, 3, 0)?;
+            expect_eq(
+                &raw.count()?,
+                &3,
+                "raw cache preserves its preceding generation",
+            )?;
+        }
+    }
+    store.begin_transaction()?;
+    canonical(store)?.retire_index(&row([91; 16])?.relation, &Resolver, control)?;
+    let mut raw = KeyValueVectorIndex::new(store.clone(), TABLE, FIELD, 2);
+    raw.add(1, vec![0.0, 1.0])?;
+    raw.delete(2)?;
+    store.rollback_transaction()?;
+    counts(&live, 3, 0)
 }
 
 /// A build captured before a concurrent replacement must census the final canonical view in either publication order, while earlier readers retain their own populations.

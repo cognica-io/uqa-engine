@@ -214,12 +214,7 @@ impl<'a> NativeVectorRead<'a> {
         };
         self.snapshot
             .coordinate_vector_field(batch, owner, self.field(), false)?;
-        self.snapshot.delete_prefix(
-            batch,
-            Family::VectorOrigins,
-            owner,
-            &[self.field(), ValueRef::Integer(doc_id)],
-        )?;
+        self.invalidate_origin(batch, owner, doc_id)?;
         self.snapshot.delete_prefix(
             batch,
             Family::Vectors,
@@ -247,12 +242,7 @@ impl<'a> NativeVectorRead<'a> {
         if let Some(owner) = self.owner {
             self.snapshot
                 .coordinate_vector_field(batch, owner, self.field(), false)?;
-            self.snapshot.delete_prefix(
-                batch,
-                Family::VectorOrigins,
-                owner,
-                &[self.field(), ValueRef::Integer(doc_id)],
-            )?;
+            self.invalidate_origin(batch, owner, doc_id)?;
             self.snapshot.delete_prefix(
                 batch,
                 Family::Vectors,
@@ -263,12 +253,31 @@ impl<'a> NativeVectorRead<'a> {
         Ok(())
     }
 
+    fn invalidate_origin(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        owner: NativeRecordOwner,
+        document: i64,
+    ) -> Result<()> {
+        let key = NativeRecordIdentity::new(Family::VectorOrigins, owner)?.encode_key(
+            &[self.field(), ValueRef::Integer(document)],
+            &self.snapshot.control,
+        )?;
+        batch.invalidate_diskann_origin(&key)?;
+        Ok(())
+    }
+
     pub(super) fn clear_family(&self, batch: &mut dyn KeyValueBatch, family: Family) -> Result<()> {
         if let Some(owner) = self.owner {
             if family == Family::Vectors {
                 self.snapshot
                     .coordinate_vector_field(batch, owner, self.field(), true)?;
-                for related in [Family::VectorOrigins, Family::VectorChanges] {
+                for related in [
+                    Family::VectorOrigins,
+                    Family::VectorChanges,
+                    Family::VectorPopulations,
+                    Family::VectorPopulationWitnesses,
+                ] {
                     self.snapshot
                         .delete_prefix(batch, related, owner, &[self.field()])?;
                 }

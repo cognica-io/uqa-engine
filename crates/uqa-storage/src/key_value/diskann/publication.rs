@@ -150,6 +150,22 @@ pub(super) fn require_observed(
     batch.require_observed(key, &revision)
 }
 
+/// Require an already selected generation in the caller's current mutation. Providers guard their catalog records separately; this binds derived metadata initialization to the actual published head without completing a transaction.
+pub fn require_selected_generation(
+    scope: &DiskANNIndexScope,
+    read: &dyn KeyValueRead,
+    batch: &mut dyn KeyValueBatch,
+    expected: DiskANNGeneration,
+    control: &StorageReadControl,
+) -> StorageBackendResult<()> {
+    if selected_generation(scope, read, control)? != Some(expected) {
+        return Err(invalid(
+            "selected generation changed during population initialization",
+        ));
+    }
+    batch.require_unchanged(&head_key(scope))
+}
+
 /// Read the logical selection on this exact view. The caller must retain this same view when opening physical pages; a fresh physical session is not a substitute for that snapshot.
 pub fn selected_generation(
     scope: &DiskANNIndexScope,

@@ -44,6 +44,7 @@ pub(in crate::mvcc::native) fn remove_empty_origins(
 pub(in crate::mvcc::native) fn remove_empty_changes(
     sqlite: &rusqlite::Connection,
 ) -> crate::Result<()> {
+    remove_empty_populations(sqlite)?;
     assert_eq!(
         sqlite.query_row(
             "SELECT count(*) FROM _uqa_mvcc_native_vector_changes",
@@ -53,6 +54,21 @@ pub(in crate::mvcc::native) fn remove_empty_changes(
         0
     );
     sqlite.execute_batch("DROP TABLE _uqa_mvcc_native_vector_changes")?;
+    Ok(())
+}
+
+pub(in crate::mvcc::native) fn remove_empty_populations(
+    sqlite: &rusqlite::Connection,
+) -> crate::Result<()> {
+    for (family, _) in super::super::populations::schema::TABLES {
+        let table = family.layout().table;
+        assert_eq!(
+            sqlite.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| row
+                .get::<_, i64>(0))?,
+            0
+        );
+        sqlite.execute_batch(&format!("DROP TABLE {table}"))?;
+    }
     Ok(())
 }
 

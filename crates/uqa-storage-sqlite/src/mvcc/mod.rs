@@ -232,9 +232,10 @@ impl VersionedPersistence for SQLiteRecordStore {
     fn diskann_population_record_layout(
         &self,
     ) -> Option<&dyn uqa_storage::mvcc::DiskANNPopulationRecordLayout> {
-        self.native
-            .is_none()
-            .then_some(&uqa_storage::key_value::KeyValueDiskANNPopulationRecords)
+        Some(match &self.native {
+            Some(namespace) => namespace,
+            None => &uqa_storage::key_value::KeyValueDiskANNPopulationRecords,
+        })
     }
 
     fn resource_leases(&self) -> Option<&dyn uqa_storage::mvcc::ResourceLeaseProvider> {
@@ -393,6 +394,8 @@ impl VersionedPersistence for SQLiteRecordStore {
             native::NativeRecordFamily::DiskANNRecords,
             native::NativeRecordFamily::VectorOrigins,
             native::NativeRecordFamily::VectorChanges,
+            native::NativeRecordFamily::VectorPopulations,
+            native::NativeRecordFamily::VectorPopulationWitnesses,
         ] {
             let prefix = native::NativeRecordIdentity::family_prefix(family, control)?;
             uqa_storage::mvcc::reclaim_tombstone_prefix(self, &prefix, control)?;

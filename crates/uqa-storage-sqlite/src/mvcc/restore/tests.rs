@@ -20,6 +20,7 @@ use crate::{
 
 mod diskann;
 mod failures;
+mod populations;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod process;
 mod receipts;

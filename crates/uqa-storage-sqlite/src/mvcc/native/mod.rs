@@ -25,6 +25,7 @@ pub(super) use maintenance::NativeMaintenanceRecords;
 mod occurrence_guards;
 mod owners;
 mod physical;
+pub(crate) mod populations;
 mod projection;
 mod queue;
 mod row;
@@ -35,8 +36,8 @@ mod vector_guards;
 
 pub(crate) use session::NativeSnapshot;
 
-pub(super) use format::validate_restoration;
 pub(super) use format::{check_mapping, initialize, initialize_in, present, reject_mapped};
+pub(super) use format::{initialize_restoration, validate_restoration};
 pub(super) use projection::materialize;
 
 #[cfg(test)]

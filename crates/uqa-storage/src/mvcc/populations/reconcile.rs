@@ -6,6 +6,8 @@
 
 //! The same exact population transformation serves private mutation previews, command refresh and publication.
 
+mod invalidation;
+
 use super::{
     DiskANNPopulationHeader, DiskANNPopulationOrigin, DiskANNPopulationRecordLayout,
     OwnedPopulationMutation,
@@ -19,6 +21,7 @@ use crate::read_control::StorageReadControl;
 use uqa_core::memory::{BudgetedMap, BudgetedVec};
 
 pub(super) type StructuralRecords<'a> = BudgetedMap<&'a [u8], &'a PreparedRecordWrite>;
+type PopulationLifecycle<'a> = BudgetedMap<&'a [u8], &'a OwnedPopulationMutation>;
 type RecordVisitor<'a> = dyn FnMut(&[u8], &[u8]) -> VersionResult<()> + 'a;
 
 pub(super) struct Reconciliation<'a> {
@@ -42,10 +45,9 @@ impl Reconciliation<'_> {
         let mut decoded = BudgetedVec::new(control.memory());
         for write in origins {
             control.check()?;
-            let value = write
-                .value()
-                .ok_or(invalid("canonical replacement has no explicit origin"))?;
-            decoded.push(self.layout.origin(write.key(), value, control)?)?;
+            if let Some(value) = write.value() {
+                decoded.push(self.layout.origin(write.key(), value, control)?)?;
+            }
         }
         let mut fields =
             BudgetedMap::<&[u8], BudgetedVec<&DiskANNPopulationOrigin>>::new(control.memory());
@@ -64,6 +66,7 @@ impl Reconciliation<'_> {
             control.check()?;
             latest.insert(operation.key().bytes(), operation)?;
         }
+        self.validate_invalidations(origins, &latest)?;
         for (&key, operation) in &latest {
             control.check()?;
             if self.structural_header(key).is_some_and(|write| {

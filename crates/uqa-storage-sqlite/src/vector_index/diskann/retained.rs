@@ -7,6 +7,7 @@
 //! Bounded canonical reads borrow native rows and preserve their original visibility and controls.
 
 mod changes;
+mod populations;
 mod pruning;
 mod publication;
 mod selection;
@@ -410,6 +411,14 @@ impl RetainedSQLiteDiskANNCanonical {
 }
 
 impl DiskANNCanonicalRead for RetainedSQLiteDiskANNCanonical {
+    fn population_counts(
+        &self,
+        generation: uqa_storage::diskann_index::format::DiskANNGeneration,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_storage::diskann_index::DiskANNCanonicalCounts>> {
+        self.read_population(generation, control)
+    }
+
     fn corpus_fingerprint(
         &self,
         control: &StorageReadControl,

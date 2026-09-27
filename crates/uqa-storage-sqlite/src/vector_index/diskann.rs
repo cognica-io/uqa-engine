@@ -27,7 +27,10 @@ use uqa_storage::{
 };
 
 use super::{encode_doc_id, SQLiteVectorIndex};
-use crate::{mvcc::native::NativeRecordFamily as Family, ManagedConnection};
+use crate::{
+    mvcc::native::{NativeRecord, NativeRecordFamily as Family},
+    ManagedConnection,
+};
 
 /// Canonical tensor owner for a bound native `SQLite` session. Raw coordinates stay in `_vectors`; this does not enable a public `DiskANN` index or publish a generation.
 pub struct SQLiteDiskANNCanonical {
@@ -119,8 +122,7 @@ impl SQLiteDiskANNCanonical {
                         ],
                     )?;
                 }
-                snapshot.put_row(
-                    batch,
+                let origin = NativeRecord::encode(
                     Family::VectorOrigins,
                     owner,
                     &[
@@ -129,7 +131,9 @@ impl SQLiteDiskANNCanonical {
                         ValueRef::Integer(document),
                         ValueRef::Blob(&record.encode()),
                     ],
+                    control,
                 )?;
+                batch.replace_diskann_origin(origin.key(), origin.row())?;
                 snapshot.put_row(
                     batch,
                     Family::VectorChanges,

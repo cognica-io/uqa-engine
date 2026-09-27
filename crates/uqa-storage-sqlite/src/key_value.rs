@@ -395,6 +395,9 @@ impl KeyValueBatch for SQLiteKeyValueBatch<'_> {
     fn touch_marker(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
         self.batch.touch_marker(key, value)
     }
+    fn invalidate_diskann_origin(&mut self, key: &[u8]) -> StorageBackendResult<()> {
+        self.batch.invalidate_diskann_origin(key)
+    }
     fn observe_identifier(&mut self, namespace: &[u8], value: u64) -> StorageBackendResult<()> {
         self.batch.observe_identifier(namespace, value)
     }

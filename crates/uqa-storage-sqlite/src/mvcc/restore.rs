@@ -156,7 +156,11 @@ fn validate_mapping(
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
     if state.pending {
-        schema::initialize_restoration(connection)?;
+        if native::present(connection)? {
+            native::initialize_restoration(connection, control)?;
+        } else {
+            schema::initialize_restoration(connection)?;
+        }
     } else if native::present(connection)? {
         native::initialize_in(connection, control)?;
     } else {
