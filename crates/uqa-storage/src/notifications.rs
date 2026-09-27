@@ -13,7 +13,10 @@ pub use publication::{
     NotificationMessageRef, NotificationPublication, NotificationPublicationHeader,
     NotificationPublicationStart, NotificationPublicationView, NotificationSubscriptionView,
 };
-pub use registry::{NotificationListenerRow, NotificationQueueEntry, NotificationQueueState};
+pub use registry::{
+    NotificationListenerRow, NotificationQueueEntry, NotificationQueueEntryRef,
+    NotificationQueueScan, NotificationQueueState,
+};
 
 /// Fresh committed publication access is independent of the caller's SQL snapshot. Publication is an auxiliary effect of its current transaction, not a user-data write.
 pub trait NotificationPublicationStore: Send + Sync {

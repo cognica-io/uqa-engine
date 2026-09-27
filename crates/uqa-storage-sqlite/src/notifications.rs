@@ -8,6 +8,7 @@
 
 mod publication;
 mod reservations;
+mod scan;
 mod schema;
 #[cfg(test)]
 mod tests;
@@ -139,36 +140,22 @@ impl NotificationRegistryTransaction {
         &self,
         from_sequence: u64,
     ) -> Result<Vec<NotificationQueueEntry>, StorageBackendError> {
-        let mut statement = self
-            .connection
-            .prepare_cached(
-                "SELECT sequence, process_id, channel, payload FROM queue_entries WHERE sequence >= ?1 ORDER BY sequence",
-            )
-            .map_err(|error| registry_error("prepare queue scan", &error))?;
-        let rows = statement
-            .query_map(
-                params![sqlite_integer(from_sequence, "scan sequence")?],
-                |row| {
-                    Ok((
-                        row.get::<_, i64>(0)?,
-                        row.get::<_, i32>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                    ))
-                },
-            )
-            .map_err(|error| registry_error("scan queue entries", &error))?;
-        rows.map(|row| {
-            let (sequence, process_id, channel, payload) =
-                row.map_err(|error| registry_error("read queue entry", &error))?;
-            Ok(NotificationQueueEntry {
-                sequence: nonnegative_u64(sequence, "entry sequence")?,
-                process_id,
-                channel,
-                payload,
-            })
-        })
-        .collect()
+        let mut entries = Vec::new();
+        self.visit_entries_from(
+            from_sequence,
+            std::num::NonZeroUsize::MAX,
+            &uqa_storage::read_control::StorageReadControl::with_limit(usize::MAX),
+            &mut |entry| {
+                entries.push(NotificationQueueEntry {
+                    sequence: entry.sequence,
+                    process_id: entry.process_id,
+                    channel: entry.channel.into(),
+                    payload: entry.payload.into(),
+                });
+                Ok(std::ops::ControlFlow::Continue(()))
+            },
+        )?;
+        Ok(entries)
     }
 
     pub fn delete_entries_before(&self, sequence: u64) -> Result<(), StorageBackendError> {

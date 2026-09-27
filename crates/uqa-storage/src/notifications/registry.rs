@@ -20,6 +20,24 @@ pub struct NotificationQueueEntry {
     pub payload: String,
 }
 
+/// One registry row borrowed until the visitor returns; no channel or payload allocation is transferred implicitly.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct NotificationQueueEntryRef<'a> {
+    pub sequence: u64,
+    pub process_id: i32,
+    pub channel: &'a str,
+    pub payload: &'a str,
+}
+
+/// Progress over accepted rows in a finite registry visit. An inspected but declined row remains at the resume boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NotificationQueueScan {
+    pub visited: usize,
+    pub next_sequence: u64,
+    /// True only when the query actually observed its end; reaching a row limit does not prove exhaustion.
+    pub exhausted: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NotificationListenerRow {
     pub owner_id: [u8; 16],
