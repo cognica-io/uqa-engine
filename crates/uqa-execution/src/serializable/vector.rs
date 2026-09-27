@@ -165,6 +165,40 @@ impl VectorIndex for ObservedVectorIndex {
         self.index
             .search_threshold_with_control(query, threshold, control)
     }
+    fn search_knn_with_statistics(
+        &self,
+        query: &[f32],
+        k: usize,
+        control: Option<&StorageReadControl>,
+    ) -> StorageBackendResult<uqa_storage::vector_index::VectorQueryResult> {
+        if let Some(control) = control {
+            control.check()?;
+        }
+        validate_vector_values(self.dimensions(), query)?;
+        if k != 0 {
+            self.observation.observe()?;
+        }
+        self.index.search_knn_with_statistics(query, k, control)
+    }
+    fn search_threshold_with_statistics(
+        &self,
+        query: &[f32],
+        threshold: f32,
+        control: Option<&StorageReadControl>,
+    ) -> StorageBackendResult<uqa_storage::vector_index::VectorQueryResult> {
+        if let Some(control) = control {
+            control.check()?;
+        }
+        validate_vector_values(self.dimensions(), query)?;
+        if !threshold.is_finite() {
+            return Err(StorageBackendError::Other(
+                "vector similarity threshold must be finite".into(),
+            ));
+        }
+        self.observation.observe()?;
+        self.index
+            .search_threshold_with_statistics(query, threshold, control)
+    }
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
         Ok(Arc::new(self.clone()))
     }

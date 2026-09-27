@@ -60,7 +60,7 @@ pub use runtime::{
     diskann_runtime_fixture_options, verify_diskann_runtime_lifecycle,
     verify_diskann_runtime_reclaimed_reopen, verify_diskann_runtime_reclamation,
     verify_diskann_runtime_reopen, verify_diskann_runtime_retirement,
-    verify_diskann_runtime_retirement_reopen,
+    verify_diskann_runtime_retirement_reopen, verify_diskann_vector_statistics,
 };
 pub use selection::{verify_diskann_query_reopen, verify_diskann_query_views};
 

@@ -14,6 +14,7 @@ use crate::diskann_index::{
 use crate::vector_index::DiskANNIndexParams;
 
 mod metadata;
+mod reports;
 mod selection;
 
 fn options(dimensions: u32) -> DiskANNMemoryOptions {

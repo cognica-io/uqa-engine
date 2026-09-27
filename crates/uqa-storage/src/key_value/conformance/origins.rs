@@ -22,7 +22,7 @@ pub use binding::{
     diskann_runtime_fixture_options, verify_diskann_runtime_lifecycle,
     verify_diskann_runtime_reclaimed_reopen, verify_diskann_runtime_reclamation,
     verify_diskann_runtime_reopen, verify_diskann_runtime_retirement,
-    verify_diskann_runtime_retirement_reopen,
+    verify_diskann_runtime_retirement_reopen, verify_diskann_vector_statistics,
 };
 pub use binding::{
     seed_diskann_population_upgrade, verify_diskann_population_late_publication,

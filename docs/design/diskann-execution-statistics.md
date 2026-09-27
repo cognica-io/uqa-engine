@@ -1,6 +1,6 @@
 # DiskANN query execution statistics
 
-Status: the Storage query owner returns successful work from its original invocation. SQL `EXPLAIN ANALYZE` collection and rendering remain required within the existing [SQL integration unit](../plans/0014-diskann-vector-index.md#sql-lifecycle-and-planning). Static [physical EXPLAIN](diskann-explain.md) estimates are not execution measurements.
+Status: the Storage query owner and common vector-index interface return successful work from their original invocation. SQL `EXPLAIN ANALYZE` collection and rendering remain required within the existing [SQL integration unit](../plans/0014-diskann-vector-index.md#sql-lifecycle-and-planning). Static [physical EXPLAIN](diskann-explain.md) estimates are not execution measurements.
 
 ## Observations and ownership
 
@@ -12,6 +12,14 @@ Provider pages and batches describe the `read_graph_pages` interface. They do no
 
 Exact KNN and threshold scoring expose invocation statistics through their existing owner algorithms. `search_threshold_with_stats` returns the threshold result and its work; `search_threshold` preserves its original posting-only API. Both numeric exact KNN routes and threshold evaluation count every scored tensor before candidate or threshold filtering. A valid zero-k invocation returns zero search work while retaining its existing input validation.
 
+## Common vector-index boundary
+
+`VectorIndex::search_knn_with_statistics` and `search_threshold_with_statistics` return `VectorQueryResult`: the actual postings and optional `DiskANNExecutionStats`. The report includes the selected immutable generation, actual route, navigation counters and query work. Routes distinguish approximate search, zero-norm/nonfinite-norm exact search, exact threshold evaluation and validated zero-k calls. Providers without reporting support execute their existing ordinary or controlled method exactly once and return `None`; absence is not zero measured work.
+
+Memory, persistent and retained DiskANN indexes forward this result from the same prepared query. A live persistent handle captures one provider snapshot; it does not obtain report identity through a later live metadata lookup. Read-only snapshots preserve their selected allowance and original cancellation scope, check any independent invoking control before and after the call, and forward the original report. Execution's serializable wrapper performs the same validation and logical candidate-range observation before forwarding; zero-k and invalid queries retain their existing nonobserving behavior. Selected-source and nested snapshots preserve that participant.
+
+This interface is the result boundary required by SQL collection, not the collector itself. The future collector must retain relation/field and invocation identity under its original allowance, then render measured work separately from static plan estimates. SQL `EXPLAIN ANALYZE` is not claimed by these direct index and provider tests.
+
 ## Preservation argument
 
 Fix the retained canonical/physical view, query inputs and actual provider/cache completion schedule. Let $\sigma$ be the successful execution trace of the existing search. Its posting observation $R(\sigma)$ includes document support, complete tensor scores, payloads and ordering. The extension returns $(R(\sigma),W(\sigma))$ and changes no navigation choice, visibility predicate, score reduction, candidate admission, threshold comparison or posting construction. Erasing the second component therefore recovers the original result, including its established binary32 arithmetic and tie behavior. No extra search, tensor scan or graph read is used to obtain $W$.
@@ -22,6 +30,10 @@ For graph pages, each admitted requested page has exactly one retained cache lea
 
 All additions are checked; overflow fails without publishing a partially updated aggregate, as with the existing traversal counters. No resource allowance is replaced, no read is admitted outside the original controls, and no new corpus-sized diagnostic structure is retained. A provider, visibility, decoding, budget or cancellation error returns the existing error path without exposing a successful query report. For successful representable traces, erasing the observations preserves every existing posting, relational and ranked composition because their operands and operation order are unchanged.
 
+The interface extension is a projection-preserving lift: for every successful invocation with live controls, $\pi_P(P,D)=P$. An unsupported implementation returns $(P,\mathrm{None})$ after one original dispatch; a DiskANN implementation returns $(P,\mathrm{Some}(g,r,W))$ from that same prepared reader. Here $g$ is its immutable generation and $r$ is its executed route, including the empty-k branch. Wrappers forward the pair without querying either component again. Consequently result erasure commutes with wrapper composition and preserves the established posting and ranked operations. Serializable observation remains the same pre-search effect and is not repeated to obtain diagnostics; a cancelled or failed call exposes no successful pair.
+
 ## Verification
 
 Owner fixtures use literal counts for packed pages, multi-page node fragments, actual provider batch limits, warm shared caches, concurrent invocations, invalid requests and original resource/cancellation failures. Query fixtures independently enumerate covered tensors, stale graph candidates, side entries, changed tensors, empty tensors and unversioned replacements. They compare literal scores and counts, check that existing tensor visitors run once, and repeat searches to reject accumulated shared totals. Numeric exact routes and threshold filtering count work before result reduction. Executed source-scoped evidence belongs in the implementation plan; these obligations do not establish the still-pending SQL collector or language artifacts.
+
+Interface regressions independently count canonical visits, require literal covered/change/exact work, retain older physical generations across mutation and rebuild, and distinguish unsupported reporting from zero-k work. Persistent acceptance runs against actual native SQLite, SQLite Key/Value and redb handles. Original allowance exhaustion and independent cancellation return errors; actual serializable histories exercise report searches and nonobserving zero-k/invalid controls.

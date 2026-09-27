@@ -12,7 +12,7 @@ use uqa_storage::{
         build::DiskANNTemporaryBudget, pages::DiskANNPageSource, DiskANNPersistentOwner,
         DiskANNQueryMetadata, PersistentDiskANNIndex,
     },
-    key_value::conformance::diskann_runtime_fixture_options,
+    key_value::conformance::{diskann_runtime_fixture_options, verify_diskann_vector_statistics},
     read_control::StorageReadControl,
     VectorIndex,
 };
@@ -208,6 +208,7 @@ fn native_diskann_runtime_lifecycle_preserves_transactions_and_cold_reopen() {
                 .unwrap()
                 .unwrap()
                 .generation();
+            verify_diskann_vector_statistics(&index, first, (3, 4), (0, 0)).unwrap();
             connection.savepoint("runtime-user").unwrap();
             index.add(1, vec![-1.0, 0.0]).unwrap();
             index.delete(2).unwrap();
@@ -216,6 +217,8 @@ fn native_diskann_runtime_lifecycle_preserves_transactions_and_cold_reopen() {
             assert_eq!(changed.manifest, metadata.manifest);
             assert_ne!(changed.corpus_fingerprint, metadata.corpus_fingerprint);
             assert_metadata(&*held, &metadata, &control);
+            verify_diskann_vector_statistics(&index, first, (1, 1), (2, 2)).unwrap();
+            verify_diskann_vector_statistics(&*held, first, (3, 4), (0, 0)).unwrap();
             index.initialize().unwrap();
             let rebuilt = index.snapshot().unwrap();
             scores(&*rebuilt, &[(1, -1.0), (3, -1.0), (4, 0.0)]);
@@ -262,6 +265,7 @@ fn native_diskann_runtime_lifecycle_preserves_transactions_and_cold_reopen() {
                 .unwrap()
                 .unwrap()
                 .generation();
+            verify_diskann_vector_statistics(&index, final_generation, (1, 1), (0, 0)).unwrap();
             (final_generation, held, rebuilt, empty)
         };
         // Old private and committed readers outlive their writable native connection.

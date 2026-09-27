@@ -50,6 +50,7 @@ fn diskann_sql_serializable_snapshot_preserves_invocation_controls() {
                 .len(),
             1
         );
+        single_vector_reports(&*observed, &empty);
         assert_eq!(empty.memory().used(), 0);
         assert!(observed
             .search_knn_with_control(&[1.0, 0.0], 0, &empty)
@@ -71,6 +72,14 @@ fn diskann_sql_serializable_snapshot_preserves_invocation_controls() {
             Err(StorageBackendError::Memory(_))
         ));
         assert_eq!(query.memory().used(), 0);
+        assert!(matches!(
+            nested.search_knn_with_statistics(&[1.0, 0.0], 1, Some(&query)),
+            Err(StorageBackendError::Memory(_))
+        ));
+        assert!(matches!(
+            nested.search_threshold_with_statistics(&[1.0, 0.0], 0.5, Some(&query)),
+            Err(StorageBackendError::Memory(_))
+        ));
         drop(held);
         assert_eq!(
             nested
@@ -86,6 +95,14 @@ fn diskann_sql_serializable_snapshot_preserves_invocation_controls() {
         ));
         assert!(matches!(
             nested.search_threshold_with_control(&[1.0, 0.0], 0.5, &query),
+            Err(StorageBackendError::Cancelled(_))
+        ));
+        assert!(matches!(
+            nested.search_knn_with_statistics(&[1.0, 0.0], 1, Some(&query)),
+            Err(StorageBackendError::Cancelled(_))
+        ));
+        assert!(matches!(
+            nested.search_threshold_with_statistics(&[1.0, 0.0], 0.5, Some(&query)),
             Err(StorageBackendError::Cancelled(_))
         ));
         sql(&engine, "ROLLBACK");
@@ -145,7 +162,16 @@ fn diskann_sql_serializable_reads_cover_nonreturned_candidates_but_not_zero_k_or
 fn diskann_selected_source_snapshots_keep_original_serializable_observation() {
     use uqa_storage::diskann_index::DiskANNReadChanges;
     for provider in 0..3 {
-        for mode in ["metadata", "zero", "knn", "threshold"] {
+        for mode in [
+            "metadata",
+            "zero",
+            "knn",
+            "threshold",
+            "report_zero",
+            "report_knn",
+            "report_threshold",
+            "report_invalid",
+        ] {
             let (_directory, first, second) = sessions(provider);
             sql(&first, "CREATE TABLE diskann_docs(id int PRIMARY KEY, embedding vector(2)); INSERT INTO diskann_docs VALUES(1,ARRAY[0.0,1.0]),(2,ARRAY[-1.0,0.0]); CREATE INDEX diskann_idx ON diskann_docs USING diskann(embedding)");
             sql(&first, "BEGIN ISOLATION LEVEL SERIALIZABLE");
@@ -184,16 +210,7 @@ fn diskann_selected_source_snapshots_keep_original_serializable_observation() {
             assert_eq!(projected.index_kind(), "diskann");
             assert_eq!(projected.count().unwrap(), 2);
             assert!(projected.contains_document(document).unwrap());
-            match mode {
-                "metadata" => (),
-                "zero" => assert!(projected.search_knn(&[1.0, 0.0], 0).unwrap().is_empty()),
-                "knn" => assert_eq!(projected.search_knn(&[1.0, 0.0], 1).unwrap().len(), 1),
-                "threshold" => assert_eq!(
-                    projected.search_threshold(&[1.0, 0.0], 0.0).unwrap().len(),
-                    1
-                ),
-                _ => unreachable!(),
-            }
+            selected_search(&*projected, mode, &control);
             sql(&second, "SELECT v FROM t");
             sql(&first, "UPDATE t SET v=2");
             sql(
@@ -201,7 +218,10 @@ fn diskann_selected_source_snapshots_keep_original_serializable_observation() {
                 "UPDATE diskann_docs SET embedding=ARRAY[1.0,0.0] WHERE id=2",
             );
             let outcomes = [first.commit(), second.commit()];
-            if matches!(mode, "knn" | "threshold") {
+            if matches!(
+                mode,
+                "knn" | "threshold" | "report_knn" | "report_threshold"
+            ) {
                 assert!(
                     outcomes.iter().any(Result::is_err),
                     "projected candidate cycle committed: {provider}/{mode}"
@@ -217,4 +237,65 @@ fn diskann_selected_source_snapshots_keep_original_serializable_observation() {
             }
         }
     }
+}
+
+fn selected_search(
+    projected: &dyn uqa_storage::VectorIndex,
+    mode: &str,
+    control: &StorageReadControl,
+) {
+    match mode {
+        "metadata" => (),
+        "zero" => assert!(projected.search_knn(&[1.0, 0.0], 0).unwrap().is_empty()),
+        "knn" => assert_eq!(projected.search_knn(&[1.0, 0.0], 1).unwrap().len(), 1),
+        "threshold" => assert_eq!(
+            projected.search_threshold(&[1.0, 0.0], 0.0).unwrap().len(),
+            1
+        ),
+        "report_zero" => {
+            let result = projected
+                .search_knn_with_statistics(&[1.0, 0.0], 0, Some(control))
+                .unwrap();
+            assert!(result.postings.is_empty());
+            assert_eq!(
+                result.diskann.unwrap().route,
+                uqa_storage::vector_index::DiskANNExecutionRoute::EmptyK
+            );
+        }
+        "report_knn" => {
+            let result = projected
+                .search_knn_with_statistics(&[1.0, 0.0], 1, Some(control))
+                .unwrap();
+            assert_eq!(result.postings.len(), 1);
+            assert!(result.diskann.is_some());
+        }
+        "report_threshold" => {
+            let result = projected
+                .search_threshold_with_statistics(&[1.0, 0.0], 0.0, Some(control))
+                .unwrap();
+            assert_eq!(result.postings.len(), 1);
+            assert_eq!(result.diskann.unwrap().work.exact.vectors, 2);
+        }
+        "report_invalid" => {
+            assert!(projected
+                .search_knn_with_statistics(&[1.0], 1, None)
+                .is_err());
+            assert!(projected
+                .search_threshold_with_statistics(&[1.0, 0.0], f32::NAN, None)
+                .is_err());
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn single_vector_reports(observed: &dyn uqa_storage::VectorIndex, empty: &StorageReadControl) {
+    let reported = observed
+        .search_knn_with_statistics(&[1.0, 0.0], 1, Some(empty))
+        .unwrap();
+    assert_eq!(reported.postings.len(), 1);
+    assert!(reported.diskann.is_some());
+    let reported = observed
+        .search_threshold_with_statistics(&[1.0, 0.0], 0.5, Some(empty))
+        .unwrap();
+    assert_eq!(reported.diskann.unwrap().work.exact.vectors, 1);
 }
