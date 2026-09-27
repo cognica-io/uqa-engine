@@ -530,9 +530,38 @@ WITH (
 );
 ```
 
-HNSW option values are unsigned integers. Underscore and documented hyphenated aliases are accepted. One vector column cannot have both IVF and HNSW physical ownership simultaneously.
+HNSW option values are unsigned integers. Underscore and documented hyphenated aliases are accepted. A field can have only one physical IVF, HNSW or DiskANN index at a time.
 
-SQL `CREATE INDEX` accepts B-tree, GIN, IVF, and HNSW. Other access methods, including R-tree, are not exposed by SQL DDL.
+## DiskANN vector indexes
+
+Current development builds support `USING diskann` on one `VECTOR(n)` or `TENSOR(n)` field. This method is unreleased; opening development databases also applies the [persistent format upgrades](../reference/10-upgrading.md#development-native-sqlite-mapping).
+
+```sql execute
+CREATE TABLE diskann_items (id INTEGER PRIMARY KEY, embedding VECTOR(2));
+INSERT INTO diskann_items VALUES
+    (1, ARRAY[1.0, 0.0]), (2, ARRAY[0.0, 1.0]), (3, ARRAY[0.9, 0.1]);
+CREATE INDEX diskann_items_embedding ON diskann_items USING diskann (embedding)
+WITH (max_degree = 2, search_list_size = 4, beam_width = 2, pq_bytes = 1);
+SELECT id, _score FROM diskann_items
+WHERE knn_match(embedding, ARRAY[1.0, 0.0], 2)
+ORDER BY _score DESC, id;
+```
+
+| Option | Default | Constraint |
+| --- | --- | --- |
+| `max_degree` | 64 | Integer at least 2 |
+| `build_list_size` | 128 | Integer at least `max_degree` |
+| `search_list_size` | 64 | Positive integer |
+| `alpha` | 1.2 | Finite real number at least 1 whose square is finite |
+| `beam_width` | 4 | Integer from 1 through `search_list_size` |
+| `pq_bytes` | `min(n, 32)` | Integer from 1 through the field dimension `n` |
+| `seed` | 42 | Unsigned 64-bit integer, including zero |
+
+Option names are case-insensitive; unknown, repeated or cross-method options are rejected. Defaults are resolved against the field dimension before construction, and buffer sizes must fit the platform. Configuration is retained in the index definition. PQ guides approximate candidate selection; final scores use canonical cosine, with the maximum element score for tensors. Threshold retrieval remains exact. See [retrieval and diagnostics](06-retrieval.md#diskann-plan-diagnostics).
+
+Memory, native SQLite, SQLite Key/Value and redb preserve DiskANN publication, private writes, rollback and retained readers through their existing transaction interfaces. `DROP INDEX` removes physical index ownership and returns the field to exact search without deleting its canonical vectors. The [binding examples](../../../examples/README.md) use the same SQL configuration and typed parameters.
+
+SQL `CREATE INDEX` accepts B-tree, GIN, IVF, HNSW and DiskANN. Other access methods, including R-tree, are not exposed by SQL DDL.
 
 ## Views
 

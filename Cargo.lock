@@ -1062,6 +1062,7 @@ dependencies = [
 name = "example-vector-knn"
 version = "0.4.0"
 dependencies = [
+ "uqa-core",
  "uqa-engine",
 ]
 
