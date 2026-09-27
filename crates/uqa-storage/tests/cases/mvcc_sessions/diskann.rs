@@ -104,6 +104,8 @@ mod live;
 mod maintenance;
 #[path = "diskann/mappings.rs"]
 mod mappings;
+#[path = "diskann/populations.rs"]
+mod populations;
 #[path = "diskann/pruning.rs"]
 mod pruning;
 #[path = "diskann/publication.rs"]

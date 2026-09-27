@@ -207,6 +207,13 @@ pub trait VersionedPersistence: Send + Sync {
         &crate::key_value::KeyValueIVFRecords
     }
 
+    /// Physical population records and canonical adapters for this provider. An unsupported provider must reject typed population changes rather than publish unresolved counts.
+    fn diskann_population_record_layout(
+        &self,
+    ) -> Option<&dyn super::DiskANNPopulationRecordLayout> {
+        None
+    }
+
     /// Native adapters must override this when their physical node and edge families differ.
     fn hnsw_record_layout(&self) -> Option<&dyn super::HNSWRecordLayout> {
         Some(&crate::key_value::KeyValueHNSWRecords)

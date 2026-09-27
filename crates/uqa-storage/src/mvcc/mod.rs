@@ -25,6 +25,7 @@ pub use notifications::{NotificationRecordLayout, NOTIFICATION_PUBLICATION_KEY};
 mod outcome;
 mod overlay;
 mod persistence;
+mod populations;
 mod projection;
 mod receipts;
 mod resolution;
@@ -64,6 +65,9 @@ pub use persistence::{
     resolve_prepared_receipt, CommitErrorOutcome, CommitFailure, CommitFingerprint, CommitReceipt,
     CommitResult, CommitStatus, DatabaseId, RecordPage, StorageMutationOrigin,
     StorageTransactionId, VersionedPersistence,
+};
+pub use populations::{
+    DiskANNPopulationHeader, DiskANNPopulationOrigin, DiskANNPopulationRecordLayout,
 };
 pub use receipts::{
     receipt_lease_id, ReceiptAcknowledgement, RetainedTransactionAllocation,

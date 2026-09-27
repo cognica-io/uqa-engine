@@ -10,10 +10,12 @@ pub(in crate::key_value) mod journal;
 mod lifecycle;
 mod live;
 mod maintenance;
+mod populations;
 mod retained;
 #[cfg(test)]
 mod tests;
 pub use live::KeyValueDiskANNHandle;
+pub use populations::KeyValueDiskANNPopulationRecords;
 pub use retained::{DiskANNCanonicalVectorVisitor, RetainedDiskANNCanonical};
 
 use std::sync::Arc;

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Provider-independent population records and complete publication census. Providers own their atomic installation and MVCC reconciliation.
+//! Provider-independent population records and complete publication census. Common MVCC owns atomic reconciliation; providers supply physical layouts.
 
 use super::DiskANNCanonicalCounts;
 use crate::diskann_index::{
@@ -35,6 +35,22 @@ pub struct DiskANNPopulationWitness {
 }
 
 impl DiskANNPopulationState {
+    /// Construct a validated record value. The lifecycle owner still establishes its exact canonical association through census or checked replacement before installation.
+    pub fn from_counts(
+        generation: DiskANNGeneration,
+        dimensions: u32,
+        counts: DiskANNCanonicalCounts,
+    ) -> StorageBackendResult<Self> {
+        if dimensions == 0 {
+            return Err(invalid("population dimensions must be nonzero"));
+        }
+        Ok(Self {
+            generation,
+            dimensions,
+            counts,
+        })
+    }
+
     pub fn generation(self) -> DiskANNGeneration {
         self.generation
     }
@@ -55,6 +71,7 @@ impl DiskANNPopulationState {
         visit: &mut dyn FnMut(DiskANNPopulationWitness) -> StorageBackendResult<()>,
     ) -> StorageBackendResult<Self> {
         current.check_control(control)?;
+        built.check_control(control)?;
         let input = built.manifest().input();
         if current.dimensions() != input.dimensions {
             return Err(invalid(
@@ -106,6 +123,7 @@ impl DiskANNPopulationState {
             after = Some(document);
         }
         current.check_control(control)?;
+        built.check_control(control)?;
         Ok(state)
     }
 

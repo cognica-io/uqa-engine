@@ -92,6 +92,7 @@ impl OriginVerifier {
 
 struct Retained {
     source: Arc<dyn DiskANNPageSource>,
+    control: StorageReadControl,
     manifest: DiskANNManifest,
     layout: DiskANNOriginLayout,
     documents: u64,
@@ -131,6 +132,7 @@ impl DiskANNOriginReader {
         control.check()?;
         let retained = Retained {
             source,
+            control: control.clone(),
             manifest,
             layout,
             documents,
@@ -145,23 +147,30 @@ impl DiskANNOriginReader {
         &self.retained.manifest
     }
 
+    /// Preserve the opening reader's cancellation even for an empty stream that needs no source lookup.
+    pub fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
+        self.retained.control.check()?;
+        control.check()?;
+        if self.retained.source.generation() != self.manifest().input().generation {
+            return Err(invalid("origin source changed its retained generation"));
+        }
+        Ok(())
+    }
+
     /// Binary search fixed-capacity batches with one charged decoded record at a time. An explicit empty tensor returns Some with count zero; an absent document returns None.
     pub fn origin(
         &self,
         document: DocId,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Option<DiskANNCanonicalOrigin>> {
-        control.check()?;
-        if self.retained.source.generation() != self.manifest().input().generation {
-            return Err(invalid("origin source changed its retained generation"));
-        }
+        self.check_control(control)?;
         let mut low = 0;
         let mut high = self
             .retained
             .documents
             .div_ceil(ORIGIN_BATCH_DOCUMENTS as u64);
         while low < high {
-            control.check()?;
+            self.check_control(control)?;
             let middle = low + (high - low) / 2;
             let first = middle * ORIGIN_BATCH_DOCUMENTS as u64;
             let bytes = read_record(
@@ -184,7 +193,7 @@ impl DiskANNOriginReader {
                 low = middle + 1;
             } else {
                 for index in 0..batch.len() {
-                    control.check()?;
+                    self.check_control(control)?;
                     let entry = batch.entry(index).expect("validated batch");
                     if entry.document() == document {
                         return Ok(Some(entry.origin()));
@@ -193,7 +202,7 @@ impl DiskANNOriginReader {
                 break;
             }
         }
-        control.check()?;
+        self.check_control(control)?;
         Ok(None)
     }
 }

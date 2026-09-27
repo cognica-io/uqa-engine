@@ -60,6 +60,8 @@ pub(in crate::mvcc) fn resolve(
             | RecordWriteKind::IVFPreview
             | RecordWriteKind::HNSWPreview
             | RecordWriteKind::Marker
+            | RecordWriteKind::DiskANNOrigin
+            | RecordWriteKind::DiskANNPopulationPreview
             | RecordWriteKind::IdempotentDelete
             | RecordWriteKind::StatisticsMaintenance => {
                 changes.apply_owned(std::slice::from_ref(write), control)?;
