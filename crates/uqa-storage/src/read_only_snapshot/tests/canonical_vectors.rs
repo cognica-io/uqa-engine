@@ -96,3 +96,53 @@ fn canonical_capture_shares_existing_coordinates_under_a_header_only_allowance()
         assert_eq!(owner.memory().used(), 0);
     }
 }
+
+#[test]
+fn canonical_readers_bind_original_controls_when_the_snapshot_is_unbound() {
+    for mut live in [
+        Box::new(HNSWIndex::new(2)) as Box<dyn VectorIndex>,
+        Box::new(IVFIndex::with_params(2, 1, 1, 1)),
+    ] {
+        live.add(3, vec![8.0, 0.0]).unwrap();
+        let snapshot = live.snapshot().unwrap();
+        let original = StorageReadControl::with_limit(4096);
+        let independent = StorageReadControl::with_limit(4096);
+        let bound = snapshot.snapshot_with_control(&original).unwrap();
+        let nested = bound.snapshot_with_control(&independent).unwrap();
+        let first = snapshot.vector_read_snapshot(&original).unwrap().unwrap();
+        let second = snapshot
+            .vector_read_snapshot(&independent)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            first.corpus_fingerprint(&independent).unwrap(),
+            second.corpus_fingerprint(&independent).unwrap()
+        );
+        assert_eq!(
+            first.corpus_fingerprint(&independent).unwrap(),
+            bound
+                .vector_read_snapshot(&independent)
+                .unwrap()
+                .unwrap()
+                .corpus_fingerprint(&independent)
+                .unwrap()
+        );
+        drop((snapshot, live));
+        original.cancellation().cancel();
+        assert!(bound
+            .search_knn_with_control(&[1.0, 0.0], 1, &independent)
+            .is_err());
+        assert!(nested.search_knn(&[1.0, 0.0], 1).is_err());
+        assert!(first.corpus_fingerprint(&independent).is_err());
+        assert!(first.next_document_after(None, &independent).is_err());
+        assert!(first.document_vector_count(3, &independent).is_err());
+        assert!(first.read_vector(3, 0, &independent).is_err());
+        assert_eq!(
+            &*second.read_vector(3, 0, &independent).unwrap().unwrap(),
+            &[8.0, 0.0]
+        );
+        drop((first, second, bound, nested));
+        assert_eq!(original.memory().used(), 0);
+        assert_eq!(independent.memory().used(), 0);
+    }
+}

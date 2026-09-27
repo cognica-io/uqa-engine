@@ -145,7 +145,7 @@ impl<T: VectorIndex + ?Sized + 'static> VectorIndex for ReadOnlySnapshot<T> {
                 |source| Ok(Some(source)),
             )?
             .map(|source| {
-                let source = ReadOnlySnapshot(source, self.1.clone(), self.2.clone(), None);
+                let source = ReadOnlySnapshot(source, self.1.clone(), Some(original.clone()), None);
                 uqa_core::memory::Budgeted::new(source, original.memory().empty_reservation())
                     .into_shared()
                     .map(|source| source as crate::vector_index::VectorReadSnapshot)
@@ -216,7 +216,7 @@ impl<T: VectorIndex + ?Sized + 'static> VectorIndex for ReadOnlySnapshot<T> {
         control: &crate::read_control::StorageReadControl,
     ) -> StorageBackendResult<Arc<dyn VectorIndex>> {
         control.check()?;
-        if self.1.is_some() || self.2.is_some() {
+        if self.1.is_some() || self.2.is_some() || self.3.is_some() {
             return self.clone().with_vector_read_control(control)?.snapshot();
         }
         Ok(Arc::new(ReadOnlySnapshot::new(
