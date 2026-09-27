@@ -4,13 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Already read nodes supply the navigation cutoff; lossy centroids do not stand in for their available coordinates.
+//! Original-vector distances decide whether a decoded node expands its edges; PQ only orders pending reads.
 
 use std::cmp::Ordering;
 
 use uqa_core::memory::BudgetedBinaryHeap;
 
-use super::Candidate;
 use crate::diskann_index::{format::DiskANNNode, NavigationVector, SquaredNavigationDistance};
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 
@@ -61,35 +60,23 @@ impl Refinement {
         })
     }
 
-    pub(super) fn allows(&self, candidate: &Candidate) -> bool {
-        self.closest.len() < self.limit
-            || self.closest.peek().is_some_and(|worst| {
-                candidate
-                    .distance
-                    .get()
-                    .total_cmp(&worst.distance.get())
-                    .then_with(|| candidate.node.cmp(&worst.node))
-                    .is_le()
-            })
-    }
-
-    /// Each physical identity is offered exactly once, after its beam has been decoded successfully.
+    /// Each decoded identity is offered once in frozen beam order. Expand its edges only if it enters the nearest original-vector set at that point.
     pub(super) fn offer(
         &mut self,
         node: &DiskANNNode,
         control: &StorageReadControl,
-    ) -> StorageBackendResult<()> {
+    ) -> StorageBackendResult<bool> {
         let candidate = Expanded {
             node: node.node_id(),
             distance: self.query.squared_distance_to_raw(node.vector(), control)?,
         };
         if self.closest.len() == self.limit {
             if self.closest.peek().is_some_and(|worst| candidate >= *worst) {
-                return Ok(());
+                return Ok(false);
             }
             self.closest.pop();
         }
         self.closest.push(candidate)?;
-        Ok(())
+        Ok(true)
     }
 }

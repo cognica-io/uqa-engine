@@ -38,14 +38,14 @@ def traverse(capacity, width):
             order.append(node)
         # Raw fixture vectors equal their declared axis centroids. The refinement
         # oracle therefore uses exact rational squared distances, with no Rust output.
-        closest = sorted(closest + [(DISTANCES[node], node) for node in selected])[:capacity]
-        cutoff = closest[-1] if len(closest) == capacity else (float('inf'), 0)
-        frontier = [node for node in frontier
-                    if node not in expanded and (DISTANCES[node], node) <= cutoff]
+        frontier = [node for node in frontier if node not in expanded]
         for node in selected:
+            key = (DISTANCES[node], node)
+            if len(closest) == capacity and key >= closest[-1]:
+                continue
+            closest = sorted(closest + [key])[:capacity]
             frontier.extend(candidate for candidate in NEIGHBORS[node]
-                            if candidate not in expanded and candidate not in frontier
-                            and (DISTANCES[candidate], candidate) <= cutoff)
+                            if candidate not in expanded and candidate not in frontier)
             frontier.sort(key=lambda candidate: (DISTANCES[candidate], candidate))
             del frontier[capacity:]
         rounds.append({'before': before, 'selected': selected, 'after': list(frontier)})
@@ -56,7 +56,7 @@ def traverse(capacity, width):
 
 
 def fixture():
-    return {'revision': 2, 'query': QUERY, 'centroids': CENTROIDS, 'labels': LABELS,
+    return {'revision': 3, 'query': QUERY, 'centroids': CENTROIDS, 'labels': LABELS,
             'distances': [int(d) for d in DISTANCES], 'neighbors': NEIGHBORS, 'entry': 6,
             'cases': [traverse(3, 1), traverse(3, 2), traverse(4, 3)]}
 

@@ -186,8 +186,9 @@ fn write_codes(
 ) -> DiskANNArtifactDigests {
     let mut artifacts = DiskANNArtifactDigests::empty();
     if count != 0 {
+        let centroid_count = count.min(data.centroids.len());
         let mut centroids = BudgetedVec::new(control.memory());
-        for center in data.centroids.iter().take(count.min(4)) {
+        for center in data.centroids.iter().take(centroid_count) {
             for coordinate in 0..dimensions as usize {
                 centroids
                     .push(center.get(coordinate).copied().unwrap_or(0.0))
@@ -197,11 +198,11 @@ fn write_codes(
         let book = PQCodebook::restore(
             dimensions,
             1,
-            count.min(4) as u16,
+            centroid_count as u16,
             PQTrainingSummary {
                 options: PQTrainingOptions {
                     max_samples: 4,
-                    max_centroids: 4,
+                    max_centroids: centroid_count as u16,
                     max_iterations: 1,
                     seed: 42,
                 },

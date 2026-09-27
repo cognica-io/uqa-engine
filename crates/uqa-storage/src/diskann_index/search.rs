@@ -221,17 +221,15 @@ impl Workspace {
         let (nodes, read) = reader.read_nodes_with_stats(&selected, control)?;
         pages.merge(read)?;
         if !completion {
-            let refinement = self.refinement.as_mut().expect("approximate refinement");
             for node in nodes.iter() {
                 control.check()?;
                 self.expanded.insert(node.node_id())?;
-                refinement.offer(node, control)?;
             }
             let mut retained = 0;
             for offset in 0..self.frontier.len() {
                 super::metric::checkpoint(offset, control)?;
                 let candidate = self.frontier[offset];
-                if !self.expanded.contains(&candidate.node) && refinement.allows(&candidate) {
+                if !self.expanded.contains(&candidate.node) {
                     self.frontier[retained] = candidate;
                     retained += 1;
                 }
@@ -244,6 +242,14 @@ impl Workspace {
                 increment(&mut stats.completion_expansions)?;
             } else {
                 increment(&mut stats.approximate_expansions)?;
+                if !self
+                    .refinement
+                    .as_mut()
+                    .expect("approximate refinement")
+                    .offer(node, control)?
+                {
+                    continue;
+                }
                 for &neighbor in node.neighbors() {
                     control.check()?;
                     self.admit(neighbor, reader, control, stats)?;
@@ -282,14 +288,6 @@ impl Workspace {
                 .estimate(code, control)?,
         };
         increment(&mut stats.pq_estimates)?;
-        if !self
-            .refinement
-            .as_ref()
-            .ok_or_else(|| invalid("approximate traversal has no refinement"))?
-            .allows(&candidate)
-        {
-            return Ok(());
-        }
         let limit = reader.manifest().input().parameters.search_list_size;
         if self.frontier.len() < limit {
             self.frontier.push(candidate)?;

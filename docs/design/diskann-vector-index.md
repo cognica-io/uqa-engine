@@ -54,7 +54,7 @@ Only one of IVF, HNSW, or DiskANN may own a vector field at a time. Creation bac
 | `pq_bytes` | `min(32, dimensions)` | One byte per nonempty coordinate chunk; between 1 and dimension count |
 | `seed` | 42 | Unsigned 64-bit seed; persisted with build algorithm and training revisions |
 
-These are explicit starting defaults, not benchmark-derived optimal settings. Search capacity grows under the query allowance when deletions or tensor collapse leave too few distinct live documents. Resource exhaustion returns the existing quota/cancellation errors instead of silently reducing degree, PQ width, or requested result count. Allocation products and offsets use checked arithmetic before conversion to platform sizes. Store `alpha` in a validated canonical representation compatible with existing configuration equality; do not add an unchecked floating-point field to an `Eq` configuration enum.
+These are explicit starting defaults, not benchmark-derived optimal settings. When deletions or tensor collapse leave too few distinct live documents after approximate exhaustion, completion scans unvisited generation IDs under the original query allowance; the pending frontier capacity stays fixed. Resource exhaustion returns the existing quota/cancellation errors instead of silently reducing degree, PQ width, or requested result count. Allocation products and offsets use checked arithmetic before conversion to platform sizes. Store `alpha` in a validated canonical representation compatible with existing configuration equality; do not add an unchecked floating-point field to an `Eq` configuration enum.
 
 SQL owns raw option parsing; Execution resolves the target dimension before finalizing dimension-dependent defaults through Storage's configuration validator. Persist the resolved PQ width and all effective algorithm defaults. Reopen must not reinterpret an omitted option using a later binary's defaults.
 
@@ -184,7 +184,7 @@ The base code array is resident and immutable; full raw vectors and adjacency ar
 
 ## Search execution
 
-The query pins one manifest, code array, page reader, and canonical/change visibility view. A bounded beam chooses several unexpanded candidates, batches their page requests, expands their outgoing edges, and scores newly discovered codes. Nodes already in the cache still count as expanded nodes; cache hits cannot change tie order or omit neighbor processing. Original coordinates read during expansion refine the navigation cutoff independently of final canonical tensor reranking. The pinned [disk-search reference](https://github.com/microsoft/DiskANN/blob/78256bbab4685e1774e78d331e081a153be26823/src/pq_flash_index.cpp) is a secondary check for beam/read/rerank mechanics; the [refined-cutoff strategy and proof](diskann-paged-navigation.md#bounded-refinement-and-preservation-proof) state UQA's explicit query improvement.
+The query pins one manifest, code array, page reader, and canonical/change visibility view. A bounded beam chooses several unexpanded candidates, batches their page requests, conditionally expands their outgoing edges using original-vector distances, and scores newly discovered codes. Nodes already in the cache still count as expanded nodes; cache hits cannot change tie order or bypass the original-distance decision. Original coordinates decide edge expansion independently of PQ read priority and final canonical tensor reranking. The pinned [disk-search reference](https://github.com/microsoft/DiskANN/blob/78256bbab4685e1774e78d331e081a153be26823/src/pq_flash_index.cpp) is a secondary check for beam/read/rerank mechanics; the [refined-cutoff strategy and proof](diskann-paged-navigation.md#bounded-refinement-and-preservation-proof) state UQA's explicit query improvement.
 
 ```mermaid
 flowchart TD
@@ -208,9 +208,9 @@ search(snapshot, query, k, control):
         select up to beam_width nodes in deterministic priority order
         deduplicate their required page IDs; reserve buffers before reads
         read missing pages under the pinned generation lease
-        validate pages; refine the cutoff with every selected original vector
-        remove expanded or cutoff-rejected entries from the pending frontier
-        expand frozen nodes in priority order; offer neighbors using PQ estimates
+        validate pages; mark every selected identity visited and remove it from the frontier
+        offer each original vector to the refined heap in frozen priority order
+        expand its edges only if admitted; offer neighbors using PQ estimates alone
         retain at most search_list_size pending candidates and refined distances each
     suppress base candidates replaced/deleted in the selected visibility view
     merge exact changed-vector and numeric-side-stream candidates
@@ -223,7 +223,7 @@ The visited set is separate from the bounded frontier; its size can exceed the c
 
 Tensor identity is preserved through `(DocId, ordinal)` until document reduction. After selecting candidate documents, read all their visible ordinals under the same snapshot and compute each document's actual maximum using the canonical reduction contract. This extra work is explicit in cost and I/O metrics. It avoids returning the score of an arbitrary encountered tensor element. Deleted or superseded base vectors can remain navigation vertices, but cannot contribute stale output.
 
-The [physical traversal](diskann-paged-navigation.md) keeps the configured pending capacity fixed, refines its cutoff from already read original vectors and freezes each beam before reads. When tensor duplication or masked nodes leave fewer than $k$ live documents after approximate exhaustion, explicitly continue through unexpanded generation IDs in ascending order while preserving prior work and the same canonical snapshot. This deterministic completion rule avoids losing candidates evicted from the bounded frontier; it does not assert exact nearest-neighbor membership. Return fewer than $k$ only when the visible corpus has fewer eligible vector-bearing documents; otherwise continue within the allowance or return a resource error. Approximate membership does not authorize silent truncation after an arbitrary I/O budget.
+The [physical traversal](diskann-paged-navigation.md) keeps the configured pending capacity fixed, decides edge expansion using original-vector distances alone and freezes each beam before reads. When tensor duplication or masked nodes leave fewer than $k$ live documents after approximate exhaustion, explicitly continue through unexpanded generation IDs in ascending order while preserving prior work and the same canonical snapshot. This deterministic completion rule avoids losing candidates evicted from the bounded frontier; it does not assert exact nearest-neighbor membership. Return fewer than $k$ only when the visible corpus has fewer eligible vector-bearing documents; otherwise continue within the allowance or return a resource error. Approximate membership does not authorize silent truncation after an arbitrary I/O budget.
 
 An ordinary relational filter is not a graph-traversal filter. ACL/RLS and security-barrier handling use the existing Execution contract: graph navigation may use internal routing nodes only where allowed by that contract, final rows must be authorized, and EXPLAIN/telemetry must not leak unauthorized payloads. Predicate pushdown or tenant-separated graphs require a separately specified semantic and security contract. They cannot be inferred from the 2019 algorithm.
 
