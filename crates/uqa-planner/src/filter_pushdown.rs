@@ -483,9 +483,7 @@ pub fn collect_cte_source_references(
 }
 
 /// Specialize a physical query plan with a predicate on its output columns.
-/// The caller keeps the original predicate as a residual check; this function
-/// only returns a plan when pushing the predicate below the output boundary is
-/// provably safe.
+/// A returned plan applies the complete predicate below the output boundary under the rewrite guards; the caller retains the original predicate when specialization is declined.
 pub fn push_output_filter_into_query_plan(
     context: FilterPushdownContext<'_>,
     plan: &QueryPlan,

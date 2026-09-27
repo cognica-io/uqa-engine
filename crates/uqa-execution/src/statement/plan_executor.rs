@@ -241,6 +241,16 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         verbose: bool,
         format: Option<&str>,
     ) -> Result<SQLResult, SQLError> {
+        if self.context.validation.transactions.transaction_depth() != 0 {
+            crate::query::locking::lock_explained_relations(
+                self.context.queries.row_lock_context(),
+                body,
+            )?;
+        }
+        let physical = self
+            .context
+            .physical_explain
+            .physical_explain_plan(body, self.params)?;
         let analysis = if analyze {
             let started = std::time::Instant::now();
             let mut executor = UnifiedPlanExecutor::new_nested(self.context.clone(), self.params);
@@ -258,7 +268,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
         } else {
             None
         };
-        (self.context.explain)(body, verbose, format, analysis.as_ref())
+        (self.context.explain)(body, verbose, format, analysis.as_ref(), &physical)
     }
 
     fn execute_prepare(

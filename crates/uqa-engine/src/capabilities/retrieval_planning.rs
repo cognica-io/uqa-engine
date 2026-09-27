@@ -77,6 +77,24 @@ impl VectorStatisticsRead for VectorRead<'_> {
     fn dimensions(&self, field: &str) -> Option<u32> {
         self.0.get(field).map(uqa_storage::VectorIndex::dimensions)
     }
+    fn diskann_index_statistics(
+        &self,
+        field: &str,
+    ) -> Result<Option<uqa_core::DiskANNIndexStats>, SQLError> {
+        let Some(index) = self.0.get(field) else {
+            return Ok(None);
+        };
+        index
+            .diskann_query_metadata(self.1)
+            .and_then(|metadata| {
+                metadata
+                    .map(|metadata| metadata.index_statistics(self.1))
+                    .transpose()
+            })
+            .map_err(|error| {
+                crate::search::storage_sql_error("read physical vector statistics", error)
+            })
+    }
     fn diskann_query_statistics(
         &self,
         field: &str,

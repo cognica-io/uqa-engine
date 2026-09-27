@@ -59,8 +59,42 @@ impl Engine {
             events: self.event_lifecycle_context(),
             foreign: self,
             table_privileges: self,
-            explain: uqa_planner::explain::run_explain,
+            explain: uqa_planner::explain::run_explain_with_physical,
+            physical_explain: self,
         }
+    }
+}
+
+impl context::PhysicalExplainPlanning for Engine {
+    fn physical_explain_plan(
+        &self,
+        body: &uqa_sql::plan::UnifiedPlan,
+        params: &[uqa_sql::SQLParam],
+    ) -> Result<uqa_sql::result::ExplainPhysicalPlan, uqa_sql::SQLError> {
+        let catalog = self.catalog_read_view();
+        let resolution = self.session_execution_view().relation_name_resolution();
+        uqa_planner::explain::physical_plan(
+            uqa_planner::explain::PhysicalExplainContext {
+                retrieval: self,
+                statistics: self,
+                filters: uqa_planner::filter_pushdown::context::FilterPushdownContext {
+                    volatility: self,
+                    correlation: uqa_sql::binding::correlation::CorrelationContext {
+                        catalog: &catalog,
+                        resolution: &resolution,
+                    },
+                    optimizer: &|plan| super::statement_planning::optimize_engine_plan(self, plan),
+                },
+                evaluate: &|expression, params| {
+                    uqa_execution::eval_scalar(
+                        expression,
+                        &uqa_execution::ScalarEvalContext::new(None, params),
+                    )
+                },
+            },
+            body,
+            params,
+        )
     }
 }
 impl context::StatementExecutionInputs<StatementReadSnapshot> for Engine {

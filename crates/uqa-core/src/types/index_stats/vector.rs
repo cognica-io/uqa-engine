@@ -44,9 +44,9 @@ pub struct VectorReadStats {
     pub read_concurrency: usize,
 }
 
-/// Facts about a field and query selected on the same retained physical/canonical view. Storage supplies format-derived quantities and the numeric route; Planner supplies work estimates.
+/// Query-independent facts about one selected field. Storage supplies format-derived quantities; Planner supplies work estimates.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DiskANNQueryStats {
+pub struct DiskANNIndexStats {
     pub generation: VectorGeneration,
     pub dimensions: u32,
     pub max_degree: usize,
@@ -61,5 +61,11 @@ pub struct DiskANNQueryStats {
     pub page_bytes: usize,
     pub populations: VectorPopulationStats,
     pub reads: VectorReadStats,
+}
+
+/// Physical facts and the numeric route for an actual query on the same retained view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiskANNQueryStats {
+    pub index: DiskANNIndexStats,
     pub query_route: VectorQueryRoute,
 }

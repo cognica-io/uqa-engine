@@ -14,6 +14,10 @@ use uqa_sql::{
 };
 
 pub use uqa_sql::result::ExplainAnalysis;
+use uqa_sql::result::ExplainPhysicalPlan;
+
+mod physical;
+pub use physical::{physical_plan, PhysicalExplainContext};
 
 pub fn run_explain(
     body: &UnifiedPlan,
@@ -21,6 +25,23 @@ pub fn run_explain(
     format: Option<&str>,
     analysis: Option<&ExplainAnalysis>,
 ) -> Result<SQLResult, SQLError> {
+    run_explain_with_physical(
+        body,
+        verbose,
+        format,
+        analysis,
+        &ExplainPhysicalPlan::default(),
+    )
+}
+
+pub fn run_explain_with_physical(
+    body: &UnifiedPlan,
+    verbose: bool,
+    format: Option<&str>,
+    analysis: Option<&ExplainAnalysis>,
+    physical: &ExplainPhysicalPlan,
+) -> Result<SQLResult, SQLError> {
+    let format = format.unwrap_or("text").to_ascii_lowercase();
     let mut plan_text = match body {
         UnifiedPlan::Query(query) => format_query_plan(query),
         UnifiedPlan::Command(command) => format!("{}\n  {command:#?}", command.name()),
@@ -29,6 +50,15 @@ pub fn run_explain(
         plan_text.push_str("\n  verbose=true");
         write!(plan_text, "\n  physical_plan={body:#?}")
             .map_err(|error| SQLError::Internal(format!("format EXPLAIN plan: {error}")))?;
+    }
+    if format == "text" {
+        for node in &physical.nodes {
+            let rendered = serde_json::to_string_pretty(node)
+                .map_err(|error| SQLError::Internal(format!("format physical EXPLAIN: {error}")))?;
+            for line in rendered.lines() {
+                let _ = write!(plan_text, "\n  {line}");
+            }
+        }
     }
     if let Some(analysis) = analysis {
         let _ = write!(
@@ -40,15 +70,17 @@ pub fn run_explain(
         );
     }
 
-    let format = format.unwrap_or("text").to_ascii_lowercase();
     if format == "json" {
-        let payload = serde_json::json!({
+        let mut payload = serde_json::json!({
             "Plan": plan_text.lines().collect::<Vec<_>>(),
             "Analyze": analysis.is_some(),
             "Actual Rows": analysis.map(|value| value.rows),
             "Affected Rows": analysis.map(|value| value.affected_rows),
             "Execution Time (ms)": analysis.map(|value| value.elapsed.as_secs_f64() * 1_000.0),
         });
+        if !physical.nodes.is_empty() {
+            payload["Physical Plans"] = serde_json::Value::Array(physical.nodes.clone());
+        }
         let mut row = ResultRow::new();
         row.insert("plan".to_string(), Value::Str(payload.to_string()));
         return Ok(SQLResult {

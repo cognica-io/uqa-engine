@@ -19,7 +19,7 @@ use crate::row_locks::{
 use crate::{Batch, ExecResult, PhysicalOperator, PhysicalRow, RowProjectionValue, RowSchema};
 use uqa_sql::ast::{LockStrength, LockWait, LockingClause, RelationPersistence};
 use uqa_sql::{
-    plan::{QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan},
+    plan::{CommandPlan, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan},
     SQLError, SQLParam, ScalarExpr,
 };
 pub mod context;
@@ -46,6 +46,29 @@ pub fn lock_query_relations<S: Clone + Send + Sync + 'static>(
         &mut locked,
         &mut visiting_views,
     )
+}
+
+/// Hold the explained statement's relation identities before collecting physical metadata or executing ANALYZE.
+pub fn lock_explained_relations<S: Clone + Send + Sync + 'static>(
+    context: RowLockContext<'_, S>,
+    plan: &UnifiedPlan,
+) -> Result<(), SQLError> {
+    match plan {
+        UnifiedPlan::Query(query) => lock_query_relations(context, query),
+        UnifiedPlan::Command(command) => match command.as_ref() {
+            CommandPlan::Explain { body, .. } => lock_explained_relations(context, body),
+            CommandPlan::CreateTableAs { query, .. }
+            | CommandPlan::CreateMaterializedView { query, .. }
+            | CommandPlan::DeclareCursor { query, .. } => lock_query_relations(context, query),
+            _ => lock_command_plan_relations(
+                context,
+                command,
+                &context.scopes.transition_relation_names(),
+                &mut std::collections::BTreeSet::new(),
+                &mut std::collections::BTreeSet::new(),
+            ),
+        },
+    }
 }
 
 fn lock_query_plan_relations<S: Clone + Send + Sync + 'static>(
@@ -92,36 +115,84 @@ fn lock_cte_plan_relations<S: Clone + Send + Sync + 'static>(
             lock_query_plan_relations(context, query, inherited, locked, visiting)
         }
         uqa_sql::plan::CtePlanBody::Command(command) => {
-            let bound = match command.as_ref() {
-                uqa_sql::plan::CommandPlan::Insert(plan) => plan.relations_bound,
-                uqa_sql::plan::CommandPlan::Update(plan) => plan.relations_bound,
-                uqa_sql::plan::CommandPlan::Delete(plan) => plan.relations_bound,
-                _ => false,
-            };
-            if let Some(target) = command.mutation_target() {
-                if let Some((table, _)) = context.catalog.resolve_relation(target, bound)? {
-                    context
-                        .session
-                        .lock_relation(&table, crate::row_locks::RelationLockMode::RowExclusive)?;
-                }
-            }
-            let mut visible = inherited.clone();
-            if command.ctes().iter().any(|cte| cte.recursive) {
-                visible.extend(command.ctes().iter().map(|cte| cte.name.clone()));
-            }
-            for cte in command.ctes() {
-                lock_cte_plan_relations(context, &cte.body, &visible, locked, visiting)?;
-                visible.insert(cte.name.clone());
-            }
-            for query in command.query_inputs() {
-                lock_query_plan_relations(context, query, &visible, locked, visiting)?;
-            }
-            if let Some(source) = command.source_input() {
-                lock_source_plan_relations(context, source, &visible, bound, locked, visiting)?;
-            }
-            Ok(())
+            lock_command_plan_relations(context, command, inherited, locked, visiting)
         }
     }
+}
+
+fn lock_command_plan_relations<S: Clone + Send + Sync + 'static>(
+    context: RowLockContext<'_, S>,
+    command: &CommandPlan,
+    inherited: &std::collections::BTreeSet<String>,
+    locked: &mut std::collections::BTreeSet<String>,
+    visiting: &mut std::collections::BTreeSet<String>,
+) -> Result<(), SQLError> {
+    let (bound, target_bound, descendants) = match command {
+        CommandPlan::Insert(plan) => (plan.relations_bound, plan.target_relation_bound, false),
+        CommandPlan::Update(plan) => (
+            plan.relations_bound,
+            plan.target_relation_bound,
+            plan.include_descendants,
+        ),
+        CommandPlan::Delete(plan) => (
+            plan.relations_bound,
+            plan.target_relation_bound,
+            plan.include_descendants,
+        ),
+        CommandPlan::Merge(plan) => (false, false, plan.include_descendants),
+        _ => (false, false, false),
+    };
+    if let Some(target) = command.mutation_target() {
+        let mode = crate::row_locks::RelationLockMode::RowExclusive;
+        if let Some(binding) = bind_relation(
+            context.session,
+            mode,
+            false,
+            || {
+                context
+                    .catalog
+                    .resolve_relation(target, target_bound)?
+                    .map(|(name, kind)| {
+                        Ok(RelationBinding {
+                            object_id: context.catalog.relation_object_id(&name)?,
+                            name,
+                            value: kind,
+                        })
+                    })
+                    .transpose()
+            },
+            |_| Ok(()),
+        )? {
+            if binding.value == "table" {
+                lock_descendants(
+                    context.catalog,
+                    context.session,
+                    context
+                        .catalog
+                        .hierarchy_scan_tables(&binding.name, descendants)?
+                        .into_iter()
+                        .filter(|name| name != &binding.name),
+                    mode,
+                    false,
+                )?;
+            }
+        }
+    }
+    let mut visible = inherited.clone();
+    if command.ctes().iter().any(|cte| cte.recursive) {
+        visible.extend(command.ctes().iter().map(|cte| cte.name.clone()));
+    }
+    for cte in command.ctes() {
+        lock_cte_plan_relations(context, &cte.body, &visible, locked, visiting)?;
+        visible.insert(cte.name.clone());
+    }
+    for query in command.query_inputs() {
+        lock_query_plan_relations(context, query, &visible, locked, visiting)?;
+    }
+    if let Some(source) = command.source_input() {
+        lock_source_plan_relations(context, source, &visible, bound, locked, visiting)?;
+    }
+    Ok(())
 }
 
 fn validate_cte_row_locks<S: Clone + Send + Sync + 'static>(

@@ -40,6 +40,7 @@ pub trait CteBodyExecutor<S: Clone>: Sync {
 }
 
 pub trait QueryOutputRewriter: Sync {
+    /// Return a plan that applies the complete output predicate, or `None` when the caller must retain it.
     fn push_output_filter(
         &self,
         query: &QueryPlan,

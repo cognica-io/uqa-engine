@@ -9,9 +9,9 @@
 use crate::catalog::services::CatalogSession;
 use uqa_sql::{
     plan::UnifiedPlan,
-    result::ExplainAnalysis,
+    result::{ExplainAnalysis, ExplainPhysicalPlan},
     semantics::{effects::QueryEffectContext, rules::RuleCatalog},
-    SQLError, SQLResult,
+    SQLError, SQLParam, SQLResult,
 };
 pub mod queries;
 pub mod routines;
@@ -20,6 +20,23 @@ pub mod session;
 
 pub type ExplainRenderer =
     fn(&UnifiedPlan, bool, Option<&str>, Option<&ExplainAnalysis>) -> Result<SQLResult, SQLError>;
+
+pub type PhysicalExplainRenderer = fn(
+    &UnifiedPlan,
+    bool,
+    Option<&str>,
+    Option<&ExplainAnalysis>,
+    &ExplainPhysicalPlan,
+) -> Result<SQLResult, SQLError>;
+
+/// Capture physical facts before an optional execution without invoking the explained query.
+pub trait PhysicalExplainPlanning: Sync {
+    fn physical_explain_plan(
+        &self,
+        body: &UnifiedPlan,
+        params: &[SQLParam],
+    ) -> Result<ExplainPhysicalPlan, SQLError>;
+}
 
 pub trait StatementEffects {
     fn query_effect_context(&self) -> QueryEffectContext<'_>;
@@ -66,5 +83,6 @@ pub struct StatementExecutionContext<'a, S: Clone + 'static> {
     pub events: crate::schema::events::context::EventLifecycleContext<'a>,
     pub foreign: &'a dyn crate::schema::foreign_creation::entry::ForeignCreationTransactions,
     pub table_privileges: &'a dyn crate::catalog::security::table_grants::TableGrantInputs,
-    pub explain: ExplainRenderer,
+    pub explain: PhysicalExplainRenderer,
+    pub physical_explain: &'a dyn PhysicalExplainPlanning,
 }

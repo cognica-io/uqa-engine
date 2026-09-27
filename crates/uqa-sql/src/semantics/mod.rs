@@ -8,6 +8,7 @@
 
 pub mod age_cypher;
 pub mod aggregates;
+pub mod cte_strategy;
 mod ctes;
 mod expression_shape;
 mod functions;
