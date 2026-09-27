@@ -259,6 +259,9 @@ pub struct CostModel {
     pub physical_cost: CostEstimator,
 }
 
+mod vector;
+pub use vector::{estimate_diskann, DiskANNWorkEstimate};
+
 impl CostModel {
     pub fn new() -> Self {
         Self::default()
@@ -296,11 +299,38 @@ impl CostModel {
                     stats.doc_freq(f, query) as f64
                 }
             }
-            OperatorTree::VectorSimilarity { .. } | OperatorTree::KNN { .. } => {
+            OperatorTree::VectorSimilarity {
+                field,
+                query_vector,
+                ..
+            } => {
+                if let Some(physical) = stats.diskann_query(field, query_vector) {
+                    return estimate_diskann(physical, None, stats.total_docs).total();
+                }
                 let dims = f64::from(stats.dimensions.max(1));
                 dims * ((stats.total_docs as f64) + 1.0).log2()
             }
-            OperatorTree::CalibratedVectorMatch { .. } => {
+            OperatorTree::KNN {
+                field,
+                query_vector,
+                k,
+            } => {
+                if let Some(physical) = stats.diskann_query(field, query_vector) {
+                    return estimate_diskann(physical, Some(*k), stats.total_docs).total();
+                }
+                let dims = f64::from(stats.dimensions.max(1));
+                dims * ((stats.total_docs as f64) + 1.0).log2()
+            }
+            OperatorTree::CalibratedVectorMatch {
+                field,
+                query_vector,
+                k,
+                ..
+            } => {
+                if let Some(physical) = stats.diskann_query(field, query_vector) {
+                    return estimate_diskann(physical, Some(*k), stats.total_docs).total()
+                        * SCORE_OVERHEAD_FACTOR;
+                }
                 let dims = f64::from(stats.dimensions.max(1));
                 dims * ((stats.total_docs as f64) + 1.0).log2() * SCORE_OVERHEAD_FACTOR
             }

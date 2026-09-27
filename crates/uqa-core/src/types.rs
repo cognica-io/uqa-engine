@@ -55,7 +55,10 @@ pub use graph_phi::{
     GraphPhiEnvelope, GraphPhiPayload, GRAPH_PHI_EDGES_FIELD, GRAPH_PHI_FIELD,
     GRAPH_PHI_VERTICES_FIELD,
 };
-pub use index_stats::IndexStats;
+pub use index_stats::{
+    DiskANNQueryStats, IndexStats, VectorGeneration, VectorPopulationStats, VectorQueryRoute,
+    VectorReadStats,
+};
 pub use jsonb::{
     jsonb_equality_key, jsonb_equality_key_with_control, write_jsonb_comparison_key,
     write_jsonb_equality_key, JsonbKeyError,

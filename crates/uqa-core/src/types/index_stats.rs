@@ -8,6 +8,11 @@
 
 use super::{BTreeMap, FieldName};
 
+mod vector;
+pub use vector::{
+    DiskANNQueryStats, VectorGeneration, VectorPopulationStats, VectorQueryRoute, VectorReadStats,
+};
+
 /// Index-level statistics consumed by the cost model and BM25 scorer.
 #[derive(Debug, Clone, Default)]
 pub struct IndexStats {
@@ -16,6 +21,7 @@ pub struct IndexStats {
     pub dimensions: u32,
     doc_freqs: BTreeMap<(FieldName, String), u64>,
     unpaired_doc_freqs: BTreeMap<(FieldName, Vec<u16>), u64>,
+    vector_queries: BTreeMap<FieldName, Vec<(Vec<u32>, DiskANNQueryStats)>>,
 }
 
 impl IndexStats {
@@ -28,7 +34,30 @@ impl IndexStats {
             dimensions: 0,
             doc_freqs: BTreeMap::new(),
             unpaired_doc_freqs: BTreeMap::new(),
+            vector_queries: BTreeMap::new(),
         }
+    }
+
+    /// Query coordinates retain their exact binary32 identity; distinct queries on one field can take different numeric routes.
+    pub fn set_diskann_query(
+        &mut self,
+        field: impl Into<FieldName>,
+        query: &[f32],
+        stats: DiskANNQueryStats,
+    ) {
+        let entries = self.vector_queries.entry(field.into()).or_default();
+        if let Some((_, existing)) = entries.iter_mut().find(|(bits, _)| same_query(bits, query)) {
+            *existing = stats;
+        } else {
+            entries.push((query.iter().map(|value| value.to_bits()).collect(), stats));
+        }
+    }
+
+    pub fn diskann_query(&self, field: &str, query: &[f32]) -> Option<&DiskANNQueryStats> {
+        self.vector_queries
+            .get(field)?
+            .iter()
+            .find_map(|(bits, stats)| same_query(bits, query).then_some(stats))
     }
 
     pub fn doc_freq(&self, field: &str, term: &str) -> u64 {
@@ -74,4 +103,12 @@ impl IndexStats {
         self.set_doc_freq(field, term, df);
         self
     }
+}
+
+fn same_query(bits: &[u32], query: &[f32]) -> bool {
+    bits.len() == query.len()
+        && bits
+            .iter()
+            .zip(query)
+            .all(|(bits, value)| *bits == value.to_bits())
 }

@@ -18,11 +18,14 @@ use uqa_planner::{
     ColumnStats,
 };
 use uqa_sql::SQLError;
-use uqa_storage::InvertedIndex;
+use uqa_storage::{read_control::StorageReadControl, InvertedIndex};
 
-struct TableStatistics(Arc<TableState>);
+struct TableStatistics(Arc<TableState>, StorageReadControl);
 struct TextRead<'a>(RwLockReadGuard<'a, Box<dyn InvertedIndex>>);
-struct VectorRead<'a>(RwLockReadGuard<'a, uqa_storage::vector_index::VectorIndexes>);
+struct VectorRead<'a>(
+    RwLockReadGuard<'a, uqa_storage::vector_index::VectorIndexes>,
+    &'a StorageReadControl,
+);
 impl TextStatisticsRead for TextRead<'_> {
     fn field_names(&self) -> Result<Option<Vec<String>>, String> {
         self.0
@@ -74,13 +77,32 @@ impl VectorStatisticsRead for VectorRead<'_> {
     fn dimensions(&self, field: &str) -> Option<u32> {
         self.0.get(field).map(uqa_storage::VectorIndex::dimensions)
     }
+    fn diskann_query_statistics(
+        &self,
+        field: &str,
+        query: &[f32],
+    ) -> Result<Option<uqa_core::DiskANNQueryStats>, SQLError> {
+        let Some(index) = self.0.get(field) else {
+            return Ok(None);
+        };
+        index
+            .diskann_query_metadata(self.1)
+            .and_then(|metadata| {
+                metadata
+                    .map(|metadata| metadata.query_statistics(query, self.1))
+                    .transpose()
+            })
+            .map_err(|error| {
+                crate::search::storage_sql_error("read physical vector statistics", error)
+            })
+    }
 }
 impl RetrievalStatisticsTable for TableStatistics {
     fn text_index(&self) -> Box<dyn TextStatisticsRead + '_> {
         Box::new(TextRead(self.0.inverted_index.read()))
     }
     fn vector_indexes(&self) -> Box<dyn VectorStatisticsRead + '_> {
-        Box::new(VectorRead(self.0.vector_indexes.read()))
+        Box::new(VectorRead(self.0.vector_indexes.read(), &self.1))
     }
 }
 impl RetrievalPlanningCatalog for Engine {
@@ -150,13 +172,16 @@ impl RetrievalPlanningCatalog for Engine {
         &self,
         table: &str,
     ) -> Result<Option<Box<dyn RetrievalStatisticsTable>>, String> {
-        self.try_query_table(table)
-            .map(|state| {
-                state.map(|state| {
-                    Box::new(TableStatistics(state)) as Box<dyn RetrievalStatisticsTable>
-                })
-            })
-            .map_err(|error| error.to_string())
+        let Some(state) = self
+            .try_query_table(table)
+            .map_err(|error| error.to_string())?
+        else {
+            return Ok(None);
+        };
+        let control = self
+            .query_retention_control()
+            .map_err(|error| error.to_string())?;
+        Ok(Some(Box::new(TableStatistics(state, control))))
     }
     fn try_query_column_stats(&self, table: &str) -> Result<BTreeMap<String, ColumnStats>, String> {
         self.try_query_column_stats(table)

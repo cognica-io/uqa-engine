@@ -135,3 +135,53 @@ fn diskann_metadata_propagates_definition_source_and_invocation_failures() {
     assert!(canonical.visits.lock().unwrap().is_empty());
     assert_eq!(control.memory().used(), 0);
 }
+
+#[test]
+fn diskann_physical_statistics_classify_queries_without_artifact_or_corpus_reads() {
+    use uqa_core::VectorQueryRoute::{Approximate, ExactNonFiniteNorm, ExactZeroNorm};
+    let canonical = Source::new([(1, vec![vec![1.0, 0.0]]), (2, vec![vec![0.0, 0.0]])]);
+    let physical = MetadataOnly {
+        source: build(&canonical),
+        reads: AtomicUsize::new(0),
+        reject: false,
+    };
+    canonical.reset();
+    let capture = StorageReadControl::with_limit(4096);
+    let metadata =
+        DiskANNQueryMetadata::capture(&canonical, &physical, parameters(), limits(), &capture)
+            .unwrap();
+    let control = StorageReadControl::with_limit(0);
+    for (query, route) in [
+        ([1.0, 0.0], Approximate),
+        ([0.0, 0.0], ExactZeroNorm),
+        ([f32::from_bits(1), 0.0], ExactZeroNorm),
+        ([f32::MAX, 0.0], ExactNonFiniteNorm),
+    ] {
+        let stats = metadata.query_statistics(&query, &control).unwrap();
+        assert_eq!(stats.query_route, route);
+        assert_eq!(stats.dimensions, 2);
+        assert_eq!(stats.populations.base_documents, Some(2));
+        assert_eq!(
+            (
+                stats.populations.graph_nodes,
+                stats.populations.side_vectors,
+                stats.populations.base_vectors
+            ),
+            (1, 1, 2)
+        );
+        assert_eq!(stats.populations.changed_vectors, None);
+        assert_eq!(stats.populations.current_vectors, None);
+        assert_eq!(stats.pq_centroids, Some(1));
+        assert_eq!(stats.node_fragments, 1);
+    }
+    assert!(metadata
+        .query_statistics(&[f32::NAN, 0.0], &control)
+        .is_err());
+    assert!(metadata.query_statistics(&[1.0], &control).is_err());
+    control.cancellation().cancel();
+    assert!(metadata.query_statistics(&[1.0, 0.0], &control).is_err());
+    assert_eq!(physical.reads.load(Ordering::Relaxed), 1);
+    assert_eq!(canonical.scans.load(Ordering::Relaxed), 0);
+    assert!(canonical.visits.lock().unwrap().is_empty());
+    assert_eq!(control.memory().used(), 0);
+}
