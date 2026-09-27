@@ -8,6 +8,8 @@ use super::*;
 use crate::vector_index::{SelectedVectorRead, VectorRead, VectorReadSnapshot};
 use uqa_core::memory::BudgetedVec;
 
+mod populations;
+
 struct Probe {
     values: VectorReadSnapshot,
     reads: Arc<AtomicUsize>,
@@ -205,6 +207,7 @@ fn diskann_definition_values_merge_complete_tensor_differences_and_mask_later_ro
     }
     assert!(retained.search_knn(&[1.0], 0).is_err());
     assert!(retained.search_threshold(&[1.0, 0.0], f32::NAN).is_err());
+    assert_eq!(populations::counts(&*retained), Some((5, 5)));
     let (replacement, _) = raw(&MemoryVectorIndex::new(2), &owner);
     let overlay = SelectedVectorRead::capture(
         retained.vector_read_snapshot(&owner).unwrap(),
@@ -217,12 +220,14 @@ fn diskann_definition_values_merge_complete_tensor_differences_and_mask_later_ro
         .snapshot_with_vector_read(overlay, &owner)
         .unwrap()
         .unwrap();
+    assert_eq!(populations::counts(&*nested), None);
     drop((retained, index));
     assert_eq!(
         bits(&nested.search_knn(&[1.0, 0.0], 10).unwrap()),
         [(4, 0.0_f64.to_bits()), (5, 1.0_f64.to_bits())]
     );
     assert_eq!(nested.count().unwrap(), 2);
+    assert_eq!(populations::counts(&*nested), Some((2, 2)));
     drop(nested);
     assert_eq!(owner.memory().used(), 0);
 }
@@ -272,6 +277,7 @@ fn diskann_definition_values_preserve_original_quotas_and_independent_cancellati
         "page failure must not run an exact recovery scan"
     );
     assert_eq!(owner.memory().used(), held);
+    assert_eq!(populations::counts(&*retained), None);
     source_owner.cancellation().cancel();
     assert!(retained.count().is_err());
     assert!(retained.search_knn(&[1.0, 0.0], 0).is_err());

@@ -11,14 +11,14 @@ use super::{invalid, DiskANNQuery};
 use crate::diskann_index::{
     format::{DiskANNGeneration, DiskANNManifest},
     pages::{DiskANNOriginReader, DiskANNPageSource, DiskANNReadLimits, DiskANNReader},
-    DiskANNCanonicalCounts, DiskANNQueryRead, ExactVectorReason,
+    DiskANNCanonicalCounts, DiskANNCanonicalRead, DiskANNQueryRead, ExactVectorReason,
 };
 use crate::{
     read_control::StorageReadControl,
     vector_index::{DiskANNExecutionRoute, DiskANNIndexParams, VectorQueryResult},
     StorageBackendError, StorageBackendResult, VectorIndex,
 };
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use uqa_core::{memory::Budgeted, DocId, PostingList};
 
 mod values;
@@ -28,6 +28,7 @@ struct Retained<S> {
     reader: DiskANNReader,
     origins: DiskANNOriginReader,
     control: StorageReadControl,
+    observed_counts: OnceLock<DiskANNCanonicalCounts>,
 }
 
 /// Read-only `VectorIndex` over an owned fixed canonical source and its prepared generation. Cloning and nested snapshots share the same leases, resident data and original query allowance, without reopening pages or copying the canonical corpus.
@@ -63,6 +64,7 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> RetainedDiskANNIndex<S> {
             reader,
             origins,
             control: original,
+            observed_counts: OnceLock::new(),
         };
         let retained =
             Budgeted::new(retained, control.memory().empty_reservation()).into_shared()?;
@@ -94,6 +96,7 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> RetainedDiskANNIndex<S> {
             reader: self.retained.reader.clone(),
             origins: self.retained.origins.clone(),
             control: self.retained.control.clone(),
+            observed_counts: OnceLock::new(),
         };
         let retained = Budgeted::new(retained, self.retained.control.memory().empty_reservation())
             .into_shared()?;
@@ -135,7 +138,6 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> VectorIndex for RetainedDiskAN
         let corpus_fingerprint = self.retained.canonical.corpus_fingerprint(control)?;
         let canonical_counts = self
             .retained
-            .canonical
             .population_counts(self.manifest().input().generation, control)?;
         self.check()?;
         Ok(Some(crate::diskann_index::DiskANNQueryMetadata {
@@ -196,6 +198,14 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> VectorIndex for RetainedDiskAN
         let result = self
             .query(control.unwrap_or(&self.retained.control))
             .search_knn(query, k, &self.retained.control)?;
+        if let Some(counts) = result.populations {
+            let previous = self.retained.observed_counts.get_or_init(|| counts);
+            if *previous != counts {
+                return Err(invalid(
+                    "fixed canonical population changed between queries",
+                ));
+            }
+        }
         let route = if k == 0 {
             DiskANNExecutionRoute::EmptyK
         } else {
@@ -310,6 +320,7 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> VectorIndex for RetainedDiskAN
             reader: self.retained.reader.clone(),
             origins: self.retained.origins.clone(),
             control: self.retained.control.clone(),
+            observed_counts: OnceLock::new(),
         };
         let retained = Budgeted::new(retained, self.retained.control.memory().empty_reservation())
             .into_shared()?;
@@ -342,6 +353,7 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> VectorIndex for RetainedDiskAN
             reader: self.retained.reader.clone(),
             origins: self.retained.origins.clone(),
             control: self.retained.control.clone(),
+            observed_counts: OnceLock::new(),
         };
         let retained = Budgeted::new(retained, self.retained.control.memory().empty_reservation())
             .into_shared()?;
@@ -358,7 +370,13 @@ impl<S: DiskANNQueryRead> crate::diskann_index::DiskANNCanonicalRead for Budgete
         control: &StorageReadControl,
     ) -> StorageBackendResult<Option<DiskANNCanonicalCounts>> {
         self.control.check()?;
-        self.canonical.population_counts(generation, control)
+        let counts = self.canonical.population_counts(generation, control)?;
+        self.canonical.check_control(control)?;
+        Ok(counts.or_else(|| {
+            (generation == self.reader.manifest().input().generation)
+                .then(|| self.observed_counts.get().copied())
+                .flatten()
+        }))
     }
 
     fn corpus_fingerprint(

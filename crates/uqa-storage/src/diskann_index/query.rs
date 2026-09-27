@@ -12,8 +12,8 @@ use uqa_core::PostingList;
 use super::{
     pages::{DiskANNOriginReader, DiskANNPageSource, DiskANNReadLimits, DiskANNReader},
     search::{DiskANNTraversal, DiskANNTraversalStats},
-    DiskANNCanonicalRead, DiskANNCanonicalScorer, DiskANNCanonicalVectorVisitor, DiskANNQueryRead,
-    ExactVectorReason, NavigationInput,
+    DiskANNCanonicalCounts, DiskANNCanonicalRead, DiskANNCanonicalScorer,
+    DiskANNCanonicalVectorVisitor, DiskANNQueryRead, ExactVectorReason, NavigationInput,
 };
 use crate::{
     read_control::StorageReadControl, vector_index::DiskANNIndexParams, StorageBackendResult,
@@ -37,6 +37,8 @@ pub struct DiskANNQueryResult {
     pub exact_reason: Option<ExactVectorReason>,
     pub traversal: DiskANNTraversalStats,
     pub work: DiskANNQueryWork,
+    /// Complete raw-view populations observed by this successful invocation. Routes that do not verify all raw coverage leave this unknown.
+    pub populations: Option<DiskANNCanonicalCounts>,
 }
 
 /// A reusable prepared generation on one fixed canonical/catalog view. Opening verifies resident PQ and complete origins once; later queries reuse those owners and load graph pages lazily. Execution owns logical read observations before invoking this storage algorithm.
@@ -132,17 +134,27 @@ impl<'a> DiskANNQuery<'a> {
         }
         candidates.side()?;
         candidates.changes()?;
+        let mut raw_vectors = None;
         if let Some(source) = self.canonical.unversioned_vectors() {
+            let mut current = 0_u64;
             values::visit(&**source, control, &mut |document| {
                 self.check(control)?;
-                if self.canonical.origin(document, control)?.is_none() {
-                    let (score, vectors) = values::score(&**source, document, query, control)?;
-                    if let Some(score) = score {
-                        candidates.offer_unversioned(document, score, vectors)?;
-                    }
-                }
+                let vectors =
+                    if let Some(origin) = self.canonical.document_origin(document, control)? {
+                        origin.count()
+                    } else {
+                        let (score, vectors) = values::score(&**source, document, query, control)?;
+                        if let Some(score) = score {
+                            candidates.offer_unversioned(document, score, vectors)?;
+                        }
+                        vectors
+                    };
+                current = current
+                    .checked_add(vectors)
+                    .ok_or_else(|| invalid("raw canonical population overflow"))?;
                 Ok(())
             })?;
+            raw_vectors = Some(current);
         }
         while candidates.len() < k {
             self.check(control)?;
@@ -156,7 +168,16 @@ impl<'a> DiskANNQuery<'a> {
         work.pages = traversal.page_stats();
         let postings = candidates.finish()?;
         self.check(control)?;
-        Ok(result(postings, None, traversal.stats(), work))
+        let mut result = result(postings, None, traversal.stats(), work);
+        if let Some(current) = raw_vectors {
+            let changed = work
+                .changed
+                .vectors
+                .checked_add(work.unversioned.vectors)
+                .ok_or_else(|| invalid("raw uncovered population overflow"))?;
+            result.populations = Some(DiskANNCanonicalCounts::new(current, changed)?);
+        }
+        Ok(result)
     }
 
     /// Exact threshold evaluation streams all visible canonical tensors, including changes and empty replacements, independently of ANN membership.
@@ -258,6 +279,7 @@ fn result(
         exact_reason,
         traversal,
         work,
+        populations: None,
     }
 }
 
