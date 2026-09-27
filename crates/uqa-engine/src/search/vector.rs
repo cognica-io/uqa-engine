@@ -108,13 +108,35 @@ impl Engine {
         })
     }
 
+    /// Obtain the actual `DiskANN` corpus and physical-generation versions for fitting a fixed calibration model. Embedding identity remains the caller's contract. This metadata read does not execute KNN or register a serializable vector predicate.
+    pub fn diskann_calibration_target(
+        &self,
+        table: &str,
+        field: &str,
+        embedding_model_id: &str,
+        embedding_model_version: &str,
+        candidate_k: usize,
+    ) -> Result<uqa_scoring::VectorCalibrationTarget, SQLError> {
+        self.with_direct_table_read(table, |engine, table_name, table| {
+            let indexes = table.vector_indexes.read();
+            let index = indexes
+                .get(field)
+                .ok_or_else(|| SQLError::UnknownColumn(field.into()))?;
+            let control = engine.query_retention_control()?;
+            uqa_execution::query::vector_calibration::diskann_target(
+                index,
+                table_name,
+                field,
+                (embedding_model_id, embedding_model_version),
+                candidate_k,
+                &control,
+            )
+        })
+    }
+
     /// Apply a persisted/offline vector calibration model to a KNN pool.
     ///
-    /// Unlike `calibrated_vector_match`, this path never fits parameters from
-    /// the current query's top-K results. The caller supplies the current
-    /// immutable corpus/index/embedding identity in `target`; it must match
-    /// the model provenance exactly. The physical table, field, index kind,
-    /// dimensions, and candidate K are validated again at execution time.
+    /// Unlike `calibrated_vector_match`, this path never fits parameters from the current query's top-K results. The target must match the model provenance, physical table/field, index kind, dimensions and candidate K. For `DiskANN`, obtain actual corpus/generation versions with [`Self::diskann_calibration_target`]; execution revalidates them against the same retained index used for KNN. Embedding identity and other index methods' version labels remain explicit caller contracts.
     pub fn calibrated_vector_search_with_model(
         &self,
         table: &str,
@@ -124,40 +146,24 @@ impl Engine {
         target: &uqa_scoring::VectorCalibrationTarget,
     ) -> Result<Vec<ScoredEntry>, SQLError> {
         self.with_direct_table_read(table, |engine, table_name, table| {
-            model
-                .validate_for(target)
-                .map_err(|error| SQLError::TypeMismatch(error.to_string()))?;
-            let expected_index_id = format!("{table_name}.{field}");
-            if target.corpus_id != table_name {
-                return Err(SQLError::TypeMismatch(format!(
-                    "vector calibration corpus_id {:?} does not match table {:?}",
-                    target.corpus_id, table_name
-                )));
-            }
-            if target.index_id != expected_index_id {
-                return Err(SQLError::TypeMismatch(format!(
-                    "vector calibration index_id {:?} does not match physical index {:?}",
-                    target.index_id, expected_index_id
-                )));
-            }
+            uqa_execution::query::vector_calibration::validate_names(
+                model, target, table_name, field,
+            )?;
 
             let indexes = table.vector_indexes.read();
             let index = indexes
                 .get(field)
                 .ok_or_else(|| SQLError::UnknownColumn(field.to_string()))?;
-            if target.index_kind != index.index_kind() {
-                return Err(SQLError::TypeMismatch(format!(
-                    "vector calibration index kind {:?} does not match {:?}",
-                    target.index_kind,
-                    index.index_kind()
-                )));
-            }
-            if target.dimensions != index.dimensions() {
-                return Err(SQLError::VectorDimMismatch {
-                    expected: index.dimensions() as usize,
-                    actual: target.dimensions as usize,
-                });
-            }
+            let control = engine.query_retention_control()?;
+            let retained = if index.index_kind() == "diskann" {
+                Some(index.snapshot_with_control(&control).map_err(|error| {
+                    storage_sql_error("retain calibrated-vector selection", error)
+                })?)
+            } else {
+                None
+            };
+            let index = retained.as_deref().unwrap_or(index);
+            uqa_execution::query::vector_calibration::validate_index(index, target, &control)?;
             let raw = uqa_execution::serializable::vector::search_knn(
                 index,
                 engine.serializable_table_state_read(table)?.as_ref(),
@@ -167,27 +173,9 @@ impl Engine {
                 target.candidate_k,
             )
             .map_err(|error| storage_sql_error("execute calibrated-vector KNN", error))?;
-            let mut calibrated = Vec::with_capacity(raw.len());
-            for entry in &raw {
-                if !entry.payload.score.is_finite() || !(-1.0..=1.0).contains(&entry.payload.score)
-                {
-                    return Err(SQLError::Internal(format!(
-                        "calibrated-vector KNN returned invalid cosine score {} for document {}",
-                        entry.payload.score, entry.doc_id
-                    )));
-                }
-                let probability = model
-                    .calibrate_one(1.0 - entry.payload.score, target)
-                    .map_err(|error| SQLError::Internal(error.to_string()))?;
-                calibrated.push(ScoredEntry {
-                    doc_id: entry.doc_id,
-                    score: probability,
-                });
-            }
-            Ok(uqa_scoring::rank_scored_entries_top_k(
-                calibrated,
-                target.candidate_k,
-            ))
+            model
+                .calibrate_postings(&raw, target)
+                .map_err(|error| SQLError::Internal(error.to_string()))
         })
     }
 

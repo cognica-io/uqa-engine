@@ -35,6 +35,17 @@ impl<T: VectorIndex + ?Sized + 'static> VectorIndex for ReadOnlySnapshot<T> {
     fn index_kind(&self) -> &'static str {
         self.0.index_kind()
     }
+    fn diskann_query_metadata(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::diskann_index::DiskANNQueryMetadata>> {
+        control.check()?;
+        let original = self.2.as_ref().unwrap_or(control);
+        original.check()?;
+        let metadata = self.0.diskann_query_metadata(original)?;
+        control.check()?;
+        Ok(metadata)
+    }
 
     fn add(&mut self, _doc_id: DocId, _vector: Vec<f32>) -> StorageBackendResult<()> {
         Err(read_only_error())
@@ -204,6 +215,13 @@ impl<T: VectorIndex + ?Sized + 'static> VectorIndex for ReadOnlySnapshot<T> {
 impl<T: crate::vector_index::VectorRead + ?Sized> crate::vector_index::VectorRead
     for ReadOnlySnapshot<T>
 {
+    fn corpus_fingerprint(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<[u8; 32]>> {
+        self.check_control(control)?;
+        self.0.corpus_fingerprint(control)
+    }
     fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
         if let Some(original) = &self.2 {
             original.check()?;

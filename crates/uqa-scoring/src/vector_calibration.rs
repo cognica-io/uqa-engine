@@ -20,9 +20,7 @@ use crate::{ScoringError, ScoringResult, VectorProbabilityTransform};
 /// JSON schema version for [`VectorCalibrationModel`].
 pub const VECTOR_CALIBRATION_MODEL_SCHEMA_VERSION: u32 = 1;
 
-/// Runtime identity of the retrieval surface to which a calibration model
-/// applies. Versions are opaque, caller-controlled identifiers (for example a
-/// content digest, catalog generation, or immutable release id).
+/// Identity of the retrieval surface to which a calibration model applies. Versions are opaque to Scoring; Execution binds `DiskANN` corpus/index versions to verified Storage metadata. Other integrations and embedding-model versions retain their explicit caller identity contract.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VectorCalibrationTarget {
     pub corpus_id: String,
@@ -99,6 +97,32 @@ pub struct VectorCalibrationModel {
 }
 
 impl VectorCalibrationModel {
+    /// Apply the fixed transform to canonical cosine postings and retain the existing document ranking. No query-pool parameters are fitted.
+    pub fn calibrate_postings(
+        &self,
+        postings: &uqa_core::PostingList,
+        target: &VectorCalibrationTarget,
+    ) -> ScoringResult<Vec<uqa_core::ScoredEntry>> {
+        self.validate_for(target)?;
+        let mut calibrated = Vec::with_capacity(postings.len());
+        for entry in postings {
+            let score = entry.payload.score;
+            if !score.is_finite() || !(-1.0..=1.0).contains(&score) {
+                return Err(invalid_input(format!(
+                    "calibrated-vector KNN returned invalid cosine score {} for document {}",
+                    score, entry.doc_id
+                )));
+            }
+            calibrated.push(uqa_core::ScoredEntry {
+                doc_id: entry.doc_id,
+                score: self.transform.calibrate_one(1.0 - score)?,
+            });
+        }
+        Ok(crate::rank_scored_entries_top_k(
+            calibrated,
+            target.candidate_k,
+        ))
+    }
     pub fn new(
         transform: VectorProbabilityTransform,
         provenance: VectorCalibrationProvenance,

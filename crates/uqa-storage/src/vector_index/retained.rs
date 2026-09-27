@@ -18,6 +18,7 @@ use crate::vector_index::{
     cosine_similarity, select_top_k_scored, validate_vector_values, VectorIndex,
 };
 use crate::{StorageBackendError, StorageBackendResult};
+use sha2::{Digest, Sha256};
 
 mod builder;
 mod canonical;
@@ -32,6 +33,7 @@ pub struct RetainedVectorIndex {
     dimensions: u32,
     index_kind: &'static str,
     control: StorageReadControl,
+    fingerprint: [u8; 32],
 }
 
 impl RetainedVectorIndex {
@@ -42,11 +44,27 @@ impl RetainedVectorIndex {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         control.check()?;
+        let mut digest = Sha256::new();
+        digest.update(b"uqa-retained-vector-values-v1\0");
+        digest.update(dimensions.to_le_bytes());
+        for (document, ordinal, vector) in entries.iter() {
+            control.check()?;
+            digest.update(document.to_le_bytes());
+            digest.update(ordinal.to_le_bytes());
+            digest.update((vector.len() as u64).to_le_bytes());
+            for chunk in vector.chunks(1024) {
+                control.check()?;
+                for value in chunk {
+                    digest.update(value.to_bits().to_le_bytes());
+                }
+            }
+        }
         Ok(Self {
             entries: entries.into_shared()?,
             dimensions,
             index_kind,
             control: control.clone(),
+            fingerprint: digest.finalize().into(),
         })
     }
 

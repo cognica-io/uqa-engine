@@ -13,13 +13,23 @@ use uqa_core::{
     DocId,
 };
 
+mod fingerprint;
 mod selection;
+pub(crate) use fingerprint::selected_fingerprint;
 pub use selection::SelectedVectorRead;
 
 /// A fixed canonical field view. Owners retain their original visibility, allowance and cancellation. Metadata enumeration never decodes coordinates; a point read owns at most one vector and releases provider locks before returning. This interface makes no claim about physical index lineage or mutation origins.
 pub trait VectorRead: Send + Sync {
     fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()>;
     fn dimensions(&self) -> u32;
+    /// Trustworthy identity of this complete fixed field, obtained from retained metadata. None means fixed-model reuse cannot be verified; callers must not replace it with a user-supplied label.
+    fn corpus_fingerprint(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<[u8; 32]>> {
+        self.check_control(control)?;
+        Ok(None)
+    }
     fn next_document_after(
         &self,
         after: Option<DocId>,
@@ -79,6 +89,12 @@ impl<T: VectorRead> VectorRead for Budgeted<T> {
     }
     fn dimensions(&self) -> u32 {
         (**self).dimensions()
+    }
+    fn corpus_fingerprint(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<[u8; 32]>> {
+        (**self).corpus_fingerprint(control)
     }
     fn next_document_after(
         &self,

@@ -11,6 +11,13 @@ use crate::{read_control::StorageReadControl, vector_index::VectorRead, StorageB
 use uqa_core::{memory::BudgetedVec, DocId};
 
 impl VectorRead for RetainedVectorIndex {
+    fn corpus_fingerprint(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<[u8; 32]>> {
+        self.check_control(control)?;
+        Ok(Some(self.fingerprint))
+    }
     fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
         self.control.check()?;
         control.check()

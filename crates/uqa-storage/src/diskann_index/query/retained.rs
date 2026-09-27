@@ -125,6 +125,19 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> VectorIndex for RetainedDiskAN
     fn index_kind(&self) -> &'static str {
         "diskann"
     }
+    fn diskann_query_metadata(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::diskann_index::DiskANNQueryMetadata>> {
+        self.check()?;
+        control.check()?;
+        let corpus_fingerprint = self.retained.canonical.corpus_fingerprint(control)?;
+        self.check()?;
+        Ok(Some(crate::diskann_index::DiskANNQueryMetadata {
+            manifest: *self.manifest(),
+            corpus_fingerprint,
+        }))
+    }
     fn add(&mut self, _: DocId, _: Vec<f32>) -> StorageBackendResult<()> {
         Err(read_only())
     }
@@ -289,6 +302,13 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> VectorIndex for RetainedDiskAN
 }
 
 impl<S: DiskANNQueryRead> crate::diskann_index::DiskANNCanonicalRead for Budgeted<Retained<S>> {
+    fn corpus_fingerprint(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<[u8; 32]>> {
+        self.control.check()?;
+        self.canonical.corpus_fingerprint(control)
+    }
     fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
         self.control.check()?;
         self.canonical.check_control(control)

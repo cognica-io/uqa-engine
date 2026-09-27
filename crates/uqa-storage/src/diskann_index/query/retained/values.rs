@@ -14,6 +14,13 @@ use crate::{
 use uqa_core::{memory::BudgetedVec, DocId};
 
 impl<S: DiskANNQueryRead + Send + Sync> VectorRead for Retained<S> {
+    fn corpus_fingerprint(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<[u8; 32]>> {
+        self.check_control(control)?;
+        self.canonical.corpus_fingerprint(control)
+    }
     fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
         self.control.check()?;
         self.canonical.check_control(control)

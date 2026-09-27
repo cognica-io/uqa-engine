@@ -410,6 +410,18 @@ impl RetainedSQLiteDiskANNCanonical {
 }
 
 impl DiskANNCanonicalRead for RetainedSQLiteDiskANNCanonical {
+    fn corpus_fingerprint(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<[u8; 32]>> {
+        self.check(control)?;
+        self.owner
+            .map(|owner| {
+                self.snapshot
+                    .vector_field_fingerprint(owner, &self.field, control)
+            })
+            .transpose()
+    }
     fn read_vector(
         &self,
         document: DocId,

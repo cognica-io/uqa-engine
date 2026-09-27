@@ -134,6 +134,7 @@ impl KeyValueDiskANNCanonical {
         let vectors = codec::vector_field_prefix(&self.index.table, &self.index.field)?;
         let origins = prefix(&self.index.table, &self.index.field)?;
         let changes = journal::prefix(&self.index.table, &self.index.field)?;
+        let marker = super::guards::reference_key(&vectors, control)?;
         let mut selected = None;
         self.index
             .store
@@ -151,7 +152,7 @@ impl KeyValueDiskANNCanonical {
                     })
                     .transpose()?;
                 let mut prefixes = uqa_core::memory::BudgetedVec::new(control.memory());
-                prefixes.extend_from_slice(&[&*vectors, &*origins, &*changes])?;
+                prefixes.extend_from_slice(&[&*vectors, &*origins, &*changes, &*marker])?;
                 if let Some(binding) = &binding {
                     prefixes.extend_from_slice(&binding.prefixes())?;
                     prefixes.push(crate::key_value::diskann::READ_PREFIX)?;

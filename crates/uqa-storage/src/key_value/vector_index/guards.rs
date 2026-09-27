@@ -11,6 +11,18 @@ use uqa_core::memory::{BudgetedVec, MemoryError};
 
 pub(crate) const ROOT: &[u8] = b"\0uqa-vector-field-guards-v1\0";
 
+pub(crate) fn reference_key(
+    vectors: &[u8],
+    control: &crate::read_control::StorageReadControl,
+) -> StorageBackendResult<BudgetedVec<u8>> {
+    control.check()?;
+    let mut key = BudgetedVec::new(control.memory());
+    key.extend_from_slice(ROOT)?;
+    key.push(1)?;
+    key.extend_from_slice(vectors)?;
+    Ok(key)
+}
+
 pub struct KeyValueVectorFieldGuards;
 
 impl crate::mvcc::VectorFieldGuardLayout for KeyValueVectorFieldGuards {
@@ -97,10 +109,7 @@ impl KeyValueVectorIndex {
         lifetime.extend_from_slice(ROOT)?;
         lifetime.push(0)?;
         lifetime.extend_from_slice(&prefix)?;
-        let mut references = BudgetedVec::new(control.memory());
-        references.extend_from_slice(ROOT)?;
-        references.push(1)?;
-        references.extend_from_slice(&prefix)?;
+        let references = reference_key(&prefix, &control)?;
         if structural {
             batch.fence_record(&lifetime)?;
             batch.fence_record(&references)

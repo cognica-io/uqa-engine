@@ -125,6 +125,25 @@ impl SelectedCanonical {
 }
 
 impl DiskANNCanonicalRead for SelectedCanonical {
+    fn corpus_fingerprint(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<[u8; 32]>> {
+        self.check_control(control)?;
+        crate::vector_index::selected_fingerprint(
+            self.dimensions(),
+            (!self.changes.complete).then_some(&self.base as &dyn crate::vector_index::VectorRead),
+            self.changes.sources.iter().map(|(document, source)| {
+                (
+                    *document,
+                    source
+                        .as_ref()
+                        .map(|source| source as &dyn crate::vector_index::VectorRead),
+                )
+            }),
+            control,
+        )
+    }
     fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
         self.changes.control.check()?;
         self.base.check_control(control)

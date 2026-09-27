@@ -62,6 +62,11 @@ pub type KeyValueVersionedMutation<'a> = dyn FnMut(
 pub trait KeyValueRead {
     fn control(&self) -> &StorageReadControl;
     fn revision(&self, prefixes: &[&[u8]]) -> StorageBackendResult<KeyValueReadRevision>;
+    /// Versioned identity of both committed and private inputs to one shared change marker. Unlike a final record revision, a private marker cannot hide a changed committed input. Unsupported providers return None.
+    fn marker_fingerprint(&self, _key: &[u8]) -> StorageBackendResult<Option<[u8; 32]>> {
+        self.control().check()?;
+        Ok(None)
+    }
     /// Identity of one live record on this fixed view. Unlike a view revision, unrelated commits do not change it. Compare identities only for the same logical key; missing records and tombstones return `None`. Providers without exact committed/private record provenance must reject this capability.
     fn record_revision(&self, _key: &[u8]) -> StorageBackendResult<Option<KeyValueReadRevision>> {
         self.control().check()?;

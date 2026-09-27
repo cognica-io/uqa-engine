@@ -100,6 +100,12 @@ impl VectorObservation {
 }
 
 impl VectorIndex for ObservedVectorIndex {
+    fn diskann_query_metadata(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_storage::diskann_index::DiskANNQueryMetadata>> {
+        self.index.diskann_query_metadata(control)
+    }
     fn dimensions(&self) -> u32 {
         self.index.dimensions()
     }

@@ -44,9 +44,10 @@ pub(super) fn capture(
         .ok_or(MemoryError::SizeOverflow)?;
     let _memory = control.memory().reserve(workspace)?;
     let prefix = vector_field_prefix(&index.table, &index.field)?;
+    let marker = super::guards::reference_key(&prefix, control)?;
     read_view(index.store.as_ref(), |read| {
         let source = Canonical {
-            read: read.retain(&[&prefix])?,
+            read: read.retain(&[&prefix, &marker])?,
             prefix: append(&prefix, &[], control)?,
             dimensions: index.dimensions,
             control: control.clone(),
@@ -154,6 +155,16 @@ pub(super) fn read_vector(
 }
 
 impl VectorRead for Canonical {
+    fn corpus_fingerprint(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<[u8; 32]>> {
+        self.check_control(control)?;
+        let key = super::guards::reference_key(&self.prefix, control)?;
+        let fingerprint = self.read.marker_fingerprint(&key)?;
+        self.check_control(control)?;
+        Ok(fingerprint)
+    }
     fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
         self.read.control().check()?;
         self.control.check()?;

@@ -31,6 +31,7 @@ pub(super) struct Canonical {
     changes: BudgetedSharedMap<DocId, DiskANNVectorVersion>,
     dimensions: u32,
     control: StorageReadControl,
+    revision: Option<DiskANNVectorVersion>,
 }
 
 impl Canonical {
@@ -40,6 +41,7 @@ impl Canonical {
             changes: BudgetedSharedMap::new(control.memory()),
             dimensions,
             control: control.clone(),
+            revision: None,
         }
     }
 
@@ -81,6 +83,7 @@ impl Canonical {
             changes,
             dimensions: self.dimensions,
             control: self.control.clone(),
+            revision: Some(version),
         })
     }
 
@@ -91,6 +94,25 @@ impl Canonical {
 }
 
 impl DiskANNCanonicalRead for Canonical {
+    fn corpus_fingerprint(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<[u8; 32]>> {
+        use sha2::{Digest, Sha256};
+        self.check_control(control)?;
+        let mut digest = Sha256::new();
+        digest.update(b"uqa-memory-diskann-corpus-v1\0");
+        digest.update(self.dimensions.to_le_bytes());
+        if let Some(revision) = self.revision {
+            digest.update([1]);
+            digest.update(revision.writer().database().as_bytes());
+            digest.update(revision.writer().allocation().to_le_bytes());
+            digest.update(revision.revision().to_le_bytes());
+        } else {
+            digest.update([0]);
+        }
+        Ok(Some(digest.finalize().into()))
+    }
     fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
         self.control.check()?;
         control.check()

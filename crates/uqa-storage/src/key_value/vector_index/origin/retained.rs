@@ -278,6 +278,16 @@ impl RetainedDiskANNCanonical {
 }
 
 impl DiskANNCanonicalRead for RetainedDiskANNCanonical {
+    fn corpus_fingerprint(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<[u8; 32]>> {
+        self.check_control(control)?;
+        let key = super::super::guards::reference_key(&self.vectors, control)?;
+        let fingerprint = self.read.marker_fingerprint(&key)?;
+        self.check_control(control)?;
+        Ok(fingerprint)
+    }
     fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
         self.read.control().check()?;
         self.control.check()?;

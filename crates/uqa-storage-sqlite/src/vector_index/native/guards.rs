@@ -15,13 +15,11 @@ use std::fmt::Write;
 use uqa_storage::KeyValueBatch;
 
 impl NativeSnapshot {
-    pub(in crate::vector_index) fn coordinate_vector_field(
+    fn vector_field_guard_records(
         &self,
-        batch: &mut dyn KeyValueBatch,
         owner: NativeRecordOwner,
         field: ValueRef<'_>,
-        structural: bool,
-    ) -> crate::Result<()> {
+    ) -> crate::Result<(NativeRecord, NativeRecord)> {
         let prefix = NativeRecordIdentity::new(Family::Vectors, owner)?
             .encode_prefix(&[field], &self.control)?;
         let bytes = prefix
@@ -49,6 +47,30 @@ impl NativeSnapshot {
         };
         let lifetime = record("::lifetime")?;
         let references = record("::references")?;
+        Ok((lifetime, references))
+    }
+
+    pub(in crate::vector_index) fn vector_field_fingerprint(
+        &self,
+        owner: NativeRecordOwner,
+        field: &[u8],
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> uqa_storage::StorageBackendResult<[u8; 32]> {
+        self.control.check()?;
+        control.check()?;
+        let (_, references) = self.vector_field_guard_records(owner, ValueRef::Text(field))?;
+        self.view
+            .marker_fingerprint(self.database, references.key(), control)
+    }
+
+    pub(in crate::vector_index) fn coordinate_vector_field(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        owner: NativeRecordOwner,
+        field: ValueRef<'_>,
+        structural: bool,
+    ) -> crate::Result<()> {
+        let (lifetime, references) = self.vector_field_guard_records(owner, field)?;
         if structural {
             batch.fence_record(lifetime.key())?;
             batch.fence_record(references.key())?;

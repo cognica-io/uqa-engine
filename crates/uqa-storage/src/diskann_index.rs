@@ -13,6 +13,7 @@ pub mod changes;
 pub mod format;
 pub mod maintenance;
 mod memory;
+mod metadata;
 mod metric;
 mod options;
 pub mod pages;
@@ -26,6 +27,7 @@ mod vamana;
 
 pub use canonical::{DiskANNCanonicalCorpusVisitor, DiskANNCanonicalRead, DiskANNQueryRead};
 pub use memory::{DiskANNMemoryIndex, DiskANNMemoryOptions};
+pub use metadata::DiskANNQueryMetadata;
 pub use metric::{ExactVectorReason, NavigationInput, NavigationVector, SquaredNavigationDistance};
 pub use options::DiskANNIndexOptions;
 pub use persistent::{DiskANNIndexBinding, DiskANNPersistentOwner, PersistentDiskANNIndex};

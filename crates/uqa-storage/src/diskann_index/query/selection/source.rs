@@ -90,6 +90,12 @@ impl DiskANNReadSnapshot {
 }
 
 impl DiskANNCanonicalRead for DiskANNReadSnapshot {
+    fn corpus_fingerprint(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<[u8; 32]>> {
+        self.read(control, || self.canonical.corpus_fingerprint(control))
+    }
     fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
         self.control.check()?;
         control.check()?;
@@ -149,6 +155,12 @@ impl DiskANNCanonicalRead for DiskANNReadSnapshot {
 }
 
 impl crate::vector_index::VectorRead for DiskANNReadSnapshot {
+    fn corpus_fingerprint(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<[u8; 32]>> {
+        DiskANNCanonicalRead::corpus_fingerprint(self, control)
+    }
     fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
         DiskANNCanonicalRead::check_control(self, control)
     }
