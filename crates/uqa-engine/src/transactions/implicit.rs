@@ -71,6 +71,15 @@ impl Engine {
         query: impl FnOnce(&Self) -> Result<R, E>,
         map_transaction_error: impl Fn(SQLError) -> E,
     ) -> Result<R, E> {
+        if read_only && self.query_table_snapshots.is_some() {
+            // Captured readers borrow the source session but already own their data and catalog view. Admitting another statement on that shared session would refresh its live transaction underneath the retained read.
+            self.runtime
+                .cancellation
+                .check()
+                .map_err(SQLError::from)
+                .map_err(&map_transaction_error)?;
+            return query(self);
+        }
         if self.transaction_depth() != 0 {
             self.ensure_transaction_usable()
                 .map_err(&map_transaction_error)?;

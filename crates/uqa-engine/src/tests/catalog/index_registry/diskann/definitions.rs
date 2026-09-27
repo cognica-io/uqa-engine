@@ -170,3 +170,66 @@ fn diskann_index_creation_preserves_fixed_query_rows_after_concurrent_writes() {
         assert_search(&reader, &[(1, 1.0), (2, 0.0)]);
     }
 }
+
+#[test]
+fn diskann_fixed_copy_retains_a_generation_replacing_another_vector_method() {
+    for method in ["hnsw", "ivf"] {
+        for changed in [false, true] {
+            let mut owner = 0;
+            owners(|engine| {
+                let provider = owner;
+                owner += 1;
+                sql(engine, "CREATE TABLE diskann_docs(id int, embedding vector(2)); INSERT INTO diskann_docs VALUES(1,ARRAY[1.0,0.0]),(2,ARRAY[0.0,1.0])");
+                sql(
+                    engine,
+                    &format!(
+                        "CREATE INDEX preceding_idx ON diskann_docs USING {method}(embedding)"
+                    ),
+                );
+                sql(
+                    engine,
+                    "BEGIN ISOLATION LEVEL REPEATABLE READ; SELECT * FROM diskann_docs",
+                );
+                if changed {
+                    sql(engine, "UPDATE diskann_docs SET embedding=ARRAY[-1.0,0.0] WHERE id=1; INSERT INTO diskann_docs VALUES(3,ARRAY[1.0,0.0])");
+                }
+                sql(engine, "DROP INDEX preceding_idx; CREATE INDEX diskann_idx ON diskann_docs USING diskann(embedding)");
+                let reader = copied(engine);
+                let indexes = engine
+                    .durable
+                    .catalog_indexes
+                    .read()
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let target = reader
+                    .diskann_calibration_target("diskann_docs", "embedding", "fixture", "1", 3)
+                    .unwrap();
+                assert_eq!(
+                    engine.durable.catalog_indexes.read().keys().cloned().collect::<Vec<_>>(),
+                    indexes,
+                    "retained metadata read changed live {method} catalog: provider={provider}, changed={changed}"
+                );
+                engine.sql("ROLLBACK", &[]).unwrap_or_else(|error| {
+                    panic!("{method} rollback: provider={provider}, changed={changed}: {error}")
+                });
+                let nested = copied(&reader);
+                drop(reader);
+                assert_search(
+                    &nested,
+                    if changed {
+                        &[(3, 1.0), (2, 0.0), (1, -1.0)]
+                    } else {
+                        &[(1, 1.0), (2, 0.0)]
+                    },
+                );
+                assert_eq!(
+                    nested
+                        .diskann_calibration_target("diskann_docs", "embedding", "fixture", "1", 3)
+                        .unwrap(),
+                    target
+                );
+            });
+        }
+    }
+}
