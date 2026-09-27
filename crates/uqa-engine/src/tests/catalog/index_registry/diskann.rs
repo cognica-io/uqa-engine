@@ -13,6 +13,7 @@ mod isolation;
 mod maintenance;
 mod metadata;
 mod observations;
+mod planning;
 mod recovery;
 mod renaming;
 mod types;
