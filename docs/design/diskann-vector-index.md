@@ -1,10 +1,10 @@
 # Native DiskANN vector index
 
-Status: Implementation in progress, tracked in the [implementation plan](../plans/0014-diskann-vector-index.md). The original design baseline is main `ae51060754813b716bea1cd5438214dfde9c9830`, inspected on 2026-09-25. Configuration, numerical primitives and physical formats/readers are internal foundations; the complete DiskANN runtime and SQL access method are not enabled. Later API and SQL examples remain proposed contracts. This document specifies a direct Rust implementation and its integration; it contains algorithm definitions and validation criteria, not mathematical proofs or performance claims.
+Status: Implemented in the current unreleased development source through memory, native SQLite, SQLite Key/Value and redb, including SQL and Rust/Python/Node.js/WASM integration. The [implementation plan](../plans/0014-diskann-vector-index.md) records source-scoped acceptance evidence, and the [manual](../manual/sql/02-ddl.md#diskann-vector-indexes) defines the supported public configuration. This document describes the native algorithms and ownership contracts; its owner-specific links provide preservation proofs. No released package, general recall floor or measured speedup is inferred. The original design baseline is main `ae51060754813b716bea1cd5438214dfde9c9830`, inspected on 2026-09-25.
 
 Primary reference: Subramanya et al., [DiskANN: Fast Accurate Billion-point Nearest Neighbor Search on a Single Node, NeurIPS 2019](https://proceedings.neurips.cc/paper_files/paper/2019/file/09853c7fb1d3f8ee67a61b6bf4a7f8e6-Paper.pdf), especially Algorithms 1-3 and Section 3. The paper combines a Vamana graph with memory-resident product-quantized vectors, disk-resident full vectors and adjacency, batched frontier reads, and caching. Its overlapping build partitions are combined into a graph rather than independently searched at query time. The paper evaluates Euclidean distance; UQA's public vector score is cosine similarity. Its reported hardware results are not UQA acceptance thresholds.
 
-The [official project](https://github.com/microsoft/DiskANN) now includes newer algorithms and a Rust implementation. UQA will implement its own algorithms, just as it implements HNSW and IVF; it will not wrap that library, link its C++ implementation, or call it as a service. Legacy reference code is pinned to `78256bbab4685e1774e78d331e081a153be26823` for supplemental algorithm/codec checks. A newer implementation is not assumed to reproduce the 2019 paper exactly. Transactional updates, SQL integration, and the storage decisions below are UQA design choices.
+The [official project](https://github.com/microsoft/DiskANN) now includes newer algorithms and a Rust implementation. UQA implements its own algorithms, just as it implements HNSW and IVF; it does not wrap that library, link its C++ implementation, or call it as a service. Legacy reference code is pinned to `78256bbab4685e1774e78d331e081a153be26823` for supplemental algorithm/codec checks. A newer implementation is not assumed to reproduce the 2019 paper exactly. Transactional updates, SQL integration, and the storage decisions below are UQA design choices.
 
 ## Objective and boundaries
 
@@ -48,13 +48,13 @@ Only one of IVF, HNSW, or DiskANN may own a vector field at a time. Creation bac
 | --- | --- | --- |
 | `max_degree` | 64 | Integer at least 2; final outgoing degree bound, including UQA connectivity edges |
 | `build_list_size` | 128 | Integer at least `max_degree`; construction candidate-list capacity |
-| `search_list_size` | 64 | Positive integer; initial query candidate capacity, raised to at least requested document count |
+| `search_list_size` | 64 | Positive integer; fixed unexpanded-candidate capacity and maximum refined-distance heap size |
 | `alpha` | 1.2 | Finite real at least 1 with a finite squared factor; pruning factor in Euclidean units |
 | `beam_width` | 4 | Positive integer no greater than configured `search_list_size`; nodes selected per expansion batch, not a promise of parallel physical I/O |
 | `pq_bytes` | `min(32, dimensions)` | One byte per nonempty coordinate chunk; between 1 and dimension count |
 | `seed` | 42 | Unsigned 64-bit seed; persisted with build algorithm and training revisions |
 
-These are explicit starting defaults, not benchmark-derived optimal settings. Search capacity grows under the query allowance when deletions or tensor collapse leave too few distinct live documents. Resource exhaustion returns the existing quota/cancellation errors instead of silently reducing degree, PQ width, or requested result count. Allocation products and offsets use checked arithmetic before conversion to platform sizes. Store `alpha` in a validated canonical representation compatible with existing configuration equality; do not add an unchecked floating-point field to an `Eq` configuration enum.
+These are explicit starting defaults, not benchmark-derived optimal settings. When deletions or tensor collapse leave too few distinct live documents after approximate exhaustion, completion scans unvisited generation IDs under the original query allowance; the pending frontier capacity stays fixed. Resource exhaustion returns the existing quota/cancellation errors instead of silently reducing degree, PQ width, or requested result count. Allocation products and offsets use checked arithmetic before conversion to platform sizes. Store `alpha` in a validated canonical representation compatible with existing configuration equality; do not add an unchecked floating-point field to an `Eq` configuration enum.
 
 SQL owns raw option parsing; Execution resolves the target dimension before finalizing dimension-dependent defaults through Storage's configuration validator. Persist the resolved PQ width and all effective algorithm defaults. Reopen must not reinterpret an omitted option using a later binary's defaults.
 
@@ -184,7 +184,7 @@ The base code array is resident and immutable; full raw vectors and adjacency ar
 
 ## Search execution
 
-The query pins one manifest, code array, page reader, and canonical/change visibility view. A bounded beam chooses several unexpanded candidates, batches their page requests, expands their outgoing edges, and scores newly discovered codes. Nodes already in the cache still count as expanded nodes; cache hits cannot change tie order or omit neighbor processing. Full coordinates read during expansion supply final reranking input. The pinned [disk-search reference](https://github.com/microsoft/DiskANN/blob/78256bbab4685e1774e78d331e081a153be26823/src/pq_flash_index.cpp) is a secondary check for beam/read/rerank mechanics, not a provider implementation to import.
+The query pins one manifest, code array, page reader, and canonical/change visibility view. A bounded beam chooses several unexpanded candidates, batches their page requests, conditionally expands their outgoing edges using original-vector distances, and scores newly discovered codes. Nodes already in the cache still count as expanded nodes; cache hits cannot change tie order or bypass the original-distance decision. Original coordinates decide edge expansion independently of PQ read priority and final canonical tensor reranking. The pinned [disk-search reference](https://github.com/microsoft/DiskANN/blob/78256bbab4685e1774e78d331e081a153be26823/src/pq_flash_index.cpp) is a secondary check for beam/read/rerank mechanics; the [refined-cutoff strategy and proof](diskann-paged-navigation.md#bounded-refinement-and-preservation-proof) state UQA's explicit query improvement.
 
 ```mermaid
 flowchart TD
@@ -203,14 +203,15 @@ flowchart TD
 search(snapshot, query, k, control):
     validate query and register the logical vector read
     select ordinary navigation or the declared numeric-edge exact path
-    create PQ lookup table and a bounded candidate frontier
+    create PQ lookup table, bounded pending frontier and bounded refined-distance heap
     while the retained frontier contains unexpanded nodes:
         select up to beam_width nodes in deterministic priority order
         deduplicate their required page IDs; reserve buffers before reads
         read missing pages under the pinned generation lease
-        validate pages and expand nodes in the selected priority order
-        record full-vector candidates; insert neighbors using PQ estimates
-        retain the best active search_list_size navigation candidates
+        validate pages; mark every selected identity visited and remove it from the frontier
+        offer each original vector to the refined heap in frozen priority order
+        expand its edges only if admitted; offer neighbors using PQ estimates alone
+        retain at most search_list_size pending candidates and refined distances each
     suppress base candidates replaced/deleted in the selected visibility view
     merge exact changed-vector and numeric-side-stream candidates
     rerank candidate documents from their visible canonical tensor elements
@@ -222,7 +223,7 @@ The visited set is separate from the bounded frontier; its size can exceed the c
 
 Tensor identity is preserved through `(DocId, ordinal)` until document reduction. After selecting candidate documents, read all their visible ordinals under the same snapshot and compute each document's actual maximum using the canonical reduction contract. This extra work is explicit in cost and I/O metrics. It avoids returning the score of an arbitrary encountered tensor element. Deleted or superseded base vectors can remain navigation vertices, but cannot contribute stale output.
 
-The [physical traversal](diskann-paged-navigation.md) keeps a fixed best-list cutoff and freezes each beam before reads. When tensor duplication or masked nodes leave fewer than $k$ live documents after approximate exhaustion, explicitly continue through unexpanded generation IDs in ascending order while preserving prior work and the same canonical snapshot. This deterministic completion rule avoids losing candidates evicted from the bounded frontier; it does not assert exact nearest-neighbor membership. Return fewer than $k$ only when the visible corpus has fewer eligible vector-bearing documents; otherwise continue within the allowance or return a resource error. Approximate membership does not authorize silent truncation after an arbitrary I/O budget.
+The [physical traversal](diskann-paged-navigation.md) keeps the configured pending capacity fixed, decides edge expansion using original-vector distances alone and freezes each beam before reads. When tensor duplication or masked nodes leave fewer than $k$ live documents after approximate exhaustion, explicitly continue through unexpanded generation IDs in ascending order while preserving prior work and the same canonical snapshot. This deterministic completion rule avoids losing candidates evicted from the bounded frontier; it does not assert exact nearest-neighbor membership. Return fewer than $k$ only when the visible corpus has fewer eligible vector-bearing documents; otherwise continue within the allowance or return a resource error. Approximate membership does not authorize silent truncation after an arbitrary I/O budget.
 
 An ordinary relational filter is not a graph-traversal filter. ACL/RLS and security-barrier handling use the existing Execution contract: graph navigation may use internal routing nodes only where allowed by that contract, final rows must be authorized, and EXPLAIN/telemetry must not leak unauthorized payloads. Predicate pushdown or tenant-separated graphs require a separately specified semantic and security contract. They cannot be inferred from the 2019 algorithm.
 
@@ -352,7 +353,7 @@ Keep ordinary query syntax unchanged. Planner selects the field's actual physica
 
 The implemented [physical statistics and cost model](diskann-physical-planning.md) specifies per-field/query identity, stored facts versus estimates, dispatch batching, numeric exact routes and preservation of decorated compositions. Exact selected-view current/change counts, static EXPLAIN and invocation counters remain open integration requirements.
 
-EXPLAIN identifies `diskann`, graph/PQ generation, navigation metric, public score domain, initial/adaptive search capacity, requested/effective beam settings, base and outstanding-change counts, exact side paths, cache limits, and residual relational filters. Execution counters include expanded nodes, discovered/visited nodes, logical pages, physical reads where the provider can report them, bytes, cache hits, I/O rounds, tensor rerank reads, exact changed vectors, and candidate/document counts. Unknown physical I/O counts remain unknown; logical reads are not relabeled SSD operations.
+EXPLAIN identifies `diskann`, graph/PQ generation, navigation metric, public score domain, configured search-list capacity and beam settings, base and outstanding-change counts, exact side paths, cache limits, and residual relational filters. Execution counters include expanded nodes, discovered/visited nodes, logical pages, physical reads where the provider can report them, bytes, cache hits, I/O rounds, tensor rerank reads, exact changed vectors, and candidate/document counts. Unknown physical I/O counts remain unknown; logical reads are not relabeled SSD operations.
 
 PQ estimates are never probabilities. Probability conversion consumes the final canonical raw cosine scores after base/change visibility, exact side-stream merging, and document-level tensor reranking. It does not recompute cosine using a different arithmetic helper or use PQ distance, normalized navigation distance, or the internal visited frontier as the calibration input.
 
@@ -487,7 +488,7 @@ Full reports, raw traces, reference binaries, and temporary databases stay in ig
 
 ## Implementation units
 
-The [implementation plan](../plans/0014-diskann-vector-index.md) expands these contracts into ordered, owner-scoped work units with prerequisites, exit evidence, and a progress ledger. Its source-scoped evidence distinguishes implemented foundations from pending runtime delivery.
+The [implementation plan](../plans/0014-diskann-vector-index.md) expands these contracts into ordered, owner-scoped work units with prerequisites, exit evidence, and a progress ledger. Its source-scoped evidence identifies the implemented owners and verifies runtime delivery, bindings and integrated quality/resource boundaries.
 
 Implementation is split by the owning contracts below, with logical commits and small reviewed PRs. Internal prerequisites do not expose `USING diskann` until the required storage and public behavior work together.
 

@@ -24,6 +24,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Improve DiskANN navigation with original-vector distances for edge expansion and PQ estimates only for pending read order, avoiding rejection by mixed estimated and original distances. Keep the pending frontier and refined-distance heap separately bounded by the configured search-list size, with all workspace charged to the original allowance; canonical scores and stored index formats are unchanged.
 - Match PostgreSQL 18's `42P17` diagnostic when a generated expression calls a non-immutable function.
 
 ## [0.4.0] - 2026-09-25

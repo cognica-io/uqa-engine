@@ -2,6 +2,26 @@
 
 This benchmark measures persistent SQLite vector search through the public SQL boundary. It is a module of the existing `uqa-engine` `retrieval_workloads` benchmark executable, so exact, IVF, and HNSW keep separate Criterion IDs without adding another Cargo benchmark binary to build and link.
 
+## DiskANN correctness
+
+The same executable also has a `diskann-correctness` selection, dispatched before Criterion initializes. It records no construction timings, latency samples, RSS observations or throughput estimates. Its ordinary test-profile build can reuse existing correctness-test artifacts:
+
+```sh
+UQA_RETRIEVAL_BENCH_SUITE=diskann-correctness \
+  cargo test -p uqa-engine --bench retrieval_workloads --locked
+python3 scripts/check-vector-search-benchmark.py --quality-only \
+  --observations target/benchmark-runs/diskann-correctness-observations.json \
+  --output target/benchmark-runs/diskann-correctness.json
+```
+
+The `correctness` contract in [`manifest.json`](manifest.json) fixes three datasets before evaluation: 256 synthetic vectors with 16 queries, the independently sourced [512-row SciFact/MiniLM fixture](fixtures/scifact-minilm-prefix512-v1/README.md) with 32 queries, and literal tensors covering maximum-element scoring, zero vectors, equal scores and NULL exclusion. Each uses seeds 7, 42 and 101, search-list sizes 32 and 128, and two candidate counts. The first two require at least 0.9 canonical ID recall and top-1 accuracy in every case; the literal tensor cases require exact recall and top-1 identity. All cases require complete results, cosine error at most `1e-6`, and independent probability error at most `1e-10`. These finite workload floors are not general recall guarantees.
+
+SQL creates, populates, closes and reopens each real SQLite database. Exact SQL runs before index creation; each DiskANN definition is built through SQL and all handles close before its query reopen. Reopen does not flush the operating-system file cache or establish the separate larger-than-cache resource gate. A first-query `EXPLAIN ANALYZE` witness for every configuration confirms actual approximate traversal and PQ work; only logical counters are retained. Every returned cosine is checked against a separate Python implementation over the frozen numerical inputs, including tensor maxima. Canonical rank order and ID recall remain mandatory; separately reported tie-aware recall never substitutes for them.
+
+The fixed transform uses declared synthetic parameters through Scoring's existing `VectorProbabilityTransform`; it does not fit a relevance model. SQL query-pool probabilities are independently checked against the documented top-quartile Gaussian rule. The report compares shared-document probability shifts when candidate K or the search-list size changes, and records recall/top-1 ranges across all declared seeds. This verifies numerical conversion and selection sensitivity, not empirical calibration; held-out Brier/log-loss/ECE and reliability evidence remain necessary before making that separate claim. Runtime fixed-model target validation remains covered by the [SQL calibration acceptance](../../crates/uqa-engine/src/tests/catalog/index_registry/diskann/calibration.rs).
+
+Correctness observations use schema 3 and the existing timing reports keep schema 2. The verifier requires the complete fixture/seed/search/K matrix, compiled manifest hash, executable hash, persistent SQL boundary, actual approximate-route witness and every quality gate. It rejects measurement fields on the correctness path. The default observation file is `target/benchmark-runs/diskann-correctness-observations.json` relative to the repository root, independently of the executable's working directory; `UQA_DISKANN_CORRECTNESS_OBSERVATIONS` overrides that output path. Keep generated observations and reports in ignored directories. Verifier tests use tiny literal fixtures rather than historical reports.
+
 ## Measured boundary
 
 The fixture opens a real temporary SQLite file with `Engine::open`, creates the table with SQL, and inserts every `(id, embedding)` row through parameterized SQL inside a transaction. It then closes and reopens the database before each query phase. The exact phase runs with the persistent `sqlite-bruteforce` vector index, the IVF phase follows a timed SQL `CREATE INDEX ... USING ivf` and reopen, and the HNSW phase follows SQL `DROP INDEX`, a timed SQL `CREATE INDEX ... USING hnsw`, and another reopen. All quality and Criterion queries call `Engine::sql` with `SELECT id, _score ... WHERE knn_match(...) ORDER BY _score DESC, id ASC LIMIT k`, so statement-cache handling, persistent snapshot synchronization, SQL lowering and optimization, physical-index selection, execution, scoring, ordering, and row materialization are inside the timed query boundary.

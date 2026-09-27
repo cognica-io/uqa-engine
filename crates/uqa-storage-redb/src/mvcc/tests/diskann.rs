@@ -10,6 +10,7 @@ mod corruption;
 mod populations;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod recovery;
+mod resources;
 mod restore;
 
 use uqa_storage::key_value::conformance::{

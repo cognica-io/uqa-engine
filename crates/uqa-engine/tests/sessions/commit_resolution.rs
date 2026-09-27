@@ -270,47 +270,54 @@ impl VersionedPersistence for FaultPersistence {
 
 fn fixtures() -> (tempfile::TempDir, Vec<Arc<FaultPersistence>>) {
     let directory = tempfile::tempdir().unwrap();
-    let mut records: Vec<Arc<dyn VersionedPersistence>> = Vec::new();
-    for mode in ["plain", "encrypted", "compressed", "compressed-encrypted"] {
-        let path = directory.path().join(format!("{mode}.db"));
-        let connection = match mode {
+    let records = [
+        "plain",
+        "encrypted",
+        "compressed",
+        "compressed-encrypted",
+        "redb",
+    ]
+    .into_iter()
+    .map(|provider| fixture(directory.path(), provider))
+    .collect();
+    (directory, records)
+}
+
+fn fixture(directory: &std::path::Path, provider: &str) -> Arc<FaultPersistence> {
+    let inner: Arc<dyn VersionedPersistence> = if provider == "redb" {
+        let redb = RedbStorage::open(directory.join("receipt.redb")).unwrap();
+        Arc::new(redb.record_store().unwrap())
+    } else {
+        let path = directory.join(format!("{provider}.db"));
+        let connection = match provider {
             "plain" => ManagedConnection::open(&path),
             "encrypted" => ManagedConnection::open_encrypted(&path, "commit test key"),
             "compressed" => {
                 ManagedConnection::open_compressed(&path, SQLiteCompressionOptions::default())
             }
-            _ => ManagedConnection::open_compressed_encrypted(
+            "compressed-encrypted" => ManagedConnection::open_compressed_encrypted(
                 &path,
                 "commit test key",
                 SQLiteCompressionOptions::default(),
             ),
+            _ => panic!("unknown receipt fixture provider {provider}"),
         }
         .unwrap();
-        records.push(Arc::new(SQLiteRecordStore::new(&connection).unwrap()));
-    }
-    let redb = RedbStorage::open(directory.path().join("receipt.redb")).unwrap();
-    records.push(Arc::new(redb.record_store().unwrap()));
-    (
-        directory,
-        records
-            .into_iter()
-            .map(|inner| {
-                Arc::new(FaultPersistence {
-                    inner,
-                    fault: AtomicU8::new(HEALTHY),
-                    identifier_fault: AtomicU8::new(HEALTHY),
-                    serializable_fault: AtomicU8::new(HEALTHY),
-                    serializable_completion: Mutex::new(None),
-                    foreground: std::thread::current().id(),
-                    foreground_transaction_allocations: AtomicUsize::new(0),
-                    foreground_record_commits: AtomicUsize::new(0),
-                    last_foreground_record_commit: Mutex::new(None),
-                    attempt: Mutex::new(None),
-                    aborts: AtomicUsize::new(0),
-                })
-            })
-            .collect(),
-    )
+        Arc::new(SQLiteRecordStore::new(&connection).unwrap())
+    };
+    Arc::new(FaultPersistence {
+        inner,
+        fault: AtomicU8::new(HEALTHY),
+        identifier_fault: AtomicU8::new(HEALTHY),
+        serializable_fault: AtomicU8::new(HEALTHY),
+        serializable_completion: Mutex::new(None),
+        foreground: std::thread::current().id(),
+        foreground_transaction_allocations: AtomicUsize::new(0),
+        foreground_record_commits: AtomicUsize::new(0),
+        last_foreground_record_commit: Mutex::new(None),
+        attempt: Mutex::new(None),
+        aborts: AtomicUsize::new(0),
+    })
 }
 
 fn engine(persistence: Arc<FaultPersistence>) -> Engine {

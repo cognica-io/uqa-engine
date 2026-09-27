@@ -96,6 +96,40 @@ impl NavigationVector {
         &self.coordinates
     }
 
+    pub(super) fn copy(&self, control: &StorageReadControl) -> StorageBackendResult<Self> {
+        control.check()?;
+        let mut coordinates = BudgetedVec::new(control.memory());
+        coordinates.reserve(self.coordinates.len())?;
+        for (offset, &value) in self.coordinates.iter().enumerate() {
+            checkpoint(offset, control)?;
+            coordinates.push(value)?;
+        }
+        control.check()?;
+        Ok(Self { coordinates })
+    }
+
+    /// Refine an already decoded physical node without allocating another normalized vector.
+    pub(super) fn squared_distance_to_raw(
+        &self,
+        raw: &[f32],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<SquaredNavigationDistance> {
+        let (canonical_norm, norm) = norms(self.coordinates.len() as u32, raw, control)?;
+        if exact_reason(canonical_norm).is_some() {
+            return Err(StorageBackendError::Other(
+                "DiskANN physical node is not navigable".into(),
+            ));
+        }
+        let mut distance = 0.0;
+        for (offset, (&query, &value)) in self.coordinates.iter().zip(raw).enumerate() {
+            checkpoint(offset, control)?;
+            let difference = query - f64::from(value) / norm;
+            distance += difference * difference;
+        }
+        control.check()?;
+        Ok(SquaredNavigationDistance(distance))
+    }
+
     pub fn squared_distance(
         &self,
         other: &Self,

@@ -9,7 +9,7 @@
 use std::env;
 use std::time::Duration;
 
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion, Throughput};
+use criterion::{black_box, criterion_group, BatchSize, Criterion, Throughput};
 use tempfile::{tempdir, TempDir};
 use uqa_core::{Edge, Value, Vertex};
 use uqa_engine::{Engine, HybridSearchParams};
@@ -18,6 +18,8 @@ use uqa_sql::SQLParam;
 
 #[path = "retrieval_workloads/beir_hybrid_search.rs"]
 mod beir_hybrid_search;
+#[path = "retrieval_workloads/diskann_correctness.rs"]
+mod diskann_correctness;
 #[path = "retrieval_workloads/sql_vector_search.rs"]
 mod sql_vector_search;
 
@@ -296,4 +298,12 @@ fn benches(c: &mut Criterion) {
 }
 
 criterion_group!(retrieval_benches, benches);
-criterion_main!(retrieval_benches);
+
+fn main() {
+    if env::var(SUITE_ENV).as_deref() == Ok("diskann-correctness") {
+        diskann_correctness::run();
+        return;
+    }
+    retrieval_benches();
+    Criterion::default().configure_from_args().final_summary();
+}
