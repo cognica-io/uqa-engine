@@ -81,6 +81,13 @@ impl MatchingCanonical {
 }
 
 impl DiskANNCanonicalRead for MatchingCanonical {
+    fn corpus_fingerprint(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<[u8; 32]>> {
+        self.check_control(control)?;
+        self.values.corpus_fingerprint(control)
+    }
     fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
         self.actual.check_control(control)?;
         self.values.check_control(control)

@@ -6,6 +6,8 @@
 
 //! Provider-independent reads combine one pinned committed boundary with a fixed private command view.
 
+mod fingerprint;
+
 use std::cmp::Ordering;
 use std::sync::Arc;
 

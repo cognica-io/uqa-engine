@@ -79,6 +79,20 @@ impl SelectedVectorRead {
 }
 
 impl VectorRead for SelectedVectorRead {
+    fn corpus_fingerprint(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<[u8; 32]>> {
+        self.check_control(control)?;
+        super::selected_fingerprint(
+            self.dimensions,
+            self.base.as_deref(),
+            self.selected
+                .iter()
+                .map(|(document, source)| (*document, source.as_deref())),
+            control,
+        )
+    }
     fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
         self.control.check()?;
         control.check()?;

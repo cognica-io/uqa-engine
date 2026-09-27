@@ -25,6 +25,7 @@ mod memory_snapshot;
 pub mod query;
 pub(crate) mod retained;
 
+pub(crate) use canonical::selected_fingerprint;
 pub use canonical::{decode_vector_bytes, SelectedVectorRead, VectorRead, VectorReadSnapshot};
 pub use collection::{
     RetainedVectorIndexesBuilder, VectorIndexSource, VectorIndexes, VectorIndexesIter,
@@ -151,6 +152,14 @@ pub trait VectorIndex: Send + Sync {
     fn dimensions(&self) -> u32;
     fn index_kind(&self) -> &'static str {
         "vector"
+    }
+    /// Metadata from the actual selected physical/canonical view, without executing a logical vector query. Unsupported methods return None.
+    fn diskann_query_metadata(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::diskann_index::DiskANNQueryMetadata>> {
+        control.check()?;
+        Ok(None)
     }
     fn add(&mut self, doc_id: DocId, vector: Vec<f32>) -> StorageBackendResult<()>;
     fn add_many(&mut self, doc_id: DocId, vectors: Vec<Vec<f32>>) -> StorageBackendResult<()>;

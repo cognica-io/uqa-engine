@@ -92,6 +92,18 @@ impl Canonical {
 }
 
 impl VectorRead for Canonical {
+    fn corpus_fingerprint(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<[u8; 32]>> {
+        self.check_control(control)?;
+        self.owner
+            .map(|owner| {
+                self.snapshot
+                    .vector_field_fingerprint(owner, &self.field, control)
+            })
+            .transpose()
+    }
     fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
         self.control.check()?;
         self.snapshot.control.check()?;

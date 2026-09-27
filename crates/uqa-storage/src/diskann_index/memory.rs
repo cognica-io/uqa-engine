@@ -163,6 +163,12 @@ impl VectorIndex for DiskANNMemoryIndex {
     fn index_kind(&self) -> &'static str {
         "diskann"
     }
+    fn diskann_query_metadata(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<super::DiskANNQueryMetadata>> {
+        self.index.diskann_query_metadata(control)
+    }
     fn add(&mut self, document: DocId, vector: Vec<f32>) -> StorageBackendResult<()> {
         // Admit the one-element tensor header before allocating this adapter-owned wrapper; coordinates remain caller-owned until replacement adopts them.
         self.control.check()?;

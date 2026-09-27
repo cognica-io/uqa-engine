@@ -81,6 +81,14 @@ pub trait DiskANNQueryRead: DiskANNCanonicalRead {
 
 /// One fixed committed/private canonical source. Implementations retain their original visibility and controls; callbacks must not reenter the source.
 pub trait DiskANNCanonicalRead {
+    /// Identity of the complete selected canonical field, independent of graph generations. Unsupported sources cannot authorize fixed-model reuse.
+    fn corpus_fingerprint(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<[u8; 32]>> {
+        self.check_control(control)?;
+        Ok(None)
+    }
     /// Check the retained source's original controls and the invoking control, including queries that need no provider reads.
     fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()>;
 

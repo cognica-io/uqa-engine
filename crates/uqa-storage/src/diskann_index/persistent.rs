@@ -83,6 +83,13 @@ impl<P: DiskANNPersistentOwner> VectorIndex for PersistentDiskANNIndex<P> {
     fn index_kind(&self) -> &'static str {
         "diskann"
     }
+    fn diskann_query_metadata(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<super::DiskANNQueryMetadata>> {
+        control.check()?;
+        self.owner.snapshot()?.diskann_query_metadata(control)
+    }
     fn add(&mut self, document: DocId, vector: Vec<f32>) -> StorageBackendResult<()> {
         self.owner.replace(document, std::slice::from_ref(&vector))
     }

@@ -37,6 +37,12 @@ impl KeyValueRead for RecordRead<'_> {
         self.control
     }
 
+    fn marker_fingerprint(&self, key: &[u8]) -> StorageBackendResult<Option<[u8; 32]>> {
+        self.view
+            .marker_fingerprint(self.database, key, self.control)
+            .map(Some)
+    }
+
     fn revision(&self, prefixes: &[&[u8]]) -> StorageBackendResult<KeyValueReadRevision> {
         self.control.check()?;
         let mut private = None;
@@ -239,6 +245,9 @@ impl RetainedRecordRead {
 impl KeyValueRead for RetainedRecordRead {
     fn control(&self) -> &StorageReadControl {
         &self.control
+    }
+    fn marker_fingerprint(&self, key: &[u8]) -> StorageBackendResult<Option<[u8; 32]>> {
+        self.read().marker_fingerprint(key)
     }
     fn revision(&self, prefixes: &[&[u8]]) -> StorageBackendResult<KeyValueReadRevision> {
         self.read().revision(prefixes)
