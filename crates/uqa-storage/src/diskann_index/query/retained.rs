@@ -136,6 +136,8 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> VectorIndex for RetainedDiskAN
         Ok(Some(crate::diskann_index::DiskANNQueryMetadata {
             manifest: *self.manifest(),
             corpus_fingerprint,
+            read_limits: self.retained.reader.limits(),
+            read_capabilities: self.retained.reader.capabilities(),
         }))
     }
     fn add(&mut self, _: DocId, _: Vec<f32>) -> StorageBackendResult<()> {

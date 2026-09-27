@@ -155,6 +155,31 @@ pub(crate) fn read_record(
     result.ok_or_else(|| invalid("record was not returned"))
 }
 
+pub(super) fn read_manifest(
+    source: &dyn DiskANNPageSource,
+    dimensions: u32,
+    parameters: crate::vector_index::DiskANNIndexParams,
+    max_record_bytes: usize,
+    control: &StorageReadControl,
+) -> StorageBackendResult<DiskANNManifest> {
+    control.check()?;
+    parameters.validate(dimensions)?;
+    let generation = source.generation();
+    let bytes = read_record(
+        source,
+        DiskANNRecordKey::Manifest,
+        max_record_bytes.min(DiskANNManifest::MAX_ENCODED_BYTES),
+        control,
+    )?;
+    let manifest = DiskANNManifest::decode(generation, &bytes, control)?;
+    check_catalog(&manifest, dimensions, parameters)?;
+    if source.generation() != generation {
+        return Err(invalid("source changed its retained generation"));
+    }
+    control.check()?;
+    Ok(manifest)
+}
+
 fn check_catalog(
     manifest: &DiskANNManifest,
     dimensions: u32,

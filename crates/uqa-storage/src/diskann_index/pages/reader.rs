@@ -11,7 +11,7 @@ use uqa_core::memory::{Budgeted, BudgetedVec, MemoryError};
 
 use super::{
     cache::{PageCache, SharedPage},
-    check_catalog, invalid, read_record, DiskANNPageSource, DiskANNReadCapabilities,
+    invalid, read_manifest, read_record, DiskANNPageSource, DiskANNReadCapabilities,
     DiskANNReadLimits, DiskANNRecordKey,
 };
 use crate::diskann_index::{
@@ -72,16 +72,13 @@ impl DiskANNReader {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         control.check()?;
-        parameters.validate(dimensions)?;
-        let bytes = read_record(
+        let manifest = read_manifest(
             &*source,
-            DiskANNRecordKey::Manifest,
+            dimensions,
+            parameters,
             limits.max_record_bytes,
             control,
         )?;
-        let manifest = DiskANNManifest::decode(source.generation(), &bytes, control)?;
-        check_catalog(&manifest, dimensions, parameters)?;
-        drop(bytes);
         if manifest.input().nodes != 0 && limits.max_in_flight_page_bytes < PAGE_BYTES {
             return Err(MemoryError::Limit {
                 required: PAGE_BYTES,
@@ -143,6 +140,9 @@ impl DiskANNReader {
     }
     pub fn capabilities(&self) -> DiskANNReadCapabilities {
         self.resident.source.capabilities()
+    }
+    pub fn limits(&self) -> DiskANNReadLimits {
+        self.resident.limits
     }
     pub fn cache_bytes(&self) -> usize {
         self.resident.cache.used()

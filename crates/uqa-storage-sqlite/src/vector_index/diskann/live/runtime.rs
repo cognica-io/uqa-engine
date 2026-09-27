@@ -26,6 +26,21 @@ impl DiskANNPersistentOwner for SQLiteDiskANNHandle {
     fn control(&self) -> &StorageReadControl {
         &self.control
     }
+    fn query_metadata(
+        &self,
+    ) -> StorageBackendResult<uqa_storage::diskann_index::DiskANNQueryMetadata> {
+        let canonical = self.retain_current()?;
+        let source = canonical
+            .selected_source(&*self.resolver, &self.control)?
+            .ok_or_else(|| invalid("live native index has no published generation"))?;
+        uqa_storage::diskann_index::DiskANNQueryMetadata::capture(
+            &canonical,
+            &*source,
+            self.parameters,
+            self.limits,
+            &self.control,
+        )
+    }
     fn snapshot(&self) -> StorageBackendResult<Self::Snapshot> {
         Self::snapshot(self)
     }
