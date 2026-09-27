@@ -6,7 +6,7 @@
 
 //! DiskANN work estimates from retained physical facts. These are uncalibrated work units, not elapsed time or measured SSD operations.
 
-use uqa_core::{DiskANNQueryStats, VectorQueryRoute};
+use uqa_core::{DiskANNIndexStats, DiskANNQueryStats, VectorQueryRoute};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct DiskANNWorkEstimate {
@@ -39,6 +39,8 @@ pub fn estimate_diskann(
     k: Option<usize>,
     table_documents: u64,
 ) -> DiskANNWorkEstimate {
+    let query_route = stats.query_route;
+    let stats = &stats.index;
     let mut work = DiskANNWorkEstimate::default();
     let populations = stats.populations;
     let dimensions = f64::from(stats.dimensions);
@@ -60,7 +62,7 @@ pub fn estimate_diskann(
     if k == Some(0) {
         return work;
     }
-    if k.is_none() || stats.query_route != VectorQueryRoute::Approximate {
+    if k.is_none() || query_route != VectorQueryRoute::Approximate {
         work.exact_vectors = current;
         work.cpu = dimensions * current;
         return work;
@@ -102,7 +104,7 @@ pub fn estimate_diskann(
     work
 }
 
-fn page_rounds(stats: &DiskANNQueryStats, expanded: f64) -> f64 {
+fn page_rounds(stats: &DiskANNIndexStats, expanded: f64) -> f64 {
     if expanded == 0.0 {
         return 0.0;
     }

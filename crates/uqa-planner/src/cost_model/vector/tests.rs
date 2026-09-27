@@ -6,43 +6,47 @@
 
 use super::*;
 use crate::cost_model::CostModel;
-use uqa_core::{IndexStats, VectorGeneration, VectorPopulationStats, VectorReadStats};
+use uqa_core::{
+    DiskANNIndexStats, IndexStats, VectorGeneration, VectorPopulationStats, VectorReadStats,
+};
 use uqa_operators::OperatorTree;
 
 fn facts() -> DiskANNQueryStats {
     DiskANNQueryStats {
-        generation: VectorGeneration {
-            database: [1; 16],
-            table: 1,
-            index: 2,
-            generation: 3,
-        },
-        dimensions: 1024,
-        max_degree: 128,
-        search_list_size: 12,
-        beam_width: 4,
-        pq_bytes: 2,
-        pq_centroids: Some(3),
-        node_slot_bytes: 5184,
-        node_fragments: 2,
-        graph_pages: 200,
-        graph_edges: Some(400),
-        page_bytes: 4096,
-        populations: VectorPopulationStats {
-            base_documents: Some(60),
-            base_vectors: 120,
-            graph_nodes: 100,
-            side_vectors: 20,
-            current_vectors: Some(200),
-            changed_vectors: Some(6),
-        },
-        reads: VectorReadStats {
-            resident_bytes: 1 << 20,
-            cache_bytes: 0,
-            max_record_bytes: 1 << 20,
-            max_in_flight_page_bytes: 3 * 4096,
-            max_batch_pages: 3,
-            read_concurrency: 2,
+        index: DiskANNIndexStats {
+            generation: VectorGeneration {
+                database: [1; 16],
+                table: 1,
+                index: 2,
+                generation: 3,
+            },
+            dimensions: 1024,
+            max_degree: 128,
+            search_list_size: 12,
+            beam_width: 4,
+            pq_bytes: 2,
+            pq_centroids: Some(3),
+            node_slot_bytes: 5184,
+            node_fragments: 2,
+            graph_pages: 200,
+            graph_edges: Some(400),
+            page_bytes: 4096,
+            populations: VectorPopulationStats {
+                base_documents: Some(60),
+                base_vectors: 120,
+                graph_nodes: 100,
+                side_vectors: 20,
+                current_vectors: Some(200),
+                changed_vectors: Some(6),
+            },
+            reads: VectorReadStats {
+                resident_bytes: 1 << 20,
+                cache_bytes: 0,
+                max_record_bytes: 1 << 20,
+                max_in_flight_page_bytes: 3 * 4096,
+                max_batch_pages: 3,
+                read_concurrency: 2,
+            },
         },
         query_route: VectorQueryRoute::Approximate,
     }
@@ -82,7 +86,7 @@ fn diskann_cost_keeps_logical_beams_separate_from_provider_limits() {
         (12.0, 8.0)
     );
     assert_eq!(original.page_rounds, 25.0);
-    physical.reads.max_in_flight_page_bytes = 4096;
+    physical.index.reads.max_in_flight_page_bytes = 4096;
     let serial = estimate_diskann(&physical, Some(10), 100);
     assert_eq!(serial.logical_page_requests, 40.0);
     assert_eq!(serial.page_rounds, 40.0);
@@ -91,7 +95,7 @@ fn diskann_cost_keeps_logical_beams_separate_from_provider_limits() {
         serial.pq_distance_evaluations,
         original.pq_distance_evaluations
     );
-    physical.reads.max_in_flight_page_bytes = 0;
+    physical.index.reads.max_in_flight_page_bytes = 0;
     assert!(!estimate_diskann(&physical, Some(10), 100).page_budget_sufficient);
 }
 
@@ -116,12 +120,12 @@ fn diskann_exact_routes_and_zero_k_do_not_inherit_ann_work() {
         assert_eq!(estimate_diskann(&physical, Some(3), 100), threshold);
     }
     assert_eq!(estimate_diskann(&physical, Some(0), 100).total(), 0.0);
-    physical.populations.current_vectors = None;
-    physical.populations.changed_vectors = None;
+    physical.index.populations.current_vectors = None;
+    physical.index.populations.changed_vectors = None;
     physical.query_route = VectorQueryRoute::Approximate;
     let unknown = estimate_diskann(&physical, Some(3), 100);
     assert_eq!(unknown.changed_vectors, 200.0);
-    assert_eq!(physical.populations.changed_vectors, None);
+    assert_eq!(physical.index.populations.changed_vectors, None);
 }
 
 #[test]
@@ -137,10 +141,10 @@ fn diskann_cost_uses_each_field_and_exact_query_identity() {
     exact.query_route = VectorQueryRoute::ExactZeroNorm;
     stats.set_diskann_query("embedding", &zero, exact);
     let mut other = physical.clone();
-    other.dimensions = 4;
-    other.node_slot_bytes = 1104;
-    other.node_fragments = 1;
-    other.graph_pages = 34;
+    other.index.dimensions = 4;
+    other.index.node_slot_bytes = 1104;
+    other.index.node_fragments = 1;
+    other.index.graph_pages = 34;
     stats.set_diskann_query("other", &[1.0, 0.0, 0.0, 0.0], other);
     let model = CostModel::new();
     for (field, query, expected) in [

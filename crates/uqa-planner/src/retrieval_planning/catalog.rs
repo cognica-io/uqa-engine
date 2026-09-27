@@ -51,6 +51,13 @@ pub trait TextStatisticsRead {
 /// The implementation retains the actual vector-index registry read guard.
 pub trait VectorStatisticsRead {
     fn dimensions(&self, field: &str) -> Option<u32>;
+    /// Query-independent facts for a retained field, including plans whose arguments are evaluated later.
+    fn diskann_index_statistics(
+        &self,
+        _field: &str,
+    ) -> Result<Option<uqa_core::DiskANNIndexStats>, SQLError> {
+        Ok(None)
+    }
     /// Physical facts and numeric route from this retained field view. No search or logical vector observation is performed.
     fn diskann_query_statistics(
         &self,

@@ -39,20 +39,20 @@ fn check(engine: &Engine) {
     let other = stats.diskann_query("other", &[1.0, 0.0, 0.0]).unwrap();
     assert_eq!(first.query_route, VectorQueryRoute::Approximate);
     assert_eq!(zero.query_route, VectorQueryRoute::ExactZeroNorm);
-    assert_eq!(first.generation, zero.generation);
+    assert_eq!(first.index.generation, zero.index.generation);
     // Memory indexes use independent incarnations with the same local index ordinal.
-    assert_ne!(first.generation, other.generation);
-    assert_eq!((first.dimensions, other.dimensions), (2, 3));
-    assert_eq!((first.pq_bytes, other.pq_bytes), (1, 3));
-    assert_eq!((first.beam_width, other.beam_width), (2, 1));
+    assert_ne!(first.index.generation, other.index.generation);
+    assert_eq!((first.index.dimensions, other.index.dimensions), (2, 3));
+    assert_eq!((first.index.pq_bytes, other.index.pq_bytes), (1, 3));
+    assert_eq!((first.index.beam_width, other.index.beam_width), (2, 1));
     assert_eq!(
         (
-            first.populations.base_vectors,
-            first.populations.side_vectors
+            first.index.populations.base_vectors,
+            first.index.populations.side_vectors
         ),
         (3, 1)
     );
-    assert_eq!(first.populations.changed_vectors, None);
+    assert_eq!(first.index.populations.changed_vectors, None);
     let fixed = engine.capture_statement_read_snapshot().unwrap();
     let reader = engine.statement_read_snapshot_engine(&fixed);
     sql(engine, "DROP INDEX diskann_other; CREATE INDEX diskann_other ON diskann_docs USING diskann(other) WITH(max_degree=2, search_list_size=16, beam_width=2, pq_bytes=1)");
@@ -68,8 +68,11 @@ fn check(engine: &Engine) {
         .index_stats
         .diskann_query("other", &[1.0, 0.0, 0.0])
         .unwrap();
-    assert_ne!(changed.generation, other.generation);
-    assert_eq!((changed.search_list_size, changed.pq_bytes), (16, 1));
+    assert_ne!(changed.index.generation, other.index.generation);
+    assert_eq!(
+        (changed.index.search_list_size, changed.index.pq_bytes),
+        (16, 1)
+    );
     assert_search(engine, &[(1, 1.0), (2, 0.0)]);
 }
 

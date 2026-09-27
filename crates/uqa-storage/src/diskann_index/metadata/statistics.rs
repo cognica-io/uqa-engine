@@ -12,7 +12,8 @@ use crate::diskann_index::{
 };
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 use uqa_core::{
-    DiskANNQueryStats, VectorGeneration, VectorPopulationStats, VectorQueryRoute, VectorReadStats,
+    DiskANNIndexStats, DiskANNQueryStats, VectorGeneration, VectorPopulationStats,
+    VectorQueryRoute, VectorReadStats,
 };
 
 impl DiskANNQueryMetadata {
@@ -29,6 +30,19 @@ impl DiskANNQueryMetadata {
             Some(ExactVectorReason::ZeroNorm) => VectorQueryRoute::ExactZeroNorm,
             Some(ExactVectorReason::NonFiniteNorm) => VectorQueryRoute::ExactNonFiniteNorm,
         };
+        Ok(DiskANNQueryStats {
+            index: self.index_statistics(control)?,
+            query_route,
+        })
+    }
+
+    /// Project the selected field without evaluating query arguments or preparing search artifacts.
+    pub fn index_statistics(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<DiskANNIndexStats> {
+        control.check()?;
+        let input = self.manifest.input();
         let generation = input.generation;
         let layout = self.manifest.layout();
         let pq_centroids = if input.nodes == 0 {
@@ -43,7 +57,7 @@ impl DiskANNQueryMetadata {
             })
         };
         control.check()?;
-        Ok(DiskANNQueryStats {
+        Ok(DiskANNIndexStats {
             generation: VectorGeneration {
                 database: generation.database(),
                 table: generation.table(),
@@ -87,7 +101,6 @@ impl DiskANNQueryMetadata {
                 max_batch_pages: self.read_capabilities.max_batch_pages(),
                 read_concurrency: self.read_capabilities.read_concurrency(),
             },
-            query_route,
         })
     }
 }

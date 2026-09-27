@@ -10,7 +10,8 @@ use super::{BTreeMap, FieldName};
 
 mod vector;
 pub use vector::{
-    DiskANNQueryStats, VectorGeneration, VectorPopulationStats, VectorQueryRoute, VectorReadStats,
+    DiskANNIndexStats, DiskANNQueryStats, VectorGeneration, VectorPopulationStats,
+    VectorQueryRoute, VectorReadStats,
 };
 
 /// Index-level statistics consumed by the cost model and BM25 scorer.
