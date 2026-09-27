@@ -5,7 +5,7 @@
 # Copyright (c) 2023-2026 Cognica, Inc.
 #
 
-"""Independent rational PQ beam order, specified before the Rust traversal."""
+"""Independent rational beam order with separate pending and refined sets."""
 
 import argparse
 from fractions import Fraction
@@ -24,6 +24,7 @@ DISTANCES = [sum((Fraction(x) - Fraction(y)) ** 2
 def traverse(capacity, width):
     frontier = [6]
     expanded = set()
+    closest = []
     rounds = []
     order = []
     while True:
@@ -35,8 +36,16 @@ def traverse(capacity, width):
             assert node not in expanded
             expanded.add(node)
             order.append(node)
+        # Raw fixture vectors equal their declared axis centroids. The refinement
+        # oracle therefore uses exact rational squared distances, with no Rust output.
+        closest = sorted(closest + [(DISTANCES[node], node) for node in selected])[:capacity]
+        cutoff = closest[-1] if len(closest) == capacity else (float('inf'), 0)
+        frontier = [node for node in frontier
+                    if node not in expanded and (DISTANCES[node], node) <= cutoff]
+        for node in selected:
             frontier.extend(candidate for candidate in NEIGHBORS[node]
-                            if candidate not in expanded and candidate not in frontier)
+                            if candidate not in expanded and candidate not in frontier
+                            and (DISTANCES[candidate], candidate) <= cutoff)
             frontier.sort(key=lambda candidate: (DISTANCES[candidate], candidate))
             del frontier[capacity:]
         rounds.append({'before': before, 'selected': selected, 'after': list(frontier)})
@@ -47,7 +56,7 @@ def traverse(capacity, width):
 
 
 def fixture():
-    return {'revision': 1, 'query': QUERY, 'centroids': CENTROIDS, 'labels': LABELS,
+    return {'revision': 2, 'query': QUERY, 'centroids': CENTROIDS, 'labels': LABELS,
             'distances': [int(d) for d in DISTANCES], 'neighbors': NEIGHBORS, 'entry': 6,
             'cases': [traverse(3, 1), traverse(3, 2), traverse(4, 3)]}
 

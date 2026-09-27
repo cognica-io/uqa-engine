@@ -17,6 +17,9 @@ use super::{
 };
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 
+mod refinement;
+use refinement::Refinement;
+
 pub use uqa_core::vector_execution::DiskANNTraversalStats;
 
 #[derive(Clone, Copy)]
@@ -43,6 +46,7 @@ enum Phase {
 
 struct Workspace {
     lookup: Option<PQLookupTable>,
+    refinement: Option<Refinement>,
     frontier: BudgetedVec<Candidate>,
     expanded: BudgetedHashSet<u64>,
     phase: Phase,
@@ -88,6 +92,11 @@ impl DiskANNTraversal {
             stats.pq_estimates = 1;
             Some(Workspace {
                 lookup: Some(lookup),
+                refinement: Some(Refinement::new(
+                    query,
+                    input.parameters.search_list_size,
+                    control,
+                )?),
                 frontier,
                 expanded: BudgetedHashSet::new(control.memory()),
                 phase: Phase::Approximate,
@@ -176,6 +185,7 @@ impl Workspace {
             }
             self.phase = Phase::Completing;
             self.lookup = None;
+            self.refinement = None;
             self.frontier = BudgetedVec::new(control.memory());
             while self.cursor < input.nodes && selected.len() < width {
                 control.check()?;
@@ -210,12 +220,29 @@ impl Workspace {
         }
         let (nodes, read) = reader.read_nodes_with_stats(&selected, control)?;
         pages.merge(read)?;
+        if !completion {
+            let refinement = self.refinement.as_mut().expect("approximate refinement");
+            for node in nodes.iter() {
+                control.check()?;
+                self.expanded.insert(node.node_id())?;
+                refinement.offer(node, control)?;
+            }
+            let mut retained = 0;
+            for offset in 0..self.frontier.len() {
+                super::metric::checkpoint(offset, control)?;
+                let candidate = self.frontier[offset];
+                if !self.expanded.contains(&candidate.node) && refinement.allows(&candidate) {
+                    self.frontier[retained] = candidate;
+                    retained += 1;
+                }
+            }
+            self.frontier.truncate(retained);
+        }
         for node in nodes.iter() {
             control.check()?;
             if completion {
                 increment(&mut stats.completion_expansions)?;
             } else {
-                self.expanded.insert(node.node_id())?;
                 increment(&mut stats.approximate_expansions)?;
                 for &neighbor in node.neighbors() {
                     control.check()?;
@@ -255,6 +282,14 @@ impl Workspace {
                 .estimate(code, control)?,
         };
         increment(&mut stats.pq_estimates)?;
+        if !self
+            .refinement
+            .as_ref()
+            .ok_or_else(|| invalid("approximate traversal has no refinement"))?
+            .allows(&candidate)
+        {
+            return Ok(());
+        }
         let limit = reader.manifest().input().parameters.search_list_size;
         if self.frontier.len() < limit {
             self.frontier.push(candidate)?;
@@ -266,7 +301,7 @@ impl Workspace {
         } else {
             return Ok(());
         }
-        // Expanded entries retain their place in the best-L cutoff. With fixed distances an evicted entry cannot beat the later cutoff; explicit completion visits anything never expanded.
+        // Only unexpanded work occupies the bounded PQ frontier. A previously evicted candidate may be admitted again if a later edge rediscovers it.
         self.frontier.sort_unstable_by(Candidate::compare);
         Ok(())
     }

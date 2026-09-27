@@ -20,6 +20,7 @@ use crate::diskann_index::{
 use crate::mvcc::{DatabaseId, StorageTransactionId};
 use crate::vector_index::DiskANNIndexParams;
 
+mod refinement;
 mod resources;
 
 #[derive(Deserialize)]
@@ -31,6 +32,8 @@ struct Oracle {
     neighbors: Vec<Vec<u64>>,
     entry: u64,
     cases: Vec<Case>,
+    #[serde(default)]
+    vectors: Vec<Vec<f32>>,
 }
 
 #[derive(Deserialize)]
@@ -80,6 +83,16 @@ fn fixture(
     physical: &MemoryBudget,
 ) -> (DiskANNMemorySource, DiskANNManifest) {
     let data = oracle();
+    fixture_from(&data, dimensions, count, case, physical)
+}
+
+fn fixture_from(
+    data: &Oracle,
+    dimensions: u32,
+    count: usize,
+    case: &Case,
+    physical: &MemoryBudget,
+) -> (DiskANNMemorySource, DiskANNManifest) {
     let control = StorageReadControl::with_limit(1 << 20);
     let generation = DiskANNGeneration::new([1; 16], 2, 3, 4).unwrap();
     let parameters = DiskANNIndexParams {
@@ -93,13 +106,15 @@ fn fixture(
     let layout = DiskANNNodeLayout::new(dimensions, 3, count as u64).unwrap();
     let mut builder = DiskANNMemoryBuilder::new(generation, physical);
     let mut coverage = DiskANNCoverageBuilder::new(generation, dimensions).unwrap();
-    let mut artifacts = write_codes(&mut builder, generation, dimensions, count, &control);
+    let mut artifacts = write_codes(data, &mut builder, generation, dimensions, count, &control);
     let mut encoded = Vec::new();
     for id in 0..count {
-        let mut raw: Vec<_> = data.centroids[data.labels[id] as usize]
-            .iter()
-            .map(|&value| value as f32)
-            .collect();
+        let mut raw: Vec<_> = data.vectors.get(id).cloned().unwrap_or_else(|| {
+            data.centroids[data.labels[id] as usize]
+                .iter()
+                .map(|&value| value as f32)
+                .collect()
+        });
         raw.resize(dimensions as usize, -0.0);
         coverage
             .push(
@@ -162,13 +177,13 @@ fn fixture(
 }
 
 fn write_codes(
+    data: &Oracle,
     builder: &mut DiskANNMemoryBuilder,
     generation: DiskANNGeneration,
     dimensions: u32,
     count: usize,
     control: &StorageReadControl,
 ) -> DiskANNArtifactDigests {
-    let data = oracle();
     let mut artifacts = DiskANNArtifactDigests::empty();
     if count != 0 {
         let mut centroids = BudgetedVec::new(control.memory());

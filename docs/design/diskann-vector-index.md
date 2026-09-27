@@ -48,7 +48,7 @@ Only one of IVF, HNSW, or DiskANN may own a vector field at a time. Creation bac
 | --- | --- | --- |
 | `max_degree` | 64 | Integer at least 2; final outgoing degree bound, including UQA connectivity edges |
 | `build_list_size` | 128 | Integer at least `max_degree`; construction candidate-list capacity |
-| `search_list_size` | 64 | Positive integer; initial query candidate capacity, raised to at least requested document count |
+| `search_list_size` | 64 | Positive integer; fixed unexpanded-candidate capacity and maximum refined-distance heap size |
 | `alpha` | 1.2 | Finite real at least 1 with a finite squared factor; pruning factor in Euclidean units |
 | `beam_width` | 4 | Positive integer no greater than configured `search_list_size`; nodes selected per expansion batch, not a promise of parallel physical I/O |
 | `pq_bytes` | `min(32, dimensions)` | One byte per nonempty coordinate chunk; between 1 and dimension count |
@@ -184,7 +184,7 @@ The base code array is resident and immutable; full raw vectors and adjacency ar
 
 ## Search execution
 
-The query pins one manifest, code array, page reader, and canonical/change visibility view. A bounded beam chooses several unexpanded candidates, batches their page requests, expands their outgoing edges, and scores newly discovered codes. Nodes already in the cache still count as expanded nodes; cache hits cannot change tie order or omit neighbor processing. Full coordinates read during expansion supply final reranking input. The pinned [disk-search reference](https://github.com/microsoft/DiskANN/blob/78256bbab4685e1774e78d331e081a153be26823/src/pq_flash_index.cpp) is a secondary check for beam/read/rerank mechanics, not a provider implementation to import.
+The query pins one manifest, code array, page reader, and canonical/change visibility view. A bounded beam chooses several unexpanded candidates, batches their page requests, expands their outgoing edges, and scores newly discovered codes. Nodes already in the cache still count as expanded nodes; cache hits cannot change tie order or omit neighbor processing. Original coordinates read during expansion refine the navigation cutoff independently of final canonical tensor reranking. The pinned [disk-search reference](https://github.com/microsoft/DiskANN/blob/78256bbab4685e1774e78d331e081a153be26823/src/pq_flash_index.cpp) is a secondary check for beam/read/rerank mechanics; the [refined-cutoff strategy and proof](diskann-paged-navigation.md#bounded-refinement-and-preservation-proof) state UQA's explicit query improvement.
 
 ```mermaid
 flowchart TD
@@ -203,14 +203,15 @@ flowchart TD
 search(snapshot, query, k, control):
     validate query and register the logical vector read
     select ordinary navigation or the declared numeric-edge exact path
-    create PQ lookup table and a bounded candidate frontier
+    create PQ lookup table, bounded pending frontier and bounded refined-distance heap
     while the retained frontier contains unexpanded nodes:
         select up to beam_width nodes in deterministic priority order
         deduplicate their required page IDs; reserve buffers before reads
         read missing pages under the pinned generation lease
-        validate pages and expand nodes in the selected priority order
-        record full-vector candidates; insert neighbors using PQ estimates
-        retain the best active search_list_size navigation candidates
+        validate pages; refine the cutoff with every selected original vector
+        remove expanded or cutoff-rejected entries from the pending frontier
+        expand frozen nodes in priority order; offer neighbors using PQ estimates
+        retain at most search_list_size pending candidates and refined distances each
     suppress base candidates replaced/deleted in the selected visibility view
     merge exact changed-vector and numeric-side-stream candidates
     rerank candidate documents from their visible canonical tensor elements
@@ -222,7 +223,7 @@ The visited set is separate from the bounded frontier; its size can exceed the c
 
 Tensor identity is preserved through `(DocId, ordinal)` until document reduction. After selecting candidate documents, read all their visible ordinals under the same snapshot and compute each document's actual maximum using the canonical reduction contract. This extra work is explicit in cost and I/O metrics. It avoids returning the score of an arbitrary encountered tensor element. Deleted or superseded base vectors can remain navigation vertices, but cannot contribute stale output.
 
-The [physical traversal](diskann-paged-navigation.md) keeps a fixed best-list cutoff and freezes each beam before reads. When tensor duplication or masked nodes leave fewer than $k$ live documents after approximate exhaustion, explicitly continue through unexpanded generation IDs in ascending order while preserving prior work and the same canonical snapshot. This deterministic completion rule avoids losing candidates evicted from the bounded frontier; it does not assert exact nearest-neighbor membership. Return fewer than $k$ only when the visible corpus has fewer eligible vector-bearing documents; otherwise continue within the allowance or return a resource error. Approximate membership does not authorize silent truncation after an arbitrary I/O budget.
+The [physical traversal](diskann-paged-navigation.md) keeps the configured pending capacity fixed, refines its cutoff from already read original vectors and freezes each beam before reads. When tensor duplication or masked nodes leave fewer than $k$ live documents after approximate exhaustion, explicitly continue through unexpanded generation IDs in ascending order while preserving prior work and the same canonical snapshot. This deterministic completion rule avoids losing candidates evicted from the bounded frontier; it does not assert exact nearest-neighbor membership. Return fewer than $k$ only when the visible corpus has fewer eligible vector-bearing documents; otherwise continue within the allowance or return a resource error. Approximate membership does not authorize silent truncation after an arbitrary I/O budget.
 
 An ordinary relational filter is not a graph-traversal filter. ACL/RLS and security-barrier handling use the existing Execution contract: graph navigation may use internal routing nodes only where allowed by that contract, final rows must be authorized, and EXPLAIN/telemetry must not leak unauthorized payloads. Predicate pushdown or tenant-separated graphs require a separately specified semantic and security contract. They cannot be inferred from the 2019 algorithm.
 
@@ -352,7 +353,7 @@ Keep ordinary query syntax unchanged. Planner selects the field's actual physica
 
 The implemented [physical statistics and cost model](diskann-physical-planning.md) specifies per-field/query identity, stored facts versus estimates, dispatch batching, numeric exact routes and preservation of decorated compositions. Exact selected-view current/change counts, static EXPLAIN and invocation counters remain open integration requirements.
 
-EXPLAIN identifies `diskann`, graph/PQ generation, navigation metric, public score domain, initial/adaptive search capacity, requested/effective beam settings, base and outstanding-change counts, exact side paths, cache limits, and residual relational filters. Execution counters include expanded nodes, discovered/visited nodes, logical pages, physical reads where the provider can report them, bytes, cache hits, I/O rounds, tensor rerank reads, exact changed vectors, and candidate/document counts. Unknown physical I/O counts remain unknown; logical reads are not relabeled SSD operations.
+EXPLAIN identifies `diskann`, graph/PQ generation, navigation metric, public score domain, configured search-list capacity and beam settings, base and outstanding-change counts, exact side paths, cache limits, and residual relational filters. Execution counters include expanded nodes, discovered/visited nodes, logical pages, physical reads where the provider can report them, bytes, cache hits, I/O rounds, tensor rerank reads, exact changed vectors, and candidate/document counts. Unknown physical I/O counts remain unknown; logical reads are not relabeled SSD operations.
 
 PQ estimates are never probabilities. Probability conversion consumes the final canonical raw cosine scores after base/change visibility, exact side-stream merging, and document-level tensor reranking. It does not recompute cosine using a different arithmetic helper or use PQ distance, normalized navigation distance, or the internal visited frontier as the calibration input.
 

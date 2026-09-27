@@ -26,10 +26,20 @@ fn normalization_preserves_raw_bits_and_canonical_scores() {
     assert_eq!(raw.map(f32::to_bits), bits);
     assert_eq!(vector.coordinates()[0].to_bits(), (-0.0_f64).to_bits());
     assert_eq!(vector.coordinates(), &[-0.0, 0.6, 0.8]);
+    let query_vector = navigable(&query, &control);
+    let used = control.memory().used();
+    let distance = query_vector
+        .squared_distance_to_raw(&raw, &control)
+        .unwrap();
+    assert!((distance.get() - 0.8).abs() < 1.0e-15);
+    assert_eq!(control.memory().used(), used);
+    let copied = query_vector.copy(&control).unwrap();
+    drop(query_vector);
+    assert_eq!(copied.coordinates(), &[0.0, 1.0, 0.0]);
     assert_eq!(cosine_similarity(&query, &raw).to_bits(), 0x3f19_999a);
     assert_eq!(cosine_similarity(&[-1.0], &[1.0]).to_bits(), 0xbf80_0000);
     assert_eq!(cosine_similarity(&[-0.0], &[1.0]).to_bits(), 0);
-    drop(vector);
+    drop((vector, copied));
     assert_eq!(control.memory().used(), 0);
 }
 
@@ -89,6 +99,15 @@ fn invalid_inputs_fail_without_allocations_and_controls_release_workspace() {
     let left = navigable(&[1.0], &control);
     let right = navigable(&[1.0, 0.0], &control);
     assert!(left.squared_distance(&right, &control).is_err());
+    for raw in [
+        vec![],
+        vec![1.0, 2.0],
+        vec![0.0],
+        vec![f32::NAN],
+        vec![f32::MAX],
+    ] {
+        assert!(left.squared_distance_to_raw(&raw, &control).is_err());
+    }
     for limit in 0..16 {
         let limited = StorageReadControl::with_limit(limit);
         assert!(matches!(
@@ -104,6 +123,14 @@ fn invalid_inputs_fail_without_allocations_and_controls_release_workspace() {
     ));
     assert!(matches!(
         left.squared_distance(&left, &control),
+        Err(StorageBackendError::Cancelled(_))
+    ));
+    assert!(matches!(
+        left.copy(&control),
+        Err(StorageBackendError::Cancelled(_))
+    ));
+    assert!(matches!(
+        left.squared_distance_to_raw(&[1.0], &control),
         Err(StorageBackendError::Cancelled(_))
     ));
 }
