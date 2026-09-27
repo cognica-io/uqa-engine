@@ -22,7 +22,7 @@
 //!    when the field belongs to the left side.
 //! 6. `fuse_join_pattern` -- merge intersected PatternMatch operators
 //!    that share a vertex variable.
-//! 7. `reorder_intersect` -- sort Intersect children by estimated operator cost (cheapest first).
+//! 7. `reorder_intersect` -- sort membership-only Intersect children by estimated operator cost (cheapest first); decorated operands retain their order.
 //! 8. `reorder_fusion_signals` -- sort fusion signals by cost; graph
 //!    operators receive a 0.5x discount when graph stats are
 //!    available.
