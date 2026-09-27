@@ -20,8 +20,10 @@ use crate::{
 };
 
 mod candidates;
+mod matching;
 mod retained;
 mod selection;
+mod values;
 pub use retained::RetainedDiskANNIndex;
 pub use selection::{DiskANNReadChanges, DiskANNReadSnapshot};
 #[cfg(test)]
@@ -94,7 +96,11 @@ impl<'a> DiskANNQuery<'a> {
         let navigation =
             match NavigationInput::from_raw(self.canonical.dimensions(), query, control)? {
                 NavigationInput::Exact(reason) => {
-                    let postings = scorer.search_exact_knn(k)?;
+                    let postings = if let Some(source) = self.canonical.unversioned_vectors() {
+                        values::exact(&**source, query, k, control)?
+                    } else {
+                        scorer.search_exact_knn(k)?
+                    };
                     self.check(control)?;
                     return Ok(result(
                         postings,
@@ -117,6 +123,17 @@ impl<'a> DiskANNQuery<'a> {
         }
         candidates.side()?;
         candidates.changes()?;
+        if let Some(source) = self.canonical.unversioned_vectors() {
+            values::visit(&**source, control, &mut |document| {
+                self.check(control)?;
+                if self.canonical.origin(document, control)?.is_none() {
+                    if let Some(score) = values::score(&**source, document, query, control)? {
+                        candidates.offer_unversioned(document, score)?;
+                    }
+                }
+                Ok(())
+            })?;
+        }
         while candidates.len() < k {
             self.check(control)?;
             let nodes = traversal.complete_next_beam()?;
@@ -138,8 +155,12 @@ impl<'a> DiskANNQuery<'a> {
         control: &StorageReadControl,
     ) -> StorageBackendResult<PostingList> {
         self.check(control)?;
-        let result =
-            DiskANNCanonicalScorer::new(self, query, control)?.search_threshold(threshold)?;
+        let scorer = DiskANNCanonicalScorer::new(self, query, control)?;
+        let result = if let Some(source) = self.canonical.unversioned_vectors() {
+            values::threshold(&**source, query, threshold, control)?
+        } else {
+            scorer.search_threshold(threshold)?
+        };
         self.check(control)?;
         Ok(result)
     }

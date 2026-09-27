@@ -119,6 +119,42 @@ impl<T: VectorIndex + ?Sized + 'static> VectorIndex for ReadOnlySnapshot<T> {
         Ok(Arc::new(self.clone()))
     }
 
+    fn vector_read_snapshot(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::vector_index::VectorReadSnapshot>> {
+        control.check()?;
+        let original = self.2.as_ref().unwrap_or(control);
+        original.check()?;
+        self.0
+            .vector_read_snapshot(original)?
+            .map(|source| {
+                let source = ReadOnlySnapshot(source, self.1.clone(), self.2.clone());
+                uqa_core::memory::Budgeted::new(source, original.memory().empty_reservation())
+                    .into_shared()
+                    .map(|source| source as crate::vector_index::VectorReadSnapshot)
+                    .map_err(Into::into)
+            })
+            .transpose()
+    }
+
+    fn snapshot_with_vector_read(
+        &self,
+        source: crate::vector_index::VectorReadSnapshot,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<Arc<dyn VectorIndex>>> {
+        control.check()?;
+        let original = self.2.as_ref().unwrap_or(control);
+        original.check()?;
+        Ok(self
+            .0
+            .snapshot_with_vector_read(source, original)?
+            .map(|index| {
+                Arc::new(ReadOnlySnapshot(index, self.1.clone(), self.2.clone()))
+                    as Arc<dyn VectorIndex>
+            }))
+    }
+
     fn diskann_read_snapshot(
         &self,
         control: &StorageReadControl,
@@ -162,5 +198,44 @@ impl<T: VectorIndex + ?Sized + 'static> VectorIndex for ReadOnlySnapshot<T> {
         Ok(Arc::new(ReadOnlySnapshot::new(
             self.0.snapshot_with_control(control)?,
         )))
+    }
+}
+
+impl<T: crate::vector_index::VectorRead + ?Sized> crate::vector_index::VectorRead
+    for ReadOnlySnapshot<T>
+{
+    fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
+        if let Some(original) = &self.2 {
+            original.check()?;
+        }
+        self.0.check_control(control)
+    }
+    fn dimensions(&self) -> u32 {
+        self.0.dimensions()
+    }
+    fn next_document_after(
+        &self,
+        after: Option<DocId>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DocId>> {
+        self.check_control(control)?;
+        self.0.next_document_after(after, control)
+    }
+    fn document_vector_count(
+        &self,
+        document: DocId,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<u64> {
+        self.check_control(control)?;
+        self.0.document_vector_count(document, control)
+    }
+    fn read_vector(
+        &self,
+        document: DocId,
+        ordinal: u32,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_core::memory::BudgetedVec<f32>>> {
+        self.check_control(control)?;
+        self.0.read_vector(document, ordinal, control)
     }
 }

@@ -17,6 +17,7 @@ use uqa_core::{DocId, Payload, PostingEntry, PostingList};
 
 use crate::{StorageBackendError, StorageBackendResult};
 
+mod canonical;
 mod collection;
 mod config;
 mod cosine;
@@ -24,6 +25,7 @@ mod memory_snapshot;
 pub mod query;
 pub(crate) mod retained;
 
+pub use canonical::{decode_vector_bytes, SelectedVectorRead, VectorRead, VectorReadSnapshot};
 pub use collection::{
     RetainedVectorIndexesBuilder, VectorIndexSource, VectorIndexes, VectorIndexesIter,
 };
@@ -210,6 +212,31 @@ pub trait VectorIndex: Send + Sync {
         &self,
         control: &crate::read_control::StorageReadControl,
     ) -> StorageBackendResult<Option<crate::diskann_index::DiskANNReadSnapshot>> {
+        control.check()?;
+        Ok(None)
+    }
+
+    /// Retain the actual canonical values independently of physical mutation provenance. Capturing this source is metadata access, not a logical vector query.
+    fn vector_read_snapshot(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<VectorReadSnapshot>> {
+        self.diskann_read_snapshot(control)?
+            .map(|source| {
+                uqa_core::memory::Budgeted::new(source, control.memory().empty_reservation())
+                    .into_shared()
+                    .map(|source| source as VectorReadSnapshot)
+                    .map_err(Into::into)
+            })
+            .transpose()
+    }
+
+    /// Keep this selected physical `DiskANN` generation while reading a different fixed canonical field view. The query owner verifies raw coverage without inventing mutation origins.
+    fn snapshot_with_vector_read(
+        &self,
+        _source: VectorReadSnapshot,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<Arc<dyn VectorIndex>>> {
         control.check()?;
         Ok(None)
     }

@@ -40,12 +40,21 @@ impl VectorSources<'_> {
                 let Some(selected) = schema.vector_dimensions.index(field) else {
                     return Ok(None);
                 };
-                let Some(changes) = self.changes.diskann_read_changes(field, column, control)?
+                if let Some(changes) = self.changes.diskann_read_changes(field, column, control)? {
+                    if let Some(index) = selected.snapshot_with_diskann_changes(
+                        &changes.without_unselected_documents(),
+                        control,
+                    )? {
+                        return Ok(Some(index));
+                    }
+                }
+                let Some(source) = self
+                    .changes
+                    .vector_read_selection(None, dimensions, field, column, control)?
                 else {
                     return Ok(None);
                 };
-                selected
-                    .snapshot_with_diskann_changes(&changes.without_unselected_documents(), control)
+                selected.snapshot_with_vector_read(source, control)
             })();
             return retained
                 .map_err(|error| snapshot_error("complete physical vector selection", &error));
@@ -75,22 +84,39 @@ impl VectorSources<'_> {
             return Ok(None);
         };
         let retained = (|| {
-            let Some(base_source) = base.diskann_read_snapshot(control)? else {
-                return Ok(None);
-            };
-            let Some(selected_source) = selected.diskann_read_snapshot(control)? else {
-                return Ok(None);
-            };
-            if !base_source.same_lineage(&selected_source) {
-                return Ok(None);
+            if let (Some(base_source), Some(selected_source)) = (
+                base.diskann_read_snapshot(control)?,
+                selected.diskann_read_snapshot(control)?,
+            ) {
+                if base_source.same_lineage(&selected_source) {
+                    if !self.changes.has_changes() {
+                        return base.snapshot_with_control(control).map(Some);
+                    }
+                    if let Some(changes) =
+                        self.changes.diskann_read_changes(field, column, control)?
+                    {
+                        if let Some(index) =
+                            base.snapshot_with_diskann_changes(&changes, control)?
+                        {
+                            return Ok(Some(index));
+                        }
+                    }
+                }
             }
-            if !self.changes.has_changes() {
-                return base.snapshot_with_control(control).map(Some);
-            }
-            let Some(changes) = self.changes.diskann_read_changes(field, column, control)? else {
+            let Some(source) = base.vector_read_snapshot(control)? else {
                 return Ok(None);
             };
-            base.snapshot_with_diskann_changes(&changes, control)
+            let Some(source) = self.changes.vector_read_selection(
+                Some(source),
+                dimensions,
+                field,
+                column,
+                control,
+            )?
+            else {
+                return Ok(None);
+            };
+            selected.snapshot_with_vector_read(source, control)
         })();
         retained.map_err(|error| snapshot_error("physical vector selection", &error))
     }

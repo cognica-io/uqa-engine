@@ -233,6 +233,13 @@ impl VectorIndex for DiskANNMemoryIndex {
         control.check()?;
         self.index.snapshot_with_diskann_changes(changes, control)
     }
+    fn snapshot_with_vector_read(
+        &self,
+        source: crate::vector_index::VectorReadSnapshot,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<Arc<dyn VectorIndex>>> {
+        self.index.snapshot_with_vector_read(source, control)
+    }
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
         self.index.snapshot()
     }

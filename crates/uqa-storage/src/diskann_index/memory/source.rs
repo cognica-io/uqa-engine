@@ -118,6 +118,28 @@ impl DiskANNCanonicalRead for Canonical {
         self.document_origin(document, control)
             .map(|origin| origin.map(DiskANNCanonicalOrigin::version))
     }
+    fn read_vector(
+        &self,
+        document: DocId,
+        ordinal: u32,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_core::memory::BudgetedVec<f32>>> {
+        self.check_control(control)?;
+        let Some(raw) = self
+            .documents
+            .get(&document)
+            .and_then(|tensor| tensor.values.get(ordinal as usize))
+        else {
+            return Ok(None);
+        };
+        let mut vector = uqa_core::memory::BudgetedVec::new(control.memory());
+        vector.reserve(raw.len())?;
+        for chunk in raw.chunks(1024) {
+            self.check_control(control)?;
+            vector.extend_from_slice(chunk)?;
+        }
+        Ok(Some(vector))
+    }
     fn visit_document(
         &self,
         document: DocId,

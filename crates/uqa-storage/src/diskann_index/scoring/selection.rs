@@ -77,17 +77,22 @@ impl TopK {
         &mut self,
         score: DiskANNDocumentScore,
     ) -> StorageBackendResult<()> {
+        self.offer_raw(score.document, score.score)
+    }
+
+    pub(in crate::diskann_index) fn offer_raw(
+        &mut self,
+        document: DocId,
+        score: f32,
+    ) -> StorageBackendResult<()> {
         if self
             .identities
             .as_ref()
-            .is_some_and(|ids| ids.get(&score.document).is_some())
+            .is_some_and(|ids| ids.get(&document).is_some())
         {
             return Ok(());
         }
-        let value = Ranked {
-            document: score.document,
-            score: score.score,
-        };
+        let value = Ranked { document, score };
         if self.heap.len() < self.limit {
             if let Some(ids) = &mut self.identities {
                 ids.insert(value.document, ())?;

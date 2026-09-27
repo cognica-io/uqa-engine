@@ -14,13 +14,16 @@ use uqa_core::memory::{Budgeted, BudgetedVec, MemoryReservation};
 use uqa_sql::ast::ColumnDef;
 use uqa_storage::{
     diskann_index::{DiskANNReadChanges, DiskANNReadSnapshot},
-    vector_index::{RetainedVectorIndexesBuilder, VectorIndexSource},
+    vector_index::{
+        RetainedVectorIndexesBuilder, SelectedVectorRead, VectorIndexSource, VectorReadSnapshot,
+    },
 };
 
 struct VectorSource {
     field: String,
     column: Option<[u8; 16]>,
-    source: DiskANNReadSnapshot,
+    source: Option<DiskANNReadSnapshot>,
+    values: VectorReadSnapshot,
     _memory: MemoryReservation,
 }
 
@@ -30,7 +33,7 @@ pub(super) struct CapturedRows {
 }
 
 impl CapturedRows {
-    fn vector(&self, field: &str, column: Option<&ColumnDef>) -> Option<&DiskANNReadSnapshot> {
+    fn vector(&self, field: &str, column: Option<&ColumnDef>) -> Option<&VectorSource> {
         let identity = column.and_then(|column| column.object_id);
         self.vectors
             .iter()
@@ -38,12 +41,11 @@ impl CapturedRows {
                 (Some(source), Some(target)) => source == target,
                 _ => source.field == field,
             })
-            .map(|source| &source.source)
     }
 }
 
 impl DocumentChanges {
-    /// Capture immutable rows and their actual canonical vector sources at the same selected table boundary. Each retained row, including a tombstone, keeps the source that supplied that version across later captures, schema renames and transaction completion. Other vector methods acquire no additional retained source.
+    /// Capture immutable rows and their actual canonical vector sources at the same selected table boundary. Each retained row, including a tombstone, keeps the source that supplied that version across later captures, schema renames and transaction completion. Raw sources carry values independently of physical mutation provenance.
     pub fn with_retained_vectors(
         mut self,
         documents: Arc<dyn DocumentStore>,
@@ -55,7 +57,16 @@ impl DocumentChanges {
         control.check()?;
         let mut vectors = BudgetedVec::new(control.memory());
         indexes.visit(&mut |field, index| {
-            let Some(source) = index.diskann_read_snapshot(control)? else {
+            let source = index.diskann_read_snapshot(control)?;
+            let values = if let Some(source) = &source {
+                Some(
+                    Budgeted::new(source.clone(), control.memory().empty_reservation())
+                        .into_shared()? as VectorReadSnapshot,
+                )
+            } else {
+                index.vector_read_snapshot(control)?
+            };
+            let Some(values) = values else {
                 return Ok(());
             };
             vectors.reserve(1)?;
@@ -68,6 +79,7 @@ impl DocumentChanges {
                 field,
                 column,
                 source,
+                values,
                 _memory: memory,
             })?;
             Ok(())
@@ -101,7 +113,7 @@ impl DocumentChanges {
         for (_, change) in self.rows() {
             control.check()?;
             if change.present()
-                && !matches!(change, Change::Captured(source, true) if source.vector(field, column).is_some())
+                && !matches!(change, Change::Captured(source, true) if source.vector(field, column).is_some_and(|source| source.source.is_some()))
             {
                 return Ok(None);
             }
@@ -120,9 +132,49 @@ impl DocumentChanges {
                         source
                             .vector(field, column)
                             .expect("validated private column")
+                            .source
+                            .as_ref()
+                            .expect("validated private physical source")
                             .clone(),
                     ),
                 ))
+            }),
+            control,
+        )
+        .map(Some)
+    }
+
+    pub(in crate::query) fn vector_read_selection(
+        &self,
+        base: Option<VectorReadSnapshot>,
+        dimensions: u32,
+        field: &str,
+        column: Option<&ColumnDef>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<VectorReadSnapshot>> {
+        for (_, change) in self.rows() {
+            control.check()?;
+            if change.present()
+                && !matches!(change, Change::Captured(source, true) if source.vector(field, column).is_some())
+            {
+                return Ok(None);
+            }
+        }
+        SelectedVectorRead::capture(
+            base,
+            dimensions,
+            self.rows().iter().map(|(document, change)| {
+                let source = match change {
+                    Change::Captured(source, true) => Some(
+                        source
+                            .vector(field, column)
+                            .expect("validated private column")
+                            .values
+                            .clone(),
+                    ),
+                    _ => None,
+                };
+                (*document, source)
             }),
             control,
         )

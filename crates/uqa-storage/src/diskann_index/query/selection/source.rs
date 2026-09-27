@@ -135,6 +135,50 @@ impl DiskANNCanonicalRead for DiskANNReadSnapshot {
             self.canonical.visit_document(document, control, visit)
         })
     }
+
+    fn read_vector(
+        &self,
+        document: DocId,
+        ordinal: u32,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_core::memory::BudgetedVec<f32>>> {
+        self.read(control, || {
+            self.canonical.read_vector(document, ordinal, control)
+        })
+    }
+}
+
+impl crate::vector_index::VectorRead for DiskANNReadSnapshot {
+    fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
+        DiskANNCanonicalRead::check_control(self, control)
+    }
+    fn dimensions(&self) -> u32 {
+        DiskANNCanonicalRead::dimensions(self)
+    }
+    fn next_document_after(
+        &self,
+        after: Option<DocId>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DocId>> {
+        DiskANNCanonicalRead::next_document_after(self, after, control)
+    }
+    fn document_vector_count(
+        &self,
+        document: DocId,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<u64> {
+        Ok(self
+            .document_origin(document, control)?
+            .map_or(0, DiskANNCanonicalOrigin::count))
+    }
+    fn read_vector(
+        &self,
+        document: DocId,
+        ordinal: u32,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_core::memory::BudgetedVec<f32>>> {
+        DiskANNCanonicalRead::read_vector(self, document, ordinal, control)
+    }
 }
 
 impl DiskANNQueryRead for DiskANNReadSnapshot {

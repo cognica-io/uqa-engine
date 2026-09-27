@@ -152,6 +152,16 @@ impl<P: DiskANNPersistentOwner> VectorIndex for PersistentDiskANNIndex<P> {
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
         self.owner.snapshot()?.snapshot()
     }
+    fn snapshot_with_vector_read(
+        &self,
+        source: crate::vector_index::VectorReadSnapshot,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<Arc<dyn VectorIndex>>> {
+        control.check()?;
+        self.owner
+            .snapshot()?
+            .snapshot_with_vector_read(source, control)
+    }
     fn snapshot_with_control(
         &self,
         control: &StorageReadControl,

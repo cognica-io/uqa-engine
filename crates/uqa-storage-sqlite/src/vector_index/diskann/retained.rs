@@ -410,6 +410,39 @@ impl RetainedSQLiteDiskANNCanonical {
 }
 
 impl DiskANNCanonicalRead for RetainedSQLiteDiskANNCanonical {
+    fn read_vector(
+        &self,
+        document: DocId,
+        ordinal: u32,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<BudgetedVec<f32>>> {
+        self.check(control)?;
+        let bytes = usize::try_from(self.dimensions)
+            .map_err(|_| uqa_core::memory::MemoryError::SizeOverflow)?
+            .checked_mul(4)
+            .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+        let mut result = None;
+        self.read_payload(
+            encode_doc_id(document)?,
+            Some(u64::from(ordinal)),
+            bytes,
+            control,
+            &mut |value| {
+                result = value
+                    .map(|value| {
+                        uqa_storage::vector_index::decode_vector_bytes(
+                            value,
+                            self.dimensions,
+                            control,
+                        )
+                    })
+                    .transpose()?;
+                Ok(())
+            },
+        )?;
+        self.check(control)?;
+        Ok(result)
+    }
     fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
         self.check(control)
     }

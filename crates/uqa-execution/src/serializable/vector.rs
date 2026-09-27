@@ -168,6 +168,27 @@ impl VectorIndex for ObservedVectorIndex {
     ) -> StorageBackendResult<Option<uqa_storage::diskann_index::DiskANNReadSnapshot>> {
         self.index.diskann_read_snapshot(control)
     }
+    fn vector_read_snapshot(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_storage::vector_index::VectorReadSnapshot>> {
+        self.index.vector_read_snapshot(control)
+    }
+    fn snapshot_with_vector_read(
+        &self,
+        source: uqa_storage::vector_index::VectorReadSnapshot,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<Arc<dyn VectorIndex>>> {
+        Ok(self
+            .index
+            .snapshot_with_vector_read(source, control)?
+            .map(|index| {
+                Arc::new(Self {
+                    index,
+                    observation: self.observation.clone(),
+                }) as Arc<dyn VectorIndex>
+            }))
+    }
     fn snapshot_with_diskann_changes(
         &self,
         changes: &uqa_storage::diskann_index::DiskANNReadChanges,
