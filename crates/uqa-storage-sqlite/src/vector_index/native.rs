@@ -268,7 +268,12 @@ impl<'a> NativeVectorRead<'a> {
             if family == Family::Vectors {
                 self.snapshot
                     .coordinate_vector_field(batch, owner, self.field(), true)?;
-                for related in [Family::VectorOrigins, Family::VectorChanges] {
+                for related in [
+                    Family::VectorOrigins,
+                    Family::VectorChanges,
+                    Family::VectorPopulations,
+                    Family::VectorPopulationWitnesses,
+                ] {
                     self.snapshot
                         .delete_prefix(batch, related, owner, &[self.field()])?;
                 }

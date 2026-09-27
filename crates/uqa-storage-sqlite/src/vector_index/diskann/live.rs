@@ -57,6 +57,7 @@ impl SQLiteDiskANNCanonical {
         .try_fold(0_usize, usize::checked_add)
         .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
         let memory = control.memory().reserve(bytes)?;
+        self.initialize_populations(&index, &*resolver, control)?;
         let source = self.retain_for_index(&index, control)?;
         let scope = source.index_scope(&*resolver, control)?;
         let parameters = source

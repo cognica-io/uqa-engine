@@ -34,8 +34,8 @@ fn diskann_explain_memory_populations_follow_private_writes_and_savepoint_undo()
 }
 
 #[test]
-fn diskann_explain_key_value_populations_follow_private_writes_and_savepoint_undo() {
-    for provider in 1..3 {
+fn diskann_explain_persistent_populations_follow_private_writes_and_savepoint_undo() {
+    for provider in 0..3 {
         let (_directory, engine, _peer) = sessions(provider);
         population_undo(&engine);
     }

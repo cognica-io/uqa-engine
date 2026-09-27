@@ -94,12 +94,7 @@ impl KeyValueDiskANNCanonical {
         let scope = source.index_scope(resolver, control)?;
         self.index.store.with_mutation(&mut |read, batch| {
             source.require_current_index(read, batch, control)?;
-            if publication::selected_generation(&scope, read, control)? != Some(generation) {
-                return Err(invalid(
-                    "selected generation changed during population initialization",
-                ));
-            }
-            batch.require_unchanged(&publication::head_key(&scope))?;
+            publication::require_selected_generation(&scope, read, batch, generation, control)?;
             source.publish_population(&selected, batch, control)
         })
     }

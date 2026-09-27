@@ -31,14 +31,18 @@ impl RetainedSQLiteDiskANNCanonical {
         let scope = self.index_scope(resolver, control)?;
         let captured = crate::diskann::map_read(&captured_read, self.snapshot.database)?;
         let current_records = crate::diskann::map_read(&current_read, current.database)?;
-        let mut batch = crate::diskann::map_batch(batch, current.database, &current.control)?;
-        publication::retire_captured_generation(
-            &scope,
-            &captured,
-            &current_records,
-            &mut batch,
-            control,
-        )
+        let generation = {
+            let mut mapped = crate::diskann::map_batch(batch, current.database, &current.control)?;
+            publication::retire_captured_generation(
+                &scope,
+                &captured,
+                &current_records,
+                &mut mapped,
+                control,
+            )?
+        };
+        self.retire_population(generation, batch, control)?;
+        Ok(generation)
     }
 
     pub(crate) fn publish_generation(
@@ -78,20 +82,27 @@ impl RetainedSQLiteDiskANNCanonical {
         let scope = source.index_scope(resolver, control)?;
         let captured = crate::diskann::map_read(&captured_read, source.snapshot.database)?;
         let current_records = crate::diskann::map_read(&current_read, current.database)?;
-        let mut batch = crate::diskann::map_batch(batch, current.database, &current.control)?;
-        publication::publish_captured_generation(
-            coverage,
-            &scope,
-            source
-                .index_parameters()
-                .ok_or_else(|| invalid("missing index parameters"))?,
-            publication::DiskANNPublicationViews {
-                captured: &captured,
-                current: &current_records,
-                batch: &mut batch,
-                sealed,
-            },
-            control,
-        )
+        let previous = publication::selected_generation(&scope, &captured, control)?;
+        {
+            let mut mapped = crate::diskann::map_batch(batch, current.database, &current.control)?;
+            publication::publish_captured_generation(
+                coverage,
+                &scope,
+                source
+                    .index_parameters()
+                    .ok_or_else(|| invalid("missing index parameters"))?,
+                publication::DiskANNPublicationViews {
+                    captured: &captured,
+                    current: &current_records,
+                    batch: &mut mapped,
+                    sealed,
+                },
+                control,
+            )?;
+        }
+        if let Some(previous) = previous {
+            source.retire_population(previous, batch, control)?;
+        }
+        source.publish_population(sealed, batch, control)
     }
 }

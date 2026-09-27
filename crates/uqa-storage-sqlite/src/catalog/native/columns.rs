@@ -7,6 +7,7 @@
 //! Field-owned storage and ordinary catalog index references share one evaluated column lifecycle batch.
 
 mod records;
+mod vectors;
 
 use super::{string, text, Catalog, Family, NativeRecordOwner, NativeSnapshot, Result};
 use crate::catalog::RelationIdentity;
@@ -24,8 +25,15 @@ impl Catalog {
         to: Option<&str>,
     ) -> Result<Option<()>> {
         self.conn.with_native_write(|snapshot, batch| {
+            if to == Some(from) {
+                return Ok(());
+            }
+            let owner = snapshot.table_owner(table)?;
+            if let (Some(owner), Some(to)) = (owner, to) {
+                snapshot.reject_diskann_field_merge(owner, table, from, to)?;
+            }
             snapshot.change_column_indexes(batch, table, from, to)?;
-            let Some(owner) = snapshot.table_owner(table)? else {
+            let Some(owner) = owner else {
                 return Ok(());
             };
             snapshot.reset_occurrence_rows(batch, owner)?;

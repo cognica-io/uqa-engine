@@ -42,19 +42,37 @@ const FORMAT_TEN: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGE
 
 const FORMAT_ELEVEN: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 11), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))";
 
-const CURRENT_VERSION: u32 = 12;
+const FORMAT_TWELVE: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 12), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))";
+
+const CURRENT_VERSION: u32 = 13;
 
 #[cfg(test)]
 mod tests;
 
 const TABLES: [(&str, &str); 4] = [
-    ("_uqa_mvcc_native_format", "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 12), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))"),
+    ("_uqa_mvcc_native_format", "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 13), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))"),
     ("_uqa_mvcc_native_owners", "CREATE TABLE _uqa_mvcc_native_owners (name TEXT PRIMARY KEY NOT NULL, object_id BLOB NOT NULL CHECK(typeof(object_id) = 'blob' AND length(object_id) = 16 AND object_id != zeroblob(16)), generation BLOB NOT NULL CHECK(typeof(generation) = 'blob' AND length(generation) = 16 AND generation != zeroblob(16)), catalog_owned INTEGER NOT NULL CHECK(catalog_owned IN (0, 1))) WITHOUT ROWID"),
     ("_uqa_mvcc_native_expected", "CREATE TABLE _uqa_mvcc_native_expected (family INTEGER NOT NULL, physical_key BLOB NOT NULL, old_key BLOB, new_key BLOB, new_value BLOB, PRIMARY KEY(family, physical_key), CHECK((new_key IS NULL) = (new_value IS NULL))) WITHOUT ROWID"),
     ("_uqa_mvcc_native_changes", "CREATE TABLE _uqa_mvcc_native_changes (family INTEGER NOT NULL, physical_key BLOB NOT NULL, PRIMARY KEY(family, physical_key)) WITHOUT ROWID"),
 ];
 const OWNER_INDEX: &str =
     "CREATE UNIQUE INDEX _uqa_mvcc_native_owner_identity ON _uqa_mvcc_native_owners(object_id)";
+
+const DISKANN_TABLES: [(u32, Family, &str); 5] = [
+    (10, Family::DiskANNRecords, super::diskann::SQL),
+    (11, Family::VectorOrigins, super::diskann::ORIGINS_SQL),
+    (12, Family::VectorChanges, super::diskann::CHANGES_SQL),
+    (
+        13,
+        super::populations::schema::TABLES[0].0,
+        super::populations::schema::TABLES[0].1,
+    ),
+    (
+        13,
+        super::populations::schema::TABLES[1].0,
+        super::populations::schema::TABLES[1].1,
+    ),
+];
 
 pub(in crate::mvcc) fn present(connection: &Connection) -> PhysicalResult<bool> {
     Ok(connection.query_row(
@@ -167,7 +185,7 @@ pub(in crate::mvcc) fn initialize_in(
         return Err(invalid("native baseline import requires an owning transaction").into());
     }
     if present(transaction)? {
-        let mapping = reopen(transaction, control)?;
+        let mapping = reopen(transaction, control, false)?;
         control.cancellation().check().map_err(VersionError::from)?;
         return Ok(mapping);
     }
@@ -206,9 +224,9 @@ pub(in crate::mvcc) fn initialize_in(
     transaction.execute_batch(graph_lookup::SQL)?;
     transaction.execute_batch(super::occurrence_guards::SQL)?;
     transaction.execute_batch(super::vector_guards::SQL)?;
-    transaction.execute_batch(super::diskann::SQL)?;
-    transaction.execute_batch(super::diskann::ORIGINS_SQL)?;
-    transaction.execute_batch(super::diskann::CHANGES_SQL)?;
+    for (_, _, sql) in DISKANN_TABLES {
+        transaction.execute_batch(sql)?;
+    }
     occurrence_accelerators::create(transaction)?;
     occurrence_accelerators::import(transaction, control)?;
     crate::Catalog::upgrade_metadata_cache_triggers(transaction)?;
@@ -264,44 +282,73 @@ pub(in crate::mvcc) fn initialize_in(
     })
 }
 
-fn reopen(connection: &Connection, control: &StorageReadControl) -> PhysicalResult<NativeMapping> {
-    crate::Catalog::upgrade_metadata_cache_triggers(connection)?;
-    let version = if schema::definition_matches(connection, TABLES[0].0, LEGACY_FORMAT)?
-        == Some(true)
-    {
-        1
-    } else if schema::definition_matches(connection, TABLES[0].0, FORMAT_TWO)? == Some(true) {
-        2
-    } else if schema::definition_matches(connection, TABLES[0].0, FORMAT_THREE)? == Some(true) {
-        3
-    } else if schema::definition_matches(connection, TABLES[0].0, FORMAT_FOUR)? == Some(true) {
-        4
-    } else if schema::definition_matches(connection, TABLES[0].0, FORMAT_FIVE)? == Some(true) {
-        5
-    } else if schema::definition_matches(connection, TABLES[0].0, FORMAT_SIX)? == Some(true) {
-        6
-    } else if schema::definition_matches(connection, TABLES[0].0, FORMAT_SEVEN)? == Some(true) {
-        7
-    } else if schema::definition_matches(connection, TABLES[0].0, FORMAT_EIGHT)? == Some(true) {
-        8
-    } else if schema::definition_matches(connection, TABLES[0].0, FORMAT_NINE)? == Some(true) {
-        9
-    } else if schema::definition_matches(connection, TABLES[0].0, FORMAT_TEN)? == Some(true) {
-        10
-    } else if schema::definition_matches(connection, TABLES[0].0, FORMAT_ELEVEN)? == Some(true) {
-        11
-    } else {
-        CURRENT_VERSION
-    };
-    validate_format(connection, version)?;
+/// Upgrade a pending restore only inside the restore owner's existing transaction, preserving its durable intent and stable data namespace.
+pub(in crate::mvcc) fn initialize_restoration(
+    connection: &Connection,
+    control: &StorageReadControl,
+) -> PhysicalResult<NativeMapping> {
+    control.cancellation().check().map_err(VersionError::from)?;
+    if connection.is_autocommit() || !present(connection)? {
+        return Err(invalid(
+            "native restoration requires an existing mapping and owning transaction",
+        )
+        .into());
+    }
+    let mapping = reopen(connection, control, true)?;
+    control.cancellation().check().map_err(VersionError::from)?;
+    Ok(mapping)
+}
+
+fn stored_version(connection: &Connection) -> PhysicalResult<u32> {
+    for (version, definition) in (1_u32..).zip([
+        LEGACY_FORMAT,
+        FORMAT_TWO,
+        FORMAT_THREE,
+        FORMAT_FOUR,
+        FORMAT_FIVE,
+        FORMAT_SIX,
+        FORMAT_SEVEN,
+        FORMAT_EIGHT,
+        FORMAT_NINE,
+        FORMAT_TEN,
+        FORMAT_ELEVEN,
+        FORMAT_TWELVE,
+    ]) {
+        if schema::definition_matches(connection, TABLES[0].0, definition)? == Some(true) {
+            return Ok(version);
+        }
+    }
+    Ok(CURRENT_VERSION)
+}
+
+fn record_history(connection: &Connection, restoring: bool) -> PhysicalResult<DatabaseId> {
+    if restoring {
+        schema::initialize_restoration(connection)?;
+        let (identity, header, pending) = codec::restoration_header(connection)?;
+        if pending.is_none() || header.key_value_mapping {
+            return Err(invalid("native restoration requires a pending native history").into());
+        }
+        return Ok(identity);
+    }
     let initialized = schema::initialize_in(connection)?;
-    let identity = initialized.identity;
     if initialized.created {
         return Err(invalid("native mapping has no record history format").into());
     }
-    if codec::header(connection, identity)?.key_value_mapping {
+    if codec::header(connection, initialized.identity)?.key_value_mapping {
         return Err(invalid("mixed native and KeyValue mappings").into());
     }
+    Ok(initialized.identity)
+}
+
+fn reopen(
+    connection: &Connection,
+    control: &StorageReadControl,
+    restoring: bool,
+) -> PhysicalResult<NativeMapping> {
+    crate::Catalog::upgrade_metadata_cache_triggers(connection)?;
+    let version = stored_version(connection)?;
+    validate_format(connection, version)?;
+    let identity = record_history(connection, restoring)?;
     check_mapping_version(connection, version)?;
     if version < 8
         && connection.query_row("SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_runs)", [], |row| {
@@ -338,17 +385,13 @@ fn reopen(connection: &Connection, control: &StorageReadControl) -> PhysicalResu
             connection.execute_batch(&sql)?;
         }
     }
-    if version < 10 {
-        connection.execute_batch(super::diskann::SQL)?;
-        install_family_guards(connection, Family::DiskANNRecords)?;
+    for (minimum, family, sql) in DISKANN_TABLES {
+        if version < minimum {
+            connection.execute_batch(sql)?;
+            install_family_guards(connection, family)?;
+        }
     }
-    if version < 11 {
-        connection.execute_batch(super::diskann::ORIGINS_SQL)?;
-        install_family_guards(connection, Family::VectorOrigins)?;
-    }
-    if version < 12 {
-        connection.execute_batch(super::diskann::CHANGES_SQL)?;
-        install_family_guards(connection, Family::VectorChanges)?;
+    if version < CURRENT_VERSION {
         upgrade_format(connection, version, identity)?;
     }
     super::standalone_graph::validate_legacy_guards(connection, control)?;
@@ -419,6 +462,7 @@ fn validate_format(connection: &Connection, version: u32) -> PhysicalResult<()> 
                 9 => FORMAT_NINE,
                 10 => FORMAT_TEN,
                 11 => FORMAT_ELEVEN,
+                12 => FORMAT_TWELVE,
                 _ => sql,
             }
         } else {
@@ -458,26 +502,10 @@ fn validate_format(connection: &Connection, version: u32) -> PhysicalResult<()> 
             require_definition(connection, &name, &sql)?;
         }
     }
-    if version >= 10 {
-        require_definition(
-            connection,
-            Family::DiskANNRecords.layout().table,
-            super::diskann::SQL,
-        )?;
-    }
-    if version >= 11 {
-        require_definition(
-            connection,
-            Family::VectorOrigins.layout().table,
-            super::diskann::ORIGINS_SQL,
-        )?;
-    }
-    if version >= 12 {
-        require_definition(
-            connection,
-            Family::VectorChanges.layout().table,
-            super::diskann::CHANGES_SQL,
-        )?;
+    for (minimum, family, sql) in DISKANN_TABLES {
+        if version >= minimum {
+            require_definition(connection, family.layout().table, sql)?;
+        }
     }
     for family in families(version) {
         for action in ["INSERT", "UPDATE", "DELETE"] {
@@ -528,6 +556,8 @@ fn validate_cache_triggers(connection: &Connection, version: u32) -> PhysicalRes
                     | Family::DiskANNRecords
                     | Family::VectorOrigins
                     | Family::VectorChanges
+                    | Family::VectorPopulations
+                    | Family::VectorPopulationWitnesses
             )
     }) {
         let layout = family.layout();
@@ -553,6 +583,7 @@ fn families(version: u32) -> impl Iterator<Item = Family> {
         Family::DiskANNRecords => version >= 10,
         Family::VectorOrigins => version >= 11,
         Family::VectorChanges => version >= 12,
+        Family::VectorPopulations | Family::VectorPopulationWitnesses => version >= 13,
         _ => true,
     })
 }

@@ -109,6 +109,8 @@ pub(in crate::mvcc) fn seed_missing_families(connection: &ManagedConnection) {
                 | Family::OccurrenceGuards
                 | Family::VectorOrigins
                 | Family::VectorChanges
+                | Family::VectorPopulations
+                | Family::VectorPopulationWitnesses
         ) {
             continue;
         }
@@ -192,6 +194,59 @@ fn canonical_records(
     })
 }
 
+fn population_records(
+    transaction: uqa_storage::mvcc::StorageTransactionId,
+    owner: NativeRecordOwner,
+    control: &StorageReadControl,
+) -> [NativeRecord; 2] {
+    use rusqlite::types::ValueRef;
+    use uqa_storage::diskann_index::{
+        format::{DiskANNCanonicalOrigin, DiskANNGeneration, DiskANNVectorVersion},
+        DiskANNCanonicalCounts, DiskANNPopulationState,
+    };
+    let generation = DiskANNGeneration::new([81; 16], 1, 2, 3).unwrap();
+    let origin =
+        DiskANNCanonicalOrigin::new(DiskANNVectorVersion::new(transaction, 1).unwrap(), 1, 1)
+            .unwrap();
+    let (state, witness) =
+        DiskANNPopulationState::from_counts(generation, 1, DiskANNCanonicalCounts::default())
+            .unwrap()
+            .replaced(1, None, origin)
+            .unwrap();
+    let mut identity = [0; 40];
+    identity[..16].copy_from_slice(&[81; 16]);
+    identity[16..24].copy_from_slice(&1_u64.to_be_bytes());
+    identity[24..32].copy_from_slice(&2_u64.to_be_bytes());
+    identity[32..].copy_from_slice(&3_u64.to_be_bytes());
+    [
+        NativeRecord::encode(
+            Family::VectorPopulations,
+            owner,
+            &[
+                ValueRef::Text(b"public.docs"),
+                ValueRef::Text(b"n"),
+                ValueRef::Blob(&identity),
+                ValueRef::Blob(&state.encode()),
+            ],
+            control,
+        )
+        .unwrap(),
+        NativeRecord::encode(
+            Family::VectorPopulationWitnesses,
+            owner,
+            &[
+                ValueRef::Text(b"public.docs"),
+                ValueRef::Text(b"n"),
+                ValueRef::Blob(&identity),
+                ValueRef::Integer(1),
+                ValueRef::Blob(&witness.encode()),
+            ],
+            control,
+        )
+        .unwrap(),
+    ]
+}
+
 pub(in crate::mvcc) fn seed_native_families(
     store: &SQLiteRecordStore,
     control: &StorageReadControl,
@@ -240,6 +295,7 @@ pub(in crate::mvcc) fn seed_native_families(
     let ivf = ivf_guard(1, "n", control);
     let transaction = store.allocate_transaction(control).unwrap();
     let [origin, change] = canonical_records(transaction, owner, control);
+    let [population, witness] = population_records(transaction, owner, control);
     let batch = PreparedRecordCommit::new(
         &[
             skips.write(None),
@@ -251,6 +307,8 @@ pub(in crate::mvcc) fn seed_native_families(
             },
             origin.write(None),
             change.write(None),
+            population.write(None),
+            witness.write(None),
         ],
         control,
     )
@@ -271,7 +329,7 @@ fn table_rename_and_generation_transfer_preserve_every_native_owned_payload_and_
     let original: Vec<_> = families()
         .map(|family| (family, rows(&connection, family, "public.docs")))
         .collect();
-    assert_eq!(original.len(), 28);
+    assert_eq!(original.len(), 30);
     let old = store.snapshot(&control).unwrap();
     bind(&connection);
     catalog
