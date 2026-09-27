@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Extend the Rust, Python, Node.js and Browser WASM vector examples with DiskANN configuration, typed parameters, canonical-score comparisons, rollback and committed SQLite reopen. Add real-browser example execution and an IndexedDB page-reload check, including a build without morphology dictionaries.
 - Retain exact current and uncovered vector populations observed by a successful ordinary DiskANN ANN query over a fixed raw view. Later planning reuses that view's counts without another scan; new or unobserved raw selections keep their unknown statistics.
 - Resolve catalog owner names with PostgreSQL-compatible `pg_get_userbyid(oid)`, including NULL, missing OIDs, role rename/deletion and its stable `name` return type.
 - Include actual DiskANN search invocations in TEXT and JSON `EXPLAIN ANALYZE`, separately from physical estimates. Report the executed generation, route, traversal, logical page work and tensor scoring while preserving single execution, nested callbacks, session isolation and DML transaction effects.

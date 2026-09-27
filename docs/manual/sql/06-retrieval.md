@@ -91,6 +91,8 @@ The `k` argument defines the support delivered by the vector leaf. A later relat
 
 With no vector index, KNN is an exact brute-force cosine scan. IVF, HNSW and DiskANN are approximate physical paths. A `TENSOR(n)` row uses its best element score.
 
+DiskANN uses PQ only to choose candidates and recomputes returned scores from canonical vectors. The ordinary KNN `_score` remains cosine similarity; creating a DiskANN index does not turn it into a probability or select a saved calibration model. Existing query-pool conversion and fixed-model validation apply at their original fusion boundaries. The [vector examples](../../../examples/README.md) compare DiskANN with exact scores on a small fixed corpus and preserve those scores through rollback, committed replacement and persistent reopen. These finite examples do not establish a general recall floor or a speedup.
+
 ### DiskANN plan diagnostics
 
 Use `EXPLAIN` or `EXPLAIN (FORMAT JSON)` on a KNN query to inspect its selected DiskANN field and generation, configured search list and beam width, PQ/page layout, stored populations and read limits. JSON adds a `Physical Plans` array to the existing result envelope; TEXT includes the same physical details. `Estimated Work` separates PQ work, logical page requests and bytes, dispatch rounds, side/change scans, tensor reranking and resident PQ payload. These are uncalibrated estimates, not measured physical I/O or elapsed time. Unavailable current/change counts are null.

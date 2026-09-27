@@ -1,8 +1,8 @@
 # Vector index architecture
 
-This document defines the physical vector-index contract shared by the memory engine, SQLite storage, SQL DDL, catalog restore, and calibration checks. A vector field starts with exact brute-force search; `CREATE INDEX ... USING ivf` and `CREATE INDEX ... USING hnsw` install different algorithms and retain different catalog identities.
+This document defines the physical vector-index contract shared by the memory engine, persistent providers, SQL DDL, catalog restore, and calibration checks. A vector field starts with exact brute-force search; `CREATE INDEX ... USING ivf`, `USING hnsw` and `USING diskann` install different algorithms and retain different catalog identities.
 
-The separate [native DiskANN proposal](diskann-vector-index.md) designs a direct Rust implementation with paged graph/vector storage, PQ, and MVCC integration. It is not implemented and does not change the supported access methods described here.
+The [native DiskANN design](diskann-vector-index.md) is implemented in current development sources through memory, native SQLite, SQLite Key/Value and redb. It uses direct Rust graph/PQ construction, paged query execution and existing MVCC publication. It is unreleased; the [implementation ledger](../plans/0014-diskann-vector-index.md#dependency-order-and-progress-ledger) distinguishes completed ownership/SQL gates from remaining binding and integrated acceptance.
 
 ## Selection and SQL surface
 
@@ -11,22 +11,24 @@ flowchart LR
     Field["VECTOR or TENSOR field"] --> Exact["Brute force"]
     Field -->|"USING ivf"| IVF["Centroid lists"]
     Field -->|"USING hnsw"| HNSW["Layered proximity graph"]
+    Field -->|"USING diskann"| DiskANN["Paged graph and resident PQ"]
     Exact --> Contract["VectorIndex"]
     IVF --> Contract
     HNSW --> Contract
+    DiskANN --> Contract
     Contract --> KNN["Approximate or exact top-K"]
     Contract --> Threshold["Exact threshold scan"]
 ```
 
 IVF accepts `lists`/`nlist`, `probes`/`nprobe`, and `train_threshold`. HNSW accepts `m`, `ef_construction`, `ef_search`, `rebuild_threshold`, and `seed`; `m` must be at least two and `ef_construction` must be at least `m`. SQL rejects cross-algorithm and unknown parameters instead of translating one access method into the other.
 
-Only one physical IVF or HNSW index may target a field at a time. `DROP INDEX` returns the field to brute-force search and removes the corresponding auxiliary metadata without deleting the canonical raw vectors.
+DiskANN accepts `max_degree`, `build_list_size`, `search_list_size`, `alpha`, `beam_width`, `pq_bytes` and `seed`, with dimension-aware validation and defaults specified by the [DDL contract](../manual/sql/02-ddl.md#diskann-vector-indexes). Only one physical IVF, HNSW or DiskANN index may target a field at a time. `DROP INDEX` returns the field to brute-force search and removes the corresponding auxiliary metadata without deleting the canonical raw vectors.
 
 ## Shared identity and tensor behavior
 
 Raw vectors are keyed by `(DocId, ordinal)`, so every element of a `TENSOR(N)` has a stable physical identity even though query results collapse all matching elements to one row. Top-K and threshold results keep the maximum cosine similarity per document and return posting storage in document-ID order; ranking is applied by the ranked-view boundary.
 
-All mutation paths validate dimensions and finite components before replacing existing vectors. `search_threshold` remains exact for every backend because its public contract is a complete similarity predicate, while top-K may use IVF or HNSW approximation.
+All mutation paths validate dimensions and finite components before replacing existing vectors. `search_threshold` remains exact for every backend because its public contract is a complete similarity predicate, while top-K may use IVF, HNSW or DiskANN approximation.
 
 ## IVF
 
@@ -45,6 +47,14 @@ Updates use logical tombstones because changing a vector in place would invalida
 Graph traversal borrows adjacency slices from their nodes and tracks visited node IDs in a query-local hash set; it does not clone an adjacency vector for each expansion. Final scores reuse the query norm and each node's cached raw norm, while persisted snapshots continue to store canonical raw vectors and reconstruct derived norms during checked restore.
 
 The implementation is deterministic for a fixed insertion order and seed, which makes persistence and differential tests reproducible. It is still an approximate nearest-neighbor algorithm: recall is measured against exhaustive search rather than claimed as an exact law. The primary algorithm reference is [Efficient and robust approximate nearest neighbor search using Hierarchical Navigable Small World graphs](https://arxiv.org/abs/1603.09320).
+
+## DiskANN
+
+Storage owns Vamana construction, product quantization, bounded partition construction and merge, generation encoding, page caching and traversal. Execution owns SQL lifecycle orchestration and publication through the existing provider transactions; Engine retains session, snapshot and resource adapters. Selected immutable generations retain their graph pages, resident codes, original coverage and read controls. Canonical changes not covered by that generation remain visible through versioned change streams, including private replacements and deletions.
+
+PQ distances guide navigation only. Final candidates are scored from canonical vectors with the existing cosine implementation, collapsed by maximum tensor-element score and exposed through the shared ranked-result boundary. Exact threshold, query-pool probability conversion and fixed-model target validation keep their existing meanings. Reopen selects and validates the stored generation instead of rebuilding it. See [generation publication](diskann-generation-publication.md), [versioned changes](diskann-versioned-changes.md) and [query work](diskann-execution-statistics.md) for the owning contracts and preservation arguments.
+
+The binding examples verify literal rows, exact canonical-score agreement on a small corpus, private rollback, committed replacement and closed reopen. Broader recall floors, bounded-resource acceptance and platform coverage remain explicit gates; no speedup or billion-vector claim follows from these functional examples.
 
 ## Persistence and transactions
 
