@@ -8,6 +8,7 @@
 use crate::SQLError;
 
 mod diskann;
+mod relational;
 pub use diskann::{parse_diskann_index_options, DiskANNIndexOptions};
 
 #[derive(Default)]
@@ -37,6 +38,24 @@ pub fn index_access_method(statement: &crate::ast::CreateIndex) -> Result<String
     }
 
     Ok(am)
+}
+
+/// Validate declared options before namespace collisions and physical index work.
+pub fn validate_index_options(statement: &crate::ast::CreateIndex) -> Result<(), SQLError> {
+    if let Some(namespace) = statement.option_namespaces.first() {
+        return Err(SQLError::Routine {
+            sqlstate: "22023".into(),
+            message: format!("unrecognized parameter namespace \"{namespace}\""),
+        });
+    }
+    match index_access_method(statement)?.as_str() {
+        "" | "btree" => relational::validate(&statement.options, false),
+        "gin" => relational::validate(&statement.options, true),
+        "ivf" => parse_ivf_index_options(&statement.options).map(|_| ()),
+        "hnsw" => parse_hnsw_index_options(&statement.options).map(|_| ()),
+        "diskann" => parse_diskann_index_options(&statement.options).map(|_| ()),
+        _ => unreachable!("validated access method"),
+    }
 }
 pub fn parse_ivf_index_options(options: &[(String, String)]) -> Result<IVFIndexOptions, SQLError> {
     let mut params = IVFIndexOptions::default();

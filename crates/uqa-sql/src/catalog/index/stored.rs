@@ -30,6 +30,7 @@ pub fn declaration(
         nulls_not_distinct: definition.nulls_not_distinct,
         if_not_exists: false,
         options: options.into_iter().collect(),
+        option_namespaces: Vec::new(),
     })
 }
 pub fn index_definition(definition: Option<&str>) -> Result<IndexDefinition, serde_json::Error> {

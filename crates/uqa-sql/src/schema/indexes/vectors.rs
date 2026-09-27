@@ -23,6 +23,25 @@ pub fn resolve_vector_index_target<'a>(
     statement: &'a CreateIndex,
     access_method: &str,
 ) -> Result<VectorIndexTarget<'a>, SQLError> {
+    let target = resolve_vector_index_columns(catalog, statement, access_method)?;
+    for (column, _) in &target.fields {
+        let existing = catalog.vector_index_names(&target.table, column)?;
+        if !existing.is_empty() {
+            return Err(SQLError::Unsupported(format!(
+                "CREATE INDEX USING {access_method}: `{}`.`{column}` already has physical vector index `{}`",
+                target.table, existing.join("`, `")
+            )));
+        }
+    }
+    Ok(target)
+}
+
+/// Validate column declarations without consulting physical index occupancy.
+pub fn resolve_vector_index_columns<'a>(
+    catalog: &dyn VectorIndexCatalog,
+    statement: &'a CreateIndex,
+    access_method: &str,
+) -> Result<VectorIndexTarget<'a>, SQLError> {
     let table = catalog
         .resolve_table_name(&statement.table)?
         .ok_or_else(|| {
@@ -47,13 +66,6 @@ pub fn resolve_vector_index_target<'a>(
                 )));
             }
         };
-        let existing = catalog.vector_index_names(&table, column)?;
-        if !existing.is_empty() {
-            return Err(SQLError::Unsupported(format!(
-                "CREATE INDEX USING {access_method}: `{table}`.`{column}` already has physical vector index `{}`",
-                existing.join("`, `")
-            )));
-        }
         fields.push((column, dimensions));
     }
     Ok(VectorIndexTarget { table, fields })

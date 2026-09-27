@@ -20,7 +20,8 @@ pub fn prepare_index_expression(
     table: &str,
     expression: &mut Expr,
 ) -> Result<ColumnType, SQLError> {
-    let ty = bind_immutable_index_expression(engine, binding, table, expression, false)?;
+    let ty = bind_index_expression(engine, binding, table, expression, false)?;
+    validate_index_expression_immutability(engine, table, expression, false)?;
     if let Some(ty) = ty {
         return Ok(ty);
     }
@@ -37,7 +38,17 @@ pub fn prepare_index_predicate(
     table: &str,
     expression: &mut Expr,
 ) -> Result<(), SQLError> {
-    match bind_immutable_index_expression(engine, binding, table, expression, true)? {
+    bind_index_predicate(engine, binding, table, expression)?;
+    validate_index_expression_immutability(engine, table, expression, true)
+}
+
+pub(super) fn bind_index_predicate(
+    engine: &dyn SchemaExpressionCatalog,
+    binding: &BindingContext<'_>,
+    table: &str,
+    expression: &mut Expr,
+) -> Result<(), SQLError> {
+    match bind_index_expression(engine, binding, table, expression, true)? {
         Some(ColumnType::Boolean) => Ok(()),
         None => {
             if let Expr::Literal(value) = expression {
@@ -51,7 +62,7 @@ pub fn prepare_index_predicate(
     }
 }
 
-fn bind_immutable_index_expression(
+pub(super) fn bind_index_expression(
     engine: &dyn SchemaExpressionCatalog,
     binding: &BindingContext<'_>,
     table: &str,
@@ -109,7 +120,6 @@ fn bind_immutable_index_expression(
             format!("set-returning functions are not allowed in {context}s"),
         ));
     }
-    typing::infer_generation_expression(engine, &columns, expression)?;
     let ty = crate::binding::bind_expression_plan_routines_for_storage(
         engine,
         &mut plan,
@@ -120,6 +130,30 @@ fn bind_immutable_index_expression(
     let references = crate::binding::stored_routines::collect_expression_routine_references(&plan)?;
     crate::catalog::stored_ast::bind_stored_expression_routines(expression, &references)?;
     Ok(ty)
+}
+
+pub(super) fn validate_index_expression_immutability(
+    engine: &dyn SchemaExpressionCatalog,
+    table: &str,
+    expression: &mut Expr,
+    predicate: bool,
+) -> Result<(), SQLError> {
+    let columns = engine
+        .schema_expression_columns(table)?
+        .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
+    typing::infer_generation_expression(engine, &columns, expression)
+        .map(|_| ())
+        .map_err(|error| {
+            if error.sqlstate() == Some("42P17") {
+                let context = if predicate { "predicate" } else { "expression" };
+                index_error(
+                    "42P17",
+                    format!("functions in index {context} must be marked IMMUTABLE"),
+                )
+            } else {
+                error
+            }
+        })
 }
 
 fn index_error(sqlstate: &str, message: String) -> SQLError {
