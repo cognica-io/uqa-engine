@@ -504,6 +504,42 @@ fn direct_knn_match_executes_registered_retrieval_predicate() {
 }
 
 #[test]
+fn diskann_builder_preserves_canonical_scores_and_private_rollback() {
+    let engine = engine_with_vectors();
+    let query = QueryBuilder::new(&engine, "vector_docs")
+        .select_columns(&["id", "_score"])
+        .knn_match("embedding", &[1.0, 0.0], 2)
+        .unwrap()
+        .order_by_desc("_score")
+        .order_by("id", Order::Asc);
+    let exact = query.execute().unwrap().rows;
+    assert_eq!(exact[0]["id"], Value::Int(1));
+    assert_eq!(exact[1]["id"], Value::Int(2));
+    engine
+        .sql(
+            "CREATE INDEX vector_docs_diskann ON vector_docs USING diskann(embedding) \
+             WITH (max_degree=2, search_list_size=4, beam_width=2, pq_bytes=1)",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(query.execute().unwrap().rows, exact);
+    engine.sql("BEGIN", &[]).unwrap();
+    engine
+        .sql(
+            "UPDATE vector_docs SET embedding=ARRAY[1.0,0.0] WHERE id=3",
+            &[],
+        )
+        .unwrap();
+    let private = query.execute().unwrap().rows;
+    assert_eq!(private[0]["id"], Value::Int(3));
+    assert_eq!(private[0]["_score"], Value::Float(1.0));
+    engine.sql("ROLLBACK", &[]).unwrap();
+    assert_eq!(query.execute().unwrap().rows, exact);
+    engine.sql("DROP INDEX vector_docs_diskann", &[]).unwrap();
+    assert_eq!(query.execute().unwrap().rows, exact);
+}
+
+#[test]
 fn all_field_term_and_facet_builders_execute_their_generated_sql() {
     let docs = engine_with_docs();
     let all_fields = QueryBuilder::new(&docs, "docs")
