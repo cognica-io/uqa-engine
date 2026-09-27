@@ -1,6 +1,6 @@
 # DiskANN canonical population statistics
 
-The shared count contract, immutable memory roots and versioned native SQLite, SQLite Key/Value and redb owners provide exact populations without reconstructing them during planning. Actual-origin sparse and complete selections maintain their own populations as described below. Cross-definition raw matching still lacks an authoritative bounded population capability and remains unknown; the [SQL integration unit](../plans/0014-diskann-vector-index.md#sql-lifecycle-and-planning) is not complete.
+The shared count contract, immutable memory roots and versioned native SQLite, SQLite Key/Value and redb owners provide exact populations without reconstructing them during planning. Actual-origin sparse and complete selections maintain their own populations as described below. Cross-definition raw readers retain exact observations from a completed ordinary ANN query on that same fixed view; before such an observation their populations remain unknown. The [SQL acceptance map](../plans/0014-diskann-vector-index.md#sql-lifecycle-and-planning-acceptance) records the completed provider and shared-DDL evidence.
 
 ## Definitions and ownership
 
@@ -118,7 +118,31 @@ These equations depend only on the final selected observations. The existing rig
 
 Storage computes the totals when attaching the evaluated selection to its receiver. It reads only point origin/cardinality metadata for selected documents and lookup batches from the receiver's already validated build-origin reader. Complete selection never reads a base document. Incomplete selection with unavailable base totals remains unknown without reconstructing the corpus. The implementation does not enumerate canonical documents or the change journal, read coordinates, reopen PQ preparation or navigate graph pages to obtain these counts.
 
-The composite retains its generation and completed totals with its immutable selection. Later metadata reads check the receiver, selection and every contributing source's original controls, then return the stored counts without origin or artifact reads; a different requested generation remains unknown. Point-read workspace and the retained composite use the receiver's existing allowance while the invoking cancellation remains checked. Admission, malformed metadata or cancellation failure discards the candidate and leaves the previous source unchanged. Nested selections apply the same equations to the preceding composite. Cross-definition raw matching has no actual origin for every fixed tensor and cannot borrow these totals or fabricate provenance; its missing capability remains explicit.
+The composite retains its generation and completed totals with its immutable selection. Later metadata reads check the receiver, selection and every contributing source's original controls, then return the stored counts without origin or artifact reads; a different requested generation remains unknown. Point-read workspace and the retained composite use the receiver's existing allowance while the invoking cancellation remains checked. Admission, malformed metadata or cancellation failure discards the candidate and leaves the previous source unchanged. Nested selections apply the same equations to the preceding composite. Cross-definition raw matching has no actual origin for every fixed tensor and uses the separate observed-population contract below.
+
+## Raw-source observations
+
+Fix the complete raw view $U$, actual versioned source $A$, and selected physical generation $g$ retained by one `RetainedDiskANNIndex`. Let $m(d)$ mean that the complete raw tensor has the same cardinality and identical binary32 coordinate bits as $A$'s tensor. Matching preserves the existing exact comparison, including signed zeros. A raw document has usable build coverage exactly when
+
+$$K(d)=m(d)\land o_A(d)\ne\bot\land o_A(d)=b_g(d).$$
+
+The raw populations are therefore
+
+$$N(U)=\sum_d n_U(d),\qquad C(U,A,g)=\sum_d n_U(d)\,\mathbf{1}[\neg K(d)].$$
+
+This definition counts tensors without a usable origin as uncovered without assigning them synthetic versions. An actual identical-coordinate rewrite with a fresh origin is also uncovered when its origin differs from the build. Empty tensors contribute zero. For a fully versioned selection, $K(d)$ reduces to the original origin-equality rule, so these definitions agree with the existing populations.
+
+An ordinary ANN query with positive K already completes two disjoint streams before final selection. The current change stream scores every matched nonempty tensor whose origin is outside the build. The raw stream visits every raw document and scores every unmatched nonempty tensor. Their existing scoring counters count each such tensor's ordinals once. During that same raw visit, a matched tensor supplies its complete cardinality through the origin already returned by the exact matching check; an unmatched tensor supplies the cardinality already returned by its score operation. Thus the added sum is exactly $N(U)$ and
+
+$$C(U,A,g)=\texttt{work.changed.vectors}+\texttt{work.unversioned.vectors}.$$
+
+Strictly increasing raw/change cursors and the disjoint matched/unmatched cases establish the partition. Query coordinates and K can change the selected postings but cannot change either complete population. Checked integer arithmetic and the existing subset validator enforce $0\le C\le N\le 2^{64}-1$ before exposing the observation. The result carries these counts only after traversal completion, posting construction and the original final control check succeed. A read, quota, cancellation, arithmetic or posting failure exposes no partial count.
+
+The retained Storage owner stores the successful observation in a fixed-size `OnceLock` covered by its existing admitted allocation. Concurrent successful queries of the same immutable view derive the same pair; disagreement is an invalid fixed source. Clones share that owner. Replacing canonical visibility, a raw selection or a physical definition creates a new owner with no inherited observation. Metadata returns the pair only for its exact selected generation and checks the original and invoking controls. It reads neither coordinates nor artifacts to obtain the stored observation.
+
+Before an ordinary ANN query has completed, a raw reader without maintained equality evidence cannot establish these counts through bounded metadata alone. Two raw tensors can have identical metadata and widths while differing in one coordinate bit, yielding different coverage against the same actual source. A label or matching hash cannot decide that exact equality. Such readers return unknown until the existing complete comparison supplies evidence. Zero-K, exact numeric routes and threshold queries do not verify all raw coverage, so they do not initialize this pair; a previously established observation remains valid on the same immutable view. Static EXPLAIN captures this knowledge before executing its body and does not perform a warmup query.
+
+Erasing the observation leaves every original tensor read, matching comparison, candidate, score and posting operation unchanged: the matched branch uses the same matching call's complete origin, and the unmatched branch uses the same score call's cardinality. The observation changes no query route or selection parameter and introduces no additional corpus, origin or coordinate read. It is a deterministic observation of the fixed carrier; the existing ordered query-composition and planning preservation arguments continue to apply. This supplies a bounded metadata capability for observed raw views while preserving explicit uncertainty on unobserved views.
 
 ## Verification obligations
 

@@ -8,6 +8,7 @@ use super::{sessions, sql, Arc, Engine, Value};
 
 mod calibration;
 mod consumers;
+mod ddl;
 mod definitions;
 mod explain;
 mod isolation;

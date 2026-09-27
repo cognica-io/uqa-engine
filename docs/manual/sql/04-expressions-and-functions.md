@@ -72,6 +72,16 @@ SELECT pg_get_indexdef(index_oid, column_number, pretty);
 
 Both overloads return text reconstructed from the stored index metadata. The one-argument form and a zero `column_number` return the complete CREATE INDEX command without a terminating semicolon. Positive column numbers are one-based and return the selected key expression or included column without its ordering options; negative or out-of-range numbers return an empty string. The full definition preserves uniqueness, the access method, key expressions and order, NULL placement, included columns, `NULLS NOT DISTINCT`, and the partial predicate. Pretty output uses visible relation names and fewer parentheses. Unknown index OIDs and NULL arguments return NULL. Both PostgreSQL signatures are stable, strict, and parallel safe and are exposed in `pg_proc`.
 
+## Role names
+
+`pg_get_userbyid(role_oid oid)` returns the selected role's current name as `name`, including when the caller cannot assume that role. It reads the role catalog without changing database state. NULL input returns NULL; an unknown OID returns `unknown (OID=n)`. The built-in is strict, stable and parallel safe, with PostgreSQL catalog OID 1642. Its result must not be used in an immutable index or generated-column expression.
+
+```sql execute
+SELECT pg_get_userbyid(0) AS missing_role,
+       pg_get_userbyid(oid) AS role_name
+FROM pg_roles WHERE rolname = current_user;
+```
+
 ## Type display
 
 ```sql

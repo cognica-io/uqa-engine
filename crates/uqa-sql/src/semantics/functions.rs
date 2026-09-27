@@ -95,6 +95,7 @@ pub fn builtin_function_dispatch_name(name: &str) -> String {
                         | "pg_get_indexdef"
                         | "format_type"
                         | "pg_has_role"
+                        | "pg_get_userbyid"
                         | "has_table_privilege"
                         | "has_column_privilege"
                         | "has_database_privilege"

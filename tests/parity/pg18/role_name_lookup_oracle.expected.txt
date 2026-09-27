@@ -1,0 +1,6 @@
+known|uqa_role_name_oracle
+unknown|unknown (OID=0)|unknown (OID=4294967295)|unknown (OID=4294967295)
+null-type|true|name
+catalog|1642|19|26|true|s|s|false|pg_get_userbyid
+renamed|uqa_role_name_renamed
+dropped|true

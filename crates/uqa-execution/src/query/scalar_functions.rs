@@ -166,6 +166,7 @@ fn is_catalog_scalar(name: &str) -> bool {
             | "pg_get_indexdef"
             | "format_type"
             | "pg_has_role"
+            | "pg_get_userbyid"
             | "has_database_privilege"
             | "has_schema_privilege"
             | "has_sequence_privilege"
@@ -219,6 +220,9 @@ pub fn catalog_scalar_value(
         "pg_get_sequence_data" => context.sequences.pg_get_sequence_data_value(arguments),
         "pg_sequence_last_value" => context.sequences.pg_sequence_last_value_value(arguments),
         "pg_sequence_parameters" => context.sequences.pg_sequence_parameters_value(arguments),
+        "pg_get_userbyid" => {
+            uqa_sql::catalog::roles::inquiry::pg_get_userbyid_value(context.roles, arguments)
+        }
         "pg_has_role" => uqa_sql::catalog::roles::inquiry::pg_has_role_value(
             context.names,
             context.roles,

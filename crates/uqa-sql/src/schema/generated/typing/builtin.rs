@@ -274,7 +274,7 @@ pub(super) fn infer_builtin_function(
         "quote_literal" | "quote_nullable" => {
             require_arity(name, args, 1, 1)?;
             if !accepts_class(&args[0], TypeClass::Text) {
-                return Err(non_immutable_function(name));
+                return Err(non_immutable_function());
             }
             GenerationType::Text
         }
@@ -404,7 +404,7 @@ pub(super) fn infer_builtin_function(
         "extract" | "date_part" => {
             require_signature(name, args, &[TypeClass::Text, TypeClass::Temporal])?;
             if matches!(args[1], GenerationType::TimestampTz) {
-                return Err(non_immutable_function(name));
+                return Err(non_immutable_function());
             }
             if name == "extract" {
                 GenerationType::Numeric
@@ -420,7 +420,7 @@ pub(super) fn infer_builtin_function(
         "date_trunc" => {
             require_signature(name, args, &[TypeClass::Text, TypeClass::Temporal])?;
             if matches!(args[1], GenerationType::TimestampTz) {
-                return Err(non_immutable_function(name));
+                return Err(non_immutable_function());
             }
             args[1].clone()
         }

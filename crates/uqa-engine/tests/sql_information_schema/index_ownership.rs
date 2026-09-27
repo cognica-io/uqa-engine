@@ -6,6 +6,40 @@
 
 use super::*;
 
+#[test]
+fn pg_get_userbyid_matches_independent_role_name_and_catalog_reference() {
+    let engine = Engine::new();
+    let source = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/parity/pg18/role_name_lookup_oracle.sql"
+    ));
+    let expected = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/parity/pg18/role_name_lookup_oracle.expected.txt"
+    ));
+    let mut actual = Vec::new();
+    for statement in source
+        .split(';')
+        .filter(|statement| !statement.trim().is_empty())
+    {
+        let result = engine
+            .sql(statement, &[])
+            .unwrap_or_else(|error| panic!("{statement}: {error}"));
+        if let Some(column) = result.columns.first() {
+            for row in result.rows {
+                let Value::Str(value) = &row[column] else {
+                    panic!("expected reference text: {row:?}");
+                };
+                actual.push(value.clone());
+            }
+        }
+    }
+    assert_eq!(actual.join("\n"), expected.trim());
+    let error = engine.sql("CREATE TABLE role_lookup_generated (id oid, owner name GENERATED ALWAYS AS (pg_get_userbyid(id)) STORED)", &[]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42P17"));
+    assert_eq!(error.to_string(), "generation expression is not immutable");
+}
+
 fn execute(engine: &Engine, sql: &str) {
     engine
         .sql(sql, &[])

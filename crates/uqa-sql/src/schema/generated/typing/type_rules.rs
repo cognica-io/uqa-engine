@@ -444,8 +444,8 @@ pub(super) fn function_type_error(name: &str, actual: &GenerationType, expected:
     ))
 }
 
-pub(super) fn non_immutable_function(name: &str) -> SQLError {
-    crate::schema::generated::eligibility::non_immutable_function(name)
+pub(super) fn non_immutable_function() -> SQLError {
+    crate::schema::generated::eligibility::non_immutable_function()
 }
 
 #[cfg(test)]
