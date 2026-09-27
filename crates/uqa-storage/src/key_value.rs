@@ -174,6 +174,32 @@ pub trait KeyValueBatch {
             "mergeable revision markers are not supported".into(),
         ))
     }
+
+    /// Stage an actual canonical origin with its evaluated complete tensor. Its original write precondition remains strict; common MVCC maintains all selected-generation populations without replaying the mutation. Capable wrappers must forward this operation.
+    fn replace_diskann_origin(&mut self, _key: &[u8], _value: &[u8]) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "DiskANN population mutations are not supported".into(),
+        ))
+    }
+
+    /// Retain already verified complete build origins for one authorized generation publication. The template supplies physical row encoding, not trusted counts; common MVCC computes the private and committed census on their actual canonical views. The catalog/head owner must authorize and guard this publication in the same batch.
+    fn publish_diskann_population(
+        &mut self,
+        _key: &[u8],
+        _template: &[u8],
+        _origins: crate::diskann_index::pages::DiskANNOriginReader,
+    ) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "DiskANN population publication is not supported".into(),
+        ))
+    }
+
+    /// Retire a generation's population header and witnesses, including witnesses added by intervening disjoint writers. The generation/head owner must retain its original publication guards. This operation follows private undo and original receipt resolution.
+    fn retire_diskann_population(&mut self, _key: &[u8]) -> StorageBackendResult<()> {
+        Err(StorageBackendError::Other(
+            "DiskANN population retirement is not supported".into(),
+        ))
+    }
     /// Stage a durable identifier observation before publishing this batch's records. Successful observations survive later transaction/savepoint rollback. Dropping an unevaluated batch consumes nothing. Stores without autonomous allocation reject this operation; capable wrappers must forward it.
     fn observe_identifier(&mut self, _namespace: &[u8], _value: u64) -> StorageBackendResult<()> {
         Err(StorageBackendError::Other(
@@ -666,7 +692,7 @@ pub use memory_store::MemoryKeyValueStore;
 pub use storage_backend::KeyValueStorageBackend;
 pub use vector_index::{
     DiskANNCanonicalVectorVisitor, KeyValueDiskANNCanonical, KeyValueDiskANNHandle,
-    KeyValueVectorIndex, RetainedDiskANNCanonical,
+    KeyValueDiskANNPopulationRecords, KeyValueVectorIndex, RetainedDiskANNCanonical,
 };
 
 #[cfg(test)]

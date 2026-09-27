@@ -181,6 +181,9 @@ impl ResourceLeaseProvider for Persistence {
 }
 
 impl VersionedPersistence for Persistence {
+    fn diskann_population_record_layout(&self) -> Option<&dyn DiskANNPopulationRecordLayout> {
+        Some(&uqa_storage::key_value::KeyValueDiskANNPopulationRecords)
+    }
     fn resource_leases(&self) -> Option<&dyn ResourceLeaseProvider> {
         Some(self)
     }

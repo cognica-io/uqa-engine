@@ -33,6 +33,7 @@ pub(super) fn has_effects(prepared: &PreparedRecordCommit) -> bool {
     prepared.graph.is_some()
         || prepared.notification.is_some()
         || prepared.vector.is_some()
+        || prepared.populations.is_some()
         || prepared
             .records()
             .iter()
@@ -64,6 +65,8 @@ pub(super) fn resolve(
     } else {
         None
     };
+    resolved =
+        super::populations::resolve(prepared, resolved, current, persistence, mode, control)?;
     if prepared.records().iter().any(|write| {
         matches!(
             write.kind(),

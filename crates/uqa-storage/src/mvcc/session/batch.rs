@@ -10,6 +10,7 @@ use uqa_core::memory::BudgetedVec;
 use crate::mvcc::commit::RecordWriteKind;
 use crate::mvcc::graph::OwnedGraphMutation;
 use crate::mvcc::key::RecordKey;
+use crate::mvcc::populations::OwnedPopulationMutation;
 use crate::mvcc::serializable::OwnedPredicate;
 use crate::mvcc::vector::{IndexKind, Key, OwnedVectorMutation};
 use crate::mvcc::{SerializableTransactionId, SharedRecordValue, VersionError};
@@ -34,6 +35,7 @@ enum Operation {
     Fence(BudgetedVec<u8>),
     Graph(OwnedGraphMutation),
     VectorInput(OwnedVectorMutation),
+    Population(OwnedPopulationMutation),
     VectorFence(IndexKind, BudgetedVec<u8>),
     TypedRecord {
         key: RecordKey,
@@ -66,6 +68,16 @@ impl<'a> Batch<'a> {
         owned.extend_from_slice(bytes)?;
         Ok(owned)
     }
+    fn require_population_layout(&self) -> StorageBackendResult<()> {
+        self.store
+            .persistence
+            .diskann_population_record_layout()
+            .map(|_| ())
+            .ok_or_else(|| {
+                VersionError::InvalidEncoding("provider has no DiskANN population layout")
+                    .into_storage_error()
+            })
+    }
     fn typed_record(
         &mut self,
         key: &[u8],
@@ -95,6 +107,21 @@ impl<'a> Batch<'a> {
                 "evaluated batch changed serializable participant",
             ));
         }
+        let population_view = self
+            .operations
+            .iter()
+            .any(|operation| {
+                matches!(
+                    operation,
+                    Operation::Population(_)
+                        | Operation::TypedRecord {
+                            kind: RecordWriteKind::DiskANNOrigin,
+                            ..
+                        }
+                )
+            })
+            .then(|| transaction.view())
+            .transpose()?;
         for operation in self.operations.iter() {
             match operation {
                 Operation::Requirement(key) => {
@@ -124,6 +151,7 @@ impl<'a> Batch<'a> {
                 }
                 Operation::Fence(key) => transaction.fence_record(key, control)?,
                 Operation::Graph(mutation) => transaction.graph_mutation(mutation)?,
+                Operation::Population(mutation) => transaction.population_mutation(mutation)?,
                 Operation::VectorInput(mutation) => {
                     let guard = mutation.kind.layout(&*self.store.persistence)?.key(
                         mutation.metadata.bytes(),
@@ -161,9 +189,64 @@ impl<'a> Batch<'a> {
                 }
             }
         }
+        if let Some(before) = population_view {
+            self.apply_populations(transaction, &before)?;
+        }
         // Validate and stage every record first. Allocation uses persistence directly because the session's mutation boundary already holds its active-transaction lock.
         self.apply_identifiers()?;
         self.observe_writes(transaction)
+    }
+
+    fn apply_populations(
+        &self,
+        transaction: &mut Transaction,
+        before: &crate::mvcc::MergedRecordSnapshot,
+    ) -> Result<(), VersionError> {
+        let control = &self.store.control;
+        let origins = crate::mvcc::PrivateRecordChanges::new(control.memory());
+        let mut lifecycle = BudgetedVec::new(control.memory());
+        for operation in self.operations.iter() {
+            control.check()?;
+            match operation {
+                Operation::Population(mutation) => lifecycle.push(mutation.clone())?,
+                Operation::TypedRecord {
+                    key,
+                    value,
+                    kind: RecordWriteKind::DiskANNOrigin,
+                } => {
+                    let expected = before
+                        .metadata(key.bytes(), control)?
+                        .and_then(|row| row.revision);
+                    let write = crate::mvcc::PreparedRecordWrite::from_shared(
+                        key.clone(),
+                        expected,
+                        value.clone(),
+                    )
+                    .with_kind(RecordWriteKind::DiskANNOrigin);
+                    origins.apply_owned(&[write], control)?;
+                }
+                _ => {}
+            }
+        }
+        let origins = origins.prepare(control)?;
+        let after = transaction.view()?;
+        let generated = crate::mvcc::populations::stage(
+            origins.records(),
+            &lifecycle,
+            before,
+            &after,
+            &*self.store.persistence,
+            control,
+        )?;
+        for write in generated.records() {
+            transaction.write_shared_record(
+                &write.shared_key(),
+                write.shared_value().as_ref(),
+                RecordWriteKind::DiskANNPopulationPreview,
+                control,
+            )?;
+        }
+        Ok(())
     }
 
     fn apply_identifiers(&self) -> Result<(), VersionError> {
@@ -373,6 +456,38 @@ impl KeyValueBatch for Batch<'_> {
     }
     fn put(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
         self.typed_record(key, Some(value), RecordWriteKind::Canonical)
+    }
+
+    fn replace_diskann_origin(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
+        self.require_population_layout()?;
+        self.typed_record(key, Some(value), RecordWriteKind::DiskANNOrigin)
+    }
+
+    fn publish_diskann_population(
+        &mut self,
+        key: &[u8],
+        template: &[u8],
+        origins: crate::diskann_index::pages::DiskANNOriginReader,
+    ) -> StorageBackendResult<()> {
+        self.require_population_layout()?;
+        self.operations
+            .push(Operation::Population(OwnedPopulationMutation::Publish {
+                key: RecordKey::new(key, self.store.control.memory())
+                    .map_err(VersionError::into_storage_error)?,
+                template: Arc::new(self.copy(template)?),
+                origins,
+            }))?;
+        Ok(())
+    }
+
+    fn retire_diskann_population(&mut self, key: &[u8]) -> StorageBackendResult<()> {
+        self.require_population_layout()?;
+        self.operations
+            .push(Operation::Population(OwnedPopulationMutation::Retire {
+                key: RecordKey::new(key, self.store.control.memory())
+                    .map_err(VersionError::into_storage_error)?,
+            }))?;
+        Ok(())
     }
     fn require_observed(
         &mut self,

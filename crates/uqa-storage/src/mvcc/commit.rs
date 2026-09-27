@@ -45,6 +45,8 @@ pub(crate) enum RecordWriteKind {
     Marker,
     StatisticsMaintenance,
     IdempotentDelete,
+    DiskANNOrigin,
+    DiskANNPopulationPreview,
 }
 
 impl PreparedRecordWrite {
@@ -124,6 +126,7 @@ pub struct PreparedRecordCommit {
     fingerprint: CommitFingerprint,
     pub(super) graph: Option<GraphEffects>,
     pub(super) vector: Option<super::vector::VectorEffects>,
+    pub(super) populations: Option<super::populations::PopulationEffects>,
     pub(super) notification: Option<Arc<super::notifications::NotificationEffect>>,
     pub(super) resolved_at: Option<CommitSequence>,
     requirements: Option<Arc<BudgetedVec<RecordRequirement>>>,
@@ -199,6 +202,8 @@ impl PreparedRecordCommit {
                     RecordWriteKind::Marker => 7,
                     RecordWriteKind::StatisticsMaintenance => 8,
                     RecordWriteKind::IdempotentDelete => 9,
+                    RecordWriteKind::DiskANNOrigin => 10,
+                    RecordWriteKind::DiskANNPopulationPreview => 11,
                 }]);
             }
             digest.update((write.key().len() as u64).to_be_bytes());
@@ -224,6 +229,7 @@ impl PreparedRecordCommit {
             fingerprint: digest.finalize().into(),
             graph: None,
             vector: None,
+            populations: None,
             notification: None,
             resolved_at: None,
             requirements: None,
@@ -323,6 +329,15 @@ impl PreparedRecordCommit {
         self.vector = Some(effects);
     }
 
+    pub(super) fn seal_population_effects(
+        &mut self,
+        fingerprint: CommitFingerprint,
+        effects: super::populations::PopulationEffects,
+    ) {
+        self.fingerprint = fingerprint;
+        self.populations = Some(effects);
+    }
+
     pub(crate) fn retain_graph_effects(
         self,
         original: &Self,
@@ -338,6 +353,7 @@ impl PreparedRecordCommit {
     pub fn validate_snapshot(&self, current: CommitSequence) -> VersionResult<()> {
         if self.graph.is_some()
             || self.vector.is_some()
+            || self.populations.is_some()
             || self.notification.is_some()
             || self
                 .writes
@@ -372,6 +388,7 @@ impl PreparedRecordCommit {
         cancellation.check()?;
         if self.graph.is_some()
             || self.vector.is_some()
+            || self.populations.is_some()
             || self.notification.is_some()
             || self
                 .writes

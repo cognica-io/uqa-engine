@@ -17,6 +17,7 @@ use uqa_core::memory::BudgetedVec;
 use crate::mvcc::commit::{RecordRequirement, RecordWriteKind};
 use crate::mvcc::graph::OwnedGraphMutation;
 use crate::mvcc::key::RecordKey;
+use crate::mvcc::populations::OwnedPopulationMutation;
 use crate::mvcc::vector::OwnedVectorMutation;
 use crate::mvcc::{
     CommitErrorOutcome, CommitFailure, CommitSequence, CommitStatus, CommittedRecordSnapshot,
@@ -32,6 +33,7 @@ struct Savepoint {
     id: StorageSavepointId,
     graph_position: usize,
     vector_position: usize,
+    population_position: usize,
     requirement_position: usize,
     committed: Arc<dyn CommittedRecordSnapshot>,
     changes: PrivateRecordChanges,
@@ -51,6 +53,7 @@ pub(super) struct Transaction {
     materialized: Option<PreparedRecordCommit>,
     graph: BudgetedVec<OwnedGraphMutation>,
     vector: BudgetedVec<OwnedVectorMutation>,
+    populations: BudgetedVec<OwnedPopulationMutation>,
     requirements: BudgetedVec<RecordRequirement>,
     outcome: Option<CommitErrorOutcome>,
     savepoints: BudgetedVec<Savepoint>,
@@ -89,6 +92,7 @@ impl Transaction {
             materialized: None,
             graph: BudgetedVec::new(control.memory()),
             vector: BudgetedVec::new(control.memory()),
+            populations: BudgetedVec::new(control.memory()),
             requirements: BudgetedVec::new(control.memory()),
             outcome: None,
             savepoints: BudgetedVec::new(control.memory()),
@@ -231,6 +235,8 @@ impl Transaction {
                 | RecordWriteKind::Marker
                 | RecordWriteKind::StatisticsMaintenance
                 | RecordWriteKind::IdempotentDelete
+                | RecordWriteKind::DiskANNOrigin
+                | RecordWriteKind::DiskANNPopulationPreview
         ) && self.changes.write_kind(key, control)? == Some(RecordWriteKind::Canonical)
         {
             RecordWriteKind::Canonical
@@ -247,7 +253,19 @@ impl Transaction {
     }
 
     pub(super) fn has_derived_changes(&self) -> bool {
-        !self.graph.is_empty() || !self.vector.is_empty() || !self.requirements.is_empty()
+        !self.graph.is_empty()
+            || !self.vector.is_empty()
+            || !self.populations.is_empty()
+            || !self.requirements.is_empty()
+    }
+
+    pub(super) fn population_mutation(
+        &mut self,
+        mutation: &OwnedPopulationMutation,
+    ) -> VersionResult<()> {
+        self.writable()?;
+        self.populations.push(mutation.clone())?;
+        Ok(())
     }
 
     pub(super) fn require_unchanged(
@@ -388,6 +406,7 @@ impl Transaction {
         self.changes.savepoint(id)?;
         let graph_position = self.graph.len();
         let vector_position = self.vector.len();
+        let population_position = self.populations.len();
         let requirement_position = self.requirements.len();
         let notification = self.notification.clone();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(self)));
@@ -395,6 +414,7 @@ impl Transaction {
             self.changes.rollback_to_savepoint(id)?;
             truncate_retained(&mut self.graph, graph_position);
             truncate_retained(&mut self.vector, vector_position);
+            truncate_retained(&mut self.populations, population_position);
             truncate_retained(&mut self.requirements, requirement_position);
             self.notification = notification;
         }
@@ -421,6 +441,7 @@ impl Transaction {
             id,
             graph_position: self.graph.len(),
             vector_position: self.vector.len(),
+            population_position: self.populations.len(),
             requirement_position: self.requirements.len(),
             committed: Arc::clone(&self.committed),
             changes: self.changes.share_owner(),
@@ -479,6 +500,10 @@ impl Transaction {
         truncate_retained(&mut self.graph, self.savepoints[position].graph_position);
         truncate_retained(&mut self.vector, self.savepoints[position].vector_position);
         truncate_retained(
+            &mut self.populations,
+            self.savepoints[position].population_position,
+        );
+        truncate_retained(
             &mut self.requirements,
             self.savepoints[position].requirement_position,
         );
@@ -522,6 +547,7 @@ impl Transaction {
         if prepared.records().is_empty()
             && prepared.graph.is_none()
             && prepared.vector.is_none()
+            && prepared.populations.is_none()
             && prepared.notification.is_none()
             && !prepared.has_requirements()
             && self.allocation.is_none()
@@ -589,7 +615,8 @@ impl Transaction {
             .prepare(control)?
             .with_requirements(&self.requirements, control)?
             .with_graph_effects(self.committed.sequence(), &self.graph, control)?
-            .with_vector_effects(self.committed.sequence(), &self.vector, control)
+            .with_vector_effects(self.committed.sequence(), &self.vector, control)?
+            .with_population_effects(self.committed.sequence(), &self.populations, control)
             .map(|prepared| {
                 prepared
                     .with_notification_effect(self.notification.as_ref())

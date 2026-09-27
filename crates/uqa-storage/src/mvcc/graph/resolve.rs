@@ -118,6 +118,8 @@ fn initial_writes(
                     | RecordWriteKind::OccurrenceCache
                     | RecordWriteKind::IVFPreview
                     | RecordWriteKind::HNSWPreview
+                    | RecordWriteKind::DiskANNOrigin
+                    | RecordWriteKind::DiskANNPopulationPreview
             ))
         {
             writes.push(write.clone())?;
