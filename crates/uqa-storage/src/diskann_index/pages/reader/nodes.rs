@@ -6,7 +6,7 @@
 
 use uqa_core::memory::BudgetedVec;
 
-use super::{invalid, DiskANNPageLease, DiskANNReader};
+use super::{invalid, DiskANNPageLease, DiskANNPageReadStats, DiskANNReader};
 use crate::diskann_index::format::{decode_page, DiskANNNode, DiskANNPage};
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 
@@ -17,6 +17,15 @@ impl DiskANNReader {
         ids: &[u64],
         control: &StorageReadControl,
     ) -> StorageBackendResult<BudgetedVec<DiskANNNode>> {
+        self.read_nodes_with_stats(ids, control)
+            .map(|(nodes, _)| nodes)
+    }
+
+    pub(crate) fn read_nodes_with_stats(
+        &self,
+        ids: &[u64],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<(BudgetedVec<DiskANNNode>, DiskANNPageReadStats)> {
         control.check()?;
         let layout = self.manifest().layout();
         let mut ordered = BudgetedVec::new(control.memory());
@@ -40,7 +49,7 @@ impl DiskANNReader {
             previous = Some(node);
         }
         drop(ordered);
-        let leases = self.read_pages(&pages, control)?;
+        let (leases, stats) = self.read_pages_with_stats(&pages, control)?;
         drop(pages);
         let mut result = BudgetedVec::new(control.memory());
         result.reserve(ids.len())?;
@@ -70,7 +79,7 @@ impl DiskANNReader {
             result.push(decoded)?;
         }
         control.check()?;
-        Ok(result)
+        Ok((result, stats))
     }
 
     fn decode_lease<'a>(

@@ -11,7 +11,9 @@ use std::cmp::Ordering;
 use uqa_core::memory::{BudgetedHashSet, BudgetedVec};
 
 use super::{
-    format::DiskANNNode, pages::DiskANNReader, NavigationVector, PQDistance, PQLookupTable,
+    format::DiskANNNode,
+    pages::{DiskANNPageReadStats, DiskANNReader},
+    NavigationVector, PQDistance, PQLookupTable,
 };
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 
@@ -61,6 +63,7 @@ pub struct DiskANNTraversal {
     workspace: Option<Workspace>,
     complete: bool,
     stats: DiskANNTraversalStats,
+    pages: DiskANNPageReadStats,
 }
 
 impl DiskANNTraversal {
@@ -107,11 +110,17 @@ impl DiskANNTraversal {
             complete: workspace.is_none(),
             workspace,
             stats,
+            pages: DiskANNPageReadStats::default(),
         })
     }
 
     pub fn stats(&self) -> DiskANNTraversalStats {
         self.stats
+    }
+
+    /// Actual page/cache/provider outcomes for this traversal. These remain separate from cache-independent navigation statistics.
+    pub fn page_stats(&self) -> DiskANNPageReadStats {
+        self.pages
     }
 
     /// Freeze up to the configured beam width in (PQ distance, node ID) order, read their pages together and expand in that order. An empty batch marks approximate exhaustion, not exact support or a complete document quota.
@@ -136,9 +145,17 @@ impl DiskANNTraversal {
             };
         };
         let mut stats = self.stats;
-        let nodes = workspace.step(&self.reader, &self.control, &mut stats, completion)?;
+        let mut pages = self.pages;
+        let nodes = workspace.step(
+            &self.reader,
+            &self.control,
+            &mut stats,
+            &mut pages,
+            completion,
+        )?;
         self.control.check()?;
         self.stats = stats;
+        self.pages = pages;
         if completion && workspace.cursor == self.reader.manifest().input().nodes {
             self.complete = true;
         } else {
@@ -154,6 +171,7 @@ impl Workspace {
         reader: &DiskANNReader,
         control: &StorageReadControl,
         stats: &mut DiskANNTraversalStats,
+        pages: &mut DiskANNPageReadStats,
         completion: bool,
     ) -> StorageBackendResult<BudgetedVec<DiskANNNode>> {
         let input = reader.manifest().input();
@@ -197,7 +215,8 @@ impl Workspace {
         if selected.is_empty() {
             return Ok(BudgetedVec::new(control.memory()));
         }
-        let nodes = reader.read_nodes(&selected, control)?;
+        let (nodes, read) = reader.read_nodes_with_stats(&selected, control)?;
+        pages.merge(read)?;
         for node in nodes.iter() {
             control.check()?;
             if completion {

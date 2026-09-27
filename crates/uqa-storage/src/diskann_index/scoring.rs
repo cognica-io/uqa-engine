@@ -20,6 +20,8 @@ use crate::{
 use uqa_core::{DocId, PostingList};
 
 pub(super) mod selection;
+mod statistics;
+pub use statistics::DiskANNScoringStats;
 #[cfg(test)]
 mod tests;
 
@@ -132,23 +134,47 @@ impl<'a> DiskANNCanonicalScorer<'a> {
 
     /// Exact document top-k with workspace proportional to selected documents, not corpus size. Scores descend with document-ID tie breaking; returned postings retain their ordinary document order and caller-owned result boundary.
     pub fn search_exact_knn(&self, k: usize) -> StorageBackendResult<PostingList> {
+        self.search_exact_knn_with_stats(k)
+            .map(|(postings, _)| postings)
+    }
+
+    /// Return the unchanged exact result with successful tensor-scoring work from this invocation.
+    pub fn search_exact_knn_with_stats(
+        &self,
+        k: usize,
+    ) -> StorageBackendResult<(PostingList, DiskANNScoringStats)> {
         self.source.check_control(self.control)?;
+        let mut stats = DiskANNScoringStats::default();
         if k == 0 {
-            return Ok(PostingList::new());
+            return Ok((PostingList::new(), stats));
         }
         let mut selected = selection::TopK::new(k, self.control);
-        self.visit_scores(&mut |score| selected.offer(score))?;
+        self.visit_scores(&mut |score| {
+            stats.record(score.vector_count())?;
+            selected.offer(score)
+        })?;
         let result = selected.finish(self.control)?;
         self.source.check_control(self.control)?;
-        Ok(result)
+        Ok((result, stats))
     }
 
     /// Scan all canonical documents and apply the existing raw-cosine threshold after full tensor reduction. NaN comparison and finite-threshold validation match the existing exact index.
     pub fn search_threshold(&self, threshold: f32) -> StorageBackendResult<PostingList> {
+        self.search_threshold_with_stats(threshold)
+            .map(|(postings, _)| postings)
+    }
+
+    /// Count every scored tensor before threshold filtering, including tensors that produce no result row.
+    pub fn search_threshold_with_stats(
+        &self,
+        threshold: f32,
+    ) -> StorageBackendResult<(PostingList, DiskANNScoringStats)> {
         self.source.check_control(self.control)?;
         validate_threshold(threshold)?;
         let mut scores = VectorQueryBuffer::new(Some(self.control));
+        let mut stats = DiskANNScoringStats::default();
         self.visit_scores(&mut |score| {
+            stats.record(score.vector_count())?;
             if score.score >= threshold {
                 scores.push((score.document, score.score))?;
             }
@@ -156,7 +182,7 @@ impl<'a> DiskANNCanonicalScorer<'a> {
         })?;
         let result = postings_from_unique_scores(scores, None, Some(self.control))?;
         self.source.check_control(self.control)?;
-        Ok(result)
+        Ok((result, stats))
     }
 
     fn document(

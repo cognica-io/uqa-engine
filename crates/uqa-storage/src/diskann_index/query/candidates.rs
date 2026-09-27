@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{invalid, DiskANNQuery};
+use super::{invalid, DiskANNQuery, DiskANNQueryWork};
 use crate::diskann_index::{
     format::{DiskANNCanonicalOrigin, DiskANNNode, DiskANNVectorVersion},
     scoring::selection::TopK,
@@ -40,6 +40,7 @@ pub(super) struct Candidates<'a, 's> {
     selected: TopK,
     graph: BudgetedMap<DocId, Candidate>,
     control: &'a StorageReadControl,
+    work: DiskANNQueryWork,
 }
 
 impl<'a, 's> Candidates<'a, 's> {
@@ -55,6 +56,7 @@ impl<'a, 's> Candidates<'a, 's> {
             selected: TopK::deduplicating(k, control),
             graph: BudgetedMap::new(control.memory()),
             control,
+            work: DiskANNQueryWork::default(),
         }
     }
 
@@ -62,16 +64,22 @@ impl<'a, 's> Candidates<'a, 's> {
         self.selected.len()
     }
 
+    pub(super) fn work(&self) -> DiskANNQueryWork {
+        self.work
+    }
+
     pub(super) fn offer_unversioned(
         &mut self,
         document: DocId,
         score: f32,
+        vectors: u64,
     ) -> StorageBackendResult<()> {
         self.query.check(self.control)?;
+        self.work.unversioned.record(vectors)?;
         self.selected.offer_raw(document, score)
     }
 
-    fn candidate(&self, document: DocId) -> StorageBackendResult<Candidate> {
+    fn candidate(&mut self, document: DocId) -> StorageBackendResult<Candidate> {
         self.query.check(self.control)?;
         let origin = self
             .query
@@ -86,6 +94,9 @@ impl<'a, 's> Candidates<'a, 's> {
             return Err(invalid(
                 "canonical tensor count differs from its original version",
             ));
+        }
+        if let Some(score) = score {
+            self.work.reranked.record(score.vector_count())?;
         }
         Ok(Candidate { origin, score })
     }
@@ -110,8 +121,14 @@ impl<'a, 's> Candidates<'a, 's> {
     pub(super) fn side(&mut self) -> StorageBackendResult<()> {
         // Side identities are document ordered; only one additional tensor score needs retention, even for a large numeric-only corpus.
         let mut previous: Option<(DocId, Candidate)> = None;
-        self.query.reader.visit_side(self.control, &mut |entry| {
+        let query = self.query;
+        query.reader.visit_side(self.control, &mut |entry| {
             self.query.check(self.control)?;
+            self.work.side_entries = self
+                .work
+                .side_entries
+                .checked_add(1)
+                .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
             let candidate = match previous {
                 Some((document, candidate)) if document == entry.doc_id() => candidate,
                 _ => self
@@ -156,6 +173,7 @@ impl<'a, 's> Candidates<'a, 's> {
                 if score.version() != change.version() {
                     return Err(invalid("canonical change moved while scoring"));
                 }
+                self.work.changed.record(score.vector_count())?;
                 self.selected.offer(score)?;
             }
         }

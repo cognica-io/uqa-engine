@@ -11,8 +11,8 @@ use uqa_core::memory::{Budgeted, BudgetedVec, MemoryError};
 
 use super::{
     cache::{PageCache, SharedPage},
-    invalid, read_manifest, read_record, DiskANNPageSource, DiskANNReadCapabilities,
-    DiskANNReadLimits, DiskANNRecordKey,
+    invalid, read_manifest, read_record, DiskANNPageReadStats, DiskANNPageSource,
+    DiskANNReadCapabilities, DiskANNReadLimits, DiskANNRecordKey,
 };
 use crate::diskann_index::{
     format::{
@@ -162,6 +162,16 @@ impl DiskANNReader {
         ids: &[u64],
         control: &StorageReadControl,
     ) -> StorageBackendResult<BudgetedVec<DiskANNPageLease>> {
+        self.read_pages_with_stats(ids, control)
+            .map(|(pages, _)| pages)
+    }
+
+    /// Return page leases and the successful work of this call. Counts come from its actual cache probes and provider batches; another concurrent reader cannot contribute to them.
+    pub fn read_pages_with_stats(
+        &self,
+        ids: &[u64],
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<(BudgetedVec<DiskANNPageLease>, DiskANNPageReadStats)> {
         control.check()?;
         if self.resident.source.generation() != self.manifest().input().generation {
             return Err(invalid("source changed its retained generation"));
@@ -184,11 +194,12 @@ impl DiskANNReader {
         if !ids.is_empty() && batch == 0 {
             return Err(invalid("no page fits the read limit"));
         }
+        let mut stats = DiskANNPageReadStats::default();
         for ids in ids.chunks(batch.max(1)) {
-            self.read_batch(ids, &mut result, control)?;
+            stats.merge(self.read_batch(ids, &mut result, control)?)?;
         }
         control.check()?;
-        Ok(result)
+        Ok((result, stats))
     }
 
     fn read_batch(
@@ -196,7 +207,7 @@ impl DiskANNReader {
         ids: &[u64],
         result: &mut BudgetedVec<DiskANNPageLease>,
         control: &StorageReadControl,
-    ) -> StorageBackendResult<()> {
+    ) -> StorageBackendResult<DiskANNPageReadStats> {
         struct Slot {
             id: u64,
             cached: Option<SharedPage>,
@@ -284,7 +295,14 @@ impl DiskANNReader {
             };
             result.push(DiskANNPageLease { id: slot.id, bytes })?;
         }
-        Ok(())
+        let requests = u64::try_from(ids.len()).map_err(|_| MemoryError::SizeOverflow)?;
+        let pages = u64::try_from(missing.len()).map_err(|_| MemoryError::SizeOverflow)?;
+        Ok(DiskANNPageReadStats {
+            page_requests: requests,
+            cache_hits: requests - pages,
+            provider_pages: pages,
+            provider_batches: u64::from(pages != 0),
+        })
     }
 
     pub fn read_node(
