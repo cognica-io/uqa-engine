@@ -68,7 +68,7 @@ pub(super) struct IndexView<T> {
     preparing_definition: AtomicBool,
 }
 
-impl<T: VectorIndex + 'static> IndexView<T> {
+impl<T: VectorIndex + crate::vector_index::VectorRead + 'static> IndexView<T> {
     pub(super) fn new(creating: bool) -> Self {
         Self {
             cached: Mutex::new(None),
@@ -91,7 +91,8 @@ impl<T: VectorIndex + 'static> IndexView<T> {
         }
         let definition_candidate = self.preparing_definition.load(Ordering::Acquire);
         let (value, revision) = load(definition_candidate)?;
-        let value = ReadOnlySnapshot::from_budgeted(value)?;
+        let value =
+            ReadOnlySnapshot::from_budgeted(value)?.with_canonical_vectors(Some(read.control()))?;
         let mut state = IndexState {
             snapshot: value.snapshot()?,
             value,

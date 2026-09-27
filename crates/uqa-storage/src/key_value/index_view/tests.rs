@@ -16,11 +16,14 @@ use uqa_core::{
     CancellationToken,
 };
 
-fn check_reader_controls<T: VectorIndex + 'static>(
+fn check_reader_controls<T: VectorIndex + crate::vector_index::VectorRead + 'static>(
     source: Budgeted<T>,
     original: &StorageReadControl,
 ) {
-    let value = ReadOnlySnapshot::from_budgeted(source).unwrap();
+    let value = ReadOnlySnapshot::from_budgeted(source)
+        .unwrap()
+        .with_canonical_vectors(Some(original))
+        .unwrap();
     let mut cached = IndexState {
         snapshot: value.snapshot().unwrap(),
         value,
@@ -48,7 +51,12 @@ fn check_reader_controls<T: VectorIndex + 'static>(
         &raw const *old.value,
         &raw const *current.value
     ));
-    original.cancellation().cancel();
+    check_canonical_reader_controls(
+        old.snapshot.as_ref(),
+        current.snapshot.as_ref(),
+        original,
+        &independent,
+    );
     assert!(matches!(
         old.snapshot.search_knn(&[1.0, 0.0], 1),
         Err(StorageBackendError::Cancelled(_))
@@ -94,6 +102,29 @@ fn check_reader_controls<T: VectorIndex + 'static>(
     );
     drop((cached, old, same, current, limited));
     assert_eq!(original.memory().used(), 0);
+}
+
+fn check_canonical_reader_controls(
+    old: &dyn VectorIndex,
+    current: &dyn VectorIndex,
+    original: &StorageReadControl,
+    independent: &StorageReadControl,
+) {
+    let old_values = old.vector_read_snapshot(original).unwrap().unwrap();
+    let current_values = current.vector_read_snapshot(independent).unwrap().unwrap();
+    assert_eq!(
+        old_values.corpus_fingerprint(original).unwrap(),
+        current_values.corpus_fingerprint(independent).unwrap()
+    );
+    original.cancellation().cancel();
+    assert!(old_values.read_vector(1, 0, independent).is_err());
+    assert_eq!(
+        &*current_values
+            .read_vector(1, 0, independent)
+            .unwrap()
+            .unwrap(),
+        &[1.0, 0.0]
+    );
 }
 
 #[test]

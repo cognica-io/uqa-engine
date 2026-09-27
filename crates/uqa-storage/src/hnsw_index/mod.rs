@@ -6,6 +6,7 @@
 
 //! Hierarchical Navigable Small World vector index.
 
+mod canonical;
 mod construction;
 mod index;
 mod metric;

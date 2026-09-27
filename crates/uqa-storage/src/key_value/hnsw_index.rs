@@ -243,6 +243,12 @@ impl VectorIndex for KeyValueHNSWIndex {
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
         Ok(self.read_graph()?.snapshot)
     }
+    fn vector_read_snapshot(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::vector_index::VectorReadSnapshot>> {
+        self.raw.vector_read_snapshot(control)
+    }
 }
 
 fn next_revision(revision: Option<u64>) -> StorageBackendResult<u64> {

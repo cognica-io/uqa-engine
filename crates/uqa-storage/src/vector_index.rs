@@ -25,7 +25,7 @@ mod memory_snapshot;
 pub mod query;
 pub(crate) mod retained;
 
-pub(crate) use canonical::selected_fingerprint;
+pub(crate) use canonical::{copy_vector, ordinal_count, selected_fingerprint};
 pub use canonical::{decode_vector_bytes, SelectedVectorRead, VectorRead, VectorReadSnapshot};
 pub use collection::{
     RetainedVectorIndexesBuilder, VectorIndexSource, VectorIndexes, VectorIndexesIter,

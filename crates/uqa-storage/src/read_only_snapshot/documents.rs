@@ -267,6 +267,7 @@ impl DocumentStore for ReadOnlySnapshot<dyn DocumentStore> {
                 snapshot,
                 self.1.as_ref().map(Arc::clone),
                 self.2.clone(),
+                None,
             )) as Arc<dyn DocumentStore>
         }))
     }

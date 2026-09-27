@@ -14,8 +14,10 @@ use uqa_core::{
 };
 
 mod fingerprint;
+mod ordered;
 mod selection;
 pub(crate) use fingerprint::selected_fingerprint;
+pub(crate) use ordered::{copy_vector, ordinal_count};
 pub use selection::SelectedVectorRead;
 
 /// A fixed canonical field view. Owners retain their original visibility, allowance and cancellation. Metadata enumeration never decodes coordinates; a point read owns at most one vector and releases provider locks before returning. This interface makes no claim about physical index lineage or mutation origins.

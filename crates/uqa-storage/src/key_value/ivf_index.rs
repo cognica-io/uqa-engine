@@ -272,9 +272,16 @@ impl VectorIndex for KeyValueIVFIndex {
             }
             let candidate = cached.value.trained_snapshot_controlled(read.control())?;
             ReadOnlySnapshot::from_budgeted(candidate)?
+                .with_canonical_vectors(Some(read.control()))?
                 .with_vector_read_control(read.control())?
                 .snapshot()
         })
+    }
+    fn vector_read_snapshot(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::vector_index::VectorReadSnapshot>> {
+        self.raw.vector_read_snapshot(control)
     }
 }
 

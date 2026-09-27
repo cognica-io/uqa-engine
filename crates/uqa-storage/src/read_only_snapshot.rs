@@ -11,6 +11,7 @@ use uqa_core::memory::{Budgeted, MemoryReservation};
 
 use crate::StorageBackendError;
 
+mod canonical_vectors;
 mod documents;
 mod inverted;
 mod vectors;
@@ -20,6 +21,7 @@ pub struct ReadOnlySnapshot<T: ?Sized>(
     Arc<T>,
     Option<Arc<MemoryReservation>>,
     Option<crate::read_control::StorageReadControl>,
+    Option<crate::vector_index::VectorReadSnapshot>,
 );
 
 impl<T> ReadOnlySnapshot<T> {
@@ -35,7 +37,7 @@ impl<T> ReadOnlySnapshot<T> {
 impl<T: ?Sized> ReadOnlySnapshot<T> {
     #[must_use]
     pub fn new(snapshot: Arc<T>) -> Self {
-        Self(snapshot, None, None)
+        Self(snapshot, None, None, None)
     }
 
     pub(crate) fn with_retention(
@@ -51,7 +53,7 @@ impl<T: ?Sized> ReadOnlySnapshot<T> {
 
     /// The owning value can retain the same lease so direct owner snapshots cannot separate shared data from its allowance.
     pub(crate) fn with_shared_retention(snapshot: Arc<T>, memory: Arc<MemoryReservation>) -> Self {
-        Self(snapshot, Some(memory), None)
+        Self(snapshot, Some(memory), None, None)
     }
 }
 
@@ -61,6 +63,7 @@ impl<T: ?Sized> Clone for ReadOnlySnapshot<T> {
             Arc::clone(&self.0),
             self.1.as_ref().map(Arc::clone),
             self.2.clone(),
+            self.3.clone(),
         )
     }
 }
