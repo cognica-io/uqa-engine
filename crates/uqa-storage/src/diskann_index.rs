@@ -25,7 +25,9 @@ mod scoring;
 pub mod search;
 mod vamana;
 
-pub use canonical::{DiskANNCanonicalCorpusVisitor, DiskANNCanonicalRead, DiskANNQueryRead};
+pub use canonical::{
+    DiskANNCanonicalCorpusVisitor, DiskANNCanonicalCounts, DiskANNCanonicalRead, DiskANNQueryRead,
+};
 pub use memory::{DiskANNMemoryIndex, DiskANNMemoryOptions};
 pub use metadata::DiskANNQueryMetadata;
 pub use metric::{ExactVectorReason, NavigationInput, NavigationVector, SquaredNavigationDistance};

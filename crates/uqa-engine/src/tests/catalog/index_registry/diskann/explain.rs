@@ -29,6 +29,32 @@ fn nodes(plan: &Json) -> &[Json] {
 }
 
 #[test]
+fn diskann_explain_memory_populations_follow_private_writes_and_savepoint_undo() {
+    let engine = Engine::new();
+    fixture(&engine);
+    let check = |current: u64, changed: u64| {
+        let plan = explain(
+            &engine,
+            "SELECT id FROM diskann_docs WHERE knn_match(embedding,ARRAY[1.0,0.0],2)",
+        );
+        assert_eq!(nodes(&plan)[0]["Population"]["Current Vectors"], current);
+        assert_eq!(nodes(&plan)[0]["Population"]["Changed Vectors"], changed);
+    };
+    check(3, 0);
+    sql(&engine, "BEGIN; UPDATE diskann_docs SET embedding=ARRAY[ARRAY[1.0,0.0]] WHERE id=1; SAVEPOINT counted");
+    check(2, 1);
+    sql(
+        &engine,
+        "INSERT INTO diskann_docs VALUES(3,ARRAY[ARRAY[1.0,0.0],ARRAY[0.0,1.0]])",
+    );
+    check(4, 3);
+    sql(&engine, "ROLLBACK TO counted");
+    check(2, 1);
+    sql(&engine, "ROLLBACK");
+    check(3, 0);
+}
+
+#[test]
 fn diskann_explain_reports_the_selected_field_configuration_and_numeric_route() {
     let engine = Engine::new();
     fixture(&engine);

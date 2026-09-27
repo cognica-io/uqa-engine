@@ -8,13 +8,91 @@ use super::*;
 use crate::diskann_index::{
     format::DiskANNManifest,
     pages::{DiskANNPageVisitor, DiskANNReadCapabilities, DiskANNRecordKey, DiskANNRecordVisitor},
-    DiskANNQueryMetadata,
+    DiskANNCanonicalCounts, DiskANNQueryMetadata,
 };
 
 struct MetadataOnly {
     source: Arc<DiskANNMemorySource>,
     reads: AtomicUsize,
     reject: bool,
+}
+
+struct CountedCanonical {
+    generation: DiskANNGeneration,
+    control: StorageReadControl,
+}
+
+impl DiskANNCanonicalRead for CountedCanonical {
+    fn population_counts(
+        &self,
+        generation: DiskANNGeneration,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DiskANNCanonicalCounts>> {
+        self.check_control(control)?;
+        assert_eq!(generation, self.generation);
+        Ok(Some(DiskANNCanonicalCounts::new(5, 4)?))
+    }
+    fn check_control(&self, control: &StorageReadControl) -> StorageBackendResult<()> {
+        self.control.check()?;
+        control.check()
+    }
+    fn dimensions(&self) -> u32 {
+        2
+    }
+    fn next_document_after(
+        &self,
+        _: Option<DocId>,
+        _: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DocId>> {
+        panic!("population capture must not enumerate canonical documents")
+    }
+    fn origin(
+        &self,
+        _: DocId,
+        _: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DiskANNVectorVersion>> {
+        panic!("population capture must not reconstruct origin coverage")
+    }
+    fn visit_document(
+        &self,
+        _: DocId,
+        _: &StorageReadControl,
+        _: &mut DiskANNCanonicalVectorVisitor<'_>,
+    ) -> StorageBackendResult<Option<DiskANNVectorVersion>> {
+        panic!("population capture must not read coordinates")
+    }
+}
+
+#[test]
+fn diskann_population_capture_uses_bounded_owner_metadata_without_corpus_reads() {
+    let original = Source::new([(1, vec![vec![1.0, 0.0]]), (2, vec![vec![0.0, 0.0]])]);
+    let physical = MetadataOnly {
+        source: build(&original),
+        reads: AtomicUsize::new(0),
+        reject: false,
+    };
+    let canonical = CountedCanonical {
+        generation: physical.generation(),
+        control: StorageReadControl::with_limit(4096),
+    };
+    let control = StorageReadControl::with_limit(4096);
+    let metadata =
+        DiskANNQueryMetadata::capture(&canonical, &physical, parameters(), limits(), &control)
+            .unwrap();
+    let statistics = metadata
+        .index_statistics(&StorageReadControl::with_limit(0))
+        .unwrap();
+    assert_eq!(statistics.populations.base_vectors, 2);
+    assert_eq!(statistics.populations.current_vectors, Some(5));
+    assert_eq!(statistics.populations.changed_vectors, Some(4));
+    assert_eq!(physical.reads.load(Ordering::Relaxed), 1);
+    assert_eq!(control.memory().used(), 0);
+    canonical.control.cancellation().cancel();
+    assert!(
+        DiskANNQueryMetadata::capture(&canonical, &physical, parameters(), limits(), &control)
+            .is_err()
+    );
+    assert_eq!(physical.reads.load(Ordering::Relaxed), 1);
 }
 
 impl DiskANNPageSource for MetadataOnly {

@@ -29,7 +29,7 @@ fn tree() -> OperatorTree {
     ])
 }
 
-fn check(engine: &Engine) {
+fn check(engine: &Engine, populations: Option<(u64, u64)>) {
     sql(engine, "CREATE TABLE diskann_docs(id int, embedding tensor(2), other vector(3)); INSERT INTO diskann_docs VALUES(1,ARRAY[ARRAY[1.0,0.0],ARRAY[0.0,1.0]],ARRAY[1.0,0.0,0.0]),(2,ARRAY[ARRAY[0.0,0.0]],ARRAY[0.0,1.0,0.0]); CREATE INDEX diskann_idx ON diskann_docs USING diskann(embedding) WITH(max_degree=2, search_list_size=4, beam_width=2, pq_bytes=1); CREATE INDEX diskann_other ON diskann_docs USING diskann(other) WITH(max_degree=2, search_list_size=8, beam_width=1, pq_bytes=3)");
     let query = tree();
     let optimizer = query_optimizer(engine, "diskann_docs", &query).unwrap();
@@ -52,7 +52,16 @@ fn check(engine: &Engine) {
         ),
         (3, 1)
     );
-    assert_eq!(first.index.populations.changed_vectors, None);
+    assert_eq!(
+        (
+            first.index.populations.current_vectors,
+            first.index.populations.changed_vectors
+        ),
+        (
+            populations.map(|counts| counts.0),
+            populations.map(|counts| counts.1)
+        )
+    );
     let fixed = engine.capture_statement_read_snapshot().unwrap();
     let reader = engine.statement_read_snapshot_engine(&fixed);
     sql(engine, "DROP INDEX diskann_other; CREATE INDEX diskann_other ON diskann_docs USING diskann(other) WITH(max_degree=2, search_list_size=16, beam_width=2, pq_bytes=1)");
@@ -78,10 +87,10 @@ fn check(engine: &Engine) {
 
 #[test]
 fn diskann_planning_retains_per_field_and_query_facts_on_all_providers() {
-    check(&Engine::new());
+    check(&Engine::new(), Some((3, 0)));
     for provider in 0..3 {
         let (_directory, engine, _peer) = sessions(provider);
-        check(&engine);
+        check(&engine, None);
     }
 }
 

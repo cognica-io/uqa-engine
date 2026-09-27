@@ -7,11 +7,16 @@
 //! Ordered canonical observations on a retained provider boundary, independent of graph coverage.
 
 use super::{
-    format::{DiskANNCanonicalOrigin, DiskANNChangeIdentity, DiskANNVectorVersion},
+    format::{
+        DiskANNCanonicalOrigin, DiskANNChangeIdentity, DiskANNGeneration, DiskANNVectorVersion,
+    },
     DiskANNCanonicalVectorVisitor,
 };
 use crate::{mvcc::VersionError, read_control::StorageReadControl, StorageBackendResult};
 use uqa_core::DocId;
+
+mod populations;
+pub use populations::DiskANNCanonicalCounts;
 
 /// Borrow one canonical ordinal in document order. Failure invalidates the consumer's partial output.
 pub type DiskANNCanonicalCorpusVisitor<'a> =
@@ -81,6 +86,16 @@ pub trait DiskANNQueryRead: DiskANNCanonicalRead {
 
 /// One fixed committed/private canonical source. Implementations retain their original visibility and controls; callbacks must not reenter the source.
 pub trait DiskANNCanonicalRead {
+    /// Exact owner-maintained counts for this canonical view and the requested build coverage. Unsupported associations return `None`; this operation must not enumerate documents, journals or origin pages to reconstruct counts.
+    fn population_counts(
+        &self,
+        _generation: DiskANNGeneration,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DiskANNCanonicalCounts>> {
+        self.check_control(control)?;
+        Ok(None)
+    }
+
     /// Identity of the complete selected canonical field, independent of graph generations. Unsupported sources cannot authorize fixed-model reuse.
     fn corpus_fingerprint(
         &self,

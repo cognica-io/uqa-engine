@@ -9,9 +9,9 @@
 use super::selection::{DiskANNReadChanges, DiskANNReadSnapshot, SelectedCanonical};
 use super::{invalid, DiskANNQuery};
 use crate::diskann_index::{
-    format::DiskANNManifest,
+    format::{DiskANNGeneration, DiskANNManifest},
     pages::{DiskANNOriginReader, DiskANNPageSource, DiskANNReadLimits, DiskANNReader},
-    DiskANNQueryRead,
+    DiskANNCanonicalCounts, DiskANNQueryRead,
 };
 use crate::{
     read_control::StorageReadControl, vector_index::DiskANNIndexParams, StorageBackendError,
@@ -132,10 +132,15 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> VectorIndex for RetainedDiskAN
         self.check()?;
         control.check()?;
         let corpus_fingerprint = self.retained.canonical.corpus_fingerprint(control)?;
+        let canonical_counts = self
+            .retained
+            .canonical
+            .population_counts(self.manifest().input().generation, control)?;
         self.check()?;
         Ok(Some(crate::diskann_index::DiskANNQueryMetadata {
             manifest: *self.manifest(),
             corpus_fingerprint,
+            canonical_counts,
             read_limits: self.retained.reader.limits(),
             read_capabilities: self.retained.reader.capabilities(),
         }))
@@ -304,6 +309,15 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> VectorIndex for RetainedDiskAN
 }
 
 impl<S: DiskANNQueryRead> crate::diskann_index::DiskANNCanonicalRead for Budgeted<Retained<S>> {
+    fn population_counts(
+        &self,
+        generation: DiskANNGeneration,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DiskANNCanonicalCounts>> {
+        self.control.check()?;
+        self.canonical.population_counts(generation, control)
+    }
+
     fn corpus_fingerprint(
         &self,
         control: &StorageReadControl,
