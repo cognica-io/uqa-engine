@@ -9,7 +9,8 @@ use crate::{ManagedConnection, SQLiteVectorIndex};
 use std::sync::Arc;
 use uqa_storage::{
     diskann_index::{
-        build::DiskANNTemporaryBudget, pages::DiskANNPageSource, PersistentDiskANNIndex,
+        build::DiskANNTemporaryBudget, pages::DiskANNPageSource, DiskANNPersistentOwner,
+        DiskANNQueryMetadata, PersistentDiskANNIndex,
     },
     key_value::conformance::diskann_runtime_fixture_options,
     read_control::StorageReadControl,
@@ -42,6 +43,42 @@ fn scores(index: &dyn VectorIndex, expected: &[(u64, f64)]) {
             .iter()
             .map(|&(document, score)| (document, score.to_bits()))
             .collect::<Vec<_>>()
+    );
+}
+
+fn metadata(
+    connection: &ManagedConnection,
+    index: &dyn VectorIndex,
+    held: &dyn VectorIndex,
+    temporary: &DiskANNTemporaryBudget,
+    control: &StorageReadControl,
+) -> DiskANNQueryMetadata {
+    let metadata = index.diskann_query_metadata(control).unwrap().unwrap();
+    assert_metadata(held, &metadata, control);
+    assert_eq!(metadata.manifest.input().coverage.vector_count(), 4);
+    let mut bounded = diskann_runtime_fixture_options(2).unwrap();
+    bounded.read.resident_bytes = 0;
+    let handle = canonical(connection, TABLE, FIELD, 2)
+        .bind(row().relation, Arc::new(Resolver), bounded.read, control)
+        .unwrap();
+    let before = control.memory().used();
+    let captured = handle.query_metadata().unwrap();
+    assert_eq!(captured.manifest, metadata.manifest);
+    assert_eq!(captured.corpus_fingerprint, metadata.corpus_fingerprint);
+    assert_eq!(captured.read_limits, bounded.read);
+    assert_eq!(control.memory().used(), before);
+    assert!(PersistentDiskANNIndex::new(handle, bounded, temporary).is_err());
+    metadata
+}
+
+fn assert_metadata(
+    index: &dyn VectorIndex,
+    expected: &DiskANNQueryMetadata,
+    control: &StorageReadControl,
+) {
+    assert_eq!(
+        index.diskann_query_metadata(control).unwrap().as_ref(),
+        Some(expected)
     );
 }
 
@@ -165,6 +202,7 @@ fn native_diskann_runtime_lifecycle_preserves_transactions_and_cold_reopen() {
             scores(&index, &[(1, 1.0), (2, 1.0), (3, -1.0)]);
             assert_eq!(index.count().unwrap(), 4);
             let held = index.snapshot().unwrap();
+            let metadata = metadata(&connection, &index, &*held, &temporary, &control);
             let first = capture(&connection, &control)
                 .selected_source(&Resolver, &control)
                 .unwrap()
@@ -174,6 +212,10 @@ fn native_diskann_runtime_lifecycle_preserves_transactions_and_cold_reopen() {
             index.add(1, vec![-1.0, 0.0]).unwrap();
             index.delete(2).unwrap();
             index.add(4, vec![0.0, 1.0]).unwrap();
+            let changed = index.diskann_query_metadata(&control).unwrap().unwrap();
+            assert_eq!(changed.manifest, metadata.manifest);
+            assert_ne!(changed.corpus_fingerprint, metadata.corpus_fingerprint);
+            assert_metadata(&*held, &metadata, &control);
             index.initialize().unwrap();
             let rebuilt = index.snapshot().unwrap();
             scores(&*rebuilt, &[(1, -1.0), (3, -1.0), (4, 0.0)]);
@@ -186,6 +228,7 @@ fn native_diskann_runtime_lifecycle_preserves_transactions_and_cold_reopen() {
                 .unwrap();
             assert_eq!(selected.manifest().input().nodes, 0);
             connection.rollback_to_savepoint("runtime-user").unwrap();
+            assert_metadata(&index, &metadata, &control);
             scores(&index, &[(1, 1.0), (2, 1.0), (3, -1.0)]);
             assert_eq!(
                 capture(&connection, &control)

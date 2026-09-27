@@ -31,6 +31,8 @@ pub trait DiskANNPersistentOwner: Send + Sync {
     fn parameters(&self) -> DiskANNIndexParams;
     fn read_limits(&self) -> DiskANNReadLimits;
     fn control(&self) -> &StorageReadControl;
+    /// Read the selected manifest and canonical identity on one provider view without preparing graph, PQ or origin readers.
+    fn query_metadata(&self) -> StorageBackendResult<super::DiskANNQueryMetadata>;
     fn snapshot(&self) -> StorageBackendResult<Self::Snapshot>;
     fn count(&self) -> StorageBackendResult<usize>;
     fn contains_document(&self, document: DocId) -> StorageBackendResult<bool>;
@@ -88,7 +90,9 @@ impl<P: DiskANNPersistentOwner> VectorIndex for PersistentDiskANNIndex<P> {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Option<super::DiskANNQueryMetadata>> {
         control.check()?;
-        self.owner.snapshot()?.diskann_query_metadata(control)
+        let metadata = self.owner.query_metadata()?;
+        control.check()?;
+        Ok(Some(metadata))
     }
     fn add(&mut self, document: DocId, vector: Vec<f32>) -> StorageBackendResult<()> {
         self.owner.replace(document, std::slice::from_ref(&vector))

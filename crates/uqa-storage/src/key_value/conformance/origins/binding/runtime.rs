@@ -16,7 +16,8 @@ use crate::{
         },
         format::{DiskANNGeneration, PAGE_BYTES},
         pages::{DiskANNPageSource, DiskANNReadLimits},
-        DiskANNIndexOptions, PQTrainingOptions, PersistentDiskANNIndex,
+        DiskANNIndexOptions, DiskANNPersistentOwner, DiskANNQueryMetadata, PQTrainingOptions,
+        PersistentDiskANNIndex,
     },
     key_value::{
         conformance::{expect, expect_eq},
@@ -125,6 +126,92 @@ fn scores(index: &dyn VectorIndex, expected: &[(u64, f64)]) -> StorageBackendRes
     )
 }
 
+fn capture_metadata(
+    store: &Arc<dyn KeyValueStore>,
+    index: &dyn VectorIndex,
+    held: &dyn VectorIndex,
+    temporary: &DiskANNTemporaryBudget,
+    control: &StorageReadControl,
+) -> StorageBackendResult<DiskANNQueryMetadata> {
+    let expected = index
+        .diskann_query_metadata(control)?
+        .expect("DiskANN metadata");
+    require_metadata(held, &expected, control)?;
+    expect_eq(
+        &expected.manifest.input().coverage.vector_count(),
+        &4,
+        "metadata complete base tensor count",
+    )?;
+    let mut options = diskann_runtime_fixture_options(2)?;
+    options.read.resident_bytes = 0;
+    let handle = canonical(store)?.bind(
+        row([91; 16])?.relation,
+        Arc::new(Resolver),
+        options.read,
+        control,
+    )?;
+    let before = control.memory().used();
+    let metadata = handle.query_metadata()?;
+    expect_eq(
+        &metadata.manifest,
+        &expected.manifest,
+        "bounded metadata selects the actual manifest",
+    )?;
+    expect_eq(
+        &metadata.corpus_fingerprint,
+        &expected.corpus_fingerprint,
+        "bounded metadata selects the actual private field",
+    )?;
+    expect_eq(
+        &metadata.read_limits,
+        &options.read,
+        "metadata retains requested read limits",
+    )?;
+    expect_eq(
+        &control.memory().used(),
+        &before,
+        "metadata releases temporary provider readers",
+    )?;
+    expect(
+        PersistentDiskANNIndex::new(handle, options, temporary).is_err(),
+        "executable restore still requires resident PQ admission",
+    )?;
+    Ok(expected)
+}
+
+fn require_metadata(
+    index: &dyn VectorIndex,
+    expected: &DiskANNQueryMetadata,
+    control: &StorageReadControl,
+) -> StorageBackendResult<()> {
+    expect_eq(
+        &index.diskann_query_metadata(control)?.as_ref(),
+        &Some(expected),
+        "selected metadata matches the original captured view",
+    )
+}
+
+fn changed_metadata(
+    index: &dyn VectorIndex,
+    held: &dyn VectorIndex,
+    expected: &DiskANNQueryMetadata,
+    control: &StorageReadControl,
+) -> StorageBackendResult<()> {
+    let changed = index
+        .diskann_query_metadata(control)?
+        .expect("changed metadata");
+    expect_eq(
+        &changed.manifest,
+        &expected.manifest,
+        "row changes preserve physical metadata",
+    )?;
+    expect(
+        changed.corpus_fingerprint != expected.corpus_fingerprint,
+        "private changes update live canonical identity",
+    )?;
+    require_metadata(held, expected, control)
+}
+
 fn create(
     store: &Arc<dyn KeyValueStore>,
     temporary: &DiskANNTemporaryBudget,
@@ -213,10 +300,12 @@ pub fn verify_diskann_runtime_lifecycle(
     expect_eq(&index.count()?, &4, "adoption preserves complete tensors")?;
     let first = generation(store, &control)?;
     let held = index.snapshot()?;
+    let metadata = capture_metadata(store, &index, &*held, &temporary, &control)?;
     store.savepoint("runtime-user")?;
     index.add(1, vec![-1.0, 0.0])?;
     index.delete(2)?;
     index.add(4, vec![0.0, 1.0])?;
+    changed_metadata(&index, &*held, &metadata, &control)?;
     expect_eq(
         &generation(store, &control)?,
         &first,
@@ -246,6 +335,7 @@ pub fn verify_diskann_runtime_lifecycle(
         "clear publishes an actually empty graph",
     )?;
     store.rollback_to_savepoint("runtime-user")?;
+    require_metadata(&index, &metadata, &control)?;
     scores(&index, &[(1, 1.0), (2, 1.0), (3, -1.0)])?;
     scores(&*rebuilt, &[(1, -1.0), (3, -1.0), (4, 0.0)])?;
     expect_eq(&empty.count()?, &0, "undone empty snapshot remains valid")?;
