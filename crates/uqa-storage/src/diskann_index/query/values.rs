@@ -7,6 +7,7 @@
 //! Complete fixed tensors keep their raw scores even when their physical definition has changed.
 
 use super::invalid;
+use crate::diskann_index::scoring::ScoringStatsExt;
 use crate::{
     diskann_index::{scoring::selection::TopK, DiskANNScoringStats},
     read_control::StorageReadControl,

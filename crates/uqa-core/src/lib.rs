@@ -23,6 +23,7 @@ pub mod ranked_view;
 pub mod relation;
 mod relation_identity;
 pub mod types;
+pub mod vector_execution;
 
 pub use cancel::{CancellationToken, QueryCancelled, SQLSTATE_QUERY_CANCELED};
 pub use doc_set::DocSet;

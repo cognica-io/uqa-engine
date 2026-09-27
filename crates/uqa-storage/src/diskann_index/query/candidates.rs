@@ -5,6 +5,7 @@
 //
 
 use super::{invalid, DiskANNQuery, DiskANNQueryWork};
+use crate::diskann_index::scoring::ScoringStatsExt;
 use crate::diskann_index::{
     format::{DiskANNCanonicalOrigin, DiskANNNode, DiskANNVectorVersion},
     scoring::selection::TopK,

@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::diskann_index::pages::PageReadStatsExt;
 
 #[test]
 fn diskann_page_work_uses_actual_cache_leases_and_keeps_concurrent_invocations_separate() {

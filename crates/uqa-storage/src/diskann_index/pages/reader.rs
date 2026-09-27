@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use super::PageReadStatsExt;
 use sha2::{Digest, Sha256};
 use uqa_core::memory::{Budgeted, BudgetedVec, MemoryError};
 

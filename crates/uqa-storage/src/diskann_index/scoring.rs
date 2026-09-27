@@ -22,6 +22,7 @@ use uqa_core::{DocId, PostingList};
 pub(super) mod selection;
 mod statistics;
 pub use statistics::DiskANNScoringStats;
+pub(crate) use statistics::ScoringStatsExt;
 #[cfg(test)]
 mod tests;
 
