@@ -4,13 +4,14 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
-use uqa_core::{Payload, PostingEntry, PostingList};
+use uqa_core::{Payload, PostingEntry, PostingList, Predicate, Value};
 use uqa_operators::{
-    ExecutionContext, IntersectOperator, Operator, OperatorTree, VectorSimilarityOperator,
+    ExecutionContext, FilterOperator, IntersectOperator, Operator, OperatorTree,
+    VectorSimilarityOperator,
 };
-use uqa_storage::{MemoryVectorIndex, VectorIndex};
+use uqa_storage::{DocumentStore, MemoryDocumentStore, MemoryVectorIndex, VectorIndex};
 
 use super::QueryOptimizer;
 
@@ -24,15 +25,16 @@ fn vector(query: [f32; 2], threshold: f32) -> OperatorTree {
 
 fn context(documents: &[[f32; 2]]) -> ExecutionContext {
     let mut index = MemoryVectorIndex::new(2);
+    let mut rows = MemoryDocumentStore::new();
     for (index_in_documents, document) in documents.iter().enumerate() {
-        index
-            .add(
-                u64::try_from(index_in_documents + 1).unwrap(),
-                document.to_vec(),
-            )
+        let id = u64::try_from(index_in_documents + 1).unwrap();
+        index.add(id, document.to_vec()).unwrap();
+        rows.put(id, BTreeMap::from([("keep".into(), Value::Bool(true))]))
             .unwrap();
     }
-    ExecutionContext::new().with_vector_index("embedding", Arc::new(index))
+    ExecutionContext::new()
+        .with_vector_index("embedding", Arc::new(index))
+        .with_document_store(Arc::new(rows))
 }
 
 // Bind the fixture's trees to the production operators and storage implementation.
@@ -50,6 +52,15 @@ fn bind(tree: &OperatorTree) -> Arc<dyn Operator> {
         OperatorTree::Intersect(children) => {
             Arc::new(IntersectOperator::new(children.iter().map(bind).collect()))
         }
+        OperatorTree::Filter {
+            field,
+            predicate,
+            source,
+        } => Arc::new(FilterOperator::new(
+            field.clone(),
+            predicate.clone(),
+            source.as_deref().map(bind),
+        )),
         _ => panic!("unexpected operator in vector intersection fixture"),
     }
 }
@@ -121,6 +132,45 @@ fn nested_vector_intersections_preserve_each_score_contribution() {
         3.0
     );
     assert_preserved(&tree, &context);
+}
+
+#[test]
+fn vector_intersection_costs_preserve_floating_point_score_order() {
+    let context = context(&[[1.0, 0.0]]);
+    let tiny = 2.0_f32.powi(-54);
+    let middle = OperatorTree::Filter {
+        field: "keep".into(),
+        predicate: Predicate::Equals(Value::Bool(true)),
+        source: Some(Box::new(vector([tiny, 1.0], -1.0))),
+    };
+    let tree = OperatorTree::Intersect(vec![
+        vector([1.0, 0.0], -1.0),
+        middle,
+        vector([-1.0, 0.0], -1.0),
+    ]);
+    // Binary64 rounds 1 + 2^-54 to 1, so the declared left fold ends at exactly zero.
+    assert_eq!(
+        execute(&tree, &context).unwrap().entries()[0].payload.score,
+        0.0
+    );
+    assert_preserved(&tree, &context);
+}
+
+#[test]
+fn vector_intersection_costs_preserve_empty_short_circuit_and_validation_order() {
+    let context = context(&[[1.0, 0.0]]);
+    let empty = OperatorTree::Filter {
+        field: "keep".into(),
+        predicate: Predicate::Equals(Value::Bool(false)),
+        source: Some(Box::new(vector([1.0, 0.0], -1.0))),
+    };
+    let invalid = vector([1.0, 0.0], f32::NAN);
+    let short_circuited = OperatorTree::Intersect(vec![empty.clone(), invalid.clone()]);
+    assert!(execute(&short_circuited, &context).unwrap().is_empty());
+    assert_preserved(&short_circuited, &context);
+    let validated = OperatorTree::Intersect(vec![invalid, empty]);
+    assert!(execute(&validated, &context).is_err());
+    assert_preserved(&validated, &context);
 }
 
 #[test]

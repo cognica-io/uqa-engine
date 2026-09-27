@@ -64,7 +64,7 @@ impl QueryOptimizer {
     }
 
     // ---------------------------------------------------------------
-    // 8. Reorder Intersect by estimated cardinality
+    // Reorder membership-only intersections by estimated cost.
     // ---------------------------------------------------------------
 
     pub(super) fn reorder_intersect(&self, op: OperatorTree) -> OperatorTree {
@@ -73,17 +73,15 @@ impl QueryOptimizer {
                 .into_iter()
                 .map(|c| self.recurse_children(c))
                 .collect();
-            // Rank intersect arms by algebraic operator cost
-            // (`CostModel.estimate`), not the
-            // cardinality estimator. The two diverge for `Filter`,
-            // `Score`, `Traverse`, `RegularPathQuery`, fusion / hybrid
-            // / cross-paradigm join nodes, and any operator with a
-            // dedicated formula in `cost_model`.
-            children.sort_by(|a, b| {
-                let ca = self.cost_model.estimate(a, &self.index_stats);
-                let cb = self.cost_model.estimate(b, &self.index_stats);
-                ca.total_cmp(&cb)
-            });
+            // Decorated postings retain their operand order: changing floating-point
+            // accumulation or right-biased field precedence can change the complete result.
+            if children.iter().all(OperatorTree::is_membership_only) {
+                children.sort_by(|a, b| {
+                    let ca = self.cost_model.estimate(a, &self.index_stats);
+                    let cb = self.cost_model.estimate(b, &self.index_stats);
+                    ca.total_cmp(&cb)
+                });
+            }
             return OperatorTree::Intersect(children);
         }
         self.recurse_children(op)

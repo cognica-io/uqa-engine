@@ -7,6 +7,7 @@
 use super::*;
 use uqa_operators::{DeepFusionLayer, ProgressiveFusionEntry};
 
+mod intersection_order;
 mod vector_thresholds;
 
 fn term(field: &str) -> OperatorTree {
