@@ -293,7 +293,10 @@ impl<S: DiskANNQueryRead + Send + Sync + 'static> VectorIndex for RetainedDiskAN
             self.manifest().input().generation,
             &self.retained.control,
         );
-        let canonical = SelectedCanonical::new(base, changes, control)?;
+        let population_control =
+            StorageReadControl::new(self.retained.control.memory(), control.cancellation());
+        let canonical =
+            SelectedCanonical::new(base, changes, &self.retained.origins, &population_control)?;
         let retained = Retained {
             canonical,
             reader: self.retained.reader.clone(),

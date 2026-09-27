@@ -8,6 +8,8 @@ A fixed query snapshot can contain evaluated private replacements and deletions 
 
 `VectorIndex::snapshot_with_diskann_changes` verifies the database, table and index lineage and canonical width, then shares the receiver's prepared physical reader and complete-origin directory. Different generations within that lineage are allowed: the receiver keeps its selected generation and effective configuration, while replacements contribute only canonical data. This operation never selects the replacement source's graph or interprets matching dimensions as authorization to combine unrelated indexes. An incompatible source returns an error without changing the receiver.
 
+The [composed population owner](diskann-population-statistics.md#actual-origin-composed-populations) captures exact current/change totals relative to the receiver’s build. It uses selected document origin/cardinality metadata and the already retained complete-origin reader, without reading coordinates or the unselected corpus. Later metadata reads use the immutable totals. An incomplete selection whose base lacks totals remains unknown; complete selection can sum its entire selected support without reading base documents.
+
 The original and private sources can contain unrelated later changes. Only selected document identities read through private sources; every other document stays on the fixed base. Callers must therefore retain the source that supplied each evaluated private row, including tombstones, instead of resolving all private identities against a later live table. Column-incarnation mapping and catalog selection belong to Execution; this storage interface does not infer them from field names.
 
 ## Preservation argument

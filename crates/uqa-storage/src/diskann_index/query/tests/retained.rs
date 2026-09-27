@@ -12,6 +12,7 @@ use crate::read_control::CancellationToken;
 use crate::vector_index::VectorIndexes;
 
 mod definitions;
+mod populations;
 
 struct Observed {
     source: Arc<DiskANNMemorySource>,

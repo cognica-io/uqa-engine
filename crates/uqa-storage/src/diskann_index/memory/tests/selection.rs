@@ -4,6 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use super::metadata::populations;
 use super::*;
 use crate::diskann_index::DiskANNReadChanges;
 
@@ -53,6 +54,7 @@ fn diskann_selected_private_origins_preserve_fixed_rows_and_tensor_scores_after_
         [(1, -1.0), (3, -1.0), (4, 0.0), (5, 1.0), (7, 1.0)]
     );
     assert_eq!(projected.count().unwrap(), 6);
+    assert_eq!(populations(&*projected), (6, 4));
     assert!(!projected.contains_document(2).unwrap());
     assert!(projected.contains_document(5).unwrap());
     assert_eq!(
@@ -115,6 +117,7 @@ fn diskann_selected_sources_keep_each_evaluated_version_and_absent_terminal_iden
         .unwrap();
     assert_eq!(scores(&*projected), [(1, -1.0), (2, 1.0)]);
     assert_eq!(projected.count().unwrap(), 2);
+    assert_eq!(populations(&*projected), (2, 2));
     assert!(!projected.contains_document(DocId::MAX).unwrap());
     assert_eq!(
         projected
@@ -131,6 +134,7 @@ fn diskann_selected_sources_keep_each_evaluated_version_and_absent_terminal_iden
         .unwrap()
         .unwrap();
     assert_eq!(scores(&*nested), [(1, 0.0), (2, 1.0)]);
+    assert_eq!(populations(&*nested), (2, 2));
     assert_eq!(scores(&*projected), [(1, -1.0), (2, 1.0)]);
 }
 
@@ -192,6 +196,7 @@ fn diskann_complete_selection_masks_unselected_base_and_journal_documents() {
     assert_eq!(projected.index_kind(), "diskann");
     assert_eq!(scores(&*projected), [(1, -1.0), (4, 1.0)]);
     assert_eq!(projected.count().unwrap(), 3);
+    assert_eq!(populations(&*projected), (3, 1));
     for id in [2, 3, 5, 6, DocId::MAX] {
         assert!(!projected.contains_document(id).unwrap());
     }
@@ -209,6 +214,7 @@ fn diskann_complete_selection_masks_unselected_base_and_journal_documents() {
         .unwrap()
         .unwrap();
     assert_eq!(scores(&*nested), [(1, -1.0), (2, 1.0), (4, 1.0)]);
+    assert_eq!(populations(&*nested), (4, 1));
     let empty_changes = DiskANNReadChanges::capture([], &control)
         .unwrap()
         .without_unselected_documents();
@@ -218,6 +224,7 @@ fn diskann_complete_selection_masks_unselected_base_and_journal_documents() {
         .unwrap();
     assert!(scores(&*empty).is_empty());
     assert_eq!(empty.count().unwrap(), 0);
+    assert_eq!(populations(&*empty), (0, 0));
     let retained = projected.snapshot().unwrap();
     drop((
         index,
@@ -315,6 +322,7 @@ fn diskann_private_selection_preserves_read_only_source_and_receiver_guards() {
     assert!(source_control.memory().used() >= 128);
     assert_eq!(scores(&*projected), [(1, 1.0)]);
     source_control.cancellation().cancel();
+    assert!(projected.diskann_query_metadata(&control).is_err());
     assert!(projected.count().is_err());
     assert!(projected.search_threshold(&[1.0, 0.0], 0.0).is_err());
     receiver_control.cancellation().cancel();
@@ -323,4 +331,42 @@ fn diskann_private_selection_preserves_read_only_source_and_receiver_guards() {
     drop((projected, changes, receiver, base));
     assert_eq!(control.memory().used(), 0);
     assert_eq!(source_control.memory().used(), 0);
+}
+
+#[test]
+fn diskann_selected_populations_can_restore_covered_origins_and_keep_empty_tensors() {
+    let control = StorageReadControl::with_limit(1 << 20);
+    let mut index = new(&control);
+    index
+        .add_many(1, vec![vec![1.0, 0.0], vec![0.0, 0.0]])
+        .unwrap();
+    index.add_many(2, vec![]).unwrap();
+    index.initialize().unwrap();
+    let original = index.snapshot().unwrap();
+    index.add(1, vec![-1.0, 0.0]).unwrap();
+    index.add_many(2, vec![]).unwrap();
+    assert_eq!(populations(&index), (1, 1));
+    let changes = selection(&*original, &[1, 2, 99], &control);
+    let covered = index
+        .snapshot_with_diskann_changes(&changes, &control)
+        .unwrap()
+        .unwrap();
+    assert_eq!(populations(&*covered), (2, 0));
+    assert_eq!(scores(&*covered), [(1, 1.0)]);
+    let source = covered.diskann_read_snapshot(&control).unwrap().unwrap();
+    assert_eq!(
+        source
+            .document_origin(2, &control)
+            .unwrap()
+            .unwrap()
+            .count(),
+        0
+    );
+    assert!(source.document_origin(99, &control).unwrap().is_none());
+    index.initialize().unwrap();
+    assert!(source
+        .population_counts(index.manifest().input().generation, &control)
+        .unwrap()
+        .is_none());
+    assert_eq!(populations(&*covered), (2, 0));
 }

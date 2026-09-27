@@ -1,6 +1,6 @@
 # DiskANN canonical population statistics
 
-The shared count contract, immutable memory roots and versioned native SQLite, SQLite Key/Value and redb owners provide exact populations without reconstructing them during planning. Counts for composed canonical sources remain required by the existing [SQL integration unit](../plans/0014-diskann-vector-index.md#sql-lifecycle-and-planning). Their missing statistics remain unknown; this change does not complete that unit.
+The shared count contract, immutable memory roots and versioned native SQLite, SQLite Key/Value and redb owners provide exact populations without reconstructing them during planning. Actual-origin sparse and complete selections maintain their own populations as described below. Cross-definition raw matching still lacks an authoritative bounded population capability and remains unknown; the [SQL integration unit](../plans/0014-diskann-vector-index.md#sql-lifecycle-and-planning) is not complete.
 
 ## Definitions and ownership
 
@@ -99,6 +99,26 @@ An atomic format upgrade installs empty families and excludes earlier native wri
 Backup restoration distinguishes the stable native data namespace from the transaction-history identity. Population addresses follow the former; the common retained record view follows the latter. A pending predecessor restore upgrades through its explicitly authorized restoration owner inside the original physical transaction, preserving the durable source/target intent; it never clears that marker to admit ordinary access. Failure rolls back an incomplete format change, and retry still requires the original restoration request. Changing history therefore leaves the address mapping and canonical sums unchanged, while subsequent fresh origins belong to the new history.
 
 These facts give an induction on the native operation history: initialization supplies the defining census, common replacement/publication preserves or reestablishes it, structural bijections preserve its summands, and atomic publication/retention expose only complete corresponding views. Errors leave the preceding view intact. No document support, payload merge, raw vector value, score, ranking or composition operator changes; the extension supplies the existing exact count observation through a second physical representation. Admission of all effects, origins, witnesses and retained views remains subject to the caller's existing resource and cancellation controls.
+
+## Actual-origin composed populations
+
+Let $g$ be the receiving index's retained physical generation and $b_g$ its complete verified build-origin map. For a selected source observation $T(d)$, define its contribution $p_g(T,d)=(n_T(d),n_T(d)\mathbf 1[v_T(d)\ne b_g(d)])$, with absence and explicit empty tensors contributing $(0,0)$. Classification compares actual origins with this receiver's build, even when a selected source owns an older or newer generation. Equal origin identities with different dimensions or cardinalities are invalid, rather than treated as covered.
+
+For the finite strictly ordered selection domain $A$, let $T_d$ be the actual retained replacement for $d$, or absence for an evaluated deletion. An incomplete selection keeps the receiver's fixed base $S$ outside $A$, so its populations are
+
+$$P(S',g)=P(S,g)-\sum_{d\in A}p_g(S,d)+\sum_{d\in A}p_g(T_d,d).$$
+
+For a complete selection, every unselected document is masked and the populations are
+
+$$P(S',g)=\sum_{d\in A}p_g(T_d,d).$$
+
+The first equation partitions the defining sums into selected and unselected documents, removes exactly the selected old summands and inserts their replacements. Strictly increasing identities prevent subtracting a document twice. The second equation follows because all unselected summands are zero. Each contribution and each intermediate remainder satisfies $0\le C\le N$; checked subtraction validates this remainder before checked addition, so replacement vectors cannot hide an invalid removal. This also handles replacement by an older covered origin, which may decrease $C$, unlike a fresh physical mutation.
+
+These equations depend only on the final selected observations. The existing right-biased selection composition is associative and its empty selection is an identity; applying the equations to either association yields the same defining sum over those observations. Complete selection explicitly replaces the base rather than asserting that it is a sparse identity. No selected tensor, score, candidate, calibration parameter or downstream composition changes, so the existing query-source preservation proof applies unchanged. Counts are observations of that same carrier, not an additional ranked operation.
+
+Storage computes the totals when attaching the evaluated selection to its receiver. It reads only point origin/cardinality metadata for selected documents and lookup batches from the receiver's already validated build-origin reader. Complete selection never reads a base document. Incomplete selection with unavailable base totals remains unknown without reconstructing the corpus. The implementation does not enumerate canonical documents or the change journal, read coordinates, reopen PQ preparation or navigate graph pages to obtain these counts.
+
+The composite retains its generation and completed totals with its immutable selection. Later metadata reads check the receiver, selection and every contributing source's original controls, then return the stored counts without origin or artifact reads; a different requested generation remains unknown. Point-read workspace and the retained composite use the receiver's existing allowance while the invoking cancellation remains checked. Admission, malformed metadata or cancellation failure discards the candidate and leaves the previous source unchanged. Nested selections apply the same equations to the preceding composite. Cross-definition raw matching has no actual origin for every fixed tensor and cannot borrow these totals or fabricate provenance; its missing capability remains explicit.
 
 ## Verification obligations
 
