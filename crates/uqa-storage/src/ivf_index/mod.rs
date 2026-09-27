@@ -13,6 +13,7 @@
 
 #![allow(clippy::cast_lossless, clippy::similar_names)]
 
+mod canonical;
 mod index;
 mod math;
 mod mutation;

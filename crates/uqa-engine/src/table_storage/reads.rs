@@ -58,7 +58,7 @@ impl Engine {
             }))
         };
         // Attached physical readers already retain their source view and have no logical frame whose locks this call could own.
-        let binding = if self.transaction_depth() == 0 {
+        let binding = if self.query_table_snapshots.is_some() || self.transaction_depth() == 0 {
             resolve()?
         } else {
             uqa_execution::query::table_read::bind_direct_table_read(self, resolve)?

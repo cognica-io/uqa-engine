@@ -25,7 +25,7 @@ impl ReadOnlySnapshot<dyn InvertedIndex> {
         snapshot: Budgeted<T>,
     ) -> StorageBackendResult<Self> {
         let snapshot = ReadOnlySnapshot::from_budgeted(snapshot)?;
-        Ok(Self(snapshot.0, snapshot.1, snapshot.2))
+        Ok(Self(snapshot.0, snapshot.1, snapshot.2, None))
     }
 }
 

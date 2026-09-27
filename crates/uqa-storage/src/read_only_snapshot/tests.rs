@@ -14,6 +14,7 @@ use crate::{
 };
 use uqa_core::Value;
 
+mod canonical_vectors;
 mod retention;
 
 #[test]

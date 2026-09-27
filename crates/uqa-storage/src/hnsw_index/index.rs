@@ -83,7 +83,9 @@ impl VectorIndex for HNSWIndex {
     }
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn VectorIndex>> {
-        Ok(Arc::new(self.clone()))
+        crate::ReadOnlySnapshot::new(Arc::new(self.clone()))
+            .with_canonical_vectors(None)?
+            .snapshot()
     }
 
     fn snapshot_with_control(
@@ -91,8 +93,17 @@ impl VectorIndex for HNSWIndex {
         control: &crate::read_control::StorageReadControl,
     ) -> StorageBackendResult<Arc<dyn VectorIndex>> {
         crate::ReadOnlySnapshot::from_budgeted(self.snapshot_controlled(control)?)?
+            .with_canonical_vectors(Some(control))?
             .with_vector_read_control(control)?
             .snapshot()
+    }
+
+    fn vector_read_snapshot(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::vector_index::VectorReadSnapshot>> {
+        self.snapshot_with_control(control)?
+            .vector_read_snapshot(control)
     }
 
     fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn VectorIndex>> {

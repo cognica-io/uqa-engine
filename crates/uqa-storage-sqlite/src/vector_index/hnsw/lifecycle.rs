@@ -78,4 +78,10 @@ impl VectorIndex for SQLiteHNSWIndex {
             self.persistent.snapshot()
         }
     }
+    fn vector_read_snapshot(
+        &self,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_storage::vector_index::VectorReadSnapshot>> {
+        self.persistent.vector_read_snapshot(control)
+    }
 }

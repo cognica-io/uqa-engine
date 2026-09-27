@@ -137,10 +137,15 @@ impl<T: VectorIndex + ?Sized + 'static> VectorIndex for ReadOnlySnapshot<T> {
         control.check()?;
         let original = self.2.as_ref().unwrap_or(control);
         original.check()?;
-        self.0
-            .vector_read_snapshot(original)?
+        self.3
+            .as_ref()
+            .map(Arc::clone)
+            .map_or_else(
+                || self.0.vector_read_snapshot(original),
+                |source| Ok(Some(source)),
+            )?
             .map(|source| {
-                let source = ReadOnlySnapshot(source, self.1.clone(), self.2.clone());
+                let source = ReadOnlySnapshot(source, self.1.clone(), Some(original.clone()), None);
                 uqa_core::memory::Budgeted::new(source, original.memory().empty_reservation())
                     .into_shared()
                     .map(|source| source as crate::vector_index::VectorReadSnapshot)
@@ -161,8 +166,12 @@ impl<T: VectorIndex + ?Sized + 'static> VectorIndex for ReadOnlySnapshot<T> {
             .0
             .snapshot_with_vector_read(source, original)?
             .map(|index| {
-                Arc::new(ReadOnlySnapshot(index, self.1.clone(), self.2.clone()))
-                    as Arc<dyn VectorIndex>
+                Arc::new(ReadOnlySnapshot(
+                    index,
+                    self.1.clone(),
+                    self.2.clone(),
+                    None,
+                )) as Arc<dyn VectorIndex>
             }))
     }
 
@@ -193,8 +202,12 @@ impl<T: VectorIndex + ?Sized + 'static> VectorIndex for ReadOnlySnapshot<T> {
             .0
             .snapshot_with_diskann_changes(changes, self.2.as_ref().unwrap_or(control))?
             .map(|index| {
-                Arc::new(ReadOnlySnapshot(index, self.1.clone(), self.2.clone()))
-                    as Arc<dyn VectorIndex>
+                Arc::new(ReadOnlySnapshot(
+                    index,
+                    self.1.clone(),
+                    self.2.clone(),
+                    None,
+                )) as Arc<dyn VectorIndex>
             }))
     }
 
@@ -203,7 +216,7 @@ impl<T: VectorIndex + ?Sized + 'static> VectorIndex for ReadOnlySnapshot<T> {
         control: &crate::read_control::StorageReadControl,
     ) -> StorageBackendResult<Arc<dyn VectorIndex>> {
         control.check()?;
-        if self.1.is_some() || self.2.is_some() {
+        if self.1.is_some() || self.2.is_some() || self.3.is_some() {
             return self.clone().with_vector_read_control(control)?.snapshot();
         }
         Ok(Arc::new(ReadOnlySnapshot::new(
@@ -254,6 +267,8 @@ impl<T: crate::vector_index::VectorRead + ?Sized> crate::vector_index::VectorRea
         control: &StorageReadControl,
     ) -> StorageBackendResult<Option<uqa_core::memory::BudgetedVec<f32>>> {
         self.check_control(control)?;
-        self.0.read_vector(document, ordinal, control)
+        let value = self.0.read_vector(document, ordinal, control)?;
+        self.check_control(control)?;
+        Ok(value)
     }
 }
