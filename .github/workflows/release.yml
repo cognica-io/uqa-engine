@@ -19,6 +19,10 @@ on:
         required: true
         type: string
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -109,6 +113,24 @@ jobs:
               -exec cp {} dist/ \;
           fi
           ls -la dist
+
+      - name: Retain existing release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          : > existing-release-assets.txt
+          if gh release view "$TAG" --json assets --jq '.assets[].name' > existing-release-assets.txt; then
+            while IFS= read -r filename; do
+              case "$filename" in
+                *.whl|*.tar.gz|*.tgz|*.node)
+                  gh release download "$TAG" --pattern "$filename" --dir dist --clobber
+                  ;;
+              esac
+            done < existing-release-assets.txt
+          fi
 
       # Every artifact this workflow can produce, by upload name. Anything
       # absent means its build job failed, so it is reported rather than
@@ -206,9 +228,9 @@ jobs:
           missing = [name for name in missing if name]
           if missing:
               print()
-              print("### Packages not in this release")
+              print("### Builds without new artifacts")
               print()
-              print("These builds did not succeed, so their packages are absent. Re-running the release workflow for this tag uploads them alongside the assets already published.")
+              print("These builds did not produce new artifacts. Previously published release assets are retained when available; missing assets still require a successful build.")
               print()
               for name in missing:
                   print(f"- `{name}`")
@@ -226,7 +248,11 @@ jobs:
         run: |
           set -euo pipefail
           if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" dist/* --clobber
+            for archive in dist/*; do
+              if ! grep -Fxq "${archive##*/}" existing-release-assets.txt; then
+                gh release upload "$TAG" "$archive"
+              fi
+            done
             gh release edit "$TAG" --notes-file release-notes.md
           else
             gh release create "$TAG" \

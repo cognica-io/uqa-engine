@@ -172,6 +172,11 @@ if (( live )); then
   fi
 
   echo "Live crates.io publish of ${#crates[@]} crates" >&2
+  version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml)"
+  if [[ -z "$version" || "$version" == *$'\n'* ]]; then
+    echo "Expected one workspace release version" >&2
+    exit 2
+  fi
   publishing=0
   if [[ -z "$start_at" ]]; then
     publishing=1
@@ -183,7 +188,26 @@ if (( live )); then
       fi
       publishing=1
     fi
-    publish_live "$crate"
+    if python3 scripts/check-published-crate.py "$crate" "$version"; then
+      echo "Already published: $crate@$version" >&2
+      continue
+    else
+      crate_status=$?
+      if (( crate_status != 1 )); then
+        exit "$crate_status"
+      fi
+    fi
+    if publish_live "$crate"; then
+      continue
+    else
+      crate_status=$?
+    fi
+    # A concurrent publisher may have completed this exact immutable version.
+    if python3 scripts/check-published-crate.py "$crate" "$version"; then
+      echo "Publication confirmed: $crate@$version" >&2
+    else
+      exit "$crate_status"
+    fi
   done
 else
   if (( retry_rate_limits )); then

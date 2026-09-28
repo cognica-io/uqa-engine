@@ -64,7 +64,11 @@ class RepositoryPolicyCheckerTest(unittest.TestCase):
 
     def test_sdist_benchmarks_require_their_data_and_external_source_modules(self) -> None:
         required = {"crates/uqa-analysis/benches/nori/corpus.json", "benchmarks/nori/persistent.rs",
-                    "crates/uqa-engine/tests/support/tpch_fixture.rs"}
+                    "crates/uqa-engine/tests/support/tpch_fixture.rs",
+                    "benchmarks/vector-search/manifest.json",
+                    "benchmarks/vector-search/fixtures/scifact-minilm-prefix512-v1/manifest.json",
+                    "benchmarks/vector-search/fixtures/scifact-minilm-prefix512-v1/corpus.f32",
+                    "benchmarks/vector-search/fixtures/scifact-minilm-prefix512-v1/queries.f32"}
         inputs = LICENSES.benchmark_inputs()
         self.assertTrue(required <= inputs)
         members = {f"uqa-0.0.0/{relative}": (ROOT / relative).read_bytes() for relative in inputs}

@@ -41,5 +41,7 @@ strip = true
 include = [
     { path = "crates/*/benches/**/*", format = "sdist" },
     { path = "benchmarks/nori/persistent.rs", format = "sdist" },
+    { path = "benchmarks/vector-search/manifest.json", format = "sdist" },
+    { path = "benchmarks/vector-search/fixtures/**/*", format = "sdist" },
     { path = "crates/uqa-engine/tests/support/tpch_fixture.rs", format = "sdist" },
 ]
