@@ -10,7 +10,7 @@ const { invalidResponse } = require("./http-error.js");
 
 // Preserve integer tokens before JavaScript Number can round them. Strings,
 // including escaped keys and type-tag-shaped user data, retain JSON semantics.
-function parseJSON(source) {
+function parseJSON(source, { rejectDuplicates = false, scalarUnicode = false, maxContainerDepth = Infinity } = {}) {
   let offset = 0;
   function whitespace() {
     while (" \t\r\n".includes(source[offset]) && offset < source.length) offset += 1;
@@ -19,7 +19,11 @@ function parseJSON(source) {
     const start = offset++;
     while (offset < source.length) {
       const character = source[offset++];
-      if (character === '"') return JSON.parse(source.slice(start, offset));
+      if (character === '"') {
+        const result = JSON.parse(source.slice(start, offset));
+        if (scalarUnicode && !validUnicode(result)) throw invalidResponse();
+        return result;
+      }
       if (character === "\\") offset += 1;
     }
     throw invalidResponse();
@@ -30,6 +34,7 @@ function parseJSON(source) {
     const character = source[offset];
     if (character === '"') return string();
     if (character === "[" || character === "{") {
+      if (depth + 1 > maxContainerDepth) throw invalidResponse();
       const array = character === "[";
       const output = array ? [] : {};
       const end = array ? "]" : "}";
@@ -42,6 +47,7 @@ function parseJSON(source) {
         if (!array) {
           if (source[offset] !== '"') throw invalidResponse();
           key = string();
+          if (rejectDuplicates && Object.prototype.hasOwnProperty.call(output, key)) throw invalidResponse();
           whitespace();
           if (source[offset++] !== ":") throw invalidResponse();
         }
@@ -77,6 +83,18 @@ function parseJSON(source) {
   }
 }
 
+function validUnicode(value) {
+  if (typeof value !== "string") return false;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(++index);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+    } else if (code >= 0xdc00 && code <= 0xdfff) return false;
+  }
+  return true;
+}
+
 // Typed floating-point arrays retain integral float tokens in JSON parameters.
 class FloatJSONValue {
   constructor(value) { this.value = value; }
@@ -96,4 +114,4 @@ function stringifyJSON(value) {
   return JSON.stringify(value);
 }
 
-module.exports = { parseJSON, stringifyJSON, FloatJSONValue };
+module.exports = { parseJSON, stringifyJSON, FloatJSONValue, validUnicode };

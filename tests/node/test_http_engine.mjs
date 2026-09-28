@@ -14,6 +14,8 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify, inspect } from "node:util";
+import { registerNotificationProtocolTests } from "./notifications/protocol.mjs";
+import { registerNotificationPortabilityTests } from "./notifications/portability.mjs";
 
 const exec = promisify(execFile);
 const source = fileURLToPath(new URL("../../crates/uqa-node/", import.meta.url));
@@ -27,6 +29,8 @@ for (const file of ["package.json", ...manifest.files]) {
 }
 const require = createRequire(join(directory, "application.cjs"));
 const uqa = require("@cognica-io/uqa");
+registerNotificationProtocolTests(packagePath);
+registerNotificationPortabilityTests(packagePath);
 after(() => rmSync(directory, { recursive: true, force: true }));
 
 async function server(handler, run) {
