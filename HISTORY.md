@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add independently owned SQL notification subscriptions in Rust, Python, Node.js and Browser WASM, retaining the original database and selected role with bounded queues and explicit cleanup. Add authenticated HTTP/SSE clients with exact sequences, cancellation, typed failures and visible resynchronization across reconnects; stateless SQL hosts reject LISTEN/UNLISTEN without changing transactional NOTIFY.
 - Extend the Rust, Python, Node.js and Browser WASM vector examples with DiskANN configuration, typed parameters, canonical-score comparisons, rollback and committed SQLite reopen. Add real-browser example execution and an IndexedDB page-reload check, including a build without morphology dictionaries.
 - Retain exact current and uncovered vector populations observed by a successful ordinary DiskANN ANN query over a fixed raw view. Later planning reuses that view's counts without another scan; new or unobserved raw selections keep their unknown statistics.
 - Resolve catalog owner names with PostgreSQL-compatible `pg_get_userbyid(oid)`, including NULL, missing OIDs, role rename/deletion and its stable `name` return type.
@@ -24,6 +25,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Release owned notification listener leases and join final recovery without waiting for another SQLite registry writer. Closed handles no longer retain their original provider; independent listeners preserve their delivery and recovery boundaries.
 - Improve DiskANN navigation with original-vector distances for edge expansion and PQ estimates only for pending read order, avoiding rejection by mixed estimated and original distances. Keep the pending frontier and refined-distance heap separately bounded by the configured search-list size, with all workspace charged to the original allowance; canonical scores and stored index formats are unchanged.
 - Match PostgreSQL 18's `42P17` diagnostic when a generated expression calls a non-immutable function.
 

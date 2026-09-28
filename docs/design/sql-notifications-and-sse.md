@@ -1,6 +1,6 @@
 # SQL notifications and SSE
 
-Status: implementation in progress under the [implementation plan](../plans/0015-sql-notifications-and-sse.md). The complete protocol and subscription APIs are not yet runtime-qualified; the plan records each required implementation and acceptance boundary.
+Status: Engine notification APIs and adapters are implemented and merged. The [implementation plan](../plans/0015-sql-notifications-and-sse.md) maps the original acceptance cases to their actual source/artifact evidence. The Cloud Node and signed tunnel are also merged, but [Cloud issue #254](https://github.com/cognica-io/uqa-cloud/issues/254) and final platform/deployed-profile qualification keep full serving-path acceptance open. No released or installed capability is inferred from development-source support.
 
 Source baseline: UQA Engine `main` at [`badada6b94446cf7c1ba0903fb94b1b600286456`](https://github.com/cognica-io/uqa-engine/tree/badada6b94446cf7c1ba0903fb94b1b600286456), whose workspace version is `0.4.0`. The baseline was checked against the remote `main` branch on September 27, 2026. All statements about existing APIs below refer to that revision, not an earlier release or unmerged work.
 
