@@ -11,10 +11,11 @@
 // database into IndexedDB and `UQA.load()` restores them on startup.
 
 import createUQAModule from "./uqa.js";
-import { subscribe, HttpNotificationSubscription, NotificationError } from "./notification-core.mjs";
+import { subscribe, subscribeDirect, HttpNotificationSubscription, NotificationSubscription, NotificationError } from "./notification-core.mjs";
 import { fetchRuntime } from "./notification-fetch.mjs";
+import { WASMNotificationHandle } from "./notification-wasm.mjs";
 
-export { HttpNotificationSubscription, NotificationError };
+export { HttpNotificationSubscription, NotificationSubscription, NotificationError };
 
 const PERSIST_DIR = "/uqa";
 
@@ -1324,6 +1325,14 @@ export class Engine {
     const handle = this.call("newSession", {});
     retainCallbackGroup(this.callbackGroup);
     return new Engine(this.module, handle, this.callbackGroup);
+  }
+
+  subscribeNotifications(channels, options) {
+    return subscribeDirect(channels, options, (names, limits) => {
+      const module = this.module;
+      const registration = this.call("subscribeNotifications", { channels: names, limits });
+      return new WASMNotificationHandle(module, rawCall, registration);
+    });
   }
 
   async sql(query, params) {

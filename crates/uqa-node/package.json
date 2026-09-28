@@ -54,6 +54,7 @@
     "notification-stream.js",
     "notification-subscription.js",
     "notification-native.js",
+    "notification-direct.js",
     "notifications.d.ts",
     "sql-param.js",
     "THIRD-PARTY/JDK-UNICODE.md",

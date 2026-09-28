@@ -4,8 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-export { HttpNotificationSubscription, NotificationError } from "./notifications";
-export type { NotificationEvent, NotificationFailureCode, NotificationRetryOptions, HttpNotificationOptions } from "./notifications";
+export { HttpNotificationSubscription, NotificationSubscription, NotificationError } from "./notifications";
+export type { NotificationEvent, NotificationFailureCode, NotificationRetryOptions, HttpNotificationOptions, NotificationSubscriptionOptions } from "./notifications";
 
 export type JSValue =
   | null
@@ -133,6 +133,7 @@ export declare const UQA: {
 };
 
 export declare class Engine {
+  subscribeNotifications(channels: readonly string[], options: import("./notifications").NotificationSubscriptionOptions): Promise<import("./notifications").NotificationSubscription>;
   /** Create an in-memory engine. */
   static inMemory(): Promise<Engine>;
   /**
