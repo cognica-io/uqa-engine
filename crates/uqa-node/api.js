@@ -8,12 +8,14 @@
 
 const { HttpEngine, HttpEngineError, HttpSQLStream, HttpNotificationSubscription, NotificationError } = require("./http.js");
 const { SQLParam, nativeParameter } = require("./sql-param.js");
+const { installNotifications, NotificationSubscription } = require("./notification-native.js");
 
 let binding;
 
 function loadNativeBinding() {
   if (binding === undefined) {
     const candidate = require("./index.js");
+    installNotifications(candidate.Engine);
     guardEngineMethods(candidate.Engine, candidate);
     installRegistrationWrappers(candidate.Engine);
     binding = candidate;
@@ -171,6 +173,7 @@ module.exports.HttpEngineError = HttpEngineError;
 module.exports.HttpSQLStream = HttpSQLStream;
 module.exports.HttpNotificationSubscription = HttpNotificationSubscription;
 module.exports.NotificationError = NotificationError;
+module.exports.NotificationSubscription = NotificationSubscription;
 module.exports.SQLParam = SQLParam;
 module.exports.detectDatabaseFile = (...args) => loadNativeBinding().detectDatabaseFile(...args);
 module.exports.JSFunctionVolatility = Object.freeze({ Volatile: "volatile", Stable: "stable", Immutable: "immutable" });

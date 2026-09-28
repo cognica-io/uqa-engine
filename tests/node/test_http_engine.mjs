@@ -79,6 +79,8 @@ test("package imports expose HTTP and parameters without loading a native addon"
   const esm = await import(pathToFileURL(join(packagePath, "api.js")));
   const httpESM = await import(pathToFileURL(join(packagePath, "http.js")));
   assert.equal(esm.HttpEngine, uqa.HttpEngine);
+  assert.equal(esm.NotificationSubscription, uqa.NotificationSubscription);
+  assert.equal(typeof uqa.NotificationSubscription, "function");
   assert.equal(http.HttpEngine, uqa.HttpEngine);
   assert.equal(httpESM.SQLParam, uqa.SQLParam);
   uqa.SQLParam.scalar(9223372036854775807n);

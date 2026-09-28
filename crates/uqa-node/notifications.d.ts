@@ -45,6 +45,28 @@ export interface HttpNotificationOptions {
   signal?: AbortSignal;
 }
 
+export interface NotificationSubscriptionOptions {
+  maxActiveSubscriptions: number;
+  maxChannels: number;
+  maxQueuedNotifications: number;
+  maxQueuedBytes: number;
+  maxRegistryEntriesPerPoll: number;
+  signal?: AbortSignal;
+}
+
+export declare class NotificationSubscription implements AsyncIterableIterator<NotificationEvent> {
+  private constructor();
+  readonly epoch: string;
+  readonly requestId: string | null;
+  readonly isClosed: boolean;
+  nextEvent(): Promise<NotificationEvent | null>;
+  next(): Promise<IteratorResult<NotificationEvent>>;
+  [Symbol.asyncIterator](): this;
+  close(): Promise<void>;
+  return(): Promise<IteratorResult<NotificationEvent>>;
+  throw(error?: unknown): Promise<IteratorResult<NotificationEvent>>;
+}
+
 export declare class HttpNotificationSubscription implements AsyncIterableIterator<NotificationEvent> {
   private constructor();
   readonly epoch: string;
