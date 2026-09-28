@@ -324,9 +324,8 @@ impl VersionedPersistence for RedbRecordStore {
             read::Snapshot {
                 database: Arc::clone(&self.database),
                 identity: self.identity,
-                sequence: lease.sequence(),
                 reclamation_epoch,
-                _lease: lease,
+                lease,
             },
             control,
         )

@@ -4122,6 +4122,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror 1.0.69",
+ "triomphe",
  "uqa-analysis",
  "uqa-core",
  "windows-sys 0.61.2",

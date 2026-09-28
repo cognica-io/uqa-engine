@@ -20,6 +20,7 @@ uqa-analysis = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
 parking_lot = { workspace = true }
+triomphe = { workspace = true }
 thiserror = { workspace = true }
 sha2 = { workspace = true }
 getrandom = { workspace = true }
