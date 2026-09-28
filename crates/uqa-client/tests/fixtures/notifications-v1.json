@@ -1,0 +1,13 @@
+{
+  "protocol_version": 1,
+  "request_id": "request_1",
+  "stream_id": "7fb52b7f-bdca-4db2-9ee0-490f99857201",
+  "channels": ["jobs", "작업"],
+  "valid_request": "{\"protocol_version\":1,\"channels\":[\"jobs\",\"작업\"]}",
+  "invalid_nested_request": "{\"protocol_version\":1,\"channels\":[[\"jobs\"]]}",
+  "ready": "event: ready\ndata: {\"protocol_version\":1,\"request_id\":\"request_1\",\"stream_id\":\"7fb52b7f-bdca-4db2-9ee0-490f99857201\",\"accepted_channel_count\":2,\"delivery\":\"live\",\"resume_supported\":false,\"max_event_bytes\":65536,\"heartbeat_interval_ms\":\"100\",\"idle_timeout_ms\":\"401\",\"timing_margin_ms\":\"100\"}\n\n",
+  "notification": "event: notification\ndata: {\"request_id\":\"request_1\",\"stream_id\":\"7fb52b7f-bdca-4db2-9ee0-490f99857201\",\"sequence\":\"1\",\"process_id\":-2147483648,\"channel\":\"작업\",\"payload\":\"{[\\\"문자\\\"]} : 😀\\n\"}\n\n",
+  "expected_payload": "{[\"문자\"]} : 😀\n",
+  "closed": "event: closed\ndata: {\"request_id\":\"request_1\",\"stream_id\":\"7fb52b7f-bdca-4db2-9ee0-490f99857201\",\"reason\":\"server_draining\"}\n\n",
+  "error": "event: error\ndata: {\"request_id\":\"request_1\",\"stream_id\":\"7fb52b7f-bdca-4db2-9ee0-490f99857201\",\"code\":\"NOTIFICATION_SOURCE_UNAVAILABLE\",\"retryable\":true}\n\n"
+}
