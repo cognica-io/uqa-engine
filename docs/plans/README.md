@@ -1,6 +1,6 @@
 # Implementation plans
 
-Files in this directory record staged implementation work. A living plan must describe the current repository boundary and remaining work, while a completed plan remains historical evidence unless its contract itself changes.
+Files in this directory record staged implementation work. A living plan must describe the current repository boundary and remaining work, while a completed plan remains historical evidence unless its contract itself changes. Update this index in the same change whenever a plan's lifecycle or remaining acceptance gates change; link completed work to its merged implementation and preserve any unverified qualification boundary.
 
 | Plan | Lifecycle | Update rule |
 | --- | --- | --- |
@@ -9,16 +9,16 @@ Files in this directory record staged implementation work. A living plan must de
 | [`0003-postgresql-18-compatibility.md`](0003-postgresql-18-compatibility.md) | Active | Update in every PostgreSQL 18 compatibility PR that changes a manifest item, milestone, supported surface, or remaining gate. |
 | [`0004-mlx-runtime-support.md`](0004-mlx-runtime-support.md) | Active | Update whenever the model format, backend contract, native-runtime lock, platform or package matrix, rollout phase, or release evidence changes. |
 | [`0005-rust-workspace-refactoring.md`](0005-rust-workspace-refactoring.md) | Complete | Update only when the completed ownership contract, permanent line policy, test topology, or final evidence changes. |
-| [`0006-nori-analyzer.md`](0006-nori-analyzer.md) | Active | Update whenever Nori contracts, implementation tasks, dictionary/reference inputs, integration behavior, or verification evidence changes. |
-| [`0007-kuromoji-analyzer.md`](0007-kuromoji-analyzer.md) | Active | Update with each logical Kuromoji implementation unit that changes ownership, interfaces, reference inputs, completion status, verification evidence, or remaining acceptance gates. |
+| [`0006-nori-analyzer.md`](0006-nori-analyzer.md) | Active: performance acceptance | Runtime and package implementation is merged in [PR #106](https://github.com/cognica-io/uqa-engine/pull/106); controlled-host timing acceptance remains unverified. Preserve the functional/allocation evidence, including the unchanged allocation gates restored in [PR #253](https://github.com/cognica-io/uqa-engine/pull/253), without treating it as timing acceptance. |
+| [`0007-kuromoji-analyzer.md`](0007-kuromoji-analyzer.md) | Complete | Preserve the shared morphology ownership, Japanese analysis/normalization/completion contracts and actual Rust/Python/Node.js/WASM acceptance merged in [PR #108](https://github.com/cognica-io/uqa-engine/pull/108), included in 0.3.5. |
 | [`0008-concurrent-storage-transactions.md`](0008-concurrent-storage-transactions.md) | Complete | Preserve the completed shared MVCC, provider migration, SQL isolation, recovery and retention contract released in 0.4.0, together with its source-scoped acceptance evidence. |
 | [`0009-nori-index-retention.md`](0009-nori-index-retention.md) | Complete | Preserve the unchanged allocation gates, fixed owner contracts and full CI evidence merged in PR #149. |
 | [`0010-sqlite-index-snapshots.md`](0010-sqlite-index-snapshots.md) | Complete | Preserve fixed unbound SQLite snapshots, retained ownership and final platform acceptance recorded in PR #155. |
 | [`0011-committed-notification-recovery.md`](0011-committed-notification-recovery.md) | Complete | Preserve the atomic publication, recovery, retained completion and final platform acceptance recorded in PR #154. |
 | [`0012-compressed-container-read-consistency.md`](0012-compressed-container-read-consistency.md) | Complete | Preserve authenticated file/map ownership and deterministic compaction regressions verified in PR #154. |
 | [`0013-added-column-publication.md`](0013-added-column-publication.md) | Complete | Preserve atomic declared-column and physical-field publication, backfilled key validation and final provider/platform acceptance recorded in PR #156. |
-| [`0014-diskann-vector-index.md`](0014-diskann-vector-index.md) | Planned | Update with each native DiskANN implementation unit, preserving owner boundaries, dependency order, paged resource limits, provider/MVCC coverage, and source-scoped acceptance evidence. |
-| [`0015-sql-notifications-and-sse.md`](0015-sql-notifications-and-sse.md) | Active | Preserve the complete direct/SSE subscription contract, actual Cloud server integration, all language artifacts, resource and timing profiles, and all fifteen acceptance cases. |
+| [`0014-diskann-vector-index.md`](0014-diskann-vector-index.md) | Complete | All twelve units are complete through [PR #228](https://github.com/cognica-io/uqa-engine/pull/228) and included in 0.4.5. Preserve the fixed-fixture quality gates, provider/MVCC and resource evidence; no general recall floor or timing/RSS performance claim follows. |
+| [`0015-sql-notifications-and-sse.md`](0015-sql-notifications-and-sse.md) | Complete: implementation and approved local acceptance | [PR #249](https://github.com/cognica-io/uqa-engine/pull/249) records closure of Engine/Cloud implementation and the approved local scope. Preserve all ten units and fifteen acceptance cases; broader platform, final-artifact and deployed-ingress qualification remains automatic CI/release work and is not reported as passing. |
 
 The PostgreSQL 18 plan contains a compact ledger generated from `tests/parity/pg18/manifest.json`. `python3 tests/parity/pg18/run_diff.py --validate-manifest` rejects any manifest change whose plan ledger was not updated in the same change, so the readable plan and machine-readable accounting cannot silently diverge again.
 
