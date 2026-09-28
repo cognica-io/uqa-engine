@@ -6,6 +6,15 @@
 
 //! Database-scoped notification hub state transitions and cross-process synchronization.
 
+mod delivery;
+mod subscriptions;
+#[cfg(all(test, any(windows, all(unix, not(target_os = "emscripten")))))]
+mod tests;
+
+use uqa_storage::notifications::{
+    NotificationListenerKey, NotificationListenerSummary, NotificationWakePorts,
+};
+
 use super::{
     append_notification, notifications_fit_queue, projected_tail_position, queue_page, queue_usage,
     Arc, Condvar, CrossNotificationCommit, CrossNotificationRequest, CrossProcessCoordinator,
@@ -32,6 +41,7 @@ impl NotificationHub {
     ) -> Arc<Self> {
         let database_path = path.to_path_buf();
         Arc::new_cyclic(|hub| Self {
+            admissions: super::registration::SubscriptionAdmissions::default(),
             commit_gate: Mutex::new(()),
             state: Mutex::new(NotificationHubState::default()),
             max_queue_pages: MAX_NOTIFICATION_QUEUE_PAGES,
@@ -67,20 +77,53 @@ impl NotificationHub {
         registry: &CrossProcessRegistryTransaction,
         state: &NotificationHubState,
         additional_local_owner: Option<[u8; 16]>,
-    ) -> Result<Vec<CrossProcessListenerRow>, SQLError> {
-        let mut local_owner_ids = Self::local_owner_ids(state);
-        if let Some(owner_id) = additional_local_owner {
-            local_owner_ids.push(owner_id);
-        }
-        let mut live = Vec::new();
-        for listener in registry.listeners()? {
-            if cross.listener_is_alive(listener.owner_id, &local_owner_ids)? {
-                live.push(listener);
+    ) -> Result<NotificationListenerSummary, SQLError> {
+        let local_owner_ids = Self::local_owner_ids(state);
+        let mut live = NotificationListenerSummary::default();
+        let mut after = None;
+        while let Some(listener) = registry.listener_metadata_after(after)? {
+            after = Some(listener.key);
+            if additional_local_owner == Some(listener.key.owner_id)
+                || cross.listener_is_alive(listener.key.owner_id, &local_owner_ids)?
+            {
+                live.include(listener, !local_owner_ids.contains(&listener.key.owner_id))
+                    .map_err(|error| {
+                        uqa_execution::storage_errors::storage_error(
+                            "asynchronous notification listener summary",
+                            &error,
+                        )
+                    })?;
             } else {
-                registry.drop_listener(listener.owner_id, listener.session_id)?;
+                registry.drop_listener(listener.key.owner_id, listener.key.session_id)?;
             }
         }
         Ok(live)
+    }
+
+    fn load_cross_listener(
+        registry: &CrossProcessRegistryTransaction,
+        state: &NotificationHubState,
+        owner_id: [u8; 16],
+        session_id: u64,
+    ) -> Result<CrossProcessListenerRow, SQLError> {
+        let max_channels = state
+            .listeners
+            .get(&session_id)
+            .filter(|listener| listener.subscription.is_some())
+            .map(|listener| listener.channels.len());
+        registry
+            .listener(
+                NotificationListenerKey {
+                    owner_id,
+                    session_id,
+                },
+                max_channels,
+            )?
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "committed asynchronous notification listener {session_id} is missing"
+                ))
+            })
     }
 
     fn load_cross_queue_state(
@@ -98,73 +141,10 @@ impl NotificationHub {
 
     fn cleanup_cross_entries(
         registry: &CrossProcessRegistryTransaction,
-        listeners: &[CrossProcessListenerRow],
+        listeners: &NotificationListenerSummary,
         next_sequence: u64,
     ) -> Result<(), SQLError> {
-        let tail_sequence = listeners
-            .iter()
-            .map(|listener| listener.next_sequence)
-            .min()
-            .unwrap_or(next_sequence);
-        registry.delete_entries_before(tail_sequence)
-    }
-
-    fn cross_deliveries(
-        registry: &CrossProcessRegistryTransaction,
-        listeners: &mut [CrossProcessListenerRow],
-        local_sessions: &[(u64, [u8; 16])],
-        queue_state: CrossProcessQueueState,
-    ) -> Result<Vec<PreparedDelivery>, SQLError> {
-        let mut deliveries = Vec::new();
-        for (session_id, owner_id) in local_sessions {
-            let Some(listener) = listeners.iter_mut().find(|listener| {
-                listener.owner_id == *owner_id && listener.session_id == *session_id
-            }) else {
-                continue;
-            };
-            if listener.transaction_open {
-                continue;
-            }
-            let entries = registry.entries_from(listener.next_sequence)?;
-            let notifications = entries
-                .into_iter()
-                .filter(|entry| listener.channels.contains(&entry.channel))
-                .map(|entry| SQLNotification {
-                    process_id: entry.process_id,
-                    channel: entry.channel,
-                    payload: entry.payload,
-                })
-                .collect::<Vec<_>>();
-            if listener.next_sequence != queue_state.next_sequence
-                || listener.position != queue_state.head_position
-            {
-                listener.next_sequence = queue_state.next_sequence;
-                listener.position = queue_state.head_position;
-                Self::save_cross_listener(registry, listener)?;
-            }
-            if !notifications.is_empty() {
-                deliveries.push(PreparedDelivery {
-                    session_id: *session_id,
-                    notifications,
-                });
-            }
-        }
-        Ok(deliveries)
-    }
-
-    fn apply_deliveries(state: &NotificationHubState, deliveries: Vec<PreparedDelivery>) {
-        for delivery in deliveries {
-            let Some(listener) = state.listeners.get(&delivery.session_id) else {
-                continue;
-            };
-            let Some(queue) = listener.queue.upgrade() else {
-                continue;
-            };
-            queue.lock().extend(delivery.notifications);
-            if let Some(wake) = listener.wake.upgrade() {
-                wake.notify_all();
-            }
-        }
+        registry.delete_entries_before(listeners.next_sequence.unwrap_or(next_sequence))
     }
 
     fn prepare_cross_sync(
@@ -173,66 +153,31 @@ impl NotificationHub {
         state: &mut NotificationHubState,
         transaction_state: Option<(u64, bool)>,
     ) -> Result<Vec<PreparedDelivery>, SQLError> {
-        let mut listeners = Self::live_cross_listeners(cross, registry, state, None)?;
+        Self::remove_dead_listeners(state);
         let queue_state = Self::load_cross_queue_state(registry)?;
-        if let Some((session_id, transaction_open)) = transaction_state {
-            let owner_id = state
+        let transition = transaction_state.and_then(|(session_id, transaction_open)| {
+            state
                 .listeners
                 .get(&session_id)
                 .and_then(|listener| listener.lease.as_ref())
-                .map(ListenerLease::owner_id);
-            if let Some(owner_id) = owner_id {
-                let listener = listeners
-                    .iter_mut()
-                    .find(|listener| {
-                        listener.owner_id == owner_id && listener.session_id == session_id
-                    })
-                    .ok_or_else(|| {
-                        SQLError::Internal(format!(
-                            "committed asynchronous notification listener {session_id} is missing"
-                        ))
-                    })?;
-                if !transaction_open && listener.transaction_open {
-                    listener.transaction_open = false;
-                    Self::save_cross_listener(registry, listener)?;
-                }
+                .map(|lease| (session_id, lease.owner_id(), transaction_open))
+        });
+        if let Some((session_id, owner_id, false)) = transition {
+            let mut listener = Self::load_cross_listener(registry, state, owner_id, session_id)?;
+            if listener.transaction_open {
+                listener.transaction_open = false;
+                Self::save_cross_listener(registry, &listener)?;
             }
         }
-        let local_sessions = state
-            .listeners
-            .iter()
-            .filter_map(|(session_id, listener)| {
-                listener
-                    .lease
-                    .as_ref()
-                    .map(|lease| (*session_id, lease.owner_id()))
-            })
-            .collect::<Vec<_>>();
         let deliveries =
-            Self::cross_deliveries(registry, &mut listeners, &local_sessions, queue_state)?;
-        if let Some((session_id, transaction_open)) = transaction_state {
-            if transaction_open {
-                let owner_id = state
-                    .listeners
-                    .get(&session_id)
-                    .and_then(|listener| listener.lease.as_ref())
-                    .map(ListenerLease::owner_id);
-                if let Some(owner_id) = owner_id {
-                    let listener = listeners
-                        .iter_mut()
-                        .find(|listener| {
-                            listener.owner_id == owner_id && listener.session_id == session_id
-                        })
-                        .ok_or_else(|| {
-                            SQLError::Internal(format!(
-                                "committed asynchronous notification listener {session_id} is missing"
-                            ))
-                        })?;
-                    listener.transaction_open = true;
-                    Self::save_cross_listener(registry, listener)?;
-                }
-            }
+            Self::cross_deliveries(registry, queue_state, state, &cross.recovery_control()?)?;
+        if let Some((session_id, owner_id, true)) = transition {
+            let mut listener = Self::load_cross_listener(registry, state, owner_id, session_id)?;
+            listener.transaction_open = true;
+            Self::save_cross_listener(registry, &listener)?;
         }
+        // Fold after delivery has persisted cursors or removed closed listeners in this transaction.
+        let listeners = Self::live_cross_listeners(cross, registry, state, None)?;
         Self::cleanup_cross_entries(registry, &listeners, queue_state.next_sequence)?;
         Ok(deliveries)
     }
@@ -255,40 +200,74 @@ impl NotificationHub {
         if !cross.recovery_initialized() {
             return Ok(());
         }
+        let control = cross.recovery_control()?;
+        let cancellation = Some(control.cancellation());
         if transaction_state.is_none() {
-            let owners = Self::local_owner_ids(&self.state.lock());
+            let owners =
+                Self::local_owner_ids(&*super::registration::lock(&self.state, cancellation)?);
             if !cross.poll_needed(&owners)? {
-                *self.cross_error.lock() = None;
+                *super::registration::lock(&self.cross_error, cancellation)? = None;
                 return Ok(());
             }
         }
         let transaction = cross.begin_registry_transaction()?;
-        let _gate = self.commit_gate.lock();
-        let mut state = self.state.lock();
+        let _gate = super::registration::lock(&self.commit_gate, cancellation)?;
+        let mut state = super::registration::lock(&self.state, cancellation)?;
         let deliveries =
             Self::prepare_cross_sync(&cross, &transaction, &mut state, transaction_state)?;
-        transaction.commit()?;
-        Self::apply_deliveries(&state, deliveries);
+        Self::complete_deliveries(
+            transaction.commit_with_control(&control),
+            &mut state,
+            deliveries,
+        )?;
         if let Some((session_id, transaction_open)) = transaction_state {
             if let Some(listener) = state.listeners.get_mut(&session_id) {
                 listener.transaction_open = transaction_open;
             }
         }
-        *self.cross_error.lock() = None;
+        if let Ok(mut error) = super::registration::lock(&self.cross_error, cancellation) {
+            *error = None;
+        }
         Ok(())
     }
 
     #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
-    pub(super) fn synchronize_cross_process_notifications(&self) {
+    pub(super) fn synchronize_cross_process_notifications(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) {
         if let Err(error) = self.try_synchronize_cross_process_notifications() {
-            self.record_cross_error(error.to_string());
+            self.record_cross_error(error, cancellation);
         }
     }
 
     #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
-    pub(super) fn record_cross_error(&self, error: String) {
-        *self.cross_error.lock() = Some(error);
-        for listener in self.state.lock().listeners.values() {
+    pub(super) fn record_cross_error(
+        &self,
+        error: SQLError,
+        cancellation: &uqa_core::CancellationToken,
+    ) {
+        let Ok(mut recorded) = super::registration::lock(&self.cross_error, Some(cancellation))
+        else {
+            return;
+        };
+        *recorded = Some(error.to_string());
+        drop(recorded);
+        let failure = super::subscription::NotificationSubscriptionError::with_source(
+            uqa_core::notifications::NotificationFailureKind::SourceUnavailable,
+            error,
+        );
+        let Ok(state) = super::registration::lock(&self.state, Some(cancellation)) else {
+            return;
+        };
+        for listener in state.listeners.values() {
+            if let Some(inbox) = listener
+                .subscription
+                .as_ref()
+                .and_then(std::sync::Weak::upgrade)
+            {
+                inbox.fail(failure.clone());
+            }
             if let Some(wake) = listener.wake.upgrade() {
                 wake.notify_all();
             }
@@ -310,8 +289,7 @@ impl NotificationHub {
                 &mut state,
                 Some((session_id, true)),
             )?;
-            transaction.commit()?;
-            Self::apply_deliveries(&state, deliveries);
+            Self::complete_deliveries(transaction.commit(), &mut state, deliveries)?;
             if let Some(listener) = state.listeners.get_mut(&session_id) {
                 listener.transaction_open = true;
             }
@@ -344,46 +322,20 @@ impl NotificationHub {
             None
         };
         let owner_id = existing_owner.or_else(|| new_lease.as_ref().map(ListenerLease::owner_id));
-        let mut listeners = Self::live_cross_listeners(
-            cross,
-            registry,
-            state,
-            owner_id.filter(|_| existing_owner.is_none()),
-        )?;
         let mut subscription = None;
         if final_channels.is_empty() {
             if let Some(owner_id) = existing_owner {
-                let mut listener = listeners
-                    .iter()
-                    .find(|listener| {
-                        listener.owner_id == owner_id && listener.session_id == session_id
-                    })
-                    .cloned()
-                    .ok_or_else(|| {
-                        SQLError::Internal(format!(
-                            "committed asynchronous notification listener {session_id} is missing"
-                        ))
-                    })?;
+                let mut listener =
+                    Self::load_cross_listener(registry, state, owner_id, session_id)?;
                 listener.channels.clear();
                 listener.transaction_open = false;
                 subscription = Some(listener);
                 registry.drop_listener(owner_id, session_id)?;
-                listeners.retain(|listener| {
-                    listener.owner_id != owner_id || listener.session_id != session_id
-                });
             }
         } else {
             let owner_id = owner_id.expect("nonempty channels have a listener lease");
-            let mut listener = if let Some(existing) = listeners
-                .iter()
-                .find(|listener| listener.owner_id == owner_id && listener.session_id == session_id)
-                .cloned()
-            {
-                existing
-            } else if existing_owner.is_some() {
-                return Err(SQLError::Internal(format!(
-                    "committed asynchronous notification listener {session_id} is missing"
-                )));
+            let mut listener = if existing_owner.is_some() {
+                Self::load_cross_listener(registry, state, owner_id, session_id)?
             } else {
                 CrossProcessListenerRow {
                     owner_id,
@@ -401,15 +353,14 @@ impl NotificationHub {
             listener.channels = final_channels.to_vec();
             listener.transaction_open = false;
             Self::save_cross_listener(registry, &listener)?;
-            subscription = Some(listener.clone());
-            if let Some(existing) = listeners.iter_mut().find(|candidate| {
-                candidate.owner_id == owner_id && candidate.session_id == session_id
-            }) {
-                *existing = listener;
-            } else {
-                listeners.push(listener);
-            }
+            subscription = Some(listener);
         }
+        let listeners = Self::live_cross_listeners(
+            cross,
+            registry,
+            state,
+            owner_id.filter(|_| existing_owner.is_none()),
+        )?;
         Ok(PreparedCrossSubscription {
             new_lease,
             listeners,
@@ -450,10 +401,8 @@ impl NotificationHub {
 
         Self::cleanup_cross_entries(&registry, &listeners, queue_state.next_sequence)?;
         let tail = listeners
-            .iter()
-            .map(|listener| listener.position)
-            .min()
-            .unwrap_or(queue_state.head_position);
+            .oldest
+            .map_or(queue_state.head_position, |listener| listener.position);
         if !notifications_fit_queue(
             queue_state.head_position,
             tail,
@@ -466,7 +415,11 @@ impl NotificationHub {
             });
         }
 
-        let pending = if listeners.is_empty() { &[] } else { pending };
+        let pending = if listeners.oldest.is_none() {
+            &[]
+        } else {
+            pending
+        };
         let publication = if durable_publication {
             Some(registry.prepare_publication(
                 process_id,
@@ -478,20 +431,12 @@ impl NotificationHub {
             None
         };
         let queue_state = Self::load_cross_queue_state(&registry)?;
-        let local_owner_ids = Self::local_owner_ids(&state);
-        let mut wake_ports = if pending.is_empty() {
-            Vec::new()
-        } else {
-            listeners
-                .iter()
-                .filter(|listener| !local_owner_ids.contains(&listener.owner_id))
-                .map(|listener| listener.wake_port)
-                .collect::<Vec<_>>()
-        };
-        wake_ports.sort_unstable();
-        wake_ports.dedup();
-
         let warning = self.cross_queue_warning(&state, &listeners, queue_state);
+        let wake_ports = if pending.is_empty() {
+            NotificationWakePorts::default()
+        } else {
+            listeners.wake_ports
+        };
         let publisher_lease = publication
             .as_ref()
             .map(|_| cross.create_listener_lease())
@@ -511,14 +456,12 @@ impl NotificationHub {
     fn cross_queue_warning(
         &self,
         state: &NotificationHubState,
-        listeners: &[CrossProcessListenerRow],
+        listeners: &NotificationListenerSummary,
         queue_state: CrossProcessQueueState,
     ) -> Option<String> {
         let tail = listeners
-            .iter()
-            .map(|listener| listener.position)
-            .min()
-            .unwrap_or(queue_state.head_position);
+            .oldest
+            .map_or(queue_state.head_position, |listener| listener.position);
         let pages = queue_page(queue_state.head_position).saturating_sub(queue_page(tail));
         let usage = pages as f64 / self.max_queue_pages as f64;
         if usage < 0.5 {
@@ -530,10 +473,7 @@ impl NotificationHub {
         }) {
             return None;
         }
-        let blocker = listeners
-            .iter()
-            .min_by_key(|listener| listener.position)?
-            .process_id;
+        let blocker = listeners.oldest?.process_id;
         Some(format!(
             "NOTIFY queue is {:.0}% full\nDETAIL: The server process with PID {blocker} is among those with the oldest transactions.\nHINT: The NOTIFY queue cannot be emptied until that process ends its current transaction.",
             usage * 100.0
@@ -607,6 +547,7 @@ impl NotificationHub {
                     channels,
                     queue: Arc::downgrade(queue),
                     wake: Arc::downgrade(wake),
+                    subscription: None,
                     next_sequence,
                     position,
                     transaction_open: false,
@@ -641,8 +582,7 @@ impl NotificationHub {
                 &mut state,
                 Some((session_id, false)),
             )?;
-            transaction.commit()?;
-            Self::apply_deliveries(&state, deliveries);
+            Self::complete_deliveries(transaction.commit(), &mut state, deliveries)?;
             if let Some(listener) = state.listeners.get_mut(&session_id) {
                 listener.transaction_open = false;
             }
@@ -695,6 +635,7 @@ impl NotificationHub {
                     channels,
                     queue: Arc::downgrade(queue),
                     wake: Arc::downgrade(wake),
+                    subscription: None,
                     next_sequence,
                     position,
                     transaction_open: false,
@@ -794,6 +735,7 @@ impl NotificationHub {
                     channels,
                     queue: Arc::downgrade(queue),
                     wake: Arc::downgrade(wake),
+                    subscription: None,
                     next_sequence: 0,
                     position: 0,
                     transaction_open: false,
@@ -807,7 +749,7 @@ impl NotificationHub {
         }
         drop(state);
         drop(gate);
-        CrossProcessCoordinator::wake(&wake_ports);
+        CrossProcessCoordinator::wake(wake_ports.iter());
         publication_result.map_err(|error| {
             SQLError::Internal(format!(
                 "transaction committed; notification publication awaits recovery: {error}"
@@ -821,46 +763,13 @@ impl NotificationHub {
             })
     }
 
-    fn deliver_idle_listeners(state: &mut NotificationHubState) {
-        let head_position = state.head_position;
-        let next_sequence = state.next_sequence;
-        let entries = &state.entries;
-        let listeners = &mut state.listeners;
-        let mut dead = Vec::new();
-        for (session_id, listener) in listeners.iter_mut() {
-            if listener.transaction_open {
-                continue;
-            }
-            let Some(queue) = listener.queue.upgrade() else {
-                dead.push(*session_id);
-                continue;
-            };
-            let delivered = entries
-                .iter()
-                .filter(|entry| entry.sequence >= listener.next_sequence)
-                .filter(|entry| listener.channels.contains(&entry.channel))
-                .map(|entry| SQLNotification {
-                    process_id: entry.process_id,
-                    channel: entry.channel.clone(),
-                    payload: entry.payload.clone(),
-                })
-                .collect::<Vec<_>>();
-            queue.lock().extend(delivered);
-            if let Some(wake) = listener.wake.upgrade() {
-                wake.notify_all();
-            }
-            listener.next_sequence = next_sequence;
-            listener.position = head_position;
-        }
-        for session_id in dead {
-            listeners.remove(&session_id);
-        }
-    }
-
     fn remove_dead_listeners(state: &mut NotificationHubState) {
-        state
-            .listeners
-            .retain(|_, listener| listener.queue.strong_count() != 0);
+        state.listeners.retain(|_, listener| {
+            listener.subscription.as_ref().map_or_else(
+                || listener.queue.strong_count() != 0,
+                |inbox| inbox.upgrade().is_some_and(|inbox| !inbox.is_closed()),
+            )
+        });
         Self::remove_consumed_entries(state);
     }
 
@@ -912,10 +821,8 @@ impl NotificationHub {
             let queue_state = Self::load_cross_queue_state(&transaction)?;
             Self::cleanup_cross_entries(&transaction, &listeners, queue_state.next_sequence)?;
             let tail = listeners
-                .iter()
-                .map(|listener| listener.position)
-                .min()
-                .unwrap_or(queue_state.head_position);
+                .oldest
+                .map_or(queue_state.head_position, |listener| listener.position);
             let pages = queue_page(queue_state.head_position).saturating_sub(queue_page(tail));
             let usage = pages as f64 / self.max_queue_pages as f64;
             transaction.commit()?;

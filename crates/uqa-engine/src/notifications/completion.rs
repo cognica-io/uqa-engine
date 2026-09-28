@@ -18,13 +18,24 @@ impl Engine {
     }
 
     pub(super) fn prepare_notification_recovery(&self) -> Result<(), SQLError> {
+        self.prepare_notification_recovery_with_cancellation(None)
+    }
+
+    pub(super) fn prepare_notification_recovery_with_cancellation(
+        &self,
+        cancellation: Option<&uqa_core::CancellationToken>,
+    ) -> Result<(), SQLError> {
         if let (Some(cross), Some(backend)) = (
             self.notification_hub.cross.as_ref(),
             self.storage.backend.as_ref(),
         ) {
             cross
-                .coordinator()?
-                .initialize_recovery(backend, &self.query_retention_control()?)?;
+                .coordinator_with_cancellation(cancellation)?
+                .initialize_recovery_with_cancellation(
+                    backend,
+                    &self.query_retention_control()?,
+                    cancellation,
+                )?;
         }
         Ok(())
     }

@@ -10,6 +10,19 @@ mod completion;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod cross_process;
 mod hub;
+mod inbox;
+mod owner;
+mod registration;
+mod subscription;
+
+pub(crate) use owner::NotificationHubOwner;
+#[cfg(test)]
+pub(crate) use registration::gate_waited;
+
+pub use subscription::{
+    NotificationSubscription, NotificationSubscriptionError, NotificationSubscriptionOptions,
+    NotificationSubscriptionPermit, NotificationWait,
+};
 
 #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
 mod cross_process {
@@ -102,7 +115,32 @@ mod cross_process {
             Err(unsupported())
         }
 
-        pub(super) fn listeners(&self) -> Result<Vec<CrossProcessListenerRow>, SQLError> {
+        pub(super) fn visit_entries_from(
+            &self,
+            _from_sequence: u64,
+            _max_entries: std::num::NonZeroUsize,
+            _control: &StorageReadControl,
+            _visit: &mut dyn FnMut(
+                uqa_storage::notifications::NotificationQueueEntryRef<'_>,
+            )
+                -> uqa_storage::StorageBackendResult<std::ops::ControlFlow<()>>,
+        ) -> Result<uqa_storage::notifications::NotificationQueueScan, SQLError> {
+            Err(unsupported())
+        }
+
+        pub(super) fn listener_metadata_after(
+            &self,
+            _after: Option<uqa_storage::notifications::NotificationListenerKey>,
+        ) -> Result<Option<uqa_storage::notifications::NotificationListenerMetadata>, SQLError>
+        {
+            Err(unsupported())
+        }
+
+        pub(super) fn listener(
+            &self,
+            _key: uqa_storage::notifications::NotificationListenerKey,
+            _max_channels: Option<usize>,
+        ) -> Result<Option<CrossProcessListenerRow>, SQLError> {
             Err(unsupported())
         }
 
@@ -124,6 +162,12 @@ mod cross_process {
         pub(super) fn commit(self) -> Result<(), SQLError> {
             Err(unsupported())
         }
+        pub(super) fn commit_with_control(
+            self,
+            _control: &StorageReadControl,
+        ) -> Result<(), SQLError> {
+            Err(unsupported())
+        }
     }
 
     pub(super) struct CrossProcessCoordinator;
@@ -139,14 +183,21 @@ mod cross_process {
         ) -> Result<CrossProcessRegistryTransaction, SQLError> {
             Err(unsupported())
         }
-        pub(super) fn initialize_recovery(
+        pub(super) fn initialize_recovery_with_cancellation(
             &self,
             _backend: &Arc<dyn PersistentStorageBackend>,
             _control: &StorageReadControl,
+            _cancellation: Option<&uqa_core::CancellationToken>,
         ) -> Result<(), SQLError> {
             Err(unsupported())
         }
         pub(super) fn recovery_control(&self) -> Result<StorageReadControl, SQLError> {
+            Err(unsupported())
+        }
+        pub(super) fn recovery_control_with_cancellation(
+            &self,
+            _cancellation: Option<&uqa_core::CancellationToken>,
+        ) -> Result<StorageReadControl, SQLError> {
             Err(unsupported())
         }
         pub(super) const fn recovery_initialized(&self) -> bool {
@@ -157,6 +208,12 @@ mod cross_process {
         }
         pub(super) fn begin_registry_transaction(
             &self,
+        ) -> Result<CrossProcessRegistryTransaction, SQLError> {
+            Err(unsupported())
+        }
+        pub(super) fn begin_registry_transaction_with_cancellation(
+            &self,
+            _cancellation: Option<&uqa_core::CancellationToken>,
         ) -> Result<CrossProcessRegistryTransaction, SQLError> {
             Err(unsupported())
         }
@@ -177,7 +234,7 @@ mod cross_process {
             0
         }
 
-        pub(super) fn wake(_ports: &[u16]) {}
+        pub(super) fn wake(_ports: impl IntoIterator<Item = u16>) {}
     }
 
     fn unsupported() -> SQLError {
@@ -240,6 +297,7 @@ struct NotificationListener {
     channels: Vec<String>,
     queue: Weak<Mutex<VecDeque<SQLNotification>>>,
     wake: Weak<Condvar>,
+    subscription: Option<Weak<inbox::SubscriptionInbox>>,
     next_sequence: u64,
     position: u64,
     transaction_open: bool,
@@ -256,9 +314,12 @@ struct NotificationSessionCommit<'a> {
     pending: &'a [PendingNotification],
 }
 
-struct PreparedDelivery {
-    session_id: u64,
-    notifications: Vec<SQLNotification>,
+enum PreparedDelivery {
+    Session {
+        session_id: u64,
+        notifications: Vec<SQLNotification>,
+    },
+    Subscription(inbox::PreparedNotifications),
 }
 
 pub(super) struct CrossNotificationCommit {
@@ -268,7 +329,7 @@ pub(super) struct CrossNotificationCommit {
     publication_applied: bool,
     publication: Option<uqa_storage::notifications::NotificationPublication>,
     previous_publication: Option<[u8; 32]>,
-    wake_ports: Vec<u16>,
+    wake_ports: uqa_storage::notifications::NotificationWakePorts,
     warning: Option<String>,
 }
 
@@ -284,7 +345,7 @@ struct CrossNotificationRequest<'a> {
 
 struct PreparedCrossSubscription {
     new_lease: Option<ListenerLease>,
-    listeners: Vec<CrossProcessListenerRow>,
+    listeners: uqa_storage::notifications::NotificationListenerSummary,
     subscription: Option<CrossProcessListenerRow>,
 }
 
@@ -315,7 +376,15 @@ impl CrossProcessState {
     fn registry(
         &self,
     ) -> Result<uqa_storage_sqlite::notifications::NotificationRegistry, SQLError> {
-        let mut initialized = self.registry.lock();
+        self.registry_with_cancellation(None)
+    }
+
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+    fn registry_with_cancellation(
+        &self,
+        cancellation: Option<&uqa_core::CancellationToken>,
+    ) -> Result<uqa_storage_sqlite::notifications::NotificationRegistry, SQLError> {
+        let mut initialized = registration::lock(&self.registry, cancellation)?;
         if let Some(registry) = initialized.as_ref() {
             return Ok(registry.clone());
         }
@@ -340,13 +409,23 @@ impl CrossProcessState {
 
     #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
     fn coordinator(&self) -> Result<Arc<CrossProcessCoordinator>, SQLError> {
-        let mut initialized = self.coordinator.lock();
+        self.coordinator_with_cancellation(None)
+    }
+
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+    fn coordinator_with_cancellation(
+        &self,
+        cancellation: Option<&uqa_core::CancellationToken>,
+    ) -> Result<Arc<CrossProcessCoordinator>, SQLError> {
+        let mut initialized = registration::lock(&self.coordinator, cancellation)?;
         if let Some(coordinator) = initialized.as_ref() {
             return Ok(Arc::clone(coordinator));
         }
-        let (coordinator, listener) =
-            CrossProcessCoordinator::open(&self.database_path, self.registry()?)
-                .map_err(SQLError::Internal)?;
+        let (coordinator, listener) = CrossProcessCoordinator::open(
+            &self.database_path,
+            self.registry_with_cancellation(cancellation)?,
+        )
+        .map_err(SQLError::Internal)?;
         let coordinator = Arc::new(coordinator);
         coordinator
             .start_worker(listener, self.hub.clone())
@@ -357,6 +436,14 @@ impl CrossProcessState {
 
     #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
     fn coordinator(&self) -> Result<Arc<CrossProcessCoordinator>, SQLError> {
+        self.coordinator_with_cancellation(None)
+    }
+
+    #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
+    fn coordinator_with_cancellation(
+        &self,
+        _cancellation: Option<&uqa_core::CancellationToken>,
+    ) -> Result<Arc<CrossProcessCoordinator>, SQLError> {
         Err(SQLError::Internal(
             "cross-process asynchronous notifications are unavailable on this target".into(),
         ))
@@ -404,6 +491,7 @@ struct NotificationHubState {
 }
 
 pub(crate) struct NotificationHub {
+    admissions: registration::SubscriptionAdmissions,
     commit_gate: Mutex<()>,
     state: Mutex<NotificationHubState>,
     max_queue_pages: u64,
@@ -414,6 +502,7 @@ pub(crate) struct NotificationHub {
 impl Default for NotificationHub {
     fn default() -> Self {
         Self {
+            admissions: registration::SubscriptionAdmissions::default(),
             commit_gate: Mutex::new(()),
             state: Mutex::new(NotificationHubState::default()),
             max_queue_pages: MAX_NOTIFICATION_QUEUE_PAGES,
@@ -489,7 +578,7 @@ enum NotificationHubIdentity {
 }
 
 static DATABASE_NOTIFICATION_HUBS: OnceLock<
-    Mutex<HashMap<NotificationHubIdentity, Weak<NotificationHub>>>,
+    Mutex<HashMap<NotificationHubIdentity, Weak<NotificationHubOwner>>>,
 > = OnceLock::new();
 
 #[derive(Default)]
@@ -527,7 +616,7 @@ pub(crate) fn release_backend_process_id(process_id: i32) {
 pub(crate) fn shared_provider_notification_hub(
     identity: Option<uqa_storage::PersistentStorageIdentity>,
     provider: &Arc<dyn uqa_storage::PersistentStorageProvider>,
-) -> Arc<NotificationHub> {
+) -> Arc<NotificationHubOwner> {
     shared_notification_hub(
         identity,
         NotificationHubIdentity::Provider(Arc::as_ptr(provider).cast::<()>() as usize),
@@ -538,7 +627,7 @@ pub(crate) fn shared_provider_notification_hub(
 pub(crate) fn shared_backend_notification_hub(
     identity: Option<uqa_storage::PersistentStorageIdentity>,
     backend: &Arc<dyn uqa_storage::PersistentStorageBackend>,
-) -> Arc<NotificationHub> {
+) -> Arc<NotificationHubOwner> {
     shared_notification_hub(
         identity,
         NotificationHubIdentity::Provider(Arc::as_ptr(backend).cast::<()>() as usize),
@@ -550,7 +639,7 @@ fn shared_notification_hub(
     identity: Option<uqa_storage::PersistentStorageIdentity>,
     fallback: NotificationHubIdentity,
     encryption_key: Option<uqa_storage::StorageEncryptionKey>,
-) -> Arc<NotificationHub> {
+) -> Arc<NotificationHubOwner> {
     let identity = identity.map_or(fallback, NotificationHubIdentity::Durable);
     let registry = DATABASE_NOTIFICATION_HUBS.get_or_init(|| Mutex::new(HashMap::new()));
     let mut registry = registry.lock();
@@ -564,6 +653,7 @@ fn shared_notification_hub(
         }
         _ => Arc::new(NotificationHub::default()),
     };
+    let hub = Arc::new(NotificationHubOwner::new(hub));
     registry.insert(identity, Arc::downgrade(&hub));
     hub
 }
@@ -749,6 +839,7 @@ mod tests {
                 channels: vec!["events".into()],
                 queue: Arc::downgrade(&queue),
                 wake: Arc::downgrade(&wake),
+                subscription: None,
                 next_sequence: 0,
                 position: 0,
                 transaction_open: true,
@@ -756,6 +847,7 @@ mod tests {
             },
         );
         let hub = NotificationHub {
+            admissions: registration::SubscriptionAdmissions::default(),
             commit_gate: Mutex::new(()),
             state: Mutex::new(NotificationHubState::default()),
             max_queue_pages: 1,

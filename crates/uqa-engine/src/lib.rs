@@ -161,7 +161,10 @@ use uqa_storage_sqlite::{
     ManagedConnection, SQLiteCompressedContainerAnchor, SQLiteStorageProvider,
 };
 
-pub use notifications::SQLNotification;
+pub use notifications::{
+    NotificationSubscription, NotificationSubscriptionError, NotificationSubscriptionOptions,
+    NotificationSubscriptionPermit, NotificationWait, SQLNotification,
+};
 pub use sql::{SQLCursor, SQLCursorSummary};
 pub use uqa_execution::{ColumnVector, ColumnarBatch};
 pub use uqa_sql::{
@@ -175,7 +178,9 @@ pub use functions::{
     SQLAggregateFunction, SQLAggregateState, SQLFunctionOptions, SQLFunctionVolatility,
     SQLScalarFunction, SQLTableFunction, SQLTableFunctionResult, SQLTableFunctionStream,
 };
-use notifications::{NotificationHub, PendingListenAction, PendingNotification};
+use notifications::{
+    NotificationHubOwner as NotificationHub, PendingListenAction, PendingNotification,
+};
 use state::{
     DurableCatalogSnapshot, DurableCatalogState, EpochCoordinator, QueryRuntime, RuntimeExtensions,
     SessionContext, StorageContext, StoredView, StoredViewKind,

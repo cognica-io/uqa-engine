@@ -10,7 +10,6 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -18,10 +17,14 @@ use std::time::Duration;
 use super::NotificationHub;
 use fs2::FileExt;
 use parking_lot::Mutex;
+use uqa_core::CancellationToken;
 use uqa_sql::SQLError;
 use uqa_storage::StorageEncryptionKey;
 use uqa_storage::{
-    notifications::{NotificationPublication, PendingNotification},
+    notifications::{
+        NotificationListenerKey, NotificationListenerMetadata, NotificationPublication,
+        PendingNotification,
+    },
     read_control::StorageReadControl,
     PersistentStorageBackend,
 };
@@ -121,8 +124,38 @@ impl CrossProcessRegistryTransaction {
             .map_err(registry_error)
     }
 
-    pub(super) fn listeners(&self) -> Result<Vec<CrossProcessListenerRow>, SQLError> {
-        self.transaction.listeners().map_err(registry_error)
+    pub(super) fn visit_entries_from(
+        &self,
+        from_sequence: u64,
+        max_entries: std::num::NonZeroUsize,
+        control: &StorageReadControl,
+        visit: &mut dyn FnMut(
+            uqa_storage::notifications::NotificationQueueEntryRef<'_>,
+        )
+            -> uqa_storage::StorageBackendResult<std::ops::ControlFlow<()>>,
+    ) -> Result<uqa_storage::notifications::NotificationQueueScan, SQLError> {
+        self.transaction
+            .visit_entries_from(from_sequence, max_entries, control, visit)
+            .map_err(registry_error)
+    }
+
+    pub(super) fn listener_metadata_after(
+        &self,
+        after: Option<NotificationListenerKey>,
+    ) -> Result<Option<NotificationListenerMetadata>, SQLError> {
+        self.transaction
+            .listener_metadata_after(after)
+            .map_err(registry_error)
+    }
+
+    pub(super) fn listener(
+        &self,
+        key: NotificationListenerKey,
+        max_channels: Option<usize>,
+    ) -> Result<Option<CrossProcessListenerRow>, SQLError> {
+        self.transaction
+            .listener(key, max_channels)
+            .map_err(registry_error)
     }
 
     pub(super) fn save_listener(&self, listener: &CrossProcessListenerRow) -> Result<(), SQLError> {
@@ -143,6 +176,12 @@ impl CrossProcessRegistryTransaction {
 
     pub(super) fn commit(self) -> Result<(), SQLError> {
         self.transaction.commit().map_err(registry_error)
+    }
+
+    pub(super) fn commit_with_control(self, control: &StorageReadControl) -> Result<(), SQLError> {
+        self.transaction
+            .commit_with_control(control)
+            .map_err(registry_error)
     }
 }
 
@@ -176,9 +215,11 @@ pub(super) struct CrossProcessCoordinator {
     database_path: PathBuf,
     registry: NotificationRegistry,
     wake_port: u16,
-    shutdown: Arc<AtomicBool>,
+    shutdown: CancellationToken,
     worker: Mutex<Option<JoinHandle<()>>>,
     recovery: Mutex<Option<RecoverySession>>,
+    #[cfg(test)]
+    gate_wait: Arc<Mutex<Option<std::sync::mpsc::SyncSender<()>>>>,
 }
 
 #[derive(Clone)]
@@ -212,9 +253,11 @@ impl CrossProcessCoordinator {
                 database_path: database_path.to_path_buf(),
                 registry,
                 wake_port,
-                shutdown: Arc::new(AtomicBool::new(false)),
+                shutdown: CancellationToken::new(),
                 worker: Mutex::new(None),
                 recovery: Mutex::new(None),
+                #[cfg(test)]
+                gate_wait: Arc::new(Mutex::new(None)),
             },
             listener,
         ))
@@ -228,10 +271,15 @@ impl CrossProcessCoordinator {
         listener.set_nonblocking(true).map_err(|error| {
             format!("configure asynchronous notification recovery polling: {error}")
         })?;
-        let shutdown = Arc::clone(&self.shutdown);
+        let shutdown = self.shutdown.clone();
+        #[cfg(test)]
+        let gate_wait = Arc::clone(&self.gate_wait);
         let worker = std::thread::Builder::new()
             .name("uqa-notification-wake".into())
             .spawn(move || loop {
+                if shutdown.is_cancelled() {
+                    break;
+                }
                 match listener.accept() {
                     Ok((stream, _)) => drop(stream),
                     Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -240,18 +288,25 @@ impl CrossProcessCoordinator {
                     }
                     Err(error) => {
                         if let Some(hub) = hub.upgrade() {
-                            hub.record_cross_error(format!(
-                                "accept asynchronous notification wake connection: {error}"
-                            ));
+                            hub.record_cross_error(
+                                SQLError::Internal(format!(
+                                    "accept asynchronous notification wake connection: {error}"
+                                )),
+                                &shutdown,
+                            );
                         }
                         break;
                     }
                 }
-                if shutdown.load(Ordering::Acquire) {
+                if shutdown.is_cancelled() {
                     break;
                 }
                 let Some(hub) = hub.upgrade() else { break };
-                hub.synchronize_cross_process_notifications();
+                #[cfg(test)]
+                if let Some(observer) = gate_wait.lock().clone() {
+                    super::registration::observe_gate_wait(observer);
+                }
+                hub.synchronize_cross_process_notifications(&shutdown);
             })
             .map_err(|error| format!("spawn asynchronous notification wake worker: {error}"))?;
         *self.worker.lock() = Some(worker);
@@ -265,9 +320,20 @@ impl CrossProcessCoordinator {
     pub(super) fn begin_registry_transaction(
         &self,
     ) -> Result<CrossProcessRegistryTransaction, SQLError> {
-        let recovery = self.recovery.lock().clone().ok_or_else(|| {
-            SQLError::Internal("notification recovery has no independent storage session".into())
-        })?;
+        self.begin_registry_transaction_with_cancellation(None)
+    }
+
+    pub(super) fn begin_registry_transaction_with_cancellation(
+        &self,
+        cancellation: Option<&uqa_core::CancellationToken>,
+    ) -> Result<CrossProcessRegistryTransaction, SQLError> {
+        let recovery = super::registration::lock(&self.recovery, cancellation)?
+            .clone()
+            .ok_or_else(|| {
+                SQLError::Internal(
+                    "notification recovery has no independent storage session".into(),
+                )
+            })?;
         let store = recovery
             .backend
             .notification_publications()
@@ -276,20 +342,28 @@ impl CrossProcessCoordinator {
                     "notification recovery session omitted atomic publication".into(),
                 )
             })?;
+        let control = cancellation.map_or_else(
+            || recovery.control.clone(),
+            |cancellation| StorageReadControl::new(recovery.control.memory(), cancellation),
+        );
         self.registry
-            .begin_recovered(store, &recovery.control)
+            .begin_recovered(store, &control)
             .map(|transaction| CrossProcessRegistryTransaction { transaction })
             .map_err(registry_error)
     }
 
-    pub(super) fn initialize_recovery(
+    pub(super) fn initialize_recovery_with_cancellation(
         &self,
         backend: &Arc<dyn PersistentStorageBackend>,
         control: &StorageReadControl,
+        cancellation: Option<&uqa_core::CancellationToken>,
     ) -> Result<(), SQLError> {
-        let mut recovery = self.recovery.lock();
+        let mut recovery = super::registration::lock(&self.recovery, cancellation)?;
         if recovery.is_none() {
             let session = backend.open_session().map_err(registry_error)?;
+            if let Some(cancellation) = cancellation {
+                cancellation.check()?;
+            }
             if session.backend.notification_publications().is_none() {
                 return Err(SQLError::Internal(
                     "persistent backend does not support atomic notification publication".into(),
@@ -301,10 +375,7 @@ impl CrossProcessCoordinator {
                 .unwrap_or_else(|| control.clone());
             *recovery = Some(RecoverySession {
                 backend: session.backend,
-                control: StorageReadControl::new(
-                    allowance.memory(),
-                    &uqa_core::CancellationToken::new(),
-                ),
+                control: StorageReadControl::new(allowance.memory(), &self.shutdown),
             });
         }
         Ok(())
@@ -336,10 +407,21 @@ impl CrossProcessCoordinator {
     }
 
     pub(super) fn recovery_control(&self) -> Result<StorageReadControl, SQLError> {
-        self.recovery
-            .lock()
+        self.recovery_control_with_cancellation(None)
+    }
+
+    pub(super) fn recovery_control_with_cancellation(
+        &self,
+        cancellation: Option<&uqa_core::CancellationToken>,
+    ) -> Result<StorageReadControl, SQLError> {
+        super::registration::lock(&self.recovery, cancellation)?
             .as_ref()
-            .map(|session| session.control.clone())
+            .map(|session| {
+                cancellation.map_or_else(
+                    || session.control.clone(),
+                    |cancellation| StorageReadControl::new(session.control.memory(), cancellation),
+                )
+            })
             .ok_or_else(|| {
                 SQLError::Internal(
                     "notification recovery session omitted its retention allowance".into(),
@@ -384,17 +466,23 @@ impl CrossProcessCoordinator {
                 .open(&path)
             {
                 Ok(file) => {
-                    file.lock_exclusive().map_err(|error| {
-                        SQLError::Internal(format!(
-                            "lock asynchronous notification listener lease `{}`: {error}",
-                            path.display()
-                        ))
-                    })?;
-                    return Ok(ListenerLease {
+                    let lease = ListenerLease {
                         owner_id,
                         path,
                         file: Some(file),
-                    });
+                    };
+                    lease
+                        .file
+                        .as_ref()
+                        .expect("newly owned lease file")
+                        .try_lock_exclusive()
+                        .map_err(|error| {
+                            SQLError::Internal(format!(
+                                "lock asynchronous notification listener lease `{}`: {error}",
+                                lease.path.display()
+                            ))
+                        })?;
+                    return Ok(lease);
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
                 Err(error) => {
@@ -449,9 +537,9 @@ impl CrossProcessCoordinator {
         }
     }
 
-    pub(super) fn wake(ports: &[u16]) {
+    pub(super) fn wake(ports: impl IntoIterator<Item = u16>) {
         for port in ports {
-            let address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, *port));
+            let address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port));
             if let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(100))
             {
                 let _ = stream.write_all(&[1]);
@@ -460,17 +548,31 @@ impl CrossProcessCoordinator {
     }
 }
 
-impl Drop for CrossProcessCoordinator {
-    fn drop(&mut self) {
-        self.shutdown.store(true, Ordering::Release);
-        let address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, self.wake_port));
-        let _ = TcpStream::connect_timeout(&address, Duration::from_millis(100));
+impl CrossProcessCoordinator {
+    #[cfg(test)]
+    pub(super) fn worker_is_retained(&self) -> bool {
+        self.worker.lock().is_some()
+    }
+
+    #[cfg(test)]
+    pub(super) fn observe_worker_gate_wait(&self, observer: std::sync::mpsc::SyncSender<()>) {
+        *self.gate_wait.lock() = Some(observer);
+    }
+
+    pub(super) fn shutdown(&self) {
+        self.shutdown.cancel();
         if let Some(worker) = self.worker.lock().take() {
             worker.thread().unpark();
             if worker.thread().id() != std::thread::current().id() {
                 let _ = worker.join();
             }
         }
+    }
+}
+
+impl Drop for CrossProcessCoordinator {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
