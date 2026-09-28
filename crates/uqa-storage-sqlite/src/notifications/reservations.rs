@@ -6,6 +6,8 @@
 
 //! Retain one unresolved publication range without retaining a physical registry writer.
 
+use super::control;
+
 use super::{
     publication::state, registry_error, NotificationRegistry, NotificationRegistryTransaction,
     StorageBackendError, StorageBackendResult, REGISTRY_BUSY_TIMEOUT,
@@ -30,6 +32,7 @@ impl NotificationRegistry {
         loop {
             control.check()?;
             let mut transaction = self.begin_recovered(store, control)?;
+            let operation = control::operation(&transaction.connection, Some(control))?;
             let current = state(&transaction.connection)?;
             if resume.is_some_and(|(publication, _)| {
                 current.registry_id != publication.view().header().registry_id
@@ -49,6 +52,7 @@ impl NotificationRegistry {
                 .filter(|pending| !already_applied && Some(*pending) != resume_identity);
             if let Some((fingerprint, owner)) = pending {
                 if owner_alive(owner)? {
+                    drop(operation);
                     drop(transaction);
                     if started.elapsed() >= REGISTRY_BUSY_TIMEOUT {
                         return Err(registry_error(
@@ -74,6 +78,7 @@ impl NotificationRegistry {
                     registry_error("retain notification preparation boundary", &error)
                 })?;
             transaction.preparing = true;
+            drop(operation);
             return Ok(transaction);
         }
     }
@@ -86,6 +91,7 @@ impl NotificationRegistryTransaction {
         publication: &NotificationPublication,
         owner: [u8; 16],
     ) -> StorageBackendResult<()> {
+        let _operation = control::operation(&self.connection, None)?;
         if !self.preparing || self.finished || self.poisoned {
             return Err(StorageBackendError::Other(
                 "notification publication has no resumable preparation boundary".into(),
@@ -127,6 +133,8 @@ impl NotificationRegistryTransaction {
         owner: [u8; 16],
         control: &StorageReadControl,
     ) -> StorageBackendResult<bool> {
+        let operation =
+            control::operation_with(&self.connection, self.control.as_ref(), Some(control))?;
         let current = state(&self.connection)?;
         let header = publication.view().header();
         if current.registry_id != header.registry_id {
@@ -142,6 +150,7 @@ impl NotificationRegistryTransaction {
                 "retained notification has no matching publication reservation".into(),
             ));
         }
+        drop(operation);
         self.apply_publication(publication.view(), control)?;
         Ok(false)
     }

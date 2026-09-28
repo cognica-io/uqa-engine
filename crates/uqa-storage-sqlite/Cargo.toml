@@ -35,11 +35,11 @@ uqa-storage = { workspace = true }
 # emscripten builds bundle plain SQLite instead. `fs2` file locks are
 # replaced by a single-process shim there.
 [target.'cfg(not(target_os = "emscripten"))'.dependencies]
-rusqlite = { workspace = true, features = ["functions"] }
+rusqlite = { workspace = true, features = ["functions", "hooks"] }
 fs2 = { workspace = true }
 
 [target.'cfg(target_os = "emscripten")'.dependencies]
-rusqlite = { version = "0.39", default-features = false, features = ["bundled", "blob", "cache", "functions"] }
+rusqlite = { version = "0.39", default-features = false, features = ["bundled", "blob", "cache", "functions", "hooks"] }
 
 [dev-dependencies]
 rstest = { workspace = true }

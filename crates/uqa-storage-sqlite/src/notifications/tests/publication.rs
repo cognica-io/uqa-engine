@@ -509,3 +509,48 @@ fn failed_publication_rollback_prevents_registry_commit() {
     );
     transaction.commit().unwrap();
 }
+
+#[test]
+fn native_write_cancellation_preserves_its_error_after_sqlite_rolls_back() {
+    let directory = tempfile::tempdir().unwrap();
+    let registry =
+        NotificationRegistry::open(&directory.path().join("interrupted.db"), None).unwrap();
+    let control = control();
+    let mut transaction = registry.begin_with_control(&control).unwrap();
+    let cancel = control.cancellation().clone();
+    transaction
+        .connection
+        .create_scalar_function(
+            "cancel_notification_insert",
+            1,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8,
+            move |context| {
+                let value: i64 = context.get(0)?;
+                if value == 16 {
+                    cancel.cancel();
+                }
+                Ok(value)
+            },
+        )
+        .unwrap();
+    transaction.connection.execute_batch("CREATE TEMP TRIGGER interrupt_notification BEFORE INSERT ON queue_entries BEGIN WITH RECURSIVE n(value) AS (SELECT 1 UNION ALL SELECT value+1 FROM n WHERE value<10000000) SELECT sum(cancel_notification_insert(value)) FROM n; END;").unwrap();
+    let error = transaction
+        .prepare_publication(42, &pending(), Some(&listener()), &control)
+        .err()
+        .expect("native interruption must reject publication");
+    assert!(matches!(error, StorageBackendError::Cancelled(_)));
+    assert!(transaction.connection.is_autocommit());
+    assert!(transaction
+        .commit()
+        .unwrap_err()
+        .to_string()
+        .contains("cannot commit"));
+    let transaction = registry.begin().unwrap();
+    assert!(transaction.listeners().unwrap().is_empty());
+    assert!(transaction.entries_from(0).unwrap().is_empty());
+    assert_eq!(
+        transaction.queue_state().unwrap(),
+        NotificationQueueState::default()
+    );
+    transaction.commit().unwrap();
+}

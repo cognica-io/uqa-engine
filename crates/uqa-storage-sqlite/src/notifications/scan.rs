@@ -14,6 +14,8 @@ use uqa_storage::{
     StorageBackendResult,
 };
 
+use super::control;
+
 use super::{nonnegative_u64, registry_error, sqlite_integer, NotificationRegistryTransaction};
 
 impl NotificationRegistryTransaction {
@@ -29,6 +31,8 @@ impl NotificationRegistryTransaction {
             NotificationQueueEntryRef<'_>,
         ) -> StorageBackendResult<ControlFlow<()>>,
     ) -> StorageBackendResult<NotificationQueueScan> {
+        let _operation =
+            control::operation_with(&self.connection, self.control.as_ref(), Some(control))?;
         control.check()?;
         let mut statement = self
             .connection
