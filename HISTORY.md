@@ -6,10 +6,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
-### Fixed
-
-- Include the vector benchmark fixtures, manifests and source attribution in the Python source distribution so its included Rust benchmarks have all required inputs.
-
 ## [0.4.5] - 2026-09-28
 
 ### Added
@@ -24,6 +20,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Include the vector benchmark fixtures, manifests and source attribution in the Python source distribution so its included Rust benchmarks have all required inputs.
 - Release owned notification listener leases and join final recovery without waiting for another SQLite registry writer. Closed handles no longer retain their original provider; independent listeners preserve their delivery and recovery boundaries.
 - Match PostgreSQL 18's `42P17` diagnostic when a generated expression calls a non-immutable function.
 
