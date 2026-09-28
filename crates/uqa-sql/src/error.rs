@@ -6,7 +6,7 @@
 
 //! Error types surfaced by the SQL compiler and executor.
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum SQLError {
     #[error("{0}")]
     Parse(String),

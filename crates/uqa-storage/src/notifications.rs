@@ -82,11 +82,12 @@ pub struct PendingNotification {
 }
 
 pub fn notification_end_position(position: u64, notification: &PendingNotification) -> u64 {
-    end_position(
-        position,
-        notification.channel.len(),
-        notification.payload.len(),
-    )
+    notification_parts_end_position(position, &notification.channel, &notification.payload)
+}
+
+/// Advance physical queue accounting from borrowed content without copying a pending notification.
+pub fn notification_parts_end_position(position: u64, channel: &str, payload: &str) -> u64 {
+    end_position(position, channel.len(), payload.len())
 }
 
 fn end_position(position: u64, channel_bytes: usize, payload_bytes: usize) -> u64 {

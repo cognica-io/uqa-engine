@@ -404,6 +404,29 @@ impl StatementGate {
         (!delegated).then(|| self.mutex.lock())
     }
 
+    pub(super) fn lock_with_cancellation(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+    ) -> Result<Option<parking_lot::ReentrantMutexGuard<'_, ()>>, uqa_core::QueryCancelled> {
+        cancellation.check()?;
+        let identity = std::ptr::from_ref(self) as usize;
+        if DELEGATED_STATEMENT_GATES.with(|delegated| delegated.borrow().contains(&identity)) {
+            return Ok(None);
+        }
+        loop {
+            cancellation.check()?;
+            if let Some(guard) = self
+                .mutex
+                .try_lock_for(std::time::Duration::from_millis(10))
+            {
+                cancellation.check()?;
+                return Ok(Some(guard));
+            }
+            #[cfg(test)]
+            crate::notifications::gate_waited();
+        }
+    }
+
     pub(super) fn delegate_to_current_thread(&self) -> DelegatedStatementGate<'_> {
         let identity = std::ptr::from_ref(self) as usize;
         DELEGATED_STATEMENT_GATES.with(|delegated| delegated.borrow_mut().push(identity));

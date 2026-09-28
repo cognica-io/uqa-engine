@@ -225,6 +225,49 @@ Subscription changes and outgoing messages take effect at outer commit, rollback
 
 `open_encrypted`, encrypted `open_auto`, and compressed-encrypted constructors protect notification payloads and channels in the sidecar with the same credential as the main database. SQLite provider and backend factories preserve that protection for independently opened engines and new sessions. An existing plaintext sidecar or a mismatched sidecar key causes open to fail; it is never silently overwritten or opened without encryption. Custom encrypted file providers must implement `auxiliary_encryption_key` on their provider and backend. See [auxiliary storage encryption](../internals/03-storage.md#encryption-and-compression) for ownership and upgrade boundaries.
 
+### Independent owned listeners
+
+Development sources add `Engine::subscribe_notifications(&[&str], NotificationSubscriptionOptions) -> Result<NotificationSubscription, NotificationSubscriptionError>`. The returned handle is ready for all requested channels and remains independent of the caller's transaction and low-level SQL listener. It uses the original memory database or retained persistent provider, including encryption, and retains the effective role incarnation selected at registration. It neither creates a new SQL session nor reconnects through HTTP. Channels must be unique, nonempty, NUL-free exact UTF-8 strings of at most 63 bytes; invalid input fails before registering any channel.
+
+Every option is required and positive: `max_active_subscriptions`, `max_channels`, `max_queued_notifications`, `max_queued_bytes` and `max_registry_entries_per_poll`. Pending registrations and retained handles share the active-subscription allowance on the same hub and must satisfy every retained permit's ceiling. Admission rejects capacity or concurrent admission-metadata contention before entering another wait; a failed registration releases its permit, while a ready handle retains it until cleanup releases its resources. Queue bytes include retained string and queue capacity, private prepared deliveries and buffer replacement overlap. Original provider caches, fixed listener/channel/admission state and values already returned to the application remain separate resources. These options have no deployment defaults; the small example below supplies limits for its two-message fixture.
+
+`subscribe_notifications_with_cancellation(channels, options, &CancellationToken)` additionally accepts an independent registration signal. Cancellation interrupts Engine gate waits and native registry lock/statement/commit waits and returns the stable `Cancelled` failure category without partially registering channels. Successful registration may win a simultaneous cancellation race. After readiness this token does not close the handle; use its explicit close/drop lifecycle. The caller's SQL cancellation and transaction remain independent. Operating-system file opening or provider construction already in progress remains synchronous, so this API does not promise an end-to-end registration or cleanup deadline.
+
+Runtime adapters reserve admission before submitting work with `reserve_notification_subscription(options, &CancellationToken) -> Result<NotificationSubscriptionPermit, NotificationSubscriptionError>`. This operation uses the original shared allowance without waiting on Engine or provider gates. The opaque permit fixes all five options and is consumed once by `subscribe_notifications_with_permit(channels, permit, &CancellationToken)`, which performs the same native registration without acquiring another slot. A different hub rejects the permit with `InvalidRequest`; the permit is not an authorization grant. Retain the original Engine separately while work is pending. Dropping an unused permit releases only capacity metadata and performs no provider I/O; successful registration transfers the same permit through the listener's completed cleanup. An adapter must reserve this capacity before placing registration in its runtime queue; this Rust interface does not establish a particular language adapter.
+
+`poll()` returns `Poll::Pending`, `Poll::Ready(Some(NotificationEvent))` or `Poll::Ready(None)` after closure without a retained failure. `wait(Duration)` returns `NotificationWait::Event`, `TimedOut` or `Closed`; a receive timeout does not unsubscribe. `next_event().await` returns `Some(NotificationEvent)` or `None` on closure without blocking a thread or requiring a particular async runtime. All three preserve a retained terminal error, including after cleanup. Serialize consumption of a handle; a second pending asynchronous receive returns `InvalidRequest`. Dropping a pending receive releases its single wake slot without consuming an event or unsubscribing. Embedded events use a fresh `NotificationIdentity.epoch`, no HTTP request ID and contiguous exact `u64` sequences beginning at one. The original notification retains its channel, payload and sender process ID.
+
+`close()` is idempotent and wakes blocked receivers; concurrent close calls wait for the same retained-resource cleanup, and dropping the handle closes it. `is_closed()` reports delivery closure, which can precede completed provider cleanup. `stop_delivery()` supplies only the non-I/O wake/closure signal for runtime adapters; registration and admission remain retained until the adapter calls and joins `close()` outside its event-loop worker. The last external owner cancels and joins shared recovery before releasing its provider; other Engine or subscription owners keep recovery alive. Close all retained handles before replacing a database file. Registration and close can perform native I/O; asynchronous runtime adapters must schedule that work outside their event-loop worker. The [cleanup argument](../../design/owned-notification-listeners.md#cleanup-completion-and-recovery-shutdown) states the completion boundary and remaining native-I/O limits.
+
+Count or byte overflow terminates the affected receiver with `NotificationFailureKind::Backpressure`. Source failures and sequence exhaustion also remain visible to every subsequent poll; another receiver cannot consume that error. `NotificationSubscriptionError::kind()` and `code()` expose closed content-free diagnostics, while `original_error()` explicitly inspects any private local cause. A terminal error does not imply replay. The application must create another subscription explicitly after handling loss of continuity.
+
+```rust
+use std::time::Duration;
+use uqa_core::notifications::NotificationEvent;
+use uqa_engine::{Engine, NotificationSubscriptionOptions, NotificationWait};
+
+let engine = Engine::new();
+let subscription = engine.subscribe_notifications(&["jobs", "results"], NotificationSubscriptionOptions {
+    max_active_subscriptions: 1,
+    max_channels: 2,
+    max_queued_notifications: 2,
+    max_queued_bytes: 4_096,
+    max_registry_entries_per_poll: 2,
+})?;
+engine.sql("BEGIN; NOTIFY jobs, 'ready'; NOTIFY results, 'done'; COMMIT", &[])?;
+for (expected_sequence, expected_channel) in [(1, "jobs"), (2, "results")] {
+    let NotificationWait::Event(NotificationEvent::Notification { sequence, notification, .. }) = subscription.wait(Duration::from_secs(1))? else {
+        panic!("expected committed notification");
+    };
+    assert_eq!(sequence, expected_sequence);
+    assert_eq!(notification.channel, expected_channel);
+}
+subscription.close();
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The [ownership and preservation argument](../../design/owned-notification-listeners.md) describes cursor publication, queue/admission limits, controlled registration and final-owner cleanup. The [implementation ledger](../../plans/0015-sql-notifications-and-sse.md) tracks remaining startup/cleanup bounds, complete resource qualification and HTTP/language adapters; this Rust API does not imply those interfaces are available.
+
 ## Document and retrieval APIs
 
 The API also exposes typed operations that bypass SQL text:
