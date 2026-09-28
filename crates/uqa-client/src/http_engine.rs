@@ -192,6 +192,46 @@ impl HttpEngine {
         Ok(SQLStream::new(response, request_id))
     }
 
+    /// Register an independent live HTTP notification subscription. Returns only after validated ready, with explicitly supplied resource and timing budgets.
+    pub async fn subscribe_notifications(
+        &self,
+        channels: &[&str],
+        options: crate::notifications::HttpNotificationOptions,
+    ) -> Result<
+        crate::notifications::HttpNotificationSubscription,
+        crate::notifications::HttpNotificationError,
+    > {
+        self.subscribe_notifications_with_cancellation(
+            channels,
+            options,
+            &crate::notifications::NotificationCancellation::new(),
+        )
+        .await
+    }
+
+    /// Use an independent, monotonic cancellation signal for registration and the complete HTTP subscription lifetime.
+    pub async fn subscribe_notifications_with_cancellation(
+        &self,
+        channels: &[&str],
+        options: crate::notifications::HttpNotificationOptions,
+        cancellation: &crate::notifications::NotificationCancellation,
+    ) -> Result<
+        crate::notifications::HttpNotificationSubscription,
+        crate::notifications::HttpNotificationError,
+    > {
+        let endpoint = self
+            .endpoint("v1/notifications/subscribe")
+            .map_err(|_| crate::notifications::HttpNotificationError::invalid_options())?;
+        crate::notifications::http::subscribe(
+            endpoint,
+            self.credential.clone(),
+            channels,
+            options,
+            cancellation.clone(),
+        )
+        .await
+    }
+
     fn authorized(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         request.bearer_auth(self.credential.expose_secret())
     }

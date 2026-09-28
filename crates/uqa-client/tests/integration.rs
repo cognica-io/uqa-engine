@@ -4,6 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+mod notifications;
+
 use std::net::Ipv4Addr;
 
 use axum::body::Body;

@@ -3766,6 +3766,10 @@ name = "uqa-client"
 version = "0.4.0"
 dependencies = [
  "axum",
+ "getrandom 0.3.4",
+ "httpdate",
+ "hyper",
+ "log",
  "reqwest",
  "secrecy",
  "serde",
@@ -3773,6 +3777,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
  "uqa-core",
  "uqa-sql",
  "zeroize",
