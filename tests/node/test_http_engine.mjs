@@ -16,6 +16,7 @@ import { execFile } from "node:child_process";
 import { promisify, inspect } from "node:util";
 import { registerNotificationProtocolTests } from "./notifications/protocol.mjs";
 import { registerNotificationPortabilityTests } from "./notifications/portability.mjs";
+import { registerNotificationHTTPTests } from "./notifications/http.mjs";
 
 const exec = promisify(execFile);
 const source = fileURLToPath(new URL("../../crates/uqa-node/", import.meta.url));
@@ -31,6 +32,7 @@ const require = createRequire(join(directory, "application.cjs"));
 const uqa = require("@cognica-io/uqa");
 registerNotificationProtocolTests(packagePath);
 registerNotificationPortabilityTests(packagePath);
+registerNotificationHTTPTests(packagePath);
 after(() => rmSync(directory, { recursive: true, force: true }));
 
 async function server(handler, run) {
@@ -322,14 +324,26 @@ test("packed npm package installs offline and runs HTTP without native artifacts
   await exec(process.execPath, [npm, "install", "--offline", "--ignore-scripts", "--omit=optional", "--no-audit", "--no-fund", archive], { ...options, cwd: install });
   const script = join(install, "smoke.mjs");
   writeFileSync(script, [
-    'import { HttpEngine, SQLParam } from "@cognica-io/uqa";',
+    'import { HttpEngine, SQLParam, HttpNotificationSubscription, NotificationError } from "@cognica-io/uqa";',
     'import { HttpEngine as Direct } from "@cognica-io/uqa/http";',
     'import assert from "node:assert/strict";',
     'assert.equal(Direct, HttpEngine);',
     'const result = await new HttpEngine(process.argv[2], "token").sql("SELECT $1", [SQLParam.scalar(7)]);',
     'assert.equal(result.rows[0].n, 1);',
+    'const sub = await new Direct(process.argv[2], "token").subscribeNotifications(["jobs", "작업"], { maxChannels: 2, maxQueuedEvents: 2, maxQueuedBytes: 65536, maxTransportChunkBytes: 65536, connectTimeoutMs: 2000, readyTimeoutMs: 3000, maxIdleTimeoutMs: 5000 });',
+    'assert.ok(sub instanceof HttpNotificationSubscription);',
+    'assert.equal(typeof NotificationError, "function");',
+    'for await (const event of sub) { assert.equal(event.sequence, 1n); assert.equal(event.channel, "작업"); break; }',
+    'assert.equal(sub.isClosed, true);',
   ].join("\n"));
-  await server((request, response) => json(response, result()), async (origin) => {
+  const fixture = JSON.parse(readFileSync(new URL("../../crates/uqa-client/tests/fixtures/notifications-v1.json", import.meta.url)));
+  await server((request, response) => {
+    if (request.url === "/v1/notifications/subscribe") {
+      response.writeHead(200, { "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-store, no-transform", "x-request-id": fixture.request_id });
+      response.write(fixture.ready + fixture.notification);
+    } else json(response, result());
+  }, async (origin) => {
     await exec(process.execPath, [script, origin], options);
   });
 });

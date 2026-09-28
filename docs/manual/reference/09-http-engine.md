@@ -231,7 +231,32 @@ async fn receive_once(
 }
 ```
 
-Applications must handle gap and reconnection observations explicitly; they must not treat a replacement epoch as replay. Options come from the application's verified resource and serving-path policy. Python, Node.js and browser subscription adapters remain separate implementation work.
+Applications must handle gap and reconnection observations explicitly; they must not treat a replacement epoch as replay. Options come from the application's verified resource and serving-path policy. The [Python binding](08-bindings-and-extensions.md#notification-subscriptions) and Node.js HTTP adapter below expose the same subscription contract; the browser adapter remains under implementation.
+
+## Node.js HTTP notification subscriptions
+
+Development sources expose `await engine.subscribeNotifications(channels, options)` from both `@cognica-io/uqa` and `@cognica-io/uqa/http`. This HTTP path requires no native addon. Creation returns an `HttpNotificationSubscription` only after validating ready; actual authenticated Cloud server support remains under implementation. Required options are `maxChannels`, `maxQueuedEvents`, `maxQueuedBytes`, `maxTransportChunkBytes`, `connectTimeoutMs`, `readyTimeoutMs` and `maxIdleTimeoutMs`. Supply explicit positive integer limits; transport chunks must allow at least 65,536 bytes, connection timeout cannot exceed readiness timeout, and individual timers cannot exceed Node's 2,147,483,647-millisecond range. Queue bytes charge reference slots and encoded records; they do not claim to bound total process RSS.
+
+Optional `retry` supplies `maxAttempts`, `episodeTimeoutMs`, `initialBackoffMs`, `maxBackoffMs` and `maxRetryAfterMs`, all positive, with initial backoff no greater than maximum backoff. Omission or `null` disables retry. A failed initial registration returns its typed error. Post-ready retries expose `resync_required` with the previous identity and failure code, then `reconnected` with the new identity before replacement data. `epoch` and `requestId` advance when reconnection is consumed. Events are frozen; notification `sequence` is a `bigint`, `processId` is an exact signed 32-bit `number`, and `channel` and `payload` retain their original text. Inapplicable variant fields return `null`.
+
+Use `for await`, `next()` or `nextEvent()` with one pending consumer at a time. A second concurrent receive rejects with `NOTIFICATION_INVALID_REQUEST`. Optional `signal: AbortSignal` cancels actual connection, readiness, reads and retries and exposes `NOTIFICATION_CANCELLED`; `close()` and iterator `return()` join local transport cleanup and end iteration normally. Always close in `finally` when consuming manually. Finalizer cleanup is best effort and has no timing guarantee. Queue overflow preserves its admitted prefix before `NOTIFICATION_BACKPRESSURE`; observed authority rejection and cancellation discard unread values. After observed abort, unread values cannot be returned while cleanup is pending. `isClosed` reports ended delivery; await `close()` to establish local cleanup completion. Ordinary SQL deadlines do not set a subscription's total lifetime.
+
+`NotificationError` exposes a stable content-free `code`, optional `httpStatus`, `requestId`, `timeoutStage`, `reconnectAttempts`, `originalFailure` and `lastAttemptFailure`. `diagnostic` permits explicit inspection of private server details; ordinary error/event inspection excludes payload and private diagnostic text. The [JavaScript HTTP preservation argument](../../design/javascript-http-notifications.md) defines queue accounting, ordered observations, retry and cleanup boundaries. This HTTP client evidence does not establish the embedded Node subscription API or browser delivery.
+
+```javascript
+import { HttpEngine } from "@cognica-io/uqa/http";
+
+// options contains the application's explicit capacities and time budgets.
+async function receiveOne(url, token, options) {
+  const engine = new HttpEngine(url, token);
+  const subscription = await engine.subscribeNotifications(["jobs"], options);
+  try {
+    return await subscription.nextEvent();
+  } finally {
+    await subscription.close();
+  }
+}
+```
 
 ## Notification protocol primitives
 

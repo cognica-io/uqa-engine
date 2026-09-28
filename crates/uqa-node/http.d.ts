@@ -3,6 +3,7 @@ export {
   HttpEngineCloudOptions, HttpEngineLocalOptions, HttpSQLBatchExecution,
   HttpSQLExecution, HttpSQLStreamFrame, SQLResult, JSValue, ParamInput,
 } from "./index";
+export * from "./notifications";
 
 export declare class HttpEngineError extends Error {
   readonly code?: string;

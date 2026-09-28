@@ -6,7 +6,7 @@
 
 "use strict";
 
-const { HttpEngine, HttpEngineError, HttpSQLStream } = require("./http.js");
+const { HttpEngine, HttpEngineError, HttpSQLStream, HttpNotificationSubscription, NotificationError } = require("./http.js");
 const { SQLParam, nativeParameter } = require("./sql-param.js");
 
 let binding;
@@ -169,6 +169,8 @@ module.exports.Engine = Engine;
 module.exports.HttpEngine = HttpEngine;
 module.exports.HttpEngineError = HttpEngineError;
 module.exports.HttpSQLStream = HttpSQLStream;
+module.exports.HttpNotificationSubscription = HttpNotificationSubscription;
+module.exports.NotificationError = NotificationError;
 module.exports.SQLParam = SQLParam;
 module.exports.detectDatabaseFile = (...args) => loadNativeBinding().detectDatabaseFile(...args);
 module.exports.JSFunctionVolatility = Object.freeze({ Volatile: "volatile", Stable: "stable", Immutable: "immutable" });

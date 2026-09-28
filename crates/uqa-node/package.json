@@ -48,6 +48,11 @@
     "notification-request.js",
     "notification-framing.js",
     "notification-protocol.js",
+    "notification-queue.js",
+    "notification-headers.js",
+    "notification-attempt.js",
+    "notification-subscription.js",
+    "notifications.d.ts",
     "sql-param.js",
     "THIRD-PARTY/JDK-UNICODE.md",
     "THIRD-PARTY/LUCENE-LICENSE.txt",
@@ -70,7 +75,7 @@
   "napi": {
     "binaryName": "uqa",
     "packageName": "@cognica-io/uqa",
-    "dtsHeader": "export type JSValue = null | boolean | number | bigint | string | Buffer | Uint8Array | Float32Array | Float64Array | Array<JSValue> | { [key: string]: JSValue }\nexport type ParamInput = SQLParam | JSValue\nexport type SQLTableFunctionRows = JSValue[][] | Array<Record<string, JSValue>>\nexport type SQLTableFunctionResult = { columns: string[]; rows: SQLTableFunctionRows } | [string[], SQLTableFunctionRows]\nexport type SQLAggregateState = ({ observe(...args: JSValue[]): unknown } | { step(...args: JSValue[]): unknown }) & ({ finish(): JSValue } | { finalize(): JSValue })\nexport interface HttpSQLStream extends AsyncIterable<HttpSQLStreamFrame> { [Symbol.asyncIterator](): AsyncIterator<HttpSQLStreamFrame> }\nexport { HttpEngineError } from \"./http\";\n",
+    "dtsHeader": "export type JSValue = null | boolean | number | bigint | string | Buffer | Uint8Array | Float32Array | Float64Array | Array<JSValue> | { [key: string]: JSValue }\nexport type ParamInput = SQLParam | JSValue\nexport type SQLTableFunctionRows = JSValue[][] | Array<Record<string, JSValue>>\nexport type SQLTableFunctionResult = { columns: string[]; rows: SQLTableFunctionRows } | [string[], SQLTableFunctionRows]\nexport type SQLAggregateState = ({ observe(...args: JSValue[]): unknown } | { step(...args: JSValue[]): unknown }) & ({ finish(): JSValue } | { finalize(): JSValue })\nexport interface HttpSQLStream extends AsyncIterable<HttpSQLStreamFrame> { [Symbol.asyncIterator](): AsyncIterator<HttpSQLStreamFrame> }\nexport { HttpEngineError } from \"./http\";\nexport * from \"./notifications\";\nexport interface HttpEngine { subscribeNotifications(channels: readonly string[], options: import(\"./notifications\").HttpNotificationOptions): Promise<import(\"./notifications\").HttpNotificationSubscription> }\n",
     "targets": [
       "x86_64-unknown-linux-gnu",
       "aarch64-unknown-linux-gnu",
