@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-09-28
+
 ### Fixed
 
 - Preserve PostgreSQL 18 overload selection when procedures compete with functions: rank all visible signatures before reporting a selected procedure as `42809`, including scalar and table calls, named-argument diagnostics and the `CALL` hint.

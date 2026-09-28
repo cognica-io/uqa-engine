@@ -534,7 +534,7 @@ HNSW option values are unsigned integers. Underscore and documented hyphenated a
 
 ## DiskANN vector indexes
 
-UQA Engine 0.4.5 supports `USING diskann` on one `VECTOR(n)` or `TENSOR(n)` field. Opening an older supported database applies the [persistent format upgrades](../reference/10-upgrading.md#045-vector-indexes-and-storage-formats).
+UQA Engine 0.4.6 supports `USING diskann` on one `VECTOR(n)` or `TENSOR(n)` field. Opening an older supported database applies the [persistent format upgrades](../reference/10-upgrading.md#045-vector-indexes-and-storage-formats).
 
 ```sql execute
 CREATE TABLE diskann_items (id INTEGER PRIMARY KEY, embedding VECTOR(2));

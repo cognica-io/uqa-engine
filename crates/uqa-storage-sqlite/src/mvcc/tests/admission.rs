@@ -164,11 +164,13 @@ fn cancelling_writer_admission_does_not_consume_a_transaction_or_identifier() {
 fn commit_behind_reader(cancel: bool) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("reader-at-commit.db");
-    let connection = ManagedConnection::open(&path).unwrap();
+    let connection = ManagedConnection::open_auxiliary(&path, None).unwrap();
     let store = SQLiteRecordStore::new(&connection).unwrap();
     store
         .with(|connection| {
-            connection.pragma_update(None, "journal_mode", "DELETE")?;
+            let mode: String =
+                connection.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
+            assert_eq!(mode, "delete", "readers must block physical COMMIT");
             connection.execute_batch("CREATE TRIGGER observe_versions AFTER INSERT ON _uqa_mvcc_versions BEGIN SELECT observe_version(); END")?;
             Ok(())
         })
