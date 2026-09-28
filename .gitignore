@@ -56,6 +56,8 @@ flamegraph.svg
 # emscripten build outputs copied into the WASM npm package
 crates/uqa-wasm/js/uqa.js
 crates/uqa-wasm/js/uqa.wasm
+crates/uqa-wasm/js/notification-core.mjs
+crates/uqa-wasm/js/notifications.d.ts
 
 # napi build outputs
 crates/uqa-node/*.node

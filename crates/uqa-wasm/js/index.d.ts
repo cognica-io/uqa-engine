@@ -4,6 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+export { HttpNotificationSubscription, NotificationError } from "./notifications";
+export type { NotificationEvent, NotificationFailureCode, NotificationRetryOptions, HttpNotificationOptions } from "./notifications";
+
 export type JSValue =
   | null
   | boolean
@@ -67,6 +70,7 @@ export declare class HttpSQLStream implements AsyncIterable<HttpSQLStreamFrame> 
 }
 
 export declare class HttpEngine {
+  subscribeNotifications(channels: readonly string[], options: import("./notifications").HttpNotificationOptions): Promise<import("./notifications").HttpNotificationSubscription>;
   constructor(url: string, token: string);
   static fromEnv(environment?: { UQA_URL?: string; UQA_TOKEN?: string }): HttpEngine;
   sql(query: string, params?: ParamInput[]): Promise<SQLResult>;

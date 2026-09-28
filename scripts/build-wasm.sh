@@ -118,4 +118,6 @@ mkdir -p "${wasm_output_dir}"
 cp "${wasm_target_dir}/wasm32-unknown-emscripten/${wasm_profile}/uqa.js" "${wasm_output_dir}/uqa.js"
 cp "${wasm_target_dir}/wasm32-unknown-emscripten/${wasm_profile}/uqa.wasm" "${wasm_output_dir}/uqa.wasm"
 
+"${EMSDK_PYTHON}" scripts/build-browser-notifications.py --output "${wasm_output_dir}/notification-core.mjs"
+
 echo "built ${wasm_output_dir}/uqa.js and ${wasm_output_dir}/uqa.wasm (${wasm_profile})"
