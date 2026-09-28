@@ -16,6 +16,7 @@ pub mod doc_set;
 mod float_text;
 pub mod json;
 pub mod memory;
+pub mod notifications;
 pub mod ordering;
 pub mod posting_list;
 pub mod predicate;
