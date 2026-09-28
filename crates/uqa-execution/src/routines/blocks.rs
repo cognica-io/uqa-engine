@@ -70,7 +70,10 @@ impl Interpreter<'_> {
                 }
                 match arm {
                     Some(arm) => {
-                        self.err_stack.push((state, message));
+                        self.err_stack.push(super::CaughtError {
+                            diagnostics: (state, message),
+                            cause: error,
+                        });
                         let handled = self.exec_stmts(&arm.body);
                         self.err_stack.pop();
                         handled

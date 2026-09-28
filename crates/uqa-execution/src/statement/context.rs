@@ -64,6 +64,10 @@ pub struct StatementValidationContext<'a> {
 /// Capture live subsystem inputs only when a statement is ready to execute.
 pub trait StatementExecutionInputs<S: Clone + 'static> {
     fn statement_execution_context(&self) -> StatementExecutionContext<'_, S>;
+    /// Read the live host policy without capturing the statement's catalog/execution inputs.
+    fn notification_subscriptions_required(&self) -> bool {
+        false
+    }
 }
 
 pub trait StatementMutationInputs<S: Clone + 'static> {

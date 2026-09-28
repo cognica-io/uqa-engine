@@ -36,6 +36,10 @@ impl StatementSettings for Engine {
     }
 }
 impl StatementNotifications for Engine {
+    fn notification_subscriptions_required(&self) -> bool {
+        Engine::notification_subscriptions_required(self)
+    }
+
     fn notify(&self, channel: &str, payload: &str) -> Result<(), SQLError> {
         Engine::notify(self, channel, payload)
     }

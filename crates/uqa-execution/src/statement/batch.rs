@@ -53,6 +53,16 @@ enum StatementInput<'sql> {
 }
 
 impl StatementInput<'_> {
+    fn is_notification_listener_command(&self) -> bool {
+        match self {
+            Self::Cached(statement) => matches!(
+                statement.as_ref(),
+                uqa_sql::Statement::Listen { .. } | uqa_sql::Statement::Unlisten { .. }
+            ),
+            Self::Parsed(statement) => statement.is_notification_listener_command(),
+        }
+    }
+
     fn compile(self) -> Result<uqa_sql::Statement, SQLError> {
         match self {
             Self::Cached(statement) => Ok(statement.as_ref().clone()),
@@ -156,6 +166,19 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
             Err(error) => return Err(abort_explicit_statement_error(context.transactions, error)),
         },
     };
+    if context.statements.notification_subscriptions_required() {
+        for statement in &statements {
+            context.runtime.cancellation.check().map_err(|error| {
+                abort_explicit_statement_error(context.transactions, error.into())
+            })?;
+            if statement.is_notification_listener_command() {
+                return Err(abort_explicit_statement_error(
+                    context.transactions,
+                    SQLError::NotificationRequiresSubscription,
+                ));
+            }
+        }
+    }
     if statements.is_empty() {
         return Ok(SQLResult::empty());
     }

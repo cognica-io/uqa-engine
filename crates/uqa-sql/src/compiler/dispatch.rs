@@ -47,6 +47,14 @@ impl<'sql> ParsedStatement<'sql> {
         self.sql
     }
 
+    /// Identify a direct LISTEN or UNLISTEN without semantic compilation or inspecting strings and routine bodies. Nested commands must still be checked when executed.
+    pub fn is_notification_listener_command(&self) -> bool {
+        matches!(
+            self.node.node.as_ref(),
+            Some(NodeEnum::ListenStmt(_) | NodeEnum::UnlistenStmt(_))
+        )
+    }
+
     /// Compile this statement into the engine's internal SQL representation.
     pub fn compile(&self) -> Result<Statement> {
         compile_stmt(&self.node)

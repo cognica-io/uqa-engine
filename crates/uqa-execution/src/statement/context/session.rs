@@ -24,6 +24,9 @@ pub trait StatementSettings {
     fn load_library(&self, library: &str) -> Result<(), SQLError>;
 }
 pub trait StatementNotifications {
+    fn notification_subscriptions_required(&self) -> bool {
+        false
+    }
     fn notify(&self, channel: &str, payload: &str) -> Result<(), SQLError>;
     fn listen(&self, channel: &str) -> Result<(), SQLError>;
     fn unlisten(&self, channel: Option<&str>) -> Result<(), SQLError>;

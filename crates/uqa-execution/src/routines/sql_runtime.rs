@@ -56,10 +56,7 @@ impl Interpreter<'_> {
         // Bare RAISE re-throws the error being handled.
         if condition.is_none() && message.is_none() {
             return match self.err_stack.last() {
-                Some((state, message)) => Err(SQLError::Routine {
-                    sqlstate: state.clone(),
-                    message: message.clone(),
-                }),
+                Some(error) => Err(error.cause.clone()),
                 None => Err(SQLError::Routine {
                     sqlstate: "0Z002".into(),
                     message: "RAISE without parameters cannot be used outside an exception handler"

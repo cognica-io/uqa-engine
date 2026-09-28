@@ -250,6 +250,8 @@ pub(super) struct SessionContext {
     /// Positive process identifier exposed by `pg_backend_pid()` and asynchronous notification responses. Portal workers share the owning session context and therefore retain the same identifier.
     pub(super) backend_process_id: AtomicI32,
     pub(super) backend_process_id_is_local: AtomicBool,
+    /// Host transport policy is monotonic and nontransactional; rollback and DISCARD cannot restore SQL listener capability.
+    pub(super) notification_subscriptions_required: AtomicBool,
     /// Transactional session values share one lock so snapshots and restores
     /// cannot observe a mixture of old and new search-path, sequence,
     /// or statement-cache state.
@@ -310,6 +312,7 @@ impl SessionContext {
             statement_started_at_micros: AtomicI64::new(0),
             backend_process_id: AtomicI32::new(crate::notifications::allocate_backend_process_id()),
             backend_process_id_is_local: AtomicBool::new(true),
+            notification_subscriptions_required: AtomicBool::new(false),
             state: RwLock::new(state),
             prepared: RwLock::new(BTreeMap::new()),
             sequence_caches: Mutex::new(BTreeMap::new()),

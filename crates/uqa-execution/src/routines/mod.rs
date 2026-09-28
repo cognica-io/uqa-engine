@@ -96,7 +96,7 @@ pub struct Interpreter<'a> {
     values: Vec<Value>,
     record_types: HashMap<usize, Vec<Option<ColumnType>>>,
     bindings: HashMap<String, Vec<usize>>,
-    err_stack: Vec<(String, String)>,
+    err_stack: Vec<CaughtError>,
     set_rows: Vec<Vec<Value>>,
     ret: Value,
     ret_record_types: Option<Vec<Option<ColumnType>>>,
@@ -104,6 +104,12 @@ pub struct Interpreter<'a> {
     found: Option<usize>,
     last_row_count: i64,
     is_set: bool,
+}
+
+/// Preserve the original typed cause for bare RAISE while exposing SQLSTATE/SQLERRM to the handler.
+struct CaughtError {
+    diagnostics: (String, String),
+    cause: SQLError,
 }
 
 /// Maps variable names and positional parameters onto an activation record.

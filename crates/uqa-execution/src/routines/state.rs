@@ -251,7 +251,7 @@ impl<'a> Interpreter<'a> {
             values: &self.values,
             record_types: &self.record_types,
             bindings: &self.bindings,
-            error: self.err_stack.last(),
+            error: self.err_stack.last().map(|error| &error.diagnostics),
             param_count: self.def.params.len(),
         }
     }

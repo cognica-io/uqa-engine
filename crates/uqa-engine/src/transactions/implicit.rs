@@ -474,6 +474,11 @@ impl Engine {
         statements: &[(&str, &[SQLParam])],
     ) -> Result<Vec<SQLResult>, SQLError> {
         self.transaction(|engine| {
+            uqa_execution::statement::notifications::admit_sql_batch(
+                engine.notification_subscriptions_required(),
+                statements.iter().map(|(sql, _)| *sql),
+                &engine.runtime.cancellation,
+            )?;
             let mut results = Vec::with_capacity(statements.len());
             for (sql, params) in statements {
                 results.push(engine.sql(sql, params)?);

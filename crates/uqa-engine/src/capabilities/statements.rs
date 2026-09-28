@@ -99,6 +99,10 @@ impl context::PhysicalExplainPlanning for Engine {
     }
 }
 impl context::StatementExecutionInputs<StatementReadSnapshot> for Engine {
+    fn notification_subscriptions_required(&self) -> bool {
+        Engine::notification_subscriptions_required(self)
+    }
+
     fn statement_execution_context(&self) -> StatementExecutionContext<'_, StatementReadSnapshot> {
         Engine::statement_execution_context(self)
     }

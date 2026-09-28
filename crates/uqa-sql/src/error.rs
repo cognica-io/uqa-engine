@@ -12,6 +12,9 @@ pub enum SQLError {
     Parse(String),
     #[error("{0}")]
     Unsupported(String),
+    /// The host configured this SQL session to require an independently owned notification subscription.
+    #[error("LISTEN and UNLISTEN require a notification subscription")]
+    NotificationRequiresSubscription,
     #[error("relation \"{0}\" does not exist")]
     UnknownTable(String),
     #[error("column \"{0}\" does not exist")]
@@ -53,6 +56,14 @@ pub enum SQLError {
 }
 
 impl SQLError {
+    /// Stable application error code, separate from the five-character SQLSTATE. Ordinary SQL errors do not acquire an application code.
+    pub const fn code(&self) -> Option<&'static str> {
+        match self {
+            Self::NotificationRequiresSubscription => Some("NOTIFICATION_REQUIRES_SUBSCRIPTION"),
+            _ => None,
+        }
+    }
+
     pub fn unknown_qualified_column(qualifier: &str, column: &str) -> Self {
         Self::Routine {
             sqlstate: "42703".into(),
@@ -67,7 +78,7 @@ impl SQLError {
         match self {
             SQLError::Cancelled(_) => Some(uqa_core::SQLSTATE_QUERY_CANCELED),
             SQLError::Parse(_) => Some("42601"), // syntax_error
-            SQLError::Unsupported(_) => Some("0A000"), // feature_not_supported
+            SQLError::Unsupported(_) | SQLError::NotificationRequiresSubscription => Some("0A000"), // feature_not_supported
             SQLError::UnknownTable(_) => Some("42P01"), // undefined_table
             SQLError::UnknownColumn(_) => Some("42703"), // undefined_column
             SQLError::AmbiguousColumn(_) => Some("42702"), // ambiguous_column

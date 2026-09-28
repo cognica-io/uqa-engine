@@ -225,6 +225,23 @@ Subscription changes and outgoing messages take effect at outer commit, rollback
 
 `open_encrypted`, encrypted `open_auto`, and compressed-encrypted constructors protect notification payloads and channels in the sidecar with the same credential as the main database. SQLite provider and backend factories preserve that protection for independently opened engines and new sessions. An existing plaintext sidecar or a mismatched sidecar key causes open to fail; it is never silently overwritten or opened without encryption. Custom encrypted file providers must implement `auxiliary_encryption_key` on their provider and backend. See [auxiliary storage encryption](../internals/03-storage.md#encryption-and-compression) for ownership and upgrade boundaries.
 
+### Notification policy for stateless SQL hosts
+
+Development sources add `Engine::require_notification_subscriptions() -> Result<(), SQLError>`. A host serving SQL without a retained notification session must call it before executing requests. It rejects SQL `LISTEN` and `UNLISTEN` with `SQLError::NotificationRequiresSubscription`: `code()` returns `Some("NOTIFICATION_REQUIRES_SUBSCRIPTION")` and `sqlstate()` returns `Some("0A000")`. `NOTIFY`, `pg_notify` and independently owned subscription handles remain available.
+
+Configuration requires an idle session with no SQL transaction or committed SQL listener; otherwise it returns SQLSTATE `55000`. Successful configuration is irreversible for that session and repeated calls are harmless. Rollback, `DISCARD`, nested execution and cached/prepared plans retain the restriction. Subsequently created sibling sessions inherit it; existing peers retain their own policy. Ordinary Engine sessions keep their PostgreSQL notification behavior by default.
+
+Direct `LISTEN`/`UNLISTEN` in one SQL message or anywhere in `sql_batch` are rejected before that batch executes or emits results. Commands reached through routines, triggers or dynamic SQL are rejected at execution and retain normal rollback and exception-handler behavior. Comments, strings, notification payloads and unevaluated function definitions are not treated as commands. The [preservation argument](../../design/stateless-notification-policy.md) states these boundaries. The HTTP server adapter and wire error mapping remain tracked separately in the [implementation ledger](../../plans/0015-sql-notifications-and-sse.md).
+
+```rust
+let session = uqa_engine::Engine::new();
+session.require_notification_subscriptions()?;
+let error = session.sql("LISTEN jobs", &[]).unwrap_err();
+assert_eq!(error.code(), Some("NOTIFICATION_REQUIRES_SUBSCRIPTION"));
+session.sql("NOTIFY jobs, 'ready'", &[])?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
 ### Independent owned listeners
 
 Development sources add `Engine::subscribe_notifications(&[&str], NotificationSubscriptionOptions) -> Result<NotificationSubscription, NotificationSubscriptionError>`. The returned handle is ready for all requested channels and remains independent of the caller's transaction and low-level SQL listener. It uses the original memory database or retained persistent provider, including encryption, and retains the effective role incarnation selected at registration. It neither creates a new SQL session nor reconnects through HTTP. Channels must be unique, nonempty, NUL-free exact UTF-8 strings of at most 63 bytes; invalid input fails before registering any channel.

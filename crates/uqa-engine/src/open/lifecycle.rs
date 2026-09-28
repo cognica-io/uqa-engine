@@ -288,6 +288,10 @@ impl Engine {
             .session
             .statistics_worker
             .store(internal_read, std::sync::atomic::Ordering::Release);
+        session.session.notification_subscriptions_required.store(
+            self.notification_subscriptions_required(),
+            std::sync::atomic::Ordering::Release,
+        );
         session.row_locks = Arc::clone(&self.row_locks);
         session.statistics = Arc::clone(&self.statistics);
         session.install_notification_hub(Arc::clone(&self.notification_hub))?;

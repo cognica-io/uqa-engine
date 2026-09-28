@@ -10,6 +10,8 @@
 mod cross_process;
 #[path = "sql_notifications/encryption.rs"]
 mod encryption;
+#[path = "sql_notifications/session_policy.rs"]
+mod session_policy;
 #[path = "sql_notifications/subscriptions.rs"]
 mod subscriptions;
 

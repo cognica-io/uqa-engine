@@ -666,10 +666,20 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 Ok(SQLResult::empty())
             }
             CommandPlan::Listen { channel } => {
+                super::notifications::require_sql_listener_session(
+                    self.context
+                        .notifications
+                        .notification_subscriptions_required(),
+                )?;
                 self.context.notifications.listen(channel)?;
                 Ok(SQLResult::empty())
             }
             CommandPlan::Unlisten { channel } => {
+                super::notifications::require_sql_listener_session(
+                    self.context
+                        .notifications
+                        .notification_subscriptions_required(),
+                )?;
                 self.context.notifications.unlisten(channel.as_deref())?;
                 Ok(SQLResult::empty())
             }

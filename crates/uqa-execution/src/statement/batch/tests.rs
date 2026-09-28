@@ -37,6 +37,7 @@ struct Inputs {
     cached: Option<(Arc<Statement>, Arc<UnifiedPlan>)>,
     cancel_after_cache_lookup: bool,
     reject_snapshot: bool,
+    requires_subscriptions: bool,
 }
 
 impl Inputs {
@@ -65,8 +66,52 @@ impl Inputs {
 }
 
 impl StatementExecutionInputs<()> for Inputs {
+    fn notification_subscriptions_required(&self) -> bool {
+        self.requires_subscriptions
+    }
+
     fn statement_execution_context(&self) -> StatementExecutionContext<'_, ()> {
         panic!("a rejected batch must not capture execution inputs")
+    }
+}
+
+#[test]
+fn notification_admission_precedes_all_commands_and_result_callbacks() {
+    for sql in [
+        "SELECT nextval('counter'); COMMIT; LISTEN events",
+        "COMMIT; UNLISTEN *",
+        "SELECT missing_column FROM absent; UNLISTEN events",
+    ] {
+        let inputs = Inputs {
+            requires_subscriptions: true,
+            ..Inputs::default()
+        };
+        let error = execute_simple_query(&inputs.context(), sql, &[], false, &mut |_| {
+            panic!("admission must precede result delivery")
+        })
+        .unwrap_err();
+        assert!(matches!(error, SQLError::NotificationRequiresSubscription));
+        inputs.assert_events(&["cache.lookup"]);
+        assert_eq!(inputs.depth.get(), 0);
+    }
+}
+
+#[test]
+fn cached_notification_admission_aborts_the_original_open_transaction() {
+    for sql in ["LISTEN events", "UNLISTEN *"] {
+        let statement = Arc::new(uqa_sql::compile(sql).unwrap().remove(0));
+        let plan = Arc::new(UnifiedPlan::lower(statement.as_ref().clone()));
+        let inputs = Inputs {
+            requires_subscriptions: true,
+            cached: Some((statement, plan)),
+            ..Inputs::default()
+        };
+        inputs.depth.set(1);
+        assert!(matches!(
+            execute(&inputs.context(), sql, &[]),
+            Err(SQLError::NotificationRequiresSubscription)
+        ));
+        inputs.assert_events(&["cache.lookup", "abort.false"]);
     }
 }
 impl StatementEffects for Inputs {

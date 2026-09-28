@@ -9,6 +9,7 @@
 pub mod batch;
 pub mod compiled;
 pub mod cursor;
+pub mod notifications;
 pub mod portal;
 pub mod prepared;
 pub mod table_locks;
