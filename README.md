@@ -35,6 +35,8 @@ Opening a supported older database upgrades its persistent formats; earlier bina
 
 Current development sources also support native DiskANN through memory, native SQLite, SQLite Key/Value and redb. It is unreleased; see the [SQL configuration and score contract](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/sql/02-ddl.md#diskann-vector-indexes), [matching Rust, Python, Node.js and browser examples](https://github.com/cognica-io/uqa-engine/blob/main/examples/README.md), and [acceptance evidence](https://github.com/cognica-io/uqa-engine/blob/main/docs/plans/0014-diskann-vector-index.md#dependency-order-and-progress-ledger).
 
+Current unreleased development sources provide independent owned SQL notification subscriptions in Rust, Python, Node.js and Browser WASM, plus authenticated HTTP/SSE subscriptions with explicit loss and reconnection events. See the [direct Rust API](docs/manual/reference/02-rust-engine-api.md#independent-owned-listeners), [language bindings](docs/manual/reference/08-bindings-and-extensions.md#notification-subscriptions) and [HTTP contract](docs/manual/reference/09-http-engine.md#rust-notification-subscriptions).
+
 ## Mathematical foundation
 
 [A Typed Carrier Algebra for Unified Query Execution](docs/papers/A%20Typed%20Carrier%20Algebra%20for%20Unified%20Query%20Execution.pdf) states the implementation-grounded theory behind UQA Engine. It distinguishes document support, weighted relations, decorated postings, ranked views, SQL bags, join tuples, graph context, and aggregate state while showing how they compose through one typed planning and execution framework.

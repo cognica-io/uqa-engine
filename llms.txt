@@ -6,6 +6,8 @@ The manual is the canonical product contract. Parser acceptance alone does not p
 
 Current unreleased development sources implement native DiskANN through memory, native SQLite, SQLite Key/Value and redb. Use the [DDL options](docs/manual/sql/02-ddl.md#diskann-vector-indexes), [retrieval/scoring contract](docs/manual/sql/06-retrieval.md#diskann-plan-diagnostics) and [binding examples](examples/README.md). PQ guides candidate selection; returned scores remain canonical cosine, and existing probability conversion stays at its original fusion boundary. The [implementation ledger](docs/plans/0014-diskann-vector-index.md#dependency-order-and-progress-ledger) records artifact, fixed-fixture quality and provider/resource evidence; do not infer a released package, general recall floor or measured speedup.
 
+Current unreleased sources also provide owned [Rust notifications](docs/manual/reference/02-rust-engine-api.md#independent-owned-listeners), [language subscriptions](docs/manual/reference/08-bindings-and-extensions.md#notification-subscriptions) and [authenticated HTTP/SSE clients](docs/manual/reference/09-http-engine.md#rust-notification-subscriptions). The [implementation ledger](docs/plans/0015-sql-notifications-and-sse.md) records actual artifacts, the merged Cloud server and its separate remaining transport/release checks.
+
 Do not infer behavior beyond the verified surface from familiar labels such as PostgreSQL 18 compatibility, AGE compatibility, vector search, fusion, or CJK analysis. Read the exact UQA Engine contract for the feature in question.
 
 When generating SQL:
