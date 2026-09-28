@@ -23,6 +23,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+allocation-counter = "=0.8.1"
 uqa-analysis = { workspace = true }
 criterion = { workspace = true }
 proptest = { workspace = true }

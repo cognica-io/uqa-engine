@@ -44,6 +44,10 @@ pub struct BayesianBM25Params {
 }
 
 impl BayesianBM25Params {
+    pub(crate) fn calibrate_raw_value(&self, raw_score: f64) -> f64 {
+        sigmoid(self.alpha * (raw_score - self.beta))
+    }
+
     /// Parameters whose posterior equals this calibration's prior-free
     /// evidence `sigmoid(alpha * (raw - beta) - logit(base_rate))`,
     /// expressed through the equivalent midpoint shift
@@ -114,7 +118,7 @@ pub struct BayesianBM25Scorer {
 
 impl BayesianBM25Scorer {
     pub fn new(params: BayesianBM25Params, stats: Arc<IndexStats>) -> ScoringResult<Self> {
-        validate_params(params, &stats)?;
+        validate_params(params, stats.avg_doc_length)?;
         Ok(Self {
             params,
             bm25: BM25Scorer::new(params.bm25, stats),
@@ -166,11 +170,14 @@ impl BayesianBM25Scorer {
     }
 
     pub(crate) fn calibrate_raw_value(&self, raw_score: f64) -> f64 {
-        sigmoid(self.params.alpha * (raw_score - self.params.beta))
+        self.params.calibrate_raw_value(raw_score)
     }
 }
 
-fn validate_params(params: BayesianBM25Params, stats: &IndexStats) -> ScoringResult<()> {
+pub(crate) fn validate_params(
+    params: BayesianBM25Params,
+    avg_doc_length: f64,
+) -> ScoringResult<()> {
     if !params.alpha.is_finite() || params.alpha <= 0.0 {
         return Err(invalid_input(format!(
             "alpha must be a positive finite value, got {}",
@@ -201,10 +208,9 @@ fn validate_params(params: BayesianBM25Params, stats: &IndexStats) -> ScoringRes
         ));
     }
     params.bm25.validate()?;
-    if !stats.avg_doc_length.is_finite() || stats.avg_doc_length < 0.0 {
+    if !avg_doc_length.is_finite() || avg_doc_length < 0.0 {
         return Err(invalid_input(format!(
-            "average document length must be finite and non-negative, got {}",
-            stats.avg_doc_length
+            "average document length must be finite and non-negative, got {avg_doc_length}"
         )));
     }
     Ok(())
