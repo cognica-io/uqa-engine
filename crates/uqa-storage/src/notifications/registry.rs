@@ -49,3 +49,21 @@ pub struct NotificationListenerRow {
     pub next_sequence: u64,
     pub position: u64,
 }
+
+/// Stable lexicographic registry key; the session identifier is stored big-endian.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct NotificationListenerKey {
+    pub owner_id: [u8; 16],
+    pub session_id: u64,
+}
+
+/// Fixed-width coordination metadata, independent of a listener's channel list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NotificationListenerMetadata {
+    pub key: NotificationListenerKey,
+    pub process_id: i32,
+    pub wake_port: u16,
+    pub transaction_open: bool,
+    pub next_sequence: u64,
+    pub position: u64,
+}
