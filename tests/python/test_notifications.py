@@ -299,7 +299,7 @@ def test_abandoned_async_receiver_does_not_root_a_closed_loop_or_listener():
     engine.close()
 
 
-FIXTURE = json.loads((Path(__file__).resolve().parents[2] / "crates/uqa-client/tests/fixtures/notifications-v1.json").read_text())
+FIXTURE = json.loads((Path(__file__).resolve().parents[2] / "crates/uqa-client/tests/fixtures/notifications-v1.json").read_text(encoding="utf-8"))
 
 
 class Peer:
