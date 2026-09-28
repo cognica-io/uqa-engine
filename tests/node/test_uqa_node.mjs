@@ -15,10 +15,12 @@ import { pathToFileURL } from "node:url";
 import { bindingFeatures, noriEnabled, runBindings } from "../parity/bindings.mjs";
 import { concurrentIsolationLevels, runConcurrentWriterCase } from "../parity/concurrent_transactions.mjs";
 import { runVectorKNN, verifyVectorKNNReopen } from "../../examples/javascript/vector-knn.mjs";
+import { registerNativeNotificationTests } from "./notifications/native.mjs";
 
 const require = createRequire(import.meta.url);
 const packagePath = require.resolve(process.env.UQA_TEST_PACKAGE ? resolve(process.env.UQA_TEST_PACKAGE) : "../../crates/uqa-node");
 const uqa = require(packagePath);
+registerNativeNotificationTests(uqa, packagePath);
 const concurrentWriterOracle = JSON.parse(readFileSync(new URL("../parity/pg18/concurrent_writes.expected.json", import.meta.url), "utf8"));
 
 async function readRequestJSON(request) {
@@ -246,6 +248,9 @@ test("CommonJS and ESM package exports agree", async () => {
   assert.equal(esm.Engine, uqa.Engine);
   assert.equal(esm.HttpEngine, uqa.HttpEngine);
   assert.equal(esm.HttpSQLStream, uqa.HttpSQLStream);
+  assert.equal(esm.NotificationSubscription, uqa.NotificationSubscription);
+  assert.equal(esm.HttpNotificationSubscription, uqa.HttpNotificationSubscription);
+  assert.equal(esm.NotificationError, uqa.NotificationError);
   assert.equal(esm.vector, uqa.vector);
   assert.equal(esm.JSFunctionVolatility, uqa.JSFunctionVolatility);
 });

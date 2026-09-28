@@ -40,7 +40,7 @@ pub struct Engine {
 }
 
 impl Engine {
-    fn inner(&self) -> Result<&Arc<CoreEngine>> {
+    pub(super) fn inner(&self) -> Result<&Arc<CoreEngine>> {
         self.inner
             .as_ref()
             .ok_or_else(|| Error::from_reason("engine is closed"))

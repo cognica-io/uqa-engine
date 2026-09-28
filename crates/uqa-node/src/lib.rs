@@ -43,6 +43,7 @@ mod callbacks;
 mod engine;
 mod http_engine;
 mod input;
+mod notifications;
 mod results;
 mod tasks;
 mod value;

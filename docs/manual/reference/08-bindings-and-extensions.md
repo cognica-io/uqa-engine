@@ -169,6 +169,43 @@ const normalized = await engine.sql("SELECT normalize_label($1) AS label", [" SQ
 
 Use `SQLParam.vector` or a typed numeric array for vector input. JavaScript callbacks always return synchronously, including when SQL is executed through `sql`; returning a `Promise` is an error. The asynchronous SQL path runs the engine on a worker and dispatches callback execution to the owning JavaScript thread.
 
+### Native notification subscriptions
+
+Development sources add `await engine.subscribeNotifications(channels, options)`. The Promise returns a ready `NotificationSubscription` with `nextEvent()`, `next()`, asynchronous iteration, `close()`, `return()` and `throw(error)`. The same method name on `HttpEngine` uses the [HTTP notification contract](09-http-engine.md#nodejs-http-notification-subscriptions). An embedded subscription uses its original Engine hub and provider directly.
+
+`channels` is a nonempty array of unique, nonempty, NUL-free strings, each at most 63 UTF-8 bytes. Names retain exact case and Unicode; lone surrogates are rejected. `options` requires five positive safe integers: `maxActiveSubscriptions`, `maxChannels`, `maxQueuedNotifications`, `maxQueuedBytes` and `maxRegistryEntriesPerPoll`. They map to the [Rust admission and queue limits](02-rust-engine-api.md#independent-owned-listeners). Optional `signal` accepts an AbortSignal. These are explicit caller limits, not measured deployment defaults.
+
+Native registration reserves the original Engine's shared allowance before entering the libuv work pool. Queued registrations count toward `maxActiveSubscriptions` alongside live handles, and another call cannot bypass a retained stricter limit. A full allowance rejects the Promise before submitting another registration task; readiness and close transfer and release the same reservation.
+
+Each frozen event has `kind`, `epoch` and `requestId`. A native request identity is `null`. A `notification` additionally exposes exact unsigned 64-bit `sequence` as `bigint`, signed 32-bit `processId` as `number`, and unchanged string `channel` and `payload`; its `cause` is `null`. Lifecycle variants use the shared [event declarations](../../../crates/uqa-node/notifications.d.ts). `nextEvent()` returns `null` after normal close, and asynchronous iteration then ends. A second pending receive rejects with `NOTIFICATION_INVALID_REQUEST`.
+
+Creation registers an independent idle listener without committing, rolling back or consuming the caller's transaction or SQL notification queue. Closing the query Engine leaves the retained subscription alive. Await `close()` or leave a `for await` loop to join original provider cleanup; repeated close calls join the same work. AbortSignal cancels registration or delivery, waits for cleanup and rejects pending receipt with `NOTIFICATION_CANCELLED`. `isClosed` reports ended delivery, not completed resource release. Idle waits do not occupy the libuv work pool. Garbage collection is a fallback; explicit close provides the resource-release boundary.
+
+Failures use `NotificationError` with a stable content-free `code` and explicit private `diagnostic`. Queue overflow raises `NOTIFICATION_BACKPRESSURE`; the native failed inbox discards unread values, and its error remains observable after close, including concurrent close and receive. Ordinary inspection omits payload and channel content. The [native preservation and ownership proof](../../design/node-native-notifications.md) covers exact conversion, close races and Node environment teardown. Complete Cloud, platform and process-resource qualification remains in the [implementation ledger](../../plans/0015-sql-notifications-and-sse.md).
+
+```javascript
+import { Engine } from "@cognica-io/uqa";
+
+const engine = new Engine();
+const subscription = await engine.subscribeNotifications(["jobs"], {
+  maxActiveSubscriptions: 2, maxChannels: 1,
+  maxQueuedNotifications: 2, maxQueuedBytes: 8192,
+  maxRegistryEntriesPerPoll: 2,
+});
+try {
+  await engine.sql("NOTIFY jobs, 'refresh'");
+  for await (const event of subscription) {
+    if (event.kind === "notification") {
+      console.log(event.sequence, event.payload);
+      break;
+    }
+  }
+} finally {
+  await subscription.close();
+  engine.close();
+}
+```
+
 ## Browser WASM
 
 The browser binding uses an Emscripten build. Initialization is asynchronous, and persistent files are synchronized to IndexedDB.

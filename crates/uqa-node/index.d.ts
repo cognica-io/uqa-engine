@@ -7,6 +7,18 @@ export interface HttpSQLStream extends AsyncIterable<HttpSQLStreamFrame> { [Symb
 export { HttpEngineError } from "./http";
 export * from "./notifications";
 export interface HttpEngine { subscribeNotifications(channels: readonly string[], options: import("./notifications").HttpNotificationOptions): Promise<import("./notifications").HttpNotificationSubscription> }
+export interface Engine { subscribeNotifications(channels: readonly string[], options: import("./notifications").NotificationSubscriptionOptions): Promise<import("./notifications").NotificationSubscription> }
+export declare class _NativeNotificationHandle {
+  run(): Promise<NativeNotificationIdentity>
+  nextEvent(): Promise<NativeNotificationEvent | null>
+  stop(): void
+  close(): Promise<void>
+  get isClosed(): boolean
+  diagnostic(): string | null
+  get failureCode(): string | null
+}
+export type NativeNotificationHandle = _NativeNotificationHandle
+
 export declare class Engine {
   /** Create an in-memory engine. */
   constructor()
@@ -67,6 +79,7 @@ export declare class Engine {
   setSQLFunctionDepthLimit(limit: number): void
   cancel(): void
   close(): void
+
 }
 
 export declare class HttpEngine {
@@ -169,6 +182,30 @@ export interface MigrationReport {
   scoringParams: number
   models: number
   columnStats: number
+}
+
+export interface NativeNotificationEvent {
+  kind: string
+  epoch: string
+  requestId?: string
+  sequence?: bigint
+  processId?: number
+  channel?: string
+  payload?: string
+  cause?: string
+}
+
+export interface NativeNotificationIdentity {
+  epoch: string
+  requestId?: string
+}
+
+export interface NativeNotificationOptions {
+  maxActiveSubscriptions: number
+  maxChannels: number
+  maxQueuedNotifications: number
+  maxQueuedBytes: number
+  maxRegistryEntriesPerPoll: number
 }
 
 export declare function open(path: string): Engine
