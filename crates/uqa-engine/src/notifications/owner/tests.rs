@@ -125,6 +125,169 @@ fn concurrent_close_retains_its_completion_barrier_and_independent_listener() {
     assert!(!replacement.is_closed());
 }
 
+const RETIREMENT_KEY: &str = "notification-retirement-fixture";
+
+fn retirement_provider(path: &Path, provider: usize) -> Engine {
+    use uqa_storage_sqlite::{ManagedConnection, SQLiteCompressionOptions, SQLiteKeyValueStorage};
+    match provider {
+        0 => Engine::open(path).unwrap(),
+        1 => Engine::from_persistent_provider(Arc::new(SQLiteKeyValueStorage::open(path).unwrap()))
+            .unwrap(),
+        2 => Engine::from_persistent_provider(Arc::new(
+            uqa_storage_redb::RedbStorage::open(path).unwrap(),
+        ))
+        .unwrap(),
+        3 => Engine::open_encrypted(path, RETIREMENT_KEY).unwrap(),
+        4 => Engine::from_persistent_provider(Arc::new(
+            SQLiteKeyValueStorage::from_connection(
+                ManagedConnection::open_encrypted(path, RETIREMENT_KEY).unwrap(),
+            )
+            .unwrap(),
+        ))
+        .unwrap(),
+        5 => Engine::open_compressed(path, SQLiteCompressionOptions::default()).unwrap(),
+        6 => Engine::open_compressed_encrypted(
+            path,
+            RETIREMENT_KEY,
+            SQLiteCompressionOptions::default(),
+        )
+        .unwrap(),
+        _ => unreachable!(),
+    }
+}
+
+fn retirement_registry(path: &Path, provider: usize) -> rusqlite::Connection {
+    let registry = rusqlite::Connection::open(registry_path(path)).unwrap();
+    if matches!(provider, 3 | 4 | 6) {
+        registry.pragma_update(None, "key", RETIREMENT_KEY).unwrap();
+    }
+    registry
+}
+
+#[rstest::rstest]
+fn individual_close_releases_its_lease_while_the_registry_writer_is_held(
+    #[values(0, 1, 2, 3, 4, 5, 6)] provider: usize,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("close-with-writer.db");
+    let engine = retirement_provider(&path, provider);
+    let subscription = Arc::new(
+        engine
+            .subscribe_notifications(&["events"], options())
+            .unwrap(),
+    );
+    let healthy = engine
+        .subscribe_notifications(&["events"], options())
+        .unwrap();
+    let coordinator = coordinator(&engine);
+    let session = subscription.resources.lock().as_ref().unwrap().session_id;
+    let owner = engine.notification_hub.state.lock().listeners[&session]
+        .lease
+        .as_ref()
+        .unwrap()
+        .owner_id();
+    let registry = retirement_registry(&path, provider);
+    registry.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let (finished, completion) = mpsc::channel();
+    let closing = Arc::clone(&subscription);
+    let worker = std::thread::spawn(move || {
+        closing.close();
+        finished.send(()).unwrap();
+    });
+    // The held writer is deliberately released only after observing cleanup.
+    // This watchdog detects dependency on that writer, not a timing margin.
+    let completed = completion.recv_timeout(Duration::from_secs(5));
+    let retired = completed.is_ok() && !coordinator.listener_is_alive(owner, &[]).unwrap();
+    registry.execute_batch("ROLLBACK").unwrap();
+    worker.join().unwrap();
+    assert!(
+        completed.is_ok(),
+        "closing one listener must not wait for the registry writer"
+    );
+    assert!(
+        retired,
+        "cleanup must release the actual native listener lease"
+    );
+    assert!(coordinator.worker_is_retained());
+    assert!(engine.notification_hub.cross_error.lock().is_none());
+    assert!(!healthy.is_closed());
+    engine.sql("NOTIFY events, 'healthy'", &[]).unwrap();
+    assert!(matches!(
+        healthy.wait(Duration::from_secs(5)).unwrap(),
+        NotificationWait::Event(_)
+    ));
+    let replacement = engine
+        .subscribe_notifications(&["events"], options())
+        .unwrap();
+    assert!(!replacement.is_closed());
+    assert!(!engine
+        .notification_hub
+        .state
+        .lock()
+        .listeners
+        .contains_key(&session));
+    let obsolete: i64 = registry
+        .query_row(
+            "SELECT count(*) FROM listeners WHERE owner_id = ?1 AND session_id = ?2",
+            rusqlite::params![owner.as_slice(), session.to_be_bytes().as_slice()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        obsolete, 0,
+        "ordinary publication and registration must reap retired rows"
+    );
+}
+
+#[rstest::rstest]
+fn final_subscription_close_joins_recovery_and_drops_the_original_provider(
+    #[values(0, 1, 2, 3, 4, 5, 6)] provider: usize,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("last-listener.db");
+    let engine = retirement_provider(&path, provider);
+    let retained_provider = Arc::downgrade(engine.storage.provider.as_ref().unwrap());
+    let retained_backend = Arc::downgrade(engine.storage.backend.as_ref().unwrap());
+    let subscription = Arc::new(
+        engine
+            .subscribe_notifications(&["events"], options())
+            .unwrap(),
+    );
+    let coordinator = coordinator(&engine);
+    drop(engine);
+    assert!(retained_provider.upgrade().is_some());
+    assert!(retained_backend.upgrade().is_some());
+    let registry = retirement_registry(&path, provider);
+    registry.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let closing = Arc::clone(&subscription);
+    let (finished, completion) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        closing.close();
+        finished.send(()).unwrap();
+    });
+    let completed = completion.recv_timeout(Duration::from_secs(5));
+    registry.execute_batch("ROLLBACK").unwrap();
+    worker.join().unwrap();
+    assert!(
+        completed.is_ok(),
+        "final cleanup must not depend on the held registry writer"
+    );
+    assert!(!coordinator.worker_is_retained());
+    assert!(coordinator
+        .recovery_control()
+        .unwrap()
+        .cancellation()
+        .is_cancelled());
+    drop(coordinator);
+    assert!(retained_provider.upgrade().is_none());
+    assert!(retained_backend.upgrade().is_none());
+    assert!(subscription.resources.lock().is_none());
+    assert_eq!(
+        subscription.wait(Duration::ZERO).unwrap(),
+        NotificationWait::Closed
+    );
+}
+
 #[test]
 fn stopping_delivery_wakes_receivers_but_retains_cleanup_admission() {
     let engine = Engine::new();

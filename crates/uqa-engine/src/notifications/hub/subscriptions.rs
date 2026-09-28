@@ -12,6 +12,21 @@ use super::{Arc, NotificationHub, NotificationListener};
 use uqa_core::CancellationToken;
 
 impl NotificationHub {
+    pub(in crate::notifications) fn retire_subscription(&self, session_id: u64) {
+        let _gate = self.commit_gate.lock();
+        let removed = {
+            let mut state = self.state.lock();
+            let removed = state.listeners.remove(&session_id);
+            Self::remove_consumed_entries(&mut state);
+            removed
+        };
+        // The native lease is the lifetime authority. Releasing it makes any
+        // remaining registry row dead; existing registration/publication scans
+        // reap that row before using its cursor. Retirement must not acquire
+        // the shared registry writer or cancel another listener's recovery.
+        drop(removed);
+    }
+
     pub(in crate::notifications) fn register_subscription(
         &self,
         session_id: u64,
