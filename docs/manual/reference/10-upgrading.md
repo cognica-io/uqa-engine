@@ -1,8 +1,48 @@
-# Upgrading to UQA Engine 0.4.0
+# Upgrading to UQA Engine 0.4.5
+
+Version 0.4.5 adds native DiskANN vector indexes and independent SQL notification subscriptions across Rust, Python, Node.js and Browser WASM, including authenticated HTTP/SSE clients for compatible servers. It also adds PostgreSQL-compatible `pg_get_userbyid(oid)` and corrects the diagnostic for non-immutable generated expressions. See the [release history](../../../HISTORY.md#045---2026-09-28).
+
+Persistent formats upgrade in one direction. Stop all owners and take a closed-file backup before the first upgraded open; update every process sharing the database together. Earlier incompatible binaries cannot reopen or continue writing upgraded state. Restore the pre-upgrade backup to return to an earlier release. Applications upgrading from before 0.4.0 must also apply the earlier MVCC, Rust API and catalog changes below.
+
+## 0.4.5 vector indexes and storage formats
+
+DiskANN generations, canonical mutation provenance, exact population metadata and scoped physical reclamation use the following final format boundaries. Conversion preserves data, record histories, receipts and identifier watermarks; it does not delete history. Older incompatible binaries are rejected, including retained adapters on their next physical access.
+
+| Format | 0.4.0 | 0.4.5 |
+| --- | --- | --- |
+| SQLite main records | 48 | 54 |
+| Native SQLite mapping | 9 | 13 |
+| redb main records | 47 | 53 |
+| SQL catalog | 49 | 49 |
+| Notification registry | 2 | 2 |
+
+### Native SQLite mapping
+
+Opening or binding an existing native database atomically upgrades its mapping to format 13, including before a DiskANN generation is created. Earlier mappings preserve their data, histories, receipts and identifiers; mapping 9's independent data namespace remains intact. Field-owned exact current/change population records follow the common MVCC rules. Writable binding initializes missing derived metadata for an existing selected generation in the caller's transaction without rebuilding its graph. Retained/private counts, column/table movement and removal share their canonical records' lifetime.
+
+A pending backup restore from native mapping 12 upgrades inside the restore owner's transaction while preserving its original source/target request, stable data namespace, history records and receipt capacity. Ordinary opens continue rejecting that pending restore. Interrupted upgrades roll back atomically; a durable restoration intent still resumes only with its original request. See the [native population contract](../../design/diskann-population-statistics.md#native-sqlite-population-ownership).
+
+### Key/Value population ownership
+
+SQLite Key/Value and redb now publish exact current/change populations with their canonical mutations and generation lifecycle. Writable binding initializes an older selected generation's missing derived metadata from its complete build origins, under the caller's original transaction and allowance. This does not rebuild the graph or reevaluate stored expressions. Metadata reads remain bounded and never perform this census; cancellation, inadequate memory, malformed metadata or a concurrent catalog/head replacement fail the operation. Custom versioned Key/Value providers must supply the population record-layout capability and their own incompatible-writer exclusion, and wrappers must forward the typed origin/publication/retirement operations, including `KeyValueBatch::invalidate_diskann_origin` for raw exact/IVF/HNSW writers. Population layouts must implement `origin_header_prefix` using the complete origin key even when no origin value exists. Raw per-document writes reject any surviving stale population at private application, command refresh and final commit; retire its association before using a raw alias on that field. Raw deletion before first publication in the same transaction remains valid because the complete publication census verifies the resulting view. See the [population ownership contract](../../design/diskann-population-statistics.md#sqlite-keyvalue-and-redb-ownership).
+
+### Physical retirement
+
+`VersionedPersistence::vector_field_guard_layout` describes field-guard maintenance; wrappers must forward this capability and native providers must supply their own key/value addressing. Built-in maintenance conditionally deletes the reference marker of an empty physical vector field without advancing its lifetime before ordinary history collection, and includes the resulting tombstones in one additional fixed reclamation domain. SQLite main format 54 and redb main format 53 validate observation epochs across every enrolled prefix and support [scoped physical tombstone retirement](../../design/diskann-key-value-generations.md#physical-tombstone-reclamation). See the [field-guard retention proof](../../design/diskann-key-value-generations.md#vector-field-guard-retention).
+
+Built-in logical sessions preserve their original snapshot epoch automatically. Raw physical integrations that prepare absent writes inside the owned DiskANN prefixes must use `PreparedRecordCommit::new_at_snapshot` with the actual evaluating snapshot; a raw `new` batch has no absence evidence once that prefix has retired tombstones. Snapshots and persistence wrappers must forward the epoch and reclamation capabilities, and custom native layouts must provide their physical prefix selection. Known positive revisions and other namespaces keep their ordinary comparison contract. A matching committed receipt resolves before epoch validation. Public identifier reads and reservations reject the epoch and prefix-floor namespaces reserved for physical reclamation. No active SQL snapshot can overlap retirement.
+
+## 0.4.5 notification subscriptions
+
+Independent subscription handles retain their original database and selected role, with explicit queue limits and cleanup. Existing SQL LISTEN/UNLISTEN and transactional NOTIFY remain available for sessionful hosts. Hosts serving stateless SQL call `Engine::require_notification_subscriptions()` to reject LISTEN/UNLISTEN with `NOTIFICATION_REQUIRES_SUBSCRIPTION` while preserving NOTIFY and owned subscriptions. See the [Rust subscription API](02-rust-engine-api.md#independent-owned-listeners) and [language bindings](08-bindings-and-extensions.md#notification-subscriptions).
+
+HTTP subscriptions require a compatible authenticated server endpoint and explicit transport limits. Updating an SDK alone does not add the endpoint to an older deployment. Disconnects require visible resynchronization rather than silent replay; follow the [HTTP notification contract](09-http-engine.md#rust-notification-subscriptions). The notification registry remains at schema 2.
+
+## Earlier release requirements
 
 Version 0.4.0 delivers overlapping logical SQL writers on native SQLite, SQLite Key/Value and redb, with shared snapshot visibility, private changes, savepoints, conflict tracking and atomic index/catalog publication. It also corrects PostgreSQL comparison, catalog-vector, array-assignment and grouping behavior, restores Nori allocation limits, and fixes retained snapshots, added-column publication and committed notification recovery. See the [release history](../../../HISTORY.md#040---2026-09-25).
 
-This minor release changes low-level Rust APIs and upgrades persistent formats in one direction. Stop all owners and take a closed-file backup before the first upgraded open; update every process sharing the database together. The 0.4.0 boundaries are SQLite main record format 48, redb main record format 47, native SQLite mapping 9, catalog format 49, and notification registry schema 2. Earlier incompatible binaries cannot reopen or continue writing upgraded state; use the pre-upgrade backup to return to an earlier release. The sections below cover source changes, migration, retained commit outcomes and explicit backup restoration.
+Version 0.4.0 introduced low-level Rust API changes and one-way persistent-format upgrades. Stop all owners and take a closed-file backup before the first upgraded open; update every process sharing the database together. The 0.4.0 boundaries are SQLite main record format 48, redb main record format 47, native SQLite mapping 9, catalog format 49, and notification registry schema 2. Earlier incompatible binaries cannot reopen or continue writing upgraded state; use the pre-upgrade backup to return to an earlier release. The sections below cover source changes, migration, retained commit outcomes and explicit backup restoration.
 
 Version 0.3.8 preserves JSONB types and PostgreSQL extraction semantics for `->`, `->>`, `#>` and `#>>`. See the [release history](../../../HISTORY.md#038---2026-09-20) and the JSON extraction guidance below.
 
@@ -13,22 +53,6 @@ Version 0.3.5 adds native Japanese Kuromoji analysis, completion and independent
 The 0.3.0 release added native Korean Nori analysis, durable analyzer revisions and token graphs, graph-aware phrases and highlighting, PostgreSQL domains and data-modifying CTEs, and prepared-plan improvements. It also moved concrete SQLite APIs into `uqa-storage-sqlite` and changed low-level Rust SQL and retrieval interfaces. The [release history](../../../HISTORY.md#030---2026-09-14) records the changes.
 
 The 0.2 series includes SQL object and privilege lifecycle changes, durable expression and unique indexes, expanded sequences and PL/pgSQL, native cross-process notifications, and a Node.js HTTP client that runs without native addons. These changes were introduced in [0.2.0](../../../HISTORY.md#020---2026-09-05); the [compatibility guide](../sql/09-compatibility.md) defines the verified PostgreSQL 18 surface and the behavior still being implemented.
-
-## Development native SQLite mapping
-
-Current development builds use native SQLite mapping format 13 for database-owned DiskANN generations, canonical mutation provenance and exact field-owned population metadata. Opening or binding an existing native database performs the atomic mapping upgrade even before any DiskANN generation is created. Earlier mappings preserve their data, histories, receipts and identifiers; format 9 keeps its independently stored data namespace. Catalog format 49 is unchanged; the separate [unreleased common record-format extensions](#unreleased-diskann-physical-retirement) also apply. Older native binaries reject the new mapping, including already-open adapters on their next physical access. Use a closed pre-upgrade backup to return to 0.4.0. SQL DiskANN creation and querying are implemented; the [implementation plan](../../plans/0014-diskann-vector-index.md#dependency-order-and-progress-ledger) records completed SQL lifecycle/diagnostic acceptance and the remaining language-artifact and integrated acceptance gates.
-
-## Unreleased DiskANN Key/Value populations
-
-Current development builds use SQLite main record format 54 and redb main record format 53. The atomic upgrade preserves data, history, receipts and identifier watermarks while excluding predecessor writers that do not maintain DiskANN populations. Native SQLite population maintenance uses mapping 13 as described below; catalog 49 and physical DiskANN artifacts are unchanged. Update all database owners together and retain a closed pre-upgrade backup before opening the newer format.
-
-SQLite Key/Value and redb now publish exact current/change populations with their canonical mutations and generation lifecycle. Writable binding initializes an older selected generation's missing derived metadata from its complete build origins, under the caller's original transaction and allowance. This does not rebuild the graph or reevaluate stored expressions. Metadata reads remain bounded and never perform this census; cancellation, inadequate memory, malformed metadata or a concurrent catalog/head replacement fail the operation. Custom versioned Key/Value providers must supply the population record-layout capability and their own incompatible-writer exclusion, and wrappers must forward the typed origin/publication/retirement operations, including `KeyValueBatch::invalidate_diskann_origin` for raw exact/IVF/HNSW writers. Population layouts must implement `origin_header_prefix` using the complete origin key even when no origin value exists. Raw per-document writes reject any surviving stale population at private application, command refresh and final commit; retire its association before using a raw alias on that field. Raw deletion before first publication in the same transaction remains valid because the complete publication census verifies the resulting view. See the [population ownership contract](../../design/diskann-population-statistics.md#sqlite-keyvalue-and-redb-ownership).
-
-## Unreleased DiskANN native populations
-
-Native mapping 13 adds field-owned exact current/change population records using the common MVCC rules. Writable binding initializes missing derived metadata for an existing selected generation in the caller's transaction, without rebuilding its graph. Retained/private counts, column/table movement and removal share their canonical records' lifetime. Main SQLite format 54, redb format 53 and catalog 49 remain unchanged by this native extension.
-
-A pending backup restore from native mapping 12 upgrades inside the restore owner's transaction while preserving its original source/target request, stable data namespace, history records and receipt capacity. Ordinary opens continue rejecting that pending restore. Interrupted upgrades roll back atomically; a durable restoration intent still resumes only with its original request. See the [native population contract](../../design/diskann-population-statistics.md#native-sqlite-population-ownership).
 
 ## 0.4.0 committed notification recovery
 
@@ -114,15 +138,7 @@ Schema security format 2 preserves namespace OIDs across ACL and owner changes a
 
 Every retained logical snapshot must register a liveness lease before obsolete historical revisions may be reclaimed. SQLite upgrades formats 1–28 atomically, preserving records, database identity, allocations and receipts, and revalidates the format on every bounded read. SQLite formats 1–27 gain a guarded `compacted` head flag with default zero during the same transaction; format 28 keeps that flag, and existing history rows remain unchanged. Collection can then retain a latest tombstone solely in its head, restoring that revision into history before a later replacement. Retained predecessor readers and writers reject the new format. redb upgrades after its previous exclusive owner closes. Reverting requires a pre-conversion backup.
 
-Native SQLite’s separate `.uqa-snapshots` coordination file holds only database identity, sequence boundaries and native lock slots. Active leases must remain in place while the database is open; do not replace or remove this file underneath live owners. Process exit releases liveness without requiring a clean shutdown. Ordinary history collection preserves head tombstones and every durable transaction outcome, including outcomes whose original record versions have been reclaimed. The unreleased DiskANN retirement extension described below explicitly changes the internal observation protocol for its owned prefixes.
-
-## Unreleased DiskANN physical retirement
-
-Field-guard maintenance adds `VersionedPersistence::vector_field_guard_layout`; wrappers must forward this capability and native providers must supply their own key/value addressing. Built-in maintenance conditionally deletes the reference marker of an empty physical vector field without advancing its lifetime before ordinary history collection, and includes the resulting tombstones in one additional fixed reclamation domain. SQLite format 53 and redb format 52 remain unchanged because their existing observation-epoch validation already covers every enrolled prefix. See the [field-guard retention proof](../../design/diskann-key-value-generations.md#vector-field-guard-retention).
-
-SQLite main record format 53 and redb main record format 52 add [scoped physical tombstone retirement](../../design/diskann-key-value-generations.md#physical-tombstone-reclamation) after ordinary history collection. Predecessor writers and retained owners cannot use the upgraded format; reverting requires a pre-conversion backup. Native mapping 12, catalog 49, graph artifacts, record visibility, identifier maxima and existing receipts are preserved. The conversion itself does not delete history.
-
-Built-in logical sessions preserve their original snapshot epoch automatically. Raw physical integrations that prepare absent writes inside the owned DiskANN prefixes must use `PreparedRecordCommit::new_at_snapshot` with the actual evaluating snapshot; a raw `new` batch has no absence evidence once that prefix has retired tombstones. Snapshots and persistence wrappers must forward the epoch and reclamation capabilities, and custom native layouts must provide their physical prefix selection. Known positive revisions and other namespaces keep their ordinary comparison contract. A matching committed receipt resolves before epoch validation. Public identifier reads and reservations reject the epoch and prefix-floor namespaces reserved for physical reclamation. No active SQL snapshot can overlap retirement.
+Native SQLite’s separate `.uqa-snapshots` coordination file holds only database identity, sequence boundaries and native lock slots. Active leases must remain in place while the database is open; do not replace or remove this file underneath live owners. Process exit releases liveness without requiring a clean shutdown. Ordinary history collection preserves head tombstones and every durable transaction outcome, including outcomes whose original record versions have been reclaimed. The [0.4.5 physical retirement contract](#physical-retirement) changes the internal observation protocol for its owned prefixes.
 
 ## 0.4.0 role names and retained authority
 
@@ -328,7 +344,7 @@ Encrypted SQLite and compressed-encrypted databases now encrypt their `.uqa-noti
 
 ## Korean analysis and package features
 
-Rust applications using Korean analysis enable `nori` on `uqa` or `uqa-engine`, for example `cargo add uqa@0.4.0 --features nori`. The feature includes the immutable dictionary through `uqa-nori-data`; the official Python, Node.js, and browser WASM packages enable it. No JVM or runtime dictionary download is required. Builds without this feature retain the non-Korean analyzers and reject Korean analysis requests explicitly.
+Rust applications using Korean analysis enable `nori` on `uqa` or `uqa-engine`, for example `cargo add uqa@0.4.5 --features nori`. The feature includes the immutable dictionary through `uqa-nori-data`; the official Python, Node.js, and browser WASM packages enable it. No JVM or runtime dictionary download is required. Builds without this feature retain the non-Korean analyzers and reject Korean analysis requests explicitly.
 
 The built-in `nori` analyzer and custom Korean pipelines retain exact dictionary and user-rule identities in durable descriptors. Deploy the same feature configuration and required resources in every process opening the database. Rich analysis retains UTF-16 terms, morphology, token graph edges, and corrected source spans; existing string projections remain available but cannot represent isolated UTF-16 units. See the [analyzer reference](06-text-analyzers.md) and [binding contracts](08-bindings-and-extensions.md) for analysis, normalization, and result APIs.
 
@@ -342,20 +358,20 @@ SQLite catalogs advance to version 46 for durable cache revisions, graph access 
 
 ## Package versions
 
-Update the UQA packages used by one application together. Rust's `0.1`, `0.2` and `0.3` dependency requirements do not select `0.4.0`; change the requirement explicitly and regenerate the application's lockfile.
+Update the UQA packages used by one application together. Rust's `0.1`, `0.2` and `0.3` dependency requirements do not select `0.4.5`; change the requirement explicitly and regenerate the application's lockfile.
 
 | Environment | Versioned installation |
 | --- | --- |
-| Embedded Rust | `cargo add uqa@0.4.0` |
-| Rust HTTP client | `cargo add uqa-client@0.4.0` |
-| Python and `usql` | `python -m pip install --upgrade uqa==0.4.0` |
-| Embedded Node.js | `npm install @cognica-io/uqa@0.4.0` |
-| Node.js HTTP only | `npm install --omit=optional @cognica-io/uqa@0.4.0` |
-| Browser WASM | `npm install @cognica-io/uqa-wasm@0.4.0` |
+| Embedded Rust | `cargo add uqa@0.4.5` |
+| Rust HTTP client | `cargo add uqa-client@0.4.5` |
+| Python and `usql` | `python -m pip install --upgrade uqa==0.4.5` |
+| Embedded Node.js | `npm install @cognica-io/uqa@0.4.5` |
+| Node.js HTTP only | `npm install --omit=optional @cognica-io/uqa@0.4.5` |
+| Browser WASM | `npm install @cognica-io/uqa-wasm@0.4.5` |
 
 The Rust workspace requires Rust 1.90 or newer. Python requires Python 3.8 or newer, and the Node.js package requires Node.js 16 or newer. The Node.js root package selects an exact-version native optional package for embedded execution; deploy the root and native packages from the same release. Deploy the Browser WASM JavaScript module and `uqa.wasm` from the same package together, including when updating a browser cache.
 
-The [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.4.0) contains the Python and npm archives, standalone Node.js addons, and the status of publication to crates.io, PyPI, and npm. Rust applications using Git dependencies should select `tag = "v0.4.0"` consistently for every UQA dependency.
+The [GitHub release](https://github.com/cognica-io/uqa-engine/releases/tag/v0.4.5) contains the Python and npm archives, standalone Node.js addons, and the status of publication to crates.io, PyPI, and npm. Rust applications using Git dependencies should select `tag = "v0.4.5"` consistently for every UQA dependency.
 
 ## Automatic statistics and session caches
 
@@ -420,10 +436,10 @@ The B-tree methods on `uqa_storage::PersistentStorageBackend` now use `ValueInde
 Opening an older supported database performs the required provider and catalog migrations. The 0.2 minor release adds typed tuple metadata, richer object and column identities, ownership and ACL records, bound routine and rule dependencies, and expression-index metadata. Initial open owns migration writes; later catalog refresh validates the persisted representation. The shipped SQLite and key-value providers handle their storage migrations through the normal engine open path.
 
 1. Stop writers, close every engine using the database, and create a recoverable backup through the [storage backup procedure](04-storage-and-security.md#backups-and-copies).
-2. Open a copy with the exact 0.4.0 application and its selected provider, encryption key, and compression configuration.
+2. Open a copy with the exact 0.4.5 application and its selected provider, encryption key, and compression configuration.
 3. Execute representative reads, writes, role and privilege checks, stored routines and views, and retrieval queries. Verify indexes, transaction rollback, and close-and-reopen behavior with the application's data.
 4. Update every process sharing the database before reopening the original file. Register process-local runtime callbacks again when the application starts.
-5. If the application must return to an older binary, restore the pre-upgrade backup. Do not rely on an older binary reading a file migrated by 0.4.0.
+5. If the application must return to an older binary, restore the pre-upgrade backup. Do not rely on an older binary reading a file migrated by 0.4.5.
 
 Keep migration failures visible and resolve them before admitting writes. Retain encryption keys and any external rollback anchor according to the [storage and security contract](04-storage-and-security.md).
 
