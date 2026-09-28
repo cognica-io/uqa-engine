@@ -382,6 +382,7 @@ mod compiler_invariants;
 mod data_commands;
 mod ddl_lifecycle;
 mod grouping;
+mod notifications;
 mod query_features;
 mod relations;
 mod routines;

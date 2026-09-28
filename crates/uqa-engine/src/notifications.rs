@@ -13,6 +13,7 @@ mod hub;
 mod inbox;
 mod owner;
 mod registration;
+mod session_policy;
 mod subscription;
 
 pub(crate) use owner::NotificationHubOwner;

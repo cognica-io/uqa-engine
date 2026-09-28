@@ -317,7 +317,7 @@ impl Interpreter<'_> {
                 {
                     Ok(self.err_stack.last().map_or_else(
                         || self.values[*index].clone(),
-                        |(state, _)| Value::Str(state.clone()),
+                        |error| Value::Str(error.diagnostics.0.clone()),
                     ))
                 }
                 Some(uqa_sql::plpgsql::PLpgSQLDatum::Var(variable))
@@ -325,7 +325,7 @@ impl Interpreter<'_> {
                 {
                     Ok(self.err_stack.last().map_or_else(
                         || self.values[*index].clone(),
-                        |(_, message)| Value::Str(message.clone()),
+                        |error| Value::Str(error.diagnostics.1.clone()),
                     ))
                 }
                 Some(

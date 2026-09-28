@@ -16,7 +16,7 @@ use super::{
 use crate::query::{cursor::SQLCursor, locking::query_has_row_locks};
 use std::sync::Arc;
 use uqa_sql::semantics::effects::{query_may_mutate_engine, query_requires_statement_transaction};
-use uqa_sql::{compile, plan::UnifiedPlan, SQLError, SQLParam};
+use uqa_sql::{plan::UnifiedPlan, SQLError, SQLParam};
 
 pub fn execute<S: Clone + Send + Sync + 'static>(
     context: &BatchExecutionContext<'_, S>,
@@ -31,9 +31,15 @@ pub fn execute<S: Clone + Send + Sync + 'static>(
     }
     if !context.persistent_backend && context.transactions.transaction_depth() == 0 {
         if let Some(plan) = context.cache.cached_optimized_sql_plan(sql) {
-            let executor =
-                UnifiedPlanExecutor::new(context.statements.statement_execution_context(), params);
-            return execute_spilled(&executor, plan.as_ref());
+            if !context.statements.notification_subscriptions_required()
+                || matches!(plan.as_ref(), UnifiedPlan::Query(_))
+            {
+                let executor = UnifiedPlanExecutor::new(
+                    context.statements.statement_execution_context(),
+                    params,
+                );
+                return execute_spilled(&executor, plan.as_ref());
+            }
         }
     }
     execute_uncached_or_snapshot_scoped(context, sql, params)
@@ -57,7 +63,25 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
             cached.optimized_plan,
         )
     } else {
-        let mut statements = compile(sql)
+        let parsed = uqa_sql::parse_statements(sql)
+            .map_err(|error| abort_explicit_statement_error(context.transactions, error))?;
+        if context.statements.notification_subscriptions_required() {
+            for statement in &parsed {
+                context.runtime.cancellation.check().map_err(|error| {
+                    abort_explicit_statement_error(context.transactions, error.into())
+                })?;
+                if statement.is_notification_listener_command() {
+                    return Err(abort_explicit_statement_error(
+                        context.transactions,
+                        SQLError::NotificationRequiresSubscription,
+                    ));
+                }
+            }
+        }
+        let mut statements = parsed
+            .iter()
+            .map(uqa_sql::ParsedStatement::compile)
+            .collect::<Result<Vec<_>, _>>()
             .map_err(|error| abort_explicit_statement_error(context.transactions, error))?;
         if statements.len() != 1 {
             return Err(abort_explicit_statement_error(
@@ -77,6 +101,17 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
         );
         (statement, plan, None)
     };
+    if context.statements.notification_subscriptions_required()
+        && matches!(
+            statement,
+            uqa_sql::Statement::Listen { .. } | uqa_sql::Statement::Unlisten { .. }
+        )
+    {
+        return Err(abort_explicit_statement_error(
+            context.transactions,
+            SQLError::NotificationRequiresSubscription,
+        ));
+    }
     let query = query_from_plan(initial_plan.as_ref())
         .map_err(|error| abort_explicit_statement_error(context.transactions, error))?;
     let has_row_locks = query_has_row_locks(query);
