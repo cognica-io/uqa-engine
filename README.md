@@ -23,19 +23,13 @@ It is designed for applications that need more than a relational table but do no
 - Use the same SQL result and parameter shapes against a local or Cloud UQA node through authenticated Rust, Python, Node.js, and browser HTTP engines.
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
-## New in 0.4.0
+## New in 0.4.5
 
-Version 0.4.0 supports overlapping SQL write transactions on default native SQLite, SQLite Key/Value, and redb. One session can commit independent changes while another keeps uncommitted changes; the latter's commit or rollback preserves the first session's committed work. Shared full-text and vector indexes and durable graph/catalog state participate in atomic publication.
+Version 0.4.5 adds native DiskANN vector indexes through memory, native SQLite, SQLite Key/Value and redb. Bounded graph navigation and product quantization select candidates; complete-tensor reranking preserves canonical cosine scores and the existing probability conversion. Indexes retain transaction, rollback and reopen behavior, and EXPLAIN distinguishes estimated work from actual query counters. See the [SQL configuration and score contract](docs/manual/sql/02-ddl.md#diskann-vector-indexes) and [matching Rust, Python, Node.js and browser examples](examples/README.md).
 
-Create an independent session with `Engine::new_session()` for each SQL conversation; cloning an `Arc<Engine>` still shares one session. UQA coordinates transaction snapshots, private changes, savepoints, and conflicts above the storage providers. SQLite and redb still serialize physical commits, and redb sessions share one provider that exclusively owns the database file. See the [concurrent transaction design](docs/design/concurrent-storage-transactions.md) and [completed acceptance plan](docs/plans/0008-concurrent-storage-transactions.md) for the verified scope.
+Independent SQL notification subscriptions retain their original database and selected role, with bounded queues and explicit cleanup. Rust, Python, Node.js and Browser WASM also provide authenticated HTTP/SSE clients with visible loss and reconnection events for compatible servers. See the [direct Rust API](docs/manual/reference/02-rust-engine-api.md#independent-owned-listeners), [language bindings](docs/manual/reference/08-bindings-and-extensions.md#notification-subscriptions) and [HTTP contract](docs/manual/reference/09-http-engine.md#rust-notification-subscriptions).
 
-The release also corrects PostgreSQL numeric and JSONB ordering, TIME/TIMETZ comparisons, catalog-vector values, array assignments, grouping expressions, and atomic added-column publication. It restores Nori allocation limits, retains fixed index snapshots, and recovers committed notifications after sender loss.
-
-Opening a supported older database upgrades its persistent formats; earlier binaries cannot reopen the upgraded database. Keep a pre-upgrade backup made with all database owners closed, update processes sharing a database together, and read the [MVCC upgrade requirements](docs/manual/reference/10-upgrading.md#040-mvcc-writer-compatibility), [backup restoration contract](docs/manual/reference/04-storage-and-security.md#backups-and-copies), and [0.4.0 release history](HISTORY.md#040---2026-09-25) before upgrading. Rust users must update their dependency requirements from `0.3` to `0.4` and apply the documented API changes.
-
-Current development sources also support native DiskANN through memory, native SQLite, SQLite Key/Value and redb. It is unreleased; see the [SQL configuration and score contract](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/sql/02-ddl.md#diskann-vector-indexes), [matching Rust, Python, Node.js and browser examples](https://github.com/cognica-io/uqa-engine/blob/main/examples/README.md), and [acceptance evidence](https://github.com/cognica-io/uqa-engine/blob/main/docs/plans/0014-diskann-vector-index.md#dependency-order-and-progress-ledger).
-
-Current unreleased development sources provide independent owned SQL notification subscriptions in Rust, Python, Node.js and Browser WASM, plus authenticated HTTP/SSE subscriptions with explicit loss and reconnection events. See the [direct Rust API](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/reference/02-rust-engine-api.md#independent-owned-listeners), [language bindings](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/reference/08-bindings-and-extensions.md#notification-subscriptions) and [HTTP contract](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/reference/09-http-engine.md#rust-notification-subscriptions).
+The release also adds PostgreSQL-compatible `pg_get_userbyid(oid)` and corrects the diagnostic for non-immutable generated expressions. Persistent databases upgrade to SQLite record format 54, native mapping 13 or redb record format 53; earlier incompatible binaries cannot reopen upgraded state. Close every database owner before taking a pre-upgrade backup, update all owners together, and follow the [0.4.5 upgrade guide](docs/manual/reference/10-upgrading.md). See the [release history](HISTORY.md#045---2026-09-28) for the complete changes.
 
 ## Mathematical foundation
 
@@ -48,7 +42,7 @@ The manuscript consolidates and revises the published work on [unified query alg
 Install the prebuilt Python package to get both the Python binding and the `usql` command:
 
 ```sh
-python -m pip install uqa==0.4.0
+python -m pip install uqa==0.4.5
 usql
 ```
 
@@ -100,7 +94,7 @@ cargo run -p uqa-cli --bin usql -- -c "SELECT 1 AS ready"
 Add the released package to your application:
 
 ```sh
-cargo add uqa@0.4.0
+cargo add uqa@0.4.5
 ```
 
 `uqa` is the primary Rust package on crates.io. It is a thin facade over `uqa-engine` that also re-exports the core `Value` type; applications that need the implementation package directly can depend on `uqa-engine`. Public component crates including `uqa-engine`, `uqa-client`, `uqa-api`, and `uqa-cli` are also published independently. The following example creates an in-memory engine, inserts data, and runs SQL through the same interface used by a persistent engine.
