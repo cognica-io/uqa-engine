@@ -140,7 +140,7 @@ impl ManagedConnection {
         let spec = spec()?;
         let initial = spec.open(false)?;
         let connection = Self {
-            pool: ConnectionPool::new(spec, initial, default_pool_connections(), Some(owner)),
+            pool: ConnectionPool::new(spec, initial, default_pool_connections(), Some(owner))?,
             session: Arc::new(SessionState::new()),
             record_access: false,
         };

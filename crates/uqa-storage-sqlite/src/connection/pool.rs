@@ -11,8 +11,8 @@ use rusqlite::Connection;
 use std::sync::Arc;
 
 use super::{
-    ownership::DatabaseOwner, snapshot::PhysicalConnection, ConnectionSpec, ManagedConnection,
-    Result, SQLiteError,
+    ownership::DatabaseOwner, snapshot::PhysicalConnection, source::DatabaseSource, ConnectionSpec,
+    ManagedConnection, Result, SQLiteError,
 };
 
 struct PoolState {
@@ -41,18 +41,28 @@ pub(super) struct ConnectionPool {
     /// same connection, and encrypted databases must not repeat key
     /// derivation merely to create a request-local change monitor.
     pub(super) data_version_monitor: Mutex<Option<Connection>>,
+    source: Option<DatabaseSource>,
     // Keep restoration excluded until every physical connection has closed.
     pub(super) owner: Option<Arc<DatabaseOwner>>,
 }
 
 impl ConnectionPool {
     pub(super) fn new(
-        spec: ConnectionSpec,
+        mut spec: ConnectionSpec,
         initial: Connection,
         max_connections: usize,
         owner: Option<Arc<DatabaseOwner>>,
-    ) -> Arc<Self> {
-        Arc::new(Self {
+    ) -> Result<Arc<Self>> {
+        let source = DatabaseSource::capture(&mut spec, &initial)?;
+        // The stable SQLite monitor pins the original file identity even if all
+        // checkout connections are discarded. A separate Unix File must not be
+        // opened and closed here: close can release other SQLite POSIX locks.
+        let (idle, monitor) = if source.is_some() {
+            (Vec::new(), Some(initial))
+        } else {
+            (vec![PhysicalConnection::new(initial)], None)
+        };
+        Ok(Arc::new(Self {
             memory_identity: Mutex::new(None),
             serializable_leases: Mutex::new(None),
             receipt_state: Arc::default(),
@@ -61,13 +71,29 @@ impl ConnectionPool {
             spec,
             max_connections: max_connections.max(1),
             state: Mutex::new(PoolState {
-                idle: vec![PhysicalConnection::new(initial)],
-                open: 1,
+                open: idle.len(),
+                idle,
             }),
             available: Condvar::new(),
-            data_version_monitor: Mutex::new(None),
+            data_version_monitor: Mutex::new(monitor),
+            source,
             owner,
-        })
+        }))
+    }
+
+    pub(super) fn check_source(&self) -> Result<()> {
+        self.source.as_ref().map_or(Ok(()), DatabaseSource::check)
+    }
+
+    pub(super) fn open_connection(&self) -> Result<Connection> {
+        self.check_source()?;
+        let connection = self.spec.open(false);
+        self.check_source()?;
+        let connection = connection?;
+        if let Some(source) = &self.source {
+            source.check_connection(&connection)?;
+        }
+        Ok(connection)
     }
 
     pub(super) fn checkout(self: &Arc<Self>) -> Result<PooledConnection> {
@@ -82,6 +108,7 @@ impl ConnectionPool {
             if let Some(cancellation) = cancellation {
                 cancellation.check()?;
             }
+            self.check_source()?;
             let mut state = self.state.lock();
             if let Some(connection) = state.idle.pop() {
                 return Ok(PooledConnection {
@@ -92,7 +119,7 @@ impl ConnectionPool {
             if state.open < self.max_connections {
                 state.open += 1;
                 drop(state);
-                return match self.spec.open(false) {
+                return match self.open_connection() {
                     Ok(connection) => Ok(PooledConnection {
                         pool: Arc::clone(self),
                         connection: Some(PhysicalConnection::new(connection)),
