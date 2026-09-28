@@ -4155,6 +4155,7 @@ dependencies = [
  "uqa-graph",
  "uqa-scoring",
  "uqa-storage",
+ "windows-sys 0.61.2",
  "zstd",
 ]
 

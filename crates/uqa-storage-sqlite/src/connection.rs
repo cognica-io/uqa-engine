@@ -34,6 +34,7 @@ pub(crate) use pool::PooledConnection;
 mod notifications;
 mod serializable;
 mod snapshot;
+mod source;
 use snapshot::PhysicalConnection;
 pub(crate) use snapshot::SnapshotIdentity;
 
@@ -102,6 +103,8 @@ pub enum SQLiteError {
     SessionOptionsMismatch,
     #[error("the SQLite session is bound to a different record mapping")]
     SessionMappingMismatch,
+    #[error("the retained SQLite database source changed; close its owners and reopen explicitly")]
+    DatabaseSourceChanged,
 }
 
 pub type Result<T> = std::result::Result<T, SQLiteError>;
@@ -129,9 +132,13 @@ enum ConnectionSpec {
 
 impl ConnectionSpec {
     fn open(&self, initialize_database: bool) -> Result<Connection> {
+        let mut flags = OpenFlags::default();
+        if !initialize_database && matches!(self, Self::File { .. } | Self::Auxiliary { .. }) {
+            flags.remove(OpenFlags::SQLITE_OPEN_CREATE);
+        }
         match self {
             Self::File { path, key } | Self::Auxiliary { path, key } => {
-                let conn = Connection::open(path)?;
+                let conn = Connection::open_with_flags(path, flags)?;
                 if let Some(key) = key {
                     ManagedConnection::apply_encryption_key(&conn, key.expose_secret())?;
                 }
@@ -156,11 +163,8 @@ impl ConnectionSpec {
             Self::Compressed {
                 path, compression, ..
             } => {
-                let conn = Connection::open_with_flags_and_vfs(
-                    path,
-                    OpenFlags::default(),
-                    compressed_vfs::VFS_NAME,
-                )?;
+                let conn =
+                    Connection::open_with_flags_and_vfs(path, flags, compressed_vfs::VFS_NAME)?;
                 if initialize_database {
                     conn.pragma_update(None, "page_size", compression.page_size)?;
                     ManagedConnection::enable_compressed_journal(&conn)?;
@@ -395,7 +399,7 @@ impl ManagedConnection {
         let initial = spec.open(true)?;
         crate::mvcc::restore::reject_pending(&initial)?;
         Ok(Self {
-            pool: ConnectionPool::new(spec, initial, max_connections, owner),
+            pool: ConnectionPool::new(spec, initial, max_connections, owner)?,
             session: Arc::new(SessionState::new()),
             record_access: false,
         })
@@ -518,6 +522,7 @@ impl ManagedConnection {
     /// connections and therefore return `None`.
     pub fn data_version(&self) -> Result<Option<u64>> {
         let _gate = self.session.gate.read();
+        self.pool.check_source()?;
         if let Some(logical) = self.session.logical.get() {
             return logical.change_version().map_err(Into::into);
         }
@@ -526,7 +531,7 @@ impl ManagedConnection {
         }
         let mut monitor = self.pool.data_version_monitor.lock();
         if monitor.is_none() {
-            *monitor = Some(self.pool.spec.open(false)?);
+            *monitor = Some(self.pool.open_connection()?);
         }
         let monitor = monitor.as_ref().ok_or_else(|| {
             SQLiteError::StorageBackend(

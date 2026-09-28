@@ -4,6 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+#[cfg(unix)]
+mod source_identity;
+
 use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration;
@@ -223,7 +226,8 @@ fn logical_sessions_share_the_pool_data_version_monitor() {
     let second = base.new_session();
 
     assert!(Arc::ptr_eq(&first.pool, &second.pool));
-    assert!(base.pool.data_version_monitor.lock().is_none());
+    // The original connection also pins the pool's physical source identity.
+    assert!(base.pool.data_version_monitor.lock().is_some());
     let first_version = first.data_version().unwrap();
     assert!(base.pool.data_version_monitor.lock().is_some());
     assert_eq!(second.data_version().unwrap(), first_version);
