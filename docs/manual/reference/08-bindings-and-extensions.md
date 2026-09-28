@@ -85,6 +85,48 @@ Use `uqa.vector(values)` and `uqa.tensor(rows)` for explicit retrieval parameter
 
 Heavy engine work releases the Python interpreter lock where the method contract permits it. A Python callback necessarily re-enters Python.
 
+### Notification subscriptions
+
+Development sources add `engine.subscribe_notifications(channels, *, options)` and `engine.subscribe_notifications_async(channels, *, options)` to both `Engine` and `HttpEngine`. The synchronous call returns a ready `NotificationSubscription` supporting `with`, iteration, `next_event()` and `close()`. The asynchronous call returns a one-use awaitable and asynchronous context manager; awaiting it returns an `AsyncNotificationSubscription` supporting `async for` and `aclose()`. HTTP readiness requires a valid protocol `ready` event, and an unsupported endpoint raises `NotificationError` without falling back to SQL `LISTEN`. Actual Cloud endpoint implementation remains tracked in the [implementation ledger](../../plans/0015-sql-notifications-and-sse.md).
+
+`channels` is a nonempty sequence of unique, nonempty, NUL-free exact UTF-8 strings, each at most 63 bytes. Embedded options use `NotificationSubscriptionOptions` with five required positive limits: `max_active_subscriptions`, `max_channels`, `max_queued_notifications`, `max_queued_bytes` and `max_registry_entries_per_poll`. They retain the [Rust listener's admission and queue accounting](02-rust-engine-api.md#independent-owned-listeners). HTTP uses `HttpNotificationOptions` with required positive `max_channels`, `max_queued_events`, `max_queued_bytes`, `max_transport_chunk_bytes`, `connect_timeout_ms`, `ready_timeout_ms` and `max_idle_timeout_ms`. Optional `retry` accepts `NotificationRetryOptions(max_attempts=..., episode_timeout_ms=..., initial_backoff_ms=..., max_backoff_ms=..., max_retry_after_ms=...)`; `None` disables reconnect. These map directly to the [Rust HTTP limits and budget validation](09-http-engine.md#rust-notification-subscriptions), without inferred deployment defaults.
+
+Creating an embedded asynchronous registration reserves its original Engine's shared subscription capacity immediately, before returning the awaitable or submitting executor work. An unstarted registration therefore counts toward `max_active_subscriptions`, and capacity exhaustion can raise `NotificationError` from the factory call itself. Starting the awaitable transfers the same reservation into its listener; failed or abandoned registration cleanup releases it.
+
+Each frozen `NotificationEvent` has `kind` equal to `notification`, `resync_required` or `reconnected`, plus `epoch` and optional `request_id`. Notification events additionally expose exact Python integer `sequence` and `process_id`, and unchanged string `channel` and `payload`; these four fields are `None` for lifecycle events. A resynchronization event supplies a stable `cause` code. Python integers preserve the entire unsigned 64-bit sequence range. `Reconnected` changes the handle's visible identity before that event is returned and precedes replacement data. An embedded handle has no HTTP request identity.
+
+An embedded subscription retains the original memory or persistent database, encryption and selected role independently of its creating Engine's transaction and low-level SQL listener. Closing the creating Engine does not close that subscription. Synchronous registration, receive and cleanup release the GIL; asynchronous receive waits without occupying a Python executor thread. Use one consumer and one asyncio loop per asynchronous handle. Receive/registration cancellation signals and joins the actual native operation and resource cleanup before raising `asyncio.CancelledError`, including when the task is cancelled again while cleaning up. `close()` and `aclose()` are idempotent; explicit closure ends a pending iteration normally. Garbage collection schedules fallback cleanup but is not a completion boundary. Close every retained subscription before replacing database files.
+
+Native failures raise `NotificationError` with a content-free `code` and typed `failure`. `NotificationFailure` exposes its code, optional HTTP status, original/last-attempt retry failures and an explicitly requested private `diagnostic`. Normal representations omit payloads, channels and credentials. Invalid concurrent consumers and repeated registration awaits use the same stable `NOTIFICATION_INVALID_REQUEST` error. Python argument type/range conversion can also raise ordinary Python exceptions before admission. `is_closed` describes ended delivery; explicit close/context exit establishes cleanup completion. The [Python preservation proof](../../design/python-notification-subscriptions.md) states exact conversion, lifecycle correspondence and resource-accounting limits.
+
+The following limits serve this small memory fixture and are not capacity recommendations:
+
+```python
+import asyncio
+import uqa
+
+options = uqa.NotificationSubscriptionOptions(
+    max_active_subscriptions=2, max_channels=1,
+    max_queued_notifications=2, max_queued_bytes=8192,
+    max_registry_entries_per_poll=2,
+)
+engine = uqa.Engine()
+with engine.subscribe_notifications(["jobs"], options=options) as subscription:
+    engine.sql("NOTIFY jobs, 'committed'")
+    event = next(subscription)
+    assert (event.sequence, event.payload) == (1, "committed")
+
+async def consume():
+    async with engine.subscribe_notifications_async(["jobs"], options=options) as subscription:
+        engine.sql("NOTIFY jobs, 'async'")
+        async for event in subscription:
+            assert event.payload == "async"
+            break
+
+asyncio.run(consume())
+engine.close()
+```
+
 ## Node.js
 
 The Node-API package requires Node.js 16 or newer. Expensive query and search methods have asynchronous forms; selected operations also expose `Sync` variants.

@@ -12,6 +12,13 @@ from ._uqa import (
     Engine,
     HttpEngine,
     HttpSQLStream,
+    HttpNotificationOptions,
+    NotificationError,
+    NotificationEvent,
+    NotificationFailure,
+    NotificationRetryOptions,
+    NotificationSubscription,
+    NotificationSubscriptionOptions,
     SQLParam,
     SQLResult,
     __version__,
@@ -27,10 +34,20 @@ from ._uqa import (
     vector,
 )
 
+from ._notifications import AsyncNotificationSubscription
+
 __all__ = [
     "Engine",
     "HttpEngine",
     "HttpSQLStream",
+    "HttpNotificationOptions",
+    "NotificationError",
+    "NotificationEvent",
+    "NotificationFailure",
+    "NotificationRetryOptions",
+    "NotificationSubscription",
+    "NotificationSubscriptionOptions",
+    "AsyncNotificationSubscription",
     "SQLParam",
     "SQLResult",
     "__version__",
