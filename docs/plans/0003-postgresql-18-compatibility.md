@@ -61,6 +61,10 @@ The Nori baseline failures were [#141](https://github.com/cognica-io/uqa-engine/
 
 Comparison acceptance uses PostgreSQL 18 Docker output as the external SQL oracle and tests internal total-order transitivity separately from SQL operator-selected coercions. It checks both operand directions, signed zero, infinities/NaN and precision/day boundaries, followed by equality versus canonical hash keys, ordered containers, DISTINCT/grouping, scan/index agreement and reopen where affected. Existing expected values must be audited against the oracle; a passing incorrect expectation is not evidence. Preserve compact executable fixtures and provenance, keep raw diagnostics outside the repository, and run only checks affected by each change.
 
+## Procedure and function candidate correction
+
+The historical overload branch retained a regression that did not reach the split implementation PRs: a procedure with the same signature as a built-in was discarded before candidate ranking, allowing the built-in to run. SQL now retains both routine kinds through signature shadowing and ranking, then validates the selected kind. PostgreSQL 18.4 independently confirms the scalar/table and named-call diagnostics, catalog precedence, mixed integer/bigint overload ranking and unknown-argument ambiguity in [the compact oracle](../../tests/parity/pg18/routine_kind_selection_oracle.sql). All 1,023 SQL owner tests and ten public Engine MD5 and CALL overload regressions pass; the independent oracle records twelve outcomes and separate diagnostic hints. Retained built-in bindings still resolve after search-path changes. This correction introduces no dependency or feature change.
+
 ## Legacy-vector correction acceptance
 
 The `fix/pg18-legacy-vector-values` follow-up addresses issue #123 after PR #137. Core owns the typed scalar carrier, comparison, keys, admitted copying and decoding; SQL owns casts, declared domains, array shape and text/JSON behavior; Execution owns index-domain keys and restoration scheduling. Engine supplies its existing initial transaction and retained state adapters. No new crate dependency or capability exception is required.
@@ -163,6 +167,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `functions.to-reg-object-lookups` | `M1` | `verified` |
 | `routines.scalar-domain-overload-resolution` | `M1` | `verified` |
 | `routines.procedure-call-overload-resolution` | `M1` | `verified` |
+| `routines.procedure-function-kind-selection` | `M1` | `verified` |
 | `routines.table-setof-overload-resolution` | `M1` | `verified` |
 | `routines.stored-view-function-drop-restrict` | `M1` | `verified` |
 | `routines.polymorphic-variadic-pseudotype-overloads` | `M4` | `verified` |

@@ -166,3 +166,45 @@ fn pg18_set_returning_user_overload_uses_the_combined_stable_binding() {
         Value::Str("900150983cd24fb0d6963f7d28e17f72".into())
     );
 }
+
+#[test]
+fn procedure_shadowing_is_rejected_after_builtin_candidate_selection() {
+    let eng = engine();
+    for sql in [
+        "CREATE SCHEMA md5_procedure",
+        "CREATE PROCEDURE md5_procedure.md5(value TEXT) AS $$ BEGIN NULL; END; $$ LANGUAGE plpgsql",
+        "SET search_path = md5_procedure, pg_catalog, public",
+    ] {
+        eng.sql(sql, &[]).unwrap();
+    }
+
+    for (sql, signature) in [
+        ("SELECT md5('abc'::text)", "md5(text)"),
+        ("SELECT * FROM md5('abc'::text)", "md5(text)"),
+        ("SELECT md5(value => 'abc'::text)", "md5(value => text)"),
+        (
+            "SELECT * FROM md5(value => 'abc'::text)",
+            "md5(value => text)",
+        ),
+        (
+            "SELECT md5_procedure.md5('abc'::text)",
+            "md5_procedure.md5(text)",
+        ),
+    ] {
+        let error = eng.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42809"), "{sql}: {error}");
+        assert_eq!(error.to_string(), format!("{signature} is a procedure"));
+        let uqa_sql::SQLError::Diagnostic { detail, hint, .. } = error else {
+            panic!("expected separate PostgreSQL diagnostic fields: {sql}");
+        };
+        assert_eq!(detail, None);
+        assert_eq!(hint.as_deref(), Some("To call a procedure, use CALL."));
+    }
+
+    eng.sql("SET search_path = pg_catalog, md5_procedure, public", &[])
+        .unwrap();
+    assert_eq!(
+        scalar(&eng, "SELECT md5('abc'::text)"),
+        Value::Str("900150983cd24fb0d6963f7d28e17f72".into()),
+    );
+}

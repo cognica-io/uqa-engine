@@ -1,0 +1,12 @@
+scalar|42809|md5(text) is a procedure|To call a procedure, use CALL.
+table|42809|md5(text) is a procedure|To call a procedure, use CALL.
+named-scalar|42809|md5(value => text) is a procedure|To call a procedure, use CALL.
+named-table|42809|md5(value => text) is a procedure|To call a procedure, use CALL.
+qualified|42809|uqa_routine_kind.md5(text) is a procedure|To call a procedure, use CALL.
+catalog-first|00000|900150983cd24fb0d6963f7d28e17f72
+implicit-catalog|00000|900150983cd24fb0d6963f7d28e17f72
+integer-function|00000|7
+bigint-procedure|42809|pick(bigint) is a procedure|To call a procedure, use CALL.
+unknown-ambiguity|42725|function pick(unknown) is not unique|Could not choose a best candidate function. You might need to add explicit type casts.
+call-function|42809|pick(integer) is not a procedure|To call a function, use SELECT.
+named-call-function|42809|pick(value => integer) is not a procedure|To call a function, use SELECT.
