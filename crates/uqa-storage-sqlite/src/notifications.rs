@@ -6,6 +6,7 @@
 
 //! Physical notification registry transactions and encrypted connection ownership.
 
+mod control;
 mod publication;
 mod reservations;
 mod scan;
@@ -38,10 +39,19 @@ impl NotificationRegistry {
     pub fn begin(&self) -> StorageBackendResult<NotificationRegistryTransaction> {
         open_registry_transaction(&self.connection)
     }
+
+    /// Admit the original registry writer with cancellable pool, native lock and statement waits. Cancellation rolls back unfinished work; it never replays an evaluated statement.
+    pub fn begin_with_control(
+        &self,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<NotificationRegistryTransaction> {
+        open_controlled_registry_transaction(&self.connection, Some(control))
+    }
 }
 
 pub struct NotificationRegistryTransaction {
     connection: SQLiteConnectionLease,
+    control: Option<uqa_storage::read_control::StorageReadControl>,
     finished: bool,
     poisoned: bool,
     pending_acknowledgement: Option<[u8; 32]>,
@@ -54,6 +64,7 @@ impl NotificationRegistryTransaction {
     }
 
     pub fn allocate_backend_process_id(&self) -> Result<i32, StorageBackendError> {
+        let _operation = control::operation(&self.connection, self.control.as_ref())?;
         let next = self
             .connection
             .query_row(
@@ -82,6 +93,7 @@ impl NotificationRegistryTransaction {
     }
 
     pub fn queue_state(&self) -> Result<NotificationQueueState, StorageBackendError> {
+        let _operation = control::operation(&self.connection, self.control.as_ref())?;
         self.connection
             .query_row(
                 "SELECT next_sequence, head_position FROM queue_state WHERE singleton = 1",
@@ -101,6 +113,7 @@ impl NotificationRegistryTransaction {
         &self,
         state: NotificationQueueState,
     ) -> Result<(), StorageBackendError> {
+        let _operation = control::operation(&self.connection, self.control.as_ref())?;
         self.connection
             .execute(
                 "UPDATE queue_state SET next_sequence = ?1, head_position = ?2 WHERE singleton = 1",
@@ -117,6 +130,7 @@ impl NotificationRegistryTransaction {
         &self,
         entries: &[NotificationQueueEntry],
     ) -> Result<(), StorageBackendError> {
+        let _operation = control::operation(&self.connection, self.control.as_ref())?;
         let mut statement = self
             .connection
             .prepare_cached(
@@ -140,6 +154,7 @@ impl NotificationRegistryTransaction {
         &self,
         from_sequence: u64,
     ) -> Result<Vec<NotificationQueueEntry>, StorageBackendError> {
+        let _operation = control::operation(&self.connection, self.control.as_ref())?;
         let mut entries = Vec::new();
         self.visit_entries_from(
             from_sequence,
@@ -159,6 +174,7 @@ impl NotificationRegistryTransaction {
     }
 
     pub fn delete_entries_before(&self, sequence: u64) -> Result<(), StorageBackendError> {
+        let _operation = control::operation(&self.connection, self.control.as_ref())?;
         self.connection
             .execute(
                 "DELETE FROM queue_entries WHERE sequence < ?1",
@@ -169,6 +185,7 @@ impl NotificationRegistryTransaction {
     }
 
     pub fn listeners(&self) -> Result<Vec<NotificationListenerRow>, StorageBackendError> {
+        let _operation = control::operation(&self.connection, self.control.as_ref())?;
         let mut statement = self
             .connection
             .prepare_cached(
@@ -226,6 +243,7 @@ impl NotificationRegistryTransaction {
         &self,
         listener: &NotificationListenerRow,
     ) -> Result<(), StorageBackendError> {
+        let _operation = control::operation(&self.connection, self.control.as_ref())?;
         let channels_json = serde_json::to_string(&listener.channels).map_err(|error| {
             StorageBackendError::Other(format!(
                 "encode asynchronous notification listener channels: {error}"
@@ -254,6 +272,7 @@ impl NotificationRegistryTransaction {
         owner_id: [u8; 16],
         session_id: u64,
     ) -> Result<(), StorageBackendError> {
+        let _operation = control::operation(&self.connection, self.control.as_ref())?;
         self.connection
             .execute(
                 "DELETE FROM listeners WHERE owner_id = ?1 AND session_id = ?2",
@@ -263,15 +282,38 @@ impl NotificationRegistryTransaction {
         Ok(())
     }
 
-    pub fn commit(mut self) -> Result<(), StorageBackendError> {
+    /// Complete an already authoritative publication even if its original query was cancelled.
+    pub fn commit(self) -> Result<(), StorageBackendError> {
+        self.commit_inner(None)
+    }
+
+    /// Commit a cancellable registration or consumption attempt. An interrupted native wait drops and rolls back the uncommitted attempt.
+    pub fn commit_with_control(
+        self,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<()> {
+        self.commit_inner(Some(control))
+    }
+
+    fn commit_inner(
+        mut self,
+        control: Option<&uqa_storage::read_control::StorageReadControl>,
+    ) -> StorageBackendResult<()> {
         if self.poisoned {
             return Err(StorageBackendError::Other(
                 "cannot commit notification registry after failed publication rollback".into(),
             ));
         }
+        let operation = match control {
+            Some(control) => {
+                control::operation_with(&self.connection, self.control.as_ref(), Some(control))?
+            }
+            None => control::operation(&self.connection, None)?,
+        };
         self.connection
             .execute_batch("COMMIT")
             .map_err(|error| registry_error("commit registry transaction", &error))?;
+        drop(operation);
         self.finished = true;
         Ok(())
     }
@@ -286,6 +328,14 @@ impl Drop for NotificationRegistryTransaction {
 }
 
 fn registry_error(action: &str, error: &rusqlite::Error) -> StorageBackendError {
+    if control::interrupted()
+        && matches!(
+            error.sqlite_error_code(),
+            Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::OperationInterrupted)
+        )
+    {
+        return uqa_core::QueryCancelled.into();
+    }
     StorageBackendError::Other(format!(
         "{action} in asynchronous notification registry: {error}"
     ))
@@ -294,29 +344,42 @@ fn registry_error(action: &str, error: &rusqlite::Error) -> StorageBackendError 
 fn open_registry_transaction(
     registry: &ManagedConnection,
 ) -> Result<NotificationRegistryTransaction, StorageBackendError> {
-    let connection = registry.lease_connection().map_err(|error| {
-        StorageBackendError::Other(format!(
-            "lease asynchronous notification registry connection: {error}"
-        ))
-    })?;
-    schema::register_writer(&connection).map_err(StorageBackendError::Other)?;
+    open_controlled_registry_transaction(registry, None)
+}
+
+fn open_controlled_registry_transaction(
+    registry: &ManagedConnection,
+    control: Option<&uqa_storage::read_control::StorageReadControl>,
+) -> StorageBackendResult<NotificationRegistryTransaction> {
+    let connection = match control {
+        Some(control) => registry.lease_connection_with_control(control),
+        None => registry.lease_connection(),
+    }
+    .map_err(StorageBackendError::from)?;
     connection
         .busy_timeout(REGISTRY_BUSY_TIMEOUT)
         .map_err(|error| registry_error("set registry busy timeout", &error))?;
+    let operation = control::operation(&connection, control)?;
+    schema::register_writer(&connection).map_err(control::schema_error)?;
     connection
         .pragma_update(None, "secure_delete", true)
         .map_err(|error| registry_error("enable registry secure deletion", &error))?;
     connection
         .execute_batch("BEGIN IMMEDIATE")
         .map_err(|error| registry_error("begin registry transaction", &error))?;
+    drop(operation);
     let transaction = NotificationRegistryTransaction {
+        control: control.cloned(),
         connection,
         finished: false,
         poisoned: false,
         pending_acknowledgement: None,
         preparing: false,
     };
-    schema::validate_writer(&transaction.connection).map_err(StorageBackendError::Other)?;
+    {
+        let _operation = control::operation(&transaction.connection, transaction.control.as_ref())?;
+        schema::validate_writer(&transaction.connection).map_err(control::schema_error)?;
+    }
     Ok(transaction)
 }
 

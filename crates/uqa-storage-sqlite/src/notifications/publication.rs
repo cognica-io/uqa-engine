@@ -6,6 +6,8 @@
 
 //! Queue publication and its bounded acknowledgement share one registry transaction.
 
+use super::control;
+
 use super::{
     fixed_bytes, nonnegative_u64, registry_error, sqlite_integer, NotificationListenerRow,
     NotificationRegistry, NotificationRegistryTransaction, StorageBackendError,
@@ -70,8 +72,9 @@ impl NotificationRegistry {
         if pending || local_owners.is_empty() {
             return Ok(pending);
         }
-        let connection = self.connection.lease_connection()?;
-        super::schema::validate_writer(&connection).map_err(StorageBackendError::Other)?;
+        let connection = self.connection.lease_connection_with_control(control)?;
+        let _operation = control::operation(&connection, Some(control))?;
+        super::schema::validate_writer(&connection).map_err(control::schema_error)?;
         let mut statement = connection.prepare_cached(
             "SELECT EXISTS (SELECT 1 FROM listeners, queue_state WHERE queue_state.singleton = 1 AND listeners.owner_id = ?1 AND listeners.transaction_open = 0 AND listeners.next_sequence < queue_state.next_sequence)",
         ).map_err(|error| registry_error("prepare committed polling state", &error))?;
@@ -96,7 +99,7 @@ impl NotificationRegistry {
         let mut acknowledged = None;
         loop {
             control.check()?;
-            let mut transaction = self.begin()?;
+            let mut transaction = self.begin_with_control(control)?;
             let mut recovered = None;
             store.visit_notification_publication(control, &mut |publication| {
                 if let Some(publication) = publication {
@@ -112,7 +115,7 @@ impl NotificationRegistry {
                 transaction.pending_acknowledgement = acknowledged;
                 return Ok(transaction);
             }
-            transaction.commit()?;
+            transaction.commit_with_control(control)?;
             if !store.try_acknowledge_notification_publication(fingerprint, control)? {
                 acknowledged = Some(fingerprint);
             }
@@ -129,6 +132,8 @@ impl NotificationRegistryTransaction {
         listener: Option<&NotificationListenerRow>,
         control: &StorageReadControl,
     ) -> StorageBackendResult<NotificationPublication> {
+        let operation =
+            control::operation_with(&self.connection, self.control.as_ref(), Some(control))?;
         control.check()?;
         let state = state(&self.connection)?;
         let queue = self.queue_state()?;
@@ -145,6 +150,7 @@ impl NotificationRegistryTransaction {
             control,
         )
         .map_err(VersionError::into_storage_error)?;
+        drop(operation);
         self.apply_publication(publication.view(), control)?;
         Ok(publication)
     }
@@ -160,7 +166,16 @@ impl NotificationRegistryTransaction {
             .connection
             .savepoint()
             .map_err(|error| registry_error("begin publication savepoint", &error))?;
-        if let Err(error) = apply(&savepoint, publication, control) {
+        let result = {
+            let _operation =
+                control::operation_with(&savepoint, self.control.as_ref(), Some(control))?;
+            apply(&savepoint, publication, control)
+        };
+        if let Err(error) = result {
+            if savepoint.is_autocommit() && matches!(&error, StorageBackendError::Cancelled(_)) {
+                self.poisoned = true;
+                return Err(error);
+            }
             if let Err(rollback) = savepoint.rollback().and_then(|()| savepoint.commit()) {
                 self.poisoned = true;
                 return Err(StorageBackendError::Other(format!(
