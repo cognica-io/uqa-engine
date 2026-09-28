@@ -23,7 +23,7 @@ static HTTP_RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
 #[pyclass(name = "HttpEngine", module = "uqa._uqa")]
 pub(super) struct PyHttpEngine {
-    inner: Arc<HttpEngine>,
+    pub(super) inner: Arc<HttpEngine>,
 }
 
 #[pyclass(name = "HttpSQLStream", module = "uqa._uqa")]
@@ -228,7 +228,7 @@ fn borrowed_statements(statements: &[(String, Vec<SQLParam>)]) -> Vec<(&str, &[S
         .collect()
 }
 
-fn http_runtime() -> PyResult<&'static Runtime> {
+pub(super) fn http_runtime() -> PyResult<&'static Runtime> {
     if let Some(runtime) = HTTP_RUNTIME.get() {
         return Ok(runtime);
     }

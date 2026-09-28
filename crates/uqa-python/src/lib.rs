@@ -35,6 +35,7 @@ mod errors;
 mod http_engine;
 mod inputs;
 mod migration;
+mod notifications;
 mod options;
 mod output;
 mod params;
@@ -87,6 +88,18 @@ fn uqa_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyEngine>()?;
     m.add_class::<PyHttpEngine>()?;
     m.add_class::<PyHttpSQLStream>()?;
+    m.add_class::<notifications::PyNotificationOptions>()?;
+    m.add_class::<notifications::PyHttpNotificationOptions>()?;
+    m.add_class::<notifications::PyNotificationRetryOptions>()?;
+    m.add_class::<notifications::PyNotificationEvent>()?;
+    m.add_class::<notifications::PyNotificationFailure>()?;
+    m.add_class::<notifications::PyNotificationSubscription>()?;
+    m.add_class::<notifications::PyNotificationRegistration>()?;
+    m.add_function(wrap_pyfunction!(notifications::_invalid_notification, m)?)?;
+    m.add(
+        "NotificationError",
+        m.py().get_type::<notifications::NotificationError>(),
+    )?;
     m.add_class::<PySQLParam>()?;
     m.add_class::<PySQLResult>()?;
     m.add_function(wrap_pyfunction!(open, m)?)?;
