@@ -274,26 +274,51 @@ fn closing_during_preparation_discards_the_private_values() {
 
 #[test]
 fn receive_timeout_keeps_registration_and_close_wakes_waiters() {
+    for timeout in [Duration::from_secs(30), Duration::MAX] {
+        let inbox = inbox(options());
+        assert_eq!(
+            inbox.wait(Duration::ZERO).unwrap(),
+            NotificationWait::TimedOut
+        );
+        assert!(!inbox.is_closed());
+        inbox.deliver(7, "events", "after timeout");
+        take(&inbox, 1, "after timeout");
+        let ready = Arc::new(std::sync::Barrier::new(2));
+        let waiter = {
+            let inbox = inbox.clone();
+            let ready = ready.clone();
+            std::thread::spawn(move || {
+                ready.wait();
+                inbox.wait(timeout).unwrap()
+            })
+        };
+        ready.wait();
+        inbox.close();
+        assert_eq!(waiter.join().unwrap(), NotificationWait::Closed);
+    }
+}
+
+#[test]
+fn maximum_receive_timeout_preserves_events_and_terminal_errors() {
     let inbox = inbox(options());
-    assert_eq!(
-        inbox.wait(Duration::ZERO).unwrap(),
-        NotificationWait::TimedOut
-    );
-    assert!(!inbox.is_closed());
-    inbox.deliver(7, "events", "after timeout");
-    take(&inbox, 1, "after timeout");
-    let ready = Arc::new(std::sync::Barrier::new(2));
-    let waiter = {
-        let inbox = inbox.clone();
-        let ready = ready.clone();
-        std::thread::spawn(move || {
-            ready.wait();
-            inbox.wait(Duration::from_secs(30)).unwrap()
-        })
+    inbox.deliver(7, "events", "committed");
+    let NotificationWait::Event(NotificationEvent::Notification {
+        sequence,
+        notification,
+        ..
+    }) = inbox.wait(Duration::MAX).unwrap()
+    else {
+        panic!("the queued event must remain available")
     };
-    ready.wait();
-    inbox.close();
-    assert_eq!(waiter.join().unwrap(), NotificationWait::Closed);
+    assert_eq!(sequence, 1);
+    assert_eq!(notification.payload, "committed");
+    inbox.fail(NotificationSubscriptionError::new(
+        NotificationFailureKind::SourceUnavailable,
+    ));
+    assert_eq!(
+        inbox.wait(Duration::MAX).unwrap_err().kind(),
+        NotificationFailureKind::SourceUnavailable
+    );
 }
 
 #[test]

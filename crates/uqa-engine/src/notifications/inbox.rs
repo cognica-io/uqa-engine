@@ -180,9 +180,7 @@ impl SubscriptionInbox {
         &self,
         timeout: Duration,
     ) -> Result<NotificationWait, NotificationSubscriptionError> {
-        let deadline = Instant::now().checked_add(timeout).ok_or_else(|| {
-            NotificationSubscriptionError::new(NotificationFailureKind::InvalidRequest)
-        })?;
+        let started = Instant::now();
         let mut state = self.state.lock();
         loop {
             match state.poll(&self.identity, &self.memory)? {
@@ -190,7 +188,7 @@ impl SubscriptionInbox {
                 Poll::Ready(None) => return Ok(NotificationWait::Closed),
                 Poll::Pending => {}
             }
-            let remaining = deadline.saturating_duration_since(Instant::now());
+            let remaining = timeout.saturating_sub(started.elapsed());
             if remaining.is_zero() {
                 return Ok(NotificationWait::TimedOut);
             }
