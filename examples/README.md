@@ -12,7 +12,7 @@ The example suite is organized by language binding and platform. Every public bi
 
 Start with unified search for the complete relational, full-text, vector, graph, fusion, and host-language UDF story. Use the focused scenarios when learning or verifying one subsystem.
 
-The vector scenario compares exact, HNSW, IVF and DiskANN access using one six-row fixture. It binds typed vector parameters, checks literal row identities and canonical-score equality, rolls back a private replacement, commits a replacement and verifies all rows and scores after closing and reopening SQLite. The Rust example also runs the scenario in memory. Real-browser verification checkpoints IndexedDB and repeats the DiskANN assertions after a fresh page load. These are functional examples for UQA Engine 0.4.5; the small fixture is not a general recall or performance benchmark.
+The vector scenario compares exact, HNSW, IVF and DiskANN access using one six-row fixture. It binds typed vector parameters, checks literal row identities and canonical-score equality, rolls back a private replacement, commits a replacement and verifies all rows and scores after closing and reopening SQLite. The Rust example also runs the scenario in memory. Real-browser verification checkpoints IndexedDB and repeats the DiskANN assertions after a fresh page load. These are functional examples for UQA Engine 0.4.6; the small fixture is not a general recall or performance benchmark.
 
 ## Run by binding
 

@@ -1,8 +1,10 @@
-# Upgrading to UQA Engine 0.4.5
+# Upgrading to UQA Engine 0.4.6
 
-Version 0.4.5 adds native DiskANN vector indexes and independent SQL notification subscriptions across Rust, Python, Node.js and Browser WASM, including authenticated HTTP/SSE clients for compatible servers. It also adds PostgreSQL-compatible `pg_get_userbyid(oid)` and corrects the diagnostic for non-immutable generated expressions. See the [release history](../../../HISTORY.md#045---2026-09-28).
+Version 0.4.6 corrects procedure/function overload selection to match PostgreSQL 18 and restores the existing Nori allocation limits across analysis, phrase matching and persistent indexing. It includes the native DiskANN indexes, owned SQL notification subscriptions, authenticated HTTP/SSE clients and catalog corrections introduced in 0.4.5. See the [release history](../../../HISTORY.md#046---2026-09-28).
 
-Persistent formats upgrade in one direction. Stop all owners and take a closed-file backup before the first upgraded open; update every process sharing the database together. Earlier incompatible binaries cannot reopen or continue writing upgraded state. Restore the pre-upgrade backup to return to an earlier release. Applications upgrading from before 0.4.0 must also apply the earlier MVCC, Rust API and catalog changes below.
+When upgrading from before 0.4.5, persistent formats upgrade in one direction. Stop all owners and take a closed-file backup before the first upgraded open; update every process sharing the database together. Earlier incompatible binaries cannot reopen or continue writing upgraded state. Restore the pre-upgrade backup to return to an earlier release. Applications upgrading from before 0.4.0 must also apply the earlier MVCC, Rust API and catalog changes below.
+
+Databases already opened with 0.4.5 use the same persistent formats in 0.4.6: SQLite main records 54, native SQLite mapping 13, redb main records 53 and SQL catalog 49.
 
 ## 0.4.5 vector indexes and storage formats
 

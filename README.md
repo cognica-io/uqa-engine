@@ -23,13 +23,15 @@ It is designed for applications that need more than a relational table but do no
 - Use the same SQL result and parameter shapes against a local or Cloud UQA node through authenticated Rust, Python, Node.js, and browser HTTP engines.
 - Embed the engine in Rust or use the Python, Node.js, and browser WASM bindings included in the workspace.
 
-## New in 0.4.5
+## New in 0.4.6
 
-Version 0.4.5 adds native DiskANN vector indexes through memory, native SQLite, SQLite Key/Value and redb. Bounded graph navigation and product quantization select candidates; complete-tensor reranking preserves canonical cosine scores and the existing probability conversion. Indexes retain transaction, rollback and reopen behavior, and EXPLAIN distinguishes estimated work from actual query counters. See the [SQL configuration and score contract](docs/manual/sql/02-ddl.md#diskann-vector-indexes) and [matching Rust, Python, Node.js and browser examples](examples/README.md).
+Version 0.4.6 corrects PostgreSQL function/procedure overload selection and restores the existing Nori allocation limits across analysis, phrase matching and persistent indexing. See the [release history](HISTORY.md#046---2026-09-28).
+
+The engine provides native DiskANN vector indexes through memory, native SQLite, SQLite Key/Value and redb. Bounded graph navigation and product quantization select candidates; complete-tensor reranking preserves canonical cosine scores and the existing probability conversion. Indexes retain transaction, rollback and reopen behavior, and EXPLAIN distinguishes estimated work from actual query counters. See the [SQL configuration and score contract](docs/manual/sql/02-ddl.md#diskann-vector-indexes) and [matching Rust, Python, Node.js and browser examples](examples/README.md).
 
 Independent SQL notification subscriptions retain their original database and selected role, with bounded queues and explicit cleanup. Rust, Python, Node.js and Browser WASM also provide authenticated HTTP/SSE clients with visible loss and reconnection events for compatible servers. See the [direct Rust API](docs/manual/reference/02-rust-engine-api.md#independent-owned-listeners), [language bindings](docs/manual/reference/08-bindings-and-extensions.md#notification-subscriptions) and [HTTP contract](docs/manual/reference/09-http-engine.md#rust-notification-subscriptions).
 
-The release also adds PostgreSQL-compatible `pg_get_userbyid(oid)` and corrects the diagnostic for non-immutable generated expressions. Persistent databases upgrade to SQLite record format 54, native mapping 13 or redb record format 53; earlier incompatible binaries cannot reopen upgraded state. Close every database owner before taking a pre-upgrade backup, update all owners together, and follow the [0.4.5 upgrade guide](docs/manual/reference/10-upgrading.md). See the [release history](HISTORY.md#045---2026-09-28) for the complete changes.
+The engine also provides PostgreSQL-compatible `pg_get_userbyid(oid)` and PostgreSQL diagnostics for non-immutable generated expressions. Persistent databases upgrade to SQLite record format 54, native mapping 13 or redb record format 53; earlier incompatible binaries cannot reopen upgraded state. Close every database owner before taking a pre-upgrade backup, update all owners together, and follow the [0.4.6 upgrade guide](docs/manual/reference/10-upgrading.md). See the [release history](HISTORY.md#046---2026-09-28) for the complete changes.
 
 ## Mathematical foundation
 
@@ -42,7 +44,7 @@ The manuscript consolidates and revises the published work on [unified query alg
 Install the prebuilt Python package to get both the Python binding and the `usql` command:
 
 ```sh
-python -m pip install uqa==0.4.5
+python -m pip install uqa==0.4.6
 usql
 ```
 
@@ -94,7 +96,7 @@ cargo run -p uqa-cli --bin usql -- -c "SELECT 1 AS ready"
 Add the released package to your application:
 
 ```sh
-cargo add uqa@0.4.5
+cargo add uqa@0.4.6
 ```
 
 `uqa` is the primary Rust package on crates.io. It is a thin facade over `uqa-engine` that also re-exports the core `Value` type; applications that need the implementation package directly can depend on `uqa-engine`. Public component crates including `uqa-engine`, `uqa-client`, `uqa-api`, and `uqa-cli` are also published independently. The following example creates an in-memory engine, inserts data, and runs SQL through the same interface used by a persistent engine.
