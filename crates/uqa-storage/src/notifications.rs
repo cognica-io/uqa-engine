@@ -7,15 +7,18 @@
 //! Notification payloads and bounded queue page accounting.
 
 pub mod conformance;
+mod listener_summary;
 mod publication;
 mod registry;
+pub use listener_summary::{NotificationListenerSummary, NotificationWakePorts};
 pub use publication::{
     NotificationMessageRef, NotificationPublication, NotificationPublicationHeader,
     NotificationPublicationStart, NotificationPublicationView, NotificationSubscriptionView,
 };
 pub use registry::{
-    NotificationListenerRow, NotificationQueueEntry, NotificationQueueEntryRef,
-    NotificationQueueScan, NotificationQueueState,
+    NotificationListenerKey, NotificationListenerMetadata, NotificationListenerRow,
+    NotificationQueueEntry, NotificationQueueEntryRef, NotificationQueueScan,
+    NotificationQueueState,
 };
 
 /// Fresh committed publication access is independent of the caller's SQL snapshot. Publication is an auxiliary effect of its current transaction, not a user-data write.

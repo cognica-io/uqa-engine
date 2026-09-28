@@ -7,6 +7,7 @@
 //! Physical notification registry transactions and encrypted connection ownership.
 
 mod control;
+mod listeners;
 mod publication;
 mod reservations;
 mod scan;
@@ -186,57 +187,23 @@ impl NotificationRegistryTransaction {
 
     pub fn listeners(&self) -> Result<Vec<NotificationListenerRow>, StorageBackendError> {
         let _operation = control::operation(&self.connection, self.control.as_ref())?;
-        let mut statement = self
-            .connection
-            .prepare_cached(
-                "SELECT owner_id, session_id, process_id, wake_port, channels_json, transaction_open, next_sequence, position FROM listeners ORDER BY owner_id, session_id",
-            )
-            .map_err(|error| registry_error("prepare listener scan", &error))?;
-        let rows = statement
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, Vec<u8>>(0)?,
-                    row.get::<_, Vec<u8>>(1)?,
-                    row.get::<_, i32>(2)?,
-                    row.get::<_, i64>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, bool>(5)?,
-                    row.get::<_, i64>(6)?,
-                    row.get::<_, i64>(7)?,
-                ))
-            })
+        let mut statement = self.connection.prepare_cached(
+            "SELECT owner_id, session_id, process_id, wake_port, transaction_open, next_sequence, position, channels_json FROM listeners ORDER BY owner_id, session_id",
+        ).map_err(|error| registry_error("prepare listener scan", &error))?;
+        let mut rows = statement
+            .query([])
             .map_err(|error| registry_error("scan listeners", &error))?;
-        rows.map(|row| {
-            let (
-                owner_id,
-                session_id,
-                process_id,
-                wake_port,
-                channels_json,
-                transaction_open,
-                next_sequence,
-                position,
-            ) = row.map_err(|error| registry_error("read listener", &error))?;
-            Ok(NotificationListenerRow {
-                owner_id: fixed_bytes(owner_id, "owner identity")?,
-                session_id: u64::from_be_bytes(fixed_bytes(session_id, "session identity")?),
-                process_id,
-                wake_port: u16::try_from(wake_port).map_err(|_| {
-                    StorageBackendError::Other(format!(
-                        "corrupt asynchronous notification wake port {wake_port}"
-                    ))
-                })?,
-                channels: serde_json::from_str(&channels_json).map_err(|error| {
-                    StorageBackendError::Other(format!(
-                        "decode asynchronous notification listener channels: {error}"
-                    ))
-                })?,
-                transaction_open,
-                next_sequence: nonnegative_u64(next_sequence, "listener sequence")?,
-                position: nonnegative_u64(position, "listener position")?,
-            })
-        })
-        .collect()
+        let mut listeners = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .map_err(|error| registry_error("read listener", &error))?
+        {
+            if let Some(control) = self.control.as_ref() {
+                control.check()?;
+            }
+            listeners.push(listeners::read_listener(row, None)?);
+        }
+        Ok(listeners)
     }
 
     pub fn save_listener(

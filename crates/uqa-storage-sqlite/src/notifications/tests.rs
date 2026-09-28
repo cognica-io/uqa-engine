@@ -11,6 +11,7 @@ use rusqlite::Connection;
 use super::schema::{initialize_registry, open_registry};
 use super::*;
 mod admission;
+mod listeners;
 mod publication;
 mod scan;
 mod serialized;
