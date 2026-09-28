@@ -49,7 +49,8 @@
     "prepared_plan_cost": "tests/parity/pg18/prepared_plan_cost_oracle.expected.json",
     "prepared_plan_settings": "tests/parity/pg18/prepared_plan_settings_oracle.expected.json",
     "prepared_plan_types": "tests/parity/pg18/prepared_plan_types_oracle.expected.json",
-    "concurrent_writes": "tests/parity/pg18/concurrent_writes.expected.json"
+    "concurrent_writes": "tests/parity/pg18/concurrent_writes.expected.json",
+    "routine_kind_selection": "tests/parity/pg18/routine_kind_selection_oracle.expected.txt"
   },
   "parser_chain": {
     "crate": "crates/uqa-pg-query",
@@ -114,6 +115,7 @@
       "functions.to-reg-object-lookups",
       "routines.scalar-domain-overload-resolution",
       "routines.procedure-call-overload-resolution",
+      "routines.procedure-function-kind-selection",
       "routines.table-setof-overload-resolution",
       "routines.stored-view-function-drop-restrict",
       "transactions.snapshot-catalog-visibility",
@@ -475,6 +477,14 @@
       "postgresql_reference": "PostgreSQL 18.4 with Apache AGE live procedure, CALL, and scalar PL/pgSQL candidate-selection results plus PostgreSQL function type-resolution, CREATE FUNCTION, CREATE PROCEDURE, and CALL documentation",
       "uqa_test": "cargo test -p uqa-engine --test integration functions::sql_plpgsql::procedures::procedure_with_inout_via_call; cargo test -p uqa-engine --test integration functions::sql_plpgsql::procedures::call_overload_resolution_; cargo test -p uqa-engine --test integration functions::sql_plpgsql::procedures::procedure_overload_preserves_percent_type_null_variable; cargo test -p uqa-engine --test integration functions::sql_plpgsql::scalar_and_resolution::runtime_overload_resolution_prefers_float8_for_integer_input",
       "supported_version": "PostgreSQL 18.4 candidate selection for implemented procedures, CALL, and scalar PL/pgSQL functions, including scalar-function declared types from direct casts and scalar subqueries, procedure declared types from direct casts, concrete PL/pgSQL datums and typed NULL variables, named and default arguments, exact implemented information-schema domain signatures, CALL subquery rejection, and CALL-visible required OUT/TABLE placeholders used for undefined-procedure and wrong-kind detection without using those wrong-kind cases as table-routine or SETOF execution evidence",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "routines.procedure-function-kind-selection",
+      "postgresql_reference": "PostgreSQL 18.4 Docker oracle: tests/parity/pg18/routine_kind_selection_oracle.sql and routine_kind_selection_oracle.expected.txt; exact server image digest recorded in the SQL fixture",
+      "uqa_test": "cargo test -p uqa-sql --lib routines::resolution::combined_overloads::tests; cargo test -p uqa-engine --test integration functions::pg18_semantics::md5_overloads",
+      "supported_version": "PostgreSQL 18.4 procedure and function candidate selection before wrong-kind validation, covering scalar and table calls, named and qualified signatures, pg_catalog search-path precedence, mixed integer/bigint overload ranking, unknown-argument ambiguity and SQLSTATE 42809 with the CALL hint",
       "status": "verified",
       "open_issue": null
     },

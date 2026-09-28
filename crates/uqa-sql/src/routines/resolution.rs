@@ -301,7 +301,13 @@ impl RoutineOverloadContext<'_> {
                 .map_err(|error| static_signature_error(kind, name, error))?
                 .ok_or_else(|| static_bound_routine_error(kind, binding))?
             };
-            ensure_routine_kind(name, argument_types, kind, &matched.function.def)?;
+            ensure_routine_kind(
+                name,
+                argument_names,
+                argument_types,
+                kind,
+                &matched.function.def,
+            )?;
             return Ok(Some(matched));
         }
         let Some(overloads) = self.catalog.lookup_sql_routine_candidates(name)? else {
@@ -373,7 +379,13 @@ fn resolve_static_routine_overload(
     let matched = candidates
         .pop()
         .ok_or_else(|| SQLError::Internal("resolved routine candidate disappeared".into()))?;
-    ensure_routine_kind(name, argument_types, kind, &matched.function.def)?;
+    ensure_routine_kind(
+        name,
+        argument_names,
+        argument_types,
+        kind,
+        &matched.function.def,
+    )?;
     Ok(matched)
 }
 
@@ -658,6 +670,7 @@ pub(super) fn static_function_return_type(
 
 fn ensure_routine_kind(
     name: &str,
+    argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
     expected: RoutineCallKind,
     definition: &CreateFunction,
@@ -665,15 +678,21 @@ fn ensure_routine_kind(
     if definition.is_procedure == expected.is_procedure() {
         return Ok(());
     }
-    let arguments = static_routine_argument_types(argument_types);
+    let arguments = static_routine_argument_types(argument_names, argument_types);
     let suffix = if definition.is_procedure {
         "is a procedure"
     } else {
         "is not a procedure"
     };
-    Err(SQLError::Routine {
+    Err(SQLError::Diagnostic {
         sqlstate: "42809".into(),
         message: format!("{name}({arguments}) {suffix}"),
+        detail: None,
+        hint: Some(if definition.is_procedure {
+            "To call a procedure, use CALL.".into()
+        } else {
+            "To call a function, use SELECT.".into()
+        }),
     })
 }
 
@@ -696,19 +715,28 @@ fn static_routine_resolution_error(
     argument_types: &[Option<ColumnType>],
     suffix: &str,
 ) -> SQLError {
-    let arguments = static_routine_argument_types(argument_types);
+    let arguments = static_routine_argument_types(&[], argument_types);
     SQLError::Routine {
         sqlstate: sqlstate.into(),
         message: format!("{} {name}({arguments}) {suffix}", kind.name()),
     }
 }
 
-fn static_routine_argument_types(argument_types: &[Option<ColumnType>]) -> String {
+fn static_routine_argument_types(
+    argument_names: &[Option<String>],
+    argument_types: &[Option<ColumnType>],
+) -> String {
     argument_types
         .iter()
-        .map(|ty| {
-            ty.as_ref()
-                .map_or_else(|| "unknown".into(), ColumnType::sql_name)
+        .enumerate()
+        .map(|(index, ty)| {
+            let ty = ty
+                .as_ref()
+                .map_or_else(|| "unknown".into(), ColumnType::regtype_name);
+            argument_names
+                .get(index)
+                .and_then(Option::as_ref)
+                .map_or_else(|| ty.clone(), |name| format!("{name} => {ty}"))
         })
         .collect::<Vec<_>>()
         .join(", ")

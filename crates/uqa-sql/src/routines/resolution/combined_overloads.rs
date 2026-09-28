@@ -6,6 +6,9 @@
 
 //! `PostgreSQL` candidate selection across catalog routines and built-ins.
 
+#[cfg(test)]
+mod tests;
+
 use std::sync::Arc;
 
 use crate::ast::{ColumnType, FunctionBinding, FunctionReturns};
@@ -54,7 +57,6 @@ struct ResolutionRequest<'a> {
 
 struct UserCandidateSet {
     candidates: Vec<FunctionMatch>,
-    procedure_matches: bool,
     match_error: Option<RoutineSignatureMatchError>,
 }
 
@@ -210,7 +212,6 @@ fn resolve_candidates(
 ) -> Result<ResolvedFunctionOverload, SQLError> {
     let UserCandidateSet {
         mut candidates,
-        procedure_matches,
         match_error,
     } = collect_user_candidates(request, users);
     let mut builtin_candidates = builtins
@@ -235,15 +236,11 @@ fn resolve_candidates(
             ));
         }
         return Err(resolution_error(
-            if procedure_matches { "42809" } else { "42883" },
+            "42883",
             request.name,
             request.argument_names,
             request.argument_types,
-            if procedure_matches {
-                "is a procedure"
-            } else {
-                "does not exist"
-            },
+            "does not exist",
         ));
     }
     if !rank_function_matches(&mut candidates, request.argument_types) || candidates.len() != 1 {
@@ -265,7 +262,6 @@ fn collect_user_candidates(
     request: &ResolutionRequest<'_>,
     users: Vec<Arc<SQLUserFunction>>,
 ) -> UserCandidateSet {
-    let mut procedure_matches = false;
     let mut matched_users = Vec::new();
     let mut match_error = None;
     let catalog = request.resolver.catalog.routine_type_snapshot();
@@ -277,7 +273,6 @@ fn collect_user_candidates(
             request.argument_types,
             request.explicit_variadic,
         ) {
-            Ok(Some(_)) if function.def.is_procedure => procedure_matches = true,
             Ok(Some(matched)) => matched_users.push(matched),
             Ok(None) => {}
             Err(error) => {
@@ -298,7 +293,6 @@ fn collect_user_candidates(
         .collect::<Vec<_>>();
     UserCandidateSet {
         candidates,
-        procedure_matches,
         match_error,
     }
 }
@@ -339,6 +333,15 @@ fn resolve_selected_candidate(
     request: &ResolutionRequest<'_>,
     selected: FunctionMatch,
 ) -> Result<ResolvedFunctionOverload, SQLError> {
+    if let FunctionTarget::User(matched) = &selected.target {
+        super::ensure_routine_kind(
+            request.name,
+            request.argument_names,
+            request.argument_types,
+            RoutineCallKind::Function,
+            &matched.function.def,
+        )?;
+    }
     let known_arguments = request.argument_types.iter().flatten().count();
     match selected.target {
         FunctionTarget::User(matched) => Ok(ResolvedFunctionOverload {
@@ -449,21 +452,7 @@ fn resolution_error(
     argument_types: &[Option<ColumnType>],
     suffix: &str,
 ) -> SQLError {
-    let arguments = argument_names
-        .iter()
-        .zip(argument_types)
-        .map(|(argument_name, argument_type)| {
-            let argument_type = argument_type
-                .as_ref()
-                .map_or_else(|| "unknown".into(), ColumnType::regtype_name);
-            argument_name
-                .as_ref()
-                .map_or(argument_type.clone(), |name| {
-                    format!("{name} => {argument_type}")
-                })
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
+    let arguments = super::static_routine_argument_types(argument_names, argument_types);
     SQLError::Routine {
         sqlstate: sqlstate.into(),
         message: format!("function {name}({arguments}) {suffix}"),
