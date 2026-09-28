@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Include the vector benchmark fixtures, manifests and source attribution in the Python source distribution so its included Rust benchmarks have all required inputs.
+
 ## [0.4.5] - 2026-09-28
 
 ### Added
