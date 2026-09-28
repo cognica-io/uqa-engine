@@ -16,6 +16,9 @@ keywords = ["database", "sql", "http", "postgresql"]
 categories = ["database"]
 
 [dependencies]
+getrandom.workspace = true
+httpdate.workspace = true
+hyper.workspace = true
 reqwest.workspace = true
 secrecy = { workspace = true, features = ["serde"] }
 serde.workspace = true
@@ -28,8 +31,10 @@ zeroize.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
+log = "0.4"
 tempfile = "3.13"
 tokio.workspace = true
+tracing.workspace = true
 
 [[test]]
 name = "integration"

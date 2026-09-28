@@ -197,6 +197,42 @@ while let Some(frame) = stream.next_frame().await? {
 
 The client bounds each NDJSON frame at 64 MiB, rejects invalid frame order, requires a terminal frame, and checks every frame request ID against the HTTP response header.
 
+## Rust notification subscriptions
+
+Development sources implement `HttpEngine::subscribe_notifications(&[&str], HttpNotificationOptions).await` and `subscribe_notifications_with_cancellation(..., &NotificationCancellation).await`. They return an owned `HttpNotificationSubscription` only after validating ready for every requested channel. The Client transport is exercised against actual loopback HTTP protocol peers; the authenticated Cloud endpoint and complete serving-path resource/timing profile remain under implementation. No released server capability or deployment defaults are inferred from this client API.
+
+The options require positive `max_channels`, `max_queued_events`, `max_queued_bytes`, `max_transport_chunk_bytes`, `connect_timeout`, `ready_timeout` and `max_idle_timeout`. The queue byte limit includes reserved slots and retained string/request-ID allocations. Transport chunk capacity must be at least 65,536 bytes and is separate from the per-event wire bound, parser storage and native HTTP/TLS buffers. Durations are whole milliseconds, no greater than `2^36 - 1` milliseconds and representable by the native monotonic clock; connection timeout cannot exceed readiness timeout. Ready advertises the actual idle timeout, which must satisfy `I > 3H + M` and the caller's idle ceiling. Receiving data after ready does not extend the initial readiness deadline into a total subscription lifetime.
+
+`retry: Some(NotificationRetryOptions { max_attempts, episode_timeout, initial_backoff, max_backoff, max_retry_after })` supplies a bounded policy for post-ready losses; all fields are positive and initial backoff cannot exceed maximum backoff. `None` explicitly disables reconnection. A failed initial attempt returns an error. A post-ready replacement emits `ResyncRequired` with the old identity, then `Reconnected` after the new ready, before replacement notifications. Each new ready ends the previous loss episode. Authentication, protocol, unsupported-capability and local-overflow failures are terminal by default; the client never invokes interactive login or replays SQL.
+
+`next_event().await` returns the existing Core `NotificationEvent` variants with exact `u64` sequences. `initial_ready()` retains original response metadata, and `identity()` advances when the consumer receives Reconnected. A separate worker reads continuously into the bounded queue. Overflow preserves the admitted prefix followed by a typed error; cancellation and observed authority rejection discard unread values. Cancelling a receive future only ends that wait. The monotonic signal returned by `cancellation()` stops connection, registration, reads and retries. `close().await` joins local cleanup and is idempotent; cancelling that future retains its task owner for a repeated close. Drop cancels and aborts the retained task, whose destruction requires continued Tokio runtime progress. Local close does not acknowledge remote listener cleanup.
+
+`HttpNotificationError` exposes `kind()` and a stable content-free `code()`. Explicit accessors inspect protocol/transport/server diagnostics, timeout stage and the original/last failure after reconnect exhaustion. Diagnostic formatting omits credentials, endpoints, channels, payloads, private server messages and unknown codes. The [ownership and preservation proof](../../design/owned-http-notification-subscriptions.md) states the lifecycle, queue and timing assumptions.
+
+The following helper consumes one typed observation and joins local cleanup, preserving an error from that receive:
+
+```rust
+use uqa_client::{HttpEngine, notifications::{
+    HttpNotificationError, HttpNotificationOptions,
+}};
+use uqa_core::notifications::NotificationEvent;
+
+async fn receive_once(
+    engine: &HttpEngine,
+    options: HttpNotificationOptions,
+) -> Result<Option<NotificationEvent>, HttpNotificationError> {
+    let mut subscription = engine.subscribe_notifications(&["jobs"], options).await?;
+    let observation = subscription.next_event().await;
+    let cleanup = subscription.close().await;
+    match observation {
+        Err(error) => Err(error),
+        Ok(event) => cleanup.map(|()| event),
+    }
+}
+```
+
+Applications must handle gap and reconnection observations explicitly; they must not treat a replacement epoch as replay. Options come from the application's verified resource and serving-path policy. Python, Node.js and browser subscription adapters remain separate implementation work.
+
 ## Notification protocol primitives
 
 Current development sources expose the low-level Rust module `uqa_client::notifications` for the [notification protocol](../../design/sql-notifications-and-sse.md). `SubscriptionRequest::new(channels, maximum_channels)` constructs an exact channel set and `encode()` produces its bounded version-one JSON request. `from_json(body, maximum_channels, last_event_id)` validates incoming request bytes, including the depth-two envelope and rejection of nonempty resume headers. The maximum is 65,536 raw bytes for a request or complete SSE block; channel names are exact nonempty UTF-8 strings of at most 63 bytes without NUL or duplicates.
@@ -224,7 +260,7 @@ assert_eq!(
 # }
 ```
 
-The HTTP subscription API and authenticated server endpoint remain under implementation. These primitives open no connection, establish no listener and select no deployment timing or capacity defaults. Existing SQL and NDJSON methods retain their contracts.
+These primitives open no connection, establish no listener and select no deployment timing or capacity defaults. The Rust transport above owns connection lifecycle; the authenticated server endpoint remains under implementation. Existing SQL and NDJSON methods retain their contracts.
 
 ## Errors and diagnostics
 

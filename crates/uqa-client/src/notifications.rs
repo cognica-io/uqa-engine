@@ -8,12 +8,17 @@
 
 mod decoder;
 mod framing;
+pub(crate) mod http;
 mod json;
 mod request;
 mod timing;
 mod wire;
 
 pub use decoder::{DecodeStep, NotificationDecoder};
+pub use http::{
+    HttpNotificationError, HttpNotificationOptions, HttpNotificationSubscription,
+    NotificationCancellation, NotificationRetryOptions, NotificationTimeoutStage,
+};
 pub use request::SubscriptionRequest;
 pub use timing::{NotificationTiming, TimerLimits};
 pub use wire::{NotificationReady, NotificationWireEvent, ServerFailure};
