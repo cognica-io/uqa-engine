@@ -332,6 +332,8 @@ fn cancellation_after_native_writer_admission_rolls_back_registration_and_lease(
         .subscribe_notifications(&["events"], options())
         .unwrap()
         .close();
+    // Reap the setup listener before measuring the new registration's rollback.
+    assert_eq!(engine.notification_hub.usage().unwrap(), 0.0);
     let mut registry_path = path.as_os_str().to_owned();
     registry_path.push(".uqa-notification-state");
     let reader = rusqlite::Connection::open(std::path::PathBuf::from(&registry_path)).unwrap();

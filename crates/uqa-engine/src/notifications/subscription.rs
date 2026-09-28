@@ -160,7 +160,7 @@ pub(super) struct ListenerResources {
 
 impl Drop for ListenerResources {
     fn drop(&mut self) {
-        self.hub.unregister(self.session_id);
+        self.hub.retire_subscription(self.session_id);
         self.locks.release_session(self.session_id);
     }
 }

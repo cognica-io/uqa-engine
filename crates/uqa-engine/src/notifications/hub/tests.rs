@@ -10,6 +10,27 @@ use super::*;
 use crate::{Engine, NotificationSubscriptionOptions, NotificationWait};
 use std::time::Duration;
 
+fn corrupt_foreign_channel_metadata(path: &std::path::Path) {
+    let mut registry_path = path.as_os_str().to_owned();
+    registry_path.push(".uqa-notification-state");
+    let fixture = rusqlite::Connection::open(std::path::PathBuf::from(registry_path)).unwrap();
+    let version: i64 = fixture
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    fixture
+        .create_scalar_function(
+            "__uqa_notification_writer_format",
+            0,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8
+                | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+            move |_| Ok(version),
+        )
+        .unwrap();
+    fixture
+        .execute("UPDATE listeners SET channels_json = '['", [])
+        .unwrap();
+}
+
 #[test]
 fn foreign_channels_do_not_enter_registration_delivery_usage_or_cleanup() {
     let directory = tempfile::tempdir().unwrap();
@@ -38,26 +59,7 @@ fn foreign_channels_do_not_enter_registration_delivery_usage_or_cleanup() {
         })
         .unwrap();
     registry.commit().unwrap();
-    let mut registry_path = path.as_os_str().to_owned();
-    registry_path.push(".uqa-notification-state");
-    {
-        let fixture = rusqlite::Connection::open(std::path::PathBuf::from(registry_path)).unwrap();
-        let version: i64 = fixture
-            .pragma_query_value(None, "user_version", |row| row.get(0))
-            .unwrap();
-        fixture
-            .create_scalar_function(
-                "__uqa_notification_writer_format",
-                0,
-                rusqlite::functions::FunctionFlags::SQLITE_UTF8
-                    | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
-                move |_| Ok(version),
-            )
-            .unwrap();
-        fixture
-            .execute("UPDATE listeners SET channels_json = '['", [])
-            .unwrap();
-    }
+    corrupt_foreign_channel_metadata(&path);
     let options = NotificationSubscriptionOptions {
         max_active_subscriptions: 1,
         max_channels: 1,
@@ -98,6 +100,9 @@ fn foreign_channels_do_not_enter_registration_delivery_usage_or_cleanup() {
     );
     registry.commit().unwrap();
     subscription.close();
+    // Retirement releases the native lease; a registry pass reaps its dead row.
+    // The pass must still avoid decoding the unrelated live owner's channels.
+    assert_eq!(engine.notification_hub.usage().unwrap(), 0.0);
     let registry = cross.begin_registry_transaction().unwrap();
     let remaining = registry.listener_metadata_after(None).unwrap().unwrap();
     assert_eq!(remaining.key.owner_id, foreign.owner_id());
