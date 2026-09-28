@@ -5,7 +5,7 @@
 # Copyright (c) 2023-2026 Cognica, Inc.
 #
 
-"""Verify notification Fetch behavior through the generated package in real Chrome."""
+"""Verify Fetch and embedded WASM notifications through the package in real Chrome."""
 
 from __future__ import annotations
 
@@ -37,6 +37,18 @@ EXPECTED = [
     "one overflowing consumer leaves the healthy iterator usable",
     "observed authorization loss discards queued notifications",
     "silent stream produces the shared idle timeout",
+    "direct WASM exact values, commit order, deduplication and rollback",
+    "direct WASM independent registration boundaries and all-channel readiness",
+    "direct WASM readiness preserves the caller transaction",
+    "direct WASM input validation and channel snapshot",
+    "direct WASM cancellation before readiness releases capacity",
+    "direct WASM idle receive permits event-loop progress and one consumer",
+    "direct WASM explicit close joins pending receipt and iterator cleanup",
+    "direct WASM overflow survives cleanup and isolates a healthy listener",
+    "direct WASM retains the original memory source after query close",
+    "direct WASM retains the original sqlite source after query close",
+    "direct WASM retains the original compressed source after query close",
+    "direct WASM fresh Worker restores IDBFS without sharing notification identity",
 ]
 
 
@@ -66,9 +78,11 @@ def main() -> int:
         raise RuntimeError("Generated notification declarations are stale")
     paths = [pathlib.Path(__file__), ROOT / "scripts/build-browser-notifications.py",
              ROOT / "crates/uqa-client/tests/fixtures/notifications-v1.json",
+             *sorted((ROOT / "crates/uqa-wasm/src").rglob("*.rs")),
+             bundle / "callback-library.js",
              *sorted((ROOT / "tests/wasm/notifications").glob("*")),
              *(ROOT / "crates/uqa-node" / name for name in builder.MODULES),
-             *(bundle / name for name in ("index.mjs", "index.d.ts", "notification-fetch.mjs", "notification-core.mjs", "notifications.d.ts", "uqa.js"))]
+             *(bundle / name for name in ("index.mjs", "index.d.ts", "notification-fetch.mjs", "notification-wasm.mjs", "notification-core.mjs", "notifications.d.ts", "uqa.js", "uqa.wasm"))]
     identities = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
     session = "notifications-" + uuid.uuid4().hex[:10]
     config = output.parent / "playwright-cli.json"
@@ -93,7 +107,7 @@ def main() -> int:
             url = server.stdout.readline().strip()
             if not url.startswith("http://127.0.0.1:") or not url.endswith("/browser.html"):
                 raise RuntimeError("Notification fixture failed to start")
-            print("Verifying notification Fetch/CORS in Chrome", flush=True)
+            print("Verifying Fetch/CORS and direct WASM notifications in Chrome", flush=True)
             cli("open", url, "--browser", "chrome", "--config", str(config))
             observed = cli("run-code", """async (page) => {
               await page.waitForFunction(() => {

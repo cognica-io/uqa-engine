@@ -29,10 +29,12 @@ MODULES = (
     "notification-headers.js",
     "notification-subscription.js",
     "notification-stream.js",
+    "notification-direct.js",
 )
 EXPORTS = {
     "notification-error.js": "NotificationError, NotificationEvent, protocol, cancelled, timeout",
     "notification-request.js": "MAX_WIRE_BYTES",
+    "notification-direct.js": "subscribeDirect, NotificationSubscription",
     "notification-stream.js": "runStream",
     "notification-subscription.js": "subscribe, HttpNotificationSubscription",
 }
@@ -76,10 +78,11 @@ def main() -> None:
     args.output.write_text(output)
     args.output.with_name("notifications.d.ts").write_bytes(
         (ROOT / "crates/uqa-node/notifications.d.ts").read_bytes())
-    transport = ROOT / "crates/uqa-wasm/js/notification-fetch.mjs"
-    destination = args.output.with_name(transport.name)
-    if destination.resolve() != transport.resolve():
-        shutil.copyfile(transport, destination)
+    for name in ("notification-fetch.mjs", "notification-wasm.mjs"):
+        transport = ROOT / "crates/uqa-wasm/js" / name
+        destination = args.output.with_name(name)
+        if destination.resolve() != transport.resolve():
+            shutil.copyfile(transport, destination)
     print(f"Packaged {len(MODULES)} portable modules into {args.output}")
 
 

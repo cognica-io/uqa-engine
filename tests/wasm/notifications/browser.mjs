@@ -4,7 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-import { HttpEngine, HttpNotificationSubscription, NotificationError } from "../../../crates/uqa-wasm/js/index.mjs";
+import { Engine, UQA, NotificationSubscription, HttpEngine, HttpNotificationSubscription, NotificationError } from "../../../crates/uqa-wasm/js/index.mjs";
+import { runDirectNotifications } from "./direct.mjs";
+import { verifyRuntimeIsolation } from "./isolation.mjs";
 
 const options = { maxChannels: 2, maxQueuedEvents: 16, maxQueuedBytes: 65536,
   maxTransportChunkBytes: 65536, connectTimeoutMs: 3000, readyTimeoutMs: 5000, maxIdleTimeoutMs: 5000 };
@@ -152,6 +154,8 @@ async function main() {
     const error = await rejects(sub.nextEvent(), "TIMEOUT"); equal(error.timeoutStage, "idle");
     await sub.close(); await control({ action: "wait", closed: 1 });
   });
+  await runDirectNotifications({ Engine, NotificationSubscription, NotificationError }, run);
+  await run("direct WASM fresh Worker restores IDBFS without sharing notification identity", () => verifyRuntimeIsolation({ Engine, UQA }));
   report.status = "Passed";
 }
 render();

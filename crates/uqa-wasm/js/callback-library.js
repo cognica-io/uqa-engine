@@ -5,6 +5,14 @@
 //
 
 mergeInto(LibraryManager.library, {
+  // Queue onto the original runtime; never re-enter Rust under its inbox locks.
+  uqa_notification_wake: function(id) {
+    queueMicrotask(function() {
+      if (typeof Module["uqaNotificationWake"] === "function") {
+        Module["uqaNotificationWake"](id);
+      }
+    });
+  },
   uqa_invoke_callback__deps: [
     "$UTF8ToString",
     "$lengthBytesUTF8",

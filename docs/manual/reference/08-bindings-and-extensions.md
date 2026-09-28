@@ -228,6 +228,30 @@ await UQA.persist();
 
 Persist after important application checkpoints. Browser callbacks use synchronous reverse dispatch from WASM into JavaScript; returning a `Promise` is an error. SQLCipher and native DuckDB or Arrow FDW handlers are unavailable in the browser build.
 
+### Direct browser notification subscriptions
+
+Unreleased development sources expose `await engine.subscribeNotifications(channels, options)` and the exported `NotificationSubscription` and `NotificationError` types. Channels are exact, unique, nonempty UTF-8 names of at most 63 bytes. Supply positive integer `maxActiveSubscriptions`, `maxChannels`, `maxQueuedNotifications`, `maxQueuedBytes` and `maxRegistryEntriesPerPoll` limits, plus an optional `signal: AbortSignal`. Browser limits must also fit the WASM addressable integer range. Registration snapshots input and resolves after all channels are ready, independently of the caller's SQL transaction.
+
+The result is an async iterator with `nextEvent`, `next`, `return`, `throw`, `close`, `epoch`, `requestId` and `isClosed`. Event fields and typed failures match the [direct Node contract](#native-notification-subscriptions): notification sequences are exact `bigint`, direct request identities are null, overflow remains visible after cleanup, and only one receive may be pending. Waiting permits unrelated JavaScript execution. Abort and iterator cleanup stop the actual retained listener; repeated close joins that same cleanup. The source remains attached to its original WASM module after the query Engine closes, including memory, plain SQLite and compressed providers. Memory-only query Engines retain their existing restriction against `newSession`; a direct subscription does not invoke that factory.
+
+```javascript
+const engine = await Engine.inMemory();
+const subscription = await engine.subscribeNotifications(["jobs"], {
+  maxActiveSubscriptions: 8, maxChannels: 2, maxQueuedNotifications: 16,
+  maxQueuedBytes: 65536, maxRegistryEntriesPerPoll: 8,
+});
+try {
+  await engine.sql("NOTIFY jobs, 'ready'");
+  const event = await subscription.nextEvent();
+  if (event.sequence !== 1n || event.payload !== "ready") throw new Error("unexpected notification");
+} finally {
+  await subscription.close();
+  await engine.close();
+}
+```
+
+Use explicit close for deterministic cleanup. Registration and close use the existing synchronous WASM call boundary; idle receipt uses a native Future and a microtask wake, without a blocking wait or an additional Worker. Persisted SQL data can be restored in another runtime, but equal filenames in different pages, Workers or modules do not share notification delivery or provide replay. See the [preservation proof](../../design/wasm-direct-notifications.md) and [qualification ledger](../../plans/0015-sql-notifications-and-sse.md). Remote browser subscriptions use the separate [HTTP Fetch API](09-http-engine.md#browser-notification-subscriptions).
+
 ## Analyzer pipelines across bindings
 
 All four bindings can execute `create_analyzer`, `list_analyzers`, `analyze_text`, `set_table_analyzer`, `fts_index_stats`, and `drop_analyzer` through SQL. The 0.4.0 Python, Node.js and browser WASM packages enable both `nori` and `kuromoji` by default. A build with that feature includes the native bundle: `list_analyzers` reports `nori`, and `analyze_text('nori', input)` returns the complete token and source-coordinate diagnostic. Python also exposes `list_named_analyzers()`, while Node.js and browser WASM expose `listNamedAnalyzers()` for custom engine-catalog names. Rust alone exposes direct `Analyzer`, `CharFilter`, `Tokenizer`, and `TokenFilter` construction. See [Text analyzer pipelines](06-text-analyzers.md) for the JSON schema and lifecycle.

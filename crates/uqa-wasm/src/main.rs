@@ -40,6 +40,7 @@ use uqa_storage_sqlite::{DatabaseFileFormat, SQLiteCompressionOptions};
 
 mod arguments;
 mod callbacks;
+mod notifications;
 
 use arguments::{
     binary_label, f32_from_f64, f32_list, opt_f64, opt_i64, opt_str, opt_u64, opt_usize,
@@ -156,6 +157,9 @@ fn register(engine: Engine) -> Result<JSON, String> {
 
 fn dispatch_static(method: &str, args: &JSON) -> Result<JSON, String> {
     match method {
+        "notificationNext" | "notificationStop" | "notificationClose" | "notificationStatus" => {
+            notifications::dispatch(method, args)
+        }
         "new" => register(Engine::new()),
         "open" => {
             let path = req_str(args, "path")?;
@@ -189,6 +193,7 @@ fn dispatch_static(method: &str, args: &JSON) -> Result<JSON, String> {
 #[expect(clippy::too_many_lines, reason = "preserves WASM result dispatch")]
 fn dispatch_engine(engine: &Engine, method: &str, args: &JSON) -> Result<JSON, String> {
     match method {
+        "subscribeNotifications" => notifications::register(engine, args),
         "sql" => {
             let query = req_str(args, "query")?;
             let params = params_from_json(args.get("params"))?;

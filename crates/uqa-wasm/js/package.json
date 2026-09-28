@@ -18,6 +18,7 @@
     "index.d.ts",
     "notification-core.mjs",
     "notification-fetch.mjs",
+    "notification-wasm.mjs",
     "notifications.d.ts",
     "LICENSE-NOTICE.md",
     "LICENSE",
