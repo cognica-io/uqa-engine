@@ -5,6 +5,8 @@ export type SQLTableFunctionResult = { columns: string[]; rows: SQLTableFunction
 export type SQLAggregateState = ({ observe(...args: JSValue[]): unknown } | { step(...args: JSValue[]): unknown }) & ({ finish(): JSValue } | { finalize(): JSValue })
 export interface HttpSQLStream extends AsyncIterable<HttpSQLStreamFrame> { [Symbol.asyncIterator](): AsyncIterator<HttpSQLStreamFrame> }
 export { HttpEngineError } from "./http";
+export * from "./notifications";
+export interface HttpEngine { subscribeNotifications(channels: readonly string[], options: import("./notifications").HttpNotificationOptions): Promise<import("./notifications").HttpNotificationSubscription> }
 export declare class Engine {
   /** Create an in-memory engine. */
   constructor()

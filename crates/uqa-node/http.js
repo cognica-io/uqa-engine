@@ -12,6 +12,12 @@ const { encodeStatement, decodeResult } = require("./http-values.js");
 const { resolveProject } = require("./http-cli.js");
 const { HttpSQLStream } = require("./http-stream.js");
 const { SQLParam } = require("./sql-param.js");
+const { subscribe, HttpNotificationSubscription } = require("./notification-subscription.js");
+const { NotificationError } = require("./notification-error.js");
+const { randomInt } = require("node:crypto");
+const { performance } = require("node:perf_hooks");
+const { runAttempt } = require("./notification-attempt.js");
+const notificationRuntime = Object.freeze({ runAttempt, randomInt, now: () => performance.now() });
 
 class HttpEngine {
   #url;
@@ -44,6 +50,8 @@ class HttpEngine {
 
   async sql(query, params) { return (await this.sqlWithMetadata(query, params)).result; }
 
+  async subscribeNotifications(channels, options) { return subscribe(this.#url, this.#token, channels, options, notificationRuntime); }
+
   async sqlWithMetadata(query, params) {
     const response = await request(this.#url, this.#token, "v1/sql", encodeStatement(query, params));
     const { body, requestId } = await jsonResponse(response);
@@ -75,6 +83,8 @@ class HttpEngine {
 module.exports.HttpEngine = HttpEngine;
 module.exports.HttpEngineError = HttpEngineError;
 module.exports.HttpSQLStream = HttpSQLStream;
+module.exports.HttpNotificationSubscription = HttpNotificationSubscription;
+module.exports.NotificationError = NotificationError;
 module.exports.SQLParam = SQLParam;
 module.exports.vector = SQLParam.vector;
 module.exports.tensor = SQLParam.tensor;
