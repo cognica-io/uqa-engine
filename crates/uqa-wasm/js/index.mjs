@@ -11,6 +11,10 @@
 // database into IndexedDB and `UQA.load()` restores them on startup.
 
 import createUQAModule from "./uqa.js";
+import { subscribe, HttpNotificationSubscription, NotificationError } from "./notification-core.mjs";
+import { fetchRuntime } from "./notification-fetch.mjs";
+
+export { HttpNotificationSubscription, NotificationError };
 
 const PERSIST_DIR = "/uqa";
 
@@ -940,6 +944,10 @@ export class HttpEngine {
       throw new HttpEngineError("required UQA connection environment variable UQA_TOKEN is missing");
     }
     return new HttpEngine(environment.UQA_URL, environment.UQA_TOKEN);
+  }
+
+  async subscribeNotifications(channels, options) {
+    return subscribe(this.#baseURL, this.#token, channels, options, fetchRuntime);
   }
 
   async #request(path, body, accept = "application/json") {

@@ -51,6 +51,7 @@
     "notification-queue.js",
     "notification-headers.js",
     "notification-attempt.js",
+    "notification-stream.js",
     "notification-subscription.js",
     "notification-native.js",
     "notifications.d.ts",

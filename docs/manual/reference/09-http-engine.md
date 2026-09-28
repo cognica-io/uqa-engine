@@ -258,6 +258,14 @@ async function receiveOne(url, token, options) {
 }
 ```
 
+## Browser notification subscriptions
+
+Development browser sources expose `await engine.subscribeNotifications(channels, options)` on `@cognica-io/uqa-wasm`'s `HttpEngine`, returning the exported `HttpNotificationSubscription`. Its options, frozen event fields, exact `bigint` sequence, `NotificationError`, asynchronous iterator and close/AbortSignal behavior follow the [Node HTTP contract](#nodejs-http-notification-subscriptions). The browser uses the same generated decoder, queue and subscription owner. Embedded WASM subscriptions remain tracked separately in the [implementation plan](../../plans/0015-sql-notifications-and-sse.md).
+
+The browser sends its bearer header with `fetch`, omits cookies and other ambient credentials, sends no Referer, and never follows a redirect. A cross-origin server must permit the authorization/content-type preflight and expose `X-Request-Id`, `Retry-After` and `Content-Encoding`; CORS permission does not authenticate the request. The serving path must use identity encoding and the specified no-store/no-transform policy. JavaScript can inspect only CORS-visible headers. Actual Cloud configuration and whole-path qualification remain required.
+
+Fetch does not expose a TCP/TLS connection callback: `connectTimeoutMs` bounds the browser request through response headers, including preflight, while `readyTimeoutMs` continues through the complete ready event. A SQL request timeout does not set the subscription's lifetime. Close aborts the owned request, cancels its response reader and releases that reader's lock before completing; it does not own the browser's connection pool or acknowledge a remote cleanup transaction. The [browser preservation proof and verified limits](../../design/browser-notification-fetch.md) distinguish these observable boundaries from platform resource and timing qualification.
+
 ## Notification protocol primitives
 
 Current development sources expose the low-level Rust module `uqa_client::notifications` for the [notification protocol](../../design/sql-notifications-and-sse.md). `SubscriptionRequest::new(channels, maximum_channels)` constructs an exact channel set and `encode()` produces its bounded version-one JSON request. `from_json(body, maximum_channels, last_event_id)` validates incoming request bytes, including the depth-two envelope and rejection of nonempty resume headers. The maximum is 65,536 raw bytes for a request or complete SSE block; channel names are exact nonempty UTF-8 strings of at most 63 bytes without NUL or duplicates.
