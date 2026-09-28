@@ -13,6 +13,7 @@
 mod cli_connection;
 mod http_engine;
 mod http_engine_error;
+pub mod notifications;
 mod server_error_envelope;
 mod sql_batch_execution;
 mod sql_execution;

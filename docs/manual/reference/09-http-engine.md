@@ -197,6 +197,35 @@ while let Some(frame) = stream.next_frame().await? {
 
 The client bounds each NDJSON frame at 64 MiB, rejects invalid frame order, requires a terminal frame, and checks every frame request ID against the HTTP response header.
 
+## Notification protocol primitives
+
+Current development sources expose the low-level Rust module `uqa_client::notifications` for the [notification protocol](../../design/sql-notifications-and-sse.md). `SubscriptionRequest::new(channels, maximum_channels)` constructs an exact channel set and `encode()` produces its bounded version-one JSON request. `from_json(body, maximum_channels, last_event_id)` validates incoming request bytes, including the depth-two envelope and rejection of nonempty resume headers. The maximum is 65,536 raw bytes for a request or complete SSE block; channel names are exact nonempty UTF-8 strings of at most 63 bytes without NUL or duplicates.
+
+`NotificationDecoder::new(Arc<SubscriptionRequest>, response_request_id, timer_limits)` constructs one response decoder using Core's validated `NotificationRequestId` and explicit `TimerLimits`. `decode(bytes)` returns `DecodeStep { consumed, event }`; retain and resubmit the unconsumed suffix until the supplied bytes are consumed. Each call yields at most one ready, notification, heartbeat or terminal observation. An event can have zero consumed bytes when a preceding exact-limit CR awaits a non-LF lookahead; process the event and resubmit the same suffix. At EOF call `finish()`, and call it again if it returns an event. A missing terminal frame is an error.
+
+The decoder checks identities, closed schemas, exact integer sequences, channel membership, UTF-8, JSON depth and the checked timing relationship before returning an observation. `ready()` exposes the admitted response metadata. Errors latch for that decoder; `ProtocolError` diagnostics retain no rejected input. Remote `ServerFailure::code()` is available explicitly, while diagnostic formatting omits unknown codes, channels and payloads. The [preservation and resource argument](../../design/notification-protocol-decoding.md) states the parser's bounds and assumptions.
+
+Construct and encode a request without performing network I/O:
+
+```rust
+# use std::num::NonZeroUsize;
+# use uqa_client::notifications::SubscriptionRequest;
+# fn example() -> Result<(), Box<dyn std::error::Error>> {
+let request = SubscriptionRequest::new(
+    &["jobs", "invoices"],
+    NonZeroUsize::new(2).unwrap(),
+)?;
+let body = request.encode()?;
+assert_eq!(
+    SubscriptionRequest::from_json(&body, NonZeroUsize::new(2).unwrap(), None)?,
+    request,
+);
+# Ok(())
+# }
+```
+
+The HTTP subscription API and authenticated server endpoint remain under implementation. These primitives open no connection, establish no listener and select no deployment timing or capacity defaults. Existing SQL and NDJSON methods retain their contracts.
+
 ## Errors and diagnostics
 
 `HttpEngineError` separates CLI availability, timeout, size, exit, and JSON failures from URL, credential, parameter, transport, content-type, response-size, request-identity, stream, and server failures. A Rust server failure retains its HTTP status, stable error code, message, and optional request ID for explicit handling, while `Debug` output redacts CLI diagnostics, server messages, transport URLs, endpoints, credentials, statements, parameters, rows, and streamed values. Python surfaces the redacted display message. Node.js and browser HTTP errors expose a redacted message plus the status, stable code, and request ID. CLI stdout and stderr are bounded at 64 KiB each, materialized JSON bodies at 65 MiB, HTTP error bodies at 64 KiB, and individual stream frames at 64 MiB.

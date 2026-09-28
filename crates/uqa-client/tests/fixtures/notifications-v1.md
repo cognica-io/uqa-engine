@@ -1,0 +1,7 @@
+# Notification protocol conformance fixture
+
+[`notifications-v1.json`](notifications-v1.json) is a hand-authored protocol-version-one fixture for the [subscription design](../../../../docs/design/sql-notifications-and-sse.md). It contains exact request and SSE bytes plus independently specified payload, channel and identity expectations. It is not a capture from a server, generated benchmark output or evidence that an HTTP endpoint exists. The integer timing values are test inputs satisfying the strict inequality, not deployment defaults or a measured timing policy.
+
+The request has structural depth two. The invalid request adds a third container and must fail before recursive value materialization. Notification payload brackets, escaped quotes, a newline and Unicode remain opaque string content. `process_id` exercises the signed 32-bit minimum. All receiving language implementations must use these literal wire values, exercise arbitrary byte partitions and add their own runtime/transport acceptance; Rust codec coverage alone does not establish binding parity.
+
+Line framing follows the [WHATWG event-stream grammar](https://html.spec.whatwg.org/multipage/server-sent-events.html#parsing-an-event-stream). The Rust tests vary LF, CRLF and CR, a single leading byte-order mark, first-colon splitting, one optional space, repeated event fields and joined data lines. UQA version one additionally rejects unsupported fields and event types, closed-schema violations and invalid UTF-8 instead of accepting generic EventSource extensions.
