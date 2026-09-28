@@ -11,6 +11,8 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use triomphe::Arc as StrongArc;
+
 mod deque;
 mod hash_set;
 mod heap;
@@ -82,7 +84,7 @@ impl Drop for Allowance {
         // Destroy an unshared parent chain iteratively, including deeply nested application budgets.
         let mut parent = self.parent.take();
         while let Some(budget) = parent {
-            match Arc::try_unwrap(budget.0) {
+            match StrongArc::try_unwrap(budget.0) {
                 Ok(mut allowance) => parent = allowance.parent.take(),
                 Err(_) => break,
             }
@@ -92,11 +94,11 @@ impl Drop for Allowance {
 
 /// Clones share one allowance, including reservations retained by completed producers.
 #[derive(Debug, Clone)]
-pub struct MemoryBudget(Arc<Allowance>);
+pub struct MemoryBudget(StrongArc<Allowance>);
 
 impl MemoryBudget {
     pub fn new(limit: usize) -> Self {
-        Self(Arc::new(Allowance {
+        Self(StrongArc::new(Allowance {
             limit,
             used: AtomicUsize::new(0),
             peak: AtomicUsize::new(0),
@@ -106,7 +108,7 @@ impl MemoryBudget {
 
     /// Add a component limit without enlarging this allowance. Every descendant reservation also charges each ancestor until its final owner releases it.
     pub fn child(&self, limit: usize) -> Self {
-        Self(Arc::new(Allowance {
+        Self(StrongArc::new(Allowance {
             limit,
             used: AtomicUsize::new(0),
             peak: AtomicUsize::new(0),
@@ -128,7 +130,7 @@ impl MemoryBudget {
     }
 
     pub fn shares_allowance(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
+        StrongArc::ptr_eq(&self.0, &other.0)
     }
 
     /// Largest simultaneous reservation, including old and replacement buffers.
@@ -202,7 +204,7 @@ impl MemoryReservation {
     /// Panics if the leases belong to different allowances.
     pub fn absorb(&mut self, mut other: Self) {
         assert!(
-            Arc::ptr_eq(&self.budget.0, &other.budget.0),
+            self.budget.shares_allowance(&other.budget),
             "different memory allowances"
         );
         self.bytes += other.bytes;

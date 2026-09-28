@@ -7,9 +7,9 @@
 //! Transaction-private evaluated replacements, retained command views and undo.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 
 use parking_lot::Mutex;
+use triomphe::Arc as StrongArc;
 use uqa_core::memory::{BudgetedSharedMap, BudgetedVec, MemoryBudget, MemoryReservation};
 
 use crate::read_control::StorageReadControl;
@@ -99,13 +99,13 @@ struct Owner {
 ///
 /// Command views and savepoints share immutable ordered roots. Replacements copy only their search paths; obsolete payloads are released as soon as the last referencing root or returned record is dropped. Rollback restores a root without allocating. This primitive does not spill retained values.
 pub struct PrivateRecordChanges {
-    owner: Arc<Owner>,
+    owner: StrongArc<Owner>,
 }
 
 impl PrivateRecordChanges {
     pub(super) fn share_owner(&self) -> Self {
         Self {
-            owner: Arc::clone(&self.owner),
+            owner: StrongArc::clone(&self.owner),
         }
     }
 
@@ -126,7 +126,7 @@ impl PrivateRecordChanges {
 
     pub fn new(memory: &MemoryBudget) -> Self {
         Self {
-            owner: Arc::new(Owner {
+            owner: StrongArc::new(Owner {
                 state: Mutex::new(State {
                     records: Records::new(memory),
                     sources: Sources::new(memory),
@@ -429,5 +429,29 @@ impl PrivateRecordSnapshot {
             }
         }
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shared_changes_keep_one_strong_counter_until_the_final_owner_drops() {
+        let memory = MemoryBudget::new(1024);
+        let bytes = size_of::<Owner>() + size_of::<usize>();
+        let mut changes = None;
+        let allocated = allocation_counter::measure(|| {
+            changes = Some(PrivateRecordChanges::new(&memory));
+        });
+        assert_eq!(allocated.count_total, 1);
+        assert_eq!(allocated.bytes_total, bytes as u64);
+        let retained = changes.as_ref().unwrap().share_owner();
+        let shared = allocation_counter::measure(|| drop(changes));
+        assert_eq!(shared.count_total, 0);
+        assert_eq!(shared.bytes_current, 0);
+        let released = allocation_counter::measure(|| drop(retained));
+        assert_eq!(released.count_current, -1);
+        assert_eq!(released.bytes_current, -(bytes as i64));
     }
 }

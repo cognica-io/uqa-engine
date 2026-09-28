@@ -7,22 +7,21 @@
 //! Query-local scoring after a positional or other support predicate accepts a candidate.
 
 use super::TextSearchError;
-use crate::{BM25Scorer, BayesianBM25Scorer, Scorer, ScoringMode};
-use std::sync::Arc;
+use crate::{BM25Params, BayesianBM25Params, ScoringMode};
 use uqa_core::{
-    memory::{BudgetedVec, MemoryBudget, MemoryReservation},
+    memory::{BudgetedVec, MemoryBudget},
     IndexStats,
 };
 
 enum CandidateMode {
-    BM25(BM25Scorer),
-    Bayesian(BayesianBM25Scorer),
+    BM25(BM25Params),
+    Bayesian(BayesianBM25Params),
 }
 impl CandidateMode {
-    fn scorer(&self) -> &dyn Scorer {
+    fn params(&self) -> &BM25Params {
         match self {
-            Self::BM25(scorer) => scorer,
-            Self::Bayesian(scorer) => scorer,
+            Self::BM25(params) => params,
+            Self::Bayesian(params) => &params.bm25,
         }
     }
     fn finalize(&self, sum: f64) -> f64 {
@@ -36,9 +35,8 @@ impl CandidateMode {
 /// Scores aligned emitted query terms, including duplicates, after support acceptance.
 pub struct TextCandidateScorer {
     scorer: CandidateMode,
+    avg_doc_length: f64,
     idfs: BudgetedVec<f64>,
-    // The scorer drops its owned scalar statistics before this payload lease is released.
-    _statistics: MemoryReservation,
 }
 
 impl TextCandidateScorer {
@@ -56,9 +54,9 @@ impl TextCandidateScorer {
         )
     }
 
-    /// Reserve query IDFs and scalar statistics from the caller's shared runtime allowance.
+    /// Reserve query IDFs from the caller's shared runtime allowance.
     ///
-    /// Only scalar statistics are needed because frequencies arrive in emitted query order. Unused vocabulary maps are dropped, and the native scorer is stored inline. The callback covers construction and IDF preparation; partial owners are released on failure.
+    /// Frequencies arrive in emitted query order. Corpus scalars and scoring parameters stay inline, and unused index statistics are dropped. The callback covers construction and IDF preparation; partial owners are released on failure.
     pub fn new_budgeted(
         mode: &ScoringMode,
         stats: IndexStats,
@@ -67,31 +65,29 @@ impl TextCandidateScorer {
         mut poll: impl FnMut() -> Result<(), TextSearchError>,
     ) -> Result<Self, TextSearchError> {
         poll()?;
-        let mut scalar = IndexStats::new(stats.total_docs);
-        scalar.avg_doc_length = stats.avg_doc_length;
-        scalar.dimensions = stats.dimensions;
+        let total_docs = stats.total_docs;
+        let avg_doc_length = stats.avg_doc_length;
         drop(stats);
-        let memory = budget.reserve(size_of::<IndexStats>())?;
-        let stats = Arc::new(scalar);
         let scorer = match mode {
             ScoringMode::BM25(params) => {
                 params.validate()?;
-                CandidateMode::BM25(BM25Scorer::new(*params, stats))
+                CandidateMode::BM25(*params)
             }
-            ScoringMode::BayesianBM25(params) => CandidateMode::Bayesian(BayesianBM25Scorer::new(
-                params.scaled_for_query_terms(document_frequencies.len()),
-                stats,
-            )?),
+            ScoringMode::BayesianBM25(params) => {
+                let params = params.scaled_for_query_terms(document_frequencies.len());
+                crate::bayesian_bm25::validate_params(params, avg_doc_length)?;
+                CandidateMode::Bayesian(params)
+            }
         };
         let mut output = Self {
             scorer,
+            avg_doc_length,
             idfs: BudgetedVec::new(budget),
-            _statistics: memory,
         };
         output.idfs.reserve(document_frequencies.len())?;
         for frequency in document_frequencies {
             poll()?;
-            output.idfs.push(output.scorer.scorer().idf(*frequency))?;
+            output.idfs.push(crate::bm25::idf(total_docs, *frequency))?;
         }
         poll()?;
         Ok(output)
@@ -122,10 +118,12 @@ impl TextCandidateScorer {
         let mut sum = -0.0;
         for (idf, frequency) in self.idfs.iter().zip(term_frequencies) {
             poll()?;
-            sum += self
-                .scorer
-                .scorer()
-                .term_score_with_idf(*frequency, document_length, *idf);
+            sum += self.scorer.params().score_with_idf(
+                self.avg_doc_length,
+                *frequency,
+                document_length,
+                *idf,
+            );
         }
         poll()?;
         Ok(self.scorer.finalize(sum))

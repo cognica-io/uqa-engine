@@ -9,6 +9,33 @@ use super::*;
 mod children;
 
 #[test]
+fn allowance_owners_keep_one_compact_allocation_through_the_final_lease() {
+    let bytes = 5 * std::mem::size_of::<usize>();
+    let mut root = None;
+    let root_info = allocation_counter::measure(|| root = Some(MemoryBudget::new(100)));
+    assert_eq!(root_info.count_total, 1);
+    assert_eq!(root_info.bytes_total, bytes as u64);
+    let root = root.unwrap();
+    let mut child = None;
+    let child_info = allocation_counter::measure(|| child = Some(root.child(80)));
+    assert_eq!(child_info.count_total, 1);
+    assert_eq!(child_info.bytes_total, bytes as u64);
+    let child = child.unwrap();
+    let mut retained = None;
+    let transfer = allocation_counter::measure(|| {
+        retained = Some(child.reserve(17).unwrap());
+        drop(child);
+        drop(root);
+    });
+    assert_eq!(transfer.count_total, 0);
+    assert_eq!(transfer.bytes_current, 0);
+    assert_eq!(retained.as_ref().unwrap().budget().used(), 17);
+    let released = allocation_counter::measure(|| drop(retained));
+    assert_eq!(released.count_current, -2);
+    assert_eq!(released.bytes_current, -2 * bytes as i64);
+}
+
+#[test]
 fn concurrent_owners_share_one_limit_and_release_their_leases() {
     let budget = MemoryBudget::new(64);
     let ready = std::sync::Barrier::new(9);

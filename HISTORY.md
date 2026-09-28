@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Restore the existing Nori allocation limits across analysis, phrase matching and persistent indexing by compacting shared memory allowances, keeping candidate-scoring statistics inline and reusing retained redb snapshot identities; preserve parent budgets, score calculations and retained-resource lifetimes.
+
 ## [0.4.5] - 2026-09-28
 
 ### Added

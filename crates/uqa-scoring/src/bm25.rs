@@ -37,6 +37,24 @@ impl Default for BM25Params {
 }
 
 impl BM25Params {
+    pub(crate) fn score_with_idf(
+        self,
+        avg_doc_length: f64,
+        term_freq: u64,
+        doc_length: u64,
+        idf_val: f64,
+    ) -> f64 {
+        let w = self.boost * idf_val;
+        let avg_dl = if avg_doc_length > 0.0 {
+            avg_doc_length
+        } else {
+            1.0
+        };
+        let b_factor = (1.0 - self.b) + self.b * (doc_length as f64 / avg_dl);
+        let inv_norm = 1.0 / (self.k1 * b_factor);
+        w - w / (1.0 + term_freq as f64 * inv_norm)
+    }
+
     pub fn validate(self) -> ScoringResult<()> {
         if !self.k1.is_finite() || self.k1 <= 0.0 {
             return Err(invalid_input(format!(
@@ -74,9 +92,7 @@ impl BM25Scorer {
     /// Robertson-Sparck-Jones IDF (Definition 3.1.1, Paper 3):
     /// `ln((N - df + 0.5) / (df + 0.5) + 1)`.
     pub fn idf(&self, doc_freq: u64) -> f64 {
-        let n = self.stats.total_docs as f64;
-        let df = doc_freq as f64;
-        ((n - df + 0.5) / (df + 0.5) + 1.0).ln()
+        idf(self.stats.total_docs, doc_freq)
     }
 
     /// Numerically stable BM25 score:
@@ -90,15 +106,8 @@ impl BM25Scorer {
     }
 
     pub fn score_with_idf(&self, term_freq: u64, doc_length: u64, idf_val: f64) -> f64 {
-        let w = self.params.boost * idf_val;
-        let avg_dl = if self.stats.avg_doc_length > 0.0 {
-            self.stats.avg_doc_length
-        } else {
-            1.0
-        };
-        let b_factor = (1.0 - self.params.b) + self.params.b * (doc_length as f64 / avg_dl);
-        let inv_norm = 1.0 / (self.params.k1 * b_factor);
-        w - w / (1.0 + term_freq as f64 * inv_norm)
+        self.params
+            .score_with_idf(self.stats.avg_doc_length, term_freq, doc_length, idf_val)
     }
 
     /// Theorem 3.2.3 supremum: `boost * IDF(df)`.
@@ -110,6 +119,12 @@ impl BM25Scorer {
     pub fn combine_scores(scores: &[f64]) -> f64 {
         scores.iter().sum()
     }
+}
+
+pub(crate) fn idf(total_docs: u64, doc_freq: u64) -> f64 {
+    let n = total_docs as f64;
+    let df = doc_freq as f64;
+    ((n - df + 0.5) / (df + 0.5) + 1.0).ln()
 }
 
 impl BlockMaxScorer for BM25Scorer {

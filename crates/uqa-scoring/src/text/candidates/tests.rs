@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::{BM25Params, BayesianBM25Params};
+use std::sync::Arc;
 use uqa_core::{memory::MemoryError, QueryCancelled};
 
 fn stats() -> IndexStats {
@@ -13,6 +14,37 @@ fn stats() -> IndexStats {
     stats.avg_doc_length = 37.0;
     stats.set_doc_freq("unused", "unused vocabulary", 42);
     stats
+}
+
+#[test]
+fn candidate_statistics_stay_inline_and_only_idfs_allocate() {
+    for mode in [
+        ScoringMode::default(),
+        ScoringMode::BayesianBM25(BayesianBM25Params::default()),
+    ] {
+        for frequencies in [&[][..], &[1, 2, 3][..]] {
+            let memory = MemoryBudget::new(size_of_val(frequencies));
+            let stats = stats();
+            let mut candidate = None;
+            let allocations = allocation_counter::measure(|| {
+                candidate = Some(
+                    TextCandidateScorer::new_budgeted(
+                        &mode,
+                        stats,
+                        frequencies,
+                        &memory,
+                        || Ok(()),
+                    )
+                    .unwrap(),
+                );
+            });
+            assert_eq!(allocations.count_total, u64::from(!frequencies.is_empty()));
+            assert_eq!(allocations.bytes_total, size_of_val(frequencies) as u64);
+            assert_eq!(memory.used(), size_of_val(frequencies));
+            drop(candidate);
+            assert_eq!(memory.used(), 0);
+        }
+    }
 }
 
 #[test]
@@ -40,10 +72,7 @@ fn retained_idfs_and_streamed_scores_match_native_scorer_bits_in_emitted_order()
             let candidate =
                 TextCandidateScorer::new_budgeted(&mode, stats(), &frequencies, &budget, || Ok(()))
                     .unwrap();
-            assert_eq!(
-                budget.used(),
-                size_of::<IndexStats>() + frequencies.len() * size_of::<f64>()
-            );
+            assert_eq!(budget.used(), frequencies.len() * size_of::<f64>());
             for length in [0, 1, 37, 1000] {
                 let term_frequencies: Vec<_> = frequencies.iter().map(|value| value % 7).collect();
                 let scores: Vec<_> = term_frequencies
@@ -69,7 +98,7 @@ fn retained_idfs_and_streamed_scores_match_native_scorer_bits_in_emitted_order()
 #[test]
 fn candidate_preparation_and_scoring_failures_keep_independent_memory_and_allow_reuse() {
     let frequencies = [1, 2, 3, 1, 2, 3];
-    let required = size_of::<IndexStats>() + size_of_val(&frequencies);
+    let required = size_of_val(&frequencies);
     for allowance in 0..=required {
         let budget = MemoryBudget::new(allowance + 7);
         let other = budget.reserve(7).unwrap();

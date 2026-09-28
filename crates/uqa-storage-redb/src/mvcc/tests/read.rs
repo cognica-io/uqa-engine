@@ -62,8 +62,11 @@ fn head_and_history_reads_preserve_missing_values_tombstones_and_order() {
     )
     .unwrap();
     let second = store.allocate_transaction(&control).unwrap();
-    store.commit(second, &replacement, &control).unwrap();
+    let second = store.commit(second, &replacement, &control).unwrap();
     let latest = store.snapshot(&control).unwrap();
+    assert_eq!(empty.sequence(), CommitSequence::INITIAL);
+    assert_eq!(older.sequence(), first.sequence);
+    assert_eq!(latest.sequence(), second.sequence);
     for (snapshot, expected) in [
         (empty, vec![]),
         (

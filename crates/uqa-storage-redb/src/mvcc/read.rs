@@ -24,9 +24,8 @@ use crate::error::redb_error;
 pub(super) struct Snapshot {
     pub(super) database: Arc<Database>,
     pub(super) identity: DatabaseId,
-    pub(super) sequence: CommitSequence,
     pub(super) reclamation_epoch: u64,
-    pub(super) _lease: Arc<uqa_storage::mvcc::SnapshotLease>,
+    pub(super) lease: Arc<uqa_storage::mvcc::SnapshotLease>,
 }
 
 impl Snapshot {
@@ -45,7 +44,7 @@ impl CommittedRecordSnapshot for Snapshot {
         Some(self.reclamation_epoch)
     }
     fn sequence(&self) -> CommitSequence {
-        self.sequence
+        self.lease.sequence()
     }
 
     fn visit_value(
@@ -63,7 +62,7 @@ impl CommittedRecordSnapshot for Snapshot {
             return Ok(());
         };
         let versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
-        visit_visible(&versions, key, head.value(), self.sequence, visit)?;
+        visit_visible(&versions, key, head.value(), self.sequence(), visit)?;
         control.cancellation().check()?;
         Ok(())
     }
@@ -111,13 +110,19 @@ impl CommittedRecordSnapshot for Snapshot {
                 continue;
             }
             let mut more = true;
-            visit_visible(&versions, key, head.value(), self.sequence, &mut |record| {
-                if let Some(record) = record {
-                    more = visit(key, record)?;
-                    count += 1;
-                }
-                Ok(())
-            })?;
+            visit_visible(
+                &versions,
+                key,
+                head.value(),
+                self.sequence(),
+                &mut |record| {
+                    if let Some(record) = record {
+                        more = visit(key, record)?;
+                        count += 1;
+                    }
+                    Ok(())
+                },
+            )?;
             control.cancellation().check()?;
             if !more || count == limit {
                 break;
@@ -173,17 +178,23 @@ impl CommittedRecordSnapshot for Snapshot {
             if after.is_some_and(|after| key <= after) {
                 continue;
             }
-            visit_visible(&versions, key, head.value(), self.sequence, &mut |record| {
-                if let Some(record) = record {
-                    let version = RecordVersion::copy_bytes(
-                        record.revision.expect("committed revision"),
-                        record.value,
-                        control,
-                    )?;
-                    result.push(ScannedRecord::copy_key(key, version, control)?)?;
-                }
-                Ok(())
-            })?;
+            visit_visible(
+                &versions,
+                key,
+                head.value(),
+                self.sequence(),
+                &mut |record| {
+                    if let Some(record) = record {
+                        let version = RecordVersion::copy_bytes(
+                            record.revision.expect("committed revision"),
+                            record.value,
+                            control,
+                        )?;
+                        result.push(ScannedRecord::copy_key(key, version, control)?)?;
+                    }
+                    Ok(())
+                },
+            )?;
             if result.len() == limit {
                 break;
             }
