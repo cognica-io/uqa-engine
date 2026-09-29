@@ -437,6 +437,8 @@ The B-tree methods on `uqa_storage::PersistentStorageBackend` now use `ValueInde
 
 Opening an older supported database performs the required provider and catalog migrations. The 0.2 minor release adds typed tuple metadata, richer object and column identities, ownership and ACL records, bound routine and rule dependencies, and expression-index metadata. Initial open owns migration writes; later catalog refresh validates the persisted representation. The shipped SQLite and key-value providers handle their storage migrations through the normal engine open path.
 
+Default document-API FTS registrations preserve their field list and analyzer revisions during migration and reopen, including fields whose declared columns are not `TEXT`. The document index continues to analyze only stored string values; migration does not stringify other values, change column types or discard registered fields. Explicit named analyzer assignments and SQL GIN definitions retain their column validation. Source reconstruction and descriptor publication remain inside the initial catalog transaction, so a later failure restores the previous durable state.
+
 1. Stop writers, close every engine using the database, and create a recoverable backup through the [storage backup procedure](04-storage-and-security.md#backups-and-copies).
 2. Open a copy with the exact 0.4.5 application and its selected provider, encryption key, and compression configuration.
 3. Execute representative reads, writes, role and privilege checks, stored routines and views, and retrieval queries. Verify indexes, transaction rollback, and close-and-reopen behavior with the application's data.
