@@ -11,13 +11,14 @@ use super::{
     compile_expr, compile_qualified_name, extract_string, render_relation_component, Expr, Node,
     NodeEnum, Result, SQLError, Statement,
 };
+use crate::ast::SQLBodyForm;
 
 mod roles;
 
 pub(super) use roles::{
-    compile_alter_role, compile_alter_routine_owner, compile_create_role, compile_drop_role,
-    compile_grant, compile_grant_role, compile_object_with_args, compile_role_specification,
-    CompiledRoutineTarget,
+    compile_acl_role_specification, compile_alter_role, compile_alter_routine_owner,
+    compile_create_role, compile_drop_role, compile_grant, compile_grant_role,
+    compile_object_with_args, compile_role_specification, CompiledRoutineTarget,
 };
 
 struct CompiledFunctionTypeName {
@@ -367,9 +368,12 @@ pub(super) fn compile_create_function(
         }
     }
 
-    let body = match (source, stmt.sql_body.as_deref()) {
-        (Some(src), None) => FunctionBody::Source(src),
-        (None, Some(node)) => FunctionBody::Statements(compile_sql_standard_body(node)?),
+    let (body, sql_body_form) = match (source, stmt.sql_body.as_deref()) {
+        (Some(src), None) => (FunctionBody::Source(src), None),
+        (None, Some(node)) => {
+            let (statements, form) = compile_sql_standard_body(node)?;
+            (FunctionBody::Statements(statements), Some(form))
+        }
         (Some(_), Some(_)) => {
             return Err(SQLError::Unsupported(format!(
                 "{keyword}: both AS body and SQL-standard body"
@@ -401,6 +405,7 @@ pub(super) fn compile_create_function(
         return_type_reference,
         language,
         body,
+        sql_body_form,
         creation_search_path: Vec::new(),
         volatility,
         strict,
@@ -418,8 +423,8 @@ pub(super) fn compile_create_function(
 }
 
 /// Compile a SQL-standard function body (`RETURN expr` or
-/// `BEGIN ATOMIC stmt; ... END`) into plain statements.
-pub(super) fn compile_sql_standard_body(node: &Node) -> Result<Vec<Statement>> {
+/// `BEGIN ATOMIC stmt; ... END`) into plain statements and its written form.
+pub(super) fn compile_sql_standard_body(node: &Node) -> Result<(Vec<Statement>, SQLBodyForm)> {
     let Some(inner) = node.node.as_ref() else {
         return Err(SQLError::Internal("empty SQL function body".into()));
     };
@@ -429,7 +434,10 @@ pub(super) fn compile_sql_standard_body(node: &Node) -> Result<Vec<Statement>> {
                 .returnval
                 .as_deref()
                 .ok_or_else(|| SQLError::Internal("RETURN without a value".into()))?;
-            Ok(vec![select_of_expr(compile_expr(value)?)])
+            Ok((
+                vec![select_of_expr(compile_expr(value)?)],
+                SQLBodyForm::Return,
+            ))
         }
         NodeEnum::List(list) => {
             let mut out = Vec::with_capacity(list.items.len());
@@ -454,7 +462,7 @@ pub(super) fn compile_sql_standard_body(node: &Node) -> Result<Vec<Statement>> {
                     _ => out.push(compile_stmt(item)?),
                 }
             }
-            Ok(out)
+            Ok((out, SQLBodyForm::Atomic))
         }
         other => Err(SQLError::Unsupported(format!(
             "SQL function body node {other:?}"

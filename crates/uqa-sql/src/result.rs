@@ -12,7 +12,9 @@ use uqa_core::Value;
 
 use crate::ast::ColumnType;
 
+mod labels;
 mod text;
+pub use labels::render_result_enum_labels;
 pub use text::format_postgres_text;
 
 pub type ResultRow = BTreeMap<String, Value>;

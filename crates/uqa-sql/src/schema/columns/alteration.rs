@@ -106,8 +106,12 @@ pub fn analyze_generated_expression(
         .keys
         .try_foreign_keys(table)
         .map_err(|error| ddl_storage_error("ALTER COLUMN SET EXPRESSION", error))?;
+    let binding = context.bindings.bindings.binding_scope()?;
     crate::schema::generated::prepare_generated_columns(
-        context.bindings.schema,
+        &crate::schema::SchemaBindingContext {
+            catalog: context.bindings.schema,
+            binding: &binding.context(),
+        },
         qualifier,
         &mut columns,
         &key_constraints,
@@ -203,8 +207,12 @@ pub fn analyze_column_type(
         &key_constraints,
         &foreign_keys,
     )?;
+    let binding = context.bindings.bindings.binding_scope()?;
     crate::schema::generated::prepare_generated_columns(
-        context.bindings.schema,
+        &crate::schema::SchemaBindingContext {
+            catalog: context.bindings.schema,
+            binding: &binding.context(),
+        },
         qualifier,
         &mut candidate_columns,
         &key_constraints,

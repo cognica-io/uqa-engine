@@ -30,12 +30,14 @@ pub struct DomainDependents {
     pub checks: BTreeSet<(String, String, bool)>,
 }
 
-pub fn references_domain(ty: &ColumnType, targets: &BTreeSet<u32>) -> bool {
+/// Whether a declared type refers to one of the target user-defined type OIDs. Catalog OIDs are unique across type kinds, so one target set covers domains and enums, including arrays and domains over them.
+pub fn references_user_type(ty: &ColumnType, targets: &BTreeSet<u32>) -> bool {
     match ty {
         ColumnType::Domain { oid, base, .. } => {
-            targets.contains(oid) || references_domain(base, targets)
+            targets.contains(oid) || references_user_type(base, targets)
         }
-        ColumnType::Array(element) => references_domain(element, targets),
+        ColumnType::Enum(reference) => targets.contains(&reference.oid),
+        ColumnType::Array(element) => references_user_type(element, targets),
         _ => false,
     }
 }
@@ -47,7 +49,7 @@ pub fn type_name_references_domain(
 ) -> bool {
     types
         .resolve_domain_type_reference(name)
-        .is_some_and(|ty| references_domain(&ty, targets))
+        .is_some_and(|ty| references_user_type(&ty, targets))
 }
 
 pub fn expression_references_domain(
@@ -120,7 +122,7 @@ pub fn expand_domain_drop_targets(
     loop {
         let previous = targets.len();
         for domain in registry.values() {
-            let mut depends = references_domain(&domain.definition.base, targets);
+            let mut depends = references_user_type(&domain.definition.base, targets);
             if let Some(default) = &domain.definition.default {
                 depends |= expression_references_domain(types, default, targets)?;
                 for routine in routines {
@@ -177,7 +179,7 @@ pub fn domain_schema_dependents(
 ) -> Result<(), SQLError> {
     for column in columns {
         let target = (table.to_string(), column.name.clone(), foreign);
-        let mut drop_column = references_domain(&column.ty, targets);
+        let mut drop_column = references_user_type(&column.ty, targets);
         if let Some(generated) = &column.generated {
             drop_column |= expression_references_domain(types, &generated.expression, targets)?;
         }
@@ -312,7 +314,7 @@ pub fn index_directly_references_domain(
             && definition
                 .key_types
                 .get(position)
-                .is_some_and(|ty| references_domain(ty, targets))
+                .is_some_and(|ty| references_user_type(ty, targets))
     });
     for expression in keys
         .iter()

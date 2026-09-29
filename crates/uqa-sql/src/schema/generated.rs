@@ -6,7 +6,6 @@
 
 //! `PostgreSQL` 18 generated-column validation and row computation.
 
-use super::SchemaExpressionCatalog;
 use crate::ast::ForeignKey;
 use crate::ast::{ColumnDef, Expr, GeneratedColumnKind, TableKeyConstraint};
 use crate::{
@@ -16,14 +15,16 @@ use crate::{
 
 pub(crate) mod eligibility;
 pub(super) mod typing;
+mod virtual_security;
 
 pub fn prepare_generated_columns(
-    engine: &dyn SchemaExpressionCatalog,
+    context: &super::SchemaBindingContext<'_, '_>,
     qualifier: &str,
     columns: &mut [ColumnDef],
     key_constraints: &[TableKeyConstraint],
     foreign_keys: &[ForeignKey],
 ) -> Result<(), SQLError> {
+    let engine = context.catalog;
     let snapshot = columns.to_vec();
     for (index, column) in snapshot.iter().enumerate() {
         let Some(generated) = column.generated.as_ref() else {
@@ -55,13 +56,10 @@ pub fn prepare_generated_columns(
                 "aggregate functions are not allowed in column generation expressions".into(),
             ));
         }
-        validate_generation_expression(
-            engine,
-            qualifier,
-            &snapshot,
-            &generated.expression,
-            generated.kind,
-        )?;
+        validate_generation_expression(qualifier, &snapshot, &generated.expression)?;
+        if generated.kind == GeneratedColumnKind::Virtual {
+            virtual_security::check_virtual_host_functions(engine, &generated.expression)?;
+        }
         let prepared = columns[index]
             .generated
             .as_mut()
@@ -69,6 +67,13 @@ pub fn prepare_generated_columns(
         bind_schema_column_references(&mut prepared.expression, qualifier);
         let (expression_type, function_dependencies) =
             typing::infer_generation_expression(engine, &snapshot, &mut prepared.expression)?;
+        if generated.kind == GeneratedColumnKind::Virtual {
+            virtual_security::check_virtual_generated_security(
+                engine,
+                &snapshot,
+                &prepared.expression,
+            )?;
+        }
         crate::catalog::regrole_dependencies::reject_stored_regrole_constants(
             engine,
             &prepared.expression,
@@ -85,6 +90,19 @@ pub fn prepare_generated_columns(
             )));
         }
         prepared.function_dependencies = function_dependencies;
+        // The generation result is assigned to the column; its routines, user-defined types and enum constants are stored by identity as parse analysis stores them.
+        crate::catalog::stored_ast::fold_assigned_stored_literal(
+            &mut prepared.expression,
+            &column.ty,
+            crate::FunctionTypeResolver::enum_labels(engine),
+        )?;
+        super::constraints::bind_stored_check_expression(
+            context,
+            qualifier,
+            qualifier,
+            &snapshot,
+            &mut prepared.expression,
+        )?;
     }
     Ok(())
 }
@@ -94,6 +112,17 @@ fn validate_virtual_column_envelope(
     key_constraints: &[TableKeyConstraint],
     foreign_keys: &[ForeignKey],
 ) -> Result<(), SQLError> {
+    if virtual_security::is_user_defined_type(&column.ty) {
+        return Err(SQLError::Diagnostic {
+            sqlstate: "0A000".into(),
+            message: format!(
+                "virtual generated column \"{}\" cannot have a user-defined type",
+                column.name
+            ),
+            detail: Some(virtual_security::USER_DEFINED_TYPE_DETAIL.into()),
+            hint: None,
+        });
+    }
     if contains_engine_defined_type(&column.ty) {
         return Err(SQLError::TypeMismatch(format!(
             "virtual generated column `{}` cannot use a user-defined type",
@@ -143,16 +172,10 @@ fn contains_engine_defined_type(ty: &ColumnType) -> bool {
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves generated coercion diagnostics"
-)]
 fn validate_generation_expression(
-    engine: &dyn SchemaExpressionCatalog,
     qualifier: &str,
     columns: &[ColumnDef],
     expression: &Expr,
-    kind: GeneratedColumnKind,
 ) -> Result<(), SQLError> {
     match expression {
         Expr::Column(name) => validate_generation_column_reference(columns, name),
@@ -167,8 +190,6 @@ fn validate_generation_expression(
             validate_generation_column_reference(columns, column)
         }
         Expr::Func {
-            name,
-            binding,
             args,
             distinct,
             order_by,
@@ -180,53 +201,36 @@ fn validate_generation_expression(
                     "aggregate syntax is not allowed in column generation expressions".into(),
                 ));
             }
-            if kind == GeneratedColumnKind::Virtual
-                && binding
-                    .as_ref()
-                    .and_then(|binding| binding.dispatch)
-                    .is_none()
-                && (engine
-                    .registered_runtime_function_volatility(name)
-                    .is_some()
-                    || engine.lookup_visible_sql_functions(name)?.is_some())
-            {
-                return Err(SQLError::Diagnostic {
-                    sqlstate: "0A000".into(),
-                    message: "generation expression uses user-defined function".into(),
-                    detail: Some("Virtual generated columns that make use of user-defined functions are not yet supported.".into()),
-                    hint: None,
-                });
-            }
             for argument in args {
-                validate_generation_expression(engine, qualifier, columns, argument, kind)?;
+                validate_generation_expression(qualifier, columns, argument)?;
             }
             Ok(())
         }
         Expr::Array(items) | Expr::Row(items) | Expr::And(items) | Expr::Or(items) => {
             for item in items {
-                validate_generation_expression(engine, qualifier, columns, item, kind)?;
+                validate_generation_expression(qualifier, columns, item)?;
             }
             Ok(())
         }
         Expr::Binary { lhs, rhs, .. } => {
-            validate_generation_expression(engine, qualifier, columns, lhs, kind)?;
-            validate_generation_expression(engine, qualifier, columns, rhs, kind)
+            validate_generation_expression(qualifier, columns, lhs)?;
+            validate_generation_expression(qualifier, columns, rhs)
         }
         Expr::Not(inner)
         | Expr::UnaryMinus(inner)
         | Expr::IsNull { expr: inner, .. }
         | Expr::Cast { expr: inner, .. } => {
-            validate_generation_expression(engine, qualifier, columns, inner, kind)
+            validate_generation_expression(qualifier, columns, inner)
         }
         Expr::Between { expr, low, high } => {
-            validate_generation_expression(engine, qualifier, columns, expr, kind)?;
-            validate_generation_expression(engine, qualifier, columns, low, kind)?;
-            validate_generation_expression(engine, qualifier, columns, high, kind)
+            validate_generation_expression(qualifier, columns, expr)?;
+            validate_generation_expression(qualifier, columns, low)?;
+            validate_generation_expression(qualifier, columns, high)
         }
         Expr::InList { expr, list, .. } => {
-            validate_generation_expression(engine, qualifier, columns, expr, kind)?;
+            validate_generation_expression(qualifier, columns, expr)?;
             for item in list {
-                validate_generation_expression(engine, qualifier, columns, item, kind)?;
+                validate_generation_expression(qualifier, columns, item)?;
             }
             Ok(())
         }
@@ -236,14 +240,14 @@ fn validate_generation_expression(
             else_branch,
         } => {
             if let Some(base) = base {
-                validate_generation_expression(engine, qualifier, columns, base, kind)?;
+                validate_generation_expression(qualifier, columns, base)?;
             }
             for (condition, result) in when {
-                validate_generation_expression(engine, qualifier, columns, condition, kind)?;
-                validate_generation_expression(engine, qualifier, columns, result, kind)?;
+                validate_generation_expression(qualifier, columns, condition)?;
+                validate_generation_expression(qualifier, columns, result)?;
             }
             if let Some(else_branch) = else_branch {
-                validate_generation_expression(engine, qualifier, columns, else_branch, kind)?;
+                validate_generation_expression(qualifier, columns, else_branch)?;
             }
             Ok(())
         }

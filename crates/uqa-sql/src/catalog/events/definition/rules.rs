@@ -471,10 +471,7 @@ impl EventAnalysisContext<'_> {
                 &mut dependencies,
             );
         }
-        crate::catalog::stored_ast::bind_stored_statement_routines(
-            action,
-            &bound_routines.references,
-        )?;
+        crate::catalog::stored_ast::bind_stored_statement_sites(action, &bound_routines.sites)?;
         if let Some(schema) = schema {
             validate_rule_returning_shape(&schema, event_columns)?;
         }
@@ -511,9 +508,10 @@ impl EventAnalysisContext<'_> {
         }
 
         let bound = bind_expr(condition, &mut RuleRowTypeResolver { columns, event })?;
-        let mut dependency_plan = crate::plan::ExpressionPlan::lower_with(bound, &|name: &str| {
+        let lowered = crate::plan::ExpressionPlan::lower_with(bound, &|name: &str| {
             self.routines.has_registered_aggregate_function(name)
         });
+        let mut dependency_plan = lowered.clone();
         self.stored_routines.bind_expression(
             &mut dependency_plan,
             &[],
@@ -523,12 +521,9 @@ impl EventAnalysisContext<'_> {
             &dependency_plan,
             dependencies,
         );
-        let routine_references =
-            crate::binding::stored_routines::collect_expression_routine_references(
-                &dependency_plan,
-            )?;
-        crate::catalog::stored_ast::bind_stored_expression_routines(condition, &routine_references)
-            .map(|_| ())
+        let sites =
+            crate::binding::syntax_sites::expression_syntax_sites(&lowered, &dependency_plan)?;
+        crate::catalog::stored_ast::bind_stored_expression_sites(condition, &sites).map(|_| ())
     }
 
     pub fn validate_rule_definition(

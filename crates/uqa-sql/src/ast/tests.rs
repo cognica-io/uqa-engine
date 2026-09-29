@@ -349,6 +349,7 @@ fn routine_identity_and_call_parameters_are_distinct() {
         return_type_reference: None,
         language: "sql".into(),
         body: FunctionBody::Statements(Vec::new()),
+        sql_body_form: Some(crate::ast::SQLBodyForm::Atomic),
         creation_search_path: Vec::new(),
         volatility: FunctionVolatility::Volatile,
         strict: false,

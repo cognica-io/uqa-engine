@@ -497,6 +497,32 @@ test("sql notices, depth limit, and encryption rejection", async () => {
   assert.deepEqual((await engine.sql("SELECT rec(10) AS v")).rows, [{ v: 0 }]);
 });
 
+test("enum values reach the browser as their current labels", async () => {
+  const engine = await Engine.inMemory();
+  await engine.sql("CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy')");
+  await engine.sql("CREATE TABLE moods (id INTEGER, m mood, ms mood[])");
+  await engine.sql("INSERT INTO moods VALUES (1, 'happy', '{sad,ok}'), (2, 'sad', NULL)");
+  assert.deepEqual((await engine.sql("SELECT id, m, ms FROM moods ORDER BY m")).rows, [
+    { id: 2, m: "sad", ms: null },
+    { id: 1, m: "happy", ms: ["sad", "ok"] },
+  ]);
+  await engine.sql("ALTER TYPE mood RENAME VALUE 'ok' TO 'neutral'");
+  assert.deepEqual((await engine.sql("SELECT ms FROM moods WHERE id = 1")).rows, [
+    { ms: ["sad", "neutral"] },
+  ]);
+  const results = await engine.sqlBatch([
+    ["CREATE TYPE fleeting AS ENUM ('a')", []],
+    ["SELECT 'a'::fleeting AS f", []],
+    ["DROP TYPE fleeting", []],
+  ]);
+  assert.deepEqual(results[1].rows, [{ f: "a" }]);
+  await engine.registerScalarFunction("js_label", (value) => `label:${value}`);
+  assert.deepEqual((await engine.sql("SELECT js_label(m) AS l FROM moods ORDER BY id")).rows, [
+    { l: "label:happy" },
+    { l: "label:sad" },
+  ]);
+});
+
 test("browser scalar, table, and aggregate SQL callbacks", async () => {
   const engine = await Engine.inMemory();
   await engine.sql("CREATE TABLE samples (grp TEXT, val INTEGER)");

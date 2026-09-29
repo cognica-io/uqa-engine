@@ -307,6 +307,10 @@ impl Copier<'_> {
                 memory.grow(value.retained_bytes())?;
                 Value::Decimal(value.clone())
             }
+            Value::Enum(value) => {
+                memory.grow(value.retained_bytes())?;
+                Value::Enum(value.clone())
+            }
             Value::Array(_)
             | Value::LegacyVector(_)
             | Value::List(_)

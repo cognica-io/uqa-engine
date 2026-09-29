@@ -157,6 +157,7 @@ fn payload(
             };
         }
         "temporal" => return structured::temporal(content, control, depth),
+        "enum" => return structured::enum_value(content, control, depth),
         _ => return Err(JsonReadError::InvalidJson),
     };
     Ok(Budgeted::new(plain, control.memory().empty_reservation()))

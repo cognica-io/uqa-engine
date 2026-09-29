@@ -86,6 +86,8 @@ pub struct InsertSelectConsumerState<S: Clone + 'static> {
     pub conflict_update_columns: Vec<String>,
     pub columns: Option<Vec<uqa_sql::ast::AssignmentTarget<crate::ScalarExpr>>>,
     pub result_width: Option<usize>,
+    /// Columns the INSERT supplies values for, recorded for failing-row descriptions.
+    pub supplied_columns: std::rc::Rc<[String]>,
     pub prepared_schema: crate::RowSchema,
     pub prepared_buffer: Option<crate::SpillBuffer>,
     pub conflict_locks: Option<InsertConflictLocks>,
@@ -132,6 +134,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
                 conflict_update_columns,
                 columns: None,
                 result_width: None,
+                supplied_columns: std::rc::Rc::from([]),
                 prepared_schema,
                 prepared_buffer: Some(crate::SpillBuffer::new(
                     physical_work_mem_bytes(services.runtime)?.max(1),
@@ -219,6 +222,11 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             }
             return Ok(());
         }
+        state.supplied_columns = crate::mutation::supplied_columns::insert_supplied_columns(
+            &columns,
+            result_width,
+            state.stmt.on_conflict.as_ref(),
+        );
         state.columns = Some(columns);
         state.result_width = Some(result_width);
         Ok(())
@@ -242,6 +250,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             conflict_update_columns,
             columns,
             result_width,
+            supplied_columns,
             prepared_schema,
             prepared_buffer,
             conflict_locks,
@@ -251,6 +260,9 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             has_prepared_effect,
             has_prepared_auto_identity,
         } = &mut *state;
+        let _supplied_columns = crate::mutation::supplied_columns::SuppliedColumnsScope::enter(
+            supplied_columns.clone(),
+        );
         let columns = columns.as_ref().ok_or_else(|| {
             SQLError::Internal("INSERT SELECT row consumer was not initialized".into())
         })?;

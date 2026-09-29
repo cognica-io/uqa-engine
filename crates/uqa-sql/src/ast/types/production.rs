@@ -39,6 +39,10 @@ impl ColumnType {
             Self::Array(element) => {
                 Self::array_with_control(element.clone_with_control(control)?, control)
             }
+            Self::Enum(reference) => {
+                let (reference, memory) = reference.clone_with_control(control)?.into_parts();
+                control.finish(Self::Enum(reference), memory)
+            }
             Self::Domain {
                 schema,
                 name,

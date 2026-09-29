@@ -38,8 +38,12 @@ mod sql_cursor;
 mod sql_domains;
 #[path = "sql_dpccp_join_order.rs"]
 mod sql_dpccp_join_order;
+#[path = "queries/sql_enums.rs"]
+mod sql_enums;
 #[path = "sql_explain.rs"]
 mod sql_explain;
+#[path = "queries/sql_failing_row_details.rs"]
+mod sql_failing_row_details;
 #[path = "sql_filter_aggregate.rs"]
 mod sql_filter_aggregate;
 #[path = "sql_golden.rs"]
@@ -60,10 +64,14 @@ mod sql_lateral;
 mod sql_legacy_vectors;
 #[path = "sql_limit_offset.rs"]
 mod sql_limit_offset;
+#[path = "queries/sql_literal_coercion.rs"]
+mod sql_literal_coercion;
 #[path = "sql_nulls_order.rs"]
 mod sql_nulls_order;
 #[path = "sql_offset_like.rs"]
 mod sql_offset_like;
+#[path = "queries/sql_partition_bounds.rs"]
+mod sql_partition_bounds;
 #[path = "sql_prepared.rs"]
 mod sql_prepared;
 #[path = "sql_row_locks.rs"]

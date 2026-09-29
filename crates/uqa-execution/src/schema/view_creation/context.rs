@@ -29,6 +29,8 @@ pub trait ViewPlanBinding {
         plan: &mut QueryPlan,
         params: &[SQLParam],
     ) -> Result<RowSchema, SQLError>;
+    /// Record the user-defined types that the plan casts to by identity.
+    fn bind_type_identities(&self, plan: &mut QueryPlan) -> Result<(), SQLError>;
 }
 pub trait MaterializedViewAccess {
     fn ensure_maintenance(&self, name: &str, view: &StoredView) -> Result<(), SQLError>;

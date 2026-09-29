@@ -165,9 +165,17 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
     }
     let mut physical_schema =
         crate::RowSchema::with_qualified_types(&qualifier, schema.clone(), column_types);
-    if let Some(position) = schema.iter().position(|column| column == XMIN_COLUMN) {
+    // System columns are addressable by name but never expand into `*` or a whole-row value.
+    let system_positions = schema
+        .iter()
+        .enumerate()
+        .filter_map(|(position, column)| {
+            (column == XMIN_COLUMN || column == TABLE_OID_COLUMN).then_some(position)
+        })
+        .collect::<Vec<_>>();
+    if !system_positions.is_empty() {
         physical_schema =
-            crate::RowSchema::with_wildcard_hidden_positions(&physical_schema, vec![position]);
+            crate::RowSchema::with_wildcard_hidden_positions(&physical_schema, system_positions);
     }
     let metadata_relation = uqa_sql::ast::InternalRelationId::allocate();
     let mut metadata_attributes = Vec::with_capacity(2);

@@ -24,6 +24,8 @@ pub struct DomainCreationContext<'a> {
     pub bindings: &'a dyn DomainDeclarationBinding,
     pub allocate_identity: fn() -> Result<[u8; 16], SQLError>,
     pub publication: &'a dyn DomainRegistryPublication,
+    /// Enum arrays share the type namespace with domain arrays.
+    pub enums: &'a dyn crate::catalog::enum_type::EnumRegistryPublication,
     pub changes: &'a dyn super::namespaces::NamespaceCatalogChanges,
 }
 
@@ -34,7 +36,22 @@ pub fn create_domain(
     let owner = context.creation.bind_owner()?;
     context.writer.prepare_writer()?;
     definition.name = context.creation.persistent_name(&definition.name)?;
+    // DefineDomain: a generated array holding the name moves aside; any other type is a conflict.
+    super::types::arrays::displace_array_type(
+        &context.creation,
+        super::types::arrays::UserTypeRegistries {
+            enums: context.enums,
+            domains: context.publication,
+        },
+        &uqa_core::RelationIdentity::from_legacy_name(&definition.name)
+            .map_err(SQLError::Internal)?,
+    )?;
     let identity = context.creation.reserve_type_name(&definition.name)?;
+    let array_name = super::types::arrays::reserve_array_name(
+        &context.creation,
+        &identity.schema,
+        &identity.name,
+    )?;
     context.bindings.bind_domain_declaration(&mut definition)?;
     let mut allocator = context
         .identities
@@ -55,6 +72,8 @@ pub fn create_domain(
             identity,
             owner: owner.identity(),
             definition,
+            array_name: Some(array_name),
+            usage_acl: None,
         },
     );
     domain::publish(context.publication, &before, registry)?;

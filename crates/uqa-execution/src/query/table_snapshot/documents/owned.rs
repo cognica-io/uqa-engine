@@ -61,6 +61,9 @@ impl RetainedDocuments {
                     uqa_core::ValueRetentionError::Cancelled(error) => {
                         StorageBackendError::Cancelled(error)
                     }
+                    error @ uqa_core::ValueRetentionError::Malformed { .. } => {
+                        StorageBackendError::Other(error.to_string())
+                    }
                 })?
                 .into_parts();
             memory.absorb(allocation);

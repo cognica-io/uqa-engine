@@ -197,7 +197,10 @@ fn dispatch_engine(engine: &Engine, method: &str, args: &JSON) -> Result<JSON, S
         "sql" => {
             let query = req_str(args, "query")?;
             let params = params_from_json(args.get("params"))?;
-            let result = engine.sql(&query, &params).map_err(|err| err.to_string())?;
+            let mut result = engine.sql(&query, &params).map_err(|err| err.to_string())?;
+            engine
+                .render_enum_labels(&mut result)
+                .map_err(|err| err.to_string())?;
             sql_result_to_json(result)
         }
         "sqlBatch" => {
@@ -221,7 +224,9 @@ fn dispatch_engine(engine: &Engine, method: &str, args: &JSON) -> Result<JSON, S
                 .iter()
                 .map(|(sql, params)| (sql.as_str(), params.as_slice()))
                 .collect();
-            let results = engine.sql_batch(&borrowed).map_err(|err| err.to_string())?;
+            let results = engine
+                .sql_batch_with_labels(&borrowed)
+                .map_err(|err| err.to_string())?;
             results
                 .into_iter()
                 .map(sql_result_to_json)
@@ -608,6 +613,8 @@ fn value_to_json(value: Value) -> Result<JSON, String> {
         }
         Value::Bytes(value) => Ok(json!({ "$bytes": BASE64.encode(value) })),
         Value::Temporal(value) => Ok(json!(value.to_sql_string())),
+        // Result conversion renders enum columns through the engine catalog before reaching this context-free converter.
+        Value::Enum(value) => Err(uqa_sql::expr::catalog_output_required(&value).to_string()),
         Value::LegacyVector(vector) => value_to_json(Value::Array(vector.into_array())),
         Value::Array(array) => array
             .into_elements()

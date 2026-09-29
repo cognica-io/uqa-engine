@@ -13,7 +13,6 @@ use uqa_sql::{ResultRow, SQLError};
 use crate::catalog::context::CatalogContext;
 use crate::catalog::{CatalogReadView, RelationNameResolution};
 
-use super::super::expression_text::default_expr_text;
 use super::super::helpers::information_schema_types::array_dimension_count;
 use super::super::helpers::oids::{split_schema_name, stable_oid};
 use super::super::helpers::rows::{
@@ -25,7 +24,6 @@ use super::super::helpers::type_metadata::{
 };
 use super::super::helpers::views::view_columns_for;
 use super::table_relation_oid_from;
-use uqa_sql::expr::value_to_text;
 
 #[expect(
     clippy::too_many_lines,
@@ -303,11 +301,19 @@ pub fn build_pg_attrdef(
             .table(resolution, &table_name)?
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?
             .columns;
-        append_pg_attrdef_rows(&mut out, &table_name, &table, relid, columns)?;
+        append_pg_attrdef_rows(
+            (catalog, resolution),
+            &mut out,
+            &table_name,
+            &table,
+            relid,
+            columns,
+        )?;
     }
     for (table_name, table) in catalog.foreign_tables() {
         let (_, local_name) = split_schema_name(&table_name)?;
         append_pg_attrdef_rows(
+            (catalog, resolution),
             &mut out,
             &table_name,
             &local_name,
@@ -318,7 +324,9 @@ pub fn build_pg_attrdef(
     Ok(out)
 }
 
+/// `adbin` holds the expression as `pg_get_expr` prints it for the relation.
 fn append_pg_attrdef_rows(
+    (catalog, resolution): (&CatalogReadView, &RelationNameResolution),
     out: &mut Vec<ResultRow>,
     table_name: &str,
     local_table_name: &str,
@@ -335,10 +343,15 @@ fn append_pg_attrdef_rows(
         }
         let default = if legacy_auto_increment {
             format!("nextval('{}_{}_seq')", local_table_name, col.name)
-        } else if let Some(generated) = &col.generated {
-            super::super::expression_text::schema_expr_text(&generated.expression)
+        } else if let Some(expression) = col
+            .generated
+            .as_ref()
+            .map(|generated| generated.expression.as_ref())
+            .or(col.default.as_ref())
+        {
+            super::super::view_definition::stored_expression_text(catalog, resolution, expression)?
         } else {
-            value_to_text(&default_expr_text(col.default.as_ref()))
+            continue;
         };
         out.push(row([
             (

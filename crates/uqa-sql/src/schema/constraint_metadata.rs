@@ -46,6 +46,10 @@ pub type CatalogIdentityAllocator<'a> = dyn CatalogObjectAllocator + 'a;
 pub enum CatalogOidClass {
     Constraint,
     Relation,
+    /// `pg_type` rows, including generated array types.
+    Type,
+    /// `pg_enum` label rows.
+    EnumLabel,
 }
 
 impl CatalogOidClass {
@@ -53,6 +57,8 @@ impl CatalogOidClass {
         match self {
             Self::Constraint => 2606,
             Self::Relation => 1259,
+            Self::Type => 1247,
+            Self::EnumLabel => 3501,
         }
     }
 
@@ -60,6 +66,8 @@ impl CatalogOidClass {
         match self {
             Self::Constraint => "constraint",
             Self::Relation => "relation",
+            Self::Type => "type",
+            Self::EnumLabel => "enum label",
         }
     }
 }

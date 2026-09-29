@@ -48,7 +48,9 @@ impl QueryBuilder<'_> {
     /// metadata columns `_doc_id` and `_score` before the requested
     /// projections.
     pub fn execute_arrow(&self) -> Result<RecordBatch, QueryBuilderError> {
-        let result = self.execute_with_result_metadata()?;
+        let mut result = self.execute_with_result_metadata()?;
+        // Arrow carries enum values as their labels, as PostgreSQL clients receive them.
+        self.engine.render_enum_labels(&mut result)?;
         sql_result_to_record_batch(&result).map_err(QueryBuilderError::Arrow)
     }
 
@@ -128,6 +130,7 @@ pub(super) fn infer_arrow_type(column_index: usize, column: &str, result: &SQLRe
             Value::Int(_) => DataType::Int64,
             Value::Float(_) => DataType::Float64,
             Value::Void
+            | Value::Enum(_)
             | Value::Decimal(_)
             | Value::Str(_)
             | Value::FixedChar(_)
@@ -300,6 +303,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::Row(_) => "row",
         Value::Record(_) => "record",
         Value::Map(_) => "map",
+        Value::Enum(_) => "enum",
     }
 }
 
@@ -329,5 +333,12 @@ fn value_to_arrow_string(value: &Value) -> Result<Option<String>, ArrowError> {
             )
         }
         Value::Map(v) => Some(format!("{v:?}")),
+        Value::Enum(value) => {
+            let error = uqa_sql::expr::catalog_output_required(value);
+            return Err(ArrowError::CastError(format!(
+                "{}: {error}",
+                error.sqlstate().unwrap_or("XX000")
+            )));
+        }
     })
 }

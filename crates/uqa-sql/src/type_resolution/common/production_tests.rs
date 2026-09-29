@@ -95,3 +95,43 @@ fn literal_type_resource_errors_are_not_unknown_type_fallbacks() {
         assert_eq!(budget.used(), 0);
     }
 }
+
+#[test]
+fn common_input_type_keeps_a_domain_only_when_every_input_has_it() {
+    let control = ProductionControl::uncontrolled();
+    let domain = ColumnType::Domain {
+        schema: "public".into(),
+        name: "positive".into(),
+        oid: 40001,
+        base: Box::new(ColumnType::Integer),
+    };
+    let select = |types: &[Option<&ColumnType>]| {
+        select_common_input_type_with_control(types, &control)
+            .unwrap()
+            .map(|ty| ty.into_uncontrolled().unwrap())
+    };
+    assert_eq!(
+        select(&[Some(&domain), Some(&domain)]),
+        Some(domain.clone())
+    );
+    // An `unknown` input differs from the domain, so the domain is reduced to its base type.
+    assert_eq!(select(&[Some(&domain), None]), Some(ColumnType::Integer));
+    assert_eq!(
+        select(&[
+            Some(&domain),
+            Some(&ColumnType::Numeric {
+                precision: None,
+                scale: None
+            })
+        ]),
+        Some(ColumnType::Numeric {
+            precision: None,
+            scale: None
+        })
+    );
+    assert_eq!(select(&[None, None]), Some(ColumnType::Text));
+    assert_eq!(
+        select(&[Some(&ColumnType::Integer), Some(&ColumnType::Boolean)]),
+        None
+    );
+}

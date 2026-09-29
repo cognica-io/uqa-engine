@@ -250,6 +250,16 @@ fn value_to_display_typed(
         return uqa_sql::expr::vector_value_to_string(value)?
             .ok_or_else(|| SQLError::Internal("invalid vector display carrier".into()));
     }
+    // Enum values display their current catalog labels, as the type's output function does.
+    if let Some(value) = value.filter(|value| uqa_sql::expr::enums::contains_enum_carrier(value)) {
+        return match ty {
+            Some(ty) => uqa_sql::result::format_postgres_text(value, ty, engine),
+            None => value_to_display(Some(&uqa_sql::expr::enums::render_enum_labels(
+                engine.and_then(EngineHook::enum_labels),
+                value,
+            )?)),
+        };
+    }
     value_to_display(value)
 }
 
@@ -292,6 +302,8 @@ pub(super) fn value_to_display(v: Option<&Value>) -> Result<String, SQLError> {
         Some(Value::Float(f)) => uqa_graph::agtype::format_float_pg(*f),
         Some(Value::Decimal(d)) => d.to_sql_string(),
         Some(Value::Str(s) | Value::FixedChar(s)) => s.clone(),
+        // Typed result columns format labels through the engine catalog; an untyped carrier has no label source.
+        Some(Value::Enum(value)) => return Err(uqa_sql::expr::catalog_output_required(value)),
         // PostgreSQL bytea hex output form.
         Some(Value::Bytes(b)) => {
             const HEX: &[u8; 16] = b"0123456789abcdef";
@@ -311,7 +323,7 @@ pub(super) fn value_to_display(v: Option<&Value>) -> Result<String, SQLError> {
         ) => uqa_sql::expr::value_to_string(value)?,
         // Maps come from JSON/JSONB values: render canonical JSON the
         // way psql prints jsonb, not a Rust-debug-ish map.
-        Some(value @ Value::Map(_)) => json_value_display(value),
+        Some(value @ Value::Map(_)) => json_value_display(value)?,
     })
 }
 
@@ -324,7 +336,7 @@ pub(super) fn pg_array_display(items: &[Value]) -> Result<String, SQLError> {
             Value::Null => "NULL".to_string(),
             Value::Bool(b) => if *b { "t" } else { "f" }.to_string(),
             Value::List(items) => pg_array_display(items)?,
-            Value::Map(_) => json_value_display(v),
+            Value::Map(_) => json_value_display(v)?,
             other => {
                 let s = value_to_display(Some(other))?;
                 let needs_quotes = s.is_empty()
@@ -346,8 +358,8 @@ pub(super) fn pg_array_display(items: &[Value]) -> Result<String, SQLError> {
 /// Canonical JSON rendering for JSON/JSONB values inside result
 /// tables: quoted keys, `": "` and `", "` separators, JSON literals
 /// for nested nulls - the same shape psql prints for `jsonb`.
-pub(super) fn json_value_display(v: &Value) -> String {
-    match v {
+pub(super) fn json_value_display(v: &Value) -> Result<String, SQLError> {
+    Ok(match v {
         Value::Null => "null".to_string(),
         Value::Void => serde_json::Value::String(String::new()).to_string(),
         Value::Bool(b) => b.to_string(),
@@ -356,24 +368,31 @@ pub(super) fn json_value_display(v: &Value) -> String {
         Value::Decimal(d) => d.to_sql_string(),
         Value::Str(s) | Value::FixedChar(s) => serde_json::Value::String(s.clone()).to_string(),
         Value::Bytes(_) | Value::Temporal(_) => {
-            serde_json::Value::String(value_to_display(Some(v)).expect("byte and temporal output"))
-                .to_string()
+            serde_json::Value::String(value_to_display(Some(v))?).to_string()
         }
         Value::Json(text) | Value::JsonB(text) => text.clone(),
+        Value::Enum(value) => return Err(uqa_sql::expr::catalog_output_required(value)),
         Value::Array(array) => {
             let inner = array
                 .elements()
                 .iter()
                 .map(json_value_display)
-                .collect::<Vec<_>>();
+                .collect::<Result<Vec<_>, SQLError>>()?;
             format!("[{}]", inner.join(", "))
         }
         Value::LegacyVector(vector) => {
-            let inner: Vec<_> = vector.elements().iter().map(json_value_display).collect();
+            let inner = vector
+                .elements()
+                .iter()
+                .map(json_value_display)
+                .collect::<Result<Vec<_>, SQLError>>()?;
             format!("[{}]", inner.join(", "))
         }
         Value::List(items) | Value::Row(items) => {
-            let inner: Vec<String> = items.iter().map(json_value_display).collect();
+            let inner = items
+                .iter()
+                .map(json_value_display)
+                .collect::<Result<Vec<_>, SQLError>>()?;
             format!("[{}]", inner.join(", "))
         }
         Value::Record(fields) => {
@@ -381,9 +400,9 @@ pub(super) fn json_value_display(v: &Value) -> String {
                 .iter()
                 .map(|(key, value)| {
                     let key = serde_json::Value::String(key.clone()).to_string();
-                    format!("{key}: {}", json_value_display(value))
+                    Ok(format!("{key}: {}", json_value_display(value)?))
                 })
-                .collect();
+                .collect::<Result<_, SQLError>>()?;
             format!("{{{}}}", inner.join(", "))
         }
         Value::Map(m) => {
@@ -391,12 +410,12 @@ pub(super) fn json_value_display(v: &Value) -> String {
                 .iter()
                 .map(|(k, v)| {
                     let key = serde_json::Value::String(k.clone()).to_string();
-                    format!("{key}: {}", json_value_display(v))
+                    Ok(format!("{key}: {}", json_value_display(v)?))
                 })
-                .collect();
+                .collect::<Result<_, SQLError>>()?;
             format!("{{{}}}", inner.join(", "))
         }
-    }
+    })
 }
 
 #[cfg(test)]

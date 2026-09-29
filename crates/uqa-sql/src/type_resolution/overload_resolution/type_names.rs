@@ -133,8 +133,20 @@ pub(in crate::type_resolution) fn canonical_column_type_name_with_control(
     ty: &ColumnType,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>, ValueRetentionError> {
+    // User-defined type spellings are neither unique across schemas nor stable across renames, so overload matching identifies them by OID.
+    if let Some(identity) = ty.user_type_identity() {
+        return control.copy_text(&identity);
+    }
     let name = ty.sql_name_with_control(control)?;
     canonical_routine_type_name_with_control(&name, control)
+}
+
+/// Parse a canonical enum identity produced by overload matching: the enum type OID and the number of array dimensions around it.
+#[must_use]
+pub fn parse_enum_type_identity(name: &str) -> Option<(u32, usize)> {
+    crate::ast::UserTypeIdentity::parse(name)
+        .filter(|identity| identity.kind == crate::ast::UserTypeKind::Enum)
+        .map(|identity| (identity.oid, identity.dimensions))
 }
 
 #[cfg(test)]

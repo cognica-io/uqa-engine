@@ -8,7 +8,8 @@
 
 use super::{ArrayValue, BTreeMap, TemporalValue, Value};
 use crate::{
-    memory::Budgeted, CancellationToken, LegacyVectorKind, LegacyVectorValue, ValueRetentionError,
+    memory::Budgeted, CancellationToken, EnumLabelKey, EnumValue, LegacyVectorKind,
+    LegacyVectorValue, ValueRetentionError,
 };
 
 mod allocation;
@@ -127,6 +128,9 @@ fn convert(
                 return Ok(Value::LegacyVector(vector));
             }
         }
+        "enum" if map.len() == 3 && map.contains_key("type_oid") && map.contains_key("key") => {
+            return decoded_enum(&map, workspace).map(Value::Enum);
+        }
         "row" if map.len() == 2 => {
             if matches!(map.get("values"), Some(Value::List(_))) {
                 return Ok(Value::Row(take_list(&mut map, "values")));
@@ -160,6 +164,32 @@ fn convert(
         _ => {}
     }
     Ok(Value::Map(map))
+}
+
+/// Enum carriers are recognized by their exact field set and then validated strictly; a stored label key that does not satisfy the key invariant is corruption rather than a document map.
+fn decoded_enum(
+    map: &BTreeMap<String, Value>,
+    workspace: &mut Workspace<'_>,
+) -> Result<EnumValue, ValueRetentionError> {
+    let malformed = |reason: &str| ValueRetentionError::Malformed {
+        kind: "enum",
+        reason: reason.to_owned(),
+    };
+    let type_oid = match map.get("type_oid") {
+        Some(Value::Int(oid)) => {
+            u32::try_from(*oid).map_err(|_| malformed("type OID out of range"))?
+        }
+        _ => return Err(malformed("type OID is not an integer")),
+    };
+    let Some(Value::Str(hex)) = map.get("key") else {
+        return Err(malformed("label key is not hexadecimal text"));
+    };
+    if hex.len() / 2 > crate::MAX_ENUM_LABEL_KEY_BYTES {
+        return Err(malformed("label key exceeds its length limit"));
+    }
+    workspace.reserve(hex.len() / 2)?;
+    let key = EnumLabelKey::from_hex(hex).map_err(|error| malformed(&error.to_string()))?;
+    Ok(EnumValue::new(type_oid, key))
 }
 
 fn decoded_legacy_vector(
@@ -283,3 +313,6 @@ mod tests;
 
 #[cfg(test)]
 mod controlled_tests;
+
+#[cfg(test)]
+mod enum_tests;

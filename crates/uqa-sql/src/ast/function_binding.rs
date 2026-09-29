@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::RangeSubtype;
+use super::{EnumFunctionOperation, RangeSubtype};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FunctionBinding {
@@ -88,6 +88,11 @@ pub enum FunctionDispatch {
         subtype: RangeSubtype,
         multirange: bool,
     },
+    /// An `anyenum` support function bound to one concrete enum type.
+    Enum {
+        operation: EnumFunctionOperation,
+        type_oid: u32,
+    },
 }
 
 /// Operation selected for one typed range or multirange call.
@@ -132,6 +137,7 @@ impl FunctionDispatch {
             Self::JsonExtract { as_text: false, .. } => "JSON extraction operator",
             Self::JsonExtract { as_text: true, .. } => "JSON text extraction operator",
             Self::Range { operation, .. } => operation.label(),
+            Self::Enum { operation, .. } => operation.label(),
         }
     }
 

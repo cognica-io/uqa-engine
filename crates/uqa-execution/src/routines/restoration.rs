@@ -28,6 +28,8 @@ pub struct PendingSQLFunctionRestore {
 }
 pub trait RoutineRestoreSchemas {
     fn routine_schema_exists(&self, schema: &str) -> bool;
+    /// The identity of the restored user-defined type a signature type name spells, for signatures recorded before types were recorded by identity.
+    fn routine_user_type_identity(&self, type_name: &str) -> Option<String>;
 }
 pub struct RoutineRestoreContext<'a> {
     pub registry: &'a dyn RoutineRegistryState,
@@ -35,6 +37,25 @@ pub struct RoutineRestoreContext<'a> {
     pub publication: &'a dyn RoutineRegistryPublication,
     pub schemas: &'a dyn RoutineRestoreSchemas,
     pub definition: RoutineDefinitionContext<'a>,
+}
+
+/// Signatures recorded before identities spell domains by qualified name. Resolving them again at each open keeps overload matching exact; a later catalog write records the identity.
+fn identify_signature_types(schemas: &dyn RoutineRestoreSchemas, def: &mut CreateFunction) {
+    let identify = |type_name: &mut String| {
+        if uqa_sql::ast::UserTypeIdentity::parse(type_name).is_none() {
+            if let Some(identity) = schemas.routine_user_type_identity(type_name) {
+                *type_name = identity;
+            }
+        }
+    };
+    for parameter in &mut def.params {
+        identify(&mut parameter.type_name);
+    }
+    if let uqa_sql::ast::FunctionReturns::Scalar { type_name }
+    | uqa_sql::ast::FunctionReturns::SetOf { type_name } = &mut def.returns
+    {
+        identify(type_name);
+    }
 }
 
 fn canonicalize_persisted_sql_functions(
@@ -53,6 +74,7 @@ fn canonicalize_persisted_sql_functions(
         )
         .map_err(StorageBackendError::Other)?;
         for mut def in overloads {
+            identify_signature_types(schemas, &mut def);
             if def.object_id.is_none() || def.object_id == Some([0; 16]) {
                 def.object_id = Some(crate::catalog::identity::new_nonzero_catalog_identity(
                     "routine",

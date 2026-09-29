@@ -433,6 +433,18 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             let overlay = MutationOverlayScope::new(mutation.state);
             let mut conflict_locks = InsertConflictLocks::new(&preparation.referential);
             let input_rows = rule_source_rows.as_deref().unwrap_or(&stmt.rows);
+            let supplied_width = if implicit_columns {
+                input_rows.first().map_or(0, Vec::len)
+            } else {
+                columns.len()
+            };
+            let _supplied_columns = crate::mutation::supplied_columns::SuppliedColumnsScope::enter(
+                crate::mutation::supplied_columns::insert_supplied_columns(
+                    &columns,
+                    supplied_width,
+                    stmt.on_conflict.as_ref(),
+                ),
+            );
             let mut documents = Vec::with_capacity(input_rows.len());
             let mut target_tables = Vec::with_capacity(input_rows.len());
             let mut prepared_conflicts = Vec::with_capacity(input_rows.len());

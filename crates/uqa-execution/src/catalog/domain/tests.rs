@@ -33,6 +33,8 @@ fn legacy() -> BTreeMap<String, StoredDomain<String>> {
             identity: RelationIdentity::new("public", "positive"),
             owner: "uqa".into(),
             definition,
+            array_name: None,
+            usage_acl: None,
         },
     )])
 }

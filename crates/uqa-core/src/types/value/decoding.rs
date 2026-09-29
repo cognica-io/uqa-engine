@@ -189,6 +189,7 @@ impl From<ValueRetentionError> for JsonReadError {
         match error {
             ValueRetentionError::Memory(error) => Self::Memory(error),
             ValueRetentionError::Cancelled(error) => Self::Cancelled(error),
+            ValueRetentionError::Malformed { kind, reason } => Self::Malformed { kind, reason },
         }
     }
 }

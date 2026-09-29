@@ -235,6 +235,10 @@ The following compact ledger is the readable projection of the machine-readable 
 | `aggregates.mode-equality-and-ties` | `M4` | `verified` |
 | `types.legacy-vector-coherence` | `M4` | `verified` |
 | `dml.assignment-subscripts` | `M4` | `verified` |
+| `types.enum-declarations-and-values` | `M3` | `partial` |
+| `types.unknown-literal-coercion` | `M3` | `partial` |
+| `ddl.partition-bound-transformation` | `M3` | `partial` |
+| `dml.failing-row-details` | `M4` | `partial` |
 
 <!-- pg18-manifest-status:end -->
 

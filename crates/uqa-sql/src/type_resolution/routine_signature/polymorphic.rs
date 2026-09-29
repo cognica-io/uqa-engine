@@ -81,7 +81,11 @@ pub(super) fn collect_polymorphic_actual(
             *compatible_range_seen = true;
             merge_compatible(compatible_element, subtype.scalar_type())
         }
-        RoutinePolymorphicType::AnyEnum => false,
+        // `anyenum` shares the simple family's element type and requires an enum; a domain over an enum is not an enum type.
+        RoutinePolymorphicType::AnyEnum => {
+            matches!(actual, ColumnType::Enum(_))
+                && merge_same_identity(simple_element, actual.clone())
+        }
     }
 }
 
@@ -166,6 +170,7 @@ fn is_array_actual(actual: &ColumnType) -> bool {
 
 pub(super) fn resolve_target(
     declared_type_name: &str,
+    declared: Option<&ColumnType>,
     actual: Option<&ColumnType>,
     substitutions: &RoutineTypeSubstitutions,
 ) -> Option<RoutineCoercionTarget> {
@@ -174,6 +179,15 @@ pub(super) fn resolve_target(
         return Some(RoutineCoercionTarget {
             type_name: canonical_column_type_name(&column_type),
             column_type: Some(column_type),
+        });
+    }
+    // A catalog enum declaration is identified by OID, independent of its spelling and of the search path at the call.
+    if let Some(declared) =
+        declared.filter(|declared| crate::expr::enums::is_enum_bearing(declared))
+    {
+        return Some(RoutineCoercionTarget {
+            type_name: canonical_column_type_name(declared),
+            column_type: Some(declared.clone()),
         });
     }
     let type_name = canonical_routine_type_name(declared_type_name);

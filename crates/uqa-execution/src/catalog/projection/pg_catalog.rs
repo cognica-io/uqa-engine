@@ -7,6 +7,7 @@
 //! Virtual `pg_catalog` relation builders.
 
 mod attributes;
+mod constraint_definitions;
 mod constraints;
 mod indexes;
 mod relations;
@@ -14,6 +15,7 @@ mod roles;
 mod sequences;
 mod types;
 pub use attributes::{build_pg_attrdef, build_pg_attribute};
+pub use constraint_definitions::pg_get_constraintdef_value;
 pub use constraints::build_pg_constraint;
 pub(crate) use indexes::legacy::catalog_index_relations as legacy_index_relations;
 pub use indexes::{
@@ -26,4 +28,4 @@ pub use relations::{
 };
 pub use roles::{build_pg_auth_members, build_pg_authid, build_pg_roles, build_pg_user};
 pub use sequences::build_pg_sequences;
-pub use types::{build_pg_range, build_pg_type};
+pub use types::{build_pg_enum, build_pg_range, build_pg_type};

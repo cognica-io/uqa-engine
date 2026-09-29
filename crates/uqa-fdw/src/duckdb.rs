@@ -310,6 +310,11 @@ fn uqa_value_to_duck_value(value: &Value) -> Result<::duckdb::types::Value, FDWE
                 "void values cannot be bound to DuckDB parameters".into(),
             ));
         }
+        Value::Enum(_) => {
+            return Err(FDWError::UnsupportedValue(
+                "enum values need catalog label output before binding to DuckDB parameters".into(),
+            ));
+        }
         Value::Bool(v) => DuckValue::Boolean(*v),
         Value::Int(v) => DuckValue::BigInt(*v),
         Value::Float(v) => DuckValue::Double(*v),

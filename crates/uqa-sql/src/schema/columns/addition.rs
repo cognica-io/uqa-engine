@@ -86,8 +86,12 @@ pub fn bind_added_column(
         .keys
         .try_foreign_keys(table)
         .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?;
+    let binding = context.bindings.binding_scope()?;
     crate::schema::generated::prepare_generated_columns(
-        context.schema,
+        &SchemaBindingContext {
+            catalog: context.schema,
+            binding: &binding.context(),
+        },
         qualifier,
         &mut candidate_columns,
         &key_constraints,

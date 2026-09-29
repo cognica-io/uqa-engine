@@ -403,6 +403,9 @@ fn projection_output_columns(
             Expr::Func { name, binding, .. } => columns.push(
                 crate::semantics::function_projection_label(name, binding.as_ref()),
             ),
+            Expr::WindowCall { name, .. } => {
+                columns.push(crate::semantics::function_projection_label(name, None));
+            }
             _ => columns.push("?column?".into()),
         }
     }

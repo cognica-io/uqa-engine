@@ -164,6 +164,9 @@ pub(super) fn projection_output_names(projections: &[crate::ast::Projection]) ->
                     Expr::Func { name, binding, .. } => {
                         crate::semantics::function_projection_label(name, binding.as_ref())
                     }
+                    Expr::WindowCall { name, .. } => {
+                        crate::semantics::function_projection_label(name, None)
+                    }
                     _ => "?column?".into(),
                 })
         })

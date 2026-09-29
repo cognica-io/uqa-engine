@@ -198,15 +198,16 @@ fn hash_partition_ddl_rejects_invalid_bounds_defaults_and_modulus_chains() {
         "CREATE TABLE range_validation (k INTEGER) PARTITION BY RANGE (k)",
     );
     exec(&engine, "CREATE TABLE wrong_bound_candidate (k INTEGER)");
+    let wrong_strategy = engine
+        .sql(
+            "ALTER TABLE range_validation ATTACH PARTITION wrong_bound_candidate FOR VALUES WITH (MODULUS 8, REMAINDER 4)",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(wrong_strategy.sqlstate(), Some("42P16"));
     assert_eq!(
-        engine
-            .sql(
-                "ALTER TABLE range_validation ATTACH PARTITION wrong_bound_candidate FOR VALUES WITH (MODULUS 8, REMAINDER 4)",
-                &[],
-            )
-            .unwrap_err()
-            .sqlstate(),
-        Some("42P17")
+        wrong_strategy.to_string(),
+        "invalid bound specification for a range partition"
     );
 
     exec(

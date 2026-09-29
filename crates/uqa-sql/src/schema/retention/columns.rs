@@ -98,6 +98,10 @@ impl<'a> Walker<'a> {
     pub(super) fn ty(&mut self, ty: &'a ColumnType) -> Result<()> {
         match ty {
             ColumnType::Named(name) => self.text(name),
+            ColumnType::Enum(reference) => {
+                self.text(&reference.schema)?;
+                self.text(&reference.name)
+            }
             ColumnType::Array(element) => self.boxed(element.as_ref(), Node::Type),
             ColumnType::Domain {
                 schema,

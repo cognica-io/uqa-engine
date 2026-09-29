@@ -27,6 +27,8 @@ fn domain_dependencies_keep_the_owner_incarnation_after_its_name_is_reused() {
             identity: RelationIdentity::new("public", "owned"),
             owner: catalog.roles["first"].identity(),
             definition,
+            array_name: None,
+            usage_acl: None,
         },
     );
     let mut original = catalog.roles.remove("first").unwrap();

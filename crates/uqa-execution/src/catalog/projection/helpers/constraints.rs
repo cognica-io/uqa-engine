@@ -86,6 +86,8 @@ pub struct ConstraintCatalogRow {
     pub state: ConstraintCatalogState,
     pub period: bool,
     pub foreign_key: Option<ForeignKeyCatalogData>,
+    /// The expression of a CHECK constraint.
+    pub expression: Option<uqa_sql::ast::Expr>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -191,6 +193,7 @@ pub struct PendingConstraintCatalogRow {
     pub state: ConstraintCatalogState,
     pub period: bool,
     pub foreign_key: Option<ForeignKeyCatalogData>,
+    pub expression: Option<uqa_sql::ast::Expr>,
 }
 
 #[expect(
@@ -239,6 +242,7 @@ pub fn constraint_catalog_rows(
                     ),
                     period: false,
                     foreign_key: None,
+                    expression: None,
                 });
             }
             if let Some(expr) = &col.check {
@@ -257,6 +261,7 @@ pub fn constraint_catalog_rows(
                     ),
                     period: false,
                     foreign_key: None,
+                    expression: Some(expr.clone()),
                 });
             }
             if let Some(reference) = &col.references {
@@ -323,6 +328,7 @@ pub fn constraint_catalog_rows(
                 ),
                 period: constraint.without_overlaps,
                 foreign_key: None,
+                expression: None,
             });
         }
 
@@ -342,6 +348,7 @@ pub fn constraint_catalog_rows(
                 ),
                 period: false,
                 foreign_key: None,
+                expression: Some(constraint.expr.clone()),
             });
         }
 
@@ -375,6 +382,7 @@ pub fn constraint_catalog_rows(
                 state: constraint.state,
                 period: constraint.period,
                 foreign_key: constraint.foreign_key,
+                expression: constraint.expression,
             });
         }
     }
@@ -413,6 +421,7 @@ pub fn constraint_catalog_rows(
                     ),
                     period: false,
                     foreign_key: None,
+                    expression: None,
                 });
             }
             if let Some(expression) = &column.check {
@@ -434,6 +443,7 @@ pub fn constraint_catalog_rows(
                     ),
                     period: false,
                     foreign_key: None,
+                    expression: Some(expression.clone()),
                 });
             }
         }
@@ -453,6 +463,7 @@ pub fn constraint_catalog_rows(
                 ),
                 period: false,
                 foreign_key: None,
+                expression: Some(check.expr.clone()),
             });
         }
         for constraint in pending {
@@ -473,6 +484,7 @@ pub fn constraint_catalog_rows(
                 state: constraint.state,
                 period: constraint.period,
                 foreign_key: constraint.foreign_key,
+                expression: constraint.expression,
             });
         }
     }
@@ -566,5 +578,6 @@ fn foreign_key_catalog_row(
             on_delete: foreign_key.on_delete,
             match_type: foreign_key.match_type,
         }),
+        expression: None,
     })
 }

@@ -209,6 +209,16 @@ declarations! { fn lookup_local(local);
         "format_type" => &[Signature::new(&[ColumnType::Oid, ColumnType::Integer],
             ColumnType::Text,
         )],
+        "pg_get_constraintdef" => &[
+            Signature::new(&[ColumnType::Oid], ColumnType::Text),
+            Signature::new(&[ColumnType::Oid, ColumnType::Boolean],
+                ColumnType::Text,
+            ),
+        ],
+        "pg_get_function_arguments"
+        | "pg_get_function_identity_arguments"
+        | "pg_get_function_result"
+        | "pg_get_function_sqlbody" => &[Signature::new(&[ColumnType::Oid], ColumnType::Text)],
         "pg_get_indexdef" => &[
             Signature::new(&[ColumnType::Oid], ColumnType::Text),
             Signature::new(&[ColumnType::Oid, ColumnType::Integer, ColumnType::Boolean],
@@ -330,7 +340,8 @@ declarations! { fn lookup_local(local);
         | "has_database_privilege"
         | "has_schema_privilege"
         | "has_sequence_privilege"
-        | "has_function_privilege" => &[
+        | "has_function_privilege"
+        | "has_type_privilege" => &[
             Signature::new(&[ColumnType::Name, ColumnType::Text, ColumnType::Text],
                 ColumnType::Boolean,
             ),

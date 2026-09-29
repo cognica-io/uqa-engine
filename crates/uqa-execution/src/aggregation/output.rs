@@ -197,7 +197,12 @@ pub(super) fn finish_group(
         .iter()
         .zip(&accumulators)
         .map(|(finalizer, accumulator)| {
-            aggregate_value_with_args(&finalizer.name, accumulator, &finalizer.args)
+            aggregate_value_with_args(
+                &finalizer.name,
+                accumulator,
+                &finalizer.args,
+                uqa_sql::expr::EngineHook::enum_labels(context),
+            )
         })
         .collect::<Result<Vec<_>, _>>()?;
     let hook = context;

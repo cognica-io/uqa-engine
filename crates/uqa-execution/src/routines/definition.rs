@@ -44,14 +44,9 @@ pub fn compile_catalog_bound_routine(
     }
     let mut changed = bind_routine_definition_dependencies(context, def, mode)?;
     let mut compiled = compile_routine_for_mode(&context.compilation, def, mode)?;
-    let body_changed = {
-        let dependency_body = compilation::stored_merge_dependency_body(&context.compilation, def)?;
-        dependencies::bind_sql_standard_body_routines(
-            &context.compilation.analysis,
-            def,
-            dependency_body.as_ref().unwrap_or(&compiled),
-        )
-    }? | bind_routine_regclass_constants(context, def)?;
+    let body_changed = with_creation_search_path(context, def, |def| {
+        dependencies::bind_sql_standard_body_routines(&context.compilation.analysis, def, mode)
+    })? | bind_routine_regclass_constants(context, def)?;
     changed |= body_changed;
     if body_changed {
         compiled = compile_routine_for_mode(&context.compilation, def, mode)?;
@@ -77,14 +72,22 @@ fn bind_routine_definition_dependencies(
     def: &mut CreateFunction,
     mode: RoutineCompilationMode,
 ) -> Result<bool, SQLError> {
-    let bind = |def: &mut CreateFunction| {
+    with_creation_search_path(context, def, |def| {
         dependencies::bind_routine_definition_dependencies(
             &context.compilation.analysis,
             context.sources,
             def,
             mode,
         )
-    };
+    })
+}
+
+/// Resolve names in stored routine syntax with the search path captured when the routine was created.
+fn with_creation_search_path<T>(
+    context: &RoutineDefinitionContext<'_>,
+    def: &mut CreateFunction,
+    bind: impl FnOnce(&mut CreateFunction) -> Result<T, SQLError>,
+) -> Result<T, SQLError> {
     if def.creation_search_path.is_empty() {
         return bind(def);
     }

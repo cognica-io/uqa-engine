@@ -157,6 +157,7 @@ pub(super) fn sql_type_name(ty: &ColumnType) -> String {
         ColumnType::Vector(dim) => format!("vector({dim})"),
         ColumnType::Tensor(dim) => format!("tensor({dim})"),
         ColumnType::Domain { schema, name, .. } => format!("{schema}.{name}"),
+        ColumnType::Enum(reference) => format!("{}.{}", reference.schema, reference.name),
     }
 }
 
@@ -209,7 +210,8 @@ pub(super) fn fdw_type_name(ty: &uqa_fdw::ColumnType) -> String {
         uqa_fdw::ColumnType::Multirange(subtype) => fdw_range_name(subtype, true).into(),
         uqa_fdw::ColumnType::Vector(dim) => format!("vector({dim})"),
         uqa_fdw::ColumnType::Tensor(dim) => format!("tensor({dim})"),
-        uqa_fdw::ColumnType::Domain { schema, name, .. } => format!("{schema}.{name}"),
+        uqa_fdw::ColumnType::Domain { schema, name, .. }
+        | uqa_fdw::ColumnType::Enum { schema, name, .. } => format!("{schema}.{name}"),
         uqa_fdw::ColumnType::Array(element) => format!("{}[]", fdw_type_name(element)),
         uqa_fdw::ColumnType::Record => "record".into(),
     }

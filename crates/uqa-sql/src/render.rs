@@ -884,6 +884,7 @@ fn value_sql(value: &Value) -> Result<String, SQLError> {
         Value::Float(value) if value.is_finite() => value.to_string(),
         Value::Float(value) => format!("{}::double precision", string_literal(&value.to_string())),
         Value::Str(value) => string_literal(value),
+        Value::Enum(value) => return Err(crate::expr::catalog_output_required(value)),
         Value::FixedChar(value) => format!("{}::character", string_literal(value)),
         Value::Bytes(value) => {
             let mut hex = String::new();

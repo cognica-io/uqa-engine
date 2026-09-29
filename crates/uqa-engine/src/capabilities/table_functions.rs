@@ -37,6 +37,15 @@ impl TableFunctionSession for Engine {
         self.sequence_introspection_context()
             .pg_sequence_parameters_value(args)
     }
+    fn role_oid(&self, name: &str) -> Result<Option<i64>, SQLError> {
+        Ok(
+            uqa_execution::catalog::security::roles::RoleCatalogGuards::inquiry_role_definitions(
+                self,
+            )?
+            .get(name)
+            .map(|role| role.oid),
+        )
+    }
 }
 impl AnalyzerTableFunctions for Engine {
     fn register_named_analyzer(&self, name: &str, config: &str) -> Result<(), String> {
@@ -96,6 +105,7 @@ impl Engine {
             joins: self,
             params,
             eval_hook,
+            resolver: self,
             subquery_runner,
             subqueries,
         }

@@ -20,7 +20,8 @@ pub(super) fn parse(text: &str, control: &ProductionControl<'_>) -> Result<Node>
 pub(super) fn parse_optional(text: &str, control: &ProductionControl<'_>) -> Result<Option<Node>> {
     match parse_node(text, control) {
         Ok(node) => Ok(Some(node)),
-        Err(JsonReadError::InvalidJson) => Ok(None),
+        // The JSON reader decodes no tagged carriers, so both failures describe invalid input text.
+        Err(JsonReadError::InvalidJson | JsonReadError::Malformed { .. }) => Ok(None),
         Err(JsonReadError::Memory(error)) => Err(error.into()),
         Err(JsonReadError::Cancelled(error)) => Err(error.into()),
     }

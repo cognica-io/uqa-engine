@@ -127,6 +127,11 @@ pub fn function_volatility_with_binding(
                 | "pg_get_ruledef"
                 | "pg_get_viewdef"
                 | "pg_get_indexdef"
+                | "pg_get_constraintdef"
+                | "pg_get_function_arguments"
+                | "pg_get_function_identity_arguments"
+                | "pg_get_function_result"
+                | "pg_get_function_sqlbody"
                 | "format_type"
                 | "pg_has_role"
                 | "pg_get_userbyid"
@@ -134,6 +139,11 @@ pub fn function_volatility_with_binding(
                 | "has_schema_privilege"
                 | "has_sequence_privilege"
                 | "has_function_privilege"
+                | "has_type_privilege"
+                // The enum support functions that read a type's label list see labels added later in the transaction.
+                | "enum_first"
+                | "enum_last"
+                | "enum_range"
         )
         || (lower == "age" && argument_count == 1)
     {

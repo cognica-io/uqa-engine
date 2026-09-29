@@ -171,7 +171,9 @@ fn run_drop_inner(
                 .drop_sequences(&stmt.names, stmt.cascade)?;
         }
         DropKind::Schema => unreachable!("DROP SCHEMA has a namespace dependency path"),
-        DropKind::Domain => unreachable!("DROP DOMAIN has a type dependency path"),
+        DropKind::Domain | DropKind::Type => {
+            unreachable!("DROP DOMAIN and DROP TYPE have a type dependency path")
+        }
     }
     Ok(SQLResult::empty())
 }

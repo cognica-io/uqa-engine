@@ -75,7 +75,7 @@ pub fn rule_condition_text(
     if has_subquery {
         return uqa_sql::render::expression_sql(condition).map(Some);
     }
-    Ok(Some(super::render_trigger_condition(condition, pretty)))
+    super::render_trigger_condition(condition, pretty).map(Some)
 }
 
 pub fn render_rule_relation(

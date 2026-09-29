@@ -251,6 +251,9 @@ impl ViewPlanBinding for Fixture {
             vec![Some(ColumnType::Integer)],
         ))
     }
+    fn bind_type_identities(&self, _: &mut QueryPlan) -> Result<(), SQLError> {
+        panic!("restoration keeps the recorded type identities");
+    }
 }
 impl ViewRestoreSchemas for Fixture {
     fn stored_schema(&self, _: &StoredView) -> Result<RowSchema, SQLError> {

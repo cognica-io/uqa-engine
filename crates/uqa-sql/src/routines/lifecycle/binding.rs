@@ -16,7 +16,6 @@ use crate::{
     ast::{AlterRoutineKind, DropFunctionItem, DropFunctionStmt},
     catalog::roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey},
     routines::{routine_signature_types, SQLUserFunction},
-    type_resolution::canonical_routine_type_name,
     SQLError,
 };
 use std::{
@@ -26,6 +25,7 @@ use std::{
 
 pub fn resolve_sql_function_drop_targets(
     catalog: &dyn RoutineNameCatalog,
+    types: &dyn crate::routines::declaration::RoutineTypeCatalog,
     stmt: &DropFunctionStmt,
     registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
     kind: &'static str,
@@ -36,8 +36,30 @@ pub fn resolve_sql_function_drop_targets(
         notices: Vec::new(),
     };
     for item in &stmt.items {
-        let target =
-            resolve_sql_function_drop_target(catalog, registry, item, stmt.is_procedure, kind)?;
+        // Argument types name catalog types, as `LookupFuncWithArgs` resolves them; a missing type skips the item under IF EXISTS.
+        let requested_types = match crate::routines::declaration::resolve_routine_identity_types(
+            types,
+            item.arg_types.as_deref(),
+            &[],
+            "DROP routine",
+        ) {
+            Ok(types) => types,
+            Err(error) if stmt.if_exists && error.sqlstate() == Some("42704") => {
+                resolution
+                    .notices
+                    .push(("NOTICE", format!("{error}, skipping")));
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        let target = resolve_sql_function_drop_target(
+            catalog,
+            registry,
+            item,
+            requested_types.as_deref(),
+            stmt.is_procedure,
+            kind,
+        )?;
         if let Some((key, position)) = target {
             let function = &registry[&key][position];
             let target = RoutineDropTarget {
@@ -74,24 +96,20 @@ pub fn resolve_sql_function_drop_targets(
     Ok(resolution)
 }
 
+/// Find the routine a DROP item names; `requested_types` are its argument types resolved to catalog type names.
 pub fn resolve_sql_function_drop_target(
     catalog: &dyn RoutineNameCatalog,
     registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
     item: &DropFunctionItem,
+    requested_types: Option<&[String]>,
     is_procedure: bool,
     expected_kind: &str,
 ) -> Result<Option<(String, usize)>, SQLError> {
-    let requested_types = item.arg_types.as_ref().map(|types| {
-        types
-            .iter()
-            .map(|type_name| canonical_routine_type_name(type_name))
-            .collect::<Vec<_>>()
-    });
     for key in routine_lookup_keys(catalog, &item.name)? {
         let Some(overloads) = registry.get(&key) else {
             continue;
         };
-        if let Some(types) = requested_types.as_ref() {
+        if let Some(types) = requested_types {
             let Some((position, function)) = overloads
                 .iter()
                 .enumerate()

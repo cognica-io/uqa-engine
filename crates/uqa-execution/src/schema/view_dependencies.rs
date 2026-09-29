@@ -94,11 +94,33 @@ pub fn rewrite_view_routine_identity(
     let mut next = (**views).clone();
     drop(views);
     let changed = analysis::rewrite_view_routine_identity(&mut next, target, new_name);
+    publish_rewritten_views(context, next, &changed)
+}
+
+/// Views embed the catalog names of the user-defined types they bind; a rename or schema move rewrites them.
+pub fn rewrite_view_type_references(
+    context: &ViewDependencyContext<'_>,
+    oid: u32,
+    identity: &RelationIdentity,
+) -> StorageBackendResult<()> {
+    context.views.synchronize_catalog()?;
+    let views = context.views.view_definitions();
+    let mut next = (**views).clone();
+    drop(views);
+    let changed = analysis::rewrite_view_type_references(&mut next, oid, identity);
+    publish_rewritten_views(context, next, &changed)
+}
+
+fn publish_rewritten_views(
+    context: &ViewDependencyContext<'_>,
+    next: std::collections::BTreeMap<RelationIdentity, uqa_sql::catalog::stored_view::StoredView>,
+    changed: &[RelationIdentity],
+) -> StorageBackendResult<()> {
     if changed.is_empty() {
         return Ok(());
     }
     if context.publication.has_catalog() {
-        for relation in &changed {
+        for relation in changed {
             let view = next.get(relation).ok_or_else(|| {
                 StorageBackendError::Other(format!(
                     "rewritten view `{}` disappeared before persistence",

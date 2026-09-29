@@ -7,7 +7,7 @@
 //! CREATE TABLE inheritance and partition row-type preparation.
 
 use crate::semantics::partition::{
-    validate_hash_partition_spec, validate_new_partition_bound, PartitionContext,
+    transform_partition_bound, validate_new_partition_bound, PartitionContext,
 };
 use crate::{
     ast::{CreateTable, TableCheck, TableConstraintSet},
@@ -24,7 +24,6 @@ pub struct InheritanceContext<'a> {
     pub partitions: PartitionContext<'a>,
     pub roles: &'a dyn crate::expr::EngineHook,
 }
-use std::collections::BTreeSet;
 
 #[expect(
     clippy::too_many_lines,
@@ -73,18 +72,12 @@ pub fn prepare_create_table_hierarchy(
             .try_table_hierarchy(&parent)
             .map_err(|error| SQLError::Internal(format!("read parent hierarchy: {error}")))?;
         if is_partition {
-            let Some(parent_spec) = parent_hierarchy.partition_spec.as_ref() else {
+            if parent_hierarchy.partition_spec.is_none() {
                 return Err(SQLError::Routine {
                     sqlstate: "42809".into(),
                     message: format!("relation \"{requested_parent}\" is not partitioned"),
                 });
-            };
-            validate_partition_bound_strategy(
-                parent_spec.strategy,
-                table.hierarchy.partition_bound.as_ref().ok_or_else(|| {
-                    SQLError::Internal("partition lost its bound during validation".into())
-                })?,
-            )?;
+            }
         } else if parent_hierarchy.partition_spec.is_some() {
             return Err(SQLError::Routine {
                 sqlstate: "42809".into(),
@@ -181,39 +174,12 @@ pub fn prepare_create_table_hierarchy(
         table.hierarchy.parents.first(),
         table.hierarchy.partition_bound.as_ref(),
     ) {
-        validate_new_partition_bound(&context.partitions, parent, bound)?;
+        // The stored bound holds the values coerced to the parent's key types, as PostgreSQL stores Const nodes.
+        let bound = transform_partition_bound(&context.partitions, parent, bound)?;
+        validate_new_partition_bound(&context.partitions, parent, &table.name, &bound)?;
+        table.hierarchy.partition_bound = Some(bound);
     }
     Ok(())
-}
-
-fn validate_partition_bound_strategy(
-    strategy: crate::ast::PartitionStrategy,
-    bound: &crate::ast::PartitionBound,
-) -> Result<(), SQLError> {
-    use crate::ast::{PartitionBound, PartitionStrategy};
-    if matches!(
-        (strategy, bound),
-        (PartitionStrategy::Hash, PartitionBound::Default)
-    ) {
-        return Err(SQLError::Routine {
-            sqlstate: "42P16".into(),
-            message: "a hash-partitioned table may not have a default partition".into(),
-        });
-    }
-    let matches = matches!(bound, PartitionBound::Default)
-        || matches!(
-            (strategy, bound),
-            (PartitionStrategy::List, PartitionBound::List(_))
-                | (PartitionStrategy::Range, PartitionBound::Range { .. })
-                | (PartitionStrategy::Hash, PartitionBound::Hash { .. })
-        );
-    if matches {
-        Ok(())
-    } else {
-        Err(SQLError::Internal(
-            "partition bound strategy differs from its parent".into(),
-        ))
-    }
 }
 
 fn merge_columns(
@@ -289,41 +255,8 @@ pub fn merge_same_column(
     Ok(())
 }
 
-fn validate_partition_keys(
-    context: &InheritanceContext<'_>,
-    table: &CreateTable,
-) -> Result<(), SQLError> {
-    let Some(spec) = table.hierarchy.partition_spec.as_ref() else {
-        return Ok(());
-    };
-    let column_names = table
-        .columns
-        .iter()
-        .map(|column| column.name.as_str())
-        .collect::<BTreeSet<_>>();
-    for key in &spec.keys {
-        let scalar = crate::plan::ExpressionPlan::lower(key.clone()).scalar;
-        let mut referenced_columns = BTreeSet::new();
-        scalar.collect_columns(&mut referenced_columns);
-        for column in referenced_columns {
-            if !column_names.contains(column.as_str()) {
-                return Err(SQLError::Routine {
-                    sqlstate: "42703".into(),
-                    message: format!("column \"{column}\" named in partition key does not exist"),
-                });
-            }
-        }
-    }
-    validate_hash_partition_spec(&context.partitions, spec, &table.columns)?;
-    for key in &spec.keys {
-        crate::catalog::regrole_dependencies::reject_stored_regrole_constants(
-            context.roles,
-            key,
-            None,
-        )?;
-    }
-    Ok(())
-}
+mod partition_keys;
+use partition_keys::validate_partition_keys;
 
 pub mod alter;
 

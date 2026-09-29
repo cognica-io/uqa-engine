@@ -26,6 +26,7 @@ mod expressions;
 mod query;
 mod rename;
 mod subscripts;
+mod types;
 pub use rename::{rename_view_column_query, view_query_references_column};
 mod sources;
 
@@ -142,6 +143,7 @@ pub fn view_definition(
         bound,
         pretty,
         wrap,
+        standalone: false,
     };
     let mut rendered = deparser.query(
         &view.query,
@@ -158,6 +160,8 @@ struct Deparser<'a> {
     bound: RelationNameResolution,
     pretty: bool,
     wrap: i64,
+    /// A standalone expression, as `pg_get_expr` and `pg_get_indexdef` print, rather than a clause of a query.
+    standalone: bool,
 }
 
 #[derive(Clone)]
@@ -283,6 +287,7 @@ pub fn stored_expression_definition(
         bound,
         pretty,
         wrap: 0,
+        standalone: true,
     };
     let expression = uqa_sql::plan::ExpressionPlan::lower(expression.clone());
     deparser.expression(
@@ -290,4 +295,84 @@ pub fn stored_expression_definition(
         &Scope::default(),
         &expression.subqueries,
     )
+}
+
+/// A domain constraint expression, whose value placeholder prints as `VALUE`.
+pub fn stored_domain_expression_definition(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    expression: &uqa_sql::ast::Expr,
+    pretty: bool,
+) -> Result<String, SQLError> {
+    let mut dynamic = resolution.clone();
+    dynamic.set_lookup_mode(RelationLookupMode::Dynamic);
+    let mut bound = resolution.clone();
+    bound.set_lookup_mode(RelationLookupMode::Bound);
+    let deparser = Deparser {
+        catalog,
+        dynamic,
+        bound,
+        pretty,
+        wrap: 0,
+        standalone: true,
+    };
+    let scope = Scope {
+        columns: vec![Column {
+            name: "value".into(),
+            qualifier: String::new(),
+            rendered_qualifier: String::new(),
+            merged: Some("VALUE".into()),
+            relation: None,
+            merged_expression: None,
+        }],
+        ..Scope::default()
+    };
+    let expression = uqa_sql::plan::ExpressionPlan::lower(expression.clone());
+    deparser.expression(&expression.scalar, &scope, &expression.subqueries)
+}
+
+/// One statement of a `BEGIN ATOMIC` body, as `get_query_def` prints a query with indentation and full parenthesization.
+pub fn stored_statement_definition(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    statement: &uqa_sql::ast::Statement,
+) -> Result<String, SQLError> {
+    let mut dynamic = resolution.clone();
+    dynamic.set_lookup_mode(RelationLookupMode::Dynamic);
+    let mut bound = resolution.clone();
+    bound.set_lookup_mode(RelationLookupMode::Bound);
+    let deparser = Deparser {
+        catalog,
+        dynamic,
+        bound,
+        pretty: false,
+        wrap: 0,
+        standalone: false,
+    };
+    match statement {
+        uqa_sql::ast::Statement::Select(select) => {
+            let query = uqa_sql::plan::QueryPlan::lower((**select).clone());
+            deparser.query(&query, &Scope::default(), None)
+        }
+        uqa_sql::ast::Statement::Insert(_) => Err(unsupported_body_statement("INSERT")),
+        uqa_sql::ast::Statement::Update(_) => Err(unsupported_body_statement("UPDATE")),
+        uqa_sql::ast::Statement::Delete(_) => Err(unsupported_body_statement("DELETE")),
+        uqa_sql::ast::Statement::Merge(_) => Err(unsupported_body_statement("MERGE")),
+        _ => Err(unsupported_body_statement("utility")),
+    }
+}
+
+fn unsupported_body_statement(kind: &str) -> SQLError {
+    SQLError::Unsupported(format!(
+        "pg_get_function_sqlbody cannot print a {kind} statement"
+    ))
+}
+
+/// A stored catalog expression as `pg_get_expr` prints it without pretty-printing.
+pub fn stored_expression_text(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    expression: &uqa_sql::ast::Expr,
+) -> Result<String, SQLError> {
+    stored_expression_definition(catalog, resolution, expression, false)
 }

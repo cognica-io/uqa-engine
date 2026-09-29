@@ -80,7 +80,7 @@ impl VariableResolver for DomainValueResolver<'_> {
         }
         Ok(Some(ResolvedVariable {
             value: Value::Null,
-            declared_type: Some(self.0.sql_name()),
+            declared_type: Some(self.0.catalog_name()),
         }))
     }
 
@@ -147,7 +147,9 @@ fn bind_domain_check(
             ty: "boolean".into(),
         };
     }
-    super::defaults::bind_stored_schema_expression_routines(context, expression, typed)?;
+    // The stored syntax includes the boolean cast, so its typed copy does too.
+    let typed = bind_expr(expression, &mut DomainValueResolver(base))?;
+    super::defaults::bind_stored_schema_expression(context, expression, typed)?;
     Ok(())
 }
 

@@ -39,6 +39,16 @@ pub fn format_postgres_text(
             crate::expr::format_real(*value as f32)
         }
         Value::Float(value) => uqa_core::format_float_pg(*value),
+        Value::Enum(label) => {
+            crate::expr::enums::enum_label_text(engine.and_then(EngineHook::enum_labels), label)?
+        }
+        // Container output calls each enum field's output function, which reads the current label.
+        _ if crate::expr::enums::contains_enum_carrier(value) => {
+            value_to_string(&crate::expr::enums::render_enum_labels(
+                engine.and_then(EngineHook::enum_labels),
+                value,
+            )?)?
+        }
         _ => value_to_string(value)?,
     })
 }

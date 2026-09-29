@@ -266,6 +266,8 @@ fn domain_occupied(oid: i64) -> CatalogReadView {
             oid: uqa_sql::catalog::domain::domain_object_oid(&[90; 16]),
             owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
             definition,
+            array_name: None,
+            usage_acl: None,
         },
     )])
     .into();

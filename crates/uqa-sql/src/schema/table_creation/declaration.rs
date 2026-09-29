@@ -108,8 +108,12 @@ pub fn validate_create_table_expressions(
             foreign_key.ref_table = canonical;
         }
     }
+    let binding = context.bindings.binding_scope()?;
     super::super::generated::prepare_generated_columns(
-        context.schema,
+        &SchemaBindingContext {
+            catalog: context.schema,
+            binding: &binding.context(),
+        },
         &c.qualifier,
         &mut c.columns,
         &c.key_constraints,

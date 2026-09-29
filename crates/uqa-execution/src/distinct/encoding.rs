@@ -196,37 +196,6 @@ fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
         output.check()?;
         if let Some(value) = current.take() {
             match value {
-                Value::Null => output.push_byte(0)?,
-                Value::Void => output.push_byte(13)?,
-                Value::Bool(value) => {
-                    output.extend_bytes(&[1, 0])?;
-                    encode_bytes(if *value { b"1" } else { b"0" }, output)?;
-                }
-                Value::Int(value) => {
-                    output.extend_bytes(&[1, 0])?;
-                    let text = output::NumberText::new(*value)?;
-                    encode_bytes(text.as_bytes(), output)?;
-                }
-                Value::Float(value) => encode_float_numeric(*value, output)?,
-                Value::Decimal(value) => encode_decimal_numeric(value, output)?,
-                Value::Str(value) => {
-                    output.push_byte(2)?;
-                    encode_bytes(value.as_bytes(), output)?;
-                }
-                Value::FixedChar(value) => {
-                    output.push_byte(7)?;
-                    encode_bytes(value.trim_end_matches(' ').as_bytes(), output)?;
-                }
-                Value::Bytes(value) => {
-                    output.push_byte(3)?;
-                    encode_bytes(value, output)?;
-                }
-                Value::Temporal(value) => encode_temporal(value, output)?,
-                Value::Json(value) => {
-                    output.push_byte(8)?;
-                    encode_bytes(value.as_bytes(), output)?;
-                }
-                Value::JsonB(value) => output::encode_jsonb(value, output)?,
                 Value::Array(array) => {
                     output.push_byte(12)?;
                     encode_len(array.lower_bounds().len(), output)?;
@@ -238,7 +207,6 @@ fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
                         stack.push(Children::Values(array.elements().iter()))?;
                     }
                 }
-                Value::LegacyVector(vector) => encode_legacy_vector(vector, output)?,
                 Value::List(values) | Value::Row(values) => {
                     output.push_byte(if matches!(value, Value::List(_)) {
                         5
@@ -264,6 +232,7 @@ fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
                         stack.push(Children::Map(fields.iter()))?;
                     }
                 }
+                leaf => encode_leaf(leaf, output)?,
             }
         }
         while let Some(children) = stack.last_mut() {
@@ -285,6 +254,53 @@ fn encode_value(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
         if current.is_none() {
             return output.check();
         }
+    }
+}
+
+/// Encode a value without nested values; containers are framed by [`encode_value`].
+fn encode_leaf(value: &Value, output: &mut impl KeyOutput) -> ExecResult<()> {
+    match value {
+        Value::Null => output.push_byte(0),
+        Value::Void => output.push_byte(13),
+        Value::Bool(value) => {
+            output.extend_bytes(&[1, 0])?;
+            encode_bytes(if *value { b"1" } else { b"0" }, output)
+        }
+        Value::Int(value) => {
+            output.extend_bytes(&[1, 0])?;
+            let text = output::NumberText::new(*value)?;
+            encode_bytes(text.as_bytes(), output)
+        }
+        Value::Float(value) => encode_float_numeric(*value, output),
+        Value::Decimal(value) => encode_decimal_numeric(value, output),
+        Value::Str(value) => {
+            output.push_byte(2)?;
+            encode_bytes(value.as_bytes(), output)
+        }
+        Value::FixedChar(value) => {
+            output.push_byte(7)?;
+            encode_bytes(value.trim_end_matches(' ').as_bytes(), output)
+        }
+        Value::Bytes(value) => {
+            output.push_byte(3)?;
+            encode_bytes(value, output)
+        }
+        Value::Temporal(value) => encode_temporal(value, output),
+        Value::Json(value) => {
+            output.push_byte(8)?;
+            encode_bytes(value.as_bytes(), output)
+        }
+        Value::JsonB(value) => output::encode_jsonb(value, output),
+        Value::LegacyVector(vector) => encode_legacy_vector(vector, output),
+        // Equal enum values share their type OID and immutable label key; both components are framed, so distinct values never share an encoding.
+        Value::Enum(value) => {
+            output.push_byte(15)?;
+            output.extend_bytes(&value.type_oid().to_be_bytes())?;
+            encode_bytes(value.key().as_bytes(), output)
+        }
+        Value::Array(_) | Value::List(_) | Value::Row(_) | Value::Record(_) | Value::Map(_) => Err(
+            encoding_error("container value reached leaf DISTINCT key encoding"),
+        ),
     }
 }
 

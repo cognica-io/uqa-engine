@@ -33,6 +33,7 @@ pub fn builtin_returns_set(name: &str) -> bool {
             | "jsonb_each_text"
             | "json_object_keys"
             | "jsonb_object_keys"
+            | "aclexplode"
     )
 }
 
@@ -113,8 +114,14 @@ pub fn function_may_return_set(
     ) {
         Ok(function) => Ok(function.is_some_and(|function| function.def.returns_set())),
         Err(error) if binding.is_none() && error.sqlstate() == Some("42883") => {
-            match crate::type_resolution::builtin_function_type(&builtin, args, &[], schema, params)
-            {
+            match crate::type_resolution::builtin_function_type_with_resolver(
+                &builtin,
+                args,
+                &[],
+                schema,
+                params,
+                resolver,
+            ) {
                 Ok(Some(_)) => Ok(false),
                 Ok(None) | Err(_) => Err(error),
             }

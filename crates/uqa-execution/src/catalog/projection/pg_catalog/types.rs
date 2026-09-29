@@ -24,7 +24,10 @@ use super::super::helpers::type_metadata::{
     clippy::too_many_lines,
     reason = "preserves catalog column and OID order"
 )]
-pub fn build_pg_type(catalog: &CatalogReadView) -> Vec<ResultRow> {
+pub fn build_pg_type(
+    catalog: &CatalogReadView,
+    resolution: &crate::catalog::RelationNameResolution,
+) -> Result<Vec<ResultRow>, uqa_sql::SQLError> {
     let catalog_types = [
         (ColumnType::Boolean, "B", true, "b"),
         (ColumnType::Bytea, "U", false, "b"),
@@ -399,7 +402,16 @@ pub fn build_pg_type(catalog: &CatalogReadView) -> Vec<ResultRow> {
         );
         entry.insert(
             "typdefault".into(),
-            super::super::expression_text::default_expr_text(domain.definition.default.as_ref()),
+            match domain.definition.default.as_ref() {
+                Some(default) => str_value(super::super::view_definition::stored_expression_text(
+                    catalog, resolution, default,
+                )?),
+                None => Value::Null,
+            },
+        );
+        entry.insert(
+            "typacl".into(),
+            type_acl_value(catalog, domain.usage_acl.as_deref())?,
         );
         types.push(entry);
         let mut array = pg_type_catalog_row(
@@ -411,14 +423,78 @@ pub fn build_pg_type(catalog: &CatalogReadView) -> Vec<ResultRow> {
             0,
             -1,
         );
+        array.insert("typname".into(), str_value(domain.array_type_name()));
         array.insert("typowner".into(), int_value(owner));
+        types.push(array);
+    }
+    for definition in catalog.enums() {
+        let ty = definition.column_type();
+        let owner = int_value(definition.owner.oid);
+        let namespace = namespace_oid(catalog, &definition.identity.schema);
+        let mut entry = pg_type_catalog_row(&ty, namespace, "e", "E", false, 0, -1);
+        entry.insert("typowner".into(), owner.clone());
+        entry.insert(
+            "typacl".into(),
+            type_acl_value(catalog, definition.usage_acl.as_deref())?,
+        );
+        types.push(entry);
+        let mut array = pg_type_catalog_row(
+            &ColumnType::Array(Box::new(ty)),
+            namespace,
+            "b",
+            "A",
+            false,
+            0,
+            -1,
+        );
+        array.insert("typname".into(), str_value(definition.array_name.clone()));
+        array.insert("typowner".into(), owner);
         types.push(array);
     }
     types.sort_by_key(|entry| match entry.get("oid") {
         Some(Value::Int(oid)) => *oid,
         _ => i64::MAX,
     });
-    types
+    Ok(types)
+}
+
+/// `typacl`: NULL for the default ACL; array types have none of their own.
+fn type_acl_value(
+    catalog: &CatalogReadView,
+    acl: Option<&[uqa_sql::ast::ObjectAclEntry]>,
+) -> Result<Value, uqa_sql::SQLError> {
+    let Some(acl) = acl else {
+        return Ok(Value::Null);
+    };
+    super::super::helpers::rows::catalog_array(
+        super::super::helpers::acl::object_acl_items(
+            &catalog.snapshot().definitions.roles,
+            acl,
+            'U',
+            "type",
+        )?,
+        "pg_type.typacl",
+    )
+}
+
+/// One row per label of every enum, with `PostgreSQL`'s float4 sort position.
+pub fn build_pg_enum(catalog: &CatalogReadView) -> Vec<ResultRow> {
+    let mut rows = Vec::new();
+    for definition in catalog.enums() {
+        for label in &definition.labels {
+            rows.push(row([
+                ("oid", int_value(i64::from(label.oid))),
+                ("enumtypid", int_value(i64::from(definition.oid))),
+                ("enumsortorder", Value::Float(f64::from(label.sort_order))),
+                ("enumlabel", str_value(label.label.clone())),
+            ]));
+        }
+    }
+    rows.sort_by_key(|entry| match entry.get("oid") {
+        Some(Value::Int(oid)) => *oid,
+        _ => i64::MAX,
+    });
+    rows
 }
 
 pub fn build_pg_range() -> Vec<ResultRow> {

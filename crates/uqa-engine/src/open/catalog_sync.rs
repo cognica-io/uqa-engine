@@ -234,6 +234,12 @@ impl Engine {
             snapshot.domains,
             &snapshot.roles,
         )?;
+        snapshot.enums = uqa_execution::catalog::enum_type::merge_private(
+            self.storage.catalog.as_deref(),
+            &current.enums,
+            snapshot.enums,
+            &snapshot.roles,
+        )?;
         snapshot.sql_user_functions = uqa_execution::routines::catalog::merge_private(
             self.storage.catalog.as_deref(),
             &current.sql_user_functions,

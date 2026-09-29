@@ -53,6 +53,7 @@ pub fn builtin_function_dispatch_name(name: &str) -> String {
                         | "jsonb_each"
                         | "json_each_text"
                         | "jsonb_each_text"
+                        | "aclexplode"
                         | "json_object_keys"
                         | "jsonb_object_keys"
                         | "upper"
@@ -93,6 +94,11 @@ pub fn builtin_function_dispatch_name(name: &str) -> String {
                         | "pg_get_ruledef"
                         | "pg_get_viewdef"
                         | "pg_get_indexdef"
+                        | "pg_get_constraintdef"
+                        | "pg_get_function_arguments"
+                        | "pg_get_function_identity_arguments"
+                        | "pg_get_function_result"
+                        | "pg_get_function_sqlbody"
                         | "format_type"
                         | "pg_has_role"
                         | "pg_get_userbyid"
@@ -102,6 +108,7 @@ pub fn builtin_function_dispatch_name(name: &str) -> String {
                         | "has_schema_privilege"
                         | "has_sequence_privilege"
                         | "has_function_privilege"
+                        | "has_type_privilege"
                 )
         }
         _ => false,

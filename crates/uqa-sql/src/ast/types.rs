@@ -8,10 +8,16 @@ use serde::{Deserialize, Serialize};
 
 use super::{IntervalFields, RangeSubtype};
 
+mod display;
+mod identity;
 mod modifiers;
 mod names;
 mod parsing;
 mod production;
+mod references;
+
+pub use display::TypeDisplayScope;
+pub use identity::{UserTypeIdentity, UserTypeKind};
 
 pub(crate) use modifiers::split_type_modifier_with_control;
 
@@ -125,6 +131,8 @@ pub enum ColumnType {
         oid: u32,
         base: Box<ColumnType>,
     },
+    /// A user-defined enum type bound by catalog identity.
+    Enum(super::EnumTypeReference),
 }
 
 pub(crate) fn builtin_array_element_name(type_name: &str) -> Option<&'static str> {

@@ -148,6 +148,7 @@ fn register_view_plan_inner(
     let relation = RelationIdentity::from_legacy_name(&name)
         .map_err(|err| SQLError::Internal(format!("invalid canonical view name: {err}")))?;
     let query_schema = context.bindings.bind_routines(&mut plan, params)?;
+    context.bindings.bind_type_identities(&mut plan)?;
     reject_regrole_constants(context, &mut plan)?;
     let output_columns = create_view_output_columns(&query_schema, column_names)?;
     validate_view_column_types(&query_schema, &output_columns)?;

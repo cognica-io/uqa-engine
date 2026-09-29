@@ -65,7 +65,7 @@ impl RuntimeRuleResolver<'_> {
         };
         Ok(ResolvedVariable {
             value,
-            declared_type: Some(metadata.ty.sql_name()),
+            declared_type: Some(metadata.ty.catalog_name()),
         })
     }
 

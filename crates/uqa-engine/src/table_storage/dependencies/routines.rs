@@ -68,14 +68,21 @@ impl Engine {
             let foreign_keys = table.foreign_keys.read().clone();
             let hierarchy = table.hierarchy.read().clone();
             if generated_requires_migration {
-                uqa_sql::schema::generated::prepare_generated_columns(
-                    self,
-                    &table_name,
-                    &mut columns,
-                    &key_constraints,
-                    &foreign_keys,
-                )
-                .map_err(|error| {
+                let context = self.schema_dependency_binding_context();
+                let mut migrate = || {
+                    let binding = context.bindings.binding_scope()?;
+                    uqa_sql::schema::generated::prepare_generated_columns(
+                        &uqa_sql::schema::SchemaBindingContext {
+                            catalog: context.schema,
+                            binding: &binding.context(),
+                        },
+                        &table_name,
+                        &mut columns,
+                        &key_constraints,
+                        &foreign_keys,
+                    )
+                };
+                migrate().map_err(|error| {
                     StorageBackendError::Other(format!(
                         "migrate generated-column routine identities for `{table_name}`: {error}"
                     ))

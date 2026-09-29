@@ -151,6 +151,10 @@ impl FunctionTypeResolver for Engine {
         self.routine_overload_context().resolve_type_name(name)
     }
 
+    fn enum_labels(&self) -> Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog> {
+        Some(self)
+    }
+
     fn resolve_function_type(
         &self,
         name: &str,

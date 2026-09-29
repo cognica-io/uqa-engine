@@ -68,6 +68,11 @@ pub trait EngineHook {
         true
     }
 
+    /// Enum labels of the statement's catalog. Embedders without catalog enum types keep the default, so enum input and output fail as an unavailable type.
+    fn enum_labels(&self) -> Option<&dyn super::enums::EnumLabelCatalog> {
+        None
+    }
+
     /// Resolve a catalog-owned SQL type name for casts evaluated with an engine context.
     fn resolve_type_name(&self, _name: &str) -> std::result::Result<Option<ColumnType>, String> {
         Ok(None)
@@ -96,6 +101,11 @@ pub trait EngineHook {
     /// Resolve `regclass` input while preserving typed SQL errors. Embedders that implement the historical string-error hook retain its previous behavior; engines with catalog privilege checks override this method directly.
     fn resolve_regclass_input(&self, name: &str) -> Result<Option<i64>> {
         self.resolve_regclass(name).map_err(SQLError::Internal)
+    }
+
+    /// Resolve a routine name that must name exactly one routine, as `regproc` input does.
+    fn resolve_regproc(&self, _name: &str) -> Result<Option<i64>> {
+        Ok(None)
     }
 
     /// Resolve an exact routine signature to the OID carrier used by `regprocedure`.

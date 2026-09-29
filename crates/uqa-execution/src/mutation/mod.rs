@@ -25,6 +25,7 @@ pub mod triggers;
 
 pub mod constraints;
 pub mod errors;
+pub mod supplied_columns;
 
 pub mod conflict;
 

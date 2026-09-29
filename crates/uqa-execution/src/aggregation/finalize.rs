@@ -11,19 +11,37 @@ use super::{
     AggregateValueBuffer, DecimalValue, SQLError, ScalarExpr, Value,
 };
 use uqa_core::ArrayValue;
+use uqa_sql::expr::enums::EnumLabelCatalog;
 
-pub fn aggregate_value(name: &str, acc: &AggregateAccumulator) -> Result<Value, SQLError> {
-    aggregate_value_with_args(name, acc, &[])
+fn render_enum_labels(
+    enums: Option<&dyn EnumLabelCatalog>,
+    value: &Value,
+) -> Result<Value, SQLError> {
+    if uqa_sql::expr::enums::contains_enum_carrier(value) {
+        uqa_sql::expr::enums::render_enum_labels(enums, value)
+    } else {
+        Ok(value.clone())
+    }
+}
+
+pub fn aggregate_value(
+    name: &str,
+    acc: &AggregateAccumulator,
+    enums: Option<&dyn EnumLabelCatalog>,
+) -> Result<Value, SQLError> {
+    aggregate_value_with_args(name, acc, &[], enums)
 }
 
 #[expect(
     clippy::too_many_lines,
     reason = "preserves aggregate NULL and type order"
 )]
+/// Finalize a built-in aggregate. JSON aggregates call their inputs' output functions, so enum inputs render through `enums`.
 pub fn aggregate_value_with_args(
     name: &str,
     acc: &AggregateAccumulator,
     args: &[ScalarExpr],
+    enums: Option<&dyn EnumLabelCatalog>,
 ) -> Result<Value, SQLError> {
     if !acc.distinct.is_empty() {
         let budget = acc.distinct.values.budget_bytes;
@@ -42,13 +60,11 @@ pub fn aggregate_value_with_args(
                     ));
                 };
                 unique.observe_registered(arguments.clone(), Vec::new())
-            } else if super::is_json_array_aggregate(name) {
-                unique.observe_including_null(value, Vec::new())
             } else {
                 unique.observe(value)
             }
         })?;
-        return aggregate_value_with_args(name, &unique, args);
+        return aggregate_value_with_args(name, &unique, args, enums);
     }
     if let Some(value) = acc.registered_value() {
         return value;
@@ -60,7 +76,7 @@ pub fn aggregate_value_with_args(
         };
         acc.values
             .for_each_ordered(|record| ordered.observe(&record.value))?;
-        return aggregate_value_with_args(name, &ordered, args);
+        return aggregate_value_with_args(name, &ordered, args, enums);
     }
     let lname = name.to_ascii_lowercase();
 
@@ -117,12 +133,14 @@ pub fn aggregate_value_with_args(
             if ordered_values.is_empty() {
                 return Ok(Value::Null);
             }
+            if let super::AggregateStatePlan::BufferedArrays = acc.state_plan {
+                return super::array_inputs::ArrayInputShape::stack(ordered_values);
+            }
             ArrayValue::try_new(ordered_values)
                 .map(Value::Array)
-                .ok_or_else(|| {
-                    SQLError::TypeMismatch(
-                        "cannot accumulate arrays of different dimensionality".into(),
-                    )
+                .ok_or_else(|| SQLError::Routine {
+                    sqlstate: "2202E".into(),
+                    message: "cannot accumulate arrays of different dimensionality".into(),
                 })?
         }
         "json_agg" | "jsonb_agg" => {
@@ -134,8 +152,8 @@ pub fn aggregate_value_with_args(
                 "[{}]",
                 ordered_values
                     .iter()
-                    .map(value_to_json_text)
-                    .collect::<Vec<_>>()
+                    .map(|value| value_to_json_text(&render_enum_labels(enums, value)?))
+                    .collect::<Result<Vec<_>, SQLError>>()?
                     .join(", ")
             );
             if lname == "jsonb_agg" {
@@ -159,12 +177,16 @@ pub fn aggregate_value_with_args(
                     ));
                 }
                 if matches!(pair[0], Value::Null) {
-                    return Err(SQLError::TypeMismatch(
-                        "JSON object aggregate key must not be NULL".into(),
-                    ));
+                    return Err(super::rewrite::json_object_aggregate_null_key(&lname));
                 }
-                let key = serde_json::Value::String(aggregate_json_key(&pair[0])?).to_string();
-                fields.push((key, value_to_json_text(&pair[1])));
+                let key = serde_json::Value::String(aggregate_json_key(&render_enum_labels(
+                    enums, &pair[0],
+                )?)?)
+                .to_string();
+                fields.push((
+                    key,
+                    value_to_json_text(&render_enum_labels(enums, &pair[1])?)?,
+                ));
             }
             if fields.is_empty() {
                 Value::Null
@@ -268,13 +290,15 @@ pub fn aggregate_json_key(value: &Value) -> Result<String, SQLError> {
         Value::Decimal(d) => d.to_sql_string(),
         Value::Str(s) => s.clone(),
         Value::FixedChar(s) => s.trim_end_matches(' ').to_string(),
+        Value::Enum(value) => return Err(uqa_sql::expr::catalog_output_required(value)),
         Value::Bytes(bytes) => String::from_utf8_lossy(bytes).into_owned(),
         Value::Temporal(t) => t.to_sql_string(),
         Value::Json(text) | Value::JsonB(text) => text.clone(),
         Value::Array(_) | Value::LegacyVector(_) => uqa_sql::expr::value_to_string(value)?,
         Value::List(_) | Value::Row(_) | Value::Record(_) | Value::Map(_) => {
-            serde_json::to_string(&core_value_to_json(value))
-                .unwrap_or_else(|_| format!("{value:?}"))
+            serde_json::to_string(&core_value_to_json(value)?).map_err(|error| {
+                SQLError::Internal(format!("cannot render JSON object aggregate key: {error}"))
+            })?
         }
     })
 }

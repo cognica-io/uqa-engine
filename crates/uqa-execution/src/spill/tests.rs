@@ -14,6 +14,7 @@ use uqa_sql::expr::RowLookup as _;
 use super::*;
 use crate::ColumnIdentity;
 
+mod enums;
 mod legacy_vectors;
 
 fn dummy_batch(start: usize, n: usize) -> Batch {

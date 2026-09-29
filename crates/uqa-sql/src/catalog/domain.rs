@@ -23,6 +23,12 @@ pub struct StoredDomain<Owner = RoleIdentity> {
     pub identity: RelationIdentity,
     pub owner: Owner,
     pub definition: CreateDomain,
+    /// Name of the generated array type, chosen as `makeArrayTypeName` chooses it. Domains created before array names were recorded use the uncontested name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub array_name: Option<String>,
+    /// Explicit `USAGE` privileges; `None` is the default ACL (PUBLIC and the owner).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_acl: Option<Vec<crate::ast::ObjectAclEntry>>,
 }
 
 impl<Owner> StoredDomain<Owner> {
@@ -33,6 +39,13 @@ impl<Owner> StoredDomain<Owner> {
             oid: self.oid,
             base: Box::new(self.definition.base.clone()),
         }
+    }
+
+    /// The name of the domain's generated array type.
+    pub fn array_type_name(&self) -> String {
+        self.array_name
+            .clone()
+            .unwrap_or_else(|| super::array_type_names::array_type_name(&self.identity.name, 0))
     }
 }
 
@@ -52,6 +65,8 @@ impl StoredDomain<String> {
             identity: self.identity,
             owner,
             definition: self.definition,
+            array_name: self.array_name,
+            usage_acl: self.usage_acl,
         })
     }
 }

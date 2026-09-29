@@ -51,7 +51,7 @@ impl RoutineTypeCatalog for Catalog {
         ColumnType::from_sql_name(name)
     }
 
-    fn resolve_catalog_domain_type_by_oid(&self, _: u32) -> Option<ColumnType> {
+    fn resolve_catalog_user_type_by_oid(&self, _: u32) -> Option<ColumnType> {
         None
     }
 }

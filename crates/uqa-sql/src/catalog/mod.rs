@@ -39,6 +39,7 @@ impl VirtualRelation {
                 | Self::PgRewrite
                 | Self::PgType
                 | Self::PgRange
+                | Self::PgEnum
                 | Self::PgProc
                 | Self::PgDatabase
                 | Self::PgAuthid
@@ -432,6 +433,12 @@ impl VirtualRelation {
                 "typdefault" => ColumnType::Text,
                 "typacl" => array(ColumnType::AclItem),
             ],
+            Self::PgEnum => columns![
+                "oid" => ColumnType::Oid,
+                "enumtypid" => ColumnType::Oid,
+                "enumsortorder" => ColumnType::Real,
+                "enumlabel" => ColumnType::Name,
+            ],
             Self::PgRange => columns![
                 "rngtypid" => ColumnType::Oid,
                 "rngsubtype" => ColumnType::Oid,
@@ -664,6 +671,16 @@ pub fn ag_catalog_domains() -> Vec<ColumnType> {
     vec![ag_label_id(), ag_label_kind()]
 }
 
+/// The fixed system catalog domain with this OID: the `information_schema` domains and the AGE catalog types.
+#[must_use]
+pub fn system_catalog_domain(oid: u32) -> Option<ColumnType> {
+    information_schema_domains()
+        .into_iter()
+        .chain(ag_catalog_domains())
+        .chain([age_graphid(), age_agtype()])
+        .find(|ty| matches!(ty, ColumnType::Domain { oid: domain_oid, .. } if *domain_oid == oid))
+}
+
 fn array(element: ColumnType) -> ColumnType {
     ColumnType::Array(Box::new(element))
 }
@@ -805,7 +822,10 @@ mod tests;
 
 pub mod analysis;
 
+pub mod array_type_names;
+
 pub mod domain;
+pub mod enum_type;
 pub mod events;
 pub mod index;
 pub mod roles;

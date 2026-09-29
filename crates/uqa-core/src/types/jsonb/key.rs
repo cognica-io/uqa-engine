@@ -27,7 +27,9 @@ pub enum JsonbKeyError {
 impl From<crate::json::JsonReadError> for JsonbKeyError {
     fn from(error: crate::json::JsonReadError) -> Self {
         match error {
-            crate::json::JsonReadError::InvalidJson => Self::InvalidJson,
+            // JSONB text never contains tagged carriers; a malformed one has no native representation.
+            crate::json::JsonReadError::InvalidJson
+            | crate::json::JsonReadError::Malformed { .. } => Self::InvalidJson,
             crate::json::JsonReadError::Memory(error) => Self::Memory(error),
             crate::json::JsonReadError::Cancelled(error) => Self::Cancelled(error),
         }
@@ -112,6 +114,7 @@ fn encode(
                         crate::ValueRetentionError::Cancelled(error) => {
                             JsonbKeyError::Cancelled(error)
                         }
+                        crate::ValueRetentionError::Malformed { .. } => JsonbKeyError::InvalidJson,
                     })
                 },
             )?;

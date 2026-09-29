@@ -95,3 +95,15 @@ pub(super) fn resolution(
         lookup_mode: crate::catalog::resolution::RelationLookupMode::Dynamic,
     }
 }
+
+/// A binding context over a catalog without relations, for tests of expressions that reference no relation.
+pub(crate) fn empty_binding_context() -> super::context::BindingContext<'static> {
+    super::context::BindingContext {
+        catalog: catalog(BTreeMap::new()),
+        resolution: resolution(vec!["public".into()], "pg_temp_1".into()),
+        ctes: BTreeMap::new(),
+        deferred_ctes: BTreeMap::new(),
+        non_returning_ctes: std::collections::BTreeSet::new(),
+        scalar_subqueries: &[],
+    }
+}

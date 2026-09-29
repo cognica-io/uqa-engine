@@ -27,6 +27,9 @@ fn retention_error(error: ValueRetentionError) -> JsonReadError {
     match error {
         ValueRetentionError::Memory(error) => JsonReadError::Memory(error),
         ValueRetentionError::Cancelled(error) => JsonReadError::Cancelled(error),
+        ValueRetentionError::Malformed { kind, reason } => {
+            JsonReadError::Malformed { kind, reason }
+        }
     }
 }
 
@@ -36,6 +39,9 @@ pub(super) fn read_error(error: JsonReadError) -> SQLiteError {
         JsonReadError::Cancelled(error) => SQLiteError::Cancelled(error),
         JsonReadError::InvalidJson => {
             SQLiteError::StorageBackend("invalid persisted document value".into())
+        }
+        error @ JsonReadError::Malformed { .. } => {
+            SQLiteError::StorageBackend(format!("invalid persisted document value: {error}"))
         }
     }
 }

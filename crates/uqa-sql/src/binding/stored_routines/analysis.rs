@@ -47,6 +47,7 @@ impl CatalogRoutineAnalysisContext<'_> {
                     binding: &binding,
                 },
                 plan,
+                &[],
             )
         })
     }

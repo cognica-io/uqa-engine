@@ -35,10 +35,10 @@ impl DistinctTracker {
     pub(super) fn insert(
         &mut self,
         value: &Value,
-        mut sort_keys: Vec<(Value, bool)>,
+        mut sort_keys: Vec<super::ordering::AggregateSortKey>,
     ) -> Result<(), SQLError> {
         // Explicit ORDER BY keys come first; the complete argument tuple resolves their ties.
-        sort_keys.push((value.clone(), false));
+        sort_keys.push(super::ordering::AggregateSortKey::ascending(value.clone()));
         self.values.push(value.clone(), sort_keys)
     }
 
@@ -98,6 +98,17 @@ pub fn value_lt(a: &Value, b: &Value) -> Result<bool, SQLError> {
         | (Value::Row(_), Value::Row(_))
         | (Value::Record(_), Value::Record(_)) => super::compare_extrema(a, b)?.is_lt(),
         (Value::Map(x), Value::Map(y)) => x < y,
+        // MIN and MAX over `anyenum` use `enum_smaller` and `enum_larger`: label keys in declaration order.
+        (Value::Enum(x), Value::Enum(y)) => {
+            if x.type_oid() != y.type_oid() {
+                return Err(SQLError::Internal(format!(
+                    "MIN/MAX received enum type OIDs {} and {}",
+                    x.type_oid(),
+                    y.type_oid()
+                )));
+            }
+            x.key() < y.key()
+        }
         _ => false,
     })
 }

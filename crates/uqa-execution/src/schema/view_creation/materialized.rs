@@ -105,6 +105,7 @@ pub fn register_materialized_view_plan(
             });
         }
         let query_schema = context.bindings.bind_routines(&mut plan, params)?;
+        context.bindings.bind_type_identities(&mut plan)?;
         reject_regrole_constants(context, &mut plan)?;
         let output_columns = create_view_output_columns(&query_schema, column_names)?;
         for column in &output_columns {

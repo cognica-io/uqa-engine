@@ -7,6 +7,8 @@
 //! Static cast compatibility that depends on declared SQL type identity.
 
 mod catalog;
+mod volatility;
+pub use volatility::cast_volatility;
 
 use crate::ast::ColumnType;
 use crate::SQLError;
@@ -212,8 +214,8 @@ fn undefined_cast(source: &ColumnType, target: &ColumnType) -> SQLError {
         sqlstate: "42846".into(),
         message: format!(
             "cannot cast type {} to {}",
-            source.sql_name(),
-            target.sql_name()
+            source.display_name(),
+            target.display_name()
         ),
     }
 }

@@ -125,6 +125,10 @@ impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
         self.routines.resolve_type_name(name)
     }
 
+    fn enum_labels(&self) -> Option<&dyn crate::expr::enums::EnumLabelCatalog> {
+        self.routines.enum_labels()
+    }
+
     fn resolve_function_type(
         &self,
         name: &str,

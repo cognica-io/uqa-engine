@@ -184,6 +184,8 @@ pub fn info_udt_name(ty: &ColumnType) -> String {
             ColumnType::Vector(_) => "_vector".into(),
             ColumnType::Tensor(_) => "_tensor".into(),
             ColumnType::Domain { name, .. } => format!("_{name}"),
+            // Catalog-aware callers use the stored array name, which a later type can displace.
+            ColumnType::Enum(reference) => format!("_{}", reference.name),
             ColumnType::Range(subtype) => format!("_{}", subtype.range_name()),
             ColumnType::Multirange(subtype) => format!("_{}", subtype.multirange_name()),
             ColumnType::Array(_) => info_udt_name(element),
@@ -197,14 +199,15 @@ pub fn info_udt_name(ty: &ColumnType) -> String {
         ColumnType::Vector(_) => "vector".into(),
         ColumnType::Tensor(_) => "tensor".into(),
         ColumnType::Domain { name, .. } => name.clone(),
+        ColumnType::Enum(reference) => reference.name.clone(),
     }
 }
 
 pub fn info_data_type(ty: &ColumnType) -> &str {
-    if matches!(ty, ColumnType::Array(_)) {
-        "ARRAY"
-    } else {
-        column_type_name(ty)
+    match ty {
+        ColumnType::Array(_) => "ARRAY",
+        ColumnType::Enum(_) => "USER-DEFINED",
+        _ => column_type_name(ty),
     }
 }
 

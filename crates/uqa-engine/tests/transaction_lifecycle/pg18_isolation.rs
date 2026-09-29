@@ -846,3 +846,74 @@ fn pg18_transaction_reset_snapshot_and_savepoint_errors_use_expected_sqlstates()
     assert_eq!(error.sqlstate(), Some("3B001"));
     eng.sql("ROLLBACK", &[]).unwrap();
 }
+
+#[test]
+fn pg18_read_only_errors_name_commands_by_their_command_tags() {
+    let eng = Engine::new();
+    for sql in [
+        "CREATE TABLE tagged_rows (id INTEGER)",
+        "CREATE INDEX tagged_index ON tagged_rows (id)",
+        "CREATE VIEW tagged_view AS SELECT id FROM tagged_rows",
+        "CREATE SCHEMA tagged_schema",
+        "CREATE FUNCTION tagged_function() RETURNS INTEGER LANGUAGE SQL AS 'SELECT 1'",
+        "CREATE PROCEDURE tagged_procedure() LANGUAGE SQL AS 'SELECT 1'",
+        "CREATE TYPE tagged_mood AS ENUM ('calm')",
+        "CREATE DOMAIN tagged_positive AS INTEGER CHECK (VALUE > 0)",
+        "CREATE ROLE tagged_role",
+        "CREATE ROLE tagged_member",
+        "GRANT tagged_role TO tagged_member",
+    ] {
+        eng.sql(sql, &[]).unwrap();
+    }
+    // CreateCommandTag names each rejected command, before any object is looked up.
+    for (sql, tag) in [
+        ("DROP VIEW tagged_view", "DROP VIEW"),
+        ("DROP INDEX tagged_index", "DROP INDEX"),
+        ("DROP SCHEMA tagged_schema", "DROP SCHEMA"),
+        ("TRUNCATE tagged_rows", "TRUNCATE TABLE"),
+        ("GRANT SELECT ON tagged_rows TO tagged_role", "GRANT"),
+        ("REVOKE SELECT ON tagged_rows FROM tagged_role", "REVOKE"),
+        (
+            "GRANT EXECUTE ON FUNCTION tagged_function() TO tagged_role",
+            "GRANT",
+        ),
+        ("GRANT USAGE ON TYPE tagged_mood TO tagged_role", "GRANT"),
+        (
+            "REVOKE USAGE ON DOMAIN tagged_positive FROM tagged_role",
+            "REVOKE",
+        ),
+        ("REVOKE tagged_role FROM tagged_member", "REVOKE ROLE"),
+        ("ALTER FUNCTION tagged_function() STABLE", "ALTER FUNCTION"),
+        (
+            "ALTER FUNCTION tagged_function() RENAME TO tagged_renamed",
+            "ALTER FUNCTION",
+        ),
+        (
+            "ALTER PROCEDURE tagged_procedure() OWNER TO tagged_role",
+            "ALTER PROCEDURE",
+        ),
+        ("ALTER ROUTINE tagged_function() IMMUTABLE", "ALTER ROUTINE"),
+        ("CREATE TYPE tagged_color AS ENUM ('red')", "CREATE TYPE"),
+        ("ALTER TYPE tagged_mood ADD VALUE 'tense'", "ALTER TYPE"),
+        (
+            "ALTER TYPE tagged_mood RENAME TO tagged_feeling",
+            "ALTER TYPE",
+        ),
+        (
+            "ALTER DOMAIN tagged_positive OWNER TO tagged_role",
+            "ALTER DOMAIN",
+        ),
+        ("DROP TYPE tagged_mood", "DROP TYPE"),
+        ("DROP DOMAIN tagged_positive", "DROP DOMAIN"),
+    ] {
+        eng.sql("BEGIN READ ONLY", &[]).unwrap();
+        let error = eng.sql(sql, &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("25006"), "{sql}: {error}");
+        assert_eq!(
+            error.to_string(),
+            format!("cannot execute {tag} in a read-only transaction"),
+            "{sql}"
+        );
+        eng.sql("ROLLBACK", &[]).unwrap();
+    }
+}

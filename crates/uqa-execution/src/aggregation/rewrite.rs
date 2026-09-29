@@ -51,7 +51,7 @@ pub fn aggregate_input_value(
             [key_expr, value_expr] => {
                 let key = eval_scalar(key_expr, ctx)?;
                 if matches!(key, Value::Null) {
-                    return Ok(Value::Null);
+                    return Err(json_object_aggregate_null_key(name));
                 }
                 let value = eval_scalar(value_expr, ctx)?;
                 Ok(Value::List(vec![key, value]))
@@ -149,11 +149,16 @@ pub fn observe_aggregate(
     ctx: &ScalarEvalContext<'_>,
 ) -> Result<(), SQLError> {
     if acc.registered.is_some() {
-        let values = aggregate_input_values(args, ctx)?;
-        let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
+        let values = uqa_sql::expr::enums::render_host_arguments(
+            ctx.function_hook()
+                .and_then(uqa_sql::expr::EngineHook::enum_labels),
+            &aggregate_input_values(args, ctx)?,
+        )?;
+        let mut sort_keys: Vec<super::ordering::AggregateSortKey> =
+            Vec::with_capacity(order_by.len());
         for ob in order_by {
             let v = eval_scalar(&ob.expr, ctx)?;
-            sort_keys.push((v, ob.descending));
+            sort_keys.push(super::ordering::AggregateSortKey::ordered(v, ob));
         }
         if distinct {
             return acc.distinct.insert(&Value::List(values), sort_keys);
@@ -163,41 +168,52 @@ pub fn observe_aggregate(
     }
 
     let value = aggregate_input_value(name, args, order_by, ctx)?;
-    observe_builtin_aggregate_value(acc, name, &value, distinct, order_by, ctx)
+    observe_builtin_aggregate_value(acc, &value, distinct, order_by, ctx)
 }
 
+/// The accumulator's state plan decides whether a NULL input reaches the aggregate.
 pub fn observe_builtin_aggregate_value(
     acc: &mut AggregateAccumulator,
-    name: &str,
     value: &Value,
     distinct: bool,
     order_by: &[ScalarOrder],
     ctx: &ScalarEvalContext<'_>,
 ) -> Result<(), SQLError> {
-    let preserves_null_inputs = is_json_array_aggregate(name);
-    let mut sort_keys: Vec<(Value, bool)> = Vec::with_capacity(order_by.len());
+    let mut sort_keys: Vec<super::ordering::AggregateSortKey> = Vec::with_capacity(order_by.len());
     for ob in order_by {
         let v = eval_scalar(&ob.expr, ctx)?;
-        sort_keys.push((v, ob.descending));
+        sort_keys.push(super::ordering::AggregateSortKey::ordered(v, ob));
     }
     if distinct {
-        if preserves_null_inputs || !matches!(value, Value::Null) {
+        if acc.admits_null_input() || !matches!(value, Value::Null) {
             acc.distinct.insert(value, sort_keys)?;
         }
         return Ok(());
     }
-    if preserves_null_inputs {
-        acc.observe_including_null(value, sort_keys)?;
-    } else if order_by.is_empty() {
-        acc.observe(value)?;
+    if order_by.is_empty() {
+        acc.observe(value)
     } else {
-        acc.observe_with_sort_keys(value, sort_keys)?;
+        acc.observe_with_sort_keys(value, sort_keys)
     }
-    Ok(())
 }
 
 pub fn is_json_array_aggregate(name: &str) -> bool {
     name.eq_ignore_ascii_case("json_agg") || name.eq_ignore_ascii_case("jsonb_agg")
+}
+
+/// The transition-function error of `json_object_agg` and `jsonb_object_agg` for a NULL key.
+pub(super) fn json_object_aggregate_null_key(name: &str) -> SQLError {
+    if name.eq_ignore_ascii_case("jsonb_object_agg") {
+        SQLError::Routine {
+            sqlstate: "22023".into(),
+            message: "field name must not be null".into(),
+        }
+    } else {
+        SQLError::Routine {
+            sqlstate: "22004".into(),
+            message: "null value not allowed for object key".into(),
+        }
+    }
 }
 
 pub fn is_json_object_aggregate(name: &str) -> bool {

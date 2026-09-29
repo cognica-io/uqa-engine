@@ -80,6 +80,11 @@ impl ViewPlanBinding for Engine {
             self, plan, params, &scope, None,
         )
     }
+    fn bind_type_identities(&self, plan: &mut QueryPlan) -> Result<(), SQLError> {
+        uqa_sql::binding::stored_types::bind_query_plan_type_identities(plan, &mut |name| {
+            uqa_sql::FunctionTypeResolver::resolve_type_name(self, name)
+        })
+    }
 }
 
 impl MaterializedViewAccess for Engine {

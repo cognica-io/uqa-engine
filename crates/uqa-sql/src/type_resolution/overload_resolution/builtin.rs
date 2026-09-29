@@ -8,9 +8,9 @@
 
 use super::{
     bound_function_resolution_error, candidates::Candidates,
-    canonical_routine_type_name_with_control, function_resolution_error,
-    match_signature_with_control, rank_function_matches_with_control, MatchedBuiltinFunction,
-    MatchedFunctionSignature, RankedFunctionMatch, SignatureParameters,
+    canonical_column_type_name_with_control, canonical_routine_type_name_with_control,
+    function_resolution_error, match_signature_with_control, rank_function_matches_with_control,
+    MatchedBuiltinFunction, MatchedFunctionSignature, RankedFunctionMatch, SignatureParameters,
 };
 use crate::{
     ast::FunctionBinding,
@@ -37,8 +37,7 @@ impl SignatureParameters for BuiltinFunctionOverload {
         index: usize,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<String>, ValueRetentionError> {
-        let name = self.argument_types[index].sql_name_with_control(control)?;
-        canonical_routine_type_name_with_control(&name, control)
+        canonical_column_type_name_with_control(&self.argument_types[index], control)
     }
 }
 
@@ -75,8 +74,7 @@ fn binding_matches(
         return Ok(false);
     }
     for (ty, selected) in builtin.argument_types.iter().zip(&binding.argument_types) {
-        let ty = ty.sql_name_with_control(control)?;
-        let canonical = canonical_routine_type_name_with_control(&ty, control)?;
+        let canonical = canonical_column_type_name_with_control(ty, control)?;
         let selected = canonical_routine_type_name_with_control(selected, control)?;
         if *canonical != *selected {
             return Ok(false);

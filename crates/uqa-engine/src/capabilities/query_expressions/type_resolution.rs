@@ -24,6 +24,10 @@ impl FunctionTypeResolver for ScopedEngineHook<'_> {
         .map(Some)
     }
 
+    fn enum_labels(&self) -> Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog> {
+        Some(self.engine)
+    }
+
     fn resolve_function_type(
         &self,
         name: &str,

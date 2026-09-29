@@ -225,6 +225,8 @@ fn domain_constraints_run_at_their_argument_position_after_base_input_conversion
         },
         owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
         definition,
+        array_name: None,
+        usage_acl: None,
     };
     let target = domain.column_type();
     let scopes = Scopes {

@@ -35,29 +35,23 @@ fn match_types(
 }
 
 #[test]
-fn parses_every_polymorphic_family_and_marks_available_actual_carriers() {
-    let cases = [
-        ("anyelement", true),
-        ("anyarray", true),
-        ("anynonarray", true),
-        ("anyenum", false),
-        ("anyrange", true),
-        ("anymultirange", true),
-        ("anycompatible", true),
-        ("anycompatiblearray", true),
-        ("anycompatiblenonarray", true),
-        ("anycompatiblerange", true),
-        ("anycompatiblemultirange", true),
-    ];
-    for (type_name, has_actual_carrier) in cases {
-        assert_eq!(
-            routine_polymorphic_type(type_name)
-                .expect("known polymorphic spelling")
-                .has_actual_carrier(),
-            has_actual_carrier,
-            "{type_name}"
-        );
+fn parses_every_polymorphic_family() {
+    for type_name in [
+        "anyelement",
+        "anyarray",
+        "anynonarray",
+        "anyenum",
+        "anyrange",
+        "anymultirange",
+        "anycompatible",
+        "anycompatiblearray",
+        "anycompatiblenonarray",
+        "anycompatiblerange",
+        "anycompatiblemultirange",
+    ] {
+        assert!(routine_polymorphic_type(type_name).is_some(), "{type_name}");
     }
+    assert!(routine_polymorphic_type("anyelementx").is_none());
 }
 
 #[test]
@@ -157,15 +151,43 @@ fn compatible_family_uses_common_type_and_unknown_text_fallback() {
 }
 
 #[test]
-fn unavailable_enum_carrier_does_not_claim_concrete_actuals() {
+fn anyenum_requires_one_enum_type_and_substitutes_it() {
+    let mood = |oid| {
+        ColumnType::Enum(crate::ast::EnumTypeReference {
+            schema: "public".into(),
+            name: "mood".into(),
+            oid,
+            array_oid: oid + 1,
+        })
+    };
     assert!(
         match_types(&[parameter("anyenum")], &[Some(ColumnType::Integer)])
             .unwrap()
             .is_none()
     );
-    assert!(match_types(&[parameter("anyenum")], &[None])
-        .unwrap()
-        .is_none());
+    assert!(matches!(
+        match_types(&[parameter("anyenum")], &[None]),
+        Err(RoutineSignatureMatchError::IndeterminatePolymorphicType {
+            family: RoutinePolymorphicFamily::Simple
+        })
+    ));
+    let matched = match_types(
+        &[parameter("anyenum"), parameter("anyenum")],
+        &[Some(mood(20_000)), None],
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(matched.argument_targets, ["enum#20000", "enum#20000"]);
+    assert_eq!(
+        matched.substitute_type("anyarray"),
+        Some(ColumnType::Array(Box::new(mood(20_000))))
+    );
+    assert!(match_types(
+        &[parameter("anyenum"), parameter("anyenum")],
+        &[Some(mood(20_000)), Some(mood(30_000))],
+    )
+    .unwrap()
+    .is_none());
 }
 
 #[test]

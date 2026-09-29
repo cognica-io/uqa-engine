@@ -19,7 +19,7 @@ pub trait RoutineTypeCatalog {
     fn try_describe_table(&self, reference: &str) -> Result<Option<Vec<ColumnDef>>, String>;
     fn resolve_catalog_column_type(&self, name: &str) -> Option<ColumnType>;
     fn resolve_catalog_column_type_name(&self, name: &str) -> Result<ColumnType, SQLError>;
-    fn resolve_catalog_domain_type_by_oid(&self, oid: u32) -> Option<ColumnType>;
+    fn resolve_catalog_user_type_by_oid(&self, oid: u32) -> Option<ColumnType>;
 }
 
 pub fn resolve_routine_type_references(
@@ -209,7 +209,8 @@ fn resolve_routine_type_name_with_reference(
     for _ in 0..array_dimensions {
         resolved = ColumnType::Array(Box::new(resolved));
     }
-    Ok(resolved.sql_name())
+    // A user-defined type is recorded by identity, so the signature survives renames and does not depend on the search path.
+    Ok(resolved.catalog_name())
 }
 
 pub fn resolve_plpgsql_datum_types(
@@ -223,8 +224,9 @@ pub fn resolve_plpgsql_datum_types(
         if variable.type_reference.is_none() {
             if let Some(ty) = variable
                 .type_oid
-                .and_then(|oid| catalog.resolve_catalog_domain_type_by_oid(oid))
+                .and_then(|oid| catalog.resolve_catalog_user_type_by_oid(oid))
             {
+                // The compiled body spells the variable's type in generated SQL; its OID keeps the binding exact.
                 variable.type_name = ty.sql_name();
                 continue;
             }

@@ -9,7 +9,7 @@
 use super::super::{ColumnType, SQLError, SQLParam, ScalarExpr};
 use crate::ast::FunctionBinding;
 use crate::routines::RoutineResolution;
-use crate::type_resolution::builtin_function_type;
+use crate::type_resolution::builtin_function_type_with_resolver;
 use crate::{FunctionTypeResolver, RowSchema, ScalarOrder};
 use std::collections::BTreeSet;
 
@@ -189,7 +189,9 @@ pub(super) fn validate_scalar_function(
     if resolve_sql_function(routines, name, binding, args, schema, params, resolver)?.is_some() {
         return Ok(());
     }
-    if builtin_function_type(&lower, args, order_by, schema, params)?.is_some() {
+    if builtin_function_type_with_resolver(&lower, args, order_by, schema, params, resolver)?
+        .is_some()
+    {
         return Ok(());
     }
     Err(undefined_function(name, args, schema, params, resolver))
@@ -421,7 +423,7 @@ fn undefined_function(
                 .and_then(|ty| {
                     crate::effective_overload_argument_type_with_params(value, ty, params)
                 })
-                .map_or_else(|| "unknown".to_string(), |ty| ty.sql_name());
+                .map_or_else(|| "unknown".to_string(), |ty| ty.regtype_name());
             argument_name.map_or(ty.clone(), |name| format!("{name} => {ty}"))
         })
         .collect::<Vec<_>>()

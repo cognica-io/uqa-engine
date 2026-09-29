@@ -441,6 +441,27 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
     let ordered_argument_types =
         infer_types(order_by.iter().map(|order| &order.expr), infer, control)?;
     let argument = |position: usize| argument_types.get(position).and_then(Option::as_ref);
+    // `unknown` literals and untyped parameters keep their parser identity for polymorphic selection.
+    let effective_types = call_arguments
+        .iter()
+        .zip(argument_types.iter())
+        .map(|(argument, ty)| {
+            super::super::common::effective_overload_argument_type_ref_with_params(
+                argument.value,
+                ty.as_ref(),
+                params,
+            )
+        })
+        .collect::<Vec<_>>();
+    let effective = |position: usize| effective_types.get(position).copied().flatten();
+    // An explicit VARIADIC argument of a `VARIADIC "any"` built-in must be an array.
+    if explicit_variadic && crate::expr::variadic_any::is_variadic_any(name) {
+        if let Some(last) = effective_types.len().checked_sub(1).and_then(effective) {
+            if super::super::array_element_type(last).is_none() {
+                return Err(crate::expr::variadic_any::not_an_array());
+            }
+        }
+    }
     let ordered_argument = || ordered_argument_types.first().and_then(Option::as_ref);
     let first = || argument(0);
     if let Some(dispatch) = binding.and_then(|binding| binding.dispatch) {
@@ -489,11 +510,24 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
                     },
                     _ => None,
                 };
+                // The operator compares with the array's element type; an `unknown` array literal stays unknown until the operator selects its type.
+                let element = match effective(1).map(base_type) {
+                    None => None,
+                    Some(ColumnType::Array(element)) => Some(element.as_ref()),
+                    Some(ColumnType::Int2Vector) => Some(&ColumnType::SmallInteger),
+                    Some(ColumnType::OidVector) => Some(&ColumnType::Oid),
+                    Some(_) => {
+                        return Err(SQLError::Routine {
+                            sqlstate: "42809".into(),
+                            message: "op ANY/ALL (array) requires array on right side".into(),
+                        })
+                    }
+                };
                 if let Some(operator) = operator {
                     super::super::operators::binary_result_type_with_control(
                         operator,
-                        argument(0),
-                        None,
+                        effective(0),
+                        element,
                         control,
                     )?;
                 }
@@ -502,15 +536,15 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
             FunctionDispatch::IsDistinct => {
                 super::super::operators::binary_result_type_with_control(
                     BinaryOp::Equal,
-                    argument(0),
-                    argument(1),
+                    effective(0),
+                    effective(1),
                     control,
                 )?;
                 return inline(ColumnType::Boolean, control);
             }
             FunctionDispatch::BetweenSymmetric => {
-                let value = argument(0);
-                for bound in [argument(1), argument(2)] {
+                let value = effective(0);
+                for bound in [effective(1), effective(2)] {
                     super::super::operators::binary_result_type_with_control(
                         BinaryOp::GreaterEqual,
                         value,
@@ -530,10 +564,14 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
             | FunctionDispatch::RandomInt8Range
             | FunctionDispatch::RandomNumericRange
             | FunctionDispatch::ArraySortJson
-            | FunctionDispatch::Range { .. } => {}
+            | FunctionDispatch::Range { .. }
+            | FunctionDispatch::Enum { .. } => {}
         }
     }
     if let Some(ty) = range::function_type(name, binding, &argument_types) {
+        return inline(ty, control);
+    }
+    if let Some(ty) = super::super::enums::function_type(name, binding, &effective_types)? {
         return inline(ty, control);
     }
     if fixed_builtin::is_function(name) {
@@ -614,10 +652,30 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         "stddev" | "stddev_samp" | "stddev_pop" | "variance" | "var_samp" | "var_pop" => {
             optional_inline(first().and_then(aggregate_average_type), control)
         }
-        "min" | "max" | "lag" | "lead" | "first_value" | "last_value" | "nth_value" | "nullif"
-        | "trim_array" | "array_sample" | "generate_series" => copy(first(), control),
+        // A domain argument selects its base type's `min` or `max`; `min(anyenum)` does not accept a domain over an enum.
+        "min" | "max" => match first() {
+            Some(domain @ ColumnType::Domain { base, .. })
+                if matches!(base_type(base), ColumnType::Enum(_)) =>
+            {
+                Err(super::super::function_resolution_error(
+                    "42883",
+                    name,
+                    &[None],
+                    std::slice::from_ref(&Some(domain.clone())),
+                    "does not exist",
+                ))
+            }
+            argument => copy(argument.map(base_type), control),
+        },
+        "lag" | "lead" | "first_value" | "last_value" | "nth_value" | "nullif" | "trim_array"
+        | "array_sample" | "generate_series" => copy(first(), control),
+        // `anycompatible` arguments: an `unknown` literal takes the type selected by the known arguments.
         "array_cat" | "array_remove" | "array_replace" | "array_append" | "array_prepend" => {
-            super::compatible_array_result_type(name, &argument_types, control)
+            let known = effective_types
+                .iter()
+                .map(|ty| ty.cloned())
+                .collect::<Vec<_>>();
+            super::compatible_array_result_type(name, &known, control)
         }
         "mode" | "percentile_disc" => copy(ordered_argument(), control),
         "percentile_cont" => optional_inline(
@@ -656,7 +714,7 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         | "to_jsonb"
         | "jsonb_build_object"
         | "jsonb_build_array" => inline(ColumnType::JsonB, control),
-        "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => {
+        "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" | "aclexplode" => {
             inline(ColumnType::Record, control)
         }
         "contains_op" | "contained_by_op" => {

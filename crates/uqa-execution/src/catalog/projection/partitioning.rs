@@ -20,6 +20,7 @@ use uqa_core::Value;
 use uqa_sql::ast::{
     ColumnType, Expr, PartitionBound, PartitionRangeDatum, PartitionSpec, PartitionStrategy,
 };
+use uqa_sql::semantics::partition::partition_datum_text;
 use uqa_sql::{ResultRow, SQLError};
 
 pub fn build_pg_partitioned_table(
@@ -67,7 +68,7 @@ pub fn build_pg_partitioned_table(
             .iter()
             .filter(|key| !matches!(key, Expr::Column(_)))
             .map(schema_expr_text)
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, SQLError>>()?;
         rows.push(row([
             (
                 "partrelid",
@@ -165,7 +166,14 @@ pub fn pg_get_expr_value(context: &CatalogContext<'_>, args: &[Value]) -> Result
         };
         let rendered_node = partition_bound_node(context, &catalog, &resolution, &table, bound)?;
         if node == &rendered_node {
-            return Ok(str_value(partition_bound_expression(bound)));
+            let parent = hierarchy
+                .parents
+                .first()
+                .ok_or_else(|| SQLError::Internal(format!("partition `{table}` has no parent")))?;
+            let key_types = partition_key_types_for_table(context, &catalog, &resolution, parent)?;
+            return Ok(str_value(partition_bound_expression(
+                context, &key_types, bound,
+            )?));
         }
         return Ok(str_value(node.clone()));
     }
@@ -197,12 +205,10 @@ pub fn pg_get_partkeydef_value(
             .table(&resolution, &table)?
             .ok_or_else(|| SQLError::UnknownTable(table.clone()))?
             .hierarchy;
-        return Ok(hierarchy
-            .partition_spec
-            .as_ref()
-            .map_or(Value::Null, |spec| {
-                str_value(partition_key_definition(spec))
-            }));
+        return Ok(match hierarchy.partition_spec.as_ref() {
+            Some(spec) => str_value(partition_key_definition(spec)?),
+            None => Value::Null,
+        });
     }
     Ok(Value::Null)
 }
@@ -281,37 +287,76 @@ pub fn partition_bound_node(
     ))
 }
 
-pub fn partition_bound_expression(bound: &PartitionBound) -> String {
-    match bound {
+/// `pg_get_expr` of a partition bound: each stored datum rendered by `get_const_expr` against its partition key type.
+fn partition_bound_expression(
+    context: &CatalogContext<'_>,
+    key_types: &[ColumnType],
+    bound: &PartitionBound,
+) -> Result<String, SQLError> {
+    let output = super::CatalogOutput(*context);
+    let engine: &dyn uqa_sql::expr::EngineHook = &output;
+    Ok(match bound {
         PartitionBound::Default => "DEFAULT".into(),
-        PartitionBound::List(values) => format!(
-            "FOR VALUES IN ({})",
-            values
-                .iter()
-                .map(schema_expr_text)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
+        PartitionBound::List(values) => {
+            let ty = key_types.first().ok_or_else(|| {
+                SQLError::Internal("LIST partition parent has no partition key".into())
+            })?;
+            let mut rendered = Vec::with_capacity(values.len());
+            for value in values {
+                rendered.push(partition_datum_text(
+                    &partition_datum_value(context, value)?,
+                    ty,
+                    Some(engine),
+                )?);
+            }
+            format!("FOR VALUES IN ({})", rendered.join(", "))
+        }
         PartitionBound::Range { lower, upper } => format!(
-            "FOR VALUES FROM ({}) TO ({})",
-            lower
-                .iter()
-                .map(partition_range_datum_text)
-                .collect::<Vec<_>>()
-                .join(", "),
-            upper
-                .iter()
-                .map(partition_range_datum_text)
-                .collect::<Vec<_>>()
-                .join(", ")
+            "FOR VALUES FROM {} TO {}",
+            range_datum_text(context, lower, key_types, engine)?,
+            range_datum_text(context, upper, key_types, engine)?
         ),
         PartitionBound::Hash { modulus, remainder } => {
             format!("FOR VALUES WITH (modulus {modulus}, remainder {remainder})")
         }
+    })
+}
+
+fn range_datum_text(
+    context: &CatalogContext<'_>,
+    datums: &[PartitionRangeDatum],
+    key_types: &[ColumnType],
+    engine: &dyn uqa_sql::expr::EngineHook,
+) -> Result<String, SQLError> {
+    let mut rendered = Vec::with_capacity(datums.len());
+    for (position, datum) in datums.iter().enumerate() {
+        rendered.push(match datum {
+            PartitionRangeDatum::MinValue => "MINVALUE".into(),
+            PartitionRangeDatum::MaxValue => "MAXVALUE".into(),
+            PartitionRangeDatum::Value(value) => partition_datum_text(
+                &partition_datum_value(context, value)?,
+                key_types.get(position).ok_or_else(|| {
+                    SQLError::Internal("partition range bound is wider than its key".into())
+                })?,
+                Some(engine),
+            )?,
+        });
+    }
+    Ok(format!("({})", rendered.join(", ")))
+}
+
+/// A stored bound datum; bounds written before bound transformation are evaluated like any other constant expression.
+fn partition_datum_value(
+    context: &CatalogContext<'_>,
+    expression: &Expr,
+) -> Result<Value, SQLError> {
+    match uqa_sql::semantics::partition::stored_datum(expression) {
+        Ok(value) => Ok(value.clone()),
+        Err(_) => context.expressions.evaluate(expression),
     }
 }
 
-pub fn partition_key_definition(spec: &PartitionSpec) -> String {
+pub fn partition_key_definition(spec: &PartitionSpec) -> Result<String, SQLError> {
     let strategy = match spec.strategy {
         PartitionStrategy::List => "LIST",
         PartitionStrategy::Range => "RANGE",
@@ -321,12 +366,12 @@ pub fn partition_key_definition(spec: &PartitionSpec) -> String {
         .keys
         .iter()
         .map(|key| match key {
-            Expr::Column(column) => uqa_sql::expr::quote_ident(column),
+            Expr::Column(column) => Ok(uqa_sql::expr::quote_ident(column)),
             expression => schema_expr_text(expression),
         })
-        .collect::<Vec<_>>()
+        .collect::<Result<Vec<_>, SQLError>>()?
         .join(", ");
-    format!("{strategy} ({keys})")
+    Ok(format!("{strategy} ({keys})"))
 }
 
 fn partition_key_types_for_table(
@@ -374,11 +419,11 @@ fn partition_key_types(
                 &[],
                 Some(context.routines),
             )?
-            .ok_or_else(|| {
-                SQLError::TypeMismatch(format!(
-                    "cannot determine partition key type for `{}`",
-                    schema_expr_text(key)
-                ))
+            .ok_or_else(|| match schema_expr_text(key) {
+                Ok(key) => SQLError::TypeMismatch(format!(
+                    "cannot determine partition key type for `{key}`"
+                )),
+                Err(error) => error,
             })
         })
         .collect()
@@ -406,14 +451,6 @@ fn partition_strategy_code(strategy: PartitionStrategy) -> &'static str {
         PartitionStrategy::List => "l",
         PartitionStrategy::Range => "r",
         PartitionStrategy::Hash => "h",
-    }
-}
-
-fn partition_range_datum_text(datum: &PartitionRangeDatum) -> String {
-    match datum {
-        PartitionRangeDatum::MinValue => "MINVALUE".into(),
-        PartitionRangeDatum::Value(value) => schema_expr_text(value),
-        PartitionRangeDatum::MaxValue => "MAXVALUE".into(),
     }
 }
 
@@ -461,16 +498,20 @@ fn partition_const_node(
     let collation_oid = pg_type_collation_oid(&ty);
     let length = pg_type_len(&ty);
     let by_value = pg_type_by_value(&ty);
-    let const_value = pg_const_value(&value, &ty);
+    let const_value = pg_const_value(context, &value, &ty)?;
     Ok(format!(
         "{{CONST :consttype {type_oid} :consttypmod {type_modifier} :constcollid {collation_oid} :constlen {length} :constbyval {by_value} :constisnull {} :location -1 :constvalue {const_value}}}",
         matches!(value, Value::Null)
     ))
 }
 
-fn pg_const_value(value: &Value, ty: &ColumnType) -> String {
+fn pg_const_value(
+    context: &CatalogContext<'_>,
+    value: &Value,
+    ty: &ColumnType,
+) -> Result<String, SQLError> {
     if matches!(value, Value::Null) {
-        return "<>".into();
+        return Ok("<>".into());
     }
     let mut bytes = match (value, base_type(ty)) {
         (Value::Bool(value), ColumnType::Boolean) => vec![u8::from(*value)],
@@ -486,9 +527,20 @@ fn pg_const_value(value: &Value, ty: &ColumnType) -> String {
         (Value::Float(value), ColumnType::DoublePrecision) => value.to_le_bytes().to_vec(),
         (Value::Str(value) | Value::FixedChar(value), _) => varlena_bytes(value.as_bytes()),
         (Value::Bytes(value), ColumnType::Bytea) => varlena_bytes(value),
-        _ => return format!("<{}>", schema_expr_text(&Expr::Literal(value.clone()))),
+        // An enum datum is its label OID.
+        (Value::Enum(label), ColumnType::Enum(_)) => u64::from(
+            uqa_sql::expr::enums::enum_label_oid(context.routines.enum_labels(), label)?,
+        )
+        .to_le_bytes()
+        .to_vec(),
+        _ => {
+            return Ok(format!(
+                "<{}>",
+                schema_expr_text(&Expr::Literal(value.clone()))?
+            ))
+        }
     };
-    if pg_type_by_value(ty) {
+    Ok(if pg_type_by_value(ty) {
         bytes.resize(8, 0);
         let width = pg_type_len(ty);
         format!(
@@ -509,7 +561,7 @@ fn pg_const_value(value: &Value, ty: &ColumnType) -> String {
                 .collect::<Vec<_>>()
                 .join(" ")
         )
-    }
+    })
 }
 
 fn varlena_bytes(payload: &[u8]) -> Vec<u8> {
@@ -684,6 +736,13 @@ fn partition_operator_class(strategy: PartitionStrategy, ty: &ColumnType) -> i64
                 10_089
             } else {
                 10_088
+            }
+        }
+        ColumnType::Enum(_) => {
+            if hash {
+                10_070
+            } else {
+                10_069
             }
         }
         _ => 0,

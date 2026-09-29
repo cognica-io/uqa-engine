@@ -80,12 +80,12 @@ pub(super) fn named_binary_operator_types_with_control(
         },
         _ => undefined_binary_operator(name, left, right),
     })?;
-    let left_name = selected.builtin.argument_types[0].sql_name_with_control(control)?;
-    let lhs = ColumnType::from_sql_name_with_control(&left_name, control)?;
-    let right_name = selected.builtin.argument_types[1].sql_name_with_control(control)?;
-    let rhs = ColumnType::from_sql_name_with_control(&right_name, control)?;
-    let result = selected.builtin.return_type.clone_with_control(control)?;
-    finish_types(lhs, rhs, result, control)
+    result(
+        &selected.builtin.argument_types[0],
+        &selected.builtin.argument_types[1],
+        &selected.builtin.return_type,
+        control,
+    )
 }
 
 fn normalized_arguments(
@@ -144,20 +144,29 @@ fn candidates(
         | ColumnType::Int2Vector
         | ColumnType::OidVector
         | ColumnType::Range(_)
-        | ColumnType::Multirange(_)),
+        | ColumnType::Multirange(_)
+        | ColumnType::Enum(_)),
     ) = concrete
     {
         let polymorphic = match concrete {
             ColumnType::Array(_) | ColumnType::Int2Vector | ColumnType::OidVector => "anyarray",
             ColumnType::Range(_) => "anyrange",
+            ColumnType::Enum(_) => "anyenum",
             _ => "anymultirange",
         };
-        let consistent = match left.zip(right) {
-            Some((left, right)) => {
-                super::super::common::same_operator_type_with_control(left, right, control)?
-            }
-            None => true,
-        };
+        // `anyenum` does not accept a domain operand, while the array and range families match a domain through its base type.
+        let domain_operand = polymorphic == "anyenum"
+            && [left, right]
+                .into_iter()
+                .flatten()
+                .any(|ty| matches!(ty, ColumnType::Domain { .. }));
+        let consistent = !domain_operand
+            && match left.zip(right) {
+                Some((left, right)) => {
+                    super::super::common::same_operator_type_with_control(left, right, control)?
+                }
+                None => true,
+            };
         for &(operator, lhs, rhs, result, _, _) in SIGNATURES {
             control.check()?;
             if operator != name || lhs != polymorphic || rhs != polymorphic || !consistent {

@@ -153,6 +153,7 @@ pub fn pg_type_oid(ty: &ColumnType) -> i64 {
             ColumnType::Vector(_) => 380_002,
             ColumnType::Tensor(_) => 380_003,
             ColumnType::Domain { oid, .. } => pg_domain_array_oid(*oid),
+            ColumnType::Enum(reference) => i64::from(reference.array_oid),
             ColumnType::Range(subtype) => match subtype {
                 RangeSubtype::Integer => 3905,
                 RangeSubtype::Numeric => 3907,
@@ -180,6 +181,7 @@ pub fn pg_type_oid(ty: &ColumnType) -> i64 {
         ColumnType::Vector(_) => 380_000,
         ColumnType::Tensor(_) => 380_001,
         ColumnType::Domain { oid, .. } => i64::from(*oid),
+        ColumnType::Enum(reference) => i64::from(reference.oid),
     }
 }
 
@@ -302,7 +304,8 @@ pub fn pg_type_len(ty: &ColumnType) -> i64 {
         | ColumnType::Regclass
         | ColumnType::Regnamespace
         | ColumnType::Regrole
-        | ColumnType::Regtype => 4,
+        | ColumnType::Regtype
+        | ColumnType::Enum(_) => 4,
         ColumnType::BigInteger => 8,
         ColumnType::Boolean | ColumnType::InternalChar => 1,
         ColumnType::Name => 64,
@@ -349,6 +352,7 @@ pub fn pg_type_by_value(ty: &ColumnType) -> bool {
             | ColumnType::TimestampPrecision(_)
             | ColumnType::TimestampTz
             | ColumnType::TimestampTzPrecision(_)
+            | ColumnType::Enum(_)
     ) || matches!(ty, ColumnType::Domain { base, .. } if pg_type_by_value(base))
 }
 
@@ -555,6 +559,7 @@ pub fn pg_type_routine_oids(ty: &ColumnType) -> PgTypeRoutineOids {
             unreachable!("unresolved declaration type {name} reached catalog projection")
         }
         ColumnType::Boolean => PgTypeRoutineOids::new(1242, 1243, 2436, 2437),
+        ColumnType::Enum(_) => PgTypeRoutineOids::new(3506, 3507, 3532, 3533),
         ColumnType::Void => PgTypeRoutineOids::new(2298, 2299, 3120, 3121),
         ColumnType::Bytea => PgTypeRoutineOids::new(1244, 31, 2412, 2413),
         ColumnType::InternalChar => PgTypeRoutineOids::new(1245, 33, 2434, 2435),
@@ -628,6 +633,7 @@ pub fn pg_type_routine_oids(ty: &ColumnType) -> PgTypeRoutineOids {
 pub fn column_type_name(ty: &ColumnType) -> &str {
     match ty {
         ColumnType::Named(name) => name,
+        ColumnType::Enum(reference) => &reference.name,
         ColumnType::SmallInteger => "smallint",
         ColumnType::Integer => "integer",
         ColumnType::BigInteger => "bigint",

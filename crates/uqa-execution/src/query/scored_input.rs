@@ -455,6 +455,7 @@ impl ScoredDocumentSource {
             .enumerate()
             .filter_map(|(position, name)| {
                 (name == XMIN_COLUMN
+                    || name == TABLE_OID_COLUMN
                     || HiddenColumn::ALL.iter().any(|hidden| {
                         hidden_columns.contains(*hidden) && name.as_str() == hidden.name()
                     }))

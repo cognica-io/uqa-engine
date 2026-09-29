@@ -28,6 +28,8 @@ pub enum CatalogRetentionError {
     Cancelled(#[from] QueryCancelled),
     #[error("validated column expression contains a subquery")]
     UnexpectedSubquery,
+    #[error("malformed {kind} value: {reason}")]
+    Malformed { kind: &'static str, reason: String },
 }
 
 impl From<ValueRetentionError> for CatalogRetentionError {
@@ -35,6 +37,7 @@ impl From<ValueRetentionError> for CatalogRetentionError {
         match error {
             ValueRetentionError::Memory(error) => Self::Memory(error),
             ValueRetentionError::Cancelled(error) => Self::Cancelled(error),
+            ValueRetentionError::Malformed { kind, reason } => Self::Malformed { kind, reason },
         }
     }
 }
@@ -48,6 +51,10 @@ impl From<CatalogRetentionError> for crate::SQLError {
             },
             CatalogRetentionError::Cancelled(error) => Self::Cancelled(error),
             CatalogRetentionError::UnexpectedSubquery => Self::Internal(error.to_string()),
+            CatalogRetentionError::Malformed { .. } => Self::Routine {
+                sqlstate: "XX001".into(),
+                message: error.to_string(),
+            },
         }
     }
 }

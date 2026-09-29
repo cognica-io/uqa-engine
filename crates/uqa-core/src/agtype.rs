@@ -180,7 +180,7 @@ pub fn agtype_type_ordinal(value: &Value) -> u8 {
             Value::Float(_) => 4,
             Value::Bool(_) => 5,
             Value::Array(_) | Value::LegacyVector(_) | Value::List(_) | Value::Row(_) => 9,
-            Value::Record(_) | Value::Map(_) => 10,
+            Value::Record(_) | Value::Map(_) | Value::Enum(_) => 10,
             Value::Json(text) | Value::JsonB(text) => json_type_ordinal(text),
             Value::Bytes(_) | Value::Temporal(_) => 11,
         },
@@ -202,7 +202,7 @@ pub fn agtype_type_name(value: &Value) -> &'static str {
             Value::Float(_) => "float",
             Value::Decimal(_) => "numeric",
             Value::Array(_) | Value::LegacyVector(_) | Value::List(_) | Value::Row(_) => "list",
-            Value::Record(_) | Value::Map(_) => "map",
+            Value::Record(_) | Value::Map(_) | Value::Enum(_) => "map",
             Value::Json(text) | Value::JsonB(text) => json_type_name(text),
             Value::Bytes(_) => "bytea",
             Value::Temporal(_) => "temporal",
@@ -256,91 +256,85 @@ fn render_into(value: &Value, out: &mut String) {
             out.push_str("::edge");
         }
         Some(EntityKind::Path) => {
-            out.push('[');
-            if let Some(elements) = path_elements(value) {
-                for (i, element) in elements.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(", ");
-                    }
-                    render_into(element, out);
-                }
-            }
-            out.push_str("]::path");
+            render_sequence(path_elements(value).unwrap_or_default(), out);
+            out.push_str("::path");
         }
-        None => match value {
-            Value::Null => out.push_str("null"),
-            Value::Void => render_json_string("", out),
-            Value::Bool(true) => out.push_str("true"),
-            Value::Bool(false) => out.push_str("false"),
-            Value::Int(n) => out.push_str(&n.to_string()),
-            Value::Float(f) => out.push_str(&format_float_agtype(*f)),
-            Value::Decimal(d) => {
-                out.push_str(&d.to_sql_string());
-                out.push_str("::numeric");
-            }
-            Value::Str(s) => render_json_string(s, out),
-            Value::FixedChar(s) => render_json_string(s.trim_end_matches(' '), out),
-            Value::Bytes(b) => render_json_string(&String::from_utf8_lossy(b), out),
-            Value::Temporal(t) => render_json_string(&t.to_sql_string(), out),
-            Value::Json(text) | Value::JsonB(text) => out.push_str(text),
-            Value::Array(array) => {
-                out.push('[');
-                for (index, item) in array.elements().iter().enumerate() {
-                    if index > 0 {
-                        out.push_str(", ");
-                    }
-                    render_into(item, out);
-                }
-                out.push(']');
-            }
-            Value::LegacyVector(vector) => {
-                out.push('[');
-                for (index, item) in vector.elements().iter().enumerate() {
-                    if index > 0 {
-                        out.push_str(", ");
-                    }
-                    render_into(item, out);
-                }
-                out.push(']');
-            }
-            Value::List(items) | Value::Row(items) => {
-                out.push('[');
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(", ");
-                    }
-                    render_into(item, out);
-                }
-                out.push(']');
-            }
-            Value::Record(fields) => {
-                out.push('{');
-                for (index, (name, value)) in fields.iter().enumerate() {
-                    if index > 0 {
-                        out.push_str(", ");
-                    }
-                    render_json_string(name, out);
-                    out.push_str(": ");
-                    render_into(value, out);
-                }
-                out.push('}');
-            }
-            Value::Map(map) => {
-                out.push('{');
-                let mut keys: Vec<&String> = map.keys().collect();
-                keys.sort_by(|a, b| jsonb_key_cmp(a, b));
-                for (i, key) in keys.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(", ");
-                    }
-                    render_json_string(key, out);
-                    out.push_str(": ");
-                    render_into(&map[*key], out);
-                }
-                out.push('}');
-            }
-        },
+        None => render_plain_into(value, out),
     }
+}
+
+/// Render a value that is not a graph entity envelope.
+fn render_plain_into(value: &Value, out: &mut String) {
+    match value {
+        Value::Null => out.push_str("null"),
+        Value::Void => render_json_string("", out),
+        Value::Bool(true) => out.push_str("true"),
+        Value::Bool(false) => out.push_str("false"),
+        Value::Int(n) => out.push_str(&n.to_string()),
+        Value::Float(f) => out.push_str(&format_float_agtype(*f)),
+        Value::Decimal(d) => {
+            out.push_str(&d.to_sql_string());
+            out.push_str("::numeric");
+        }
+        Value::Str(s) => render_json_string(s, out),
+        Value::FixedChar(s) => render_json_string(s.trim_end_matches(' '), out),
+        Value::Bytes(b) => render_json_string(&String::from_utf8_lossy(b), out),
+        Value::Temporal(t) => render_json_string(&t.to_sql_string(), out),
+        Value::Json(text) | Value::JsonB(text) => out.push_str(text),
+        Value::Array(array) => render_sequence(array.elements(), out),
+        Value::LegacyVector(vector) => render_sequence(vector.elements(), out),
+        Value::List(items) | Value::Row(items) => render_sequence(items, out),
+        Value::Record(fields) => {
+            out.push('{');
+            for (index, (name, value)) in fields.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(", ");
+                }
+                render_json_string(name, out);
+                out.push_str(": ");
+                render_into(value, out);
+            }
+            out.push('}');
+        }
+        Value::Map(map) => {
+            out.push('{');
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort_by(|a, b| jsonb_key_cmp(a, b));
+            for (i, key) in keys.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                render_json_string(key, out);
+                out.push_str(": ");
+                render_into(&map[*key], out);
+            }
+            out.push('}');
+        }
+        // Label text belongs to the SQL catalog, so a raw carrier renders as its serialized tagged object rather than an invented label.
+        Value::Enum(value) => {
+            let fields = BTreeMap::from([
+                ("$uqa_type".to_owned(), Value::Str("enum".into())),
+                ("key".to_owned(), Value::Str(value.key().to_hex())),
+                (
+                    "type_oid".to_owned(),
+                    Value::Int(i64::from(value.type_oid())),
+                ),
+            ]);
+            render_into(&Value::Map(fields), out);
+        }
+    }
+}
+
+/// Render list-shaped values as `[a, b, ...]`.
+fn render_sequence(items: &[Value], out: &mut String) {
+    out.push('[');
+    for (index, item) in items.iter().enumerate() {
+        if index > 0 {
+            out.push_str(", ");
+        }
+        render_into(item, out);
+    }
+    out.push(']');
 }
 
 /// Render vertex / edge envelope bodies with AGE's fixed field order
@@ -401,7 +395,7 @@ fn sort_priority(value: &Value) -> u8 {
         Some(EntityKind::Edge) => 1,
         Some(EntityKind::Vertex) => 2,
         None => match value {
-            Value::Record(_) | Value::Map(_) => 3,
+            Value::Record(_) | Value::Map(_) | Value::Enum(_) => 3,
             Value::Array(_) | Value::LegacyVector(_) | Value::List(_) | Value::Row(_) => 4,
             Value::Json(text) | Value::JsonB(text) => json_sort_priority(text),
             Value::Void

@@ -182,6 +182,16 @@ pub fn read_i32(bytes: &mut &[u8]) -> i32 {
     value
 }
 
+/// Compare the diagnostic fields a reference recorded; references captured without DETAIL and HINT omit those fields.
+pub fn error_matches(actual: &Value, expected: &Value) -> bool {
+    match (actual.as_object(), expected.as_object()) {
+        (Some(actual), Some(expected)) => expected
+            .iter()
+            .all(|(field, value)| actual.get(field).unwrap_or(&Value::Null) == value),
+        _ => actual == expected,
+    }
+}
+
 pub fn evidence(messages: &[Message]) -> Value {
     result_evidence(messages, false)
 }
@@ -248,7 +258,12 @@ fn result_evidence(messages: &[Message], include_fields: bool) -> Value {
             }
             b'E' => {
                 let diagnostic = fields(bytes);
-                error = json!({ "sqlstate": diagnostic[&b'C'], "message": diagnostic[&b'M'] });
+                error = json!({
+                    "sqlstate": diagnostic[&b'C'],
+                    "message": diagnostic[&b'M'],
+                    "detail": diagnostic.get(&b'D'),
+                    "hint": diagnostic.get(&b'H'),
+                });
             }
             _ => {}
         }

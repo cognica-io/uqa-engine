@@ -96,6 +96,40 @@ pub struct ColumnDef {
     pub references: Option<ForeignKeyRef>,
 }
 
+impl ColumnDef {
+    /// A nullable column without a default, generation expression, identity or constraint.
+    #[must_use]
+    pub fn nullable(name: impl Into<String>, ty: ColumnType) -> Self {
+        Self {
+            name: name.into(),
+            ty,
+            object_id: None,
+            missing_value: None,
+            primary_key: false,
+            not_null: false,
+            not_null_explicit: false,
+            not_null_name: None,
+            not_null_identity: None,
+            not_null_validated: true,
+            not_null_no_inherit: false,
+            not_null_is_local: true,
+            auto_increment: None,
+            unique: false,
+            default: None,
+            generated: None,
+            check: None,
+            check_name: None,
+            check_enforced: true,
+            check_validated: true,
+            check_no_inherit: false,
+            check_is_local: true,
+            check_object_id: None,
+            check_catalog_oid: None,
+            references: None,
+        }
+    }
+}
+
 pub use uqa_core::catalog_identity::CatalogObjectIdentity as ConstraintCatalogIdentity;
 
 /// `REFERENCES table[(column)]` reference target.

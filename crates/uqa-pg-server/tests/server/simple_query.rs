@@ -12,7 +12,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use uqa_engine::{SQLFunctionOptions, SQLFunctionVolatility};
 
-use super::client::{evidence, evidence_with_fields, fields, Client, Fixture};
+use super::client::{error_matches, evidence, evidence_with_fields, fields, Client, Fixture};
 
 fn compare_reference(input: &str) {
     let fixture = Fixture::new();
@@ -33,7 +33,12 @@ fn compare_reference(input: &str) {
                 if key == "results" && sql == "SELECT version()" {
                     continue;
                 }
-                if &actual[key] != expected {
+                let matches = if key == "error" {
+                    error_matches(&actual[key], expected)
+                } else {
+                    &actual[key] == expected
+                };
+                if !matches {
                     differences.push(format!(
                         "{sql}\n{key}: expected {expected}\nactual: {}",
                         actual[key]

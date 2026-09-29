@@ -179,6 +179,11 @@ pub fn sql_column_type_to_fdw(column_type: &uqa_sql::ast::ColumnType) -> uqa_fdw
         uqa_sql::ast::ColumnType::Array(element) => {
             uqa_fdw::ColumnType::Array(Box::new(sql_column_type_to_fdw(element)))
         }
+        uqa_sql::ast::ColumnType::Enum(reference) => uqa_fdw::ColumnType::Enum {
+            schema: reference.schema.clone(),
+            name: reference.name.clone(),
+            oid: reference.oid,
+        },
         uqa_sql::ast::ColumnType::Domain {
             schema,
             name,

@@ -140,7 +140,7 @@ pub fn convert_declared_value_to_column_type(
 
 fn type_requires_catalog_resolution(ty: &ColumnType) -> bool {
     match ty {
-        ColumnType::Regrole | ColumnType::Domain { .. } => true,
+        ColumnType::Regrole | ColumnType::Domain { .. } | ColumnType::Enum(_) => true,
         ColumnType::Array(element) => type_requires_catalog_resolution(element),
         _ => false,
     }
@@ -151,6 +151,15 @@ pub fn convert_value_to_column_type_with_context(
     value: Value,
     ty: &ColumnType,
 ) -> Result<Value, SQLError> {
+    // Assignment to a string type calls the enum output function, which reads the current label.
+    let value = if textual_target(ty) && crate::expr::enums::contains_enum_carrier(&value) {
+        crate::expr::enums::render_enum_labels(
+            crate::expr::EngineHook::enum_labels(context),
+            &value,
+        )?
+    } else {
+        value
+    };
     if let Some(value) = super::domain::assign_domain_value(context, &value, ty)? {
         return Ok(value);
     }
@@ -166,11 +175,18 @@ pub fn convert_value_to_column_type_with_context(
         return crate::expr::cast_value_with_type_resolution(
             &value,
             None,
-            &ty.sql_name(),
+            &ty.catalog_name(),
             Some(context),
         );
     }
     convert_value_to_column_type(value, ty)
+}
+
+fn textual_target(ty: &ColumnType) -> bool {
+    match ty {
+        ColumnType::Array(element) => textual_target(element),
+        other => other.is_character_string(),
+    }
 }
 
 fn convert_catalog_array(
@@ -322,6 +338,6 @@ pub fn json_table_arg(value: &Value, name: &str) -> Result<serde_json::Value, SQ
             serde_json::from_str::<serde_json::Value>(s)
                 .map_err(|e| SQLError::TypeMismatch(format!("{name}: invalid JSON: {e}")))
         }
-        other => Ok(core_value_to_json(other)),
+        other => core_value_to_json(other),
     }
 }

@@ -4,12 +4,36 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Render visible index input values with the existing catalog deparser and SQL type output functions.
+//! Render visible index input values with the existing catalog deparser and catalog-aware SQL type output functions.
 
 use super::ConstraintContext;
-use crate::catalog::{context::CatalogContext, projection};
+use crate::catalog::projection;
 use uqa_core::Value;
-use uqa_sql::{catalog::index::EnforcedKey, expr::EngineHook, ColumnType, SQLError};
+use uqa_sql::{ast::ColumnDef, catalog::index::EnforcedKey, ResultRow, SQLError};
+
+/// `Failing row contains ...` for a row of `table`, omitted when the current role may see none of its columns.
+pub fn failing_row_detail(
+    source: &dyn super::context::ConstraintDiagnosticSource,
+    table: &str,
+    columns: &[ColumnDef],
+    row: &ResultRow,
+) -> Result<Option<String>, SQLError> {
+    let context = source.diagnostic_context();
+    let supplied = crate::mutation::supplied_columns::current_supplied_columns();
+    let Some(access) = context.authorization.failing_row_access(table, &supplied)? else {
+        return Ok(None);
+    };
+    let output = projection::CatalogOutput(context.catalog);
+    Ok(
+        uqa_sql::semantics::row_description::failing_row_description(
+            Some(&output),
+            &access,
+            columns,
+            row,
+        )?
+        .map(|description| format!("Failing row contains {description}.")),
+    )
+}
 
 pub(super) fn unique_key_detail(
     context: ConstraintContext<'_>,
@@ -64,7 +88,7 @@ fn index_key_detail(
         .map(|key| projection::index_key_definition(&catalog, &resolution, key, false))
         .collect::<Result<Vec<_>, _>>()?
         .join(", ");
-    let output = OutputNames(catalog_context);
+    let output = projection::CatalogOutput(catalog_context);
     let values = values
         .iter()
         .enumerate()
@@ -93,30 +117,4 @@ fn index_key_detail(
         .collect::<Result<Vec<_>, SQLError>>()?
         .join(", ");
     Ok(Some(format!("Key ({names})=({values})")))
-}
-
-struct OutputNames<'a>(CatalogContext<'a>);
-
-impl EngineHook for OutputNames<'_> {
-    fn resolve_regtype_output(&self, ty: &ColumnType, oid: i64) -> Result<Option<String>, String> {
-        projection::resolve_regtype_output(&self.0, ty, oid)
-    }
-
-    fn nextval(&self, _name: &str) -> Result<i64, SQLError> {
-        Err(SQLError::Internal(
-            "index output cannot advance a sequence".into(),
-        ))
-    }
-
-    fn currval(&self, _name: &str) -> Result<i64, SQLError> {
-        Err(SQLError::Internal(
-            "index output cannot read a sequence".into(),
-        ))
-    }
-
-    fn setval(&self, _name: &str, _value: i64, _is_called: bool) -> Result<i64, SQLError> {
-        Err(SQLError::Internal(
-            "index output cannot change a sequence".into(),
-        ))
-    }
 }

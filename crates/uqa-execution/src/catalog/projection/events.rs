@@ -333,9 +333,10 @@ fn pg_trigger_row(
         ("tgargs", Value::Bytes(arguments)),
         (
             "tgqual",
-            definition.when.as_ref().map_or(Value::Null, |condition| {
-                str_value(schema_expr_text(condition))
-            }),
+            match definition.when.as_ref() {
+                Some(condition) => str_value(schema_expr_text(condition)?),
+                None => Value::Null,
+            },
         ),
         (
             "tgoldtable",
@@ -755,7 +756,7 @@ fn render_trigger_definition(
     rendered.push_str(if definition.row { "ROW" } else { "STATEMENT" });
     if let Some(condition) = &definition.when {
         rendered.push_str(" WHEN (");
-        rendered.push_str(&render_trigger_condition(condition, pretty));
+        rendered.push_str(&render_trigger_condition(condition, pretty)?);
         rendered.push(')');
     }
     rendered.push_str(" EXECUTE FUNCTION ");
@@ -808,7 +809,7 @@ fn render_trigger_function(
     }
 }
 
-fn render_trigger_condition(condition: &Expr, pretty: bool) -> String {
+fn render_trigger_condition(condition: &Expr, pretty: bool) -> Result<String, SQLError> {
     if pretty {
         render_pretty_expr(condition, 0)
     } else {
@@ -820,14 +821,14 @@ fn render_trigger_condition(condition: &Expr, pretty: bool) -> String {
     clippy::too_many_lines,
     reason = "preserves catalog column and OID order"
 )]
-fn render_pretty_expr(expr: &Expr, parent_precedence: u8) -> String {
+fn render_pretty_expr(expr: &Expr, parent_precedence: u8) -> Result<String, SQLError> {
     let (precedence, rendered) = match expr {
         Expr::Or(items) => (
             1,
             items
                 .iter()
                 .map(|item| render_pretty_expr(item, 1))
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, SQLError>>()?
                 .join(" OR "),
         ),
         Expr::And(items) => (
@@ -835,7 +836,7 @@ fn render_pretty_expr(expr: &Expr, parent_precedence: u8) -> String {
             items
                 .iter()
                 .map(|item| render_pretty_expr(item, 2))
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, SQLError>>()?
                 .join(" AND "),
         ),
         Expr::Not(inner) => match inner.as_ref() {
@@ -848,12 +849,12 @@ fn render_pretty_expr(expr: &Expr, parent_precedence: u8) -> String {
                     4,
                     format!(
                         "{} IS NOT DISTINCT FROM {}",
-                        render_pretty_expr(&args[0], 5),
-                        render_pretty_expr(&args[1], 5)
+                        render_pretty_expr(&args[0], 5)?,
+                        render_pretty_expr(&args[1], 5)?
                     ),
                 )
             }
-            _ => (3, format!("NOT {}", render_pretty_expr(inner, 3))),
+            _ => (3, format!("NOT {}", render_pretty_expr(inner, 3)?)),
         },
         Expr::Binary { op, lhs, rhs } => {
             let (precedence, operator) = match op {
@@ -877,8 +878,8 @@ fn render_pretty_expr(expr: &Expr, parent_precedence: u8) -> String {
                 precedence,
                 format!(
                     "{} {operator} {}",
-                    render_pretty_expr(lhs, precedence),
-                    render_pretty_expr(rhs, rhs_precedence)
+                    render_pretty_expr(lhs, precedence)?,
+                    render_pretty_expr(rhs, rhs_precedence)?
                 ),
             )
         }
@@ -891,8 +892,8 @@ fn render_pretty_expr(expr: &Expr, parent_precedence: u8) -> String {
                 4,
                 format!(
                     "{} IS DISTINCT FROM {}",
-                    render_pretty_expr(&args[0], 5),
-                    render_pretty_expr(&args[1], 5)
+                    render_pretty_expr(&args[0], 5)?,
+                    render_pretty_expr(&args[1], 5)?
                 ),
             )
         }
@@ -900,7 +901,7 @@ fn render_pretty_expr(expr: &Expr, parent_precedence: u8) -> String {
             4,
             format!(
                 "{} IS {}NULL",
-                render_pretty_expr(expr, 5),
+                render_pretty_expr(expr, 5)?,
                 if *negated { "NOT " } else { "" }
             ),
         ),
@@ -908,9 +909,9 @@ fn render_pretty_expr(expr: &Expr, parent_precedence: u8) -> String {
             4,
             format!(
                 "{} BETWEEN {} AND {}",
-                render_pretty_expr(expr, 5),
-                render_pretty_expr(low, 5),
-                render_pretty_expr(high, 5)
+                render_pretty_expr(expr, 5)?,
+                render_pretty_expr(low, 5)?,
+                render_pretty_expr(high, 5)?
             ),
         ),
         Expr::InList {
@@ -921,22 +922,22 @@ fn render_pretty_expr(expr: &Expr, parent_precedence: u8) -> String {
             4,
             format!(
                 "{} {}IN ({})",
-                render_pretty_expr(expr, 5),
+                render_pretty_expr(expr, 5)?,
                 if *negated { "NOT " } else { "" },
                 list.iter()
                     .map(|item| render_pretty_expr(item, 0))
-                    .collect::<Vec<_>>()
+                    .collect::<Result<Vec<_>, SQLError>>()?
                     .join(", ")
             ),
         ),
-        Expr::UnaryMinus(inner) => (7, format!("-{}", render_pretty_expr(inner, 7))),
-        _ => (8, schema_expr_text(expr)),
+        Expr::UnaryMinus(inner) => (7, format!("-{}", render_pretty_expr(inner, 7)?)),
+        _ => (8, schema_expr_text(expr)?),
     };
-    if precedence < parent_precedence {
+    Ok(if precedence < parent_precedence {
         format!("({rendered})")
     } else {
         rendered
-    }
+    })
 }
 
 fn render_qualified_name(name: &str) -> String {

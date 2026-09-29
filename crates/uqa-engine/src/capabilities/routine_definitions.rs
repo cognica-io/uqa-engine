@@ -51,8 +51,8 @@ impl RoutineTypeCatalog for Engine {
             name,
         )
     }
-    fn resolve_catalog_domain_type_by_oid(&self, oid: u32) -> Option<ColumnType> {
-        uqa_execution::catalog::projection::resolve_catalog_domain_type_by_oid(
+    fn resolve_catalog_user_type_by_oid(&self, oid: u32) -> Option<ColumnType> {
+        uqa_execution::catalog::projection::resolve_catalog_user_type_by_oid(
             &self.catalog_execution(),
             oid,
         )

@@ -192,10 +192,7 @@ pub(super) fn unary_minus_result_type_with_control(
         | ColumnType::DoublePrecision
         | ColumnType::Numeric { .. }
         | ColumnType::Interval) => ty.clone_with_control(control).map_err(Into::into),
-        other => Err(SQLError::TypeMismatch(format!(
-            "operator does not exist: - {}",
-            other.sql_name()
-        ))),
+        other => Err(super::undefined_prefix_operator("-", &other.display_name())),
     }
 }
 
@@ -304,15 +301,11 @@ pub fn binary_result_type_with_control(
             .map(Some)
             .map_err(Into::into);
     }
-    Err(SQLError::Routine {
-        sqlstate: "42883".into(),
-        message: format!(
-            "operator does not exist: {} {} {}",
-            left.sql_name(),
-            binary_operator_name(op),
-            right.sql_name()
-        ),
-    })
+    Err(super::undefined_binary_operator(
+        Some(left),
+        binary_operator_name(op),
+        Some(right),
+    ))
 }
 
 fn undefined_binary_operator(
@@ -320,17 +313,7 @@ fn undefined_binary_operator(
     left: Option<&ColumnType>,
     right: Option<&ColumnType>,
 ) -> SQLError {
-    let type_name =
-        |ty: Option<&ColumnType>| ty.map_or_else(|| "unknown".to_string(), ColumnType::sql_name);
-    SQLError::Routine {
-        sqlstate: "42883".into(),
-        message: format!(
-            "operator does not exist: {} {} {}",
-            type_name(left),
-            name,
-            type_name(right)
-        ),
-    }
+    super::undefined_binary_operator(left, name, right)
 }
 
 fn temporal_binary_result_type(

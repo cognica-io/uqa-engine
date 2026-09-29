@@ -546,6 +546,8 @@ fn aggregate_target_has_variable_state(
         | AggregateStatePlan::Min
         | AggregateStatePlan::Max
         | AggregateStatePlan::Buffered
+        | AggregateStatePlan::BufferedWithNulls
+        | AggregateStatePlan::BufferedArrays
         | AggregateStatePlan::Statistics => Ok(true),
     }
 }
@@ -612,6 +614,7 @@ fn value_retained_bytes(value: &Value) -> usize {
             value.capacity()
         }
         Value::Bytes(value) => value.capacity(),
+        Value::Enum(value) => value.retained_bytes(),
         Value::LegacyVector(vector) => vector.retained_bytes(),
         Value::Array(array) => array
             .retained_header_bytes()

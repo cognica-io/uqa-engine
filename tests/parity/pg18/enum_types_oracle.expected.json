@@ -1,0 +1,6045 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TYPE mood AS ENUM ('x')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "type \"mood\" already exists"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT t.typname, t.typlen, t.typbyval, t.typtype, t.typcategory, t.typispreferred, t.typdelim, t.typrelid, t.typsubscript::text, t.typelem, a.typname AS array_name, t.typinput::text, t.typoutput::text, t.typreceive::text, t.typsend::text, t.typmodin::text, t.typmodout::text, t.typanalyze::text, t.typalign, t.typstorage, t.typnotnull, t.typbasetype, t.typtypmod, t.typndims, t.typcollation, t.typdefault, t.typacl FROM pg_type t JOIN pg_type a ON a.oid = t.typarray WHERE t.typname = 'mood'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typname",
+            "typlen",
+            "typbyval",
+            "typtype",
+            "typcategory",
+            "typispreferred",
+            "typdelim",
+            "typrelid",
+            "typsubscript",
+            "typelem",
+            "array_name",
+            "typinput",
+            "typoutput",
+            "typreceive",
+            "typsend",
+            "typmodin",
+            "typmodout",
+            "typanalyze",
+            "typalign",
+            "typstorage",
+            "typnotnull",
+            "typbasetype",
+            "typtypmod",
+            "typndims",
+            "typcollation",
+            "typdefault",
+            "typacl"
+          ],
+          "type_oids": [
+            19,
+            21,
+            16,
+            18,
+            18,
+            16,
+            18,
+            26,
+            25,
+            26,
+            19,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            18,
+            18,
+            16,
+            26,
+            23,
+            23,
+            26,
+            25,
+            1034
+          ],
+          "rows": [
+            [
+              "mood",
+              "4",
+              "t",
+              "e",
+              "E",
+              "f",
+              ",",
+              "0",
+              "-",
+              "0",
+              "_mood",
+              "enum_in",
+              "enum_out",
+              "enum_recv",
+              "enum_send",
+              "-",
+              "-",
+              "-",
+              "i",
+              "p",
+              "f",
+              "0",
+              "-1",
+              "0",
+              "0",
+              null,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT a.typname, a.typlen, a.typbyval, a.typtype, a.typcategory, a.typelem::regtype::text, a.typinput::text, a.typoutput::text, a.typreceive::text, a.typsend::text, a.typanalyze::text, a.typalign, a.typstorage, a.typsubscript::text, a.typarray FROM pg_type a WHERE a.typname = '_mood'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "typname",
+            "typlen",
+            "typbyval",
+            "typtype",
+            "typcategory",
+            "typelem",
+            "typinput",
+            "typoutput",
+            "typreceive",
+            "typsend",
+            "typanalyze",
+            "typalign",
+            "typstorage",
+            "typsubscript",
+            "typarray"
+          ],
+          "type_oids": [
+            19,
+            21,
+            16,
+            18,
+            18,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            18,
+            18,
+            25,
+            26
+          ],
+          "rows": [
+            [
+              "_mood",
+              "-1",
+              "f",
+              "b",
+              "A",
+              "mood",
+              "array_in",
+              "array_out",
+              "array_recv",
+              "array_send",
+              "array_typanalyze",
+              "i",
+              "x",
+              "array_subscript_handler",
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT n.nspname, t.typowner = (SELECT oid FROM pg_roles WHERE rolname = current_user) AS owned FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE t.typname IN ('mood', '_mood') ORDER BY t.typname",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nspname",
+            "owned"
+          ],
+          "type_oids": [
+            19,
+            16
+          ],
+          "rows": [
+            [
+              "public",
+              "t"
+            ],
+            [
+              "public",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT enumsortorder, enumlabel FROM pg_enum WHERE enumtypid = 'mood'::regtype ORDER BY enumsortorder",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "enumsortorder",
+            "enumlabel"
+          ],
+          "type_oids": [
+            700,
+            19
+          ],
+          "rows": [
+            [
+              "1",
+              "sad"
+            ],
+            [
+              "2",
+              "ok"
+            ],
+            [
+              "3",
+              "happy"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT count(DISTINCT oid) = 3 AS distinct_label_oids FROM pg_enum WHERE enumtypid = 'mood'::regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "distinct_label_oids"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TYPE dup AS ENUM ('a', 'a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23505",
+        "message": "duplicate key value violates unique constraint \"pg_enum_typid_label_index\""
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TYPE long_label AS ENUM ('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42602",
+        "message": "invalid enum label \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\""
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TYPE edge_label AS ENUM ('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TYPE empty_enum AS ENUM ()",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT enum_range(NULL::empty_enum)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "enum_range"
+          ],
+          "type_oids": [
+            18277
+          ],
+          "rows": [
+            [
+              "{}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT enum_first(NULL::empty_enum)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "enum empty_enum contains no values"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT enum_last(NULL::empty_enum)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "enum empty_enum contains no values"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TYPE blank AS ENUM ('', ' ', 'Mixed Case', 'quote''s')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT enum_range(NULL::blank)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "enum_range"
+          ],
+          "type_oids": [
+            18279
+          ],
+          "rows": [
+            [
+              "{\"\",\" \",\"Mixed Case\",quote's}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT ''::blank AS empty_label, length(''::blank::text) AS empty_length, 'quote''s'::blank AS quoted",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "empty_label",
+            "empty_length",
+            "quoted"
+          ],
+          "type_oids": [
+            18280,
+            23,
+            18280
+          ],
+          "rows": [
+            [
+              "",
+              "0",
+              "quote's"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'happy'::mood AS label",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "label"
+          ],
+          "type_oids": [
+            18257
+          ],
+          "rows": [
+            [
+              "happy"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'angry'::mood",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input value for enum mood: \"angry\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 'Happy'::mood",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input value for enum mood: \"Happy\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT ' happy'::mood",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input value for enum mood: \" happy\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 'happy'::mood > 'sad'::mood AS gt, 'ok'::mood < 'sad' AS lt, 'ok' = 'ok'::mood AS eq, 'ok'::mood <> 'happy' AS ne, 'ok'::mood <= 'ok' AS le, 'sad'::mood >= 'happy' AS ge",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "gt",
+            "lt",
+            "eq",
+            "ne",
+            "le",
+            "ge"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f",
+              "t",
+              "t",
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT NULL::mood = 'ok' AS null_eq, NULL::mood IS NULL AS is_null",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "null_eq",
+            "is_null"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              null,
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TYPE happiness AS ENUM ('happy', 'very happy', 'ecstatic')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'happy'::mood = 'happy'::happiness",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: mood = happiness"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 'happy'::mood = 'happy'::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: mood = text"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 'happy'::mood < 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: mood < integer"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 'happy'::mood::text = 'happy'::happiness::text AS same_text",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same_text"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'happy'::mood::happiness",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42846",
+        "message": "cannot cast type mood to happiness"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 'happy'::mood::integer",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42846",
+        "message": "cannot cast type mood to integer"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 1::mood",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42846",
+        "message": "cannot cast type integer to mood"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 'happy'::mood || '!' AS right_text, '!' || 'happy'::mood AS left_text",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "right_text",
+            "left_text"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "happy!",
+              "!happy"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT pg_typeof('happy'::mood)::text, pg_typeof(ARRAY['ok'::mood])::text, pg_typeof(enum_range(NULL::mood))::text",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof",
+            "pg_typeof",
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "mood",
+              "mood[]",
+              "mood[]"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'happy'::mood::text AS text_value, 'happy'::mood::varchar AS varchar_value, 'happy'::mood::varchar(3) AS short_value, 'happy'::mood::bpchar AS bpchar_value, 'happy'::mood::name AS name_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "text_value",
+            "varchar_value",
+            "short_value",
+            "bpchar_value",
+            "name_value"
+          ],
+          "type_oids": [
+            25,
+            1043,
+            1043,
+            1042,
+            19
+          ],
+          "rows": [
+            [
+              "happy",
+              "happy",
+              "hap",
+              "happy",
+              "happy"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'ok'::text::mood AS from_text, 'ok'::varchar::mood AS from_varchar, 'ok'::bpchar::mood AS from_bpchar, 'ok '::bpchar::mood AS from_padded",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input value for enum mood: \"ok \""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 'nope'::text::mood",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input value for enum mood: \"nope\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT format('%s|%I|%L', 'happy'::mood, 'happy'::mood, 'happy'::mood) AS formatted, concat('a', 'ok'::mood, 1) AS concatenated, concat_ws('-', 'sad'::mood, 'ok'::mood) AS joined",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "formatted",
+            "concatenated",
+            "joined"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "happy|happy|'happy'",
+              "aok1",
+              "sad-ok"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT quote_literal('ok'::mood) AS literal, quote_nullable(NULL::mood) AS nullable",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "literal",
+            "nullable"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "'ok'",
+              "NULL"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT enum_first(NULL::mood) AS first, enum_last(NULL::mood) AS last, enum_range(NULL::mood) AS range_all",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "first",
+            "last",
+            "range_all"
+          ],
+          "type_oids": [
+            18257,
+            18257,
+            18256
+          ],
+          "rows": [
+            [
+              "sad",
+              "happy",
+              "{sad,ok,happy}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT enum_range('ok'::mood, NULL) AS from_ok, enum_range(NULL, 'ok'::mood) AS to_ok, enum_range('ok'::mood, 'ok'::mood) AS only_ok, enum_range('happy'::mood, 'sad'::mood) AS reversed, enum_range(NULL::mood, NULL) AS unbounded",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "from_ok",
+            "to_ok",
+            "only_ok",
+            "reversed",
+            "unbounded"
+          ],
+          "type_oids": [
+            18256,
+            18256,
+            18256,
+            18256,
+            18256
+          ],
+          "rows": [
+            [
+              "{ok,happy}",
+              "{sad,ok}",
+              "{ok}",
+              "{}",
+              "{sad,ok,happy}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT enum_first('happy'::mood) AS first_from_value, enum_range('sad'::mood) AS range_from_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "first_from_value",
+            "range_from_value"
+          ],
+          "type_oids": [
+            18257,
+            18256
+          ],
+          "rows": [
+            [
+              "sad",
+              "{sad,ok,happy}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT enum_cmp('ok'::mood, 'sad') AS cmp_gt, enum_cmp('ok'::mood, 'ok') AS cmp_eq, enum_cmp('sad'::mood, 'happy') AS cmp_lt",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "cmp_gt",
+            "cmp_eq",
+            "cmp_lt"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "0",
+              "-1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT enum_lt('sad'::mood, 'ok') AS lt, enum_le('ok'::mood, 'ok') AS le, enum_eq('ok'::mood, 'ok') AS eq, enum_ne('ok'::mood, 'sad') AS ne, enum_ge('happy'::mood, 'ok') AS ge, enum_gt('sad'::mood, 'ok') AS gt",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "lt",
+            "le",
+            "eq",
+            "ne",
+            "ge",
+            "gt"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t",
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT enum_smaller('ok'::mood, 'happy') AS smaller, enum_larger('ok'::mood, 'happy') AS larger",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "smaller",
+            "larger"
+          ],
+          "type_oids": [
+            18257,
+            18257
+          ],
+          "rows": [
+            [
+              "ok",
+              "happy"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT hashenum('ok'::mood) = hashenum('ok'::mood) AS stable_hash, hashenumextended('ok'::mood, 0) = hashenumextended('ok'::mood, 0) AS stable_extended",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "stable_hash",
+            "stable_extended"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT enum_range(NULL::integer)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function enum_range(integer) does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT enum_first(1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function enum_first(integer) does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE person (id integer PRIMARY KEY, m mood, ms mood[])",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO person VALUES (1, 'happy', '{happy,sad}'), (2, 'sad', ARRAY['ok'::mood]), (3, NULL, NULL), (4, 'ok', '{}'), (5, 'sad', '{sad,NULL,ok}')",
+      "command_tags": [
+        "INSERT 0 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO person VALUES (6, 'angry', NULL)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input value for enum mood: \"angry\""
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO person SELECT 7, 'happy'::text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"m\" is of type mood but expression is of type text"
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO person VALUES (8, 'happy'::varchar, NULL)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "column \"m\" is of type mood but expression is of type character varying"
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO person VALUES (9, 'ok'::happiness, NULL)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input value for enum happiness: \"ok\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT id, m, ms FROM person ORDER BY m, id",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "m",
+            "ms"
+          ],
+          "type_oids": [
+            23,
+            18257,
+            18256
+          ],
+          "rows": [
+            [
+              "2",
+              "sad",
+              "{ok}"
+            ],
+            [
+              "5",
+              "sad",
+              "{sad,NULL,ok}"
+            ],
+            [
+              "4",
+              "ok",
+              "{}"
+            ],
+            [
+              "1",
+              "happy",
+              "{happy,sad}"
+            ],
+            [
+              "3",
+              null,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id, m FROM person ORDER BY m DESC NULLS LAST, id",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "m"
+          ],
+          "type_oids": [
+            23,
+            18257
+          ],
+          "rows": [
+            [
+              "1",
+              "happy"
+            ],
+            [
+              "4",
+              "ok"
+            ],
+            [
+              "2",
+              "sad"
+            ],
+            [
+              "5",
+              "sad"
+            ],
+            [
+              "3",
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id, ms FROM person ORDER BY ms, id",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "ms"
+          ],
+          "type_oids": [
+            23,
+            18256
+          ],
+          "rows": [
+            [
+              "4",
+              "{}"
+            ],
+            [
+              "5",
+              "{sad,NULL,ok}"
+            ],
+            [
+              "2",
+              "{ok}"
+            ],
+            [
+              "1",
+              "{happy,sad}"
+            ],
+            [
+              "3",
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT min(m) AS min_mood, max(m) AS max_mood, count(DISTINCT m) AS distinct_moods, count(m) AS present FROM person",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "min_mood",
+            "max_mood",
+            "distinct_moods",
+            "present"
+          ],
+          "type_oids": [
+            18257,
+            18257,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "sad",
+              "happy",
+              "3",
+              "4"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT m, count(*) FROM person GROUP BY m ORDER BY m",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "m",
+            "count"
+          ],
+          "type_oids": [
+            18257,
+            20
+          ],
+          "rows": [
+            [
+              "sad",
+              "2"
+            ],
+            [
+              "ok",
+              "1"
+            ],
+            [
+              "happy",
+              "1"
+            ],
+            [
+              null,
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT DISTINCT m FROM person ORDER BY m",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "m"
+          ],
+          "type_oids": [
+            18257
+          ],
+          "rows": [
+            [
+              "sad"
+            ],
+            [
+              "ok"
+            ],
+            [
+              "happy"
+            ],
+            [
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id FROM person WHERE m BETWEEN 'sad' AND 'ok' ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ],
+            [
+              "4"
+            ],
+            [
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id FROM person WHERE m IN ('happy', 'sad') ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ],
+            [
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id FROM person WHERE m = ANY ('{happy,ok}') ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "4"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id FROM person WHERE m > 'sad' ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "4"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id FROM person WHERE 'ok' = ANY (ms) ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "2"
+            ],
+            [
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id, ms[1] AS first_element, array_length(ms, 1) AS elements FROM person ORDER BY id",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "first_element",
+            "elements"
+          ],
+          "type_oids": [
+            23,
+            18257,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "happy",
+              "2"
+            ],
+            [
+              "2",
+              "ok",
+              "1"
+            ],
+            [
+              "3",
+              null,
+              null
+            ],
+            [
+              "4",
+              null,
+              null
+            ],
+            [
+              "5",
+              "sad",
+              "3"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id, array_position(ms, 'sad') AS position FROM person WHERE ms IS NOT NULL ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "position"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "2"
+            ],
+            [
+              "2",
+              null
+            ],
+            [
+              "4",
+              null
+            ],
+            [
+              "5",
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT unnest(ms) AS element FROM person WHERE id = 5",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "element"
+          ],
+          "type_oids": [
+            18257
+          ],
+          "rows": [
+            [
+              "sad"
+            ],
+            [
+              null
+            ],
+            [
+              "ok"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT p.id, q.id AS other FROM person p JOIN person q ON p.m = q.m AND p.id < q.id ORDER BY p.id",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "other"
+          ],
+          "type_oids": [
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "2",
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT m, rank() OVER (ORDER BY m) FROM person WHERE m IS NOT NULL ORDER BY m, rank",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "m",
+            "rank"
+          ],
+          "type_oids": [
+            18257,
+            20
+          ],
+          "rows": [
+            [
+              "sad",
+              "1"
+            ],
+            [
+              "sad",
+              "1"
+            ],
+            [
+              "ok",
+              "3"
+            ],
+            [
+              "happy",
+              "4"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT max(m) FILTER (WHERE id < 3) AS filtered FROM person",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "filtered"
+          ],
+          "type_oids": [
+            18257
+          ],
+          "rows": [
+            [
+              "happy"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT array_agg(m ORDER BY m) AS ordered, array_agg(DISTINCT m) AS distinct_values FROM person WHERE m IS NOT NULL",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ordered",
+            "distinct_values"
+          ],
+          "type_oids": [
+            18256,
+            18256
+          ],
+          "rows": [
+            [
+              "{sad,sad,ok,happy}",
+              "{sad,ok,happy}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT m::text AS label, m::text < 'p' AS lexical FROM person WHERE m IS NOT NULL ORDER BY m",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "label",
+            "lexical"
+          ],
+          "type_oids": [
+            25,
+            16
+          ],
+          "rows": [
+            [
+              "sad",
+              "f"
+            ],
+            [
+              "sad",
+              "f"
+            ],
+            [
+              "ok",
+              "t"
+            ],
+            [
+              "happy",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE UNIQUE INDEX person_m_unique ON person (m) WHERE id > 1 AND id < 5",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO person VALUES (10, 'ok', NULL)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE INDEX person_m ON person (m)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id FROM person WHERE m = 'ok' ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "4"
+            ],
+            [
+              "10"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_json('ok'::mood) AS json_value, to_jsonb(ARRAY['ok', 'sad']::mood[]) AS jsonb_array, row_to_json(p) AS row_json FROM person p WHERE id = 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "json_value",
+            "jsonb_array",
+            "row_json"
+          ],
+          "type_oids": [
+            114,
+            3802,
+            114
+          ],
+          "rows": [
+            [
+              "\"ok\"",
+              "[\"ok\", \"sad\"]",
+              "{\"id\":1,\"m\":\"happy\",\"ms\":[\"happy\",\"sad\"]}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT json_build_object('mood', 'ok'::mood) AS object, jsonb_build_array('sad'::mood, 'happy'::mood) AS jsonb_array_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "object",
+            "jsonb_array_value"
+          ],
+          "type_oids": [
+            114,
+            3802
+          ],
+          "rows": [
+            [
+              "{\"mood\" : \"ok\"}",
+              "[\"sad\", \"happy\"]"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT json_agg(m ORDER BY id) AS aggregated FROM person WHERE id < 4",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "aggregated"
+          ],
+          "type_oids": [
+            114
+          ],
+          "rows": [
+            [
+              "[\"happy\", \"sad\", null]"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN good_mood AS mood CHECK (VALUE > 'sad')",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'ok'::good_mood AS good",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "good"
+          ],
+          "type_oids": [
+            18257
+          ],
+          "rows": [
+            [
+              "ok"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'sad'::good_mood",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain good_mood violates check constraint \"good_mood_check\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT pg_typeof('ok'::good_mood)::text",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "pg_typeof"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "good_mood"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION next_mood(m mood) RETURNS mood LANGUAGE sql AS $$ SELECT min(e) FROM unnest(enum_range(NULL::mood)) e WHERE e > m $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT next_mood('sad') AS next_after_sad, next_mood('happy') AS next_after_happy",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "next_after_sad",
+            "next_after_happy"
+          ],
+          "type_oids": [
+            18257,
+            18257
+          ],
+          "rows": [
+            [
+              "ok",
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE FUNCTION same_enum(a anyenum, b anyenum) RETURNS boolean LANGUAGE sql AS $$ SELECT a = b $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT same_enum('ok'::mood, 'ok'::mood) AS same, same_enum('ok'::mood, 'sad') AS different",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "same",
+            "different"
+          ],
+          "type_oids": [
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT same_enum('ok'::mood, 'happy'::happiness)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function same_enum(mood, happiness) does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT same_enum(1, 2)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function same_enum(integer, integer) does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE FUNCTION first_of(e anyenum) RETURNS anyenum LANGUAGE sql AS $$ SELECT enum_first(e) $$",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT first_of('happy'::mood) AS first_mood, first_of('ecstatic'::happiness) AS first_happiness",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "first_mood",
+            "first_happiness"
+          ],
+          "type_oids": [
+            18257,
+            18290
+          ],
+          "rows": [
+            [
+              "sad",
+              "happy"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT format_type('mood'::regtype, NULL) AS formatted, 'mood'::regtype::text AS regtype_text, 'mood[]'::regtype::text AS array_regtype, '_mood'::regtype::text AS underscore_regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "formatted",
+            "regtype_text",
+            "array_regtype",
+            "underscore_regtype"
+          ],
+          "type_oids": [
+            25,
+            25,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "mood",
+              "mood",
+              "mood[]",
+              "mood[]"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT data_type, udt_schema = current_schema() AS local_udt, udt_name FROM information_schema.columns WHERE table_name = 'person' ORDER BY ordinal_position",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "data_type",
+            "local_udt",
+            "udt_name"
+          ],
+          "type_oids": [
+            1043,
+            16,
+            19
+          ],
+          "rows": [
+            [
+              "integer",
+              "f",
+              "int4"
+            ],
+            [
+              "USER-DEFINED",
+              "t",
+              "mood"
+            ],
+            [
+              "ARRAY",
+              "t",
+              "_mood"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT attname, format_type(atttypid, atttypmod) AS type FROM pg_attribute WHERE attrelid = 'person'::regclass AND attnum > 0 ORDER BY attnum",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "type"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "id",
+              "integer"
+            ],
+            [
+              "m",
+              "mood"
+            ],
+            [
+              "ms",
+              "mood[]"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE mood ADD VALUE 'curious' AFTER 'ok'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE mood ADD VALUE 'angry' BEFORE 'sad'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE mood ADD VALUE 'ecstatic'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE mood ADD VALUE 'happy'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "enum label \"happy\" already exists"
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TYPE mood ADD VALUE IF NOT EXISTS 'happy'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE mood ADD VALUE IF NOT EXISTS 'serene' BEFORE 'curious'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE mood ADD VALUE 'x' BEFORE 'missing'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "\"missing\" is not an existing enum label"
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TYPE mood ADD VALUE 'y' AFTER 'missing'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "\"missing\" is not an existing enum label"
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TYPE mood ADD VALUE 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42602",
+        "message": "invalid enum label \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\""
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TYPE mood RENAME VALUE 'ok' TO 'neutral'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE mood RENAME VALUE 'missing' TO 'y'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "\"missing\" is not an existing enum label"
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TYPE mood RENAME VALUE 'sad' TO 'happy'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "enum label \"happy\" already exists"
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TYPE mood RENAME VALUE 'sad' TO 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42602",
+        "message": "invalid enum label \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\""
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TYPE missing_type ADD VALUE 'x'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"missing_type\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TYPE good_mood ADD VALUE 'x'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "good_mood is not an enum"
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TYPE _mood ADD VALUE 'x'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "mood[] is not an enum"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT enumsortorder, enumlabel FROM pg_enum WHERE enumtypid = 'mood'::regtype ORDER BY enumsortorder",
+      "command_tags": [
+        "SELECT 7"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "enumsortorder",
+            "enumlabel"
+          ],
+          "type_oids": [
+            700,
+            19
+          ],
+          "rows": [
+            [
+              "0",
+              "angry"
+            ],
+            [
+              "1",
+              "sad"
+            ],
+            [
+              "2",
+              "neutral"
+            ],
+            [
+              "2.25",
+              "serene"
+            ],
+            [
+              "2.5",
+              "curious"
+            ],
+            [
+              "3",
+              "happy"
+            ],
+            [
+              "4",
+              "ecstatic"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT enum_range(NULL::mood) AS relabeled",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relabeled"
+          ],
+          "type_oids": [
+            18256
+          ],
+          "rows": [
+            [
+              "{angry,sad,neutral,serene,curious,happy,ecstatic}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id, m FROM person ORDER BY m, id",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "m"
+          ],
+          "type_oids": [
+            23,
+            18257
+          ],
+          "rows": [
+            [
+              "2",
+              "sad"
+            ],
+            [
+              "5",
+              "sad"
+            ],
+            [
+              "4",
+              "neutral"
+            ],
+            [
+              "10",
+              "neutral"
+            ],
+            [
+              "1",
+              "happy"
+            ],
+            [
+              "3",
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id FROM person WHERE m = 'neutral' ORDER BY id",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "4"
+            ],
+            [
+              "10"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'ok'::mood",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input value for enum mood: \"ok\""
+      },
+      "results": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE mood ADD VALUE 'pending'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT count(*) AS labels FROM pg_enum WHERE enumtypid = 'mood'::regtype",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "labels"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "8"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'pending'::mood",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55P04",
+        "message": "unsafe use of new value \"pending\" of enum type mood"
+      },
+      "results": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT count(*) AS labels_after_rollback FROM pg_enum WHERE enumtypid = 'mood'::regtype AND enumlabel = 'pending'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "labels_after_rollback"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE mood ADD VALUE 'pending_range'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT enum_range(NULL::mood)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55P04",
+        "message": "unsafe use of new value \"pending_range\" of enum type mood"
+      },
+      "results": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE mood ADD VALUE 'pending_last'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT enum_last(NULL::mood)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55P04",
+        "message": "unsafe use of new value \"pending_last\" of enum type mood"
+      },
+      "results": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE mood ADD VALUE 'pending_first' BEFORE 'angry'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT enum_first(NULL::mood)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55P04",
+        "message": "unsafe use of new value \"pending_first\" of enum type mood"
+      },
+      "results": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE mood ADD VALUE 'committed_later'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'happy'::mood AS old_value",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "old_value"
+          ],
+          "type_oids": [
+            18257
+          ],
+          "rows": [
+            [
+              "happy"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "COMMIT",
+      "command_tags": [
+        "COMMIT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'committed_later'::mood AS now_committed",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "now_committed"
+          ],
+          "type_oids": [
+            18257
+          ],
+          "rows": [
+            [
+              "committed_later"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TYPE fresh AS ENUM ('a')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE fresh ADD VALUE 'b'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'b'::fresh AS fresh_value, enum_range(NULL::fresh) AS fresh_range",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "fresh_value",
+            "fresh_range"
+          ],
+          "type_oids": [
+            18326,
+            18325
+          ],
+          "rows": [
+            [
+              "b",
+              "{a,b}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "COMMIT",
+      "command_tags": [
+        "COMMIT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE mood RENAME VALUE 'curious' TO 'inquisitive'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'inquisitive'::mood AS renamed_in_transaction",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "renamed_in_transaction"
+          ],
+          "type_oids": [
+            18257
+          ],
+          "rows": [
+            [
+              "inquisitive"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT enum_range(NULL::mood) AS after_rename_rollback",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "after_rename_rollback"
+          ],
+          "type_oids": [
+            18256
+          ],
+          "rows": [
+            [
+              "{angry,sad,neutral,serene,curious,happy,ecstatic,committed_later}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SAVEPOINT before_add",
+      "command_tags": [
+        "SAVEPOINT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE mood ADD VALUE 'savepoint_value'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK TO SAVEPOINT before_add",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT count(*) AS savepoint_labels FROM pg_enum WHERE enumtypid = 'mood'::regtype AND enumlabel = 'savepoint_value'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "savepoint_labels"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "COMMIT",
+      "command_tags": [
+        "COMMIT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TYPE txn_type AS ENUM ('one')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'one'::txn_type AS in_transaction",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "in_transaction"
+          ],
+          "type_oids": [
+            18334
+          ],
+          "rows": [
+            [
+              "one"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'one'::txn_type",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"txn_type\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TYPE dense AS ENUM ('a', 'z')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v1' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v2' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v3' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v4' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v5' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v6' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v7' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v8' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v9' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v10' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v11' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v12' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v13' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v14' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v15' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v16' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v17' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v18' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v19' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v20' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v21' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v22' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v23' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v24' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v25' BEFORE 'z'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v26' AFTER 'a'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v27' BEFORE 'a'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE dense ADD VALUE 'v28' BEFORE 'v27'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT enumsortorder, enumlabel FROM pg_enum WHERE enumtypid = 'dense'::regtype ORDER BY enumsortorder",
+      "command_tags": [
+        "SELECT 30"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "enumsortorder",
+            "enumlabel"
+          ],
+          "type_oids": [
+            700,
+            19
+          ],
+          "rows": [
+            [
+              "-1",
+              "v28"
+            ],
+            [
+              "0",
+              "v27"
+            ],
+            [
+              "1",
+              "a"
+            ],
+            [
+              "1.5",
+              "v26"
+            ],
+            [
+              "2",
+              "v1"
+            ],
+            [
+              "3",
+              "v2"
+            ],
+            [
+              "4",
+              "v3"
+            ],
+            [
+              "5",
+              "v4"
+            ],
+            [
+              "6",
+              "v5"
+            ],
+            [
+              "7",
+              "v6"
+            ],
+            [
+              "8",
+              "v7"
+            ],
+            [
+              "9",
+              "v8"
+            ],
+            [
+              "10",
+              "v9"
+            ],
+            [
+              "11",
+              "v10"
+            ],
+            [
+              "12",
+              "v11"
+            ],
+            [
+              "13",
+              "v12"
+            ],
+            [
+              "14",
+              "v13"
+            ],
+            [
+              "15",
+              "v14"
+            ],
+            [
+              "16",
+              "v15"
+            ],
+            [
+              "17",
+              "v16"
+            ],
+            [
+              "18",
+              "v17"
+            ],
+            [
+              "19",
+              "v18"
+            ],
+            [
+              "20",
+              "v19"
+            ],
+            [
+              "21",
+              "v20"
+            ],
+            [
+              "22",
+              "v21"
+            ],
+            [
+              "23",
+              "v22"
+            ],
+            [
+              "24",
+              "v23"
+            ],
+            [
+              "24.5",
+              "v24"
+            ],
+            [
+              "24.75",
+              "v25"
+            ],
+            [
+              "25",
+              "z"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT enum_range(NULL::dense) AS dense_order",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "dense_order"
+          ],
+          "type_oids": [
+            18337
+          ],
+          "rows": [
+            [
+              "{v28,v27,a,v26,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v14,v15,v16,v17,v18,v19,v20,v21,v22,v23,v24,v25,z}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'v25'::dense < 'z'::dense AS before_z, 'v26'::dense > 'a' AS after_a, 'v28'::dense < 'v27' AS prepended",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "before_z",
+            "after_a",
+            "prepended"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE happiness (a integer)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "type \"happiness\" already exists"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE mood_table (m mood)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TYPE mood_table AS ENUM ('x')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42710",
+        "message": "type \"mood_table\" already exists"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TYPE _mood AS ENUM ('x')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TYPE \"Quoted Mood\" AS ENUM ('A', 'b')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'A'::\"Quoted Mood\" < 'b'::\"Quoted Mood\" AS quoted_order, format_type('\"Quoted Mood\"'::regtype, NULL) AS quoted_name",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "quoted_order",
+            "quoted_name"
+          ],
+          "type_oids": [
+            16,
+            25
+          ],
+          "rows": [
+            [
+              "t",
+              "\"Quoted Mood\""
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TYPE mood",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type mood because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP TYPE _mood",
+      "command_tags": [
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TYPE mood, happiness",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop desired object(s) because other objects depend on them"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP TYPE IF EXISTS nothing_here",
+      "command_tags": [
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TYPE nothing_here",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"nothing_here\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP TYPE IF EXISTS nothing_here, blank",
+      "command_tags": [
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT count(*) AS blank_dropped FROM pg_type WHERE typname = 'blank'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "blank_dropped"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TYPE empty_enum RESTRICT",
+      "command_tags": [
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TYPE mood CASCADE",
+      "command_tags": [
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT attname FROM pg_attribute WHERE attrelid = 'person'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname"
+          ],
+          "type_oids": [
+            19
+          ],
+          "rows": [
+            [
+              "id"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT count(*) AS mood_objects FROM pg_type WHERE typname IN ('mood', '_mood', 'good_mood')",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "mood_objects"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT count(*) AS mood_functions FROM pg_proc WHERE proname = 'next_mood'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "mood_functions"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'ok'::mood",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "type \"mood\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT id FROM person ORDER BY id",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ],
+            [
+              "3"
+            ],
+            [
+              "4"
+            ],
+            [
+              "5"
+            ],
+            [
+              "10"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TYPE mood AS ENUM ('recreated')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT enum_range(NULL::mood) AS recreated_range",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "recreated_range"
+          ],
+          "type_oids": [
+            18411
+          ],
+          "rows": [
+            [
+              "{recreated}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN probe_domain AS integer",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TYPE probe_enum AS ENUM ('a')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN probe_enum",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "\"probe_enum\" is not a domain"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP TYPE probe_domain",
+      "command_tags": [
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TYPE integer",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type integer because it is required by the database system"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP TYPE pg_catalog.int4",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type integer because it is required by the database system"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP TYPE int4[]",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type integer[] because it is required by the database system"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP TYPE probe_enum[]",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type probe_enum[] because type probe_enum requires it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP TYPE missing_schema.probe",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "3F000",
+        "message": "schema \"missing_schema\" does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE probe_table (a integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TYPE probe_table",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type probe_table because table probe_table requires it"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP TABLE probe_table",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TYPE public.probe_enum",
+      "command_tags": [
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TYPE mood, happiness, dense, fresh, \"Quoted Mood\", edge_label",
+      "command_tags": [
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE mood_table",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TYPE part_mood AS ENUM ('sad', 'ok', 'happy')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE mood_list (m part_mood, v integer) PARTITION BY LIST (m)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE mood_list_low PARTITION OF mood_list FOR VALUES IN ('sad', 'ok')",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE mood_list_high PARTITION OF mood_list FOR VALUES IN ('happy', NULL)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE mood_list_bad PARTITION OF mood_list FOR VALUES IN ('angry')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input value for enum part_mood: \"angry\""
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE mood_list_overlap PARTITION OF mood_list FOR VALUES IN ('ok')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "partition \"mood_list_overlap\" would overlap partition \"mood_list_low\""
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE mood_list_typed PARTITION OF mood_list FOR VALUES IN ('ok'::text)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "specified value cannot be cast to type part_mood for column \"m\""
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO mood_list VALUES ('sad', 1), ('happy', 2), ('ok', 3), (NULL, 4)",
+      "command_tags": [
+        "INSERT 0 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT tableoid::regclass::text AS partition, m, v FROM mood_list ORDER BY v",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "partition",
+            "m",
+            "v"
+          ],
+          "type_oids": [
+            25,
+            18425,
+            23
+          ],
+          "rows": [
+            [
+              "mood_list_low",
+              "sad",
+              "1"
+            ],
+            [
+              "mood_list_high",
+              "happy",
+              "2"
+            ],
+            [
+              "mood_list_low",
+              "ok",
+              "3"
+            ],
+            [
+              "mood_list_high",
+              null,
+              "4"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT c.relname, pg_get_expr(c.relpartbound, c.oid) AS bound FROM pg_class c WHERE c.relname LIKE 'mood_list_%' ORDER BY c.relname",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relname",
+            "bound"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "mood_list_high",
+              "FOR VALUES IN ('happy', NULL)"
+            ],
+            [
+              "mood_list_low",
+              "FOR VALUES IN ('sad', 'ok')"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT v FROM mood_list WHERE m = 'ok'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT v FROM mood_list WHERE m IN ('sad', 'happy') ORDER BY v",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE mood_range (m part_mood, v integer) PARTITION BY RANGE (m)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE mood_range_low PARTITION OF mood_range FOR VALUES FROM (MINVALUE) TO ('ok')",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE mood_range_high PARTITION OF mood_range FOR VALUES FROM ('ok') TO (MAXVALUE)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE mood_range_empty PARTITION OF mood_range FOR VALUES FROM ('happy') TO ('sad')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "empty range bound specified for partition \"mood_range_empty\""
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE mood_range_invalid PARTITION OF mood_range FOR VALUES FROM ('nope') TO ('ok')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input value for enum part_mood: \"nope\""
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO mood_range VALUES ('sad', 1), ('ok', 2), ('happy', 3)",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO mood_range VALUES (NULL, 4)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "no partition of relation \"mood_range\" found for row"
+      },
+      "results": []
+    },
+    {
+      "sql": "ALTER TYPE part_mood ADD VALUE 'meh' AFTER 'sad'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO mood_range VALUES ('meh', 5)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO mood_list VALUES ('meh', 5)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "no partition of relation \"mood_list\" found for row"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT tableoid::regclass::text AS partition, m, v FROM mood_range ORDER BY m, v",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "partition",
+            "m",
+            "v"
+          ],
+          "type_oids": [
+            25,
+            18425,
+            23
+          ],
+          "rows": [
+            [
+              "mood_range_low",
+              "sad",
+              "1"
+            ],
+            [
+              "mood_range_low",
+              "meh",
+              "5"
+            ],
+            [
+              "mood_range_high",
+              "ok",
+              "2"
+            ],
+            [
+              "mood_range_high",
+              "happy",
+              "3"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT v FROM mood_range WHERE m < 'ok' ORDER BY v",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "1"
+            ],
+            [
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT c.relname, pg_get_expr(c.relpartbound, c.oid) AS bound FROM pg_class c WHERE c.relname LIKE 'mood_range_%' ORDER BY c.relname",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relname",
+            "bound"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "mood_range_high",
+              "FOR VALUES FROM ('ok') TO (MAXVALUE)"
+            ],
+            [
+              "mood_range_low",
+              "FOR VALUES FROM (MINVALUE) TO ('ok')"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE mood_hash (m part_mood, v integer) PARTITION BY HASH (m)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE mood_hash_0 PARTITION OF mood_hash FOR VALUES WITH (MODULUS 3, REMAINDER 0)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE mood_hash_1 PARTITION OF mood_hash FOR VALUES WITH (MODULUS 3, REMAINDER 1)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE mood_hash_2 PARTITION OF mood_hash FOR VALUES WITH (MODULUS 3, REMAINDER 2)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO mood_hash VALUES ('sad', 1), ('meh', 2), ('ok', 3), ('happy', 4), (NULL, 5)",
+      "command_tags": [
+        "INSERT 0 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT v, tableoid::regclass::text = ('mood_hash_' || mod(mod(hashenumextended(m, 8816678312871386365)::numeric + 18446744073709551616 + 5305509591434766563, 18446744073709551616), 3)) AS routed_by_label_hash FROM mood_hash WHERE m IS NOT NULL ORDER BY v",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v",
+            "routed_by_label_hash"
+          ],
+          "type_oids": [
+            23,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "t"
+            ],
+            [
+              "2",
+              "t"
+            ],
+            [
+              "3",
+              "t"
+            ],
+            [
+              "4",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT tableoid::regclass::text AS partition FROM mood_hash WHERE m IS NULL",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "partition"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "mood_hash_0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT count(*) AS hashed_rows FROM mood_hash",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "hashed_rows"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "5"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT v FROM mood_hash WHERE m = 'ok'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "v"
+          ],
+          "type_oids": [
+            23
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE mood_expression_key (m part_mood) PARTITION BY LIST ((m::text))",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "functions in partition key expression must be marked IMMUTABLE"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE mood_expression_ok (m part_mood) PARTITION BY LIST ((enum_cmp(m, 'ok')))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE mood_expression_ok_zero PARTITION OF mood_expression_ok FOR VALUES IN (0)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO mood_expression_ok VALUES ('ok')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO mood_expression_ok VALUES ('sad')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "no partition of relation \"mood_expression_ok\" found for row"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT tableoid::regclass::text AS partition, m FROM mood_expression_ok",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "partition",
+            "m"
+          ],
+          "type_oids": [
+            25,
+            18425
+          ],
+          "rows": [
+            [
+              "mood_expression_ok_zero",
+              "ok"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE part_mood RENAME VALUE 'happy' TO 'glad'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT c.relname, pg_get_expr(c.relpartbound, c.oid) AS bound FROM pg_class c WHERE c.relname LIKE 'mood_list_%' OR c.relname LIKE 'mood_range_%' ORDER BY c.relname",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relname",
+            "bound"
+          ],
+          "type_oids": [
+            19,
+            25
+          ],
+          "rows": [
+            [
+              "mood_list_high",
+              "FOR VALUES IN ('glad', NULL)"
+            ],
+            [
+              "mood_list_low",
+              "FOR VALUES IN ('sad', 'ok')"
+            ],
+            [
+              "mood_range_high",
+              "FOR VALUES FROM ('ok') TO (MAXVALUE)"
+            ],
+            [
+              "mood_range_low",
+              "FOR VALUES FROM (MINVALUE) TO ('ok')"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT tableoid::regclass::text AS partition, m, v FROM mood_list ORDER BY v",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "partition",
+            "m",
+            "v"
+          ],
+          "type_oids": [
+            25,
+            18425,
+            23
+          ],
+          "rows": [
+            [
+              "mood_list_low",
+              "sad",
+              "1"
+            ],
+            [
+              "mood_list_high",
+              "glad",
+              "2"
+            ],
+            [
+              "mood_list_low",
+              "ok",
+              "3"
+            ],
+            [
+              "mood_list_high",
+              null,
+              "4"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO mood_list VALUES ('glad', 6)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT tableoid::regclass::text AS partition, v FROM mood_list WHERE v = 6",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "partition",
+            "v"
+          ],
+          "type_oids": [
+            25,
+            23
+          ],
+          "rows": [
+            [
+              "mood_list_high",
+              "6"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE mood_generated (m part_mood, h integer GENERATED ALWAYS AS (hashenum(m)) STORED, c integer GENERATED ALWAYS AS (enum_cmp(m, 'ok')) STORED, after_ok boolean GENERATED ALWAYS AS (m > 'ok') STORED, larger part_mood GENERATED ALWAYS AS (enum_larger(m, 'ok')) STORED, extended bigint GENERATED ALWAYS AS (hashenumextended(m, 7)) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO mood_generated (m) VALUES ('sad'), ('ok'), ('glad'), (NULL)",
+      "command_tags": [
+        "INSERT 0 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT m, h = hashenum(m) AS stored_hash, extended = hashenumextended(m, 7) AS stored_extended, c, after_ok, larger FROM mood_generated ORDER BY m NULLS LAST",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "m",
+            "stored_hash",
+            "stored_extended",
+            "c",
+            "after_ok",
+            "larger"
+          ],
+          "type_oids": [
+            18425,
+            16,
+            16,
+            23,
+            16,
+            18425
+          ],
+          "rows": [
+            [
+              "sad",
+              "t",
+              "t",
+              "-1",
+              "f",
+              "ok"
+            ],
+            [
+              "ok",
+              "t",
+              "t",
+              "0",
+              "f",
+              "ok"
+            ],
+            [
+              "glad",
+              "t",
+              "t",
+              "1",
+              "t",
+              "glad"
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "UPDATE mood_generated SET m = 'meh' WHERE m = 'sad'",
+      "command_tags": [
+        "UPDATE 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT m, h = hashenum(m) AS stored_hash, c, after_ok, larger FROM mood_generated ORDER BY m NULLS LAST",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "m",
+            "stored_hash",
+            "c",
+            "after_ok",
+            "larger"
+          ],
+          "type_oids": [
+            18425,
+            16,
+            23,
+            16,
+            18425
+          ],
+          "rows": [
+            [
+              "meh",
+              "t",
+              "-1",
+              "f",
+              "ok"
+            ],
+            [
+              "ok",
+              "t",
+              "0",
+              "f",
+              "ok"
+            ],
+            [
+              "glad",
+              "t",
+              "1",
+              "t",
+              "glad"
+            ],
+            [
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TYPE part_mood RENAME VALUE 'ok' TO 'fine'",
+      "command_tags": [
+        "ALTER TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT m, c, after_ok, larger FROM mood_generated ORDER BY m NULLS LAST",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "m",
+            "c",
+            "after_ok",
+            "larger"
+          ],
+          "type_oids": [
+            18425,
+            23,
+            16,
+            18425
+          ],
+          "rows": [
+            [
+              "meh",
+              "-1",
+              "f",
+              "fine"
+            ],
+            [
+              "fine",
+              "0",
+              "f",
+              "fine"
+            ],
+            [
+              "glad",
+              "1",
+              "t",
+              "glad"
+            ],
+            [
+              null,
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE mood_generated_text (m part_mood, t text GENERATED ALWAYS AS (m::text) STORED)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "generation expression is not immutable"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE mood_generated_first (m part_mood, f part_mood GENERATED ALWAYS AS (enum_first(m)) STORED)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "generation expression is not immutable"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE mood_generated_range (m part_mood, r part_mood[] GENERATED ALWAYS AS (enum_range(m, NULL)) STORED)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P17",
+        "message": "generation expression is not immutable"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE mood_generated_virtual (m part_mood, c integer GENERATED ALWAYS AS (enum_cmp(m, 'fine')) VIRTUAL)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "generation expression uses user-defined type"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE mood_generated_virtual_type (m part_mood, l part_mood GENERATED ALWAYS AS (enum_larger(m, 'fine')) VIRTUAL)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "virtual generated column \"l\" cannot have a user-defined type"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE mood_generated_label (m part_mood, t text GENERATED ALWAYS AS (m) STORED, a text[] GENERATED ALWAYS AS (ARRAY[m, 'glad']) STORED)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO mood_generated_label (m) VALUES ('meh'), (NULL)",
+      "command_tags": [
+        "INSERT 0 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT m, t, a FROM mood_generated_label ORDER BY m NULLS LAST",
+      "command_tags": [
+        "SELECT 2"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "m",
+            "t",
+            "a"
+          ],
+          "type_oids": [
+            18425,
+            25,
+            1009
+          ],
+          "rows": [
+            [
+              "meh",
+              "meh",
+              "{meh,glad}"
+            ],
+            [
+              null,
+              null,
+              "{NULL,glad}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TYPE part_mood",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "2BP01",
+        "message": "cannot drop type part_mood because other objects depend on it"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT count(*) AS partitioned_tables FROM pg_class WHERE relname IN ('mood_list', 'mood_range', 'mood_hash') AND relkind = 'p'",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "partitioned_tables"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE mood_list, mood_range, mood_hash, mood_expression_ok, mood_generated, mood_generated_label",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TYPE part_mood",
+      "command_tags": [
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TYPE dom_mood AS ENUM ('sad', 'ok', 'happy')",
+      "command_tags": [
+        "CREATE TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN dom_good AS dom_mood CHECK (VALUE > 'sad')",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE DOMAIN dom_plain AS dom_mood",
+      "command_tags": [
+        "CREATE DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE dom_t (id integer, g dom_good, p dom_plain, m dom_mood)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO dom_t VALUES (1, 'ok', 'happy', 'sad'), (2, 'happy', 'sad', 'ok'), (3, NULL, NULL, NULL)",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO dom_t VALUES (4, 'sad', NULL, NULL)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "value for domain dom_good violates check constraint \"dom_good_check\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 'ok'::dom_plain < 'happy'::dom_plain",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: dom_plain < dom_plain"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 'ok'::dom_plain = 'ok'::dom_plain",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: dom_plain = dom_plain"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT p = 'ok' FROM dom_t WHERE id = 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: dom_plain = unknown"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT id FROM dom_t WHERE p = 'sad'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: dom_plain = unknown"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT id FROM dom_t WHERE p IN ('sad', 'happy')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: dom_plain = dom_mood"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT id FROM dom_t WHERE g > 'ok'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: dom_good > unknown"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT p = m FROM dom_t",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: dom_plain = dom_mood"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT p::dom_mood < 'happy' AS base_compare FROM dom_t WHERE id = 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "base_compare"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "f"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id, p FROM dom_t ORDER BY p, id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "p"
+          ],
+          "type_oids": [
+            23,
+            18515
+          ],
+          "rows": [
+            [
+              "2",
+              "sad"
+            ],
+            [
+              "1",
+              "happy"
+            ],
+            [
+              "3",
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id, g FROM dom_t ORDER BY g DESC NULLS LAST, id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "g"
+          ],
+          "type_oids": [
+            23,
+            18515
+          ],
+          "rows": [
+            [
+              "2",
+              "happy"
+            ],
+            [
+              "1",
+              "ok"
+            ],
+            [
+              "3",
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT DISTINCT p FROM dom_t ORDER BY p",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "p"
+          ],
+          "type_oids": [
+            18515
+          ],
+          "rows": [
+            [
+              "sad"
+            ],
+            [
+              "happy"
+            ],
+            [
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT p, count(*) FROM dom_t GROUP BY p ORDER BY p",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "p",
+            "count"
+          ],
+          "type_oids": [
+            18515,
+            20
+          ],
+          "rows": [
+            [
+              "sad",
+              "1"
+            ],
+            [
+              "happy",
+              "1"
+            ],
+            [
+              null,
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT min(p) FROM dom_t",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function min(dom_plain) does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT enum_first(NULL::dom_plain)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function enum_first(dom_plain) does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT enum_range(NULL::dom_plain)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function enum_range(dom_plain) does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT enum_cmp(p, p) FROM dom_t",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function enum_cmp(dom_plain, dom_plain) does not exist"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT enum_first(p::dom_mood) FROM dom_t WHERE id = 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "enum_first"
+          ],
+          "type_oids": [
+            18515
+          ],
+          "rows": [
+            [
+              "sad"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT array_agg(p ORDER BY p) AS ordered FROM dom_t",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "ordered"
+          ],
+          "type_oids": [
+            18524
+          ],
+          "rows": [
+            [
+              "{sad,happy,NULL}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_json(p) AS as_json, p::text AS as_text, format('%s', p) AS formatted FROM dom_t WHERE id = 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "as_json",
+            "as_text",
+            "formatted"
+          ],
+          "type_oids": [
+            114,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "\"happy\"",
+              "happy",
+              "happy"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT coalesce(p, 'ok') AS filled FROM dom_t ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "filled"
+          ],
+          "type_oids": [
+            18515
+          ],
+          "rows": [
+            [
+              "happy"
+            ],
+            [
+              "sad"
+            ],
+            [
+              "ok"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT CASE WHEN id = 1 THEN p ELSE 'ok' END AS chosen FROM dom_t ORDER BY id",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "chosen"
+          ],
+          "type_oids": [
+            18515
+          ],
+          "rows": [
+            [
+              "happy"
+            ],
+            [
+              "ok"
+            ],
+            [
+              "ok"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT greatest(p, 'ok'::dom_plain) FROM dom_t WHERE id = 1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "greatest"
+          ],
+          "type_oids": [
+            18515
+          ],
+          "rows": [
+            [
+              "happy"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT p BETWEEN 'sad' AND 'ok' FROM dom_t WHERE id = 2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: dom_plain >= unknown"
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE INDEX dom_t_p ON dom_t (p)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE UNIQUE INDEX dom_t_g ON dom_t (g)",
+      "command_tags": [
+        "CREATE INDEX"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id FROM dom_t WHERE p = 'happy'::dom_plain",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: dom_plain = dom_plain"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP TABLE dom_t",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP DOMAIN dom_good, dom_plain",
+      "command_tags": [
+        "DROP DOMAIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TYPE dom_mood",
+      "command_tags": [
+        "DROP TYPE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

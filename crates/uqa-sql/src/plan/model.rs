@@ -630,6 +630,10 @@ pub enum CommandPlan {
     },
     CreateSequence(crate::ast::CreateSequence),
     CreateDomain(crate::ast::CreateDomain),
+    CreateEnum(crate::ast::CreateEnum),
+    AlterEnum(crate::ast::AlterEnum),
+    AlterTypeObject(crate::ast::AlterTypeObject),
+    GrantType(crate::ast::GrantTypeStmt),
     AlterSequence(crate::ast::AlterSequence),
     CreateTableAs {
         name: String,

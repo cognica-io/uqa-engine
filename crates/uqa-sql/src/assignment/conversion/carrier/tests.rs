@@ -70,6 +70,8 @@ fn context(base: ColumnType) -> Context {
                     expression: crate::ast::Expr::Literal(Value::Bool(true)),
                 }],
             },
+            array_name: None,
+            usage_acl: None,
         },
     }
 }

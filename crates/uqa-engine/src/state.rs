@@ -77,6 +77,7 @@ pub(crate) use uqa_execution::catalog::view::{StoredView, StoredViewKind};
 
 pub(super) struct DurableCatalogState {
     pub(super) domains: CatalogCell<BTreeMap<String, super::domains::StoredDomain>>,
+    pub(super) enums: CatalogCell<uqa_execution::catalog::enum_type::EnumRegistry>,
     pub(super) graphs: CatalogCell<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub(super) models: CatalogCell<BTreeMap<String, DeepModel>>,
     pub(super) scoring_params: CatalogCell<BTreeMap<String, String>>,
@@ -113,6 +114,7 @@ pub(super) struct DurableCatalogState {
 #[derive(Clone)]
 pub(super) struct DurableCatalogSnapshot {
     pub(super) domains: Arc<BTreeMap<String, super::domains::StoredDomain>>,
+    pub(super) enums: Arc<uqa_execution::catalog::enum_type::EnumRegistry>,
     pub(super) graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub(super) models: Arc<BTreeMap<String, DeepModel>>,
     pub(super) scoring_params: Arc<BTreeMap<String, String>>,
@@ -147,6 +149,7 @@ impl DurableCatalogState {
     pub(super) fn new() -> Self {
         Self {
             domains: CatalogCell::new(BTreeMap::new()),
+            enums: CatalogCell::new(BTreeMap::new()),
             graphs: CatalogCell::new(BTreeMap::new()),
             models: CatalogCell::new(BTreeMap::new()),
             scoring_params: CatalogCell::new(BTreeMap::new()),
@@ -183,6 +186,7 @@ impl DurableCatalogState {
     pub(super) fn snapshot(&self) -> DurableCatalogSnapshot {
         DurableCatalogSnapshot {
             domains: self.domains.snapshot(),
+            enums: self.enums.snapshot(),
             graphs: self.graphs.snapshot(),
             models: self.models.snapshot(),
             scoring_params: self.scoring_params.snapshot(),
@@ -236,6 +240,7 @@ impl DurableCatalogState {
             .restore(&snapshot.system_relation_security);
         self.sql_user_functions
             .restore(&snapshot.sql_user_functions);
+        self.enums.restore(&snapshot.enums);
         self.domains.restore(&snapshot.domains);
         self.roles.restore(&snapshot.roles);
         self.role_memberships.restore(&snapshot.role_memberships);
@@ -279,6 +284,8 @@ pub(super) struct SessionContext {
     pub(super) next_portal_transaction_origin: Mutex<u64>,
     pub(crate) statistics_worker: AtomicBool,
     pub(crate) statistics_client: AtomicBool,
+    /// Enum labels that the outermost transaction added to types it did not create; they become usable at commit. Label checks run while catalog restoration holds the transaction stack, so this state has its own lock.
+    pub(crate) uncommitted_enum_labels: Mutex<uqa_execution::schema::enums::UncommittedEnumLabels>,
 }
 
 #[derive(Clone)]
@@ -331,6 +338,9 @@ impl SessionContext {
             next_portal_transaction_origin: Mutex::new(1),
             statistics_worker: AtomicBool::new(false),
             statistics_client: AtomicBool::new(false),
+            uncommitted_enum_labels: Mutex::new(
+                uqa_execution::schema::enums::UncommittedEnumLabels::default(),
+            ),
         }
     }
 
@@ -466,6 +476,7 @@ pub(super) struct QueryRuntime {
     pub(super) function_depth_limit: AtomicUsize,
     pub(super) bayesian_params_cache: RwLock<BTreeMap<String, BayesianBM25Params>>,
     pub(super) regtype_output_cache: uqa_execution::catalog::cache::RegtypeOutputCache,
+    pub(super) enum_label_cache: uqa_execution::catalog::enum_type::EnumLabelCache,
     pub(super) physical_index_cache: uqa_execution::catalog::index::physical::PhysicalIndexCache,
 }
 
@@ -489,6 +500,7 @@ impl QueryRuntime {
             function_depth_limit: AtomicUsize::new(function_depth_limit),
             bayesian_params_cache: RwLock::new(BTreeMap::new()),
             regtype_output_cache: uqa_execution::catalog::cache::RegtypeOutputCache::default(),
+            enum_label_cache: uqa_execution::catalog::enum_type::EnumLabelCache::default(),
             physical_index_cache:
                 uqa_execution::catalog::index::physical::PhysicalIndexCache::default(),
         }

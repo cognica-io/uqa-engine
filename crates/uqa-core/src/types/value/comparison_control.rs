@@ -54,6 +54,12 @@ impl Value {
                 control,
             )?,
             (Self::Bytes(left), Self::Bytes(right)) => compare_bytes(left, right, control)?,
+            (Self::Enum(left), Self::Enum(right)) => match left.type_oid().cmp(&right.type_oid()) {
+                Ordering::Equal => {
+                    compare_bytes(left.key().as_bytes(), right.key().as_bytes(), control)?
+                }
+                ordering => ordering,
+            },
             (Self::JsonB(left), Self::JsonB(right)) => {
                 super::super::jsonb::compare_jsonb_text_with_control(left, right, control)?
             }

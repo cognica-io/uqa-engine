@@ -196,7 +196,7 @@ pub fn expression_references_routine_identity(
     Ok(found)
 }
 
-fn apply_routine_reference(
+pub(super) fn apply_routine_reference(
     name: &mut String,
     binding: Option<&mut Option<crate::ast::FunctionBinding>>,
     reference: &crate::binding::stored_routines::BoundRoutineReference,

@@ -19,6 +19,7 @@ pub(crate) fn empty_catalog() -> CatalogReadView {
             sql_user_functions: Arc::default(),
             role_memberships: Arc::default(),
             domains: Arc::default(),
+            enums: Arc::default(),
             graphs: Arc::default(),
             views: Arc::default(),
             catalog_indexes: Arc::default(),

@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::aggregation::ordering::AggregateSortKey;
 
 fn check_reference(budget_bytes: usize) {
     let oracle: serde_json::Value = serde_json::from_str(include_str!("pg18_mode.json")).unwrap();
@@ -31,14 +32,17 @@ fn check_reference(budget_bytes: usize) {
             }
             let mut accumulator = AggregateAccumulator::builtin_with_budget("mode", budget_bytes);
             for value in inputs {
-                let keys = vec![(value.clone(), case["descending"].as_bool().unwrap())];
+                let keys = vec![AggregateSortKey::directed(
+                    value.clone(),
+                    case["descending"].as_bool().unwrap(),
+                )];
                 accumulator.observe_with_sort_keys(&value, keys).unwrap();
             }
             let should_spill =
                 budget_bytes == 1 && values.iter().any(|v| !matches!(v, Value::Null));
             assert_eq!(!accumulator.values.runs.is_empty(), should_spill);
             assert_eq!(
-                aggregate_value("mode", &accumulator).unwrap(),
+                aggregate_value("mode", &accumulator, None).unwrap(),
                 expected,
                 "case={case}, budget={budget_bytes}, reversed={reverse_inputs}"
             );
@@ -68,11 +72,11 @@ fn mode_combines_distinct_nan_payloads_in_memory_and_spill() {
             Value::Float(1.0),
         ] {
             accumulator
-                .observe_with_sort_keys(&value, vec![(value.clone(), false)])
+                .observe_with_sort_keys(&value, vec![AggregateSortKey::ascending(value.clone())])
                 .unwrap();
         }
         assert_eq!(
-            aggregate_value("mode", &accumulator).unwrap(),
+            aggregate_value("mode", &accumulator, None).unwrap(),
             Value::Float(f64::NAN)
         );
     }

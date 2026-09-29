@@ -44,10 +44,12 @@ pub fn run_drop_statement(
             crate::schema::namespaces::removal::drop_schemas(context, &statement)?;
             Ok(SQLResult::empty())
         })),
-        DropKind::Domain => bindings.with_domain_removal_write(Box::new(move |context| {
-            crate::schema::domains::removal::drop_domains(context, &statement)?;
-            Ok(SQLResult::empty())
-        })),
+        DropKind::Domain | DropKind::Type => {
+            bindings.with_domain_removal_write(Box::new(move |context| {
+                crate::schema::domains::removal::drop_domains(context, &statement)?;
+                Ok(SQLResult::empty())
+            }))
+        }
         _ => bindings.with_relation_removal_inputs(Box::new(move |context| {
             super::run_drop(context, statement)
         })),

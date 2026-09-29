@@ -430,6 +430,15 @@ impl<'a> BinaryReader<'a> {
                     .ok_or_else(|| spill_error("invalid array dimensions in spill file"))
             }
             16 => Ok(Value::Void),
+            18 => {
+                let type_oid = u32::from_le_bytes(self.read_i32("enum type OID")?.to_le_bytes());
+                let key = self.read_bytes("enum label key")?.to_vec();
+                uqa_core::EnumLabelKey::from_bytes(key)
+                    .map(|key| Value::Enum(uqa_core::EnumValue::new(type_oid, key)))
+                    .map_err(|error| {
+                        spill_error(format!("invalid enum label key in spill file: {error}"))
+                    })
+            }
             17 => {
                 let kind = match self.read_u8("legacy vector kind")? {
                     0 => uqa_core::LegacyVectorKind::SmallInteger,

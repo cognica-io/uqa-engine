@@ -47,6 +47,8 @@ mod binary;
 mod casting;
 mod conversion;
 mod current_time;
+pub mod enums;
+pub(crate) mod hashing;
 mod scalar_array;
 mod scalar_core;
 mod scalar_dispatch;
@@ -58,6 +60,7 @@ mod scalar_postgres;
 mod scalar_range;
 mod scalar_temporal;
 mod session_settings;
+pub mod variadic_any;
 
 #[cfg(test)]
 use binary::eval_comparison_op;
@@ -75,11 +78,12 @@ pub use casting::{
     negate_value_with_control, parse_pg_array_literal, parse_pg_array_literal_with_control,
 };
 use conversion::{
-    allocation_error, coerce_i64, float_to_i64_rounded, float_to_i64_trunc, nonnegative_usize,
-    to_decimal, to_i64,
+    allocation_error, float_to_i64_rounded, float_to_i64_trunc, nonnegative_usize, to_decimal,
+    to_i64,
 };
 pub use conversion::{
-    array_value_to_string, value_to_string, value_to_string_with_control, vector_value_to_string,
+    array_value_to_string, catalog_output_required, value_to_string, value_to_string_with_control,
+    vector_value_to_string,
 };
 pub(crate) use conversion::{tensor_items, vector_element, vector_items};
 pub use conversion::{

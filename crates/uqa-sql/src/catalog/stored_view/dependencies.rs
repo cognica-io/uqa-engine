@@ -61,6 +61,34 @@ pub fn views_depending_on_function(
     dependents
 }
 
+/// Give the bound types that views embed, in typed constants and materialized column types, the current name of the user-defined type `oid`. Returns the views that changed.
+pub fn rewrite_view_type_references(
+    views: &mut BTreeMap<RelationIdentity, StoredView>,
+    oid: u32,
+    identity: &RelationIdentity,
+) -> Vec<RelationIdentity> {
+    let mut changed = Vec::new();
+    for (relation, view) in views {
+        let mut view_changed = false;
+        view.query.rewrite_scalar_expressions(&mut |expression| {
+            if let crate::ir::ScalarExpr::TypedLiteral {
+                bound_type: Some(ty),
+                ..
+            } = expression
+            {
+                view_changed |= ty.rename_user_type(oid, identity);
+            }
+        });
+        for ty in view.materialized_column_types.iter_mut().flatten() {
+            view_changed |= ty.rename_user_type(oid, identity);
+        }
+        if view_changed {
+            changed.push(relation.clone());
+        }
+    }
+    changed
+}
+
 pub fn rewrite_view_routine_identity(
     views: &mut BTreeMap<RelationIdentity, StoredView>,
     target: &FunctionBinding,

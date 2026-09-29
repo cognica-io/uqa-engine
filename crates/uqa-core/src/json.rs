@@ -24,6 +24,9 @@ pub enum JsonReadError {
     Memory(#[from] MemoryError),
     #[error(transparent)]
     Cancelled(#[from] QueryCancelled),
+    /// Valid JSON whose recognized tagged value carrier violates its format.
+    #[error("malformed {kind} value: {reason}")]
+    Malformed { kind: &'static str, reason: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

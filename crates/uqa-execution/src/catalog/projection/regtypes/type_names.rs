@@ -22,20 +22,68 @@ static CATALOG_NAMED_TYPES: LazyLock<Vec<ColumnType>> = LazyLock::new(|| {
     domains
 });
 
-/// Creation reads current domain declarations, independently of a query's retained snapshot.
+/// Creation reads current type declarations, independently of a query's retained snapshot. Enum array names occupy the type namespace too.
 pub fn named_type_exists<'a>(
     mut domains: impl Iterator<Item = &'a uqa_sql::catalog::domain::StoredDomain>,
+    mut enums: impl Iterator<Item = &'a uqa_sql::catalog::enum_type::StoredEnum>,
     identity: &uqa_core::RelationIdentity,
 ) -> bool {
-    domains.any(|domain| domain.identity == *identity)
-        || ColumnType::from_sql_name(&identity.qualified_name()).is_ok()
+    domains.any(|domain| {
+        domain.identity == *identity
+            || (domain.identity.schema == identity.schema
+                && domain.array_type_name() == identity.name)
+    }) || enums.any(|definition| {
+        definition.identity.schema == identity.schema
+            && (definition.identity.name == identity.name || definition.array_name == identity.name)
+    }) || ColumnType::from_sql_name(&identity.qualified_name()).is_ok()
         || CATALOG_NAMED_TYPES.iter().any(|ty| {
             matches!(ty, ColumnType::Domain { schema, name, .. }
                 if schema == &identity.schema && name == &identity.name)
         })
 }
 
-pub fn resolve_catalog_domain_type_by_oid(
+/// The current definition of the user-defined type an identity names, wrapped in its array dimensions.
+pub fn resolve_user_type_identity(
+    context: &CatalogContext<'_>,
+    identity: uqa_sql::ast::UserTypeIdentity,
+) -> Option<ColumnType> {
+    catalog_user_type_identity(&context.catalog_read_view(), identity)
+}
+
+/// [`resolve_user_type_identity`] over one catalog snapshot.
+pub fn catalog_user_type_identity(
+    catalog: &crate::catalog::CatalogReadView,
+    identity: uqa_sql::ast::UserTypeIdentity,
+) -> Option<ColumnType> {
+    let mut resolved = match identity.kind {
+        uqa_sql::ast::UserTypeKind::Enum => catalog
+            .enums()
+            .find(|definition| definition.oid == identity.oid)?
+            .column_type(),
+        uqa_sql::ast::UserTypeKind::Domain => catalog
+            .domains()
+            .find(|domain| domain.oid == identity.oid)
+            .map(uqa_sql::catalog::domain::StoredDomain::column_type)
+            .or_else(|| uqa_sql::catalog::system_catalog_domain(identity.oid))?,
+    };
+    for _ in 0..identity.dimensions {
+        resolved = ColumnType::Array(Box::new(resolved));
+    }
+    Some(resolved)
+}
+
+/// The `pg_type` OID of a declared routine type. A user-defined type is named by identity; its array type OID is recorded in the catalog.
+pub fn catalog_routine_type_oid(catalog: &crate::catalog::CatalogReadView, type_name: &str) -> i64 {
+    let canonical = uqa_sql::type_resolution::canonical_routine_type_name(type_name);
+    uqa_sql::ast::UserTypeIdentity::parse(&canonical)
+        .and_then(|identity| catalog_user_type_identity(catalog, identity))
+        .map_or_else(
+            || uqa_sql::catalog::type_metadata::routine_type_oid(type_name),
+            |ty| pg_type_oid(&ty),
+        )
+}
+
+pub fn resolve_catalog_user_type_by_oid(
     context: &CatalogContext<'_>,
     oid: u32,
 ) -> Option<ColumnType> {
@@ -43,6 +91,11 @@ pub fn resolve_catalog_domain_type_by_oid(
     for domain in catalog
         .domains()
         .map(uqa_sql::catalog::domain::StoredDomain::column_type)
+        .chain(
+            catalog
+                .enums()
+                .map(uqa_sql::catalog::enum_type::StoredEnum::column_type),
+        )
         .chain(CATALOG_NAMED_TYPES.iter().cloned())
     {
         if pg_type_oid(&domain) == i64::from(oid) {
@@ -62,6 +115,10 @@ pub fn resolve_catalog_column_type(
     if let Ok(ty) = ColumnType::from_sql_name(type_name) {
         return Some(ty);
     }
+    // Stored syntax, routine signatures and bound casts record user-defined types by OID identity rather than by a search-path-dependent name.
+    if let Some(identity) = uqa_sql::ast::UserTypeIdentity::parse(type_name) {
+        return resolve_user_type_identity(context, identity);
+    }
     let mut base_name = type_name.trim();
     let mut array_dimensions = 0usize;
     while let Some(element) = base_name.strip_suffix("[]") {
@@ -74,7 +131,7 @@ pub fn resolve_catalog_column_type(
             (Some(schema.trim_matches('"')), local_name)
         });
     let local_name = local_name.trim_matches('"');
-    let mut resolved = context.resolve_domain_type(base_name).or_else(|| {
+    let mut resolved = context.resolve_user_type(base_name).or_else(|| {
         CATALOG_NAMED_TYPES
             .iter()
             .find(|domain| match domain {
@@ -99,4 +156,78 @@ pub fn resolve_catalog_column_type(
         }
     }
     resolved
+}
+
+/// `format_type_be` of a type in one catalog snapshot: a user-defined type is spelled by its current name, qualified when the search path does not include its schema; built-in types use their SQL spelling.
+pub fn catalog_type_display_name(
+    resolution: &crate::catalog::RelationNameResolution,
+    ty: &ColumnType,
+) -> String {
+    let qualified = |schema: &str, name: &str| {
+        let local = uqa_sql::expr::quote_ident(name);
+        if schema == "pg_catalog" || resolution.search_path().iter().any(|entry| entry == schema) {
+            local
+        } else {
+            format!("{}.{local}", uqa_sql::expr::quote_ident(schema))
+        }
+    };
+    match ty {
+        ColumnType::Array(element) => {
+            format!("{}[]", catalog_type_display_name(resolution, element))
+        }
+        ColumnType::Enum(reference) => qualified(&reference.schema, &reference.name),
+        ColumnType::Domain { schema, name, .. } => qualified(schema, name),
+        other => other.sql_name(),
+    }
+}
+
+/// Enum label output over one catalog snapshot, for catalog projections that render stored enum constants.
+pub struct CatalogEnumLabels<'a> {
+    pub catalog: &'a crate::catalog::CatalogReadView,
+    pub resolution: &'a crate::catalog::RelationNameResolution,
+}
+
+impl uqa_sql::expr::enums::EnumLabelCatalog for CatalogEnumLabels<'_> {
+    fn enum_type_labels(
+        &self,
+        type_oid: u32,
+    ) -> Result<Option<std::sync::Arc<uqa_sql::expr::enums::EnumTypeLabels>>, uqa_sql::SQLError>
+    {
+        Ok(self
+            .catalog
+            .enums()
+            .find(|definition| definition.oid == type_oid)
+            .map(|definition| {
+                std::sync::Arc::new(uqa_sql::expr::enums::EnumTypeLabels {
+                    type_oid,
+                    labels: definition
+                        .labels
+                        .iter()
+                        .map(|label| uqa_sql::expr::enums::EnumTypeLabel {
+                            oid: label.oid,
+                            key: label.key.clone(),
+                            label: label.label.clone(),
+                        })
+                        .collect(),
+                })
+            }))
+    }
+
+    fn enum_label_uncommitted(&self, _label_oid: u32) -> bool {
+        false
+    }
+
+    fn enum_type_name(&self, type_oid: u32) -> Result<Option<String>, uqa_sql::SQLError> {
+        Ok(self
+            .catalog
+            .enums()
+            .find(|definition| definition.oid == type_oid)
+            .map(|definition| {
+                catalog_type_display_name(self.resolution, &definition.column_type())
+            }))
+    }
+
+    fn has_enum_types(&self) -> bool {
+        self.catalog.enums().next().is_some()
+    }
 }

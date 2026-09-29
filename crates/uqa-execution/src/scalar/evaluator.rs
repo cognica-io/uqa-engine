@@ -284,6 +284,11 @@ fn materialize_qualified_whole_row(
         .filter(|(column, logical, _, _)| {
             logical.map_or_else(
                 || {
+                    // A whole-row value holds user attributes only; scans expose system columns through qualified aliases.
+                    if uqa_sql::schema::columns::POSTGRES_SYSTEM_COLUMNS.contains(&column.as_str())
+                    {
+                        return false;
+                    }
                     let mut matching = false;
                     let mut visible = false;
                     for (position, identity) in schema.identities().iter().enumerate() {

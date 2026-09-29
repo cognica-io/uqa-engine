@@ -66,8 +66,13 @@ pub fn preflight_sql_function_drop(
         "function"
     };
     let registry = context.registry.routine_snapshot();
-    let mut resolution =
-        analysis_binding::resolve_sql_function_drop_targets(context.names, stmt, &registry, kind)?;
+    let mut resolution = analysis_binding::resolve_sql_function_drop_targets(
+        context.names,
+        context.bodies.compilation.analysis.types,
+        stmt,
+        &registry,
+        kind,
+    )?;
     ensure_routine_drop_owners(context, &registry, &resolution.targets)?;
     let cascaded_routines =
         expand_stored_routine_drop_dependents(context, &registry, stmt.cascade, &mut resolution)?;

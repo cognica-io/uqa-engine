@@ -113,6 +113,33 @@ SELECT * FROM cleanup_orders;
 SELECT to_regprocedure('cleanup_amount_reader()') IS NULL AS routine_removed;
 ```
 
+## Enum types
+
+```sql
+CREATE TYPE schema_name.type_name AS ENUM ('first_label', 'second_label');
+ALTER TYPE schema_name.type_name ADD VALUE IF NOT EXISTS 'new_label' BEFORE 'second_label';
+ALTER TYPE schema_name.type_name RENAME VALUE 'first_label' TO 'renamed_label';
+DROP TYPE IF EXISTS schema_name.type_name CASCADE;
+```
+
+`ADD VALUE` also accepts `AFTER 'existing_label'` or no position, which appends the label, and `DROP TYPE` accepts several names and `RESTRICT`.
+
+`CREATE TYPE ... AS ENUM` declares the labels in order; an empty list is allowed. A label longer than 63 bytes reports `42602`, and a repeated label reports PostgreSQL's `23505` unique-index violation on `pg_enum_typid_label_index`. The type receives a `pg_type` row with `typtype = 'e'` and category `E`, a generated array type named like PostgreSQL's array names, and one `pg_enum` row per label. Type names share the type namespace with domains, generated array names and relation row types: a name held by another type reports `42710`, while a name held only by an enum's generated array type moves that array to a new name first, as PostgreSQL does. The array type OID is assigned before the enum type OID.
+
+`ADD VALUE` appends the label or places it before or after an existing label; an existing label reports `42710`, or a `NOTICE` with `IF NOT EXISTS`, and a missing neighbor reports `22023`. `RENAME VALUE` reports `22023` for a missing label and `42710` for an existing new label, and both commands report `42602` for an overlong label. They require ownership of the type (`42501`) and an enum type (`42809`, including its array type). Concurrent label changes to one type are serialized for the rest of the owning transaction. Definitions, labels, positions, owners and OIDs participate in transaction and savepoint rollback and survive reopen on native SQLite, SQLite Key/Value and redb; transactions changing different enum types commit independently, while a concurrent change to the same type reports `40001`.
+
+```sql execute
+CREATE TYPE review_state AS ENUM ('draft', 'approved');
+ALTER TYPE review_state ADD VALUE 'reviewed' BEFORE 'approved';
+ALTER TYPE review_state RENAME VALUE 'draft' TO 'submitted';
+SELECT enumlabel, enumsortorder
+FROM pg_enum
+WHERE enumtypid = 'review_state'::regtype
+ORDER BY enumsortorder;
+```
+
+`DROP TYPE` removes enum types and domains after resolving every target, checking type ownership or containing-schema ownership, and applying the dependency rules of [domain deletion](#domain-declarations-and-deletion): RESTRICT reports `2BP01` while columns, domains, arrays or routines depend on the type, and CASCADE removes those dependents. Built-in types report `2BP01` as required by the database system, a generated array type cannot be dropped by itself (`2BP01`, naming its element type), and the row type of a table, view, materialized view or foreign table always reports `2BP01` naming its relation.
+
 ## Tables
 
 ```sql
@@ -180,6 +207,21 @@ CREATE TABLE events_2026 PARTITION OF events FOR VALUES FROM ('2026-01-01') TO (
 CREATE TABLE events_other PARTITION OF events DEFAULT;
 ```
 
+Each bound value is analyzed as a partition bound expression, coerced to its partition key's type in assignment context and evaluated once when the partition is created or attached, as PostgreSQL's `transformPartitionBound` does. A column reference or subquery reports `0A000`, an aggregate `42803`, a window function `42P20`, and a set-returning function `0A000`; a value with no assignment cast to the key type reports `42804` naming the key, invalid input reports the key type's input error, and a NULL range bound reports `42P17`. The stored bound holds the resulting typed constants: routing compares keys in the key type's order, a repeated list value is stored once, `pg_get_expr` spells each constant as PostgreSQL's constant deparser does for the key type, and an enum bound keeps its label identity when the label is renamed. Overlap, empty-range, default-conflict and hash modulus diagnostics name the partitions PostgreSQL names, and a row that no partition accepts reports `23514` with the failing row's partition key in DETAIL when the current role can read that key. Partition key expressions must be immutable and reference a column of the table; system columns, generated columns and constant keys report `42P17`. `HASH` keys use PostgreSQL's extended hash functions for `smallint`, `integer`, `bigint`, `text`, `name`, `varchar`, `character`, `uuid`, `date`, enum types, and domains over them, so rows reach the same remainders as in PostgreSQL; an enum key hashes its label OID, and other key types report `0A000`.
+
+```sql execute
+CREATE TYPE request_priority AS ENUM ('low', 'normal', 'urgent');
+CREATE TABLE support_requests (request_id INTEGER, priority request_priority) PARTITION BY LIST (priority);
+CREATE TABLE support_requests_routine PARTITION OF support_requests FOR VALUES IN ('low', 'normal');
+CREATE TABLE support_requests_urgent PARTITION OF support_requests FOR VALUES IN ('urgent');
+INSERT INTO support_requests VALUES (1, 'urgent'), (2, 'low');
+ALTER TYPE request_priority RENAME VALUE 'urgent' TO 'critical';
+SELECT tableoid::regclass::text AS partition, request_id, priority FROM support_requests ORDER BY request_id;
+SELECT pg_get_expr(relpartbound, oid) AS bound FROM pg_class WHERE relname = 'support_requests_urgent';
+```
+
+Request 1 stays in `support_requests_urgent` and reads as `critical`, and that partition's bound reads `FOR VALUES IN ('critical')`.
+
 Direct hierarchy changes use PostgreSQL 18 `ALTER TABLE` forms:
 
 ```sql
@@ -226,11 +268,11 @@ INSERT INTO generated_totals VALUES (2, 4.50, DEFAULT, DEFAULT);
 SELECT display_quantity, line_total FROM generated_totals;
 ```
 
-A generation expression can reference non-generated columns in the same row and must be immutable. Subqueries, aggregate or window functions, parameters, `DEFAULT`, whole-row references, and references to another generated column are rejected before the table is created. The implemented expression surface is statically typed before catalog mutation. Stored SQL routine calls bind and persist the exact overload signature used for later evaluation and dependency checks. A generated column cannot also have a default or identity definition.
+A generation expression can reference non-generated columns in the same row and must be immutable. Subqueries, aggregate or window functions, parameters, `DEFAULT`, whole-row references, and references to another generated column are rejected before the table is created. The implemented expression surface is statically typed before catalog mutation. Immutability follows PostgreSQL's function and cast volatility: a cast calls its `pg_cast` function or, for an I/O conversion, the source type's output and target type's input function, so casts involving `date`, timestamps, `interval`, arrays, ranges, records, the `reg*` types or enum types, such as `mood::text` or `date_value::timestamptz`, report `42P17`, while an `unknown` literal is converted during analysis and calls nothing at run time. The same analysis applies to index expressions and partition key expressions with their own messages. Among the enum support functions, `enum_first`, `enum_last` and `enum_range` read the label list and are stable, while comparisons, `enum_cmp`, `enum_smaller`, `enum_larger`, `hashenum` and `hashenumextended` are immutable; an invalid enum label in a generation expression reports `22P02` when the table is created. Stored SQL routine calls bind and persist the exact overload signature used for later evaluation and dependency checks. A generated column cannot also have a default or identity definition.
 
 Virtual generated values are absent from physical row storage and are evaluated only when a logical projection or enforced constraint requires them. Stored generated values are recomputed exactly once at the prepared-write boundary of every insert, update, upsert, merge, referential action, and direct document replacement. Assigning a generated column directly is rejected; `DEFAULT` requests recomputation and is the only accepted explicit assignment.
 
-Virtual generated columns cannot use user-defined routines or UQA Engine engine-defined types and cannot own primary-key, unique, foreign-key, or index constraints. A user-defined routine call in an explicitly or implicitly virtual generation expression raises `0A000` with primary message `generation expression uses user-defined function` and a separate DETAIL explaining the virtual-column restriction, including through `ALTER TABLE`. Stored generated columns can participate in those constraints and indexes and may call immutable user-defined routines.
+Virtual generated columns cannot use user-defined routines, user-defined types or UQA Engine engine-defined types and cannot own primary-key, unique, foreign-key, or index constraints. A virtual column declared with an enum or domain type reports `0A000` with `virtual generated column "name" cannot have a user-defined type`. After the immutability check, the expression is examined in pre-order as PostgreSQL 18's `check_virtual_generated_security` does: a user-defined routine call raises `0A000` with primary message `generation expression uses user-defined function`, and any subexpression of a user-defined type, such as a column of an enum type, raises `0A000` with `generation expression uses user-defined type`, each with a separate DETAIL explaining the virtual-column restriction, including through `ALTER TABLE`. Stored generated columns can participate in those constraints and indexes and may call immutable user-defined routines.
 
 `ALTER TABLE ADD COLUMN` supports both generated kinds, and `ALTER COLUMN ... SET EXPRESSION AS (...)` replaces a generation expression. `DROP EXPRESSION` is available for a stored generated column and retains its last stored values; PostgreSQL 18 rejects that operation for a virtual generated column.
 
@@ -261,6 +303,8 @@ CREATE TABLE measurements (
 ```
 
 A check rejects rows for which its predicate is false. Follow SQL three-valued logic: a NULL result does not replace a separate `NOT NULL` requirement.
+
+A NOT NULL (`23502`), CHECK or partition constraint (`23514`) or auto-updatable view `WITH CHECK OPTION` (`44000`) violation reports the failing row in DETAIL as PostgreSQL's `ExecBuildSlotValueDescription` does, for example `Failing row contains (1, bad, null, 2.00).`. A role with SELECT on the table sees every column's output text; otherwise the DETAIL names the columns the role may select or that the INSERT, UPDATE or MERGE supplied, as in `Failing row contains (id, note) = (3, fine).`, and is omitted when no column qualifies. Virtual generated columns print `virtual`, NULL prints `null`, and output longer than 64 bytes is clipped and followed by `...`.
 
 User-routine calls in column defaults and column- or table-level CHECK constraints bind the exact overload when the schema change is published. Renaming that routine rewrites the stored expression without changing its object identity, so recreating the old name cannot retarget the expression. `DROP FUNCTION ... RESTRICT` reports `2BP01` while one of these expressions depends on the routine; `CASCADE` removes only the dependent default or CHECK constraint and retains its column and table. Replacing or dropping a default or CHECK constraint atomically replaces or releases its dependency, and committed bindings survive catalog reopen.
 

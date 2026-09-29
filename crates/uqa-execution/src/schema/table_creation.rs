@@ -47,6 +47,12 @@ pub trait TableCreationPublication {
         -> StorageBackendResult<()>;
     fn persist_schema(&self, table: &str) -> StorageBackendResult<bool>;
     fn refresh_value_indexes(&self, table: &str) -> StorageBackendResult<()>;
+    /// Reject a new partition whose bound accepts a row already stored in the parent's default partition.
+    fn validate_default_partition_rows(
+        &self,
+        parent: &str,
+        bound: &uqa_sql::ast::PartitionBound,
+    ) -> Result<(), SQLError>;
 }
 pub struct CreateTableContext<'a> {
     pub creation: crate::schema::namespaces::relations::RelationCreationContext<'a>,
@@ -126,6 +132,14 @@ fn create_after_preflight(
     owner: &crate::catalog::security::roles::locking::RoleBinding,
 ) -> Result<SQLResult, SQLError> {
     declaration::prepare_create_table_declaration(&context.analysis, &mut table)?;
+    if let (Some(parent), Some(bound)) = (
+        table.hierarchy.parents.first(),
+        table.hierarchy.partition_bound.as_ref(),
+    ) {
+        context
+            .publication
+            .validate_default_partition_rows(parent, bound)?;
+    }
     context.creation.retain_owner(owner)?;
     if preflight(context, &table.name, table.persistence, table.if_not_exists)?.is_none() {
         return Ok(SQLResult::empty());

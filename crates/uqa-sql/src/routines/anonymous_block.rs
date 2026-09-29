@@ -38,6 +38,7 @@ pub fn compile_do_block(
         return_type_reference: None,
         language: "plpgsql".into(),
         body: crate::ast::FunctionBody::Source(body.to_string()),
+        sql_body_form: None,
         creation_search_path: Vec::new(),
         volatility: crate::ast::FunctionVolatility::Volatile,
         strict: false,

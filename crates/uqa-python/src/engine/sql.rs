@@ -25,7 +25,11 @@ impl PyEngine {
         let params = params_from_py(params)?;
         let inner = self.inner()?;
         let result = py
-            .detach(|| inner.sql(&query, &params))
+            .detach(|| {
+                let mut result = inner.sql(&query, &params)?;
+                inner.render_enum_labels(&mut result)?;
+                Ok::<_, uqa_sql::SQLError>(result)
+            })
             .map_err(runtime_error)?;
         Ok(result.into())
     }
@@ -52,7 +56,7 @@ impl PyEngine {
             .collect();
         let inner = self.inner()?;
         let results = py
-            .detach(|| inner.sql_batch(&borrowed))
+            .detach(|| inner.sql_batch_with_labels(&borrowed))
             .map_err(runtime_error)?;
         Ok(results.into_iter().map(Into::into).collect())
     }
