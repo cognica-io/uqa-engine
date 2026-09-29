@@ -283,3 +283,159 @@ fn standalone_graph_handles_open_in_read_only_sessions_and_reject_mutation() {
     assert!(!connection.transaction_has_written().unwrap());
     connection.rollback_transaction().unwrap();
 }
+
+fn catalog_alias(connection: &ManagedConnection, populated: bool) {
+    Catalog::open(connection.clone()).unwrap();
+    connection
+        .with(|sqlite| {
+            sqlite.execute_batch(
+                r#"
+            CREATE TABLE _graph_catalog (graph_name TEXT PRIMARY KEY);
+            INSERT INTO _named_graphs VALUES ('shared');
+            INSERT INTO _graph_vertices VALUES (1,'catalog','{"kept":42}');
+            INSERT INTO _graph_membership VALUES ('vertex',1,'shared');
+        "#,
+            )?;
+            if populated {
+                sqlite.execute_batch(
+                    "INSERT INTO _graph_catalog VALUES ('shared'),('legacy_empty')",
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
+fn catalog_graph_alias_preserves_native_and_standalone_graph_namespaces() {
+    for populated in [false, true] {
+        for catalog_first in [false, true] {
+            let connection = ManagedConnection::open_in_memory().unwrap();
+            catalog_alias(&connection, populated);
+            let mut scoped = SQLiteGraphStore::open(connection.clone(), Some("Other")).unwrap();
+            scoped.create_graph("separate").unwrap();
+            scoped
+                .add_vertex(uqa_core::Vertex::new(1, "standalone"), "separate")
+                .unwrap();
+            if catalog_first {
+                Catalog::open(connection.clone()).unwrap();
+            }
+            connection
+                .bind_native_records(uqa_storage::mvcc::VersionedSessionOptions::default())
+                .unwrap();
+            Catalog::open(connection.clone()).unwrap();
+            with(&connection, |sqlite| {
+                let names = sqlite
+                    .prepare("SELECT name FROM _named_graphs ORDER BY name")?
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                assert_eq!(
+                    names,
+                    if populated {
+                        vec!["legacy_empty", "shared"]
+                    } else {
+                        vec!["shared"]
+                    }
+                );
+                assert_eq!(
+                    sqlite.query_row(
+                        "SELECT label,properties_json FROM _graph_vertices WHERE vertex_id=1",
+                        [],
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    )?,
+                    ("catalog".into(), r#"{"kept":42}"#.into())
+                );
+                assert_eq!(sqlite.query_row("SELECT count(*) FROM _graph_membership WHERE entity_type='vertex' AND entity_id=1 AND graph_name='shared'", [], |row| row.get::<_,i64>(0))?, 1);
+                assert_eq!(sqlite.query_row("SELECT count(*) FROM _uqa_mvcc_native_standalone_graph_vertices WHERE scope=''", [], |row| row.get::<_,i64>(0))?, 0);
+                Ok(())
+            });
+            assert_eq!(
+                scoped.get_vertex(1).unwrap(),
+                Some(uqa_core::Vertex::new(1, "standalone"))
+            );
+            // Retiring the catalog alias also leaves the standalone default namespace available.
+            let mut unqualified = SQLiteGraphStore::open(connection.clone(), None).unwrap();
+            unqualified.create_graph("independent").unwrap();
+            assert!(unqualified.get_vertex(1).unwrap().is_none());
+            SQLiteRecordStore::for_native(&connection, &StorageReadControl::with_limit(1 << 24))
+                .unwrap();
+        }
+    }
+}
+
+#[test]
+fn catalog_graph_alias_and_names_roll_back_after_later_conversion_failure() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    catalog_alias(&connection, true);
+    connection
+        .with(|sqlite| {
+            sqlite.execute(
+                "UPDATE _metadata SET value='999' WHERE key='schema_version'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    let error =
+        SQLiteRecordStore::for_native(&connection, &StorageReadControl::with_limit(1 << 24))
+            .err()
+            .unwrap();
+    assert!(error.to_string().contains("999"), "{error}");
+    with(&connection, |sqlite| {
+        assert_eq!(
+            sqlite.query_row("SELECT count(*) FROM _graph_catalog", [], |row| row
+                .get::<_, i64>(0))?,
+            2
+        );
+        assert_eq!(
+            sqlite.query_row("SELECT count(*) FROM _named_graphs", [], |row| row
+                .get::<_, i64>(0))?,
+            1
+        );
+        assert_eq!(
+            sqlite.query_row(
+                "SELECT count(*) FROM sqlite_schema WHERE name LIKE '_uqa_mvcc%'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )?,
+            0
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn malformed_catalog_graph_alias_is_not_silently_discarded() {
+    for source in [
+        "INSERT INTO _graph_catalog VALUES (NULL)",
+        "ALTER TABLE _graph_catalog ADD COLUMN unknown TEXT",
+        "ALTER TABLE _graph_membership RENAME COLUMN entity_type TO entity_kind",
+    ] {
+        let connection = ManagedConnection::open_in_memory().unwrap();
+        catalog_alias(&connection, true);
+        connection
+            .with(|sqlite| {
+                sqlite.execute_batch(source)?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(SQLiteRecordStore::for_native(
+            &connection,
+            &StorageReadControl::with_limit(1 << 24)
+        )
+        .is_err());
+        with(&connection, |sqlite| {
+            assert!(
+                sqlite.query_row("SELECT count(*) FROM _graph_catalog", [], |row| row
+                    .get::<_, i64>(0))?
+                    >= 2
+            );
+            assert_eq!(
+                sqlite.query_row("SELECT count(*) FROM _named_graphs", [], |row| row
+                    .get::<_, i64>(0))?,
+                1
+            );
+            Ok(())
+        });
+    }
+}

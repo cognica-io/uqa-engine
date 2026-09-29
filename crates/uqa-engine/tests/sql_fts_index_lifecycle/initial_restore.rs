@@ -154,3 +154,168 @@ fn migrated_fts_columns_rename_and_drop_with_retired_legacy_table_shapes() {
         uqa_core::Value::Int(2)
     );
 }
+
+fn create_default_document_fields(database: &Path) {
+    let engine = crate::native_storage::legacy_engine(database);
+    engine
+        .sql(
+            "CREATE TABLE notes (id INTEGER PRIMARY KEY, content TEXT, turn_index INTEGER)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO notes VALUES (1, 'retained token', 7), (2, 'another token', 8)",
+            &[],
+        )
+        .unwrap();
+    engine.add_fts_field("notes", "content".into()).unwrap();
+    engine.add_fts_field("notes", "turn_index".into()).unwrap();
+}
+
+#[test]
+fn default_document_fields_preserve_non_text_columns_through_migration_and_reopen() {
+    for legacy_descriptors in [false, true] {
+        let directory = TempDir::new().unwrap();
+        let database = directory.path().join("default-document-fields.db");
+        create_default_document_fields(&database);
+        if legacy_descriptors {
+            rewrite_fts_tables_to_valid_v21_postings(&database, "notes");
+            let db = rusqlite::Connection::open(&database).unwrap();
+            db.execute_batch(
+                "DELETE FROM _table_field_analyzers;
+                 ALTER TABLE _table_field_analyzers DROP COLUMN binding_json;
+                 ALTER TABLE _analyzers DROP COLUMN descriptor_json;
+                 UPDATE _metadata SET value = '46' WHERE key = 'schema_version';",
+            )
+            .unwrap();
+        }
+
+        for reopen in 0..2 {
+            let engine = Engine::open(&database).unwrap();
+            let result = engine
+                .sql(
+                    "SELECT id, turn_index FROM notes WHERE text_match(content, 'retained')",
+                    &[],
+                )
+                .unwrap();
+            assert_eq!(result.rows.len(), 1);
+            assert_eq!(result.rows[0]["id"], uqa_core::Value::Int(1));
+            assert_eq!(result.rows[0]["turn_index"], uqa_core::Value::Int(7));
+            assert!(engine
+                .sql(
+                    "SELECT id FROM notes WHERE text_match(turn_index, '7')",
+                    &[]
+                )
+                .unwrap()
+                .rows
+                .is_empty());
+            let error = engine
+                .set_table_field_analyzer("notes", "turn_index", "standard", "both")
+                .unwrap_err();
+            assert!(error.contains("must be TEXT"), "{error}");
+            if reopen == 0 {
+                engine
+                    .sql("INSERT INTO notes VALUES (3, 'new token', 9)", &[])
+                    .unwrap();
+            }
+            assert_eq!(
+                engine
+                    .sql("SELECT count(*) AS n FROM notes", &[])
+                    .unwrap()
+                    .rows[0]["n"],
+                uqa_core::Value::Int(3)
+            );
+        }
+    }
+}
+
+#[test]
+fn legacy_graph_names_restore_before_document_field_migration_and_reopen() {
+    let directory = TempDir::new().unwrap();
+    let database = directory.path().join("legacy-graph-and-text.db");
+    create_default_document_fields(&database);
+    let db = rusqlite::Connection::open(&database).unwrap();
+    db.execute_batch(
+        "CREATE TABLE _graph_catalog (graph_name TEXT PRIMARY KEY);
+         INSERT INTO _graph_catalog VALUES ('legacy_empty');",
+    )
+    .unwrap();
+    drop(db);
+    for _ in 0..2 {
+        let engine = Engine::open(&database).unwrap();
+        assert!(engine.has_graph("legacy_empty").unwrap());
+        assert_eq!(
+            engine
+                .sql("SELECT count(*) AS n FROM notes", &[])
+                .unwrap()
+                .rows[0]["n"],
+            uqa_core::Value::Int(2)
+        );
+    }
+}
+
+#[test]
+fn legacy_named_assignment_to_non_text_column_still_rolls_back_initial_restore() {
+    let directory = TempDir::new().unwrap();
+    let database = directory.path().join("named-non-text-field.db");
+    create_default_document_fields(&database);
+    let db = rusqlite::Connection::open(&database).unwrap();
+    db.execute_batch(
+        "DELETE FROM _table_field_analyzers;
+         ALTER TABLE _table_field_analyzers DROP COLUMN binding_json;
+         ALTER TABLE _analyzers DROP COLUMN descriptor_json;
+         INSERT INTO _table_field_analyzers VALUES ('public.notes', 'turn_index', 'both', 'standard');
+         UPDATE _metadata SET value = '46' WHERE key = 'schema_version';",
+    )
+    .unwrap();
+    drop(db);
+    let before = snapshot(&database);
+    let Err(error) = Engine::open(&database) else {
+        panic!("accepted an explicit analyzer assignment to an integer column");
+    };
+    assert!(error.to_string().contains("must be TEXT"), "{error}");
+    assert_eq!(snapshot(&database), before);
+}
+
+#[test]
+fn gin_definition_with_non_text_column_still_rolls_back_initial_restore() {
+    for analyzer_option in [false, true] {
+        let directory = TempDir::new().unwrap();
+        let database = directory.path().join("invalid-gin-field.db");
+        create_notes_gin_fixture(&database);
+        let db = rusqlite::Connection::open(&database).unwrap();
+        let columns: String = db
+            .query_row(
+                "SELECT columns FROM _tables WHERE relation_name = 'notes'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut columns: serde_json::Value = serde_json::from_str(&columns).unwrap();
+        for column in columns.as_array_mut().unwrap() {
+            if column["name"] == "content" {
+                column["ty"] = serde_json::Value::String("Integer".into());
+            }
+        }
+        db.execute(
+            "UPDATE _tables SET columns = ?1 WHERE relation_name = 'notes'",
+            [columns.to_string()],
+        )
+        .unwrap();
+        if !analyzer_option {
+            db.execute(
+                "UPDATE _catalog_indexes SET parameters = '{}' WHERE index_type = 'gin'",
+                [],
+            )
+            .unwrap();
+        }
+        drop(db);
+        let before = snapshot(&database);
+        let Err(error) = Engine::open(&database) else {
+            panic!("accepted a GIN definition over an integer column");
+        };
+        assert!(error.to_string().contains("must be TEXT"), "{error}");
+        assert_eq!(snapshot(&database), before);
+    }
+}

@@ -160,9 +160,9 @@ impl Engine {
                     migrations.rebuild_tables.insert(table_name.clone());
                     binding
                 };
-                let named_field_assignment = binding.owner == AnalyzerBindingOwner::Field
-                    && (binding.index.name.is_some() || binding.search.name.is_some());
-                if *table.columns_declared.read() || named_field_assignment {
+                // Default document fields index only stored strings, even when a declared column has another type.
+                // Named assignments retain the stricter SQL column contract; GIN definitions are checked separately.
+                if binding.index.name.is_some() || binding.search.name.is_some() {
                     Self::validate_table_analyzer_field(table_name, table, &field)
                         .map_err(corrupt)?;
                 }
@@ -320,6 +320,10 @@ impl Engine {
                     .any(|current| current == field)
                 {
                     table.fts_fields.write().push(field.to_owned());
+                }
+                if *table.columns_declared.read() {
+                    Self::validate_table_analyzer_field(&table_name, &table, field)
+                        .map_err(corrupt)?;
                 }
                 if let Some(name) = analyzer {
                     let key = (table_name.clone(), field.to_owned());

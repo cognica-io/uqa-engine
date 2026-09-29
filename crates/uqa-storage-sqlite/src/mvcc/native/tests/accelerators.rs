@@ -104,6 +104,78 @@ fn ambiguous_populated_accelerators_leave_the_entire_source_format_unchanged() {
 }
 
 #[test]
+fn legacy_text_affinity_accelerators_preserve_blob_keys_and_reject_text_values() {
+    for contents in ["empty", "blob", "text"] {
+        let connection = ManagedConnection::open_in_memory().unwrap();
+        Catalog::open(connection.clone()).unwrap();
+        let mut index = SQLiteInvertedIndex::new(connection.clone(), "docs", whitespace_analyzer());
+        index
+            .add_document(1, BTreeMap::from([("body".into(), "alpha".into())]))
+            .unwrap();
+        index.flush_skip_pointers().unwrap();
+        connection.with(|sqlite| {
+            sqlite.execute_batch(
+                "ALTER TABLE _skip_docs_body RENAME TO saved_skip;
+                 CREATE TABLE _skip_docs_body (term TEXT NOT NULL, skip_doc_id INTEGER NOT NULL, skip_offset INTEGER NOT NULL, PRIMARY KEY(term,skip_doc_id));
+                 CREATE TABLE _blockmax_legacy_empty (term TEXT NOT NULL, block_idx INTEGER NOT NULL, max_score REAL NOT NULL, PRIMARY KEY(term,block_idx));
+                 CREATE TABLE _blockmax_legacy_fingerprint_empty (term TEXT NOT NULL, block_idx INTEGER NOT NULL, max_score REAL NOT NULL, scorer_fingerprint TEXT NOT NULL, PRIMARY KEY(term,block_idx));",
+            )?;
+            if contents != "empty" {
+                sqlite.execute("INSERT INTO _skip_docs_body SELECT * FROM saved_skip", [])?;
+            }
+            if contents == "text" {
+                sqlite.execute("UPDATE _skip_docs_body SET term=CAST(term AS TEXT)", [])?;
+            }
+            sqlite.execute_batch("DROP TABLE saved_skip")?;
+            Ok(())
+        }).unwrap();
+        let control = StorageReadControl::with_limit(1 << 24);
+        let result = SQLiteRecordStore::for_native(&connection, &control);
+        if contents == "text" {
+            assert!(result.is_err());
+            connection
+                .with(|sqlite| {
+                    assert_eq!(
+                        sqlite.query_row(
+                            "SELECT typeof(term) FROM _skip_docs_body",
+                            [],
+                            |row| row.get::<_, String>(0)
+                        )?,
+                        "text"
+                    );
+                    assert_eq!(
+                        sqlite.query_row(
+                            "SELECT value FROM _metadata WHERE key='schema_version'",
+                            [],
+                            |row| row.get::<_, String>(0)
+                        )?,
+                        "48"
+                    );
+                    Ok(())
+                })
+                .unwrap();
+        } else {
+            let store = result.unwrap();
+            let rows = records(
+                &connection,
+                &store,
+                NativeRecordFamily::OccurrenceSkips,
+                &control,
+            );
+            assert_eq!(rows.len(), usize::from(contents == "blob"));
+            if let Some(record) = rows.first() {
+                let (_, values) = decode_record(record.key(), record.row(), &control).unwrap();
+                assert!(matches!(values[2], ValueRef::Blob(_)));
+            }
+            with(&connection, |sqlite| {
+                assert_eq!(sqlite.query_row("SELECT count(*) FROM sqlite_schema WHERE type='table' AND (name GLOB '_skip_*' OR name GLOB '_blockmax_*')", [], |row| row.get::<_,i64>(0))?, 0);
+                Ok(())
+            });
+        }
+    }
+}
+
+#[test]
 fn native_format_three_upgrade_preserves_original_records_and_commit_sequence() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     Catalog::open(connection.clone()).unwrap();

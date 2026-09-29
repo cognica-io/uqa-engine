@@ -147,6 +147,7 @@ fn prepare_catalog_sources(
     connection: &Connection,
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
+    crate::Catalog::promote_legacy_graph_catalog(connection)?;
     super::standalone_graph::import_sources(connection, control)?;
     // Bootstrap or upgrade the catalog inside the same physical transaction as conversion. A failed baseline import leaves the original file and schema intact.
     crate::Catalog::migrate_storage_in(connection)?;
