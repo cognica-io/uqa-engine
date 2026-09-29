@@ -1,10 +1,12 @@
-# Upgrading to UQA Engine 0.4.6
+# Upgrading to UQA Engine 0.4.7
 
-Version 0.4.6 corrects procedure/function overload selection to match PostgreSQL 18 and restores the existing Nori allocation limits across analysis, phrase matching and persistent indexing. It includes the native DiskANN indexes, owned SQL notification subscriptions, authenticated HTTP/SSE clients and catalog corrections introduced in 0.4.5. See the [release history](../../../HISTORY.md#046---2026-09-28).
+Version 0.4.7 corrects supported legacy catalog migration and reopen for default document-API full-text fields, Python graph-name aliases and historical FTS accelerator declarations. Stored values and binary token keys remain unchanged, and incompatible stored representations still fail atomically. It includes the PostgreSQL overload and Nori corrections from 0.4.6. See the [release history](../../../HISTORY.md#047---2026-09-29).
 
 When upgrading from before 0.4.5, persistent formats upgrade in one direction. Stop all owners and take a closed-file backup before the first upgraded open; update every process sharing the database together. Earlier incompatible binaries cannot reopen or continue writing upgraded state. Restore the pre-upgrade backup to return to an earlier release. Applications upgrading from before 0.4.0 must also apply the earlier MVCC, Rust API and catalog changes below.
 
-Databases already opened with 0.4.5 use the same persistent formats in 0.4.6: SQLite main records 54, native SQLite mapping 13, redb main records 53 and SQL catalog 49.
+Databases already opened with 0.4.5 or 0.4.6 use the same persistent formats in 0.4.7: SQLite main records 54, native SQLite mapping 13, redb main records 53 and SQL catalog 49.
+
+Application-owned raw SQLite tables remain outside the native UQA record model. Initial open still rejects unmapped physical tables; application-specific migration must preserve their data before native conversion. This release does not infer ownership or silently discard those tables.
 
 ## 0.4.5 vector indexes and storage formats
 
