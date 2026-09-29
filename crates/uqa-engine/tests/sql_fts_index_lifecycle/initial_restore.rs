@@ -231,6 +231,31 @@ fn default_document_fields_preserve_non_text_columns_through_migration_and_reope
 }
 
 #[test]
+fn legacy_graph_names_restore_before_document_field_migration_and_reopen() {
+    let directory = TempDir::new().unwrap();
+    let database = directory.path().join("legacy-graph-and-text.db");
+    create_default_document_fields(&database);
+    let db = rusqlite::Connection::open(&database).unwrap();
+    db.execute_batch(
+        "CREATE TABLE _graph_catalog (graph_name TEXT PRIMARY KEY);
+         INSERT INTO _graph_catalog VALUES ('legacy_empty');",
+    )
+    .unwrap();
+    drop(db);
+    for _ in 0..2 {
+        let engine = Engine::open(&database).unwrap();
+        assert!(engine.has_graph("legacy_empty").unwrap());
+        assert_eq!(
+            engine
+                .sql("SELECT count(*) AS n FROM notes", &[])
+                .unwrap()
+                .rows[0]["n"],
+            uqa_core::Value::Int(2)
+        );
+    }
+}
+
+#[test]
 fn legacy_named_assignment_to_non_text_column_still_rolls_back_initial_restore() {
     let directory = TempDir::new().unwrap();
     let database = directory.path().join("named-non-text-field.db");

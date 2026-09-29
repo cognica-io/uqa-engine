@@ -99,6 +99,8 @@ impl Catalog {
             });
         }
 
+        Self::promote_legacy_graph_catalog(conn)?;
+
         debug_assert_eq!(
             MIGRATIONS.last().map(|migration| migration.version),
             Some(CURRENT_SCHEMA_VERSION)

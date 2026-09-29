@@ -7,6 +7,7 @@
 //! Catalog bootstrap, legacy namespace migration, and schema-shape repair.
 
 mod access;
+mod graph_names;
 mod native_fts;
 mod registry;
 mod shape;
