@@ -14,6 +14,6 @@ The reference manual describes public ways to operate and embed UQA Engine.
 | [Bindings and extensions](08-bindings-and-extensions.md) | QueryBuilder, Python, Node.js, browser WASM, UDFs, and FDWs |
 | [HTTP Engine](09-http-engine.md) | Direct authenticated local and Cloud SQL, atomic batches, streaming, and security |
 | [PostgreSQL TCP server](11-postgresql-server.md) | Development Simple Query listener, trust authentication, session behavior, and Rust embedding |
-| [Upgrading](10-upgrading.md) | Version 0.4.6 package selection, vector-index storage formats, notification subscriptions, and earlier MVCC, Rust API and analyzer migration requirements |
+| [Upgrading](10-upgrading.md) | Version 0.4.7 package selection, vector-index storage formats, notification subscriptions, and earlier MVCC, Rust API and analyzer migration requirements |
 
 For syntax organized by SQL feature, use the [Supported SQL manual](../sql/README.md). For implementation ownership and invariants, use the [Internals manual](../internals/README.md).

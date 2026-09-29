@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-09-29
+
 ### Fixed
 
 - Preserve default document-API full-text field registrations during catalog migration and reopen, including registered fields with non-text column types. Existing string-only indexing and stored values remain unchanged; explicit analyzer assignments and SQL GIN definitions retain their column validation.
