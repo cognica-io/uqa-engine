@@ -9,6 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 
 - Preserve default document-API full-text field registrations during catalog migration and reopen, including registered fields with non-text column types. Existing string-only indexing and stored values remain unchanged; explicit analyzer assignments and SQL GIN definitions retain their column validation.
+- Migrate legacy Python graph-name aliases into the native graph catalog without reclassifying catalog entities as standalone graphs, and accept historical FTS accelerator column declarations while preserving canonical binary keys and rejecting incompatible stored values. Failed conversions retain the complete source state.
 
 ## [0.4.6] - 2026-09-28
 

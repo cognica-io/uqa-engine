@@ -119,8 +119,12 @@ fn validate_source(connection: &Connection, table: &str, skip: bool) -> Physical
         let Some(&(name, kind, primary)) = expected.get(count) else {
             return Err(invalid("unexpected occurrence accelerator column").into());
         };
+        let declared_kind = row.get_ref(2)?.as_str().ok();
+        // Historical TEXT-affinity term columns can hold canonical BLOB keys. Native row validation still rejects text-valued keys without coercing them.
+        let valid_kind =
+            declared_kind == Some(kind) || (count == 0 && declared_kind == Some("TEXT"));
         if row.get_ref(1)?.as_str().ok() != Some(name)
-            || row.get_ref(2)?.as_str().ok() != Some(kind)
+            || !valid_kind
             || !row.get::<_, bool>(3)?
             || row.get::<_, u16>(5)? != primary
         {
