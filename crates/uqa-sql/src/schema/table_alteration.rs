@@ -16,6 +16,7 @@ pub fn normalize_inherited_action(action: &mut AlterTableAction, is_partition: b
     if let AlterTableAction::AddColumn { column, .. } = action {
         column.not_null_is_local = !column.not_null;
         column.not_null_identity = None;
+        column.default_catalog_oid = None;
         if is_partition {
             if let Some(reference) = &mut column.references {
                 reference.catalog_identity = None;

@@ -6,8 +6,8 @@
 
 use super::super::context::{RoleDependencyRead, RoleTableSecurity, RoleTablesRead};
 use super::*;
+use crate::catalog::security::database::BoundDatabaseSecurity;
 use crate::catalog::security::BoundTableSecurity;
-use crate::catalog::{roles::RoleDefinition, security::database::BoundDatabaseSecurity};
 use crate::{catalog::stored_view::StoredView, routines::SQLUserFunction};
 use std::{cell::RefCell, ops::Deref, rc::Rc, sync::Arc};
 
@@ -57,7 +57,6 @@ impl RoleTablesRead for Read<'_, BTreeMap<RelationIdentity, Table>> {
     }
 }
 pub(super) struct Catalog {
-    pub roles: BTreeMap<String, RoleDefinition>,
     pub database: BoundDatabaseSecurity,
     pub schemas: BTreeMap<String, BoundSchemaSecurity>,
     pub tables: BTreeMap<RelationIdentity, Table>,
@@ -73,20 +72,6 @@ pub(super) struct Catalog {
 impl Catalog {
     pub fn new() -> Self {
         Self {
-            roles: ["uqa", "first", "second", "unreferenced"]
-                .into_iter()
-                .enumerate()
-                .map(|(index, name)| {
-                    let mut role = RoleDefinition::bootstrap();
-                    if index != 0 {
-                        role.name = name.into();
-                        role.oid = 20_000 + index as i64;
-                        role.object_id = [index as u8; 16];
-                        role.attributes.clear();
-                    }
-                    (name.into(), role)
-                })
-                .collect(),
             database: BoundDatabaseSecurity::bootstrap(),
             schemas: BTreeMap::new(),
             tables: BTreeMap::new(),

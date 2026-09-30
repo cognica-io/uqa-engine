@@ -81,6 +81,7 @@ pub fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool 
                 | "regclass"
                 | "regnamespace"
                 | "regproc"
+                | "regprocedure"
                 | "regrole"
                 | "regtype",
         ) | (
@@ -93,6 +94,7 @@ pub fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool 
                 | "regclass"
                 | "regnamespace"
                 | "regproc"
+                | "regprocedure"
                 | "regrole"
                 | "regtype",
         ) | (
@@ -104,15 +106,18 @@ pub fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool 
                 | "regclass"
                 | "regnamespace"
                 | "regproc"
+                | "regprocedure"
                 | "regrole"
                 | "regtype",
         ) | (
             "oid",
-            "regclass" | "regnamespace" | "regproc" | "regrole" | "regtype",
+            "regclass" | "regnamespace" | "regproc" | "regprocedure" | "regrole" | "regtype",
         ) | (
-            "regclass" | "regnamespace" | "regproc" | "regrole" | "regtype",
+            "regclass" | "regnamespace" | "regproc" | "regprocedure" | "regrole" | "regtype",
             "oid",
-        ) | ("numeric", "float4" | "float8")
+        ) | ("regproc", "regprocedure")
+            | ("regprocedure", "regproc")
+            | ("numeric", "float4" | "float8")
             | ("float4", "float8")
             | ("bpchar", "varchar" | "name" | "text")
             | ("varchar", "bpchar" | "name" | "text" | "regclass")
@@ -142,7 +147,7 @@ fn canonical_type_category(canonical: &str) -> char {
         "bool" => 'B',
         "date" | "time" | "timetz" | "timestamp" | "timestamptz" => 'D',
         "int2" | "int4" | "int8" | "float4" | "float8" | "numeric" | "oid" | "regclass"
-        | "regnamespace" | "regproc" | "regrole" | "regtype" => 'N',
+        | "regnamespace" | "regproc" | "regprocedure" | "regrole" | "regtype" => 'N',
         "int2vector" | "oidvector" => 'A',
         "anyarray" | "record" => 'P',
         "bpchar" | "name" | "text" | "varchar" => 'S',

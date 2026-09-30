@@ -516,6 +516,8 @@ pub struct RegtypeOutputCatalog {
     procs: BTreeMap<i64, RegtypeCatalogEntry>,
     proc_names_by_namespace: BTreeMap<i64, BTreeSet<String>>,
     types: BTreeMap<i64, RegtypeCatalogEntry>,
+    /// The catalog's dependencies and object descriptions, derived when an object is first described.
+    dependencies: std::sync::OnceLock<Arc<super::CatalogDependencies>>,
 }
 
 impl RegtypeOutputCatalog {
@@ -613,8 +615,29 @@ impl RegtypeOutputCatalog {
             procs,
             proc_names_by_namespace,
             types,
+            dependencies: std::sync::OnceLock::new(),
         })
     }
+}
+
+/// The dependencies of the catalog `reg*` output names, derived once until catalog state changes.
+pub(crate) fn catalog_dependencies(
+    context: &CatalogContext<'_>,
+) -> Result<Arc<super::CatalogDependencies>, SQLError> {
+    let catalog = regtype_output_catalog(context)?;
+    if let Some(dependencies) = catalog.dependencies.get() {
+        return Ok(dependencies.clone());
+    }
+    let view = context.catalog_read_view();
+    let view = view.metadata_view();
+    let mut resolution = context.session_execution_view().relation_name_resolution();
+    resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
+    let dependencies = Arc::new(super::CatalogDependencies::build(
+        context,
+        &view,
+        &resolution,
+    )?);
+    Ok(catalog.dependencies.get_or_init(|| dependencies).clone())
 }
 
 fn regtype_output_catalog(

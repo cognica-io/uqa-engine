@@ -133,6 +133,7 @@ pub fn function_volatility_with_binding(
                 | "pg_get_function_result"
                 | "pg_get_function_sqlbody"
                 | "format_type"
+                | "pg_describe_object"
                 | "pg_has_role"
                 | "pg_get_userbyid"
                 | "has_database_privilege"

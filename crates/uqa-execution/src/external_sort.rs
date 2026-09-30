@@ -54,13 +54,19 @@ pub struct ExternalSort<'a> {
 }
 
 impl<'a> ExternalSort<'a> {
+    /// Sort keys are bound against the child's declared row types, as projections and filters bind their expressions, so a key that nests a catalog function resolves it by its argument types rather than by the runtime values.
     pub fn new(
         child: Box<dyn PhysicalOperator + 'a>,
-        keys: Vec<SortKey>,
+        mut keys: Vec<SortKey>,
         evaluator: SharedExpressionEvaluator<'a>,
         keep: Option<usize>,
         work_mem_bytes: usize,
     ) -> Self {
+        for key in &mut keys {
+            let expression =
+                std::mem::replace(&mut key.expr, uqa_sql::ir::ScalarExpr::Literal(Value::Null));
+            key.expr = evaluator.bind_type_introspection(expression, child.row_schema());
+        }
         let (schema, input_slots) = child.row_schema().canonical_projection();
         let run_schema = run_schema(input_slots.len(), keys.len());
         let ordering = keys

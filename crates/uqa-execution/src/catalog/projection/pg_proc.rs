@@ -294,27 +294,7 @@ pub fn build_pg_proc(
             })
             .transpose()?
             .unwrap_or(0);
-        let return_type_oid = if def.is_procedure {
-            if def.output_params().is_empty() {
-                2278
-            } else {
-                2249
-            }
-        } else {
-            match &def.returns {
-                uqa_sql::ast::FunctionReturns::Scalar { type_name }
-                | uqa_sql::ast::FunctionReturns::SetOf { type_name } => {
-                    catalog_routine_type_oid(catalog, type_name)
-                }
-                uqa_sql::ast::FunctionReturns::Table | uqa_sql::ast::FunctionReturns::None => {
-                    match def.output_params().as_slice() {
-                        [output] => catalog_routine_type_oid(catalog, &output.type_name),
-                        [] => 2278,
-                        _ => 2249,
-                    }
-                }
-            }
-        };
+        let return_type_oid = routine_result_type_oid(catalog, def);
         rows.push(row([
             ("oid", int_value(user_routine_catalog_oid(&function)?)),
             ("proname", str_value(routine_name)),
@@ -409,4 +389,31 @@ fn routine_acl_catalog_value(
         object_acl_items(&catalog.snapshot().definitions.roles, acl, 'X', "routine")?,
         "pg_proc.proacl",
     )
+}
+
+/// `prorettype` of a user routine: `void` for a procedure without output parameters and `record` for one with them; for a function, its declared result type, or that of its single output parameter, or `record` for several.
+pub(crate) fn routine_result_type_oid(
+    catalog: &CatalogReadView,
+    def: &uqa_sql::ast::CreateFunction,
+) -> i64 {
+    if def.is_procedure {
+        return if def.output_params().is_empty() {
+            2278
+        } else {
+            2249
+        };
+    }
+    match &def.returns {
+        uqa_sql::ast::FunctionReturns::Scalar { type_name }
+        | uqa_sql::ast::FunctionReturns::SetOf { type_name } => {
+            catalog_routine_type_oid(catalog, type_name)
+        }
+        uqa_sql::ast::FunctionReturns::Table | uqa_sql::ast::FunctionReturns::None => {
+            match def.output_params().as_slice() {
+                [output] => catalog_routine_type_oid(catalog, &output.type_name),
+                [] => 2278,
+                _ => 2249,
+            }
+        }
+    }
 }

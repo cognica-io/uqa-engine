@@ -1,0 +1,104 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Dependencies of relation constraints as `CreateConstraintEntry` records them: automatically on the constrained columns, or the relation when none is named; normally on a foreign key's referenced columns and unique index, and on what a check expression uses; and a partition's key constraint on its parent's.
+
+use super::{ColumnScope, DependencyBuilder, MemberObject, References};
+use crate::catalog::projection::helpers::constraints::{
+    constraint_catalog_rows, ConstraintCatalogKind,
+};
+use crate::catalog::projection::pg_catalog::{
+    catalog_index_relations, constraint_index_oid, constraint_parent_oid, constraint_row_oid,
+};
+use uqa_core::RelationIdentity;
+use uqa_sql::catalog::dependencies::{
+    DependencyKind, ObjectAddress, CONSTRAINT_CLASS, RELATION_CLASS,
+};
+use uqa_sql::SQLError;
+
+impl DependencyBuilder<'_> {
+    pub(super) fn record_constraints(&mut self) -> Result<(), SQLError> {
+        let indexes = catalog_index_relations(self.catalog, self.resolution)?;
+        for constraint in constraint_catalog_rows(self.catalog, self.resolution)? {
+            let relation = RelationIdentity::new(&constraint.schema, &constraint.table);
+            let Some(relation_oid) = self.objects.relation_oid(&relation) else {
+                continue;
+            };
+            let oid = super::catalog_oid(constraint_row_oid(&constraint))?;
+            self.objects.add_member(
+                CONSTRAINT_CLASS,
+                oid,
+                MemberObject::Constraint {
+                    name: constraint.name.clone(),
+                    relation: Some(relation_oid),
+                },
+            );
+            let address = ObjectAddress::whole(CONSTRAINT_CLASS, oid);
+            let mut constrained = References::default();
+            if constraint.columns.is_empty() {
+                constrained.add_relation(relation_oid);
+            }
+            for column in &constraint.columns {
+                if let Ok(number) = i32::try_from(column.table_ordinal) {
+                    constrained.add_column(relation_oid, number);
+                }
+            }
+            self.recorder
+                .record_references(address, constrained, DependencyKind::Auto);
+            if let Some(foreign_key) = &constraint.foreign_key {
+                let mut referenced = References::default();
+                let target = RelationIdentity::new(&foreign_key.schema, &foreign_key.table);
+                if let Some(target) = self.objects.relation_oid(&target) {
+                    for ordinal in &foreign_key.column_ordinals {
+                        if let Ok(number) = i32::try_from(*ordinal) {
+                            referenced.add_column(target, number);
+                        }
+                    }
+                }
+                if let Ok(index @ 1..) = u32::try_from(constraint_index_oid(&constraint, &indexes))
+                {
+                    referenced.add_relation(index);
+                }
+                self.recorder
+                    .record_references(address, referenced, DependencyKind::Normal);
+            }
+            if let (ConstraintCatalogKind::Check, Some(expression)) =
+                (constraint.kind, &constraint.expression)
+            {
+                let table = self.relation_object(relation_oid)?.clone();
+                let mut references = References::default();
+                self.expressions().collect(
+                    expression,
+                    ColumnScope::Relation(relation_oid, &table),
+                    &mut references,
+                )?;
+                self.recorder.record_single_relation(
+                    address,
+                    references,
+                    relation_oid,
+                    (DependencyKind::Normal, DependencyKind::Normal),
+                    false,
+                );
+            }
+            // `index_constraint_create`: a partition's key constraint belongs to its parent's and to the partition.
+            if let Ok(parent @ 1..) =
+                u32::try_from(constraint_parent_oid(self.catalog, &constraint, &indexes))
+            {
+                self.recorder.record(
+                    address,
+                    ObjectAddress::whole(CONSTRAINT_CLASS, parent),
+                    DependencyKind::PartitionPrimary,
+                );
+                self.recorder.record(
+                    address,
+                    ObjectAddress::whole(RELATION_CLASS, relation_oid),
+                    DependencyKind::PartitionSecondary,
+                );
+            }
+        }
+        Ok(())
+    }
+}

@@ -28,6 +28,8 @@ pub fn drop_domain_types_and_routines(
         seen_targets: BTreeSet::new(),
         notices: Vec::new(),
     };
+    // `performMultipleDeletions`: the dependents a RESTRICT drop refuses and a cascading drop reports.
+    let cascade_notice = report_type_drop(context, targets, cascade)?;
     let mut domains = targets.clone();
     expand_routine_domain_drop(context, &registry, &mut resolution, &mut domains)?;
     if !cascade
@@ -35,23 +37,13 @@ pub fn drop_domain_types_and_routines(
             || !resolution.targets.is_empty()
             || domain_dependencies::domain_drop_has_dependents(&context.domains, targets)?)
     {
-        let message = if targets.len() == 1 {
-            let oid = *targets.first().expect("one root domain");
-            let name = crate::catalog::projection::resolve_regtype_output(
-                &context.catalog,
-                &uqa_sql::ast::ColumnType::Regtype,
-                i64::from(oid),
-            )
-            .map_err(SQLError::Internal)?
-            .ok_or_else(|| SQLError::Internal("DROP DOMAIN target disappeared".into()))?;
-            format!("cannot drop type {name} because other objects depend on it")
-        } else {
-            "cannot drop desired object(s) because other objects depend on them".into()
-        };
-        return Err(SQLError::Routine {
-            sqlstate: "2BP01".into(),
-            message,
-        });
+        return Err(SQLError::Internal(
+            "DROP TYPE found dependents that the catalog dependencies do not record".into(),
+        ));
+    }
+    let mut notices = resolution.notices;
+    if let Some(notice) = cascade_notice {
+        notices.insert(0, ("NOTICE", notice.message));
     }
     let dependents = routine_object_dependents(context, &resolution.targets, true)?;
     commit_sql_function_drop(
@@ -60,9 +52,40 @@ pub fn drop_domain_types_and_routines(
             domains,
             targets: resolution.targets,
             dependents,
-            notices: resolution.notices,
+            notices,
         },
     )
+}
+
+/// Search the catalog's dependencies from the named types as `findDependentObjects` does, and report them as `reportDependentObjects` does: a RESTRICT drop with dependents fails listing them, and a cascading drop returns its notice.
+fn report_type_drop(
+    context: &RoutineRemovalContext<'_>,
+    targets: &BTreeSet<u32>,
+    cascade: bool,
+) -> Result<Option<uqa_sql::catalog::dependencies::CascadeNotice>, SQLError> {
+    use uqa_sql::catalog::dependencies::{DeletionTargets, ObjectAddress, TYPE_CLASS};
+    let catalog = context.catalog.catalog_read_view();
+    let mut resolution = context
+        .catalog
+        .session_execution_view()
+        .relation_name_resolution();
+    resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
+    let dependencies = crate::catalog::projection::CatalogDependencies::build(
+        &context.catalog,
+        &catalog,
+        &resolution,
+    )?;
+    let originals = targets
+        .iter()
+        .map(|oid| ObjectAddress::whole(TYPE_CLASS, *oid))
+        .collect::<Vec<_>>();
+    let describe = |object| dependencies.describe(&context.catalog, object);
+    let deletion = DeletionTargets::collect(dependencies.graph(), &originals, &describe)?;
+    let original = match originals.as_slice() {
+        [original] => Some(*original),
+        _ => None,
+    };
+    deletion.report(cascade, original, &describe)
 }
 
 pub fn drop_schema_types_and_routines(

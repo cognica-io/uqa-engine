@@ -164,6 +164,14 @@ impl RoleTablesRead for RoleTableRegistryRead<'_> {
         )
     }
 }
+impl uqa_execution::catalog::security::role_lifecycle::context::RoleSharedDependencies for Engine {
+    fn role_dependency_detail(
+        &self,
+        role: uqa_sql::catalog::roles::RoleIdentity,
+    ) -> Result<Option<String>, SQLError> {
+        uqa_execution::catalog::projection::role_dependency_detail(&self.catalog_execution(), role)
+    }
+}
 impl RoleDependencyCatalog for Engine {
     fn database(&self) -> RoleDependencyRead<'_, BoundDatabaseSecurity> {
         Box::new(self.durable.database_security.read())

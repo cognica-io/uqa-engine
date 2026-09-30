@@ -14,6 +14,7 @@ fn legacy_vector_array_type_lookup_uses_the_array_identity() {
         procs: BTreeMap::new(),
         proc_names_by_namespace: BTreeMap::new(),
         types: BTreeMap::new(),
+        dependencies: std::sync::OnceLock::new(),
     };
     for (oid, name, array_oid, element_oid) in [
         (21, "int2", 1005, 0),

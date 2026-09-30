@@ -85,6 +85,7 @@ pub(crate) fn fixed_builtin_is_non_immutable(name: &str) -> bool {
             | "pg_get_function_result"
             | "pg_get_function_sqlbody"
             | "format_type"
+            | "pg_describe_object"
             | "pg_has_role"
             | "pg_get_userbyid"
             | "has_table_privilege"

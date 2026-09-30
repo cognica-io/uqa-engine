@@ -24,9 +24,11 @@ use uqa_core::RelationIdentity;
 
 mod expressions;
 mod query;
+mod references;
 mod rename;
 mod subscripts;
 mod types;
+pub use references::query_references;
 pub use rename::{rename_view_column_query, view_query_references_column};
 mod sources;
 
@@ -172,6 +174,8 @@ struct Column {
     merged: Option<String>,
     relation: Option<String>,
     merged_expression: Option<ScalarExpr>,
+    /// The relation column this column reads, by relation name and column name, whatever alias names it.
+    base: Option<(String, String)>,
 }
 
 #[derive(Clone, Default)]
@@ -324,6 +328,7 @@ pub fn stored_domain_expression_definition(
             merged: Some("VALUE".into()),
             relation: None,
             merged_expression: None,
+            base: None,
         }],
         ..Scope::default()
     };

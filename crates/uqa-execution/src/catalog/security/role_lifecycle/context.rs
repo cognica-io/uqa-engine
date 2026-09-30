@@ -10,8 +10,8 @@ use std::{collections::BTreeMap, ops::DerefMut};
 use uqa_sql::catalog::roles::identity::RoleBinding;
 use uqa_sql::{
     catalog::roles::{
-        definition::RoleValidationContext, dependencies::context::RoleDependencyCatalog,
-        RoleDefinition, RoleMembership, RoleMembershipKey,
+        definition::RoleValidationContext, RoleDefinition, RoleIdentity, RoleMembership,
+        RoleMembershipKey,
     },
     SQLError,
 };
@@ -40,12 +40,17 @@ pub trait RolePublication {
     fn set_current_role(&self, target: Option<RoleBinding>);
     fn set_session_authorization(&self, target: RoleBinding);
 }
+/// What depends on a role, as `checkSharedDependencies` reports it from `pg_shdepend`.
+pub trait RoleSharedDependencies {
+    /// The detail listing the objects that depend on `role`; `None` when nothing does.
+    fn role_dependency_detail(&self, role: RoleIdentity) -> Result<Option<String>, SQLError>;
+}
 #[derive(Clone, Copy)]
 pub struct RoleExecutionContext<'a> {
     pub analysis: RoleValidationContext<'a>,
     pub registry: &'a dyn RoleRegistry,
     pub publication: &'a dyn RolePublication,
-    pub dependencies: &'a dyn RoleDependencyCatalog,
+    pub dependencies: &'a dyn RoleSharedDependencies,
     pub locks: &'a dyn crate::row_locks::shared_objects::SharedObjectLockSession,
     pub temporary_roles: &'a dyn super::super::roles::temporary::TemporaryRoleDependencyReads,
 }

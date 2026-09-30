@@ -75,6 +75,31 @@ pub(super) fn materialize_check_oid(
     Ok(changed)
 }
 
+/// `StoreAttrDefault`: a column's default or generation expression has its own `pg_attrdef` row, whose OID it keeps until the expression is replaced. A column without one has no row.
+pub fn materialize_default_oid(
+    column: &mut ColumnDef,
+    allocate: &mut CatalogIdentityAllocator<'_>,
+) -> ConstraintMetadataResult<bool> {
+    let has_expression = column.default.is_some()
+        || column.generated.is_some()
+        || column
+            .auto_increment
+            .as_ref()
+            .is_some_and(crate::ast::AutoIncrement::is_legacy);
+    if !has_expression {
+        return Ok(column.default_catalog_oid.take().is_some());
+    }
+    if column.default_catalog_oid.is_some() {
+        return Ok(false);
+    }
+    let object_id = column.object_id.ok_or_else(|| {
+        ConstraintMetadataError::Invalid("column default has no column incarnation".into())
+    })?;
+    column.default_catalog_oid =
+        Some(allocate.allocate_catalog_oid(super::CatalogOidClass::AttributeDefault, &object_id)?);
+    Ok(true)
+}
+
 pub(super) fn materialize_not_null_identity(
     column: &mut ColumnDef,
     allocate: &mut CatalogIdentityAllocator<'_>,

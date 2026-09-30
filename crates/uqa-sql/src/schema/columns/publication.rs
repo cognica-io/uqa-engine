@@ -34,6 +34,8 @@ pub fn apply_property(
         ColumnProperty::Generated(generated) => definition.generated = generated,
         ColumnProperty::Type(ty) => definition.ty.clone_from(ty),
     }
+    // Each change removes the column's `pg_attrdef` row; an expression that remains is stored again under a new OID, as `ATExecAlterColumnType` and `ATExecColumnDefault` store it.
+    definition.default_catalog_oid = None;
     Ok(())
 }
 pub fn set_not_null(

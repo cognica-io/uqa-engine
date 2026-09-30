@@ -138,7 +138,7 @@ WHERE enumtypid = 'review_state'::regtype
 ORDER BY enumsortorder;
 ```
 
-`DROP TYPE` removes enum types and domains after resolving every target, checking type ownership or containing-schema ownership, and applying the dependency rules of [domain deletion](#domain-declarations-and-deletion): RESTRICT reports `2BP01` while columns, domains, arrays or routines depend on the type, and CASCADE removes those dependents. Built-in types report `2BP01` as required by the database system, a generated array type cannot be dropped by itself (`2BP01`, naming its element type), and the row type of a table, view, materialized view or foreign table always reports `2BP01` naming its relation.
+`DROP TYPE` removes enum types and domains after resolving every target, checking type ownership or containing-schema ownership, and applying the dependency rules of [domain deletion](#domain-declarations-and-deletion): RESTRICT reports `2BP01` while columns, domains, arrays, views or routines depend on the type, and CASCADE removes those dependents. The error and the cascade notice come from the [catalog dependencies](#catalog-dependencies) as PostgreSQL's `findDependentObjects` finds them: the RESTRICT detail names each dependent and the object it depends on, newest dependents last, and a column default or generation expression and a view's rule are reported as the column or view they belong to. Built-in types report `2BP01` as required by the database system, a generated array type cannot be dropped by itself (`2BP01`, naming its element type), and the row type of a table, view, materialized view or foreign table always reports `2BP01` naming its relation.
 
 ## Type lifecycle and privileges
 
@@ -819,6 +819,25 @@ ALTER SEQUENCE routine_drop_sequence RENAME TO routine_drop_sequence_moved;
 SELECT routine_drop_next();
 DROP SEQUENCE routine_drop_sequence_moved CASCADE;
 ```
+
+## Catalog dependencies
+
+`pg_depend` records what each user object depends on, as PostgreSQL records it when the object is created: its schema, the types of its columns, arguments and results, its row type and array type, inheritance parents and partitioned parents, a sequence's owning column, and for constraints, column defaults, generation expressions, index keys and predicates, triggers, rules, views and SQL-standard routine bodies, the columns, types, routines and relations their expressions use. The dependency type tells what a drop does: an object that another references normally (`n`) is removed only by `CASCADE`; one that goes with it automatically (`a`), is part of it (`i`), or belongs to a partitioned parent (`P`, `S`) is removed with it. Dependencies on built-in objects, which cannot be dropped, are not recorded. `pg_shdepend` records the roles each object depends on: its owner (`o`) and every role its privileges name as a grantee or grantor (`a`), including the columns of a relation, and a role membership's grantor. `pg_describe_object(classid, objid, objsubid)` names an object as the dependency reports do, and returns `NULL` for an object that does not exist.
+
+```sql execute
+CREATE TYPE catalog_mood AS ENUM ('calm', 'busy');
+CREATE TABLE catalog_diary (id integer PRIMARY KEY, mood catalog_mood DEFAULT 'calm');
+SELECT pg_describe_object(classid, objid, objsubid) AS object,
+       pg_describe_object(refclassid, refobjid, refobjsubid) AS referenced,
+       deptype
+FROM pg_depend
+WHERE refobjid = 'catalog_mood'::regtype
+ORDER BY 1;
+DROP TYPE catalog_mood CASCADE;
+DROP TABLE catalog_diary;
+```
+
+`DROP ROLE` reports `2BP01` while any object depends on the role; the detail lists each dependent object once per dependency type, by ascending OID, as `owner of` or `privileges for` the object, as PostgreSQL's `checkSharedDependencies` does.
 
 ## TRUNCATE and DROP
 

@@ -80,7 +80,7 @@ pub fn build_pg_constraint(
                 None => 0,
             };
             let index_oid = constraint_index_oid(&constraint, &indexes);
-            let parent_index_constraint_oid = key_parent_oid(catalog, &constraint, &indexes);
+            let parent_index_constraint_oid = constraint_parent_oid(catalog, &constraint, &indexes);
             let (inheritance_count, is_local) =
                 constraint_inheritance_state(catalog, resolution, &constraint)?;
             Ok(row([
@@ -145,7 +145,7 @@ pub fn build_pg_constraint(
 }
 
 /// The `pg_constraint` OID of a relation constraint.
-pub(super) fn constraint_row_oid(constraint: &ConstraintCatalogRow) -> i64 {
+pub(crate) fn constraint_row_oid(constraint: &ConstraintCatalogRow) -> i64 {
     constraint.catalog_oid.unwrap_or_else(|| {
         constraint
             .object_id
@@ -284,7 +284,8 @@ const fn foreign_key_match_code(match_type: uqa_sql::ast::ForeignKeyMatch) -> &'
     }
 }
 
-pub(super) fn constraint_index_oid(
+/// `conindid`: the index that implements a key constraint, or the unique index a foreign key references; zero for other constraints.
+pub(crate) fn constraint_index_oid(
     constraint: &super::super::helpers::constraints::ConstraintCatalogRow,
     indexes: &[super::CatalogIndexRelation],
 ) -> i64 {
@@ -313,7 +314,8 @@ pub(super) fn constraint_index_oid(
         .map_or(0, super::CatalogIndexRelation::oid)
 }
 
-fn key_parent_oid(
+/// `conparentid`: the constraint of the parent partitioned table whose index is the parent of this key constraint's index; zero otherwise.
+pub(crate) fn constraint_parent_oid(
     catalog: &CatalogReadView,
     constraint: &ConstraintCatalogRow,
     indexes: &[super::CatalogIndexRelation],

@@ -37,6 +37,7 @@ impl<'a> Walker<'a> {
             check_is_local: _,
             check_object_id: _,
             check_catalog_oid: _,
+            default_catalog_oid: _,
             references,
         } = column;
         self.text(name)?;

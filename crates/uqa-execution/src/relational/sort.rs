@@ -82,14 +82,10 @@ impl<'a> Sort<'a> {
 
     pub fn with_evaluator_and_work_mem(
         child: Box<dyn PhysicalOperator + 'a>,
-        mut keys: Vec<SortKey>,
+        keys: Vec<SortKey>,
         evaluator: SharedExpressionEvaluator<'a>,
         work_mem_bytes: usize,
     ) -> Self {
-        for key in &mut keys {
-            let expression = std::mem::replace(&mut key.expr, ScalarExpr::Literal(Value::Null));
-            key.expr = evaluator.bind_type_introspection(expression, child.row_schema());
-        }
         Self {
             inner: crate::external_sort::ExternalSort::new(
                 child,
@@ -103,14 +99,10 @@ impl<'a> Sort<'a> {
 
     pub fn with_evaluator_and_keep(
         child: Box<dyn PhysicalOperator + 'a>,
-        mut keys: Vec<SortKey>,
+        keys: Vec<SortKey>,
         evaluator: SharedExpressionEvaluator<'a>,
         keep: usize,
     ) -> Self {
-        for key in &mut keys {
-            let expression = std::mem::replace(&mut key.expr, ScalarExpr::Literal(Value::Null));
-            key.expr = evaluator.bind_type_introspection(expression, child.row_schema());
-        }
         Self {
             inner: crate::external_sort::ExternalSort::new(
                 child,

@@ -54,6 +54,8 @@ pub enum CatalogOidClass {
     Rewrite,
     /// `pg_proc` rows.
     Procedure,
+    /// `pg_attrdef` rows: column defaults and generation expressions.
+    AttributeDefault,
 }
 
 impl CatalogOidClass {
@@ -65,6 +67,7 @@ impl CatalogOidClass {
             Self::EnumLabel => 3501,
             Self::Rewrite => 2618,
             Self::Procedure => 1255,
+            Self::AttributeDefault => 2604,
         }
     }
 
@@ -76,6 +79,7 @@ impl CatalogOidClass {
             Self::EnumLabel => "enum label",
             Self::Rewrite => "rule",
             Self::Procedure => "function",
+            Self::AttributeDefault => "default",
         }
     }
 }
@@ -164,14 +168,12 @@ pub fn materialize_constraint_metadata_with_names(
         if let Some(object_id) = column.object_id {
             column_object_ids.insert(object_id);
         }
-        if column.not_null {
-            changed |= assign_constraint_name(
-                &mut column.not_null_name,
-                (&relation.name, &column.name, "not_null"),
-                &mut used,
-            )?;
-            changed |= identity::materialize_not_null_identity(column, allocate)?;
-        }
+    }
+    // `DefineRelation` stores the defaults and generation expressions, then the CHECK constraints of the columns and of the table, then the NOT NULL constraints; key indexes and foreign keys follow the relation.
+    for column in columns.iter_mut() {
+        changed |= identity::materialize_default_oid(column, allocate)?;
+    }
+    for column in columns.iter_mut() {
         if column.check.is_some() {
             changed |= assign_constraint_name(
                 &mut column.check_name,
@@ -189,15 +191,16 @@ pub fn materialize_constraint_metadata_with_names(
                 allocate,
             )?;
         }
-        if let Some(reference) = &mut column.references {
+    }
+    changed |= materialize_checks(relation, &mut constraints.checks, &mut used, allocate)?;
+    for column in columns.iter_mut() {
+        if column.not_null {
             changed |= assign_constraint_name(
-                &mut reference.name,
-                (&relation.name, &column.name, "fkey"),
+                &mut column.not_null_name,
+                (&relation.name, &column.name, "not_null"),
                 &mut used,
             )?;
-            changed |= assign_constraint_object_id(&mut reference.object_id, allocate)?;
-            changed |=
-                identity::foreign_keys::materialize(&mut reference.catalog_identity, allocate)?;
+            changed |= identity::materialize_not_null_identity(column, allocate)?;
         }
     }
     for constraint in &mut constraints.key_constraints {
@@ -215,7 +218,18 @@ pub fn materialize_constraint_metadata_with_names(
         )?;
         changed |= identity::materialize_key_identity(constraint, allocate)?;
     }
-    changed |= materialize_checks(relation, &mut constraints.checks, &mut used, allocate)?;
+    for column in columns.iter_mut() {
+        if let Some(reference) = &mut column.references {
+            changed |= assign_constraint_name(
+                &mut reference.name,
+                (&relation.name, &column.name, "fkey"),
+                &mut used,
+            )?;
+            changed |= assign_constraint_object_id(&mut reference.object_id, allocate)?;
+            changed |=
+                identity::foreign_keys::materialize(&mut reference.catalog_identity, allocate)?;
+        }
+    }
     changed |= synchronize_partition_inherited_foreign_key_ids(constraints);
     for constraint in &mut constraints.foreign_keys {
         let component = constraint_column_component(&constraint.local_columns, relation)?;

@@ -45,6 +45,8 @@ impl VirtualRelation {
                 | Self::PgAuthid
                 | Self::PgAuthMembers
                 | Self::PgDescription
+                | Self::PgDepend
+                | Self::PgShdepend
                 | Self::AgGraph
                 | Self::AgLabel
         )
@@ -592,6 +594,24 @@ impl VirtualRelation {
                 "objsubid" => ColumnType::Integer,
                 "description" => ColumnType::Text,
             ],
+            Self::PgDepend => columns![
+                "classid" => ColumnType::Oid,
+                "objid" => ColumnType::Oid,
+                "objsubid" => ColumnType::Integer,
+                "refclassid" => ColumnType::Oid,
+                "refobjid" => ColumnType::Oid,
+                "refobjsubid" => ColumnType::Integer,
+                "deptype" => ColumnType::InternalChar,
+            ],
+            Self::PgShdepend => columns![
+                "dbid" => ColumnType::Oid,
+                "classid" => ColumnType::Oid,
+                "objid" => ColumnType::Oid,
+                "objsubid" => ColumnType::Integer,
+                "refclassid" => ColumnType::Oid,
+                "refobjid" => ColumnType::Oid,
+                "deptype" => ColumnType::InternalChar,
+            ],
             Self::PgMatviews => columns![
                 "schemaname" => ColumnType::Name,
                 "matviewname" => ColumnType::Name,
@@ -844,6 +864,8 @@ pub mod view;
 pub mod session;
 
 pub mod constraints;
+
+pub mod dependencies;
 
 pub const DATABASE_NAME: &str = "uqa";
 pub const DATABASE_OID: i64 = 5;

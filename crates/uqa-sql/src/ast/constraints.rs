@@ -70,6 +70,9 @@ pub struct ColumnDef {
     /// only when a logical row is read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generated: Option<GeneratedColumn>,
+    /// The `pg_attrdef` OID of the default or generation expression, allocated when the expression was set; an expression set before OIDs were recorded derives it from the table and column names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_catalog_oid: Option<i64>,
     /// `CHECK (<expr>)` column-level constraint. Evaluated at INSERT
     /// (and UPDATE-replace) time against the row being written.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -125,6 +128,7 @@ impl ColumnDef {
             check_is_local: true,
             check_object_id: None,
             check_catalog_oid: None,
+            default_catalog_oid: None,
             references: None,
         }
     }

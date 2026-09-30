@@ -237,6 +237,7 @@ fn legacy_boolean_auto_increment_metadata_remains_readable() {
         check_is_local: true,
         check_object_id: None,
         check_catalog_oid: None,
+        default_catalog_oid: None,
         references: None,
     };
     let round_trip: ColumnDef =

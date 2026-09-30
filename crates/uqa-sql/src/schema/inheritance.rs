@@ -87,6 +87,8 @@ pub fn merge_create_table_hierarchy(
             .ok_or_else(|| SQLError::UnknownTable(parent.clone()))?;
         for column in &mut columns {
             column.not_null_identity = None;
+            // The child stores its own copy of an inherited default.
+            column.default_catalog_oid = None;
             if let Some(reference) = &mut column.references {
                 reference.catalog_identity = None;
             }
@@ -109,9 +111,11 @@ pub fn merge_create_table_hierarchy(
             column.check_no_inherit = false;
         }
         if !is_partition {
-            // PostgreSQL inherits the NOT NULL property of an identity column, but not its identity generation attribute or owned sequence. SERIAL is different: its nextval default is ordinary inherited metadata and therefore keeps pointing at the parent's sequence.
+            // PostgreSQL inherits the NOT NULL property of an identity column, but not its identity generation attribute or owned sequence. SERIAL is different: its nextval default is ordinary inherited metadata and therefore keeps pointing at the parent's sequence. Key constraints, like foreign keys, are not inherited: only their columns' NOT NULL constraints are.
             for column in &mut columns {
                 column.references = None;
+                column.primary_key = false;
+                column.unique = false;
                 if column
                     .auto_increment
                     .as_ref()

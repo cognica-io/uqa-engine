@@ -219,6 +219,7 @@ fn sequence_attribute_column(name: &str, ty: ColumnType) -> SQLColumnDef {
         check_is_local: true,
         check_object_id: None,
         check_catalog_oid: None,
+        default_catalog_oid: None,
         references: None,
     }
 }
@@ -324,6 +325,13 @@ pub fn build_pg_attrdef(
     Ok(out)
 }
 
+/// The `pg_attrdef` OID of a column's default or generation expression: the recorded one, or for an expression set before OIDs were recorded, the one derived from the qualified names of its table and column.
+pub fn attrdef_catalog_oid(table_name: &str, column: &SQLColumnDef) -> i64 {
+    column
+        .default_catalog_oid
+        .unwrap_or_else(|| stable_oid("attrdef", &format!("{table_name}.{}", column.name)))
+}
+
 /// `adbin` holds the expression as `pg_get_expr` prints it for the relation.
 fn append_pg_attrdef_rows(
     (catalog, resolution): (&CatalogReadView, &RelationNameResolution),
@@ -354,10 +362,7 @@ fn append_pg_attrdef_rows(
             continue;
         };
         out.push(row([
-            (
-                "oid",
-                int_value(stable_oid("attrdef", &format!("{table_name}.{}", col.name))),
-            ),
+            ("oid", int_value(attrdef_catalog_oid(table_name, col))),
             ("adrelid", int_value(relid)),
             (
                 "adnum",

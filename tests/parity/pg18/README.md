@@ -476,3 +476,11 @@ cargo test -p uqa-engine --test integration sql_prepared
 cargo test -p uqa-engine prepared
 cargo test -p uqa-pg-server --test integration prepared_plan_
 ```
+
+## Type lifecycle oracle
+
+`type_lifecycle_oracle.expected.json` contains 256 PostgreSQL 18.4 cases covering `ALTER TYPE | DOMAIN` renames, schema moves and ownership changes, `GRANT | REVOKE USAGE` with `typacl` and `has_type_privilege`, `USAGE` enforcement, stored references that follow renames, the details of `DROP TYPE | DOMAIN` and `DROP ROLE`, and search-path visibility of type names. The `sql_type_lifecycle` tests run it on memory and SQLite engines. Reproduce it by passing the JSON to `capture_command_completion_oracle.py --rows --details` with a superuser `PG_COMPLETION_CONNECTION` in a fresh PostgreSQL 18.4 database, with unused `tl_owner`, `tl_user` and `tl_other` role names.
+
+## Catalog dependency oracle
+
+`catalog_dependencies_oracle.expected.json` contains 74 PostgreSQL 18.4 cases covering `pg_depend` and `pg_shdepend` for enums, domains, tables with defaults, generation expressions, checks, keys, indexes, inheritance, partitions, foreign keys, triggers and rules, and for views, materialized views, sequences and routines; the details of `DROP TYPE`, `DROP DOMAIN` and `DROP ROLE`; `pg_describe_object`; and what cascading type and domain drops remove. The queries describe objects instead of printing OIDs, order rows by the bytes of the descriptions so that the database collation does not matter, and leave out TOAST objects and the internal triggers of foreign keys, whose names contain OIDs. The `catalog_dependencies` tests run it on memory and SQLite engines. Reproduce it by passing the JSON to `capture_command_completion_oracle.py --rows --details` with a superuser `PG_COMPLETION_CONNECTION` in a fresh PostgreSQL 18.4 database, with unused `dep_owner` and `dep_user` role names.

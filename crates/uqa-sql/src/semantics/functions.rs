@@ -100,6 +100,7 @@ pub fn builtin_function_dispatch_name(name: &str) -> String {
                         | "pg_get_function_result"
                         | "pg_get_function_sqlbody"
                         | "format_type"
+                        | "pg_describe_object"
                         | "pg_has_role"
                         | "pg_get_userbyid"
                         | "has_table_privilege"

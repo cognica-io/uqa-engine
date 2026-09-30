@@ -155,10 +155,14 @@ impl Deparser<'_> {
             }
             SourcePlan::Join { .. } => return self.join_columns(source, scope),
         };
+        let base_relation = table_source_relation(source, scope);
         Ok(names
             .into_iter()
             .enumerate()
             .map(|(index, name)| Column {
+                base: base_relation
+                    .as_ref()
+                    .map(|relation| (relation.clone(), name.clone())),
                 name: aliases.get(index).cloned().unwrap_or(name),
                 qualifier: qualifier.clone(),
                 rendered_qualifier: rendered.clone(),
@@ -511,7 +515,17 @@ fn column_relation(
     }
 }
 
-fn cte_source_columns<'a>(scope: &'a Scope, name: &str) -> Option<&'a Vec<String>> {
+/// The relation a table source reads, unless the name refers to a CTE.
+fn table_source_relation(source: &SourcePlan, scope: &Scope) -> Option<String> {
+    match source {
+        SourcePlan::Table { name, .. } if cte_source_columns(scope, name).is_none() => {
+            Some(name.clone())
+        }
+        _ => None,
+    }
+}
+
+pub(super) fn cte_source_columns<'a>(scope: &'a Scope, name: &str) -> Option<&'a Vec<String>> {
     let (schema, local) = RelationIdentity::parse_reference(name).ok()?;
     if schema.is_some() {
         return None;

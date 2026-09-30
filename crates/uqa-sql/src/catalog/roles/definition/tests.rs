@@ -14,6 +14,7 @@ use crate::catalog::roles::{
     RoleReference,
 };
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeSet;
 
 struct Inputs {
     roles: BTreeMap<String, RoleDefinition>,

@@ -79,6 +79,13 @@ fn set_column_property(
     let mut next = guard.columns().to_vec();
     publication::apply_property(&mut next, &table_name, column, property)
         .map_err(StorageBackendError::Other)?;
+    let definition = publication::column_mut(&mut next, &table_name, column)
+        .map_err(StorageBackendError::Other)?;
+    uqa_sql::schema::constraint_metadata::identity::materialize_default_oid(
+        definition,
+        &mut context.identity_allocator(),
+    )
+    .map_err(|error| StorageBackendError::backend("column default identity", error))?;
     state.mark_statistics_dirty()?;
     state.persist_columns(&next)?;
     guard.publish(next);

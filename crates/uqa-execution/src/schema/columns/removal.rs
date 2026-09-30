@@ -81,11 +81,11 @@ pub fn drop_column(
     } else {
         Vec::new()
     };
-    context.events.handle_dependencies(table, column, cascade)?;
     if cascade {
         // A routine/domain cycle may already have removed the root column.
         drop_column_cascade(context, table, column, true)?;
     } else {
+        context.events.handle_dependencies(table, column, false)?;
         drop_column_restrict(context, table, column, false)?;
     }
     context.routines.publish_rewrites(rewritten)?;
@@ -101,6 +101,8 @@ pub fn drop_column_cascade(
     if !ensure_drop_column_exists(context, table, column, if_exists)? {
         return Ok(());
     }
+    // Triggers and rules that name the column go with it, whichever drop removes the column.
+    context.events.handle_dependencies(table, column, true)?;
     let views = context
         .views
         .dependents(table, column)

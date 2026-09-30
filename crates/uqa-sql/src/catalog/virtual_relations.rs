@@ -73,6 +73,8 @@ virtual_relations! {
     PgPreparedStatements => ("pg_catalog", "pg_prepared_statements", 12095),
     PgCursors => ("pg_catalog", "pg_cursors", 12077),
     PgDescription => ("pg_catalog", "pg_description", 2609),
+    PgDepend => ("pg_catalog", "pg_depend", 2608),
+    PgShdepend => ("pg_catalog", "pg_shdepend", 1214),
     PgMatviews => ("pg_catalog", "pg_matviews", 12038),
     PgSequences => ("pg_catalog", "pg_sequences", 12048),
     AgGraph => ("ag_catalog", "ag_graph", super::oids::relation_oid("relation", "ag_catalog", "ag_graph")),
