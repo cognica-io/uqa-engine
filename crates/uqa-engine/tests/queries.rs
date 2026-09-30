@@ -84,6 +84,8 @@ mod sql_simple_query;
 mod sql_subqueries;
 #[path = "sql_subquery.rs"]
 mod sql_subquery;
+#[path = "queries/sql_type_usage.rs"]
+mod sql_type_usage;
 #[path = "sql_window.rs"]
 mod sql_window;
 #[path = "sql_window_frame.rs"]

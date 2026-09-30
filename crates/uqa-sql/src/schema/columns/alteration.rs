@@ -166,10 +166,10 @@ pub fn analyze_column_type(
         .has_column(table, name)
         .map_err(|error| ddl_storage_error("ALTER COLUMN", error))?
     {
-        return Err(SQLError::Unsupported(format!(
-            "ALTER TABLE ALTER COLUMN: column `{name}` does not exist"
-        )));
+        return Err(super::undefined_relation_column(table, name));
     }
+    // ATPrepAlterColumnType requires USAGE on the new type before CheckAttributeType rejects a pseudo-type.
+    context.bindings.schema.require_type_usage(ty)?;
     super::validate_postgres_relation_column_type(name, ty)?;
     let mut candidate_columns = context
         .columns

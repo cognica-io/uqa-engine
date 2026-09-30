@@ -42,14 +42,20 @@ pub fn validate_routine_security_attributes(
     def: &CreateFunction,
     current_user_is_superuser: bool,
 ) -> Result<(), SQLError> {
-    if (def.security.leakproof || def.support.is_some()) && !current_user_is_superuser {
+    if current_user_is_superuser {
+        return Ok(());
+    }
+    // compute_function_attributes validates SUPPORT before CreateFunction checks LEAKPROOF.
+    if def.support.is_some() {
         return Err(SQLError::Routine {
             sqlstate: "42501".into(),
-            message: if def.security.leakproof {
-                "only superuser can define a leakproof function".into()
-            } else {
-                "must be superuser to specify a support function".into()
-            },
+            message: "must be superuser to specify a support function".into(),
+        });
+    }
+    if def.security.leakproof {
+        return Err(SQLError::Routine {
+            sqlstate: "42501".into(),
+            message: "only superuser can define a leakproof function".into(),
         });
     }
     Ok(())

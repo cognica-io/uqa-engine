@@ -28,6 +28,13 @@ impl FunctionTypeResolver for ScopedEngineHook<'_> {
         Some(self.engine)
     }
 
+    fn require_type_usage(&self, ty: &ColumnType) -> Result<(), SQLError> {
+        uqa_execution::catalog::security::type_inquiry::require_type_usage(
+            &self.engine.catalog_execution(),
+            ty,
+        )
+    }
+
     fn resolve_function_type(
         &self,
         name: &str,

@@ -34,13 +34,15 @@ pub fn prepare_domain_definition(
         ColumnType::Void | ColumnType::Record | ColumnType::AnyArray
     ) {
         return Err(domain_error(
-            "42809",
+            "42804",
             format!(
                 "\"{}\" is not a valid base type for a domain",
                 definition.base.sql_name()
             ),
         ));
     }
+    // DefineDomain requires USAGE on the base type once it is known to be valid for a domain.
+    context.catalog.require_type_usage(&definition.base)?;
     if definition.collation.is_some() {
         return Err(SQLError::Unsupported(
             "domain collation binding is not implemented".into(),

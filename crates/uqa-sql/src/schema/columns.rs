@@ -20,6 +20,20 @@ pub fn validate_postgres_column_name(name: &str) -> Result<(), SQLError> {
     Ok(())
 }
 
+/// `column "x" of relation "t" does not exist`, which `ALTER TABLE` reports for a column the relation lacks.
+pub fn undefined_relation_column(table: &str, column: &str) -> SQLError {
+    match uqa_core::RelationIdentity::from_legacy_name(table) {
+        Ok(relation) => SQLError::Routine {
+            sqlstate: "42703".into(),
+            message: format!(
+                "column \"{column}\" of relation \"{}\" does not exist",
+                relation.name
+            ),
+        },
+        Err(error) => SQLError::Internal(format!("resolve ALTER TABLE target `{table}`: {error}")),
+    }
+}
+
 pub fn validate_postgres_relation_column_type(name: &str, ty: &ColumnType) -> Result<(), SQLError> {
     let pseudo_type = match ty {
         ColumnType::Void | ColumnType::AnyArray | ColumnType::Record => Some(ty.sql_name()),

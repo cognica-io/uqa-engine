@@ -57,6 +57,12 @@ impl RoutineTypeCatalog for Engine {
             oid,
         )
     }
+    fn require_type_usage(&self, ty: &ColumnType) -> Result<(), SQLError> {
+        uqa_execution::catalog::security::type_inquiry::require_type_usage(
+            &self.catalog_execution(),
+            ty,
+        )
+    }
 }
 impl StoredMergeColumnCatalog for Engine {
     fn stored_merge_target_definitions(&self, table: &str) -> Option<Vec<ColumnDef>> {

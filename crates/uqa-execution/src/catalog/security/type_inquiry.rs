@@ -4,16 +4,19 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Captured type catalog adapters for SQL-owned `has_type_privilege`.
+//! Captured type catalog adapters for SQL-owned `has_type_privilege` and the `USAGE` a declared type requires.
 
 use crate::catalog::{
     context::CatalogContext,
-    projection::{resolve_regtype_oid, row_type_relation, type_privilege_oid},
+    projection::{format_type_value, resolve_regtype_oid, row_type_relation, type_privilege_oid},
     CatalogReadView,
 };
 use uqa_core::{catalog_role::RoleIdentity, Value};
 use uqa_sql::{
-    catalog::security::type_inquiry::{TypePrivilegeCatalog, TypePrivilegeInquiry, TypePrivileges},
+    ast::ColumnType,
+    catalog::security::type_inquiry::{
+        usage_governing_type, TypePrivilegeCatalog, TypePrivilegeInquiry, TypePrivileges,
+    },
     SQLError,
 };
 
@@ -82,4 +85,30 @@ pub fn has_type_privilege_value(
         catalog: &catalog,
     }
     .has_type_privilege_value(arguments)
+}
+
+/// Require the current user's `USAGE` on the type governing a declared type, named in a denial as `format_type_be` spells it.
+pub fn require_type_usage(context: &CatalogContext<'_>, ty: &ColumnType) -> Result<(), SQLError> {
+    let Some((oid, _)) = usage_governing_type(ty) else {
+        return Ok(());
+    };
+    let catalog = TypeCatalog {
+        context,
+        catalog: context.catalog_read_view(),
+    };
+    let definitions = &catalog.catalog.snapshot().definitions;
+    TypePrivilegeInquiry {
+        current_user: &context.current_role(),
+        roles: &definitions.roles,
+        memberships: &definitions.role_memberships,
+        catalog: &catalog,
+    }
+    .require_usage(oid, || {
+        match format_type_value(context, &[Value::Int(i64::from(oid)), Value::Null])? {
+            Value::Str(name) => Ok(name),
+            other => Err(SQLError::Internal(format!(
+                "format_type returned {other:?} for type {oid}"
+            ))),
+        }
+    })
 }

@@ -151,6 +151,10 @@ fn register_view_plan_inner(
     context.bindings.bind_type_identities(&mut plan)?;
     reject_regrole_constants(context, &mut plan)?;
     let output_columns = create_view_output_columns(&query_schema, column_names)?;
+    // DefineVirtualRelation describes every column with BuildDescForRelation, a replaced view as well, which requires USAGE on its type before CheckAttributeNamesTypes rejects a pseudo-type.
+    for ty in query_schema.column_types().iter().flatten() {
+        context.routines.require_type_usage(ty)?;
+    }
     validate_view_column_types(&query_schema, &output_columns)?;
     let replacement_schema = named_view_schema(&query_schema, &output_columns)?;
     let existing_view =

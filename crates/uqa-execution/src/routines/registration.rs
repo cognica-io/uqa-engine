@@ -61,6 +61,22 @@ fn allocate_routine_object_id(
     }
 }
 
+/// `CreateFunction` checks CREATE on the schema, the SUPPORT function and the superuser-only attributes before `interpret_function_parameter_list` resolves the argument types. The locked registration checks them again.
+fn validate_routine_creation_privileges(
+    context: &RoutineRegistrationContext<'_>,
+    def: &CreateFunction,
+    current_user: &uqa_sql::catalog::roles::RoleReference,
+) -> Result<(), SQLError> {
+    context.namespace.ensure_create(&def.name)?;
+    if let Some(support) = def.support.as_deref() {
+        analysis::validate_routine_support(context.support, support)?;
+    }
+    let current_user_is_superuser = current_user
+        .role_definition(&context.catalog.roles.role_definitions())
+        .is_some_and(|role| role.has(RoleAttribute::Superuser));
+    analysis::validate_routine_security_attributes(def, current_user_is_superuser)
+}
+
 pub fn register_sql_function(
     context: &RoutineRegistrationContext<'_>,
     mut def: CreateFunction,
@@ -81,10 +97,8 @@ pub fn register_sql_function(
     def.owner = Some(owner.identity());
     let requested_name = def.name.clone();
     def.name = context.namespace.persistent_name(&requested_name)?;
+    validate_routine_creation_privileges(context, &def, &current_user)?;
     resolve_routine_type_references(context.definition.compilation.analysis.types, &mut def)?;
-    if let Some(support) = def.support.as_deref() {
-        analysis::validate_routine_support(context.support, support)?;
-    }
     configuration::apply_routine_config_actions(context.configuration, &mut def)?;
     let (compiled, _) = compile_catalog_bound_routine(
         &context.definition,

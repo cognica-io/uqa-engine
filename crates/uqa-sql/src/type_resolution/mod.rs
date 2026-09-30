@@ -140,6 +140,11 @@ pub trait FunctionTypeResolver: Send + Sync {
         None
     }
 
+    /// Require the current user's `USAGE` privilege on a type that a relation column, domain or routine declares, as `object_aclcheck(TypeRelationId, ..., ACL_USAGE)` and `aclcheck_error_type` require it; see [`crate::catalog::security::type_inquiry::usage_governing_type`]. A resolver without roles and type privileges has nothing to deny.
+    fn require_type_usage(&self, _ty: &ColumnType) -> Result<(), SQLError> {
+        Ok(())
+    }
+
     fn resolve_function_type(
         &self,
         name: &str,

@@ -108,6 +108,10 @@ pub fn register_materialized_view_plan(
         context.bindings.bind_type_identities(&mut plan)?;
         reject_regrole_constants(context, &mut plan)?;
         let output_columns = create_view_output_columns(&query_schema, column_names)?;
+        // BuildDescForRelation requires USAGE on every column's type before CheckAttributeNamesTypes rejects system column names and pseudo-types.
+        for ty in query_schema.column_types().iter().flatten() {
+            context.routines.require_type_usage(ty)?;
+        }
         for column in &output_columns {
             uqa_sql::schema::columns::validate_postgres_column_name(column)?;
         }

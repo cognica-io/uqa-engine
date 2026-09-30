@@ -8,7 +8,7 @@
 use crate::mutation::{constraints::context::ConstraintCatalog, publication::DocumentVectors};
 use crate::query::CteScope;
 use uqa_core::DocId;
-use uqa_sql::schema::table_creation::create_table_as_columns;
+use uqa_sql::schema::table_creation::{create_table_as_columns, validate_create_table_as_columns};
 use uqa_sql::{
     ast::{ColumnDef, ColumnType, OnCommitAction, RelationPersistence},
     plan::QueryPlan,
@@ -105,6 +105,8 @@ pub fn run_create_table_as<S: Clone>(
     if execution.persistence != uqa_sql::ast::RelationPersistence::Temporary {
         context.creation.ensure_create(&preliminary_name)?;
     }
+    // create_ctas_internal describes the relation before a source tuple is read.
+    validate_create_table_as_columns(context.routines, &columns)?;
     context.creation.retain_owner(&owner)?;
     let executable = if execution.with_no_data {
         None

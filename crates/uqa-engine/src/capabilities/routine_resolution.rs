@@ -155,6 +155,13 @@ impl FunctionTypeResolver for Engine {
         Some(self)
     }
 
+    fn require_type_usage(&self, ty: &ColumnType) -> Result<(), SQLError> {
+        uqa_execution::catalog::security::type_inquiry::require_type_usage(
+            &self.catalog_execution(),
+            ty,
+        )
+    }
+
     fn resolve_function_type(
         &self,
         name: &str,

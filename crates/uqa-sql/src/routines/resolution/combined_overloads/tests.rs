@@ -54,6 +54,10 @@ impl RoutineTypeCatalog for Catalog {
     fn resolve_catalog_user_type_by_oid(&self, _: u32) -> Option<ColumnType> {
         None
     }
+
+    fn require_type_usage(&self, _: &ColumnType) -> Result<(), SQLError> {
+        Ok(())
+    }
 }
 
 impl RoutineOverloadCatalog for Catalog {

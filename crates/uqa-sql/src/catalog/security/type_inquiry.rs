@@ -4,10 +4,10 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `has_type_privilege`: a type named by text must exist, an unknown OID yields NULL, and an array type answers with its element type's privileges.
+//! Type privileges of roles. `has_type_privilege`: a type named by text must exist, an unknown OID yields NULL, and an array type answers with its element type's privileges. A declared type requires `USAGE` of the current user.
 
 use super::object_acl;
-use crate::ast::{ObjectAclEntry, RoleAttribute};
+use crate::ast::{ColumnType, ObjectAclEntry, RoleAttribute};
 use crate::catalog::roles::{
     identity::RoleSubject, role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey,
     RoleReference,
@@ -15,6 +15,20 @@ use crate::catalog::roles::{
 use crate::SQLError;
 use std::collections::BTreeMap;
 use uqa_core::{catalog_role::RoleIdentity, Value};
+
+#[cfg(test)]
+mod tests;
+
+/// The type whose privileges govern `USAGE` of a declared type, with its OID: `pg_type_aclmask` consults the element type of an array type, while a domain governs itself rather than its base type. Built-in types and relation row types yield `None`, because they keep the default privileges, which grant `USAGE` to PUBLIC.
+#[must_use]
+pub fn usage_governing_type(ty: &ColumnType) -> Option<(u32, &ColumnType)> {
+    match ty {
+        ColumnType::Array(element) => usage_governing_type(element),
+        ColumnType::Enum(reference) => Some((reference.oid, ty)),
+        ColumnType::Domain { oid, .. } => Some((*oid, ty)),
+        _ => None,
+    }
+}
 
 /// The owner and explicit `USAGE` ACL governing a type. `None` is the default ACL.
 pub struct TypePrivileges<'a> {
@@ -92,6 +106,35 @@ impl TypePrivilegeInquiry<'_> {
                 },
             )
         })))
+    }
+
+    /// `object_aclcheck(TypeRelationId, oid, GetUserId(), ACL_USAGE)` followed by `aclcheck_error_type`: the current user needs `USAGE` on the type, and the error names the type as `format_type_be` spells it.
+    pub fn require_usage(
+        &self,
+        oid: u32,
+        display: impl FnOnce() -> Result<String, SQLError>,
+    ) -> Result<(), SQLError> {
+        let privileges = self
+            .catalog
+            .type_privileges(oid)
+            .ok_or_else(|| SQLError::Internal(format!("type with OID {oid} does not exist")))?;
+        let superuser = self
+            .current_user
+            .role_definition(self.roles)
+            .is_some_and(|role| role.attributes.contains(&RoleAttribute::Superuser));
+        if object_acl::privilege_allowed(
+            &privileges.owner,
+            privileges.usage_acl,
+            false,
+            superuser,
+            |role| role_inherits(self.roles, self.memberships, self.current_user, role),
+        ) {
+            return Ok(());
+        }
+        Err(SQLError::Routine {
+            sqlstate: "42501".into(),
+            message: format!("permission denied for type {}", display()?),
+        })
     }
 
     fn resolve_role(&self, value: &Value) -> Result<Option<RoleReference>, SQLError> {

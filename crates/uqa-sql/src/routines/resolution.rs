@@ -62,6 +62,10 @@ impl FunctionTypeResolver for RoutineOverloadContext<'_> {
             .map(Some)
     }
 
+    fn require_type_usage(&self, ty: &ColumnType) -> Result<(), SQLError> {
+        self.catalog.require_type_usage(ty)
+    }
+
     fn resolve_function_type(
         &self,
         name: &str,

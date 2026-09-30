@@ -25,11 +25,12 @@ pub struct InheritanceContext<'a> {
     pub roles: &'a dyn crate::expr::EngineHook,
 }
 
+/// `MergeAttributes`: the columns, CHECK constraints and partition keys a new table inherits from its parents, ahead of its own. The table's partition key and bound are bound by [`bind_create_table_partitioning`] once its row type is described, as `DefineRelation` computes them after creating the relation.
 #[expect(
     clippy::too_many_lines,
     reason = "preserves DDL dependency and action order"
 )]
-pub fn prepare_create_table_hierarchy(
+pub fn merge_create_table_hierarchy(
     context: &InheritanceContext<'_>,
     table: &mut CreateTable,
 ) -> Result<(), SQLError> {
@@ -44,7 +45,6 @@ pub fn prepare_create_table_hierarchy(
                 "partition bound has no parent relation".into(),
             ));
         }
-        validate_partition_keys(context, table)?;
         return Ok(());
     }
     let is_partition = table.hierarchy.partition_bound.is_some();
@@ -59,13 +59,8 @@ pub fn prepare_create_table_hierarchy(
     let mut inherited_foreign_keys = Vec::new();
     let mut inherited_keys = Vec::new();
     for requested_parent in &table.hierarchy.parents {
+        // A parent with the new table's own name is the relation that already has the name, which `heap_create_with_catalog` reports once the columns are described.
         let parent = context.catalog.resolve_parent(requested_parent)?;
-        if parent == table.name {
-            return Err(SQLError::Routine {
-                sqlstate: "42P17".into(),
-                message: "circular inheritance not allowed".into(),
-            });
-        }
         let parent_hierarchy = context
             .partitions
             .catalog
@@ -169,7 +164,14 @@ pub fn prepare_create_table_hierarchy(
         table.key_constraints = inherited_keys;
     }
     table.hierarchy.parents = canonical_parents;
-    validate_partition_keys(context, table)?;
+    Ok(())
+}
+
+/// The bound of a new partition and the partition key of a new partitioned table, in `DefineRelation` order: `transformPartitionBound` and `check_new_partition_bound` before `ComputePartitionAttrs`.
+pub fn bind_create_table_partitioning(
+    context: &InheritanceContext<'_>,
+    table: &mut CreateTable,
+) -> Result<(), SQLError> {
     if let (Some(parent), Some(bound)) = (
         table.hierarchy.parents.first(),
         table.hierarchy.partition_bound.as_ref(),
@@ -179,7 +181,7 @@ pub fn prepare_create_table_hierarchy(
         validate_new_partition_bound(&context.partitions, parent, &table.name, &bound)?;
         table.hierarchy.partition_bound = Some(bound);
     }
-    Ok(())
+    validate_partition_keys(context, table)
 }
 
 fn merge_columns(
