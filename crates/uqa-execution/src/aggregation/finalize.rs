@@ -88,6 +88,8 @@ pub fn aggregate_value_with_args(
         "sum" => {
             if acc.count == 0 {
                 Value::Null
+            } else if let Some(sum) = acc.interval_sum {
+                Value::Temporal(sum.value())
             } else if acc.numeric_inputs.decimal_without_float() {
                 acc.decimal_sum.clone().map_or(Value::Null, Value::Decimal)
             } else if acc.numeric_inputs.all_integers() {
@@ -101,6 +103,9 @@ pub fn aggregate_value_with_args(
         "avg" => {
             if acc.count == 0 {
                 Value::Null
+            } else if let Some(sum) = acc.interval_sum {
+                // `interval_avg` divides the sum by the count as a double precision factor.
+                Value::Temporal(sum.divide(acc.count as f64)?.value())
             } else if acc.numeric_inputs.decimal_without_float() {
                 let divisor = DecimalValue::from_i64(i64::try_from(acc.count).map_err(|_| {
                     SQLError::TypeMismatch("aggregate count exceeds BIGINT".into())

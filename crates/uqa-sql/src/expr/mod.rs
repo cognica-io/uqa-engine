@@ -38,6 +38,7 @@ pub use json_strip::argument_positions as json_strip_nulls_argument_positions;
 pub use range::{
     multirange_from_ranges, parse_multirange, parse_range, CanonicalMultirange, CanonicalRange,
 };
+pub use time::IntervalFields;
 use time::{
     age_between, coerce_temporal, format_pg_number, format_temporal, hex_encode, make_timestamp,
     parse_timestamp, pg_to_chrono_fmt,
@@ -73,7 +74,7 @@ pub use binary::{
     type_comparison_can_fail, validate_legacy_vector_comparison, value_comparison_can_fail,
     values_equal_nullable_with_control, values_equal_with_control, IntegerWidth,
 };
-pub(crate) use binary::{division_by_zero, out_of_range};
+pub(crate) use binary::{datetime_out_of_range, division_by_zero, out_of_range};
 pub use casting::{
     array_dimensions, cast_value, cast_value_from, cast_value_from_with_control,
     invalid_boolean_input, negate_value, negate_value_with_control, parse_boolean_input,

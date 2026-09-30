@@ -135,7 +135,8 @@
       "functions.uuid-extraction",
       "query.window-frames",
       "aggregates.null-and-enum-inputs",
-      "expressions.boolean-conditions"
+      "expressions.boolean-conditions",
+      "expressions.interval-arithmetic"
     ],
     "M2": [
       "protocol.frontend-backend-3.2"
@@ -1106,6 +1107,14 @@
       "postgresql_reference": "PostgreSQL 18.4 live rows, SQLSTATEs and messages in tests/parity/pg18/boolean_conditions_oracle.expected.json; coerce_to_boolean in src/backend/parser/parse_coerce.c; boolin in src/backend/utils/adt/bool.c",
       "uqa_test": "cargo test -p uqa-engine --test integration queries::sql_boolean_conditions",
       "supported_version": "Unreleased: 45 PostgreSQL 18.4 cases on memory and SQLite engines cover the conditions of WHERE, HAVING, JOIN ON, searched CASE, AND, OR, NOT and aggregate FILTER in queries, updates and deletes: a condition of another type than boolean or a domain over it is 42804 naming its construct, and an unknown literal is read as boolean input with prefixes and surrounding spaces, invalid text being 22P02",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "expressions.interval-arithmetic",
+      "postgresql_reference": "PostgreSQL 18.4 live rows, SQLSTATEs, messages and hints in tests/parity/pg18/interval_arithmetic_oracle.expected.json; interval_um_internal, finite_interval_pl, finite_interval_mi, interval_mul, interval_div, interval_justify_hours, interval_justify_days, interval_justify_interval, timestamp_pl_interval, interval_avg_accum, interval_avg_combine, interval_sum and interval_avg in src/backend/utils/adt/timestamp.c; time_pl_interval, time_mi_interval and date_pli in src/backend/utils/adt/date.c",
+      "uqa_test": "cargo test -p uqa-engine --test integration functions::pg18_semantics::interval_arithmetic; cargo test -p uqa-sql --lib expr::time::interval",
+      "supported_version": "Unreleased: 58 PostgreSQL 18.4 cases on memory and SQLite engines cover interval multiplication and division by float8, numeric and integer factors with the fractional month and day cascades and TSROUND, division by zero (22012), NaN, overflow and the field values reserved for infinity (22008), interval addition, subtraction and negation, time and timetz arithmetic that ignores months and days and wraps the 64-bit sum, date and timestamp overflow (22008), justify_hours, justify_days and justify_interval with their argument resolution (42883), and sum and avg over interval with grouping, NULLs, empty input, DISTINCT, FILTER, window frames and overflow",
       "status": "verified",
       "open_issue": null
     }

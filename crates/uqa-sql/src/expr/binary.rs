@@ -330,6 +330,14 @@ pub(crate) fn division_by_zero() -> SQLError {
     }
 }
 
+/// `PostgreSQL`'s error for a date, time, timestamp or interval beyond its type's range (SQLSTATE 22008).
+pub(crate) fn datetime_out_of_range(type_name: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "22008".into(),
+        message: format!("{type_name} out of range"),
+    }
+}
+
 /// `PostgreSQL` numeric overflow error (SQLSTATE 22003).
 pub(crate) fn out_of_range(type_name: &str) -> SQLError {
     SQLError::Routine {

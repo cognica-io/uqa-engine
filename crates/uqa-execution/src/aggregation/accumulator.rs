@@ -10,6 +10,7 @@ use super::{
     value_as_f64, value_gt, value_lt, AggregateValueBuffer, Arc, DecimalValue, DistinctTracker,
     RegisteredAggregateBuffer, SQLAggregateFunction, SQLAggregateState, SQLError, Value,
 };
+use uqa_sql::expr::IntervalFields;
 
 pub struct AggregateAccumulator {
     pub(super) registered: Option<Arc<dyn SQLAggregateFunction>>,
@@ -19,6 +20,8 @@ pub struct AggregateAccumulator {
     pub(super) sum: f64,
     pub(super) integer_sum: i128,
     pub(super) decimal_sum: Option<DecimalValue>,
+    /// `sumX` of `sum(interval)` and `avg(interval)`, added field by field as `interval_avg_accum` adds each input.
+    pub(super) interval_sum: Option<IntervalFields>,
     pub(super) numeric_inputs: NumericInputKind,
     pub(super) min: Option<Value>,
     pub(super) max: Option<Value>,
@@ -196,6 +199,7 @@ impl Default for AggregateAccumulator {
             sum: 0.0,
             integer_sum: 0,
             decimal_sum: None,
+            interval_sum: None,
             numeric_inputs: NumericInputKind::default(),
             min: None,
             max: None,
@@ -229,6 +233,7 @@ impl AggregateAccumulator {
             sum: 0.0,
             integer_sum: 0,
             decimal_sum: None,
+            interval_sum: None,
             numeric_inputs: NumericInputKind::default(),
             min: None,
             max: None,
@@ -487,9 +492,22 @@ impl AggregateAccumulator {
     }
 
     pub(super) fn observe_sum(&mut self, value: &Value) -> Result<(), SQLError> {
+        if let Value::Temporal(temporal) = value {
+            let interval = IntervalFields::of(temporal).ok_or_else(|| {
+                SQLError::TypeMismatch(format!(
+                    "SUM/AVG requires a numeric or interval value, got {value:?}"
+                ))
+            })?;
+            self.interval_sum = Some(
+                self.interval_sum
+                    .unwrap_or(IntervalFields::ZERO)
+                    .plus(interval)?,
+            );
+            return Ok(());
+        }
         if !matches!(value, Value::Int(_) | Value::Float(_) | Value::Decimal(_)) {
             return Err(SQLError::TypeMismatch(format!(
-                "SUM/AVG requires a numeric value, got {value:?}"
+                "SUM/AVG requires a numeric or interval value, got {value:?}"
             )));
         }
         match value {
@@ -557,7 +575,7 @@ impl AggregateAccumulator {
             }
             _ => {
                 return Err(SQLError::TypeMismatch(format!(
-                    "SUM/AVG requires a numeric value, got {value:?}"
+                    "SUM/AVG requires a numeric or interval value, got {value:?}"
                 )))
             }
         }

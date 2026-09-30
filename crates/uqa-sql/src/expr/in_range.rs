@@ -11,6 +11,8 @@ use std::cmp::Ordering;
 use uqa_core::memory::ProductionControl;
 use uqa_core::{DecimalValue, TemporalValue, Value};
 
+use super::IntervalFields;
+
 use crate::error::{Result, SQLError};
 
 const MICROS_PER_DAY: i64 = 86_400_000_000;
@@ -43,10 +45,11 @@ fn invalid_offset() -> SQLError {
     }
 }
 
-fn out_of_range(kind: &str) -> SQLError {
+/// `numeric_add` and `numeric_sub` beyond the numeric format's range.
+fn numeric_overflow() -> SQLError {
     SQLError::Routine {
-        sqlstate: "22008".into(),
-        message: format!("{kind} out of range"),
+        sqlstate: "22003".into(),
+        message: "value overflows numeric format".into(),
     }
 }
 
@@ -144,7 +147,7 @@ fn numeric_in_range(
     } else {
         base.checked_add(offset)
     }
-    .ok_or_else(|| out_of_range("value"))?;
+    .ok_or_else(numeric_overflow)?;
     Ok(bound(val.cmp(&target), less))
 }
 
@@ -157,16 +160,8 @@ fn temporal_in_range(
     less: bool,
 ) -> Result<bool> {
     use TemporalValue as T;
-    let T::Interval {
-        months,
-        days,
-        micros,
-    } = *offset
-    else {
-        return Err(SQLError::Internal(format!(
-            "RANGE frame offset {offset:?} over {base:?} is not an interval"
-        )));
-    };
+    let offset = interval_fields(offset)?;
+    let micros = offset.micros;
     match (val, base) {
         (T::Time { micros: val }, T::Time { micros: base }) => {
             // Like time +/- interval, only the time field of the offset counts, and the sum does not wrap around midnight.
@@ -212,69 +207,47 @@ fn temporal_in_range(
             )?;
             Ok(bound(ordering, less))
         }
-        (
-            T::Interval {
-                months: val_months,
-                days: val_days,
-                micros: val_micros,
-            },
-            T::Interval {
-                months: base_months,
-                days: base_days,
-                micros: base_micros,
-            },
-        ) => {
-            if interval_span(months, days, micros) < 0 {
+        (T::Interval { .. }, T::Interval { .. }) => {
+            if interval_span(offset) < 0 {
                 return Err(invalid_offset());
             }
-            let (months, days, micros) = signed_interval(months, days, micros, sub)?;
-            let target_months = base_months
-                .checked_add(months)
-                .ok_or_else(|| out_of_range("interval"))?;
-            let target_days = base_days
-                .checked_add(days)
-                .ok_or_else(|| out_of_range("interval"))?;
-            let target_micros = base_micros
-                .checked_add(micros)
-                .ok_or_else(|| out_of_range("interval"))?;
-            let ordering = interval_span(*val_months, *val_days, *val_micros).cmp(&interval_span(
-                target_months,
-                target_days,
-                target_micros,
-            ));
-            Ok(bound(ordering, less))
+            let (val, base) = (interval_fields(val)?, interval_fields(base)?);
+            let target = if sub {
+                base.minus(offset)?
+            } else {
+                base.plus(offset)?
+            };
+            Ok(bound(interval_span(val).cmp(&interval_span(target)), less))
         }
         _ => {
-            if interval_span(months, days, micros) < 0 {
+            if interval_span(offset) < 0 {
                 return Err(invalid_offset());
             }
             let val = timestamp_micros(val)?;
             let base = timestamp_micros(base)?;
-            let (months, days, micros) = signed_interval(months, days, micros, sub)?;
-            let target = super::time::timestamp_plus_interval(base, months, days, micros)?;
+            // `timestamp_mi_interval` adds the interval that `interval_um` negates.
+            let offset = if sub { offset.negate()? } else { offset };
+            let target = super::time::timestamp_plus_interval(
+                base,
+                offset.months,
+                offset.days,
+                offset.micros,
+            )?;
             Ok(bound(val.cmp(&target), less))
         }
     }
 }
 
-/// The interval as `interval_cmp_value` orders it: a month is 30 days and a day is 24 hours.
-fn interval_span(months: i32, days: i32, micros: i64) -> i128 {
-    (i128::from(months) * 30 + i128::from(days)) * i128::from(MICROS_PER_DAY) + i128::from(micros)
+fn interval_fields(value: &TemporalValue) -> Result<IntervalFields> {
+    IntervalFields::of(value).ok_or_else(|| {
+        SQLError::Internal(format!("RANGE frame value {value:?} is not an interval"))
+    })
 }
 
-/// The offset to add: the interval itself, or its negation as `interval_um` computes it.
-fn signed_interval(months: i32, days: i32, micros: i64, sub: bool) -> Result<(i32, i32, i64)> {
-    if !sub {
-        return Ok((months, days, micros));
-    }
-    match (
-        months.checked_neg(),
-        days.checked_neg(),
-        micros.checked_neg(),
-    ) {
-        (Some(months), Some(days), Some(micros)) => Ok((months, days, micros)),
-        _ => Err(out_of_range("interval")),
-    }
+/// The interval as `interval_cmp_value` orders it: a month is 30 days and a day is 24 hours.
+fn interval_span(interval: IntervalFields) -> i128 {
+    (i128::from(interval.months) * 30 + i128::from(interval.days)) * i128::from(MICROS_PER_DAY)
+        + i128::from(interval.micros)
 }
 
 /// A date as the timestamp at its midnight, as `date2timestamp` converts it, or a timestamp's own microseconds.

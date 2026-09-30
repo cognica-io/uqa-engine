@@ -14,6 +14,8 @@
 use uqa_core::{ArrayValue, DecimalValue, TemporalValue, Value};
 use uqa_engine::Engine;
 
+#[path = "pg18_semantics/interval_arithmetic.rs"]
+mod interval_arithmetic;
 #[path = "pg18_semantics/jsonb_comparisons.rs"]
 mod jsonb_comparisons;
 

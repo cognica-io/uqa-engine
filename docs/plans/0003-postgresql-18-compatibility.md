@@ -244,6 +244,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `query.window-frames` | `M1` | `verified` |
 | `aggregates.null-and-enum-inputs` | `M1` | `verified` |
 | `expressions.boolean-conditions` | `M1` | `verified` |
+| `expressions.interval-arithmetic` | `M1` | `verified` |
 
 <!-- pg18-manifest-status:end -->
 

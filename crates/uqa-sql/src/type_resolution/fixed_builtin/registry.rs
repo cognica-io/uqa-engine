@@ -147,6 +147,9 @@ declarations! { fn lookup_local(local);
         "uuid_extract_version" => &[Signature::new(&[ColumnType::Uuid],
             ColumnType::SmallInteger,
         )],
+        "justify_days" | "justify_hours" | "justify_interval" => &[Signature::new(&[ColumnType::Interval],
+            ColumnType::Interval,
+        )],
         "gen_random_uuid" | "uuidv4" => &[Signature::new(&[], ColumnType::Uuid)],
         "uuidv7" => &[
             Signature::new(&[], ColumnType::Uuid),

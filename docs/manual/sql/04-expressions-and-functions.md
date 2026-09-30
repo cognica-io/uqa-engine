@@ -249,7 +249,7 @@ SELECT json_strip_nulls(strip_in_arrays => true, target => '{"keep":1,"drop":nul
 | Current time | `now`, `transaction_timestamp`, `statement_timestamp`, `clock_timestamp`, `current_date`, `current_time`, `current_timestamp`, `localtime`, `localtimestamp`, `timeofday` |
 | Conversion | `to_timestamp`, `to_date`, `to_char` |
 | Parts and truncation | `extract`, `date_part`, `date_trunc` |
-| Arithmetic and construction | `age`, `make_timestamp`, `make_date`, `make_interval`, `justify_hours` |
+| Arithmetic and construction | `age`, `make_timestamp`, `make_date`, `make_interval`, `justify_hours`, `justify_days`, `justify_interval` |
 | Validation | `isfinite` |
 
 `CURRENT_DATE`, `CURRENT_TIME[(precision)]`, `CURRENT_TIMESTAMP[(precision)]`, `LOCALTIME[(precision)]`, and `LOCALTIMESTAMP[(precision)]` are SQL value expressions. Their result types are `date`, `time with time zone`, `timestamp with time zone`, `time without time zone`, and `timestamp without time zone`, respectively. A precision from zero through six rounds fractional seconds and remains visible in result metadata. SQL value expressions keep their built-in identity even when the search path contains a user function with the same name.
@@ -265,6 +265,16 @@ SELECT pg_typeof(CURRENT_TIME)::text AS time_type,
 ```
 
 The results are `time with time zone`, `timestamp without time zone`, `true`, and `true`. The differential clock transcript uses UTC; session time-zone conversion and display, complete catalog signatures, and precision-reduction diagnostics remain open PostgreSQL compatibility bugs tracked in the [compatibility ledger](09-compatibility.md).
+
+An interval keeps months, days, and time separately. Multiplying or dividing one by a number scales each field on its own and cascades a fractional month into days at 30 days a month and a fractional day into time at 24 hours a day, never upward, so `interval '1 month' * 0.5` is `15 days`; division divides each field rather than multiplying by the reciprocal, and dividing by zero reports SQLSTATE `22012`. `justify_hours` moves whole 24-hour periods of the time into days, `justify_days` moves whole 30-day periods into months, and `justify_interval` does both so that every field takes one sign; each carry truncates toward zero, so `justify_hours(interval '-25 hours')` is `-1 days -01:00:00`. Adding an interval to or subtracting it from a `time` or `time with time zone` value uses only its time field and wraps within the day. A date, time, timestamp, or interval result outside its type's range reports SQLSTATE `22008`.
+
+```sql execute
+SELECT interval '1 day' / 3 AS third,
+       interval '1 mon 1 day 1 sec' * 0.3 AS scaled,
+       justify_interval(interval '1 mon -00:00:01') AS justified;
+```
+
+The results are `08:00:00`, `9 days 07:12:00.3`, and `29 days 23:59:59`.
 
 ## Range and multirange functions
 
@@ -365,6 +375,8 @@ SELECT lastval() AS last_allocated;
 | Statistics | `stddev`, `stddev_samp`, `stddev_pop`, `variance`, `var_samp`, `var_pop` |
 | Ordered set | `percentile_cont`, `percentile_disc`, `mode` |
 | JSON | `json_agg`, `jsonb_agg`, `json_object_agg`, `jsonb_object_agg` |
+
+`sum` and `avg` also take `interval` input: the sum adds months, days, and time separately and reports SQLSTATE `22008` when a field overflows, and the average divides that sum by the input count as interval division does, so the average of `1 mon` and `0` is `15 days`.
 
 Aggregates support `DISTINCT`, aggregate-local `ORDER BY`, and `FILTER` where the function shape permits it; on an ordinary function each is `42809` (`FILTER specified, but abs is not an aggregate function`). `min` and `max` compare arrays and record-like map values lexicographically in addition to their scalar inputs.
 

@@ -20,9 +20,12 @@ use crate::ast::BinaryOp;
 use crate::error::{Result, SQLError};
 
 use super::conversion::to_f64_with_control;
-use super::{division_by_zero, float_to_i64_rounded, out_of_range};
+use super::{datetime_out_of_range, float_to_i64_rounded, out_of_range};
 
+mod interval;
 mod number_format;
+
+pub use interval::IntervalFields;
 
 const MICROS_PER_SECOND: i64 = 1_000_000;
 const MICROS_PER_MINUTE: i64 = 60 * MICROS_PER_SECOND;
@@ -35,27 +38,30 @@ fn epoch_date() -> NaiveDate {
 fn naive_from_micros(micros: i64) -> Result<NaiveDateTime> {
     chrono::DateTime::from_timestamp_micros(micros)
         .map(|dt| dt.naive_utc())
-        .ok_or_else(|| out_of_range("timestamp"))
+        .ok_or_else(|| datetime_out_of_range("timestamp"))
 }
 
 fn micros_from_naive(naive: NaiveDateTime) -> i64 {
     naive.and_utc().timestamp_micros()
 }
 
-/// Shift a date by whole months, clamping the day-of-month to the end
+/// Shift the date of a timestamp by whole months, clamping the day-of-month to the end
 /// of the target month exactly like `PostgreSQL` (`Jan 31 + 1 mon` ->
-/// `Feb 29` in a leap year).
+/// `Feb 29` in a leap year). `timestamp_pl_interval` reports any overflow as the timestamp's.
 fn shift_months(date: NaiveDate, months: i32) -> Result<NaiveDate> {
     let total = i64::from(date.year())
         .checked_mul(12)
         .and_then(|value| value.checked_add(i64::from(date.month0())))
         .and_then(|value| value.checked_add(i64::from(months)))
-        .ok_or_else(|| out_of_range("date"))?;
-    let year = i32::try_from(total.div_euclid(12)).map_err(|_| out_of_range("date"))?;
-    let month = u32::try_from(total.rem_euclid(12)).map_err(|_| out_of_range("date"))? + 1;
+        .ok_or_else(|| datetime_out_of_range("timestamp"))?;
+    let year =
+        i32::try_from(total.div_euclid(12)).map_err(|_| datetime_out_of_range("timestamp"))?;
+    let month =
+        u32::try_from(total.rem_euclid(12)).map_err(|_| datetime_out_of_range("timestamp"))? + 1;
     let day = date.day();
     let last = days_in_month(year, month);
-    NaiveDate::from_ymd_opt(year, month, day.min(last)).ok_or_else(|| out_of_range("date"))
+    NaiveDate::from_ymd_opt(year, month, day.min(last))
+        .ok_or_else(|| datetime_out_of_range("timestamp"))
 }
 
 fn days_in_month(year: i32, month: u32) -> u32 {
@@ -85,20 +91,16 @@ pub(super) fn timestamp_plus_interval(
     let date = shift_months(naive.date(), months)?;
     let date = date
         .checked_add_signed(chrono::Duration::days(i64::from(days)))
-        .ok_or_else(|| out_of_range("timestamp"))?;
+        .ok_or_else(|| datetime_out_of_range("timestamp"))?;
     let shifted = NaiveDateTime::new(date, naive.time());
     micros_from_naive(shifted)
         .checked_add(micros)
-        .ok_or_else(|| out_of_range("timestamp"))
+        .ok_or_else(|| datetime_out_of_range("timestamp"))
 }
 
 /// Binary arithmetic when either operand is temporal. Handles the full
 /// `PostgreSQL` matrix used by the engine: date/int, date/date,
 /// temporal/interval, timestamp/timestamp, and interval scaling.
-#[expect(
-    clippy::too_many_lines,
-    reason = "temporal dispatch preserves PostgreSQL unit and error precedence"
-)]
 pub(super) fn temporal_arith_with_control(
     a: &Value,
     b: &Value,
@@ -113,59 +115,26 @@ pub(super) fn temporal_arith_with_control(
             (T::Date { days: d1 }, T::Date { days: d2 }, BinaryOp::Subtract) => {
                 Ok(Value::Int(i64::from(*d1) - i64::from(*d2)))
             }
-            (
-                T::Interval {
-                    months: m1,
-                    days: d1,
-                    micros: u1,
-                },
-                T::Interval {
-                    months: m2,
-                    days: d2,
-                    micros: u2,
-                },
-                BinaryOp::Add | BinaryOp::Subtract,
-            ) => {
-                let sign = if matches!(op, BinaryOp::Add) { 1 } else { -1 };
-                Ok(Value::Temporal(T::Interval {
-                    months: m1
-                        .checked_add(sign * m2)
-                        .ok_or_else(|| out_of_range("interval"))?,
-                    days: d1
-                        .checked_add(sign * d2)
-                        .ok_or_else(|| out_of_range("interval"))?,
-                    micros: u1
-                        .checked_add(i64::from(sign) * u2)
-                        .ok_or_else(|| out_of_range("interval"))?,
-                }))
+            (T::Interval { .. }, T::Interval { .. }, BinaryOp::Add | BinaryOp::Subtract) => {
+                let (left, right) = (interval_fields(x)?, interval_fields(y)?);
+                Ok(Value::Temporal(
+                    if matches!(op, BinaryOp::Add) {
+                        left.plus(right)?
+                    } else {
+                        left.minus(right)?
+                    }
+                    .value(),
+                ))
             }
-            (
-                _,
-                T::Interval {
-                    months,
-                    days,
-                    micros,
-                },
-                BinaryOp::Add,
-            ) => add_interval_to_temporal(x, *months, *days, *micros),
-            (
-                _,
-                T::Interval {
-                    months,
-                    days,
-                    micros,
-                },
-                BinaryOp::Subtract,
-            ) => add_interval_to_temporal(x, -months, -days, -micros),
-            (
-                T::Interval {
-                    months,
-                    days,
-                    micros,
-                },
-                _,
-                BinaryOp::Add,
-            ) => add_interval_to_temporal(y, *months, *days, *micros),
+            (_, T::Interval { .. }, BinaryOp::Add) => {
+                add_interval_to_temporal(x, interval_fields(y)?, false)
+            }
+            (_, T::Interval { .. }, BinaryOp::Subtract) => {
+                add_interval_to_temporal(x, interval_fields(y)?, true)
+            }
+            (T::Interval { .. }, _, BinaryOp::Add) => {
+                add_interval_to_temporal(y, interval_fields(x)?, false)
+            }
             (T::Time { micros: t1 }, T::Time { micros: t2 }, BinaryOp::Subtract) => {
                 Ok(Value::Temporal(T::Interval {
                     months: 0,
@@ -178,13 +147,13 @@ pub(super) fn temporal_arith_with_control(
                 let rhs = temporal_timestamp_micros(y)?;
                 let diff = lhs
                     .checked_sub(rhs)
-                    .ok_or_else(|| out_of_range("interval"))?;
+                    .ok_or_else(|| datetime_out_of_range("interval"))?;
                 // PostgreSQL justifies full 24h chunks into days but
                 // never synthesizes months from a timestamp difference.
                 Ok(Value::Temporal(T::Interval {
                     months: 0,
                     days: i32::try_from(diff / MICROS_PER_DAY)
-                        .map_err(|_| out_of_range("interval"))?,
+                        .map_err(|_| datetime_out_of_range("interval"))?,
                     micros: diff % MICROS_PER_DAY,
                 }))
             }
@@ -196,11 +165,11 @@ pub(super) fn temporal_arith_with_control(
         (Value::Temporal(T::Date { days }), Value::Int(n)) => match op {
             BinaryOp::Add => i64::from(*days)
                 .checked_add(*n)
-                .ok_or_else(|| out_of_range("date"))
+                .ok_or_else(|| datetime_out_of_range("date"))
                 .and_then(date_value),
             BinaryOp::Subtract => i64::from(*days)
                 .checked_sub(*n)
-                .ok_or_else(|| out_of_range("date"))
+                .ok_or_else(|| datetime_out_of_range("date"))
                 .and_then(date_value),
             _ => Err(SQLError::TypeMismatch(format!(
                 "unsupported temporal arithmetic: {a:?} {op:?} {b:?}"
@@ -208,42 +177,29 @@ pub(super) fn temporal_arith_with_control(
         },
         (Value::Int(n), Value::Temporal(T::Date { days })) if matches!(op, BinaryOp::Add) => n
             .checked_add(i64::from(*days))
-            .ok_or_else(|| out_of_range("date"))
+            .ok_or_else(|| datetime_out_of_range("date"))
             .and_then(date_value),
-        // interval * number / number * interval.
-        (
-            Value::Temporal(T::Interval {
-                months,
-                days,
-                micros,
-            }),
-            other,
-        ) if matches!(op, BinaryOp::Multiply | BinaryOp::Divide) => {
-            let factor = to_f64(other)?;
-            let factor = if matches!(op, BinaryOp::Divide) {
-                if factor == 0.0 {
-                    return Err(division_by_zero());
+        // interval * float8, interval / float8 and float8 * interval.
+        (Value::Temporal(interval @ T::Interval { .. }), other)
+            if matches!(op, BinaryOp::Multiply | BinaryOp::Divide) =>
+        {
+            let (interval, factor) = (interval_fields(interval)?, to_f64(other)?);
+            Ok(Value::Temporal(
+                if matches!(op, BinaryOp::Divide) {
+                    interval.divide(factor)?
+                } else {
+                    interval.multiply(factor)?
                 }
-                1.0 / factor
-            } else {
-                factor
-            };
-            Ok(Value::Temporal(scale_interval(
-                *months, *days, *micros, factor,
-            )?))
+                .value(),
+            ))
         }
-        (
-            other,
-            Value::Temporal(T::Interval {
-                months,
-                days,
-                micros,
-            }),
-        ) if matches!(op, BinaryOp::Multiply) => {
+        (other, Value::Temporal(interval @ T::Interval { .. }))
+            if matches!(op, BinaryOp::Multiply) =>
+        {
             let factor = to_f64(other)?;
-            Ok(Value::Temporal(scale_interval(
-                *months, *days, *micros, factor,
-            )?))
+            Ok(Value::Temporal(
+                interval_fields(interval)?.multiply(factor)?.value(),
+            ))
         }
         _ => Err(SQLError::TypeMismatch(format!(
             "unsupported temporal arithmetic: {a:?} {op:?} {b:?}"
@@ -253,68 +209,53 @@ pub(super) fn temporal_arith_with_control(
 
 fn date_value(days: i64) -> Result<Value> {
     Ok(Value::Temporal(TemporalValue::Date {
-        days: i32::try_from(days).map_err(|_| out_of_range("date"))?,
+        days: i32::try_from(days).map_err(|_| datetime_out_of_range("date"))?,
     }))
 }
 
-/// Multiply an interval by a factor, cascading fractional months into
-/// days and fractional days into microseconds (`PostgreSQL`
-/// `interval_mul` semantics).
-fn scale_interval(months: i32, days: i32, micros: i64, factor: f64) -> Result<TemporalValue> {
-    if !factor.is_finite() {
-        return Err(out_of_range("interval"));
-    }
-    let month_total = f64::from(months) * factor;
-    let month_whole = month_total.trunc();
-    let day_total = f64::from(days) * factor + (month_total - month_whole) * 30.0;
-    let day_whole = day_total.trunc();
-    let micro_total = micros as f64 * factor + (day_total - day_whole) * MICROS_PER_DAY as f64;
-    if !month_whole.is_finite()
-        || month_whole < f64::from(i32::MIN)
-        || month_whole >= 2_147_483_648.0
-        || !day_whole.is_finite()
-        || day_whole < f64::from(i32::MIN)
-        || day_whole >= 2_147_483_648.0
-    {
-        return Err(out_of_range("interval"));
-    }
-    Ok(TemporalValue::Interval {
-        months: month_whole as i32,
-        days: day_whole as i32,
-        micros: float_to_i64_rounded(micro_total, "interval")?,
-    })
+fn interval_fields(value: &TemporalValue) -> Result<IntervalFields> {
+    IntervalFields::of(value)
+        .ok_or_else(|| SQLError::Internal(format!("{value:?} is not an interval")))
 }
 
+/// `timestamp_pl_interval`, `timestamp_mi_interval` and their date, time and time with time zone counterparts. Subtraction from a date or timestamp adds the negated interval, while `time_mi_interval` and `timetz_mi_interval` subtract the time field alone.
 fn add_interval_to_temporal(
     base: &TemporalValue,
-    months: i32,
-    days: i32,
-    micros: i64,
+    span: IntervalFields,
+    subtract: bool,
 ) -> Result<Value> {
     use TemporalValue as T;
+    let calendar_span = || if subtract { span.negate() } else { Ok(span) };
     match base {
         // date +/- interval promotes to timestamp in PostgreSQL.
         T::Date { days: base_days } => {
             let ts = i64::from(*base_days) * MICROS_PER_DAY;
+            let span = calendar_span()?;
             Ok(Value::Temporal(T::Timestamp {
-                micros: timestamp_plus_interval(ts, months, days, micros)?,
+                micros: timestamp_plus_interval(ts, span.months, span.days, span.micros)?,
             }))
         }
-        T::Timestamp { micros: ts } => Ok(Value::Temporal(T::Timestamp {
-            micros: timestamp_plus_interval(*ts, months, days, micros)?,
-        })),
-        T::TimestampTz { micros: ts } => Ok(Value::Temporal(T::TimestampTz {
-            micros: timestamp_plus_interval(*ts, months, days, micros)?,
-        })),
+        T::Timestamp { micros: ts } => {
+            let span = calendar_span()?;
+            Ok(Value::Temporal(T::Timestamp {
+                micros: timestamp_plus_interval(*ts, span.months, span.days, span.micros)?,
+            }))
+        }
+        T::TimestampTz { micros: ts } => {
+            let span = calendar_span()?;
+            Ok(Value::Temporal(T::TimestampTz {
+                micros: timestamp_plus_interval(*ts, span.months, span.days, span.micros)?,
+            }))
+        }
         // time +/- interval wraps within the day; months/days vanish.
         T::Time { micros: t } => Ok(Value::Temporal(T::Time {
-            micros: wrap_time(*t, micros),
+            micros: wrap_time(*t, span.micros, subtract),
         })),
         T::TimeTz {
             micros: t,
             offset_minutes,
         } => Ok(Value::Temporal(T::TimeTz {
-            micros: wrap_time(*t, micros),
+            micros: wrap_time(*t, span.micros, subtract),
             offset_minutes: *offset_minutes,
         })),
         T::Interval { .. } => Err(SQLError::TypeMismatch(
@@ -323,8 +264,14 @@ fn add_interval_to_temporal(
     }
 }
 
-fn wrap_time(left: i64, right: i64) -> i64 {
-    (i128::from(left) + i128::from(right)).rem_euclid(i128::from(MICROS_PER_DAY)) as i64
+/// The time of day `time_pl_interval` and `time_mi_interval` compute: the 64-bit sum wraps as `PostgreSQL`'s `-fwrapv` build wraps it before it is reduced to one day.
+fn wrap_time(time: i64, span: i64, subtract: bool) -> i64 {
+    let result = if subtract {
+        time.wrapping_sub(span)
+    } else {
+        time.wrapping_add(span)
+    };
+    result.rem_euclid(MICROS_PER_DAY)
 }
 
 /// Absolute timestamp microseconds for datetime-like temporal values.
@@ -409,8 +356,8 @@ pub(super) fn age_between(a: &TemporalValue, b: &TemporalValue) -> Result<Value>
     }
     Ok(Value::Temporal(TemporalValue::Interval {
         months: i32::try_from(sign * (years * 12 + months))
-            .map_err(|_| out_of_range("interval"))?,
-        days: i32::try_from(sign * days).map_err(|_| out_of_range("interval"))?,
+            .map_err(|_| datetime_out_of_range("interval"))?,
+        days: i32::try_from(sign * days).map_err(|_| datetime_out_of_range("interval"))?,
         micros: sign * time,
     }))
 }
@@ -662,7 +609,7 @@ pub(super) fn make_timestamp(
     let micros = float_to_i64_rounded(second * MICROS_PER_SECOND as f64, "time")?;
     let naive = base
         .checked_add_signed(chrono::Duration::microseconds(micros))
-        .ok_or_else(|| out_of_range("timestamp"))?;
+        .ok_or_else(|| datetime_out_of_range("timestamp"))?;
     Ok(Value::Temporal(TemporalValue::Timestamp {
         micros: micros_from_naive(naive),
     }))

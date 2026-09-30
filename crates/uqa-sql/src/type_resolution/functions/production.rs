@@ -811,7 +811,7 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         "localtime" => inline(ColumnType::Time, control),
         "localtimestamp" | "make_timestamp" => inline(ColumnType::Timestamp, control),
         "current_date" | "make_date" | "to_date" => inline(ColumnType::Date, control),
-        "age" | "make_interval" | "justify_hours" => inline(ColumnType::Interval, control),
+        "age" | "make_interval" => inline(ColumnType::Interval, control),
         "date_trunc" => optional_inline(
             argument(1).map(|ty| match base_type(ty) {
                 ColumnType::Interval => ColumnType::Interval,

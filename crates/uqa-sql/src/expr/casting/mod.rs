@@ -12,7 +12,9 @@ mod legacy_vector;
 mod temporal;
 
 use super::conversion::value_to_string_with_control;
-use super::{out_of_range, ArrayValue, Result, SQLError, TemporalValue, Value};
+use super::{
+    datetime_out_of_range, out_of_range, ArrayValue, Result, SQLError, TemporalValue, Value,
+};
 use crate::ast::RangeSubtype;
 use uqa_core::memory::{Produced, ProductionControl, ProductionString, ProductionVec};
 
@@ -482,11 +484,13 @@ pub fn negate_value_with_control(
         ) => Ok(Value::Temporal(TemporalValue::Interval {
             months: months
                 .checked_neg()
-                .ok_or_else(|| out_of_range("interval"))?,
-            days: days.checked_neg().ok_or_else(|| out_of_range("interval"))?,
+                .ok_or_else(|| datetime_out_of_range("interval"))?,
+            days: days
+                .checked_neg()
+                .ok_or_else(|| datetime_out_of_range("interval"))?,
             micros: micros
                 .checked_neg()
-                .ok_or_else(|| out_of_range("interval"))?,
+                .ok_or_else(|| datetime_out_of_range("interval"))?,
         })),
         _ => Err(crate::type_resolution::undefined_prefix_operator(
             "-",

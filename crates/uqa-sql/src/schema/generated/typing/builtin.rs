@@ -442,13 +442,6 @@ pub(super) fn infer_builtin_function(
             require_class(name, args, TypeClass::Numeric)?;
             GenerationType::Interval
         }
-        "justify_hours" => {
-            require_arity(name, args, 1, 1)?;
-            if !matches!(args[0], GenerationType::Interval) {
-                return Err(function_type_error(name, &args[0], "interval"));
-            }
-            GenerationType::Interval
-        }
         "isfinite" => {
             require_signature(name, args, &[TypeClass::Temporal])?;
             GenerationType::Boolean
