@@ -362,10 +362,7 @@ fn rules(
             }
             dependencies.routines = routines.into_iter().collect();
         }
-        if rule_changed {
-            uqa_sql::catalog::events::synchronize_rule_sql_text(&mut rule.definition)?;
-            changed = true;
-        }
+        changed |= rule_changed;
     }
     if changed {
         catalog

@@ -18,6 +18,8 @@ mod catalog_dependencies;
 mod catalog_oid_order;
 #[path = "catalog/drop_dependencies.rs"]
 mod drop_dependencies;
+#[path = "catalog/event_definitions.rs"]
+mod event_definitions;
 #[path = "catalog/function_sqlbody.rs"]
 mod function_sqlbody;
 #[path = "catalog/legacy_type_names.rs"]

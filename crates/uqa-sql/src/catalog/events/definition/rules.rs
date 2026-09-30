@@ -635,7 +635,6 @@ impl EventAnalysisContext<'_> {
                 }),
             );
         }
-        super::super::synchronize_rule_sql_text(definition)?;
         Ok((relation, condition_plan, condition_binding, dependencies))
     }
 }

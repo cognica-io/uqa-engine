@@ -115,7 +115,6 @@ pub fn rewrite_stored_rule_relation(
             )?;
         }
     }
-    super::synchronize_rule_sql_text(&mut rule.definition)?;
     Ok(changed)
 }
 

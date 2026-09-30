@@ -8,6 +8,7 @@
 
 use std::fmt::Write as _;
 
+use uqa_core::Value;
 use uqa_sql::ast::{CteMaterialization, LockWait, NullsOrder, SetOpKind};
 use uqa_sql::ir::ScalarExpr;
 use uqa_sql::plan::{OrderPlan, QueryBlockPlan, QueryPlan, RelationalPlan};
@@ -281,7 +282,12 @@ impl Deparser<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
         for (index, projection) in projections.iter().enumerate() {
-            let mut expression = self.expression(&projection.expr, scope, subqueries)?;
+            let mut expression = match &projection.expr {
+                ScalarExpr::Literal(Value::Str(text)) if scope.unknown_outputs => {
+                    format!("'{}'", text.replace('\'', "''"))
+                }
+                expression => self.expression(expression, scope, subqueries)?,
+            };
             let name = names
                 .and_then(|names| names.get(index))
                 .cloned()

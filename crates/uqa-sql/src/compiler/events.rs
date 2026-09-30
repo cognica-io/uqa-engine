@@ -21,35 +21,6 @@ use super::{
     SQLError,
 };
 
-fn deparse_rule_condition(condition: &pg_query::protobuf::Node) -> Result<String> {
-    let target = pg_query::protobuf::Node {
-        node: Some(NodeEnum::ResTarget(Box::new(
-            pg_query::protobuf::ResTarget {
-                name: String::new(),
-                indirection: Vec::new(),
-                val: Some(Box::new(condition.clone())),
-                location: 0,
-            },
-        ))),
-    };
-    let select = pg_query::protobuf::Node {
-        node: Some(NodeEnum::SelectStmt(Box::new(
-            pg_query::protobuf::SelectStmt {
-                target_list: vec![target],
-                limit_option: pg_query::protobuf::LimitOption::Default as i32,
-                op: pg_query::protobuf::SetOperation::SetopNone as i32,
-                ..Default::default()
-            },
-        ))),
-    };
-    let sql = select
-        .deparse()
-        .map_err(|error| SQLError::Internal(format!("deparse CREATE RULE condition: {error}")))?;
-    sql.strip_prefix("SELECT ")
-        .map(str::to_string)
-        .ok_or_else(|| SQLError::Internal(format!("deparse CREATE RULE condition: {sql}")))
-}
-
 pub(super) fn compile_create_trigger(
     stmt: &pg_query::protobuf::CreateTrigStmt,
 ) -> Result<CreateTrigger> {
@@ -153,24 +124,10 @@ pub(super) fn compile_create_rule(stmt: &pg_query::protobuf::RuleStmt) -> Result
         }
     };
     let condition = stmt.where_clause.as_deref().map(compile_expr).transpose()?;
-    let condition_sql = stmt
-        .where_clause
-        .as_deref()
-        .map(deparse_rule_condition)
-        .transpose()?;
     let actions = stmt
         .actions
         .iter()
         .map(compile_stmt)
-        .collect::<Result<Vec<_>>>()?;
-    let action_sql = stmt
-        .actions
-        .iter()
-        .map(|action| {
-            action
-                .deparse()
-                .map_err(|error| SQLError::Internal(format!("deparse CREATE RULE action: {error}")))
-        })
         .collect::<Result<Vec<_>>>()?;
     for action in &actions {
         if !matches!(
@@ -205,9 +162,7 @@ pub(super) fn compile_create_rule(stmt: &pg_query::protobuf::RuleStmt) -> Result
         event,
         instead: stmt.instead,
         condition,
-        condition_sql,
         actions,
-        action_sql,
         or_replace: stmt.replace,
     })
 }

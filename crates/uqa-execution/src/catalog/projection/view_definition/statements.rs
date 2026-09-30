@@ -34,12 +34,31 @@ impl Deparser<'_> {
                 CommandPlan::Update(update) => self.update(update, scope),
                 CommandPlan::Delete(delete) => self.delete(delete, scope),
                 CommandPlan::Merge(merge) => self.merge(merge, scope),
+                CommandPlan::Notify { channel, payload } => {
+                    Ok(self.notify(channel, payload, scope))
+                }
                 other => Err(SQLError::Internal(format!(
                     "a routine body holds a {} statement, which SQL-standard bodies cannot contain",
                     other.name()
                 ))),
             },
         }
+    }
+
+    /// `get_utility_query_def`: a rule's `NOTIFY` action, which starts a new line one column in. The parser does not tell an empty payload from a missing one.
+    fn notify(&self, channel: &str, payload: &str, scope: &Scope) -> String {
+        let mut rendered = String::new();
+        if self.indent {
+            rendered.push('\n');
+            rendered.push_str(&" ".repeat(scope.indent + 1));
+        }
+        write!(rendered, "NOTIFY {}", quote_ident(channel))
+            .expect("writing to a String cannot fail");
+        if !payload.is_empty() {
+            write!(rendered, ", '{}'", payload.replace('\'', "''"))
+                .expect("writing to a String cannot fail");
+        }
+        rendered
     }
 
     /// `get_insert_query_def`.
@@ -86,8 +105,11 @@ impl Deparser<'_> {
         }
         match (&insert.source, insert.rows.as_slice()) {
             (Some(source), _) => {
+                let mut source_scope = scope.child();
+                source_scope.unknown_outputs =
+                    matches!(source.root, uqa_sql::plan::RelationalPlan::QueryBlock(_));
                 rendered.push(' ');
-                rendered.push_str(&self.query(source, &scope.child(), None)?);
+                rendered.push_str(&self.query(source, &source_scope, None)?);
             }
             (None, [row]) if row.is_empty() => rendered.push_str(" DEFAULT VALUES"),
             (None, [row]) => {

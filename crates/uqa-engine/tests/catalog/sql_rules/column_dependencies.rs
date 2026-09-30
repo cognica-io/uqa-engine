@@ -279,15 +279,16 @@ fn rule_join_keys_keep_their_visible_name_when_one_side_is_renamed() {
             panic!("expected rule definition text");
         };
         assert!(
-            definition.contains("join_key_left AS left_source(key_value, left_value)"),
+            definition.contains("join_key_left left_source(key_value, left_value)"),
             "{definition}"
         );
         assert!(
-            definition.contains("join_key_right AS right_source(key_value, right_value)"),
+            definition
+                .contains("join_key_right right_source(key_value, right_value) USING (key_value))"),
             "{definition}"
         );
         assert!(
-            definition.contains("AS joined(key_value, left_value, right_value)"),
+            definition.contains("WHERE joined.key_value = new.id"),
             "{definition}"
         );
     }
@@ -356,7 +357,7 @@ fn owned_sequence_cascade_does_not_restore_rules_while_rebinding_column_aliases(
         panic!("expected retained rule definition text");
     };
     assert!(
-        definition.contains("AS owner_alias(retained_alias)"),
+        definition.contains("sequence_alias_owner owner_alias(retained_alias)"),
         "{definition}"
     );
     assert!(
@@ -389,8 +390,7 @@ fn join_range_aliases_preserve_only_explicit_positional_names() {
     let Some(Value::Str(initial)) = initial.rows[0].get("definition") else {
         panic!("expected initial rule definition text");
     };
-    assert!(initial.contains("AS joined(join_key)"), "{initial}");
-    assert!(!initial.contains("AS joined(join_key,"), "{initial}");
+    assert!(initial.contains("SELECT joined.left_value"), "{initial}");
 
     exec(
         &engine,
@@ -408,10 +408,8 @@ fn join_range_aliases_preserve_only_explicit_positional_names() {
     let Some(Value::Str(renamed)) = renamed.rows[0].get("definition") else {
         panic!("expected renamed rule definition text");
     };
-    assert!(renamed.contains("AS joined(join_key)"), "{renamed}");
-    assert!(!renamed.contains("AS joined(join_key,"), "{renamed}");
     assert!(
-        renamed.contains("joined.renamed_left_value AS left_value"),
+        renamed.contains("SELECT joined.renamed_left_value AS left_value"),
         "{renamed}"
     );
 }

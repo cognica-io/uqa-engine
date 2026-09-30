@@ -322,6 +322,38 @@ impl Deparser<'_> {
             };
             return Ok(self.parenthesize(text));
         }
+        match binding.and_then(|binding| binding.dispatch) {
+            // `get_rule_expr` prints a `DistinctExpr` as an operator.
+            Some(FunctionDispatch::IsDistinct) => {
+                let [left, right] = args else {
+                    return Err(SQLError::Internal("invalid distinct operands".into()));
+                };
+                return Ok(self.parenthesize(format!(
+                    "{} IS DISTINCT FROM {}",
+                    self.operand(left, 40, false, scope, subqueries)?,
+                    self.operand(right, 40, true, scope, subqueries)?
+                )));
+            }
+            // A `ScalarArrayOpExpr`: the operator, then `ANY` or `ALL` over the parenthesized array.
+            Some(dispatch @ (FunctionDispatch::AnyOperator | FunctionDispatch::AllOperator)) => {
+                let [left, right, ScalarExpr::Literal(Value::Str(operator))] = args else {
+                    return Err(SQLError::Internal(
+                        "invalid quantified operator operands".into(),
+                    ));
+                };
+                return Ok(self.parenthesize(format!(
+                    "{} {operator} {} ({})",
+                    self.operand(left, 80, false, scope, subqueries)?,
+                    if dispatch == FunctionDispatch::AnyOperator {
+                        "ANY"
+                    } else {
+                        "ALL"
+                    },
+                    self.operand(right, 80, true, scope, subqueries)?
+                )));
+            }
+            _ => {}
+        }
         if let [left, right] = args {
             let operator = match name {
                 "like" => Some(("~~", 40)),
@@ -699,6 +731,25 @@ fn precedence(expression: &ScalarExpr) -> u8 {
             };
             numeric_operator_precedence(operator)
         }
+        ScalarExpr::Func {
+            binding: Some(binding),
+            ..
+        } if binding.dispatch == Some(uqa_sql::ast::FunctionDispatch::IsDistinct) => 40,
+        // `isSimpleNode` never counts a `ScalarArrayOpExpr` as simple, so it keeps its parentheses as any operand.
+        ScalarExpr::Func {
+            binding: Some(binding),
+            ..
+        } if matches!(
+            binding.dispatch,
+            Some(
+                uqa_sql::ast::FunctionDispatch::AnyOperator
+                    | uqa_sql::ast::FunctionDispatch::AllOperator
+            )
+        ) =>
+        {
+            0
+        }
+        ScalarExpr::InList { list, .. } if list.len() > 1 => 0,
         ScalarExpr::Or(_) => 10,
         ScalarExpr::And(_) | ScalarExpr::Between { .. } => 20,
         ScalarExpr::Not(_) => 30,

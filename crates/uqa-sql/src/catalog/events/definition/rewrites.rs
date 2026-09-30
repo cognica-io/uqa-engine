@@ -91,7 +91,6 @@ impl EventAnalysisContext<'_> {
                         action, target, new_name,
                     )?;
                 }
-                crate::catalog::events::synchronize_rule_sql_text(&mut rule.definition)?;
                 let (validated_relation, condition_plan, condition_binding, dependencies) = self
                     .validate_rule_definition(
                         &mut rule.definition,

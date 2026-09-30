@@ -208,6 +208,8 @@ struct Scope {
     range_table: bool,
     /// `colNamesVisible`: the output column names of this query level matter, so every column that is not a plain column reference prints its name.
     column_names_visible: bool,
+    /// The query is an `INSERT`'s source, whose output literals `transformInsertStmt` leaves `unknown` for the target columns to coerce, so they print without a type.
+    unknown_outputs: bool,
 }
 
 impl Scope {
@@ -436,6 +438,116 @@ pub fn routine_body_definition(
     }
     body.push_str("END");
     Ok(body)
+}
+
+/// A trigger's `WHEN` condition as `pg_get_triggerdef` prints it: `get_rule_expr` over the trigger relation's `old` and `new` entries at the standard indentation, with constants spelled through the catalog.
+pub fn trigger_condition_definition(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    condition: &uqa_sql::ast::Expr,
+    pretty: bool,
+) -> Result<String, SQLError> {
+    let expression = uqa_sql::plan::ExpressionPlan::lower(condition.clone());
+    event_deparser(catalog, resolution, pretty).expression(
+        &expression.scalar,
+        &Scope::default(),
+        &expression.subqueries,
+    )
+}
+
+/// A rewrite rule as `make_ruledef` prints it, which always indents: the event and the relation, which `relation` names as the caller qualified it, the condition over the rule's `old` and `new` entries, and each action as `get_query_def` prints it, followed by a semicolon.
+pub fn rule_definition(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    definition: &uqa_sql::ast::CreateRule,
+    relation: &str,
+    pretty: bool,
+) -> Result<String, SQLError> {
+    let deparser = event_deparser(catalog, resolution, pretty);
+    let event = match definition.event {
+        uqa_sql::ast::RuleEvent::Select => "SELECT",
+        uqa_sql::ast::RuleEvent::Update => "UPDATE",
+        uqa_sql::ast::RuleEvent::Insert => "INSERT",
+        uqa_sql::ast::RuleEvent::Delete => "DELETE",
+    };
+    let mut rendered = format!(
+        "CREATE RULE {} AS\n    ON {event} TO {relation}",
+        quote_ident(&definition.name)
+    );
+    if let Some(condition) = &definition.condition {
+        let expression = uqa_sql::plan::ExpressionPlan::lower(condition.clone());
+        rendered.push_str("\n   WHERE ");
+        append_context_text(
+            &mut rendered,
+            &deparser.expression(
+                &expression.scalar,
+                &Scope::default(),
+                &expression.subqueries,
+            )?,
+        );
+    }
+    rendered.push_str(" DO ");
+    if definition.instead {
+        rendered.push_str("INSTEAD ");
+    }
+    // The actions' range tables hold the rule's `old` and `new` entries, so their column references always carry a relation name.
+    let scope = Scope {
+        nested: true,
+        column_names_visible: true,
+        ..Scope::default()
+    };
+    let action = |statement: &uqa_sql::ast::Statement| {
+        deparser.statement(
+            &uqa_sql::plan::UnifiedPlan::lower(statement.clone()),
+            &scope,
+        )
+    };
+    match definition.actions.as_slice() {
+        [] => rendered.push_str("NOTHING;"),
+        [statement] => {
+            append_context_text(&mut rendered, &action(statement)?);
+            rendered.push(';');
+        }
+        statements => {
+            rendered.push('(');
+            for statement in statements {
+                append_context_text(&mut rendered, &action(statement)?);
+                rendered.push_str(";\n");
+            }
+            rendered.push_str(");");
+        }
+    }
+    Ok(rendered)
+}
+
+/// Append deparsed text that may start with `appendContextKeyword`'s line break, which first removes the spaces the buffer ends with.
+fn append_context_text(rendered: &mut String, text: &str) {
+    if text.starts_with('\n') {
+        rendered.truncate(rendered.trim_end_matches(' ').len());
+    }
+    rendered.push_str(text);
+}
+
+/// The deparser of trigger conditions and rewrite rules, which `ruleutils.c` prints with `PRETTYFLAG_INDENT` whether or not the caller asked for pretty output.
+fn event_deparser<'a>(
+    catalog: &'a CatalogReadView,
+    resolution: &RelationNameResolution,
+    pretty: bool,
+) -> Deparser<'a> {
+    let mut dynamic = resolution.clone();
+    dynamic.set_lookup_mode(RelationLookupMode::Dynamic);
+    let mut bound = resolution.clone();
+    bound.set_lookup_mode(RelationLookupMode::Bound);
+    Deparser {
+        catalog,
+        dynamic,
+        bound,
+        pretty,
+        wrap: 0,
+        standalone: false,
+        indent: true,
+        routine: None,
+    }
 }
 
 /// A stored catalog expression as `pg_get_expr` prints it without pretty-printing.
