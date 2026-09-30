@@ -30,6 +30,7 @@ impl Engine {
     fn view_creation_context(&self) -> ViewCreationContext<'_> {
         ViewCreationContext {
             catalog: self,
+            identities: self.catalog_identity_reservation_context(),
             views: self,
             locks: self,
             namespace: self.relation_creation_context(),

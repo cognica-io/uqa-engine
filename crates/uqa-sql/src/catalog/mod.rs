@@ -636,6 +636,7 @@ fn ag_catalog_domain(name: &str, base: ColumnType) -> ColumnType {
         schema: AG_CATALOG_SCHEMA.into(),
         name: name.into(),
         oid: ag_catalog_type_oid(name),
+        array_oid: None,
         base: Box::new(base),
     }
 }
@@ -685,11 +686,13 @@ fn array(element: ColumnType) -> ColumnType {
     ColumnType::Array(Box::new(element))
 }
 
+/// An `information_schema` domain; initdb assigned each domain's array type the preceding OID.
 fn information_schema_domain(name: &str, oid: u32, base: ColumnType) -> ColumnType {
     ColumnType::Domain {
         schema: "information_schema".into(),
         name: name.into(),
         oid,
+        array_oid: Some(oid - 1),
         base: Box::new(base),
     }
 }
@@ -848,6 +851,8 @@ pub const DATABASE_OID: i64 = 5;
 pub mod stored_ast;
 
 pub mod regrole_dependencies;
+
+pub mod relation_oids;
 
 pub mod security;
 

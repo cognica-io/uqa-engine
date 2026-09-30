@@ -36,6 +36,7 @@ fn view(id: u8, source: &str) -> StoredView {
         ),
         definition: uqa_sql::catalog::stored_view::StoredViewDefinition {
             object_id: [id; 16],
+            catalog_oids: None,
             query: *query,
             output_columns: None,
             persistence: RelationPersistence::Permanent,

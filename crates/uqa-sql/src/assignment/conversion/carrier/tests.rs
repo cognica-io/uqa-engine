@@ -56,6 +56,7 @@ fn context(base: ColumnType) -> Context {
         domain: StoredDomain {
             object_id: [3; 16],
             oid: 12345,
+            array_oid: None,
             identity: uqa_core::RelationIdentity::new("public", "legacy_items"),
             owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
             definition: crate::ast::CreateDomain {

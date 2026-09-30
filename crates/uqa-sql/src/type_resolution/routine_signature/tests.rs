@@ -91,6 +91,7 @@ fn simple_anyarray_flattens_array_domains() {
         schema: "public".into(),
         name: "ints".into(),
         oid: 42,
+        array_oid: None,
         base: Box::new(ColumnType::Array(Box::new(ColumnType::Integer))),
     };
     let matched = match_types(&[parameter("anyarray")], &[Some(domain)])
@@ -299,6 +300,7 @@ fn compatible_family_preserves_equal_domains_and_flattens_mixed_domains() {
         schema: "public".into(),
         name: "positive_int".into(),
         oid: 43,
+        array_oid: None,
         base: Box::new(ColumnType::Integer),
     };
     let same = match_types(

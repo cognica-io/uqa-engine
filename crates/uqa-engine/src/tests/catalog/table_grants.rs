@@ -126,6 +126,9 @@ impl SharedObjectLockSession for Authorization<'_> {
         self.calls.borrow_mut().push("shared-role-refresh");
         SharedObjectLockSession::refresh_shared_catalog(self.engine)
     }
+    fn next_catalog_oid(&self) -> Result<u32, SQLError> {
+        SharedObjectLockSession::next_catalog_oid(self.engine)
+    }
 }
 
 struct FailedForeignWrite<'a> {

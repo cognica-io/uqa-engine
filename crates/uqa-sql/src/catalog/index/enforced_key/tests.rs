@@ -14,6 +14,7 @@ fn declared(name: &str) -> EnforcedKey {
             object_id: [1; 16],
             oid: 50001,
         }),
+        index_identity: None,
         name: Some(name.into()),
         kind: TableKeyConstraintKind::Unique,
         columns: vec!["value".into()],

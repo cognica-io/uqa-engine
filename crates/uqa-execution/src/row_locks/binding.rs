@@ -26,6 +26,8 @@ pub trait RelationDefinitionSession: RelationLockSession {
 
 pub trait RelationLockCatalog {
     fn relation_object_id(&self, name: &str) -> Result<Option<[u8; 16]>, SQLError>;
+    /// The `pg_class` OID of a table, view, materialized view or foreign table, which addresses its catalog tuple.
+    fn relation_catalog_oid(&self, name: &str) -> Result<Option<u32>, SQLError>;
     fn table_name(&self, object_id: [u8; 16]) -> Option<String>;
 }
 

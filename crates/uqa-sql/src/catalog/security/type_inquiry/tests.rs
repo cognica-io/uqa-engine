@@ -92,6 +92,7 @@ fn usage_is_governed_by_the_array_element_or_the_domain_itself() {
         schema: "public".into(),
         name: "good_mood".into(),
         oid: 30_000,
+        array_oid: None,
         base: Box::new(feeling),
     };
     assert_eq!(

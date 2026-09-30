@@ -240,11 +240,14 @@ impl Engine {
             bodies: self,
         }
     }
+    /// Registration locks the routine's name and allocates its OID in a transaction, as every definition statement does.
     #[cfg(test)]
     pub(crate) fn register_sql_function(&self, def: CreateFunction) -> Result<(), SQLError> {
-        uqa_execution::routines::registration::register_sql_function(
-            &self.routine_registration_context(),
-            def,
-        )
+        self.with_implicit_definition_transaction(|engine| {
+            uqa_execution::routines::registration::register_sql_function(
+                &engine.routine_registration_context(),
+                def,
+            )
+        })
     }
 }

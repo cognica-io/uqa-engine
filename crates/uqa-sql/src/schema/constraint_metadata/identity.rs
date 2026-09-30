@@ -26,6 +26,12 @@ pub(super) fn materialize_key_identity(
             "invalid key constraint catalog identity".into(),
         ));
     }
+    // The enforcing index takes its OID before the constraint does.
+    let index_object_id = allocate.allocate_object_id("index")?;
+    key.index_identity = Some(ConstraintCatalogIdentity {
+        object_id: index_object_id,
+        oid: allocate.allocate_catalog_oid(super::CatalogOidClass::Relation, &index_object_id)?,
+    });
     let object_id = allocate.allocate_object_id("key constraint")?;
     key.catalog_identity = Some(ConstraintCatalogIdentity {
         object_id,

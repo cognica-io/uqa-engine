@@ -77,7 +77,7 @@ pub(in crate::schema::indexes) fn prepare(
                 .and_then(|(_, definition)| definition.relationships.parent_index);
             identity
         } else {
-            IndexCatalogIdentity::allocate(table_object_id, allocator).map_err(metadata_error)?
+            new_key_index_identity(key, &name, table_object_id, allocator)?
         };
         definition
             .relationships
@@ -117,4 +117,22 @@ pub(in crate::schema::indexes) fn prepare(
         .removals
         .extend(owned.into_values().map(|(row, _)| row.clone()));
     Ok(change)
+}
+
+/// A key whose index is not registered yet binds the index identity reserved with the key, as `index_create` precedes `index_constraint_create`; a key recorded before that reservation allocates one now.
+fn new_key_index_identity(
+    key: &uqa_sql::ast::TableKeyConstraint,
+    name: &RelationIdentity,
+    table_object_id: [u8; 16],
+    allocator: &mut dyn CatalogObjectAllocator,
+) -> StorageBackendResult<IndexCatalogIdentity> {
+    match key.index_identity {
+        Some(reserved) => {
+            allocator
+                .include_catalog_identity(name, CatalogOidClass::Relation, reserved)
+                .map_err(metadata_error)?;
+            IndexCatalogIdentity::reserved(table_object_id, reserved).map_err(metadata_error)
+        }
+        None => IndexCatalogIdentity::allocate(table_object_id, allocator).map_err(metadata_error),
+    }
 }

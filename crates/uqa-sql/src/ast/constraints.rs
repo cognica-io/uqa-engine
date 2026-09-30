@@ -225,6 +225,9 @@ pub struct TableKeyConstraint {
     /// Independent catalog row lifetime, retained while the owning index changes its name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catalog_identity: Option<ConstraintCatalogIdentity>,
+    /// The identity of the index that enforces the key (`conindid`), reserved before the constraint's own as `index_create` creates the index before `index_constraint_create`. Keys created before it was recorded bind their index when it is registered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index_identity: Option<ConstraintCatalogIdentity>,
     pub name: Option<String>,
     pub kind: TableKeyConstraintKind,
     pub columns: Vec<String>,
@@ -261,6 +264,9 @@ pub struct TableConstraintSet {
     /// Durable relation hierarchy and partition-bound metadata.
     #[serde(default)]
     pub hierarchy: TableHierarchy,
+    /// The relation's public OIDs, allocated when it was created. Tables created before OIDs were recorded derive them from their identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_oids: Option<crate::catalog::relation_oids::RelationCatalogOids>,
 }
 
 /// `CHECK (expr)` constraint with an optional name (`CONSTRAINT <name>

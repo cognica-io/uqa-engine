@@ -50,6 +50,10 @@ pub enum CatalogOidClass {
     Type,
     /// `pg_enum` label rows.
     EnumLabel,
+    /// `pg_rewrite` rows: user rules and the `_RETURN` rules of views.
+    Rewrite,
+    /// `pg_proc` rows.
+    Procedure,
 }
 
 impl CatalogOidClass {
@@ -59,6 +63,8 @@ impl CatalogOidClass {
             Self::Relation => 1259,
             Self::Type => 1247,
             Self::EnumLabel => 3501,
+            Self::Rewrite => 2618,
+            Self::Procedure => 1255,
         }
     }
 
@@ -68,6 +74,8 @@ impl CatalogOidClass {
             Self::Relation => "relation",
             Self::Type => "type",
             Self::EnumLabel => "enum label",
+            Self::Rewrite => "rule",
+            Self::Procedure => "function",
         }
     }
 }
@@ -325,6 +333,7 @@ pub fn materialize_column_key_constraints(
                 .key_constraints
                 .push(crate::ast::TableKeyConstraint {
                     catalog_identity: None,
+                    index_identity: None,
                     name: None,
                     kind,
                     columns: vec![column.name.clone()],

@@ -78,11 +78,10 @@ impl MembershipWork<'_, '_> {
     }
 
     fn insert(&mut self, insertion: MembershipInsertion) -> Result<(), SQLError> {
-        let oid = identity::reserve_membership_oid(
-            self.context,
-            &self.memberships.oids(),
-            identity::allocate_oid,
-        )?;
+        let context = self.context;
+        let oid = identity::reserve_membership_oid(context, &self.memberships.oids(), || {
+            identity::allocate_oid(context)
+        })?;
         if insertion.grantor.oid != 10 {
             let guard = self.context.locks.acquire_shared_catalog(
                 SharedCatalogLock::Object {

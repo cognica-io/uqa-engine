@@ -13,6 +13,7 @@ fn controlled_type_clones_hold_every_domain_and_array_allocation() {
         schema: "custom".into(),
         name: "numeric_values".into(),
         oid: 40000,
+        array_oid: None,
         base: Box::new(ColumnType::Array(Box::new(ColumnType::Numeric {
             precision: Some(10),
             scale: Some(-2),
@@ -104,6 +105,7 @@ fn type_production_checks_both_tokens_and_releases_partial_results() {
         schema: "a".repeat(64),
         name: "b".repeat(64),
         oid: 40000,
+        array_oid: None,
         base: Box::new(ColumnType::Text),
     };
     let budget = MemoryBudget::new(80);

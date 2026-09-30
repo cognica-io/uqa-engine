@@ -33,11 +33,19 @@ impl IndexCatalogIdentity {
     ) -> ConstraintMetadataResult<Self> {
         let object_id = allocate.allocate_object_id("index")?;
         let oid = allocate.allocate_catalog_oid(CatalogOidClass::Relation, &object_id)?;
+        Self::reserved(table_object_id, CatalogObjectIdentity { object_id, oid })
+    }
+
+    /// The identity of an index whose address was reserved in advance, as a key constraint reserves its enforcing index's.
+    pub fn reserved(
+        table_object_id: [u8; 16],
+        identity: CatalogObjectIdentity,
+    ) -> ConstraintMetadataResult<Self> {
         let identity = Self {
-            identity: CatalogObjectIdentity { object_id, oid },
+            identity,
             table_object_id,
             // A SQL-qualified identifier always contains a dot; this namespace cannot collide with a preserved legacy physical name.
-            physical_key: format!("uqa:index:{:032x}", u128::from_be_bytes(object_id)),
+            physical_key: format!("uqa:index:{:032x}", u128::from_be_bytes(identity.object_id)),
         };
         identity.validate(table_object_id)?;
         Ok(identity)

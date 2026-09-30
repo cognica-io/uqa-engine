@@ -72,6 +72,7 @@ impl TableOwnerState for OwnedTable<'_> {
             persistence: table.persistence,
             on_commit: table.on_commit,
             hierarchy: table.hierarchy.read().clone(),
+            catalog_oids: table.recorded_catalog_oids(),
         };
         TableOwnerSchema {
             columns,

@@ -107,6 +107,7 @@ impl<'a> Walker<'a> {
                 schema,
                 name,
                 oid: _,
+                array_oid: _,
                 base,
             } => {
                 self.text(schema)?;

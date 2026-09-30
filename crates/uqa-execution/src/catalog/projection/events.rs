@@ -586,7 +586,11 @@ fn catalog_view_rules(
 }
 
 fn view_rule_oid(view: &crate::catalog::view::StoredView) -> i64 {
-    super::helpers::oids::stable_object_oid("view-rule", &view.object_id)
+    i64::from(
+        view.relation_oids()
+            .rule
+            .expect("a view's OIDs include its _RETURN rule"),
+    )
 }
 
 fn definition_arguments(

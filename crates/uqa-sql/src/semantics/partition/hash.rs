@@ -294,6 +294,7 @@ mod tests {
             schema: "public".into(),
             name: "positive_integer".into(),
             oid: 42,
+            array_oid: None,
             base: Box::new(ColumnType::Integer),
         };
         assert_eq!(remainder(&Value::Int(42), &domain), 14);

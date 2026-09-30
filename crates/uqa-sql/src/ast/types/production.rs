@@ -47,6 +47,7 @@ impl ColumnType {
                 schema,
                 name,
                 oid,
+                array_oid,
                 base,
             } => {
                 let schema = control.copy_text(schema)?;
@@ -65,6 +66,7 @@ impl ColumnType {
                         schema,
                         name,
                         oid: *oid,
+                        array_oid: *array_oid,
                         base: Box::new(base),
                     },
                     memory,

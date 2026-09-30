@@ -165,13 +165,13 @@ pub fn initial_enum_labels(
 }
 
 impl<Owner> StoredEnum<Owner> {
-    /// Apply `ALTER TYPE ... ADD VALUE` with `PostgreSQL`'s check order: label length, existing label (or the `IF NOT EXISTS` notice), then the neighbor. The float4 sort position follows `AddEnumLabel`, renumbering every label to `1..n` when a midpoint collapses onto a neighbor; keys never change.
+    /// Apply `ALTER TYPE ... ADD VALUE` with `PostgreSQL`'s check order: label length, existing label (or the `IF NOT EXISTS` notice), then the neighbor. The float4 sort position follows `AddEnumLabel`, renumbering every label to `1..n` when a midpoint collapses onto a neighbor; keys never change. Only then does `allocate` draw the label's OID, which must satisfy the predicate it receives: an even OID when the new OID orders correctly against every even-numbered label and an odd one otherwise, as `AddEnumLabel` chooses it.
     pub fn add_label(
         &mut self,
         label: &str,
         neighbor: Option<&EnumNeighbor>,
         if_not_exists: bool,
-        oid: u32,
+        allocate: impl FnOnce(&dyn Fn(u32) -> bool) -> Result<u32, SQLError>,
     ) -> Result<AddedEnumLabel, SQLError> {
         validate_enum_label(label)?;
         if self.label_by_text(label).is_some() {
@@ -214,6 +214,20 @@ impl<Owner> StoredEnum<Owner> {
                 (position, key, order)
             }
         };
+        let labels = &self.labels;
+        let oid = allocate(&|candidate| {
+            let sorts = labels
+                .iter()
+                .filter(|existing| existing.oid % 2 == 0)
+                .all(|existing| {
+                    if existing.sort_order < sort_order {
+                        existing.oid < candidate
+                    } else {
+                        existing.oid > candidate
+                    }
+                });
+            sorts == (candidate % 2 == 0)
+        })?;
         self.labels.insert(
             position,
             StoredEnumLabel {
@@ -280,7 +294,7 @@ pub fn validate_enum_registry(
             .into_iter()
             .chain(definition.label_oids())
         {
-            if oid < 16_384 || !oids.insert(oid) {
+            if oid < super::oids::FIRST_NORMAL_OBJECT_ID || !oids.insert(oid) {
                 return Err(format!("invalid or duplicate enum OID {oid} for `{name}`"));
             }
         }

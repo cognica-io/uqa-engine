@@ -275,6 +275,7 @@ impl Engine {
             .map(|(relation, table)| {
                 let snapshot = CatalogTableSnapshot {
                     object_id: table.object_id(),
+                    catalog_oids: table.relation_oids(),
                     security: table.security.snapshot(),
                     columns: table.columns.snapshot(),
                     columns_declared: *table.columns_declared.read(),

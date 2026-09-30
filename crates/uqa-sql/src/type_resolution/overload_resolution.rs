@@ -367,6 +367,7 @@ mod tests {
             schema: "public".into(),
             name: "integer_domain".into(),
             oid: 99_999,
+            array_oid: None,
             base: Box::new(ColumnType::Integer),
         };
         let domain_match = match_function_signature(
@@ -420,6 +421,7 @@ mod tests {
             schema: "public".into(),
             name: "integer_domain".into(),
             oid: 99_999,
+            array_oid: None,
             base: Box::new(ColumnType::Integer),
         };
         let mut candidates = vec![

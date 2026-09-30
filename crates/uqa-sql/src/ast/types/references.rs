@@ -25,6 +25,7 @@ impl ColumnType {
                 name,
                 oid: domain_oid,
                 base,
+                ..
             } => {
                 let mut changed = base.rename_user_type(oid, identity);
                 if *domain_oid == oid {
@@ -57,6 +58,7 @@ mod tests {
             schema: "public".into(),
             name: "good_mood".into(),
             oid: 20_002,
+            array_oid: None,
             base: Box::new(mood),
         }));
         let feeling = RelationIdentity::new("other", "feeling");

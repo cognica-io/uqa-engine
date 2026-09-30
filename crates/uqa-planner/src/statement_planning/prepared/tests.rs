@@ -48,6 +48,7 @@ fn specialization_preserves_bound_domain_and_parameter_provenance() {
         schema: "public".into(),
         name: "positive".into(),
         oid: 90_001,
+        array_oid: None,
         base: Box::new(ColumnType::Integer),
     };
     let mut plan =

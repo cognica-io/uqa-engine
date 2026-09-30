@@ -22,6 +22,7 @@ fn registry() -> BTreeMap<String, StoredDomain> {
         StoredDomain {
             object_id: [1; 16],
             oid: domain_object_oid(&[1; 16]),
+            array_oid: None,
             identity: RelationIdentity::new("public", "positive"),
             owner: RoleIdentity::BOOTSTRAP,
             definition,

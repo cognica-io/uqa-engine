@@ -232,6 +232,13 @@ impl ForeignCreationContext<'_> {
             &mut columns,
             uqa_sql::ast::RelationPersistence::Permanent,
         )?;
+        // `DefineRelation` allocates the relation's OIDs before those of its constraints.
+        let catalog_oids = self
+            .identities
+            .allocator(crate::catalog::identity::allocate_catalog_object_id)
+            .allocate_relation_oids(
+                uqa_sql::catalog::relation_oids::RelationOidKind::ForeignTable,
+            )?;
         self.schema.prepare_foreign_table_schema(
             name,
             &mut columns,
@@ -260,6 +267,7 @@ impl ForeignCreationContext<'_> {
         let table = StoredForeignTable {
             name: name.to_string(),
             object_id,
+            catalog_oids: Some(catalog_oids),
             server_name,
             columns,
             checks,

@@ -78,6 +78,8 @@ enum CrossAttachment {
 pub struct RowLockManager {
     next_session: AtomicU64,
     next_transaction_xid: AtomicU64,
+    /// The OID counter of a database whose storage does not reserve identifiers durably.
+    catalog_oids: crate::catalog::identity::CatalogOidCounter,
     relation_ids: Mutex<HashMap<LockRelationIdentity, u64>>,
     relation_identities: Mutex<HashMap<u64, LockRelationIdentity>>,
     next_table: AtomicU64,

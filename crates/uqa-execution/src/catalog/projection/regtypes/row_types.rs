@@ -12,8 +12,6 @@ use uqa_sql::{ast::ColumnType, schema::domains::removal::RowTypeRelation, SQLErr
 use crate::catalog::context::CatalogContext;
 use crate::catalog::view::StoredViewKind;
 
-use super::super::helpers::oids::stable_object_oid;
-
 /// Find the table, view, materialized view or foreign table whose row type has this OID. The relation name uses `regclass` output, which qualifies names hidden by the search path.
 pub fn row_type_relation(
     context: &CatalogContext<'_>,
@@ -39,10 +37,10 @@ pub fn row_type_relation(
     };
     let snapshot = catalog.snapshot();
     for (identity, table) in &snapshot.tables {
-        if stable_object_oid("rowtype", &table.object_id) == oid {
+        if i64::from(table.catalog_oids.reltype()) == oid {
             return describe(
                 "table",
-                stable_object_oid("relation", &table.object_id),
+                i64::from(table.catalog_oids.relation),
                 identity,
                 table.security.role_owner,
             );
@@ -95,7 +93,7 @@ fn resolve_row_type_oid(context: &CatalogContext<'_>, name: &str) -> Result<Opti
         snapshot
             .tables
             .get(&identity)
-            .map(|table| stable_object_oid("rowtype", &table.object_id))
+            .map(|table| i64::from(table.catalog_oids.reltype()))
             .or_else(|| {
                 snapshot
                     .definitions

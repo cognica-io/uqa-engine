@@ -46,6 +46,7 @@ pub trait ViewQueryOwners {
 }
 pub struct ViewCreationContext<'a> {
     pub catalog: &'a dyn ViewCreationCatalog,
+    pub identities: crate::catalog::identity::CatalogIdentityReservationContext<'a>,
     pub locks: &'a dyn crate::row_locks::binding::RelationDefinitionSession,
     pub views: &'a dyn ViewAlterCatalog,
     pub namespace: crate::schema::namespaces::relations::RelationCreationContext<'a>,

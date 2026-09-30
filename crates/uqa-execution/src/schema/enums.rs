@@ -93,6 +93,10 @@ fn allocate_oid(
         .map_err(|_| SQLError::Internal(format!("invalid {} OID {oid}", class.label())))
 }
 
+fn label_oid(oid: i64) -> Result<u32, SQLError> {
+    u32::try_from(oid).map_err(|_| SQLError::Internal(format!("invalid enum label OID {oid}")))
+}
+
 /// `CREATE TYPE ... AS ENUM`. A name held by a generated array type first moves that array out of the way, as `PostgreSQL`'s `moveArrayTypeName` does; any other existing type is a 42710 conflict. Label validation follows the name checks.
 pub fn create_enum(context: &EnumTypeContext<'_>, definition: CreateEnum) -> Result<(), SQLError> {
     let owner = context.creation.bind_owner()?;
@@ -114,14 +118,20 @@ pub fn create_enum(context: &EnumTypeContext<'_>, definition: CreateEnum) -> Res
         &identity.name,
     )?;
     let object_id = (context.allocate_identity)()?;
+    // `DefineEnum` assigns the array type's OID before the enum's, and `EnumValuesCreate` then gives the labels even OIDs in ascending order.
     let mut allocator = context.identities.allocator(allocate_catalog_object_id);
-    let oid = allocate_oid(&mut allocator, CatalogOidClass::Type, &object_id)?;
     let array_oid = allocate_oid(&mut allocator, CatalogOidClass::Type, &object_id)?;
-    let label_oids = definition
+    let oid = allocate_oid(&mut allocator, CatalogOidClass::Type, &object_id)?;
+    let mut label_oids = definition
         .labels
         .iter()
-        .map(|_| allocate_oid(&mut allocator, CatalogOidClass::EnumLabel, &object_id))
+        .map(|_| {
+            allocator
+                .allocate_catalog_oid_matching(CatalogOidClass::EnumLabel, |oid| oid % 2 == 0)
+                .and_then(label_oid)
+        })
         .collect::<Result<Vec<_>, SQLError>>()?;
+    label_oids.sort_unstable();
     let labels = initial_enum_labels(oid, &definition.labels, &label_oids)?;
     context.creation.retain_owner(&owner)?;
     let before = context.publication.enum_registry().clone();
@@ -175,12 +185,14 @@ pub fn alter_enum(context: &EnumTypeContext<'_>, statement: AlterEnum) -> Result
             neighbor,
         } => {
             let mut allocator = context.identities.allocator(allocate_catalog_object_id);
-            let label_oid = allocate_oid(
-                &mut allocator,
-                CatalogOidClass::EnumLabel,
-                &definition.object_id,
-            )?;
-            match definition.add_label(&label, neighbor.as_ref(), if_not_exists, label_oid)? {
+            let allocate = |accept: &dyn Fn(u32) -> bool| {
+                allocator
+                    .allocate_catalog_oid_matching(CatalogOidClass::EnumLabel, |oid| {
+                        u32::try_from(oid).is_ok_and(accept)
+                    })
+                    .and_then(label_oid)
+            };
+            match definition.add_label(&label, neighbor.as_ref(), if_not_exists, allocate)? {
                 AddedEnumLabel::Added { oid, .. } => {
                     enum_type::publish(context.publication, &before, registry)?;
                     context.visibility.enum_label_added(resolved.oid, oid);

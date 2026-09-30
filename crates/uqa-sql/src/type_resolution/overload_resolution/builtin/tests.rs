@@ -23,6 +23,7 @@ fn local_resolution_borrows_rejected_declarations_and_retains_only_selected_resu
         schema: "public".into(),
         name: "rejected".repeat(1 << 15),
         oid: 90_001,
+        array_oid: None,
         base: Box::new(ColumnType::Text),
     };
     let builtins = [

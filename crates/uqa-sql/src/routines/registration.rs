@@ -104,6 +104,7 @@ pub fn prepare_routine_replacement(
             existing.name,
         ))
     })?);
+    def.catalog_oid = existing.catalog_oid;
     def.owner = existing.owner;
     def.execute_acl.clone_from(&existing.execute_acl);
     Ok(())

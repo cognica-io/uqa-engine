@@ -86,6 +86,7 @@ fn names() -> Vec<(ColumnType, &'static str, &'static str)> {
                 schema: "a\"B".into(),
                 name: "한.글".into(),
                 oid: 42,
+                array_oid: None,
                 base: Box::new(ColumnType::Text),
             },
             "\"a\"\"B\".\"한.글\"",
@@ -96,6 +97,7 @@ fn names() -> Vec<(ColumnType, &'static str, &'static str)> {
                 schema: "bare".into(),
                 name: "a1_$".into(),
                 oid: 43,
+                array_oid: None,
                 base: Box::new(ColumnType::Integer),
             },
             "bare.a1_$",
@@ -137,6 +139,7 @@ fn rejected_type_names_cleanup_and_both_cancellation_scopes_remain_active() {
         schema: "quoted.schema".repeat(200),
         name: "name".repeat(200),
         oid: 1,
+        array_oid: None,
         base: Box::new(ColumnType::Text),
     };
     for cancelled in [None, Some(true), Some(false)] {

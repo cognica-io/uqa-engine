@@ -164,12 +164,14 @@ fn register_view_plan_inner(
     }
     context.locks.prepare_definition_write()?;
     context.namespace.ensure_create(&name)?;
-    let object_id = if let Some(existing) = existing_view.as_ref() {
-        existing.object_id
+    // A replaced view keeps its identity and OIDs.
+    let (object_id, catalog_oids) = if let Some(existing) = existing_view.as_ref() {
+        (existing.object_id, existing.catalog_oids)
     } else {
-        context.catalog.allocate_identity().map_err(|error| {
+        let object_id = context.catalog.allocate_identity().map_err(|error| {
             SQLError::Internal(format!("allocate view `{name}` identity: {error}"))
-        })?
+        })?;
+        (object_id, Some(allocate_view_oids(context)?))
     };
     let view = StoredView {
         security: existing_view.as_ref().map_or_else(
@@ -186,6 +188,7 @@ fn register_view_plan_inner(
             materialized_rows: Vec::new(),
             materialized_column_types: Vec::new(),
             populated: true,
+            catalog_oids,
         },
     };
     uqa_sql::semantics::view_rewrite::validate_view_definition_check_option(
@@ -198,4 +201,14 @@ fn register_view_plan_inner(
     }
     publication::publish_regular_view(context.publication, context.changes, relation, view, &name)?;
     Ok(())
+}
+
+/// The OIDs of a new view or materialized view: its relation, array type and row type, then its `_RETURN` rule.
+pub(super) fn allocate_view_oids(
+    context: &ViewCreationContext<'_>,
+) -> Result<uqa_sql::catalog::relation_oids::RelationCatalogOids, SQLError> {
+    context
+        .identities
+        .allocator(crate::catalog::identity::allocate_catalog_object_id)
+        .allocate_relation_oids(uqa_sql::catalog::relation_oids::RelationOidKind::View)
 }

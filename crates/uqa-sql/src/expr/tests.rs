@@ -35,6 +35,7 @@ impl EngineHook for DomainCastHook {
             name: name.into(),
             base: Box::new(base),
             oid: 80_000,
+            array_oid: None,
         }))
     }
 }

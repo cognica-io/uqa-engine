@@ -540,6 +540,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                         AlterTableAction::AddKeyConstraint {
                             constraint: TableKeyConstraint {
                                 catalog_identity: None,
+                                index_identity: None,
                                 name,
                                 kind,
                                 columns,

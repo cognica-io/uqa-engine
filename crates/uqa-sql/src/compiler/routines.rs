@@ -397,6 +397,7 @@ pub(super) fn compile_create_function(
 
     Ok(CreateFunction {
         object_id: None,
+        catalog_oid: None,
         name,
         or_replace: stmt.replace,
         is_procedure: stmt.is_procedure,

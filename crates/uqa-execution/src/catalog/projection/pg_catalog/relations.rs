@@ -16,7 +16,7 @@ use crate::catalog::{CatalogReadView, RelationNameResolution};
 
 use super::super::helpers::acl::acl_identifier;
 use super::super::helpers::oids::{
-    current_user_oid, namespace_oid, relation_oid, split_schema_name, stable_object_oid, stable_oid,
+    current_user_oid, namespace_oid, relation_oid, split_schema_name, stable_oid,
 };
 use super::super::helpers::rows::{
     bool_value, catalog_array, catalog_name, int_value, row, str_value,
@@ -76,7 +76,7 @@ pub fn table_relation_oid_from(
     table: &str,
 ) -> Result<i64, SQLError> {
     if let Some(table_state) = catalog.table(resolution, table)? {
-        return Ok(stable_object_oid("relation", &table_state.object_id));
+        return Ok(i64::from(table_state.catalog_oids.relation));
     }
     if let Some((_, table)) = catalog.foreign_table_entry_resolved(resolution, table)? {
         return Ok(crate::catalog::projection::foreign_table_relation_oid(
@@ -94,7 +94,7 @@ pub fn table_rowtype_oid_from(
     let table_state = catalog
         .table(resolution, table)?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
-    Ok(stable_object_oid("rowtype", &table_state.object_id))
+    Ok(i64::from(table_state.catalog_oids.reltype()))
 }
 
 pub fn pg_class_row(

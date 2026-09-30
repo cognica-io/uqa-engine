@@ -17,7 +17,9 @@ use uqa_sql::catalog::constraints::ConstraintIdentity;
 pub use uqa_sql::catalog::domain::domain_object_oid;
 
 mod identity_claims;
-pub use identity_claims::{catalog_oid_in_use, validate_catalog_identity_claim};
+pub use identity_claims::{
+    catalog_oid_in_use, largest_catalog_oid, validate_catalog_identity_claim,
+};
 pub(crate) use identity_claims::{legacy_relation_claims, relation_claims};
 
 pub fn is_virtual_catalog_relation(resolution: &RelationNameResolution, name: &str) -> bool {
@@ -126,7 +128,7 @@ mod partitioning;
 mod pg_catalog;
 mod pg_namespace;
 mod pg_proc;
-pub(crate) use pg_proc::user_routine_catalog_oid;
+pub(crate) use pg_proc::{routine_oid_in_use, user_routine_catalog_oid};
 mod pg_settings;
 mod plpgsql;
 mod prepared_statements;
@@ -280,19 +282,19 @@ pub fn sequence_relation_oid(object_id: [u8; 16]) -> i64 {
     helpers::oids::stable_object_oid("relation", &object_id)
 }
 pub fn view_relation_oid(view: &crate::catalog::view::StoredView) -> i64 {
-    helpers::oids::stable_object_oid("relation", &view.object_id)
+    i64::from(view.relation_oids().relation)
 }
 
 pub fn view_rowtype_oid(view: &crate::catalog::view::StoredView) -> i64 {
-    helpers::oids::stable_object_oid("rowtype", &view.object_id)
+    i64::from(view.relation_oids().reltype())
 }
 
 pub fn foreign_table_relation_oid(table: &crate::catalog::foreign::StoredForeignTable) -> i64 {
-    helpers::oids::stable_object_oid("relation", &table.object_id)
+    i64::from(table.relation_oids().relation)
 }
 
 pub fn foreign_table_rowtype_oid(table: &crate::catalog::foreign::StoredForeignTable) -> i64 {
-    helpers::oids::stable_object_oid("rowtype", &table.object_id)
+    i64::from(table.relation_oids().reltype())
 }
 pub fn snapshot_table_relation_oid(
     catalog: &CatalogReadView,

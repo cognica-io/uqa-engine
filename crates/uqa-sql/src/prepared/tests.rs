@@ -31,6 +31,7 @@ fn domain(oid: u32, name: &str) -> ColumnType {
         schema: "public".into(),
         name: name.into(),
         oid,
+        array_oid: None,
         base: Box::new(ColumnType::Integer),
     }
 }

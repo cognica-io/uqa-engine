@@ -16,6 +16,7 @@ fn common_type_control_preserves_domain_identity_and_mixed_array_rules() {
         schema: "schema".into(),
         name: "number".into(),
         oid: 40000,
+        array_oid: None,
         base: Box::new(ColumnType::Integer),
     };
     let same = common_type_with_control(&domain, &domain, &control).unwrap();
@@ -103,6 +104,7 @@ fn common_input_type_keeps_a_domain_only_when_every_input_has_it() {
         schema: "public".into(),
         name: "positive".into(),
         oid: 40001,
+        array_oid: None,
         base: Box::new(ColumnType::Integer),
     };
     let select = |types: &[Option<&ColumnType>]| {

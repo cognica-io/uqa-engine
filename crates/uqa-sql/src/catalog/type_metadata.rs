@@ -152,7 +152,7 @@ pub fn pg_type_oid(ty: &ColumnType) -> i64 {
             ColumnType::Interval | ColumnType::IntervalWithFields { .. } => 1187,
             ColumnType::Vector(_) => 380_002,
             ColumnType::Tensor(_) => 380_003,
-            ColumnType::Domain { oid, .. } => pg_domain_array_oid(*oid),
+            ColumnType::Domain { oid, array_oid, .. } => pg_domain_array_oid(*oid, *array_oid),
             ColumnType::Enum(reference) => i64::from(reference.array_oid),
             ColumnType::Range(subtype) => match subtype {
                 RangeSubtype::Integer => 3905,
@@ -421,20 +421,17 @@ pub fn pg_type_array_oid(ty: &ColumnType) -> i64 {
             unreachable!("unresolved declaration type {name} reached catalog projection")
         }
         ColumnType::Array(_) => 0,
-        ColumnType::Domain { oid, .. } => pg_domain_array_oid(*oid),
+        ColumnType::Domain { oid, array_oid, .. } => pg_domain_array_oid(*oid, *array_oid),
         other => pg_type_oid(&ColumnType::Array(Box::new(other.clone()))),
     }
 }
 
-fn pg_domain_array_oid(domain_oid: u32) -> i64 {
-    match domain_oid {
-        13_307 => 13_306,
-        13_310 => 13_309,
-        13_312 => 13_311,
-        13_318 => 13_317,
-        13_320 => 13_319,
-        _ => super::oids::stable_oid("domain_array", &domain_oid.to_string()),
-    }
+/// The OID of a domain's generated array type: the recorded one, or for a domain created before array OIDs were recorded, the one derived from its OID.
+pub fn pg_domain_array_oid(domain_oid: u32, array_oid: Option<u32>) -> i64 {
+    array_oid.map_or_else(
+        || super::oids::stable_oid("domain_array", &domain_oid.to_string()),
+        i64::from,
+    )
 }
 
 pub fn pg_type_element_oid(ty: &ColumnType) -> i64 {

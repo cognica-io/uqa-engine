@@ -40,6 +40,7 @@ fn domain() -> ColumnType {
         schema: "app".into(),
         name: "bounded_text".into(),
         oid: 99_999,
+        array_oid: None,
         base: Box::new(ColumnType::Varchar(Some(17))),
     }
 }
@@ -63,6 +64,7 @@ fn function_results_retain_nested_type_payloads_and_release_inference_scratch() 
                 schema: "app".into(),
                 name: "bounded_integer".into(),
                 oid: 99_998,
+                array_oid: None,
                 base: Box::new(ColumnType::Integer),
             },
             ColumnType::Integer,

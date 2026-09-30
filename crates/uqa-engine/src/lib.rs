@@ -623,6 +623,8 @@ pub(crate) struct TableState {
     /// Immutable relation lifecycle attributes captured at creation.
     persistence: uqa_sql::ast::RelationPersistence,
     on_commit: uqa_sql::ast::OnCommitAction,
+    /// The public OIDs allocated when the table was created; `None` for a table created before OIDs were recorded, which derives them from its identity.
+    catalog_oids: Option<uqa_sql::catalog::relation_oids::RelationCatalogOids>,
 }
 
 impl TableState {
@@ -636,6 +638,22 @@ impl TableState {
 
     fn object_id(&self) -> [u8; 16] {
         self.object_id
+    }
+
+    fn recorded_catalog_oids(
+        &self,
+    ) -> Option<uqa_sql::catalog::relation_oids::RelationCatalogOids> {
+        self.catalog_oids
+    }
+
+    /// The table's public OIDs: the recorded ones, or those its identity derives.
+    fn relation_oids(&self) -> uqa_sql::catalog::relation_oids::RelationCatalogOids {
+        self.catalog_oids.unwrap_or_else(|| {
+            uqa_sql::catalog::relation_oids::RelationCatalogOids::legacy(
+                uqa_sql::catalog::relation_oids::RelationOidKind::Table,
+                &self.object_id,
+            )
+        })
     }
 
     fn role_owner(&self) -> uqa_sql::catalog::roles::RoleIdentity {

@@ -41,6 +41,11 @@ fn neighbor(label: &str, after: bool) -> Option<EnumNeighbor> {
     })
 }
 
+/// An allocator that supplies one OID whatever its parity.
+fn fixed(oid: u32) -> impl FnOnce(&dyn Fn(u32) -> bool) -> Result<u32, SQLError> {
+    move |_| Ok(oid)
+}
+
 fn assert_keys_increase(definition: &StoredEnum) {
     for pair in definition.labels.windows(2) {
         assert!(pair[0].key < pair[1].key, "{pair:?}");
@@ -54,7 +59,7 @@ fn sort_positions_follow_postgresql_add_enum_label() {
     let mut add = |definition: &mut StoredEnum, label: &str, position: Option<EnumNeighbor>| {
         next_oid += 1;
         definition
-            .add_label(label, position.as_ref(), false, next_oid)
+            .add_label(label, position.as_ref(), false, fixed(next_oid))
             .unwrap()
     };
     add(&mut definition, "curious", neighbor("ok", true));
@@ -87,18 +92,18 @@ fn collapsed_float4_midpoints_renumber_catalog_positions_but_not_keys() {
                 &format!("v{index}"),
                 neighbor("z", false).as_ref(),
                 false,
-                40_000 + index,
+                fixed(40_000 + index),
             )
             .unwrap();
     }
     definition
-        .add_label("v26", neighbor("a", true).as_ref(), false, 50_026)
+        .add_label("v26", neighbor("a", true).as_ref(), false, fixed(50_026))
         .unwrap();
     definition
-        .add_label("v27", neighbor("a", false).as_ref(), false, 50_027)
+        .add_label("v27", neighbor("a", false).as_ref(), false, fixed(50_027))
         .unwrap();
     definition
-        .add_label("v28", neighbor("v27", false).as_ref(), false, 50_028)
+        .add_label("v28", neighbor("v27", false).as_ref(), false, fixed(50_028))
         .unwrap();
     // Positions captured from PostgreSQL 18.4 for the same history.
     let mut expected = vec![
@@ -142,11 +147,11 @@ fn declaration_errors_follow_postgresql_check_order() {
 
     let mut definition = stored(&["sad", "ok", "happy"]);
     let error = definition
-        .add_label(&long, neighbor("missing", true).as_ref(), true, 9)
+        .add_label(&long, neighbor("missing", true).as_ref(), true, fixed(9))
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("42602"));
     let error = definition
-        .add_label("happy", neighbor("missing", true).as_ref(), false, 9)
+        .add_label("happy", neighbor("missing", true).as_ref(), false, fixed(9))
         .unwrap_err();
     assert_eq!(
         (error.sqlstate(), error.to_string()),
@@ -157,12 +162,12 @@ fn declaration_errors_follow_postgresql_check_order() {
     );
     assert_eq!(
         definition
-            .add_label("happy", neighbor("missing", true).as_ref(), true, 9)
+            .add_label("happy", neighbor("missing", true).as_ref(), true, fixed(9))
             .unwrap(),
         AddedEnumLabel::Skipped("enum label \"happy\" already exists, skipping".into())
     );
     let error = definition
-        .add_label("x", neighbor("missing", false).as_ref(), false, 9)
+        .add_label("x", neighbor("missing", false).as_ref(), false, fixed(9))
         .unwrap_err();
     assert_eq!(
         (error.sqlstate(), error.to_string()),
@@ -181,4 +186,37 @@ fn declaration_errors_follow_postgresql_check_order() {
     assert_eq!(error.sqlstate(), Some("42710"));
     let error = definition.rename_label("sad", "sad").unwrap_err();
     assert_eq!(error.sqlstate(), Some("42710"));
+}
+
+#[test]
+fn added_labels_take_the_oid_parity_their_sort_position_allows() {
+    let labels = ["sad".to_owned(), "ok".to_owned()];
+    let mut definition = stored(&[]);
+    definition.labels = initial_enum_labels(16_384, &labels, &[20_000, 20_002]).unwrap();
+    let mut counter = 30_000;
+    let mut draw = |definition: &mut StoredEnum, label: &str, position: Option<EnumNeighbor>| {
+        let AddedEnumLabel::Added { oid, .. } = definition
+            .add_label(label, position.as_ref(), false, |accept| loop {
+                counter += 1;
+                if accept(counter) {
+                    return Ok(counter);
+                }
+            })
+            .unwrap()
+        else {
+            panic!("the label is new")
+        };
+        oid
+    };
+    // A label at the end orders after every even-numbered label, so the odd OID is passed over for the next even one.
+    assert_eq!(draw(&mut definition, "happy", None), 30_002);
+    // A label placed before an older one cannot order by OID, so it keeps the odd OID that marks it.
+    assert_eq!(draw(&mut definition, "meh", neighbor("ok", false)), 30_003);
+    // An even candidate that does not order correctly is passed over for an odd one.
+    assert_eq!(
+        draw(&mut definition, "angry", neighbor("sad", false)),
+        30_005
+    );
+    // Labels with odd OIDs are ignored: the next label at the end takes an even OID again.
+    assert_eq!(draw(&mut definition, "ecstatic", None), 30_006);
 }

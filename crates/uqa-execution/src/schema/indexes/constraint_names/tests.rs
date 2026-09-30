@@ -90,6 +90,10 @@ fn candidate_names_follow_catalog_identity_without_replacing_key_structure() {
     candidate.key_constraints[0].columns = vec!["new_column".into()];
     let current = crate::catalog::CatalogTableSnapshot {
         object_id: [1; 16],
+        catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids::legacy(
+            uqa_sql::catalog::relation_oids::RelationOidKind::Table,
+            &[1; 16],
+        ),
         security: std::sync::Arc::new(crate::catalog::security::BoundTableSecurity::owner(
             uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
         )),

@@ -24,6 +24,7 @@ fn domain_dependencies_keep_the_owner_incarnation_after_its_name_is_reused() {
         crate::catalog::domain::StoredDomain {
             object_id: [1; 16],
             oid: crate::catalog::domain::domain_object_oid(&[1; 16]),
+            array_oid: None,
             identity: RelationIdentity::new("public", "owned"),
             owner: catalog.roles["first"].identity(),
             definition,

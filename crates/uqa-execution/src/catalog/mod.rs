@@ -50,6 +50,8 @@ pub struct CatalogReadSnapshot {
 #[derive(Clone)]
 pub struct CatalogTableSnapshot {
     pub object_id: [u8; 16],
+    /// The table's public OIDs, recorded or derived from its identity.
+    pub catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids,
     pub security: Arc<crate::catalog::security::BoundTableSecurity>,
     pub columns: Arc<Vec<uqa_sql::ast::ColumnDef>>,
     pub columns_declared: bool,

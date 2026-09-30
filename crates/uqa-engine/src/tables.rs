@@ -41,6 +41,7 @@ impl Engine {
             persistence: table.persistence,
             on_commit: table.on_commit,
             hierarchy: table.hierarchy.read().clone(),
+            catalog_oids: table.recorded_catalog_oids(),
         };
         self.try_save_table_schema_with_components(name, table, columns, &constraints)
     }
@@ -88,8 +89,13 @@ impl Engine {
             })
             .collect();
         let columns_json = serde_json::to_string(columns).map_err(StorageBackendError::from)?;
+        // The table's state is the authority for the OIDs it was created with.
+        let constraints = uqa_sql::ast::TableConstraintSet {
+            catalog_oids: table.recorded_catalog_oids(),
+            ..constraints.clone()
+        };
         let constraints_json =
-            uqa_execution::schema::indexes::constraint_names::encode(constraints)?;
+            uqa_execution::schema::indexes::constraint_names::encode(&constraints)?;
         catalog.save_table(&TableSchema {
             relation: RelationIdentity::from_legacy_name(name)
                 .map_err(StorageBackendError::Other)?,
@@ -223,6 +229,11 @@ impl Engine {
         self.relation_creation_context()
             .reserve_row_type_name(&name)
             .map_err(|error| StorageBackendError::backend("CREATE TABLE name", error))?;
+        let catalog_oids = self
+            .catalog_identity_reservation_context()
+            .allocator(uqa_execution::catalog::identity::allocate_catalog_object_id)
+            .allocate_relation_oids(uqa_sql::catalog::relation_oids::RelationOidKind::Table)
+            .map_err(|error| StorageBackendError::backend("CREATE TABLE OIDs", error))?;
         let table = TableState {
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: crate::new_table_object_id()?,
@@ -248,6 +259,7 @@ impl Engine {
             doc_count_dirty: AtomicBool::new(true),
             persistence,
             on_commit,
+            catalog_oids: Some(catalog_oids),
         };
         let table_arc = Arc::new(table);
         if self.is_persistent() && persistence != uqa_sql::ast::RelationPersistence::Temporary {

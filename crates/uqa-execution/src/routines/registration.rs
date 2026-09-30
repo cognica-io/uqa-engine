@@ -62,6 +62,41 @@ fn allocate_routine_object_id(
     }
 }
 
+/// The OID reserved for a routine that the registry did not hold when its creation began.
+fn created_routine_oid(name: &str, reserved: Option<u32>) -> Result<u32, SQLError> {
+    reserved.ok_or_else(|| {
+        SQLError::Internal(format!(
+            "routine `{name}` replaced during creation disappeared"
+        ))
+    })
+}
+
+/// `ProcedureCreate` keeps a replaced routine's OID and gives a new routine the next one: `None` for a replacement. The OID is reserved before the registry is held for writing, since the reservation reads the catalog.
+fn new_routine_oid(
+    context: &RoutineRegistrationContext<'_>,
+    name: &str,
+    signature: &[String],
+) -> Result<Option<u32>, SQLError> {
+    let routines = context.catalog.registry.routine_snapshot();
+    let replaces = routines.get(name).is_some_and(|overloads| {
+        overloads
+            .iter()
+            .any(|function| routine_signature_types(&function.def) == signature)
+    });
+    if replaces {
+        return Ok(None);
+    }
+    let oid = crate::catalog::identity::reserve_new_catalog_oid(
+        context.namespace.locks,
+        uqa_sql::schema::constraint_metadata::CatalogOidClass::Procedure.class_id(),
+        "function",
+        |oid| crate::catalog::projection::routine_oid_in_use(&routines, oid),
+    )?;
+    u32::try_from(oid)
+        .map(Some)
+        .map_err(|_| SQLError::Internal(format!("invalid routine OID {oid}")))
+}
+
 /// `CreateFunction` checks CREATE on the schema, the SUPPORT function and the superuser-only attributes before `interpret_function_parameter_list` resolves the argument types. The locked registration checks them again.
 fn validate_routine_creation_privileges(
     context: &RoutineRegistrationContext<'_>,
@@ -108,6 +143,7 @@ pub fn register_sql_function(
     )?;
     let name = def.name.clone();
     let signature = routine_signature_types(&def);
+    let new_oid = new_routine_oid(context, &name, &signature)?;
     let RoleDependencyCandidate {
         roles,
         memberships,
@@ -151,6 +187,7 @@ pub fn register_sql_function(
                 dependencies =
                     uqa_sql::routines::security::binding::routine_role_dependencies(&def, &roles)?;
                 def.object_id = Some(allocate_routine_object_id(&registry, &name)?);
+                def.catalog_oid = Some(created_routine_oid(&name, new_oid)?);
                 let published = Arc::new(SQLUserFunction::new(def, bound.body.clone()));
                 overloads.push(Arc::clone(&published));
                 published

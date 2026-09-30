@@ -143,18 +143,21 @@ fn information_schema_uses_pg18_domain_type_identities() {
                 schema: "information_schema".into(),
                 name: "sql_identifier".into(),
                 oid: 13_312,
+                array_oid: Some(13_311),
                 base: Box::new(ColumnType::Name),
             }),
             Some(ColumnType::Domain {
                 schema: "information_schema".into(),
                 name: "cardinal_number".into(),
                 oid: 13_307,
+                array_oid: Some(13_306),
                 base: Box::new(ColumnType::Integer),
             }),
             Some(ColumnType::Domain {
                 schema: "information_schema".into(),
                 name: "yes_or_no".into(),
                 oid: 13_320,
+                array_oid: Some(13_319),
                 base: Box::new(ColumnType::Varchar(Some(3))),
             }),
         ]

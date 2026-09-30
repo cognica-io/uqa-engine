@@ -192,6 +192,7 @@ impl Engine {
             foreign_keys: foreign_keys.to_vec(),
             key_constraints: key_constraints.to_vec(),
             hierarchy: hierarchy.clone(),
+            catalog_oids: table.recorded_catalog_oids(),
         };
         self.try_save_table_schema_with_components(name, table, columns, &constraints)
     }

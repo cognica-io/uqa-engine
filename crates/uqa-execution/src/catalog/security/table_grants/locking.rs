@@ -57,10 +57,14 @@ pub(super) fn lock_targets(
             let oid = if let Some(system) = system_target(&current.value) {
                 system.oid()
             } else {
-                let identity = current.object_id.ok_or_else(|| {
-                    SQLError::Internal("GRANT target has no bound identity".into())
-                })?;
-                uqa_sql::catalog::oids::stable_object_oid("relation", &identity)
+                i64::from(
+                    context
+                        .bindings
+                        .relation_catalog_oid(&current.value.name)?
+                        .ok_or_else(|| {
+                            SQLError::Internal("GRANT target has no catalog OID".into())
+                        })?,
+                )
             };
             for catalog in ["pg_catalog.pg_class", "pg_catalog.pg_attribute"] {
                 acquire_relation(

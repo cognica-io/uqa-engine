@@ -22,7 +22,11 @@ use uqa_sql::registry::registered_names;
 use uqa_sql::routines::{builtin_routine_support_oid, SQLUserFunction};
 use uqa_sql::{ResultRow, SQLError};
 
+/// The routine's public OID: the recorded one, or for a routine created before OIDs were recorded, the one its identity derives.
 pub fn user_routine_catalog_oid(function: &SQLUserFunction) -> Result<i64, SQLError> {
+    if let Some(oid) = function.def.catalog_oid {
+        return Ok(i64::from(oid));
+    }
     let object_id = function.def.object_id.ok_or_else(|| {
         SQLError::Internal(format!(
             "routine `{}` has no catalog object identity",
@@ -30,6 +34,21 @@ pub fn user_routine_catalog_oid(function: &SQLUserFunction) -> Result<i64, SQLEr
         ))
     })?;
     Ok(stable_object_oid("proc", &object_id))
+}
+
+/// Whether a routine holds `oid` in `pg_proc`: a user routine, or a registered function, whose OID derives from its name.
+pub fn routine_oid_in_use(
+    routines: &std::collections::BTreeMap<String, Vec<std::sync::Arc<SQLUserFunction>>>,
+    oid: i64,
+) -> Result<bool, SQLError> {
+    for function in routines.values().flatten() {
+        if user_routine_catalog_oid(function)? == oid {
+            return Ok(true);
+        }
+    }
+    Ok(registered_names()
+        .into_iter()
+        .any(|name| stable_oid("proc", name) == oid))
 }
 
 #[expect(

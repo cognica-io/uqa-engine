@@ -98,6 +98,7 @@ fn temporal_keys_cover_native_predicates_and_future_text_matches() {
             schema: "public".into(),
             name: "clock_value".into(),
             oid: 42_001,
+            array_oid: None,
             base: Box::new(ty),
         };
         assert_eq!(ScalarIndexDomain::from_column_type(&alias), Some(domain));

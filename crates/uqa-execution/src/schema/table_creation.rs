@@ -212,6 +212,8 @@ fn create_after_preflight(
         foreign_keys: table.foreign_keys.clone(),
         key_constraints: table.key_constraints.clone(),
         hierarchy: table.hierarchy.clone(),
+        // The created relation's state carries its OIDs; publication records them.
+        catalog_oids: None,
     };
     context
         .schema_transactions

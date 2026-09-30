@@ -298,6 +298,7 @@ pub fn constraint_catalog_rows(
             }
             key_constraints.push(uqa_sql::ast::TableKeyConstraint {
                 catalog_identity: None,
+                index_identity: None,
                 name: None,
                 kind,
                 columns: vec![column.name.clone()],

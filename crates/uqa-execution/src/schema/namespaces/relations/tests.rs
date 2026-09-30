@@ -118,6 +118,9 @@ impl SharedObjectLockSession for Fixture {
         }
         Ok(())
     }
+    fn next_catalog_oid(&self) -> Result<u32, SQLError> {
+        self.locks.catalog_oids().next_oid(None, || Ok(None))
+    }
 }
 struct EmptyNames;
 impl CreationRelationNames for EmptyNames {
