@@ -147,6 +147,7 @@ impl Engine {
         candidate: GraphStoreHandle,
     ) -> StorageBackendResult<Arc<GraphStoreHandle>> {
         let candidate = candidate.without_serializable_read();
+        self.record_created_graph_oids(&candidate)?;
         if self.session.state.read().graph_overlay.is_some() {
             let names = Arc::new(
                 candidate

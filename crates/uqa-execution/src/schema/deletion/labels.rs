@@ -25,18 +25,20 @@ pub fn drop_graph_label_dependents(
         .iter()
         .map(|label| RelationIdentity::new(graph, label))
         .collect::<Vec<_>>();
+    let catalog = context.catalog.catalog_read_view();
     let oids = LabelRelationOids(
         labels
             .iter()
             .zip(&relations)
             .map(|(label, relation)| {
-                (
+                Ok((
                     relation.qualified_name(),
-                    crate::catalog::projection::label_relation_oid(graph, label),
-                )
+                    crate::catalog::projection::named_label_relation_oid(&catalog, graph, label)?,
+                ))
             })
-            .collect(),
+            .collect::<Result<_, SQLError>>()?,
     );
+    drop(catalog);
     let names = oids.0.keys().cloned().collect::<BTreeSet<_>>();
     perform_quiet_cascade(context, |dependencies| {
         let catalog = context.catalog.catalog_read_view();

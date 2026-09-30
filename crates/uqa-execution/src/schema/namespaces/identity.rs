@@ -71,12 +71,13 @@ pub(super) fn reserve_creation(
         context.locks,
         SCHEMA_CATALOG_CLASS_ID,
         "schema",
-        |oid| Ok(oid_in_use(context.schemas, oid)),
+        |oid| Ok(namespace_oid_in_use(context.schemas, oid)),
     )?;
     new_tuple(oid).map_err(|error| SQLError::Internal(error.to_string()))
 }
 
-fn oid_in_use(
+/// Whether a namespace already holds `oid`: a built-in, created or graph schema.
+pub fn namespace_oid_in_use(
     catalog: &dyn uqa_sql::catalog::security::schema_inquiry::SchemaPrivilegeCatalog,
     oid: i64,
 ) -> bool {
@@ -93,5 +94,7 @@ fn oid_in_use(
     {
         return true;
     }
-    catalog.graphs().names().any(|name| schema_oid(name) == oid)
+    let graphs = catalog.graphs();
+    let in_use = graphs.names().any(|name| graphs.namespace_oid(name) == oid);
+    in_use
 }

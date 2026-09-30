@@ -91,6 +91,9 @@ pub(super) struct DurableCatalogState {
     pub(super) sequence_object_ids: CatalogCell<BTreeMap<RelationIdentity, [u8; 16]>>,
     /// The `pg_class` OIDs sequences recorded when they were created, by object identity.
     pub(super) sequence_catalog_oids: CatalogCell<BTreeMap<[u8; 16], u32>>,
+    /// The OIDs graphs and their labels recorded when they were created, by graph name.
+    pub(super) graph_catalog_oids:
+        CatalogCell<BTreeMap<String, uqa_sql::catalog::graph_oids::GraphCatalogOids>>,
     pub(super) sequence_persistence:
         CatalogCell<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
     pub(super) sequence_security: CatalogCell<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
@@ -128,6 +131,8 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
     pub(super) sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
     pub(super) sequence_catalog_oids: Arc<BTreeMap<[u8; 16], u32>>,
+    pub(super) graph_catalog_oids:
+        Arc<BTreeMap<String, uqa_sql::catalog::graph_oids::GraphCatalogOids>>,
     pub(super) sequence_persistence:
         Arc<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
     pub(super) sequence_security: Arc<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
@@ -167,6 +172,7 @@ impl DurableCatalogState {
             sequences: CatalogCell::new(BTreeMap::new()),
             sequence_object_ids: CatalogCell::new(BTreeMap::new()),
             sequence_catalog_oids: CatalogCell::new(BTreeMap::new()),
+            graph_catalog_oids: CatalogCell::new(BTreeMap::new()),
             sequence_persistence: CatalogCell::new(BTreeMap::new()),
             sequence_security: CatalogCell::new(BTreeMap::new()),
             named_analyzers: CatalogCell::new(BTreeMap::new()),
@@ -202,6 +208,7 @@ impl DurableCatalogState {
             sequences: self.sequences.snapshot(),
             sequence_object_ids: self.sequence_object_ids.snapshot(),
             sequence_catalog_oids: self.sequence_catalog_oids.snapshot(),
+            graph_catalog_oids: self.graph_catalog_oids.snapshot(),
             sequence_persistence: self.sequence_persistence.snapshot(),
             sequence_security: self.sequence_security.snapshot(),
             named_analyzers: self.named_analyzers.snapshot(),
@@ -233,6 +240,8 @@ impl DurableCatalogState {
             .restore(&snapshot.sequence_object_ids);
         self.sequence_catalog_oids
             .restore(&snapshot.sequence_catalog_oids);
+        self.graph_catalog_oids
+            .restore(&snapshot.graph_catalog_oids);
         self.sequence_persistence
             .restore(&snapshot.sequence_persistence);
         self.sequence_security.restore(&snapshot.sequence_security);

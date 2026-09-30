@@ -292,6 +292,14 @@ impl CatalogReadView {
         self.snapshot.definitions.role_memberships.values()
     }
 
+    /// The OIDs the graph recorded when it and its labels were created; `None` for a graph created before OIDs were recorded.
+    pub fn graph_catalog_oids(
+        &self,
+        graph: &str,
+    ) -> Option<&uqa_sql::catalog::graph_oids::GraphCatalogOids> {
+        self.snapshot.definitions.graph_catalog_oids.get(graph)
+    }
+
     /// The `pg_class` OID of the sequence with the object identity.
     pub fn sequence_catalog_oid(&self, object_id: &[u8; 16]) -> i64 {
         super::sequence::catalog_oids::sequence_catalog_oid(

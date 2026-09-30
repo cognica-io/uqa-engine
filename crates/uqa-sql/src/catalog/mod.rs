@@ -874,6 +874,7 @@ pub mod stored_ast;
 
 pub mod regrole_dependencies;
 
+pub mod graph_oids;
 pub mod relation_oids;
 
 pub mod security;

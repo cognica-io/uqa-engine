@@ -183,5 +183,8 @@ impl CatalogObjectAllocator for ReservedCatalogIdentityAllocator<'_> {
     }
 }
 
+mod graphs;
+pub use graphs::LabelShape;
+
 #[cfg(test)]
 mod tests;

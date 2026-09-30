@@ -106,7 +106,7 @@ pub fn build_info_schema_rows(
 }
 
 mod ag_catalog;
-pub(crate) use ag_catalog::label_relation_oid;
+pub(crate) use ag_catalog::named_label_relation_oid;
 mod builtin_routines;
 mod cursors;
 mod dependencies;

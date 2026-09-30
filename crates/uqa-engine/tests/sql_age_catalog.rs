@@ -17,6 +17,8 @@ use uqa_sql::SQLResult;
 
 #[path = "sql_age_catalog/default_label_drop.rs"]
 mod age_default_label_drop;
+#[path = "sql_age_catalog/catalog_oids.rs"]
+mod catalog_oids;
 #[path = "sql_age_catalog/persistence.rs"]
 mod persistence;
 

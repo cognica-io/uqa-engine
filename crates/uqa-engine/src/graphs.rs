@@ -7,6 +7,7 @@
 use super::{BTreeMap, Engine, RelationIdentity, StorageBackendResult, Value};
 use uqa_graph::GraphStore as _;
 
+mod catalog_oids;
 mod snapshots;
 
 fn graph_store_error(
@@ -65,6 +66,7 @@ impl Engine {
         store.drop_graph(name).map_err(graph_store_error)?;
         self.invalidate_graph_path_indexes(name)?;
         self.publish_graph_candidate(store)?;
+        self.forget_graph_oids(name)?;
         self.durable.graphs.write().remove(name);
         self.durable
             .path_indexes
@@ -242,15 +244,15 @@ impl Engine {
                 "graph `{graph}` does not exist"
             )));
         };
-        let dropped = candidate
+        let Some((label_id, _)) = candidate
             .drop_label(graph, label)
             .map_err(graph_store_error)?
-            .is_some();
-        if !dropped {
+        else {
             return Ok(false);
-        }
+        };
         self.invalidate_graph_path_indexes(graph)?;
         let published = self.publish_graph_candidate(candidate)?;
+        self.forget_graph_label_oids(graph, &[label_id])?;
         self.durable
             .graphs
             .write()
@@ -294,6 +296,7 @@ impl Engine {
             .collect::<BTreeMap<_, _>>();
         self.rewrite_view_relation_references(&replacements)?;
         self.invalidate_graph_path_indexes(from)?;
+        self.rename_graph_oids(from, to)?;
         let published = self.publish_graph_candidate(candidate)?;
         let mut graphs = self.durable.graphs.write();
         graphs.remove(from);

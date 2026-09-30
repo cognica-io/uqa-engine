@@ -14,6 +14,7 @@ use uqa_sql::{
     SQLError,
 };
 
+mod graphs;
 mod relations;
 pub(crate) use relations::{legacy_relation_claims, relation_claims};
 
@@ -23,6 +24,9 @@ pub fn catalog_oid_in_use(
     class: CatalogOidClass,
     oid: i64,
 ) -> Result<bool, SQLError> {
+    if graphs::graph_oid_in_use(catalog, class, oid) {
+        return Ok(true);
+    }
     match class {
         CatalogOidClass::Relation => Ok(relation_claims(catalog, resolution)?
             .iter()
@@ -145,7 +149,10 @@ pub fn largest_catalog_oid(
     for function in snapshot.definitions.sql_user_functions.values().flatten() {
         oids.push(super::user_routine_catalog_oid(function)?);
     }
-    // Namespaces without a catalog tuple, the extension and graph schemas, derive their OIDs from their names.
+    for graph in snapshot.definitions.graph_catalog_oids.values() {
+        oids.extend(graph.claimed().map(i64::from));
+    }
+    // Namespaces without a catalog tuple, the extension schema and graphs created before OIDs were recorded, derive their OIDs from their names.
     oids.extend(
         snapshot
             .definitions

@@ -29,6 +29,10 @@ pub type SchemaRegistryRead<'a> =
 pub trait GraphNamespaceRead {
     fn names(&self) -> Box<dyn Iterator<Item = &str> + '_>;
     fn contains(&self, name: &str) -> bool;
+    /// The OID of the graph's schema: the one its creation allocated, or for a graph created before OIDs were recorded the one its name derives.
+    fn namespace_oid(&self, name: &str) -> i64 {
+        crate::catalog::oids::schema_oid(name)
+    }
 }
 
 pub trait SchemaPrivilegeCatalog {
@@ -66,6 +70,11 @@ impl SchemaPrivilegeInquiry<'_> {
         if let Some(security) = self.catalog.schemas().get(schema) {
             return Some(security.clone());
         }
+        let graphs = self.catalog.graphs();
+        if graphs.contains(schema) && schema != self.catalog.temporary_schema_name() {
+            let oid = u32::try_from(graphs.namespace_oid(schema)).ok()?;
+            return Some(BoundSchemaSecurity::bootstrap_with_oid(schema, oid));
+        }
         let mut security = match schema {
             "pg_catalog" | "information_schema" => {
                 Some(BoundSchemaSecurity::with_public_privileges(false))
@@ -73,9 +82,6 @@ impl SchemaPrivilegeInquiry<'_> {
             "ag_catalog" => Some(BoundSchemaSecurity::bootstrap("ag_catalog")),
             name if name == self.catalog.temporary_schema_name() => {
                 Some(BoundSchemaSecurity::with_public_privileges(true))
-            }
-            name if self.catalog.graphs().contains(name) => {
-                Some(BoundSchemaSecurity::bootstrap(name))
             }
             _ => None,
         }?;

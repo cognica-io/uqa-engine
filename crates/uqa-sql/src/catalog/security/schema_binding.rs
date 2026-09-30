@@ -39,10 +39,16 @@ impl BoundSchemaSecurity {
     }
 
     pub fn bootstrap(name: &str) -> Self {
-        let mut security = Self::from_row(BoundSchemaRow::bootstrap(name)).1;
-        security.tuple = Some(SchemaTupleIdentity::initial(
+        Self::bootstrap_with_oid(
+            name,
             u32::try_from(crate::catalog::oids::schema_oid(name)).expect("bootstrap schema OID"),
-        ));
+        )
+    }
+
+    /// A bootstrap schema whose namespace took `oid`, as a graph's schema takes the OID its creation allocated.
+    pub fn bootstrap_with_oid(name: &str, oid: u32) -> Self {
+        let mut security = Self::from_row(BoundSchemaRow::bootstrap(name)).1;
+        security.tuple = Some(SchemaTupleIdentity::initial(oid));
         security
     }
 

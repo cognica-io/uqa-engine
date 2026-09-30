@@ -99,18 +99,34 @@ fn collect_relation_claims(
         });
     }
     for graph in crate::catalog::graph::graph_catalog_entries(catalog)? {
-        for (kind, name) in std::iter::once(("S", "_label_id_seq".to_string())).chain(
-            graph.labels.iter().flat_map(|label| {
-                [
-                    ("r", label.name.clone()),
-                    ("S", format!("{}_id_seq", label.name)),
-                ]
-            }),
-        ) {
+        // A graph's relations hold the OIDs it recorded, or for a graph or label created before OIDs were recorded the ones their names derive.
+        let recorded = catalog.graph_catalog_oids(&graph.name);
+        let derived =
+            |kind, name: &str| uqa_sql::catalog::oids::relation_oid(kind, &graph.name, name);
+        claims.push(RelationClaim {
+            relation: RelationIdentity::new(&graph.name, "_label_id_seq"),
+            object_id: None,
+            oid: recorded.map_or_else(
+                || derived("S", "_label_id_seq"),
+                |oids| i64::from(oids.label_sequence),
+            ),
+        });
+        for label in &graph.labels {
+            let label_oids = recorded.and_then(|oids| oids.labels.get(&label.id));
+            let sequence = format!("{}_id_seq", label.name);
             claims.push(RelationClaim {
-                relation: RelationIdentity::new(&graph.name, &name),
+                relation: RelationIdentity::new(&graph.name, &label.name),
                 object_id: None,
-                oid: uqa_sql::catalog::oids::relation_oid(kind, &graph.name, &name),
+                oid: label_oids.map_or_else(
+                    || derived("r", &label.name),
+                    |oids| i64::from(oids.relation.relation),
+                ),
+            });
+            claims.push(RelationClaim {
+                relation: RelationIdentity::new(&graph.name, &sequence),
+                object_id: None,
+                oid: label_oids
+                    .map_or_else(|| derived("S", &sequence), |oids| i64::from(oids.sequence)),
             });
         }
     }
