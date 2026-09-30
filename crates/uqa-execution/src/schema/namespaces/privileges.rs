@@ -46,7 +46,7 @@ pub trait SchemaPrivilegeRegistry {
     fn schemas_write(&self) -> SchemaRegistryWrite<'_>;
 }
 pub trait SchemaPrivilegeNotices {
-    fn schema_privilege_notice(&self, level: &str, message: &str);
+    fn schema_privilege_notice(&self, notice: uqa_sql::SQLNotice);
 }
 pub struct SchemaPrivilegeContext<'a> {
     pub writer: &'a dyn SchemaStatementWriter,
@@ -112,8 +112,8 @@ pub fn grant_schema_privileges(
             .schemas_write()
             .insert(name, value.security);
         context.changes.catalog_registry_changed();
-        if let Some((level, message)) = value.notice {
-            context.notices.schema_privilege_notice(level, &message);
+        if let Some(notice) = value.notice {
+            context.notices.schema_privilege_notice(notice);
         }
     }
     Ok(())
@@ -122,7 +122,7 @@ pub fn grant_schema_privileges(
 struct SchemaPrivilegeCandidate {
     before: uqa_core::catalog_schema::SchemaTupleIdentity,
     security: BoundSchemaSecurity,
-    notice: Option<(&'static str, String)>,
+    notice: Option<uqa_sql::SQLNotice>,
 }
 
 fn prepare_privileges<'a>(

@@ -106,10 +106,14 @@ pub fn build_info_schema_rows(
 }
 
 mod ag_catalog;
+pub(crate) use ag_catalog::label_relation_oid;
 mod builtin_routines;
 mod cursors;
 mod dependencies;
-pub use dependencies::{pg_describe_object_value, role_dependency_detail, CatalogDependencies};
+pub use dependencies::{
+    pg_describe_object_value, role_dependency_detail, CatalogDependencies, CatalogObject,
+    RelationKind,
+};
 mod events;
 use uqa_sql::catalog::expression_text;
 mod index_definition;
@@ -272,7 +276,10 @@ pub fn query_source_column_names(
 
 use ag_catalog::{build_ag_graph, build_ag_label};
 use events::{build_pg_rewrite, build_pg_rules, build_pg_trigger};
-pub use events::{event_relation_oid, pg_get_ruledef_value, pg_get_triggerdef_value};
+pub use events::{
+    event_relation_oid, legacy_rule_catalog_oid, pg_get_ruledef_value, pg_get_triggerdef_value,
+    rule_catalog_oid,
+};
 use information_schema::{
     build_info_catalog_name, build_info_column_privileges, build_info_columns,
     build_info_key_column_usage, build_info_routines, build_info_schemata, build_info_sequences,
@@ -286,7 +293,8 @@ pub fn table_relation_oid(context: &CatalogContext<'_>, table: &str) -> Result<i
     resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
     snapshot_table_relation_oid(&catalog, &resolution, table)
 }
-pub fn sequence_relation_oid(object_id: [u8; 16]) -> i64 {
+/// The OID a sequence created before OIDs were recorded derives from its identity.
+pub fn legacy_sequence_relation_oid(object_id: [u8; 16]) -> i64 {
     helpers::oids::stable_object_oid("relation", &object_id)
 }
 pub fn view_relation_oid(view: &crate::catalog::view::StoredView) -> i64 {

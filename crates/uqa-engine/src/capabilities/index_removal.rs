@@ -9,34 +9,21 @@ use crate::Engine;
 use uqa_core::RelationIdentity;
 use uqa_execution::schema::indexes::removal::{
     IndexRemovalCatalog, IndexRemovalContext, IndexRemovalPrivileges, IndexRemovalPublication,
-    IndexRemovalReferrers, IndexRemovalTransactions, IndexRemovalWrite,
+    IndexRemovalTransactions, IndexRemovalWrite,
 };
-use uqa_sql::{
-    ast::{ColumnType, ForeignKey},
-    catalog::resolution::RelationResolution,
-    SQLError, SQLResult,
-};
+use uqa_sql::{ast::ColumnType, catalog::resolution::RelationResolution, SQLError, SQLResult};
 use uqa_storage::{CatalogIndexRow, StorageBackendResult};
 impl Engine {
     pub(crate) fn index_removal_context(&self) -> IndexRemovalContext<'_> {
         IndexRemovalContext {
+            deletion: self,
             catalog: self,
             privileges: self,
-            referrers: self,
             publication: self,
             constraints: self.constraint_alter_context(),
             transactions: self,
             notices: self.query_runtime_view().notices,
         }
-    }
-    pub(crate) fn drop_index_dependency(
-        &self,
-        relation: &RelationIdentity,
-    ) -> Result<(), SQLError> {
-        uqa_execution::schema::indexes::removal::drop_index_dependency(
-            &self.index_removal_context(),
-            relation,
-        )
     }
 }
 impl IndexRemovalCatalog for Engine {
@@ -45,9 +32,6 @@ impl IndexRemovalCatalog for Engine {
     }
     fn bound_catalog_index(&self, name: &str) -> StorageBackendResult<Option<CatalogIndexRow>> {
         Engine::bound_catalog_index(self, name)
-    }
-    fn has_constraint_index(&self, relation: &RelationIdentity) -> bool {
-        self.catalog_read_view().has_constraint_index(relation)
     }
     fn list_catalog_indexes(&self) -> StorageBackendResult<Vec<CatalogIndexRow>> {
         Engine::catalog_indexes_in_execution(self)
@@ -59,11 +43,6 @@ impl IndexRemovalCatalog for Engine {
 impl IndexRemovalPrivileges for Engine {
     fn ensure_drop_authority(&self, index: &CatalogIndexRow) -> Result<(), SQLError> {
         self.require_index_drop_authority(index)
-    }
-}
-impl IndexRemovalReferrers for Engine {
-    fn referrers_to(&self, table: &str) -> StorageBackendResult<Vec<(String, ForeignKey)>> {
-        self.referrers_in_execution(table)
     }
 }
 impl IndexRemovalPublication for Engine {

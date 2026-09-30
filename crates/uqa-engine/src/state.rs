@@ -89,6 +89,8 @@ pub(super) struct DurableCatalogState {
     pub(super) path_indexes: CatalogCell<BTreeMap<String, uqa_graph::PathIndex>>,
     pub(super) sequences: CatalogCell<BTreeMap<RelationIdentity, SequenceState>>,
     pub(super) sequence_object_ids: CatalogCell<BTreeMap<RelationIdentity, [u8; 16]>>,
+    /// The `pg_class` OIDs sequences recorded when they were created, by object identity.
+    pub(super) sequence_catalog_oids: CatalogCell<BTreeMap<[u8; 16], u32>>,
     pub(super) sequence_persistence:
         CatalogCell<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
     pub(super) sequence_security: CatalogCell<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
@@ -125,6 +127,7 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) path_indexes: Arc<BTreeMap<String, uqa_graph::PathIndex>>,
     pub(super) sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
     pub(super) sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
+    pub(super) sequence_catalog_oids: Arc<BTreeMap<[u8; 16], u32>>,
     pub(super) sequence_persistence:
         Arc<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
     pub(super) sequence_security: Arc<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
@@ -163,6 +166,7 @@ impl DurableCatalogState {
             path_indexes: CatalogCell::new(BTreeMap::new()),
             sequences: CatalogCell::new(BTreeMap::new()),
             sequence_object_ids: CatalogCell::new(BTreeMap::new()),
+            sequence_catalog_oids: CatalogCell::new(BTreeMap::new()),
             sequence_persistence: CatalogCell::new(BTreeMap::new()),
             sequence_security: CatalogCell::new(BTreeMap::new()),
             named_analyzers: CatalogCell::new(BTreeMap::new()),
@@ -197,6 +201,7 @@ impl DurableCatalogState {
             path_indexes: self.path_indexes.snapshot(),
             sequences: self.sequences.snapshot(),
             sequence_object_ids: self.sequence_object_ids.snapshot(),
+            sequence_catalog_oids: self.sequence_catalog_oids.snapshot(),
             sequence_persistence: self.sequence_persistence.snapshot(),
             sequence_security: self.sequence_security.snapshot(),
             named_analyzers: self.named_analyzers.snapshot(),
@@ -226,6 +231,8 @@ impl DurableCatalogState {
         self.sequences.restore(&snapshot.sequences);
         self.sequence_object_ids
             .restore(&snapshot.sequence_object_ids);
+        self.sequence_catalog_oids
+            .restore(&snapshot.sequence_catalog_oids);
         self.sequence_persistence
             .restore(&snapshot.sequence_persistence);
         self.sequence_security.restore(&snapshot.sequence_security);
@@ -474,7 +481,7 @@ pub(super) struct QueryRuntime {
     pub(super) statement_gate: Arc<StatementGate>,
     pub(super) sql_execution_depth: AtomicUsize,
     pub(super) cancellation: uqa_core::CancellationToken,
-    pub(super) notices: Arc<Mutex<Vec<(String, String)>>>,
+    pub(super) notices: Arc<Mutex<Vec<uqa_sql::SQLNotice>>>,
     pub(super) notifications: Arc<Mutex<VecDeque<crate::SQLNotification>>>,
     pub(super) notification_wake: Arc<parking_lot::Condvar>,
     pub(super) function_depth_limit: AtomicUsize,

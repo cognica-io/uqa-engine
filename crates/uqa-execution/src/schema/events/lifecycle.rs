@@ -16,6 +16,7 @@ use uqa_sql::{
         },
         resolution::{RelationLookupMode, RelationResolution},
     },
+    schema::constraint_metadata::CatalogOidClass,
     SQLError,
 };
 
@@ -32,17 +33,11 @@ impl EventLifecycleContext<'_> {
             .resolve_visible_relation_kind(requested)?;
         match resolution {
             RelationResolution::MissingSchema(schema) if if_exists => {
-                self.notice(
-                    "NOTICE",
-                    &format!("schema \"{schema}\" does not exist, skipping"),
-                );
+                self.notice(format!("schema \"{schema}\" does not exist, skipping"));
                 Ok(None)
             }
             RelationResolution::MissingRelation if if_exists => {
-                self.notice(
-                    "NOTICE",
-                    &format!("relation \"{requested}\" does not exist, skipping"),
-                );
+                self.notice(format!("relation \"{requested}\" does not exist, skipping"));
                 Ok(None)
             }
             resolution => Ok(Some(resolution)),
@@ -98,6 +93,7 @@ impl EventLifecycleContext<'_> {
             return Ok(());
         }
         self.writer.prepare_writer()?;
+        let reserved = self.reserve_rule_oid(&relation, &definition.name)?;
         let mut rules = self.catalog.registry.rules();
         let mut next = rules.clone();
         let relation_rules = next.entry(relation).or_default();
@@ -111,6 +107,15 @@ impl EventLifecycleContext<'_> {
         let enabled = relation_rules
             .get(&definition.name)
             .map_or(EventEnableMode::Origin, |rule| rule.enabled);
+        let catalog_oid = match relation_rules.get(&definition.name) {
+            Some(existing) => crate::catalog::projection::rule_catalog_oid(existing),
+            None => reserved.ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "rule `{}` was removed while the definition writer was held",
+                    definition.name
+                ))
+            })?,
+        };
         relation_rules.insert(
             definition.name.clone(),
             StoredRule {
@@ -119,6 +124,7 @@ impl EventLifecycleContext<'_> {
                 condition_plan,
                 condition_binding,
                 dependencies: Some(dependencies),
+                catalog_oid: Some(catalog_oid),
             },
         );
         self.catalog.publication.persist_rules(&next)?;
@@ -165,12 +171,14 @@ impl EventLifecycleContext<'_> {
                 .view_definition(&table)?
                 .is_some()
         {
-            return Err(SQLError::Routine {
+            return Err(SQLError::Diagnostic {
                 sqlstate: "2BP01".into(),
                 message: format!(
-                    "cannot drop rule _RETURN on view {} because view {} requires it\nHINT: You can drop view {} instead.",
-                    relation.name, relation.name, relation.name
+                    "cannot drop rule _RETURN on view {} because view {} requires it",
+                    relation.name, relation.name
                 ),
+                detail: None,
+                hint: Some(format!("You can drop view {} instead.", relation.name)),
             });
         }
         self.writer.prepare_writer()?;
@@ -181,13 +189,10 @@ impl EventLifecycleContext<'_> {
             .and_then(|entries| entries.remove(&statement.name));
         if removed.is_none() {
             if statement.if_exists {
-                self.notice(
-                    "NOTICE",
-                    &format!(
-                        "rule \"{}\" for relation \"{}\" does not exist, skipping",
-                        statement.name, table
-                    ),
-                );
+                self.notice(format!(
+                    "rule \"{}\" for relation \"{}\" does not exist, skipping",
+                    statement.name, table
+                ));
                 return Ok(());
             }
             return Err(undefined_rule(&statement.name, &table));
@@ -293,6 +298,8 @@ impl EventLifecycleContext<'_> {
             )?;
         }
         self.writer.prepare_writer()?;
+        let reserved =
+            self.reserve_trigger_oids(&relation, &definition.name, definition.constraint)?;
         let mut triggers = self.catalog.registry.triggers();
         let mut next = triggers.clone();
         let table_triggers = next.entry(relation).or_default();
@@ -318,6 +325,15 @@ impl EventLifecycleContext<'_> {
             None => Some(new_trigger_object_id()?),
         };
         let constraint_name = definition.constraint.then(|| definition.name.clone());
+        let (catalog_oid, constraint_catalog_oid) = match table_triggers.get(&definition.name) {
+            Some(existing) => (existing.catalog_oid, existing.constraint_catalog_oid),
+            None => reserved.ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "trigger `{}` was removed while the definition writer was held",
+                    definition.name
+                ))
+            })?,
+        };
         table_triggers.insert(
             definition.name.clone(),
             StoredTrigger {
@@ -326,6 +342,8 @@ impl EventLifecycleContext<'_> {
                 enabled: EventEnableMode::Origin,
                 object_id,
                 constraint_name,
+                catalog_oid,
+                constraint_catalog_oid,
             },
         );
         self.catalog.publication.persist_triggers(&next)?;
@@ -372,13 +390,10 @@ impl EventLifecycleContext<'_> {
             .and_then(|entries| entries.remove(&statement.name));
         let Some(removed) = removed else {
             if statement.if_exists {
-                self.notice(
-                    "NOTICE",
-                    &format!(
-                        "trigger \"{}\" for relation \"{}\" does not exist, skipping",
-                        statement.name, table
-                    ),
-                );
+                self.notice(format!(
+                    "trigger \"{}\" for relation \"{}\" does not exist, skipping",
+                    statement.name, table
+                ));
                 return Ok(());
             }
             return Err(undefined_object("trigger", &statement.name, &relation.name));
@@ -500,6 +515,9 @@ impl EventLifecycleContext<'_> {
     }
 }
 
+/// The `pg_trigger` OID of a trigger, and the `pg_constraint` OID of a constraint trigger's constraint.
+type TriggerCatalogOids = (Option<i64>, Option<i64>);
+
 fn new_trigger_object_id() -> Result<[u8; 16], SQLError> {
     let mut object_id = [0_u8; 16];
     getrandom::fill(&mut object_id).map_err(|error| {
@@ -514,9 +532,57 @@ fn new_trigger_object_id() -> Result<[u8; 16], SQLError> {
 }
 
 impl EventLifecycleContext<'_> {
-    pub(super) fn notice(&self, level: &str, message: &str) {
+    pub(super) fn notice(&self, message: impl Into<String>) {
         self.notices
             .lock()
-            .push((level.to_string(), message.to_string()));
+            .push(uqa_sql::SQLNotice::notice(message));
+    }
+
+    /// The OID of the rule `InsertRule` creates, or `None` when it replaces a rule, whose OID it keeps. Reserving reads a catalog snapshot, which includes the rule registry, so it precedes the registry's write guard.
+    fn reserve_rule_oid(
+        &self,
+        relation: &uqa_core::RelationIdentity,
+        name: &str,
+    ) -> Result<Option<i64>, SQLError> {
+        if self
+            .catalog
+            .registry
+            .rules()
+            .get(relation)
+            .is_some_and(|rules| rules.contains_key(name))
+        {
+            return Ok(None);
+        }
+        self.identities
+            .allocator(crate::catalog::identity::allocate_catalog_object_id)
+            .allocate_catalog_oid_matching(CatalogOidClass::Rewrite, |_| true)
+            .map(Some)
+    }
+
+    /// The OIDs of the trigger `CreateTrigger` creates and of a constraint trigger's constraint, which it allocates after the trigger's, or `None` when it replaces a trigger, whose OIDs it keeps. Reserving reads a catalog snapshot, which includes the trigger registry, so it precedes the registry's write guard.
+    fn reserve_trigger_oids(
+        &self,
+        relation: &uqa_core::RelationIdentity,
+        name: &str,
+        constraint: bool,
+    ) -> Result<Option<TriggerCatalogOids>, SQLError> {
+        if self
+            .catalog
+            .registry
+            .triggers()
+            .get(relation)
+            .is_some_and(|triggers| triggers.contains_key(name))
+        {
+            return Ok(None);
+        }
+        let mut allocator = self
+            .identities
+            .allocator(crate::catalog::identity::allocate_catalog_object_id);
+        let trigger =
+            allocator.allocate_catalog_oid_matching(CatalogOidClass::Trigger, |_| true)?;
+        let constraint = constraint
+            .then(|| allocator.allocate_catalog_oid_matching(CatalogOidClass::Constraint, |_| true))
+            .transpose()?;
+        Ok(Some((Some(trigger), constraint)))
     }
 }

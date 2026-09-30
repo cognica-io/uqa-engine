@@ -15,7 +15,6 @@ use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::{FunctionBinding, RelationPersistence},
     catalog::stored_view::dependencies as analysis,
-    SQLError,
 };
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
@@ -60,29 +59,6 @@ pub fn views_depending_on_function(
         &context.views.view_definitions(),
         target,
     ))
-}
-
-pub fn cascade_view_closure(
-    context: &ViewDependencyContext<'_>,
-    initial: Vec<String>,
-) -> Result<Vec<String>, SQLError> {
-    let mut views = initial;
-    views.sort();
-    views.dedup();
-    let mut index = 0;
-    while index < views.len() {
-        let dependents = views_depending_on_relation(context, &views[index]).map_err(|error| {
-            SQLError::Internal(format!("read cascading view dependencies: {error}"))
-        })?;
-        for dependent in dependents {
-            if !views.contains(&dependent) {
-                views.push(dependent);
-            }
-        }
-        index += 1;
-    }
-    views.sort();
-    Ok(views)
 }
 
 pub fn rewrite_view_routine_identity(

@@ -305,6 +305,7 @@ impl Engine {
                 schemas: durable.schemas.clone(),
                 sequences: durable.sequences.clone(),
                 sequence_object_ids: durable.sequence_object_ids.clone(),
+                sequence_catalog_oids: durable.sequence_catalog_oids.clone(),
                 sequence_security: durable.sequence_security.clone(),
                 foreign_table_security: durable.foreign_table_security.clone(),
                 system_relation_security: durable.system_relation_security.clone(),
@@ -644,6 +645,8 @@ mod view_restoration;
 mod domains;
 mod enums;
 mod namespaces;
+
+mod object_removal;
 mod type_lifecycle;
 
 mod index_routines;

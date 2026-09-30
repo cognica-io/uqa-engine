@@ -447,14 +447,8 @@ pub fn validate_schema_acl_roles(
     Ok(())
 }
 
-pub fn schema_acl_warning(is_grant: bool, partial: bool, name: &str) -> (&'static str, String) {
-    let message = match (is_grant, partial) {
-        (true, true) => format!("not all privileges were granted for \"{name}\""),
-        (true, false) => format!("no privileges were granted for \"{name}\""),
-        (false, true) => format!("not all privileges could be revoked for \"{name}\""),
-        (false, false) => format!("no privileges could be revoked for \"{name}\""),
-    };
-    ("WARNING", message)
+pub fn schema_acl_warning(is_grant: bool, partial: bool, name: &str) -> crate::SQLNotice {
+    super::object_acl::privilege_warning(is_grant, partial, name)
 }
 
 pub fn resolve_schema_grant_targets(

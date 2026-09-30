@@ -88,8 +88,6 @@ pub fn rewritten_view_sequence_references(
     Ok(changed.then_some(rewritten))
 }
 
-pub mod analysis;
-
 pub fn detach_sequence_provenance(columns: &mut [crate::ast::ColumnDef], sequence: &str) -> bool {
     let mut changed = false;
     for column in columns {

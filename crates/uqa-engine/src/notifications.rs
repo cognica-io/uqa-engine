@@ -311,7 +311,7 @@ struct NotificationSessionCommit<'a> {
     channels: Vec<String>,
     queue: &'a Arc<Mutex<VecDeque<SQLNotification>>>,
     wake: &'a Arc<Condvar>,
-    notices: &'a Arc<Mutex<Vec<(String, String)>>>,
+    notices: &'a Arc<Mutex<Vec<uqa_sql::SQLNotice>>>,
     pending: &'a [PendingNotification],
 }
 
@@ -331,7 +331,7 @@ pub(super) struct CrossNotificationCommit {
     publication: Option<uqa_storage::notifications::NotificationPublication>,
     previous_publication: Option<[u8; 32]>,
     wake_ports: uqa_storage::notifications::NotificationWakePorts,
-    warning: Option<String>,
+    warning: Option<uqa_sql::SQLNotice>,
 }
 
 #[derive(Clone, Copy)]
@@ -855,9 +855,15 @@ mod tests {
             cross: None,
             cross_error: Mutex::new(None),
         };
+        let warning = hub.queue_warning(&mut state).unwrap();
+        assert_eq!(warning.message, "NOTIFY queue is 100% full");
         assert_eq!(
-            hub.queue_warning(&mut state).as_deref(),
-            Some("NOTIFY queue is 100% full\nDETAIL: The server process with PID 42 is among those with the oldest transactions.\nHINT: The NOTIFY queue cannot be emptied until that process ends its current transaction.")
+            warning.detail.as_deref(),
+            Some("The server process with PID 42 is among those with the oldest transactions.")
+        );
+        assert_eq!(
+            warning.hint.as_deref(),
+            Some("The NOTIFY queue cannot be emptied until that process ends its current transaction.")
         );
         assert!(hub.queue_warning(&mut state).is_none());
     }

@@ -101,6 +101,8 @@ pub struct CatalogDefinitionSnapshot {
     pub schemas: Arc<BTreeMap<String, BoundSchemaSecurity>>,
     pub sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
     pub sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
+    /// The `pg_class` OIDs sequences recorded when they were created, by object identity.
+    pub sequence_catalog_oids: Arc<BTreeMap<[u8; 16], u32>>,
     pub sequence_security: Arc<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
     pub foreign_table_security: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
     pub system_relation_security:

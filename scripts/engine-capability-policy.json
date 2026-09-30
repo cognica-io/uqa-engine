@@ -47,6 +47,7 @@
         "crates/uqa-engine/src/capabilities/mutation_publication.rs",
         "crates/uqa-engine/src/capabilities/mutation_rows.rs",
         "crates/uqa-engine/src/capabilities/namespaces.rs",
+        "crates/uqa-engine/src/capabilities/object_removal.rs",
         "crates/uqa-engine/src/capabilities/partitions.rs",
         "crates/uqa-engine/src/capabilities/physical_retrieval.rs",
         "crates/uqa-engine/src/capabilities/portals.rs",

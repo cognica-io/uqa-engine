@@ -54,6 +54,7 @@ impl EventRestoreContext<'_> {
             .map(|(relation, entries)| (relation.clone(), entries.clone()))
             .collect::<BTreeMap<_, _>>();
         let mut rules = temporary_rules;
+        let mut recorded_oids = false;
         for mut rule in stored.rules {
             let persisted_definition = if migrating_catalog {
                 None
@@ -97,6 +98,11 @@ impl EventRestoreContext<'_> {
             rule.condition_plan = condition_plan;
             rule.condition_binding = condition_binding;
             rule.dependencies = Some(dependencies);
+            // A rule stored before OIDs were recorded keeps the OID its name derives, so renaming it later does not change it.
+            if rule.catalog_oid.is_none() && allows_migration {
+                rule.catalog_oid = Some(crate::catalog::projection::legacy_rule_catalog_oid(&rule));
+                recorded_oids = true;
+            }
             let name = rule.definition.name.clone();
             if rules
                 .entry(relation)
@@ -110,7 +116,7 @@ impl EventRestoreContext<'_> {
             }
         }
         **self.catalog.registry.rules() = rules;
-        if migrating_catalog {
+        if migrating_catalog || recorded_oids {
             let rules = self.reads.read_rules();
             self.catalog
                 .publication

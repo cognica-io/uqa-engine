@@ -15,9 +15,7 @@ fn sequence_privilege_inquiry_keeps_committed_roles_and_acl_together() {
         for isolation in ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] {
             let (_directory, engine, peer) = sessions(provider);
             sql(&engine, "CREATE ROLE reader; CREATE ROLE readers; GRANT readers TO reader; CREATE SEQUENCE ids; GRANT USAGE ON SEQUENCE ids TO readers; GRANT SELECT ON t TO reader; SET ROLE reader");
-            let oid = uqa_execution::catalog::projection::sequence_relation_oid(
-                engine.durable.sequence_object_ids.read()[&RelationIdentity::new("public", "ids")],
-            );
+            let oid = super::sequence_oid(&engine, &RelationIdentity::new("public", "ids"));
             let reader_oid = engine.durable.roles.read()["reader"].oid;
             sql(
                 &engine,

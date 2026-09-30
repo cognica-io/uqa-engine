@@ -333,8 +333,10 @@ fn foreign_table_trigger_lifecycle_tracks_owner_transfer_rollback_drop_and_reope
         .expect_err("foreign-table trigger must retain its function dependency");
     assert_eq!(dependency.sqlstate(), Some("2BP01"));
     assert!(
-        dependency.to_string().contains("owner_trigger"),
-        "{dependency}"
+        dependency
+            .detail()
+            .is_some_and(|detail| detail.contains("trigger owner_trigger on foreign table")),
+        "{dependency:?}"
     );
     exec(&reopened, "DROP FOREIGN TABLE foreign_trigger_acl.items");
     exec(

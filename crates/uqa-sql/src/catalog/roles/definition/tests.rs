@@ -61,10 +61,10 @@ impl RoleCatalogGuards for Inputs {
     }
 }
 impl RoleNotices for Inputs {
-    fn notice(&self, level: &str, message: &str) {
+    fn notice(&self, notice: crate::SQLNotice) {
         self.notices
             .borrow_mut()
-            .push((level.into(), message.into()));
+            .push((notice.severity.as_str().into(), notice.message));
     }
 }
 

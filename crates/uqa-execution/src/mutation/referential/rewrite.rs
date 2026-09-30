@@ -361,8 +361,13 @@ pub fn reject_partition_rewrite<S: Clone + 'static>(
     if destination == prepared.table {
         return Ok(());
     }
-    Err(SQLError::Routine {
+    Err(SQLError::Diagnostic {
         sqlstate: "0A000".into(),
-        message: "invalid ON UPDATE specification\nDETAIL: The result tuple would appear in a different partition than the original tuple.".into(),
+        message: "invalid ON UPDATE specification".into(),
+        detail: Some(
+            "The result tuple would appear in a different partition than the original tuple."
+                .into(),
+        ),
+        hint: None,
     })
 }

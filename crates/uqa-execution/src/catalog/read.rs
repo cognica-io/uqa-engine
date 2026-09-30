@@ -292,6 +292,14 @@ impl CatalogReadView {
         self.snapshot.definitions.role_memberships.values()
     }
 
+    /// The `pg_class` OID of the sequence with the object identity.
+    pub fn sequence_catalog_oid(&self, object_id: &[u8; 16]) -> i64 {
+        super::sequence::catalog_oids::sequence_catalog_oid(
+            &self.snapshot.definitions.sequence_catalog_oids,
+            object_id,
+        )
+    }
+
     pub fn sequences(&self) -> Result<Vec<super::CatalogSequenceMetadata>, SQLError> {
         self.snapshot
             .definitions

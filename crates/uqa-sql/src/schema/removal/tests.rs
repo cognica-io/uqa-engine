@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `PostgreSQL` DROP target diagnostics and canonical target order.
+//! `PostgreSQL` DROP target diagnostics.
 
 use super::*;
 
@@ -80,18 +80,4 @@ fn drop_wrong_kind_is_an_error_even_with_if_exists() {
             format!("\"t\" is not a {}", drop_relation_kind(kind))
         );
     }
-}
-
-#[test]
-fn drop_deduplicates_canonical_targets_without_sorting_the_statement() {
-    let stmt = DropStmt {
-        kind: DropKind::View,
-        names: vec!["z".into(), "a".into(), "public.z".into()],
-        if_exists: false,
-        cascade: false,
-    };
-    assert_eq!(
-        bind_relation_drop_targets(&Catalog, &stmt, &mut |_| {}).unwrap(),
-        ["public.z", "public.a"]
-    );
 }

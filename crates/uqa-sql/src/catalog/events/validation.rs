@@ -242,14 +242,18 @@ pub fn validate_rule_returning_shape(
         } else {
             "type"
         };
-        return Err(SQLError::Routine {
+        return Err(SQLError::Diagnostic {
             sqlstate: "42P17".into(),
             message: format!(
-                "RETURNING list's entry {} has different {difference} from column \"{column}\"\nDETAIL: RETURNING list entry has type {}, but column has type {}.",
+                "RETURNING list's entry {} has different {difference} from column \"{column}\"",
                 position + 1,
+            ),
+            detail: Some(format!(
+                "RETURNING list entry has type {}, but column has type {}.",
                 actual.sql_name(),
                 expected.sql_name()
-            ),
+            )),
+            hint: None,
         });
     }
     Ok(())

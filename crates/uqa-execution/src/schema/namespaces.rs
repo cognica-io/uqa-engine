@@ -229,8 +229,11 @@ pub fn create_schema(
             });
         }
         context.notices.notice(
-            "NOTICE",
-            &format!(r#"schema "{}" already exists, skipping"#, target.name),
+            uqa_sql::SQLNotice::notice(format!(
+                r#"schema "{}" already exists, skipping"#,
+                target.name
+            ))
+            .with_sqlstate("42P06"),
         );
     }
     Ok(SQLResult::empty())

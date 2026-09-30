@@ -78,19 +78,18 @@ pub(crate) fn send_result(
 }
 
 pub(crate) fn send_notices(transport: &mut Transport, engine: &Engine) -> Result<(), ServerError> {
-    for (level, message) in engine.take_sql_notices() {
-        let mut notice = ErrorOrNotice::error("00000", message);
-        notice.severity = match level.as_str() {
-            "WARNING" => {
-                notice.code = "01000".into();
-                NoticeSeverity::Warning
-            }
-            "INFO" => NoticeSeverity::Info,
-            "LOG" => NoticeSeverity::Log,
-            "DEBUG" => NoticeSeverity::Debug,
-            _ => NoticeSeverity::Notice,
+    for notice in engine.take_sql_notices() {
+        let mut response = ErrorOrNotice::error(notice.sqlstate, notice.message);
+        response.severity = match notice.severity {
+            uqa_engine::NoticeSeverity::Warning => NoticeSeverity::Warning,
+            uqa_engine::NoticeSeverity::Notice => NoticeSeverity::Notice,
+            uqa_engine::NoticeSeverity::Info => NoticeSeverity::Info,
+            uqa_engine::NoticeSeverity::Log => NoticeSeverity::Log,
+            uqa_engine::NoticeSeverity::Debug => NoticeSeverity::Debug,
         };
-        transport.send(&BackendMessage::NoticeResponse(notice))?;
+        response.detail = notice.detail;
+        response.hint = notice.hint;
+        transport.send(&BackendMessage::NoticeResponse(response))?;
     }
     Ok(())
 }

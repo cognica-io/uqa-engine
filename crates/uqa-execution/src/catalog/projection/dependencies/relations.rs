@@ -37,9 +37,12 @@ impl DependencyBuilder<'_> {
             self.record_relation(identity, oids.relation, &table.columns, oids);
         }
         for (identity, object_id) in snapshot.definitions.sequence_object_ids.iter() {
-            let oid = super::catalog_oid(uqa_sql::catalog::oids::stable_object_oid(
-                "relation", object_id,
-            ))?;
+            let oid = super::catalog_oid(
+                crate::catalog::sequence::catalog_oids::sequence_catalog_oid(
+                    &snapshot.definitions.sequence_catalog_oids,
+                    object_id,
+                ),
+            )?;
             let sequence = ObjectAddress::whole(RELATION_CLASS, oid);
             self.record_namespace(sequence, &identity.schema);
             let Some(owner) = snapshot
@@ -185,14 +188,22 @@ impl DependencyBuilder<'_> {
         Ok(())
     }
 
-    /// The column a sequence is owned by, from the stable identities of the table and column.
+    /// The column of a table or foreign table a sequence is owned by, from the stable identities of the relation and column.
     fn owned_column(&self, table: [u8; 16], column: [u8; 16]) -> Option<ObjectAddress> {
         let snapshot = self.catalog.snapshot();
         let (oid, columns) = snapshot
             .tables
             .values()
             .find(|candidate| candidate.object_id == table)
-            .map(|table| (table.catalog_oids.relation, table.columns.as_ref()))?;
+            .map(|table| (table.catalog_oids.relation, table.columns.as_ref().clone()))
+            .or_else(|| {
+                snapshot
+                    .definitions
+                    .foreign_tables
+                    .values()
+                    .find(|candidate| candidate.object_id == table)
+                    .map(|table| (table.relation_oids().relation, table.columns.clone()))
+            })?;
         let index = columns
             .iter()
             .position(|candidate| candidate.object_id == Some(column))?;

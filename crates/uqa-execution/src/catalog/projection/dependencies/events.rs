@@ -121,7 +121,8 @@ impl DependencyBuilder<'_> {
                     .constraint_name
                     .clone()
                     .unwrap_or_else(|| trigger.definition.name.clone()),
-                relation: Some(relation),
+                owner: super::ConstraintOwner::Relation(relation),
+                not_null: false,
             },
         );
         let constraint = ObjectAddress::whole(CONSTRAINT_CLASS, oid);

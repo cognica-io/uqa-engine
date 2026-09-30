@@ -7,20 +7,13 @@
 //! Bind routine-dependent index reads to the live registry and its catalog provider.
 
 use crate::Engine;
-use uqa_core::RelationIdentity;
 use uqa_execution::schema::indexes::routines::{
     self, IndexRoutineContext, IndexRoutineRead, IndexRoutineRegistry,
 };
-use uqa_sql::{ast::FunctionBinding, SQLError};
+use uqa_sql::ast::FunctionBinding;
 use uqa_storage::{CatalogIndexRow, StorageBackendResult};
 
 impl Engine {
-    pub(crate) fn indexes_depending_on_routine(
-        &self,
-        target: &FunctionBinding,
-    ) -> Result<Vec<RelationIdentity>, SQLError> {
-        routines::indexes_depending_on_routine(self, target)
-    }
     pub(crate) fn rewrite_index_routine_identity(
         &self,
         target: &FunctionBinding,

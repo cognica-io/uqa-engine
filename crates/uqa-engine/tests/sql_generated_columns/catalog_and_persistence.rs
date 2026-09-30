@@ -285,9 +285,13 @@ fn generated_expression_dependencies_follow_rename_and_block_drop() {
             "ALTER TABLE renamed_generated_dependencies DROP COLUMN renamed_source",
             &[],
         )
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("generation expression"), "{error}");
+        .unwrap_err();
+    assert!(
+        error.detail().is_some_and(|detail| detail.contains(
+            "column derived of table renamed_generated_dependencies depends on column renamed_source"
+        )),
+        "{error:?}"
+    );
     assert!(engine
         .table_has_column("renamed_generated_dependencies", "renamed_source")
         .unwrap());

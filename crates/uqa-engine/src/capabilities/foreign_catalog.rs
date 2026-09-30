@@ -29,7 +29,6 @@ impl Engine {
             catalog: self.storage.catalog.as_deref(),
             changes: self,
             events: self.event_lifecycle_context(),
-            owners: self,
         }
     }
 }

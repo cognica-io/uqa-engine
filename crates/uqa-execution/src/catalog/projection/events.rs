@@ -68,6 +68,9 @@ pub fn trigger_catalog_oid(
     resolution: &RelationNameResolution,
     trigger: &StoredTrigger,
 ) -> Result<i64, SQLError> {
+    if let Some(oid) = trigger.catalog_oid {
+        return Ok(oid);
+    }
     let identity = if let Some(object_id) = trigger.object_id {
         format!(
             "{}:{}",
@@ -87,6 +90,9 @@ pub fn trigger_constraint_catalog_oid(
 ) -> Result<i64, SQLError> {
     if !trigger.definition.constraint {
         return Ok(0);
+    }
+    if let Some(oid) = trigger.constraint_catalog_oid {
+        return Ok(oid);
     }
     let constraint_name = trigger
         .constraint_name
@@ -115,6 +121,12 @@ fn hex_object_id(object_id: [u8; 16]) -> String {
 }
 
 pub fn rule_catalog_oid(rule: &StoredRule) -> i64 {
+    rule.catalog_oid
+        .unwrap_or_else(|| legacy_rule_catalog_oid(rule))
+}
+
+/// The OID a rule created before OIDs were recorded derives from its relation and name.
+pub fn legacy_rule_catalog_oid(rule: &StoredRule) -> i64 {
     stable_oid(
         "rule",
         &format!("{}.{}", rule.definition.table, rule.definition.name),
@@ -161,10 +173,17 @@ pub fn catalog_triggers(
             for original in originals.iter().filter(|trigger| {
                 trigger.definition.row && trigger.definition.table == source.qualified_name()
             }) {
+                // A partition's clone of a row trigger has OIDs of its own, derived from the trigger's identity and the partition; the recorded OIDs are those of the trigger on its own table.
                 let mut clone = original.clone();
                 clone.definition.table.clone_from(&table);
+                clone.catalog_oid = None;
+                clone.constraint_catalog_oid = None;
                 let mut parent_clone = original.clone();
                 parent_clone.definition.table = parent.qualified_name();
+                if *parent != *source {
+                    parent_clone.catalog_oid = None;
+                    parent_clone.constraint_catalog_oid = None;
+                }
                 catalog
                     .entry((table.clone(), clone.definition.name.clone()))
                     .or_insert((

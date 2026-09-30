@@ -84,11 +84,11 @@ pub struct ColumnDropPublicationContext<'a> {
     pub views: &'a dyn ColumnRemovalViews,
     pub modes: &'a dyn ConstraintModes,
 }
+/// Remove one column with its indexes, keys, checks and data. The sequences it owns and what depends on it have been removed.
 pub fn drop_column(
     context: &ColumnDropPublicationContext<'_>,
     table: &str,
     column: &str,
-    cascade: bool,
 ) -> StorageBackendResult<bool> {
     let Some(table_name) = context
         .catalog
@@ -119,6 +119,12 @@ pub fn drop_column(
     let owned_sequences = context
         .sequences
         .owned_by_column(state.object_id(), column_object_id)?;
+    if !owned_sequences.is_empty() {
+        return Err(StorageBackendError::Other(format!(
+            "column `{table_name}`.`{column}` still owns sequence(s) `{}`",
+            owned_sequences.into_iter().collect::<Vec<_>>().join("`, `")
+        )));
+    }
     preflight_dependencies(context, &table_name, column)?;
     let prepared_rule_drop = context.rules.prepare(&table_name, column)?;
     crate::schema::indexes::diskann::retire_column(&context.registry, &table_name, column)?;
@@ -152,12 +158,6 @@ pub fn drop_column(
     }
     state.persist_drop(&table_name, column)?;
     context.rules.finish(prepared_rule_drop)?;
-    for sequence in owned_sequences {
-        context
-            .sequences
-            .sequence_removal_context()
-            .drop_owned_sequence(&sequence, cascade)?;
-    }
     state.mark_statistics_dirty(&table_name)?;
     context.indexes.refresh_value_indexes(&table_name)?;
     context

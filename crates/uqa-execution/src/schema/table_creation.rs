@@ -59,7 +59,7 @@ pub struct CreateTableContext<'a> {
     pub ownership: ImplicitOwnershipContext<'a>,
     pub schema_transactions: &'a dyn SchemaWriteTransaction,
     pub publication: &'a dyn TableCreationPublication,
-    pub notices: &'a parking_lot::Mutex<Vec<(String, String)>>,
+    pub notices: &'a parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
 }
 fn storage_error(action: &str, error: StorageBackendError) -> SQLError {
     uqa_sql::catalog::errors::storage_error(action, &error)
@@ -129,10 +129,12 @@ fn preflight(
             .map_err(SQLError::Internal)?
             .name;
         if if_not_exists {
-            context.notices.lock().push((
-                "NOTICE".into(),
-                format!("relation \"{local}\" already exists, skipping"),
-            ));
+            context.notices.lock().push(
+                uqa_sql::SQLNotice::notice(format!(
+                    "relation \"{local}\" already exists, skipping"
+                ))
+                .with_sqlstate("42P07"),
+            );
             return Ok(None);
         }
         if existing == ExistingRelation::Reported {

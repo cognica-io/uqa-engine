@@ -43,7 +43,11 @@ impl Engine {
                 ))
             })?;
         Ok(Some(
-            uqa_execution::catalog::projection::sequence_relation_oid(object_id).to_string(),
+            uqa_execution::catalog::sequence::catalog_oids::sequence_catalog_oid(
+                &self.durable.sequence_catalog_oids.read(),
+                &object_id,
+            )
+            .to_string(),
         ))
     }
 

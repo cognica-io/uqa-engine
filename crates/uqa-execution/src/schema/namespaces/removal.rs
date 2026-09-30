@@ -7,9 +7,7 @@
 //! Namespace removal with ordered dependent-object reads, relation locks, and registry publication.
 
 use super::{NamespaceCatalogChanges, NamespaceCatalogRefresh, SchemaRegistryWrite};
-use crate::schema::removal::{
-    RelationRemovalEvents, RelationRemovalLocks, RelationRemovalRoutines,
-};
+use crate::schema::removal::RelationRemovalLocks;
 use std::collections::BTreeSet;
 use uqa_core::RelationIdentity;
 use uqa_sql::{
@@ -23,40 +21,20 @@ use uqa_sql::{
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
 pub trait SchemaRemovalNames {
-    fn schema_tables(&self, schemas: &BTreeSet<String>) -> Vec<String>;
-    fn schema_foreign_tables(&self, schemas: &BTreeSet<String>) -> Vec<String>;
-    fn schema_views(&self, schemas: &BTreeSet<String>) -> Vec<String>;
-    fn schema_sequences(&self, schemas: &BTreeSet<String>) -> Vec<String>;
     fn graph_tables(&self, schema: &str) -> StorageBackendResult<Vec<String>>;
-}
-pub trait SchemaTypeRoutineRemoval {
-    fn drop_schema_types_and_routines(&self, schemas: &BTreeSet<String>) -> Result<(), SQLError>;
-}
-pub trait SchemaRemovalViews {
-    fn drop_views_depending_on_relations(&self, names: &[String]) -> StorageBackendResult<()>;
-    fn remaining_view_drop_targets(&self, names: &[String]) -> Result<Vec<String>, SQLError>;
-    fn cascade_view_closure(&self, names: Vec<String>) -> Result<Vec<String>, SQLError>;
-    fn drop_views_inner(&self, names: &[String], cascade: bool) -> Result<(), SQLError>;
 }
 pub trait SchemaRemovalPublication {
     fn drop_graph(&self, name: &str) -> StorageBackendResult<()>;
-    fn drop_empty_schema(&self, name: &str) -> StorageBackendResult<()>;
 }
 pub trait SchemaDropNotices {
-    fn schema_drop_notice(&self, message: &str);
+    fn schema_drop_notice(&self, notice: uqa_sql::SQLNotice);
 }
 pub struct SchemaRemovalContext<'a> {
+    pub deletion: &'a dyn crate::schema::deletion::CatalogRemovalInputs,
     pub tuples: super::locking::SchemaLockContext<'a>,
     pub refresh: &'a dyn NamespaceCatalogRefresh,
     pub catalog: &'a dyn SchemaDropCatalog,
     pub names: &'a dyn SchemaRemovalNames,
-    pub types: &'a dyn SchemaTypeRoutineRemoval,
-    pub tables: crate::schema::table_removal::context::TableRemovalContext<'a>,
-    pub routines: &'a dyn RelationRemovalRoutines,
-    pub events: &'a dyn RelationRemovalEvents,
-    pub foreign: crate::schema::foreign_removal::ForeignTableRemovalContext<'a>,
-    pub views: &'a dyn SchemaRemovalViews,
-    pub sequences: &'a dyn crate::schema::sequences::removal::SequenceRemovalInputs,
     pub locks: &'a dyn RelationRemovalLocks,
     pub publication: &'a dyn SchemaRemovalPublication,
     pub notices: &'a dyn SchemaDropNotices,
@@ -115,7 +93,7 @@ pub fn drop_schemas(
         .refresh
         .refresh_catalog()
         .map_err(|error| storage_error(&error))?;
-    let mut schemas = BTreeSet::new();
+    let mut schemas = Vec::new();
     let mut graphs = BTreeSet::new();
     for name in &statement.names {
         let mut target = bind_schema_drop_target(context.catalog, name, statement.if_exists)?;
@@ -127,29 +105,40 @@ pub fn drop_schemas(
         }
         match target {
             BoundSchemaDrop::Schema => {
-                schemas.insert(name.clone());
+                if !schemas.contains(name) {
+                    schemas.push(name.clone());
+                }
             }
             BoundSchemaDrop::Graph => {
                 graphs.insert(name.clone());
             }
-            BoundSchemaDrop::Skipped(message) => context.notices.schema_drop_notice(&message),
+            BoundSchemaDrop::Skipped(message) => context
+                .notices
+                .schema_drop_notice(uqa_sql::SQLNotice::notice(message)),
         }
     }
-    if !statement.cascade {
-        validate_schema_drop_restrict(context.catalog, &schemas, &graphs)?;
+    if !statement.cascade && !graphs.is_empty() {
+        validate_schema_drop_restrict(
+            context.catalog,
+            &schemas.iter().cloned().collect(),
+            &graphs,
+        )?;
     }
-    if statement.cascade {
-        context.types.drop_schema_types_and_routines(&schemas)?;
-        drop_schema_relations(context, &schemas)?;
-        let sequences = context.names.schema_sequences(&schemas);
-        for sequence in sequences {
-            context
-                .sequences
-                .sequence_removal_context()
-                .drop_owned_sequence(&sequence, true)
-                .map_err(|error| storage_error(&error))?;
-        }
-    }
+    crate::schema::deletion::perform_deletion(
+        &context.deletion.catalog_removal_context(),
+        |dependencies| {
+            schemas
+                .iter()
+                .map(|schema| {
+                    crate::schema::deletion::required_address(
+                        dependencies.schema_address(schema),
+                        || format!("schema {schema}"),
+                    )
+                })
+                .collect()
+        },
+        statement.cascade,
+    )?;
     for graph in graphs {
         for table in context
             .names
@@ -167,12 +156,6 @@ pub fn drop_schemas(
             .drop_graph(&graph)
             .map_err(|error| storage_error(&error))?;
     }
-    for schema in schemas {
-        context
-            .publication
-            .drop_empty_schema(&schema)
-            .map_err(|error| storage_error(&error))?;
-    }
     Ok(())
 }
 
@@ -186,67 +169,4 @@ fn lock_deletion(
         .schema_security(name)
         .ok_or_else(|| super::locking::missing(name))?;
     context.replace(name, super::locking::tuple(&security)?)
-}
-
-fn drop_schema_relations(
-    context: &SchemaRemovalContext<'_>,
-    schemas: &BTreeSet<String>,
-) -> Result<(), SQLError> {
-    let tables = context.names.schema_tables(schemas);
-    let (tables, _) = context.tables.hierarchy_drop_targets(&tables, true);
-    for table in &tables {
-        context.locks.lock_exclusive(table)?;
-        context
-            .events
-            .ensure_no_pending_trigger_events(table, "DROP TABLE")?;
-    }
-    if !tables.is_empty() {
-        context
-            .tables
-            .try_drop_tables(&tables, true)
-            .map_err(|error| storage_error(&error))?;
-    }
-    let foreign = context.names.schema_foreign_tables(schemas);
-    let owned_sequences = context
-        .foreign
-        .foreign_table_owned_sequence_names(&foreign)
-        .map_err(|error| storage_error(&error))?;
-    for table in &foreign {
-        context.locks.lock_exclusive(table)?;
-    }
-    context
-        .events
-        .drop_rules_depending_on_relations_inner(&foreign)
-        .map_err(|error| storage_error(&error))?;
-    context
-        .views
-        .drop_views_depending_on_relations(&foreign)
-        .map_err(|error| storage_error(&error))?;
-    for table in foreign {
-        context
-            .foreign
-            .drop_foreign_table_inner(&table)
-            .map_err(SQLError::Internal)?;
-    }
-    for sequence in owned_sequences {
-        context
-            .sequences
-            .sequence_removal_context()
-            .drop_owned_sequence(&sequence, true)
-            .map_err(|error| storage_error(&error))?;
-    }
-    let views = context.names.schema_views(schemas);
-    context
-        .routines
-        .drop_relation_routine_dependents(&views, true, "view")?;
-    let views = context.views.remaining_view_drop_targets(&views)?;
-    let closure = context.views.cascade_view_closure(views)?;
-    for view in &closure {
-        context.locks.lock_exclusive(view)?;
-    }
-    context
-        .events
-        .drop_rules_depending_on_relations_inner(&closure)
-        .map_err(|error| storage_error(&error))?;
-    context.views.drop_views_inner(&closure, false)
 }

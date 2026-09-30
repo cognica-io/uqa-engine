@@ -61,9 +61,9 @@ fn resolved_regclass_oid(
                     "resolved sequence `{canonical}` has no object identity"
                 ))
             })?;
-        return Ok(Some(crate::catalog::projection::sequence_relation_oid(
-            object_id,
-        )));
+        return Ok(Some(
+            context.catalog_read_view().sequence_catalog_oid(&object_id),
+        ));
     }
     if kind == "index" {
         let relation =

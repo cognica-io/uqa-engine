@@ -36,10 +36,11 @@ fn scalar(engine: &Engine, sql: &str) -> Value {
         .clone()
 }
 
+/// The only notice is the `01007` warning of a `GRANT` whose grantor holds none or not all of the privileges.
 fn assert_single_warning(engine: &Engine, message: &str) {
     assert_eq!(
         engine.take_sql_notices(),
-        [("WARNING".into(), message.into())]
+        [uqa_engine::SQLNotice::warning(message).with_sqlstate("01007")]
     );
 }
 
@@ -236,13 +237,9 @@ fn assert_owner_dependency_and_resolution_errors(engine: &Engine) {
     assert_eq!(
         engine.take_sql_notices(),
         [
-            (
-                "NOTICE".into(),
-                "relation \"missing_role_ids\" does not exist, skipping".into()
-            ),
-            (
-                "NOTICE".into(),
-                "relation \"missing_public_ids\" does not exist, skipping".into()
+            uqa_engine::SQLNotice::notice("relation \"missing_role_ids\" does not exist, skipping"),
+            uqa_engine::SQLNotice::notice(
+                "relation \"missing_public_ids\" does not exist, skipping"
             )
         ]
     );

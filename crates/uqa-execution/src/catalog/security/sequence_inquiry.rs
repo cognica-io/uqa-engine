@@ -8,7 +8,7 @@
 
 use crate::catalog::{
     context::CatalogContext,
-    projection::{resolve_regclass_kind_by_oid, sequence_relation_oid},
+    projection::resolve_regclass_kind_by_oid,
     sequence::snapshot::{SequenceReadSnapshot, SequenceSnapshotSource},
 };
 use uqa_core::Value;
@@ -69,12 +69,7 @@ fn sequence_privilege_value(
                 Some(snapshot) => snapshot,
                 None => read_snapshot(snapshots)?,
             };
-            let relation = snapshot
-                .object_ids
-                .iter()
-                .find_map(|(relation, object_id)| {
-                    (sequence_relation_oid(*object_id) == oid).then(|| relation.clone())
-                });
+            let relation = snapshot.relation_with_oid(oid);
             let Some(relation) = relation else {
                 if let Some((name, kind)) = other_relation(oid)? {
                     // An older statement catalog can still contain a sequence removed from the current authority view.

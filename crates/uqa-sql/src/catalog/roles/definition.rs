@@ -23,7 +23,7 @@ use crate::{
 use std::collections::BTreeMap;
 
 pub trait RoleNotices {
-    fn notice(&self, level: &str, message: &str);
+    fn notice(&self, notice: crate::SQLNotice);
 }
 
 #[derive(Clone, Copy)]
@@ -193,10 +193,9 @@ impl RoleDropAuthority {
         };
         let Some(role) = roles.get(name) else {
             if if_exists {
-                context.notices.notice(
-                    "NOTICE",
-                    &format!("role \"{name}\" does not exist, skipping"),
-                );
+                context.notices.notice(crate::SQLNotice::notice(format!(
+                    "role \"{name}\" does not exist, skipping"
+                )));
                 return Ok(None);
             }
             return Err(SQLError::Routine {

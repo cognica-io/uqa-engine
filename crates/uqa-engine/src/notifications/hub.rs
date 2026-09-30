@@ -458,7 +458,7 @@ impl NotificationHub {
         state: &NotificationHubState,
         listeners: &NotificationListenerSummary,
         queue_state: CrossProcessQueueState,
-    ) -> Option<String> {
+    ) -> Option<uqa_sql::SQLNotice> {
         let tail = listeners
             .oldest
             .map_or(queue_state.head_position, |listener| listener.position);
@@ -474,10 +474,7 @@ impl NotificationHub {
             return None;
         }
         let blocker = listeners.oldest?.process_id;
-        Some(format!(
-            "NOTIFY queue is {:.0}% full\nDETAIL: The server process with PID {blocker} is among those with the oldest transactions.\nHINT: The NOTIFY queue cannot be emptied until that process ends its current transaction.",
-            usage * 100.0
-        ))
+        Some(queue_fill_warning(usage, blocker))
     }
 
     pub(super) fn validate_commit(
@@ -562,8 +559,8 @@ impl NotificationHub {
         }
         Self::deliver_idle_listeners(&mut state);
         Self::remove_consumed_entries(&mut state);
-        if let Some(message) = self.queue_warning(&mut state) {
-            notices.lock().push(("WARNING".into(), message));
+        if let Some(warning) = self.queue_warning(&mut state) {
+            notices.lock().push(warning);
         }
     }
 
@@ -605,7 +602,7 @@ impl NotificationHub {
         channels: Vec<String>,
         queue: &Arc<Mutex<VecDeque<SQLNotification>>>,
         wake: &Arc<Condvar>,
-        notices: &Arc<Mutex<Vec<(String, String)>>>,
+        notices: &Arc<Mutex<Vec<uqa_sql::SQLNotice>>>,
     ) -> Result<(), SQLError> {
         if channels.is_empty() && !self.state.lock().listeners.contains_key(&session_id) {
             return Ok(());
@@ -655,7 +652,7 @@ impl NotificationHub {
         channels: Vec<String>,
         queue: &Arc<Mutex<VecDeque<SQLNotification>>>,
         wake: &Arc<Condvar>,
-        notices: &Arc<Mutex<Vec<(String, String)>>>,
+        notices: &Arc<Mutex<Vec<uqa_sql::SQLNotice>>>,
     ) -> Result<(), SQLError> {
         let cross_state = self.cross.as_ref().ok_or_else(|| {
             SQLError::Internal("cross-process notification coordinator is missing".into())
@@ -743,9 +740,9 @@ impl NotificationHub {
                 },
             );
         }
-        if let Some(message) = prepared.warning {
+        if let Some(warning) = prepared.warning {
             state.last_queue_warning = Some(Instant::now());
-            notices.lock().push(("WARNING".into(), message));
+            notices.lock().push(warning);
         }
         drop(state);
         drop(gate);
@@ -789,7 +786,10 @@ impl NotificationHub {
         }
     }
 
-    pub(super) fn queue_warning(&self, state: &mut NotificationHubState) -> Option<String> {
+    pub(super) fn queue_warning(
+        &self,
+        state: &mut NotificationHubState,
+    ) -> Option<uqa_sql::SQLNotice> {
         if queue_usage(state, self.max_queue_pages) < 0.5 {
             return None;
         }
@@ -805,9 +805,9 @@ impl NotificationHub {
             .min_by_key(|listener| listener.position)?
             .process_id;
         state.last_queue_warning = Some(now);
-        let percentage = queue_usage(state, self.max_queue_pages) * 100.0;
-        Some(format!(
-            "NOTIFY queue is {percentage:.0}% full\nDETAIL: The server process with PID {blocker} is among those with the oldest transactions.\nHINT: The NOTIFY queue cannot be emptied until that process ends its current transaction."
+        Some(queue_fill_warning(
+            queue_usage(state, self.max_queue_pages),
+            blocker,
         ))
     }
 
@@ -868,4 +868,16 @@ impl NotificationHub {
         state.listeners.remove(&session_id);
         Self::remove_consumed_entries(&mut state);
     }
+}
+
+/// `asyncQueueFillWarning`: how full the queue is, and the listener whose position holds it.
+fn queue_fill_warning(usage: f64, blocker: i32) -> uqa_sql::SQLNotice {
+    uqa_sql::SQLNotice::warning(format!("NOTIFY queue is {:.0}% full", usage * 100.0))
+        .with_detail(Some(format!(
+            "The server process with PID {blocker} is among those with the oldest transactions."
+        )))
+        .with_hint(Some(
+            "The NOTIFY queue cannot be emptied until that process ends its current transaction."
+                .into(),
+        ))
 }

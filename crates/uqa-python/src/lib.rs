@@ -20,7 +20,7 @@ use uqa_core::{DecimalValue, TemporalValue, Value};
 use uqa_engine::migration::{migrate_python_database, PythonMigrationReport};
 use uqa_engine::{
     Engine, HybridSearchParams, RobustHybridSearchParams, SQLAggregateFunction, SQLAggregateState,
-    SQLFunctionOptions, SQLFunctionVolatility, SQLParam, SQLResult, SQLScalarFunction,
+    SQLFunctionOptions, SQLFunctionVolatility, SQLNotice, SQLParam, SQLResult, SQLScalarFunction,
     SQLTableFunction, SQLTableFunctionResult, ScoredEntry, ScoringMode,
 };
 use uqa_scoring::{BM25Params, CalibrationReport};
@@ -62,6 +62,7 @@ use migration::migrate_python_db;
 use options::{compression_options, database_file_format_name, scoring_mode};
 use output::{
     calibration_report_to_py, migration_report_to_py, parse_scoring_params, scored_entries_to_py,
+    sql_notices_to_py,
 };
 use params::{scalar, tensor, vector, PySQLParam};
 use result::PySQLResult;

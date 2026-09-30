@@ -6,6 +6,7 @@
 
 //! `pg_depend` and `pg_shdepend` for the user objects of one catalog snapshot, derived from their definitions as `PostgreSQL` records the rows when it creates the objects, and the descriptions `getObjectDescription` gives the objects the rows name.
 
+mod addresses;
 mod columns;
 mod constraints;
 mod defaults;
@@ -25,8 +26,10 @@ mod types;
 
 use crate::catalog::context::CatalogContext;
 use crate::catalog::{CatalogReadView, RelationNameResolution};
+pub use addresses::CatalogObject;
 use expressions::{ColumnScope, ExpressionReferences};
-use objects::{catalog_oid, CatalogObjects, MemberObject, RelationObject};
+pub use objects::RelationKind;
+use objects::{catalog_oid, CatalogObjects, ConstraintOwner, MemberObject, RelationObject};
 use recorder::DependencyRecorder;
 use references::References;
 use uqa_sql::catalog::dependencies::{
@@ -85,6 +88,59 @@ impl CatalogDependencies {
 
     pub const fn graph(&self) -> &DependencyGraph {
         &self.graph
+    }
+
+    /// The object `address` names; `None` for one that does not exist or is not a user object.
+    pub fn catalog_object(&self, address: ObjectAddress) -> Option<CatalogObject> {
+        self.objects.catalog_object(address)
+    }
+
+    /// The address of a relation, or of one of its columns.
+    pub fn relation_address(
+        &self,
+        identity: &uqa_core::RelationIdentity,
+        column: Option<&str>,
+    ) -> Option<ObjectAddress> {
+        self.objects.relation_address(identity, column)
+    }
+
+    /// The address of the constraint, trigger or rule of `class_id` named `name` on the relation.
+    pub fn relation_member_address(
+        &self,
+        class_id: u32,
+        identity: &uqa_core::RelationIdentity,
+        name: &str,
+    ) -> Option<ObjectAddress> {
+        self.objects
+            .relation_member_address(class_id, identity, name)
+    }
+
+    /// The address of the default of a relation's column.
+    pub fn column_default_address(
+        &self,
+        identity: &uqa_core::RelationIdentity,
+        column: &str,
+    ) -> Option<ObjectAddress> {
+        self.objects.column_default_address(identity, column)
+    }
+
+    /// The address of a domain's constraint.
+    pub fn domain_constraint_address(&self, domain: u32, name: &str) -> Option<ObjectAddress> {
+        self.objects.domain_constraint_address(domain, name)
+    }
+
+    /// The address of a user routine.
+    pub fn routine_address(&self, object_id: &[u8; 16]) -> Option<ObjectAddress> {
+        self.objects
+            .routine_oid(object_id)
+            .map(|oid| ObjectAddress::whole(uqa_sql::catalog::dependencies::PROCEDURE_CLASS, oid))
+    }
+
+    /// The address of a schema.
+    pub fn schema_address(&self, name: &str) -> Option<ObjectAddress> {
+        self.objects
+            .namespace_oid(name)
+            .map(|oid| ObjectAddress::whole(NAMESPACE_CLASS, oid))
     }
 
     pub fn shared(&self) -> &[SharedDependency] {

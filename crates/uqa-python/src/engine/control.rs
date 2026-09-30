@@ -6,12 +6,15 @@
 
 //! Notices, limits, cancellation, close, and representation.
 
-use super::{pymethods, runtime_error, PyEngine, PyResult, PyRuntimeError};
+use super::{
+    pymethods, runtime_error, sql_notices_to_py, Py, PyAny, PyEngine, PyResult, PyRuntimeError,
+    Python,
+};
 
 #[pymethods]
 impl PyEngine {
-    fn take_sql_notices(&self) -> PyResult<Vec<(String, String)>> {
-        Ok(self.inner()?.take_sql_notices())
+    fn take_sql_notices(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        sql_notices_to_py(py, &self.inner()?.take_sql_notices())
     }
 
     fn sql_function_depth_limit(&self) -> PyResult<usize> {

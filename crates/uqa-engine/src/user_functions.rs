@@ -27,13 +27,12 @@ impl Engine {
     }
 
     /// Queue a notice (`RAISE NOTICE` / `WARNING` / ...).
-    pub(crate) fn push_sql_notice(&self, level: &str, message: &str) {
-        self.query_runtime_view().push_diagnostic(level, message);
+    pub(crate) fn push_sql_notice(&self, notice: uqa_sql::SQLNotice) {
+        self.query_runtime_view().push_notice(notice);
     }
 
-    /// Drain queued notices as `(level, message)` pairs in emission
-    /// order.
-    pub fn take_sql_notices(&self) -> Vec<(String, String)> {
+    /// Drain queued notices and warnings in emission order.
+    pub fn take_sql_notices(&self) -> Vec<uqa_sql::SQLNotice> {
         std::mem::take(&mut *self.runtime.notices.lock())
     }
 }

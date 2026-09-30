@@ -215,9 +215,8 @@ fn drop_sequence_sql_matches_missing_wrong_kind_and_multi_target_semantics() {
         .unwrap();
     assert_eq!(
         engine.take_sql_notices(),
-        vec![(
-            "NOTICE".to_string(),
-            "sequence \"missing_ids\" does not exist, skipping".to_string()
+        vec![uqa_engine::SQLNotice::notice(
+            "sequence \"missing_ids\" does not exist, skipping"
         )]
     );
 
@@ -330,8 +329,7 @@ fn drop_sequence_tracks_column_and_table_check_dependencies() {
         .unwrap();
     assert_eq!(
         engine.take_sql_notices(),
-        vec![("NOTICE".into(), "drop cascades to 2 other objects".into())]
-    );
+        vec![uqa_engine::SQLNotice::notice("drop cascades to 2 other objects").with_detail(Some("drop cascades to constraint check_dependency_column on table check_dependency_rows\ndrop cascades to constraint check_dependency_table on table check_dependency_rows".into()))]);
     let result = engine
         .sql(
             "SELECT count(*) AS count FROM pg_catalog.pg_constraint AS constraint_row JOIN pg_catalog.pg_class AS relation_row ON relation_row.oid = constraint_row.conrelid WHERE relation_row.relname = 'check_dependency_rows' AND constraint_row.contype = 'c'",

@@ -161,8 +161,18 @@ impl Deparser<'_> {
                     reference_expression(expression, scope, references);
                 }
             }
-            SourcePlan::Function { binding, args, .. } => {
+            SourcePlan::Function {
+                binding,
+                args,
+                relations,
+                ..
+            } => {
                 references.routines.extend(binding.iter().cloned());
+                // Operators such as `vector_similarity_join` read the relations they name.
+                if let Some(relations) = relations {
+                    references.relations.push(relations.left.clone());
+                    references.relations.push(relations.right.clone());
+                }
                 for expression in args {
                     reference_expression(expression, scope, references);
                 }
@@ -170,6 +180,10 @@ impl Deparser<'_> {
             SourcePlan::FunctionGroup { functions, .. } => {
                 for function in functions {
                     references.routines.extend(function.binding.iter().cloned());
+                    if let Some(relations) = &function.relations {
+                        references.relations.push(relations.left.clone());
+                        references.relations.push(relations.right.clone());
+                    }
                     for expression in &function.args {
                         reference_expression(expression, scope, references);
                     }

@@ -212,6 +212,6 @@ pub fn rewrite_routine_acl_owner(
     object_acl::rewrite_owner(&mut definition.execute_acl, old_owner, new_owner);
 }
 
-pub fn routine_acl_warning(is_grant: bool, name: &str) -> (&'static str, String) {
+pub fn routine_acl_warning(is_grant: bool, name: &str) -> crate::SQLNotice {
     object_acl::acl_warning(is_grant, name.rsplit('.').next().unwrap_or(name))
 }

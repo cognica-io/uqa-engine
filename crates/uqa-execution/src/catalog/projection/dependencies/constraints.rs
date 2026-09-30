@@ -33,7 +33,8 @@ impl DependencyBuilder<'_> {
                 oid,
                 MemberObject::Constraint {
                     name: constraint.name.clone(),
-                    relation: Some(relation_oid),
+                    owner: super::ConstraintOwner::Relation(relation_oid),
+                    not_null: matches!(constraint.kind, ConstraintCatalogKind::NotNull),
                 },
             );
             let address = ObjectAddress::whole(CONSTRAINT_CLASS, oid);

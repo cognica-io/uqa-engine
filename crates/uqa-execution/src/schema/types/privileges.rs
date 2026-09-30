@@ -67,8 +67,8 @@ pub fn grant_type(
     }
     drop(memberships);
     drop(roles);
-    for (level, message) in notices {
-        context.notices.notice(level, &message);
+    for notice in notices {
+        context.notices.notice(notice);
     }
     context.changes.catalog_registry_changed();
     Ok(())
@@ -76,7 +76,7 @@ pub fn grant_type(
 
 struct TypePrivilegeCandidate {
     changes: Vec<TypeObject>,
-    notices: Vec<(&'static str, String)>,
+    notices: Vec<uqa_sql::SQLNotice>,
 }
 
 fn prepare<'a>(

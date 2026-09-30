@@ -77,7 +77,7 @@ fn drop_branch(
             })
             .collect::<Result<Vec<_>, _>>()?
     };
-    super::drop::drop_constraint_one(context, table, target.name, false, cascade)?;
+    super::drop::perform_constraint_deletion(context, table, target.name, cascade)?;
     for (name, identity) in children.into_iter().flatten() {
         let Some(child) = lock_relation_identity(
             context.lock_catalog,

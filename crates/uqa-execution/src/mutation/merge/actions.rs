@@ -32,9 +32,11 @@ pub(super) fn ensure_merge_target_is_modified_once(
     if mutated_target_ids.insert((storage_table.to_string(), doc_id)) {
         return Ok(());
     }
-    Err(SQLError::Routine {
+    Err(SQLError::Diagnostic {
         sqlstate: "21000".into(),
         message: "MERGE command cannot affect row a second time".into(),
+        detail: None,
+        hint: Some("Ensure that not more than one source row matches any one target row.".into()),
     })
 }
 

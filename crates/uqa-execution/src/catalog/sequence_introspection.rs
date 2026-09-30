@@ -8,7 +8,7 @@
 
 use super::{
     context::CatalogContext,
-    projection::{resolve_regclass_kind_by_oid, resolve_regclass_oid, sequence_relation_oid},
+    projection::{resolve_regclass_kind_by_oid, resolve_regclass_oid},
     security::{roles::persistence::RoleCatalogSnapshot, SequenceSecurity},
     sequence::{snapshot::SequenceSnapshotSource, SequenceState},
 };
@@ -239,13 +239,7 @@ fn read_sequence(
     let snapshot = catalog.sequence_read_snapshot().map_err(|error| {
         SQLError::Internal(format!("load sequences for introspection: {error}"))
     })?;
-    let Some(relation) = snapshot
-        .object_ids
-        .iter()
-        .find_map(|(relation, object_id)| {
-            (sequence_relation_oid(*object_id) == oid).then(|| relation.clone())
-        })
-    else {
+    let Some(relation) = snapshot.relation_with_oid(oid) else {
         return Ok(None);
     };
     let state = snapshot.sequences.get(&relation).copied().ok_or_else(|| {

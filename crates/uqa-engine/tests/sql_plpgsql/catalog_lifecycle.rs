@@ -47,7 +47,7 @@ fn drop_function_variants() {
     let notices = eng.take_sql_notices();
     assert_eq!(notices.len(), 1);
     assert!(
-        notices[0].1.contains("does not exist, skipping"),
+        notices[0].message.contains("does not exist, skipping"),
         "got: {notices:?}"
     );
     // DROP PROCEDURE mirrors the behavior.

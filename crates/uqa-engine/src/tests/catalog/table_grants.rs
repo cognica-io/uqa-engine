@@ -229,7 +229,7 @@ fn final_foreign_persistence_failure_rolls_back_prior_writes_without_publishing_
 }
 
 impl TableGrantNotices for Authorization<'_> {
-    fn notice(&self, level: &str, message: &str) {
+    fn notice(&self, notice: uqa_sql::SQLNotice) {
         assert!(!self.roles_held.get() && !self.memberships_held.get());
         assert!(
             self.engine.storage.tables.read()[&RelationIdentity::new("public", "items")]
@@ -242,7 +242,7 @@ impl TableGrantNotices for Authorization<'_> {
             .acl
             .is_none());
         self.calls.borrow_mut().push("notice");
-        self.engine.push_sql_notice(level, message);
+        self.engine.push_sql_notice(notice);
     }
 }
 
@@ -280,10 +280,10 @@ fn mixed_table_sequence_grant_releases_authorization_guards_before_sequence_warn
     drop(calls);
     assert_eq!(
         engine.take_sql_notices(),
-        vec![(
-            "WARNING".into(),
-            "sequence \"ids\" only supports USAGE, SELECT, and UPDATE privileges".into()
-        )]
+        vec![uqa_sql::SQLNotice::warning(
+            "sequence \"ids\" only supports USAGE, SELECT, and UPDATE privileges"
+        )
+        .with_sqlstate("0LP01")]
     );
     assert!(
         engine.durable.sequence_security.read()[&RelationIdentity::new("public", "ids")]

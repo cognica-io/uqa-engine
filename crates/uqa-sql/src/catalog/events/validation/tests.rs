@@ -101,8 +101,14 @@ fn returning_checks_width_before_types_and_preserves_unknown_literal_slots() {
         vec![None, Some(ColumnType::Varchar(Some(4)))],
     );
     let error = validate_rule_returning_shape(&schema, &columns).unwrap_err();
-    assert!(
-        matches!(error, SQLError::Routine { sqlstate, message } if sqlstate == "42P17" && message.starts_with("RETURNING list's entry 2 has different size from column \"label\""))
+    assert_eq!(error.sqlstate(), Some("42P17"));
+    assert_eq!(
+        error.to_string(),
+        "RETURNING list's entry 2 has different size from column \"label\""
+    );
+    assert_eq!(
+        error.detail(),
+        Some("RETURNING list entry has type character varying(4), but column has type character varying(8).")
     );
     let unknown = RowSchema::with_types(vec!["id".into(), "label".into()], vec![None, None]);
     validate_rule_returning_shape(&unknown, &columns).unwrap();

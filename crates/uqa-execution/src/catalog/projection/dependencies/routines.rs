@@ -134,6 +134,45 @@ impl DependencyBuilder<'_> {
                 references.add_relation(oid);
             }
         }
+        self.collect_body_columns(definition, local_name, statement, parameters, references)?;
+        // A `MERGE` assignment coerces its value to a domain-typed target column; the coercion stays in the body after the column is dropped.
+        uqa_sql::catalog::stored_ast::visit_stored_statement_merges(
+            &mut statement.clone(),
+            &mut |merge| {
+                for binding in merge.target_column_bindings.values() {
+                    for domain in &binding.domain_dependencies {
+                        references.add_type(*domain);
+                    }
+                }
+                Ok(())
+            },
+        )?;
+        let expressions = self.expressions();
+        for name in &types {
+            if let Some(oid) = expressions.type_oid(name) {
+                references.add_type(oid);
+            }
+        }
+        for binding in &routines {
+            if let Some(oid) = expressions.routine_oid(binding) {
+                references.add_routine(oid);
+            }
+        }
+        for (ty, oid) in constants {
+            super::expressions::add_constant_reference(&ty, oid, references);
+        }
+        Ok(())
+    }
+
+    /// The columns a body statement names, and the types of the parameters it uses, including those its unresolved column names name.
+    fn collect_body_columns(
+        &self,
+        definition: &CreateFunction,
+        local_name: &str,
+        statement: &Statement,
+        mut parameters: BTreeSet<usize>,
+        references: &mut References,
+    ) -> Result<(), SQLError> {
         let sources = super::columns::StoredColumns::new(self);
         let columns = uqa_sql::binding::stored_columns::stored_statement_references(
             sources.binding_context(),
@@ -167,32 +206,6 @@ impl DependencyBuilder<'_> {
                     references.add_type(ty);
                 }
             }
-        }
-        // A `MERGE` assignment coerces its value to a domain-typed target column; the coercion stays in the body after the column is dropped.
-        uqa_sql::catalog::stored_ast::visit_stored_statement_merges(
-            &mut statement.clone(),
-            &mut |merge| {
-                for binding in merge.target_column_bindings.values() {
-                    for domain in &binding.domain_dependencies {
-                        references.add_type(*domain);
-                    }
-                }
-                Ok(())
-            },
-        )?;
-        let expressions = self.expressions();
-        for name in &types {
-            if let Some(oid) = expressions.type_oid(name) {
-                references.add_type(oid);
-            }
-        }
-        for binding in &routines {
-            if let Some(oid) = expressions.routine_oid(binding) {
-                references.add_routine(oid);
-            }
-        }
-        for (ty, oid) in constants {
-            super::expressions::add_constant_reference(&ty, oid, references);
         }
         Ok(())
     }

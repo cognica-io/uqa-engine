@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::catalog::projection::legacy_sequence_relation_oid;
 use crate::catalog::{security::roles::persistence::RoleCatalogSnapshot, sequence::SequenceState};
 use std::{
     cell::{Cell, RefCell},
@@ -39,6 +40,7 @@ impl Catalog {
         reader.attributes.clear();
         let relation = RelationIdentity::new("public", "ids");
         let retained = SequenceReadSnapshot {
+            catalog_oids: std::sync::Arc::default(),
             sequences: Arc::new(BTreeMap::from([(
                 relation.clone(),
                 SequenceState::initial(1, 1, SequenceDataType::BigInt),
@@ -167,7 +169,7 @@ fn inquiry_oid_authority_is_current_without_touching_live_resolution() {
         .next()
         .unwrap()
         .acl = Some(Vec::new());
-    let oid = sequence_relation_oid([7; 16]);
+    let oid = legacy_sequence_relation_oid([7; 16]);
     for subject in [
         None,
         Some(Value::Str("reader".into())),
@@ -234,7 +236,7 @@ fn inquiry_binds_a_new_committed_role_before_target_resolution() {
     for subject in [Value::Str("new_reader".into()), Value::Int(20_001)] {
         for target in [
             Value::Str("ids".into()),
-            Value::Int(sequence_relation_oid([7; 16])),
+            Value::Int(legacy_sequence_relation_oid([7; 16])),
         ] {
             assert_eq!(
                 catalog
@@ -251,7 +253,7 @@ fn inquiry_binds_a_new_committed_role_before_target_resolution() {
 fn removed_sequence_authority_does_not_reappear_from_a_retained_statement_catalog() {
     let catalog = Catalog::new();
     Arc::make_mut(&mut catalog.current.borrow_mut().object_ids).clear();
-    let oid = sequence_relation_oid([7; 16]);
+    let oid = legacy_sequence_relation_oid([7; 16]);
     let arguments = [Value::Int(oid), Value::Str("USAGE".into())];
     let inquiry = SequencePrivilegeInquiry {
         names: &catalog,

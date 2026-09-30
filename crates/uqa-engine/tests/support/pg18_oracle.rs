@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Replay checked-in `PostgreSQL` 18.4 simple-query oracles: command tags, SQLSTATE and message, DETAIL and HINT when the transcript records them, and every result row as `PostgreSQL` text.
+//! Replay checked-in `PostgreSQL` 18.4 simple-query oracles: command tags, SQLSTATE and message, DETAIL and HINT when the transcript records them, every result row as `PostgreSQL` text, and the notices and warnings when the transcript records them.
 
 use uqa_core::Value;
 use uqa_engine::sql::{format_postgres_text, postgres_result_type};
@@ -33,6 +33,7 @@ fn normalized_results(results: &serde_json::Value) -> serde_json::Value {
 
 /// Run one simple query and describe it in the oracle's shape.
 pub fn run_case(engine: &Engine, sql: &str) -> serde_json::Value {
+    engine.take_sql_notices();
     let mut tags = Vec::new();
     let mut results = Vec::new();
     let outcome = engine.sql_simple_query(sql, &[], |result| {
@@ -87,7 +88,20 @@ pub fn run_case(engine: &Engine, sql: &str) -> serde_json::Value {
             "hint": error.hint(),
         })
     });
-    serde_json::json!({"error": error, "command_tags": tags, "results": results})
+    let notices = engine
+        .take_sql_notices()
+        .into_iter()
+        .map(|notice| {
+            serde_json::json!({
+                "severity": notice.severity.as_str(),
+                "sqlstate": notice.sqlstate,
+                "message": notice.message,
+                "detail": notice.detail,
+                "hint": notice.hint,
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({"error": error, "command_tags": tags, "results": results, "notices": notices})
 }
 
 /// Compare the diagnostic fields the transcript recorded; transcripts captured without `--details` omit DETAIL and HINT.
@@ -112,13 +126,18 @@ pub fn verify(engine: &Engine, transcript: &str) {
         let sql = case["sql"].as_str().unwrap();
         let actual = run_case(engine, sql);
         let expected_results = normalized_results(&case["results"]);
+        // Transcripts captured without `--notices` do not record notices.
+        let notices_match = case
+            .get("notices")
+            .is_none_or(|expected| actual["notices"] == *expected);
         if !error_matches(&actual["error"], &case["error"])
             || actual["command_tags"] != case["command_tags"]
             || (sql != "SELECT version()" && actual["results"] != expected_results)
+            || !notices_match
         {
             differences.push(format!(
                 "{sql}\nexpected: {}\nactual: {actual}",
-                serde_json::json!({"error": case["error"], "command_tags": case["command_tags"], "results": expected_results})
+                serde_json::json!({"error": case["error"], "command_tags": case["command_tags"], "results": expected_results, "notices": case.get("notices")})
             ));
         }
     }

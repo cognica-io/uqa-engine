@@ -68,12 +68,7 @@ impl SequenceValueContext<'_> {
                 })?
             }
             ValueReference::Oid(oid) => snapshot
-                .object_ids
-                .iter()
-                .find_map(|(relation, object_id)| {
-                    (crate::catalog::projection::sequence_relation_oid(*object_id) == oid)
-                        .then(|| relation.clone())
-                })
+                .relation_with_oid(oid)
                 .ok_or_else(|| SequenceValueError::Undefined(reference.into()))?,
         };
         let name = relation.qualified_name();
@@ -102,9 +97,7 @@ impl SequenceValueContext<'_> {
                     (*object_id == bound.object_id).then(|| relation.clone())
                 })
                 .ok_or_else(|| {
-                    SequenceValueError::MissingOid(
-                        crate::catalog::projection::sequence_relation_oid(bound.object_id),
-                    )
+                    SequenceValueError::MissingOid(snapshot.catalog_oid(&bound.object_id))
                 })?;
             let current_name = relation.qualified_name();
             if current_name != name {

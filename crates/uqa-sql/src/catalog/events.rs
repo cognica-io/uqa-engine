@@ -46,6 +46,12 @@ pub struct StoredTrigger {
     pub object_id: Option<[u8; 16]>,
     #[serde(default)]
     pub constraint_name: Option<String>,
+    /// The `pg_trigger` OID `CreateTrigger` allocated; triggers created before OIDs were recorded derive theirs from their identity and relation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_oid: Option<i64>,
+    /// The `pg_constraint` OID of a constraint trigger, allocated after the trigger's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraint_catalog_oid: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +65,9 @@ pub struct StoredRule {
     pub condition_binding: Option<RuleConditionBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dependencies: Option<RuleDependencies>,
+    /// The `pg_rewrite` OID `InsertRule` allocated; rules created before OIDs were recorded keep the OID their name derived when the catalog first opened with this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_oid: Option<i64>,
 }
 
 impl StoredRule {

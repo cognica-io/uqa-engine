@@ -78,9 +78,7 @@ fn cached_values_and_introspection_observe_committed_membership_revocation() {
         for isolation in ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] {
             let (_directory, engine, peer) = sessions(provider);
             sql(&engine, "CREATE ROLE reader; CREATE ROLE readers; GRANT readers TO reader; CREATE SEQUENCE ids CACHE 5; GRANT ALL ON SEQUENCE ids TO readers; GRANT SELECT ON t TO reader; SET ROLE reader; SELECT nextval('ids')");
-            let oid = uqa_execution::catalog::projection::sequence_relation_oid(
-                engine.durable.sequence_object_ids.read()[&RelationIdentity::new("public", "ids")],
-            );
+            let oid = super::super::sequence_oid(&engine, &RelationIdentity::new("public", "ids"));
             sql(
                 &engine,
                 &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT * FROM t"),
@@ -213,7 +211,10 @@ fn setval_by_oid_returns_a_committed_value_before_the_live_registry_contains_the
         row.relation = RelationIdentity::new("public", "late_ids");
         row.object_id = [31; 16];
         row.definition_generation = [32; 16];
-        let oid = uqa_execution::catalog::projection::sequence_relation_oid(row.object_id);
+        let oid = uqa_execution::catalog::sequence::catalog_oids::sequence_catalog_oid(
+            &engine.durable.sequence_catalog_oids.read(),
+            &row.object_id,
+        );
         // Inspect the value boundary before transaction completion can refresh the live registry.
         engine.begin().unwrap();
         let resolution = AfterResolution {

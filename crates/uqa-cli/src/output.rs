@@ -59,12 +59,22 @@ fn print_result_expanded_impl(
 
 pub(super) fn print_result(result: &SQLResult, out: &mut (impl Write + ?Sized)) {
     if let Err(error) = print_result_impl(result, None, out) {
-        let _ = writeln!(
-            out,
-            "ERROR: {}: {error}",
-            error.sqlstate().unwrap_or("XX000")
-        );
+        let _ = writeln!(out, "ERROR: {}", sql_error_text(&error));
     }
+}
+
+/// An SQL error as the shell reports it: the SQLSTATE and message, then the detail and hint on lines of their own, as `psql` shows them.
+pub(super) fn sql_error_text(error: &SQLError) -> String {
+    let mut text = format!("{}: {error}", error.sqlstate().unwrap_or("XX000"));
+    if let Some(detail) = error.detail() {
+        text.push_str("\nDETAIL: ");
+        text.push_str(detail);
+    }
+    if let Some(hint) = error.hint() {
+        text.push_str("\nHINT: ");
+        text.push_str(hint);
+    }
+    text
 }
 
 pub(super) fn print_result_with_engine(

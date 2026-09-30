@@ -99,17 +99,16 @@ pub(super) fn recursive_alter_children<S: Clone + 'static>(
     recurse: bool,
     action: &AlterTableAction,
 ) -> Result<Vec<String>, SQLError> {
-    let partition_column = matches!(
-        action,
-        AlterTableAction::RenameColumn { .. } | AlterTableAction::DropColumn { .. }
-    ) && context
-        .hierarchy
-        .partitions
-        .catalog
-        .try_table_hierarchy(table)
-        .map_err(SQLError::Internal)?
-        .partition_spec
-        .is_some();
+    // `ATExecDropColumn` recurses into inheritors itself.
+    let partition_column = matches!(action, AlterTableAction::RenameColumn { .. })
+        && context
+            .hierarchy
+            .partitions
+            .catalog
+            .try_table_hierarchy(table)
+            .map_err(SQLError::Internal)?
+            .partition_spec
+            .is_some();
     let recursive = partition_column
         || matches!(action, AlterTableAction::AddColumn { .. })
         || matches!(action, AlterTableAction::AddCheckConstraint { constraint } if !constraint.no_inherit)
@@ -120,7 +119,12 @@ pub(super) fn recursive_alter_children<S: Clone + 'static>(
                 ..
             }
         )
-        || matches!(action, AlterTableAction::SetNotNull { .. });
+        || matches!(action, AlterTableAction::SetNotNull { .. })
+        // `ATSimpleRecursion`: a column default is set or dropped in every inheritor too.
+        || matches!(
+            action,
+            AlterTableAction::SetDefault { .. } | AlterTableAction::DropDefault { .. }
+        );
     if !recursive {
         return Ok(Vec::new());
     }

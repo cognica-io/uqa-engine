@@ -56,6 +56,8 @@ pub enum CatalogOidClass {
     Procedure,
     /// `pg_attrdef` rows: column defaults and generation expressions.
     AttributeDefault,
+    /// `pg_trigger` rows.
+    Trigger,
 }
 
 impl CatalogOidClass {
@@ -68,6 +70,7 @@ impl CatalogOidClass {
             Self::Rewrite => 2618,
             Self::Procedure => 1255,
             Self::AttributeDefault => 2604,
+            Self::Trigger => 2620,
         }
     }
 
@@ -80,6 +83,7 @@ impl CatalogOidClass {
             Self::Rewrite => "rule",
             Self::Procedure => "function",
             Self::AttributeDefault => "default",
+            Self::Trigger => "trigger",
         }
     }
 }

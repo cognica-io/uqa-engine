@@ -293,9 +293,11 @@ fn trigger_dependencies_follow_table_rename_drop_and_function_cascade() {
     let error = engine
         .sql("DROP FUNCTION mutate_item()", &[])
         .expect_err("a trigger must depend on its function");
-    assert!(
-        matches!(error, uqa_sql::SQLError::Routine { ref sqlstate, .. } if sqlstate == "2BP01"),
-        "{error}"
+    assert_eq!(error.sqlstate(), Some("2BP01"), "{error}");
+    assert_eq!(
+        error.detail(),
+        Some("trigger mutate_before on table items depends on function mutate_item()"),
+        "{error:?}"
     );
 
     exec(&engine, "ALTER TABLE items RENAME TO renamed_items");

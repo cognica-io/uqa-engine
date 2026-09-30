@@ -75,15 +75,6 @@ impl ViewRegistryState for Fixture {
     }
 }
 impl ViewRemovalEvents for Fixture {
-    fn rules_depending_on_relations(
-        &self,
-        _: &[String],
-    ) -> StorageBackendResult<Vec<(RelationIdentity, String)>> {
-        panic!("dependency preflight precedes publication");
-    }
-    fn drop_rules_depending_on_relations_inner(&self, _: &[String]) -> StorageBackendResult<()> {
-        panic!("dependency preflight precedes publication");
-    }
     fn drop_relation_events_inner(&self, relation: &RelationIdentity) -> StorageBackendResult<()> {
         assert_eq!(relation, &RelationIdentity::new("public", "v"));
         assert!(self.views.try_borrow_mut().is_ok());
@@ -143,10 +134,7 @@ fn durable_view_deletion_persists_under_the_registry_guard_before_generation_pub
 fn failed_or_missing_durable_deletion_preserves_the_registry_and_generation() {
     for (persistence, message) in [
         (Persistence::Failure, "injected deletion failure"),
-        (
-            Persistence::Missing,
-            "disappeared after dependency preflight",
-        ),
+        (Persistence::Missing, "disappeared before its removal"),
     ] {
         let fixture = Fixture::new(persistence, false);
         let before =

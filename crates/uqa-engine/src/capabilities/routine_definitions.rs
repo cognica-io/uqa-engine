@@ -7,9 +7,8 @@
 //! Bind routine definition analysis to current catalog data and compilation namespaces.
 
 use crate::Engine;
-use std::collections::BTreeSet;
 use uqa_sql::{
-    ast::{ColumnDef, ColumnType, CreateFunction},
+    ast::{ColumnDef, ColumnType},
     binding::{snapshot::BindingSnapshot, stored_relations::StoredQueryNamespace},
     plpgsql::PlpgsqlCatalog,
     routines::{
@@ -117,7 +116,6 @@ use uqa_execution::routines::{
     definition::RoutineDefinitionContext,
     rewrites::{self, RoutineRewriteContext},
 };
-use uqa_sql::ast::FunctionBinding;
 
 impl Engine {
     pub(crate) fn routine_definition_context(&self) -> RoutineDefinitionContext<'_> {
@@ -160,26 +158,6 @@ impl Engine {
             relation,
             from,
             to,
-        )
-    }
-    pub(crate) fn publish_stored_routine_body_rewrites(
-        &self,
-        definitions: Vec<CreateFunction>,
-    ) -> Result<(), SQLError> {
-        rewrites::publish_stored_routine_body_rewrites(&self.routine_rewrite_context(), definitions)
-    }
-    pub(crate) fn refresh_stored_merge_target_plans(&self) -> Result<(), SQLError> {
-        rewrites::refresh_stored_merge_target_plans(&self.routine_rewrite_context())
-    }
-    pub(crate) fn prepare_routine_column_alias_drop(
-        &self,
-        columns: BTreeSet<(String, String)>,
-        removed: &[FunctionBinding],
-    ) -> Result<Vec<CreateFunction>, SQLError> {
-        uqa_execution::routines::removal::prepare_routine_column_alias_drop(
-            &self.routine_removal_context(),
-            columns,
-            removed,
         )
     }
 }
@@ -239,15 +217,5 @@ impl Engine {
             configuration: self,
             bodies: self,
         }
-    }
-    /// Registration locks the routine's name and allocates its OID in a transaction, as every definition statement does.
-    #[cfg(test)]
-    pub(crate) fn register_sql_function(&self, def: CreateFunction) -> Result<(), SQLError> {
-        self.with_implicit_definition_transaction(|engine| {
-            uqa_execution::routines::registration::register_sql_function(
-                &engine.routine_registration_context(),
-                def,
-            )
-        })
     }
 }

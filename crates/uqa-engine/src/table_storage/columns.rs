@@ -49,71 +49,33 @@ impl Engine {
         )
     }
 
+    /// Drop a column and the copies its inheritors have from no other source, as `ALTER TABLE ... DROP COLUMN` does without `CASCADE`. Returns `false` when the table or column does not exist.
     pub fn drop_column(&self, table: &str, column: &str) -> StorageBackendResult<bool> {
-        self.with_implicit_storage_transaction(|engine| {
-            let mut rewritten = Vec::new();
-            if let Some(canonical) =
-                engine.resolve_table_ddl_target(table, "ALTER TABLE DROP COLUMN")?
-            {
-                if engine.table_has_column_in_execution(&canonical, column)? {
-                    engine
-                        .drop_column_routine_dependents(&canonical, column, false)
-                        .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-                    rewritten = engine
-                        .prepare_routine_column_alias_drop(
-                            std::collections::BTreeSet::from([(canonical, column.to_string())]),
-                            &[],
-                        )
-                        .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-                }
-            }
-            let dropped = engine.try_drop_column_inner(table, column)?;
-            if dropped {
-                engine
-                    .publish_stored_routine_body_rewrites(rewritten)
-                    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-                engine
-                    .refresh_stored_merge_target_plans()
-                    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-            }
-            Ok(dropped)
+        use uqa_execution::schema::columns::deletion::ColumnDrop;
+        use uqa_execution::schema::deletion::CatalogRemovalInputs;
+        self.with_implicit_definition_transaction(|engine| {
+            let Some(canonical) = engine
+                .resolve_table_ddl_target(table, "ALTER TABLE DROP COLUMN")
+                .map_err(|error| uqa_sql::SQLError::Internal(error.to_string()))?
+            else {
+                return Ok(false);
+            };
+            let outcome = uqa_execution::schema::columns::deletion::drop_column(
+                &engine.catalog_removal_context(),
+                &canonical,
+                column,
+                (true, false, true),
+                &mut |_| {
+                    Err(uqa_sql::SQLError::Internal(
+                        "a recursive column drop keeps no inherited copy".into(),
+                    ))
+                },
+            )?;
+            Ok(matches!(outcome, ColumnDrop::Dropped))
         })
-    }
-
-    pub(crate) fn try_drop_column(&self, table: &str, column: &str) -> StorageBackendResult<bool> {
-        self.with_implicit_storage_transaction(|engine| engine.try_drop_column_inner(table, column))
-    }
-
-    pub(crate) fn try_drop_column_cascade(
-        &self,
-        table: &str,
-        column: &str,
-    ) -> StorageBackendResult<bool> {
-        self.with_implicit_storage_transaction(|engine| {
-            engine.try_drop_column_inner_with_sequence_cascade(table, column, true)
+        .map_err(|error| {
+            uqa_storage::StorageBackendError::backend("ALTER TABLE DROP COLUMN", error)
         })
-    }
-
-    pub(crate) fn try_drop_column_inner(
-        &self,
-        table: &str,
-        column: &str,
-    ) -> StorageBackendResult<bool> {
-        self.try_drop_column_inner_with_sequence_cascade(table, column, false)
-    }
-
-    fn try_drop_column_inner_with_sequence_cascade(
-        &self,
-        table: &str,
-        column: &str,
-        cascade: bool,
-    ) -> StorageBackendResult<bool> {
-        uqa_execution::schema::publication::removal::drop_column(
-            &self.column_drop_publication_context(),
-            table,
-            column,
-            cascade,
-        )
     }
 
     pub(crate) fn try_drop_vector_indexes_for_column(

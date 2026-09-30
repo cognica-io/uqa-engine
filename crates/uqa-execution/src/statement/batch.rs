@@ -304,10 +304,10 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                         )
                     })
                 {
-                    context.runtime.notices.lock().push((
-                        "WARNING".into(),
-                        "there is no transaction in progress".into(),
-                    ));
+                    context.runtime.notices.lock().push(
+                        uqa_sql::SQLNotice::warning("there is no transaction in progress")
+                            .with_sqlstate("25P01"),
+                    );
                     last = SQLResult::empty();
                     last.command_tag = Some(
                         uqa_sql::result::completion::transaction_completion(
@@ -331,10 +331,10 @@ fn execute_uncached_or_snapshot_scoped<S: Clone + Send + Sync + 'static>(
                         )
                     })
                 {
-                    context.runtime.notices.lock().push((
-                        "WARNING".into(),
-                        "there is no transaction in progress".into(),
-                    ));
+                    context.runtime.notices.lock().push(
+                        uqa_sql::SQLNotice::warning("there is no transaction in progress")
+                            .with_sqlstate("25P01"),
+                    );
                 }
                 last = UnifiedPlanExecutor::with_nested_statement(
                     context.statements.statement_execution_context(),

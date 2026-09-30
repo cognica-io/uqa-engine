@@ -50,12 +50,18 @@ impl Engine {
         let Some(mut store) = self.graph_write_candidate(name, false)? else {
             return Ok(false);
         };
-        let labels = store.graph_labels(name).map_err(graph_store_error)?;
-        let label_relations = labels
-            .iter()
-            .map(|label| RelationIdentity::new(name, &label.name).qualified_name())
+        let labels = store
+            .graph_labels(name)
+            .map_err(graph_store_error)?
+            .into_iter()
+            .map(|label| label.name)
             .collect::<Vec<_>>();
-        self.drop_views_depending_on_relations(&label_relations)?;
+        uqa_execution::schema::deletion::drop_graph_label_dependents(
+            &uqa_execution::schema::deletion::CatalogRemovalInputs::catalog_removal_context(self),
+            name,
+            &labels,
+        )
+        .map_err(|error| super::StorageBackendError::Other(error.to_string()))?;
         store.drop_graph(name).map_err(graph_store_error)?;
         self.invalidate_graph_path_indexes(name)?;
         self.publish_graph_candidate(store)?;

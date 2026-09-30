@@ -10,13 +10,9 @@ use std::sync::Arc;
 use uqa_execution::{
     catalog::foreign::reads::ForeignTablesRead,
     schema::sequences::dependency_lifecycle::{
-        SequenceChecksRead, SequenceColumnsRead, SequenceDependencyCatalog,
-        SequenceDependencyContext, SequenceTableMetadata,
+        SequenceColumnsRead, SequenceDependencyCatalog, SequenceDependencyContext,
+        SequenceTableMetadata,
     },
-};
-use uqa_sql::schema::sequences::{
-    dependencies::analysis::{SequenceExpressionCatalog, SequenceExpressionObjectIdsRead},
-    dependents::SequenceSchemaDependent,
 };
 use uqa_storage::{SequenceOwner, StorageBackendResult};
 impl SequenceTableMetadata for TableState {
@@ -25,9 +21,6 @@ impl SequenceTableMetadata for TableState {
     }
     fn columns(&self) -> SequenceColumnsRead<'_> {
         Box::new(self.columns.read())
-    }
-    fn table_checks(&self) -> SequenceChecksRead<'_> {
-        Box::new(self.table_checks.read())
     }
 }
 impl SequenceDependencyCatalog for Engine {
@@ -52,11 +45,6 @@ impl SequenceDependencyCatalog for Engine {
     }
     fn foreign_tables(&self) -> ForeignTablesRead<'_> {
         Box::new(self.durable.foreign_tables.read())
-    }
-}
-impl SequenceExpressionCatalog for Engine {
-    fn object_ids(&self) -> SequenceExpressionObjectIdsRead<'_> {
-        Box::new(self.durable.sequence_object_ids.read())
     }
 }
 impl Engine {
@@ -95,35 +83,12 @@ impl Engine {
             column_object_id,
         )
     }
-    pub(crate) fn sequence_schema_expression_dependents(
-        &self,
-        sequence: &str,
-    ) -> StorageBackendResult<Vec<SequenceSchemaDependent>> {
-        self.sequence_dependency_context()
-            .sequence_schema_expression_dependents(sequence)
-    }
     pub(crate) fn resolve_stored_sequence_references_in_expr(
         &self,
         expression: &mut uqa_sql::ast::Expr,
     ) -> StorageBackendResult<()> {
         self.sequence_dependency_context()
             .resolve_stored_sequence_references_in_expr(expression)
-    }
-    pub(crate) fn sequence_external_dependents_for_owner_drop(
-        &self,
-        sequence: &str,
-        owner_drop_targets: &std::collections::BTreeSet<String>,
-    ) -> StorageBackendResult<Vec<String>> {
-        self.sequence_dependency_context()
-            .sequence_external_dependents_for_owner_drop(sequence, owner_drop_targets)
-    }
-    pub(crate) fn owned_sequence_dependents_for_column(
-        &self,
-        table_name: &str,
-        column_name: &str,
-    ) -> StorageBackendResult<Vec<String>> {
-        self.sequence_dependency_context()
-            .owned_sequence_dependents_for_column(table_name, column_name)
     }
     pub(crate) fn sequence_owner_target(
         &self,

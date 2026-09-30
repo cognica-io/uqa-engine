@@ -22,8 +22,7 @@ fn explicit_block_command(transaction: &uqa_sql::ast::TransactionStmt) -> Option
 fn compile_simple_query_batch(
     text: &str,
 ) -> Result<Option<Vec<(String, uqa_sql::ast::Statement)>>, String> {
-    let compiled = uqa_sql::compile(text)
-        .map_err(|error| format!("{}: {error}", error.sqlstate().unwrap_or("XX000")))?;
+    let compiled = uqa_sql::compile(text).map_err(|error| sql_error_text(&error))?;
     if compiled.len() <= 1 {
         return Ok(None);
     }
@@ -464,7 +463,7 @@ impl Session {
                 }
                 self.engine
                     .promote_simple_query_transaction()
-                    .map_err(|error| format!("{}: {error}", error.sqlstate().unwrap_or("XX000")))?;
+                    .map_err(|error| sql_error_text(&error))?;
                 if let Some(uqa_sql::ast::TransactionStmt::BeginWithCharacteristics(options)) =
                     transaction
                 {
@@ -472,9 +471,7 @@ impl Session {
                         .run_transaction_statement(
                             uqa_sql::ast::TransactionStmt::SetCharacteristics(options),
                         )
-                        .map_err(|error| {
-                            format!("{}: {error}", error.sqlstate().unwrap_or("XX000"))
-                        })?;
+                        .map_err(|error| sql_error_text(&error))?;
                 }
                 implicit_segment_open = false;
                 continue;
@@ -485,7 +482,7 @@ impl Session {
             {
                 self.engine
                     .begin_simple_query_transaction()
-                    .map_err(|error| format!("{}: {error}", error.sqlstate().unwrap_or("XX000")))?;
+                    .map_err(|error| sql_error_text(&error))?;
                 implicit_segment_open = true;
             }
             if self.engine.transaction_depth() == 0
@@ -521,7 +518,7 @@ impl Session {
             self.engine
                 .sql("COMMIT", &[])
                 .map(|_| ())
-                .map_err(|error| format!("{}: {error}", error.sqlstate().unwrap_or("XX000")))
+                .map_err(|error| sql_error_text(&error))
         } else {
             Ok(())
         }
@@ -543,9 +540,22 @@ impl Session {
         let notice_result = {
             let stderr = io::stderr();
             let mut diagnostics = stderr.lock();
-            notices.iter().try_for_each(|(level, message)| {
-                writeln!(diagnostics, "{level}: {message}")
-                    .map_err(|error| format!("write SQL notice: {error}"))
+            notices.iter().try_for_each(|notice| {
+                writeln!(
+                    diagnostics,
+                    "{}: {}",
+                    notice.severity.as_str(),
+                    notice.message
+                )
+                .and_then(|()| match &notice.detail {
+                    Some(detail) => writeln!(diagnostics, "DETAIL: {detail}"),
+                    None => Ok(()),
+                })
+                .and_then(|()| match &notice.hint {
+                    Some(hint) => writeln!(diagnostics, "HINT: {hint}"),
+                    None => Ok(()),
+                })
+                .map_err(|error| format!("write SQL notice: {error}"))
             })
         };
         let result = notice_result.and_then(|()| match outcome {
@@ -560,10 +570,9 @@ impl Session {
                         print_result_with_engine(&result, &self.engine, writer)
                     };
                 })?;
-                formatted
-                    .map_err(|error| format!("{}: {error}", error.sqlstate().unwrap_or("XX000")))
+                formatted.map_err(|error| sql_error_text(&error))
             }
-            Err(err) => Err(format!("{}: {err}", err.sqlstate().unwrap_or("XX000"))),
+            Err(err) => Err(sql_error_text(&err)),
         });
         let timing_result = if self.show_timing {
             let ms = elapsed.as_secs_f64() * 1000.0;

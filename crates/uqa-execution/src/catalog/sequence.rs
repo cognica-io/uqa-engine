@@ -79,6 +79,7 @@ pub fn sequence_row(
     })
 }
 
+pub mod catalog_oids;
 pub mod restoration;
 
 pub mod session;

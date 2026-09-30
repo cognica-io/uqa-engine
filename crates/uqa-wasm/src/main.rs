@@ -573,7 +573,15 @@ fn dispatch_engine(engine: &Engine, method: &str, args: &JSON) -> Result<JSON, S
             engine
                 .take_sql_notices()
                 .into_iter()
-                .map(|(level, message)| json!({ "level": level, "message": message }))
+                .map(|notice| {
+                    json!({
+                        "level": notice.severity.as_str(),
+                        "sqlstate": notice.sqlstate,
+                        "message": notice.message,
+                        "detail": notice.detail,
+                        "hint": notice.hint,
+                    })
+                })
                 .collect(),
         )),
         "sqlFunctionDepthLimit" => json_u64(

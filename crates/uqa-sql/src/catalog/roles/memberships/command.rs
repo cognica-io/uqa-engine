@@ -174,10 +174,11 @@ impl MembershipTarget {
                 after.set_option = option;
             }
             return Ok(if after == *before {
-                MembershipChange::Notice {
-                    level: "NOTICE",
-                    message: self.membership_notice(roles, member, "has already been granted")?,
-                }
+                MembershipChange::Notice(crate::SQLNotice::notice(self.membership_notice(
+                    roles,
+                    member,
+                    "has already been granted",
+                )?))
             } else {
                 MembershipChange::Update(vec![MembershipUpdate {
                     before: before.clone(),
@@ -221,10 +222,7 @@ impl MembershipTarget {
 pub enum MembershipChange {
     Insert(MembershipInsertion),
     Update(Vec<MembershipUpdate>),
-    Notice {
-        level: &'static str,
-        message: String,
-    },
+    Notice(crate::SQLNotice),
 }
 
 pub struct MembershipUpdate {

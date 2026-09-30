@@ -74,6 +74,14 @@ pub fn catalog_oid_in_use(
         )?
         .iter()
         .any(|row| matches!(row.get("oid"), Some(uqa_core::Value::Int(existing)) if *existing == oid))),
+        CatalogOidClass::Trigger => {
+            for (trigger, _) in super::events::catalog_triggers(catalog, resolution)? {
+                if super::events::trigger_catalog_oid(catalog, resolution, &trigger)? == oid {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        }
     }
 }
 
@@ -237,7 +245,8 @@ pub fn validate_catalog_identity_claim(
         | CatalogOidClass::EnumLabel
         | CatalogOidClass::Rewrite
         | CatalogOidClass::Procedure
-        | CatalogOidClass::AttributeDefault => Err(SQLError::Internal(format!(
+        | CatalogOidClass::AttributeDefault
+        | CatalogOidClass::Trigger => Err(SQLError::Internal(format!(
             "supplied {} catalog identities are not accepted",
             class.label()
         ))),

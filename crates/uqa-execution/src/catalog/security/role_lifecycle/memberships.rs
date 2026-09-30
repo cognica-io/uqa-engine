@@ -141,7 +141,10 @@ impl MembershipWork<'_, '_> {
             let mut plan = MembershipRevocation::new(&bound, &memberships);
             for member in &bound.members {
                 if let Some(message) = plan.member(&roles, member)? {
-                    self.context.analysis.notices.notice("WARNING", &message);
+                    self.context
+                        .analysis
+                        .notices
+                        .notice(uqa_sql::SQLNotice::warning(message));
                 }
             }
             for update in plan.into_updates() {
@@ -162,8 +165,8 @@ impl MembershipWork<'_, '_> {
                         self.memberships.update(update);
                     }
                 }
-                MembershipChange::Notice { level, message } => {
-                    self.context.analysis.notices.notice(level, &message);
+                MembershipChange::Notice(notice) => {
+                    self.context.analysis.notices.notice(notice);
                 }
             }
         }

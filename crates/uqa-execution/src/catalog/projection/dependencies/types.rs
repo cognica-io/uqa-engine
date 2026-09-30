@@ -6,7 +6,7 @@
 
 //! Dependencies of user-defined types, as `GenerateTypeDependencies` records them for enums, domains and their array types, and `domainAddConstraint` for domain constraints.
 
-use super::{ColumnScope, DependencyBuilder, MemberObject, References};
+use super::{ColumnScope, ConstraintOwner, DependencyBuilder, MemberObject, References};
 use uqa_sql::catalog::dependencies::{DependencyKind, ObjectAddress, CONSTRAINT_CLASS, TYPE_CLASS};
 use uqa_sql::SQLError;
 
@@ -75,7 +75,8 @@ impl DependencyBuilder<'_> {
                     oid,
                     MemberObject::Constraint {
                         name: name.to_string(),
-                        relation: None,
+                        owner: ConstraintOwner::Domain(domain.oid),
+                        not_null: expression.is_none(),
                     },
                 );
                 let constraint = ObjectAddress::whole(CONSTRAINT_CLASS, oid);

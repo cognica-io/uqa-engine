@@ -198,7 +198,9 @@ pub fn alter_enum(context: &EnumTypeContext<'_>, statement: AlterEnum) -> Result
                     context.visibility.enum_label_added(resolved.oid, oid);
                 }
                 AddedEnumLabel::Skipped(message) => {
-                    context.notices.notice("NOTICE", &message);
+                    context
+                        .notices
+                        .notice(uqa_sql::SQLNotice::notice(message).with_sqlstate("42710"));
                     return Ok(());
                 }
             }

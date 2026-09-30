@@ -6,5 +6,5 @@
 
 //! Borrowed notice delivery for catalog operations.
 pub trait CatalogNotices {
-    fn notice(&self, level: &str, message: &str);
+    fn notice(&self, notice: uqa_sql::SQLNotice);
 }

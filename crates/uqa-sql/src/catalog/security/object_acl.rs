@@ -318,15 +318,31 @@ pub fn bind_grantees(
 }
 
 /// The WARNING of a GRANT or REVOKE whose current user holds no grant option, naming the object without its schema.
-pub fn acl_warning(is_grant: bool, local_name: &str) -> (&'static str, String) {
-    (
-        "WARNING",
-        if is_grant {
-            format!("no privileges were granted for \"{local_name}\"")
-        } else {
-            format!("no privileges could be revoked for \"{local_name}\"")
-        },
-    )
+pub fn acl_warning(is_grant: bool, local_name: &str) -> crate::SQLNotice {
+    privilege_warning(is_grant, false, local_name)
+}
+
+/// `ExecGrant_*`'s warning when a grantor holds none (or not all) of the privileges a `GRANT` or `REVOKE` names: `01007` for grants and `01006` for revocations.
+pub fn privilege_warning(is_grant: bool, partial: bool, name: &str) -> crate::SQLNotice {
+    let (message, sqlstate) = match (is_grant, partial) {
+        (true, true) => (
+            format!("not all privileges were granted for \"{name}\""),
+            "01007",
+        ),
+        (true, false) => (
+            format!("no privileges were granted for \"{name}\""),
+            "01007",
+        ),
+        (false, true) => (
+            format!("not all privileges could be revoked for \"{name}\""),
+            "01006",
+        ),
+        (false, false) => (
+            format!("no privileges could be revoked for \"{name}\""),
+            "01006",
+        ),
+    };
+    crate::SQLNotice::warning(message).with_sqlstate(sqlstate)
 }
 
 #[cfg(test)]

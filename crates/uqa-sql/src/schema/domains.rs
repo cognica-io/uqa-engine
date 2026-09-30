@@ -156,5 +156,4 @@ fn bind_domain_check(
 }
 
 pub mod constraints;
-pub mod dependencies;
 pub mod removal;

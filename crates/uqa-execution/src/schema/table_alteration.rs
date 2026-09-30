@@ -5,7 +5,6 @@
 //
 
 //! Execute table alterations in declaration order and propagate inheritable actions through child relations.
-use crate::schema::columns::removal::drop_column;
 use crate::schema::constraints::{
     add_check_constraint, add_foreign_key_constraint, add_not_null_constraint, alter_constraint,
     drop::drop_constraint, set_not_null_constraint, table_constraint_state, validate_constraint,
@@ -15,6 +14,7 @@ use uqa_sql::{
     SQLError, SQLResult,
 };
 pub mod binding;
+mod column_removal;
 mod context;
 pub mod entry;
 mod locking;
@@ -50,13 +50,13 @@ pub fn run_alter_table<S: Clone + 'static>(
                 .has_column(&table, &column.name)
                 .map_err(|error| ddl_storage_error("ALTER TABLE ADD COLUMN", error))?
             {
-                context.constraints.notices.lock().push((
-                    "NOTICE".into(),
-                    format!(
+                context.constraints.notices.lock().push(
+                    uqa_sql::SQLNotice::notice(format!(
                         "column \"{}\" of relation \"{qualifier}\" already exists, skipping",
                         column.name
-                    ),
-                ));
+                    ))
+                    .with_sqlstate("42701"),
+                );
                 continue;
             }
         }
@@ -285,7 +285,14 @@ fn run_alter_table_action<S: Clone + 'static>(
             if_exists,
             cascade,
         } => {
-            drop_column(&context.removal, &stmt.table, &name, if_exists, cascade)?;
+            column_removal::drop_column(
+                context,
+                &stmt.table,
+                &name,
+                if_exists,
+                cascade,
+                stmt.recurse,
+            )?;
         }
         AlterTableAction::RenameColumn { from, to } => {
             uqa_sql::schema::columns::validate_postgres_column_name(&to)?;

@@ -6,7 +6,7 @@
 
 //! `getObjectDescription`: an object named by its catalog, OID and column number, as `DROP` diagnostics and `pg_describe_object` name it. Relations, types and routines are named as their `reg*` output names them, qualified when the search path does not find them.
 
-use super::objects::{CatalogObjects, MemberObject, RelationKind};
+use super::objects::{CatalogObjects, ConstraintOwner, MemberObject, RelationKind};
 use crate::catalog::context::CatalogContext;
 use uqa_sql::ast::ColumnType;
 use uqa_sql::catalog::dependencies::{
@@ -83,11 +83,13 @@ fn member_description(
     Ok(match member {
         MemberObject::Constraint {
             name,
-            relation: None,
+            owner: ConstraintOwner::Domain(_),
+            ..
         } => Some(format!("constraint {name}")),
         MemberObject::Constraint {
             name,
-            relation: Some(oid),
+            owner: ConstraintOwner::Relation(oid),
+            ..
         } => relation(*oid)?.map(|relation| format!("constraint {name} on {relation}")),
         MemberObject::AttributeDefault {
             relation: oid,

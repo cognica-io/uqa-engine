@@ -63,6 +63,7 @@ fn stored_rule(name: &str, event: RuleEvent, enabled: EventEnableMode) -> Stored
     ));
     definition.event = event;
     StoredRule {
+        catalog_oid: None,
         definition,
         enabled,
         condition_plan: None,

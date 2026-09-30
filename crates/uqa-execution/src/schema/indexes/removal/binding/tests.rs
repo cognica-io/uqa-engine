@@ -116,9 +116,6 @@ impl IndexRemovalCatalog for Session {
     fn bound_catalog_index(&self, _: &str) -> StorageBackendResult<Option<CatalogIndexRow>> {
         Ok(self.current.borrow().row.clone())
     }
-    fn has_constraint_index(&self, _: &RelationIdentity) -> bool {
-        self.current.borrow().owned
-    }
     fn list_catalog_indexes(&self) -> StorageBackendResult<Vec<CatalogIndexRow>> {
         unreachable!()
     }
@@ -236,7 +233,6 @@ fn constraint_index_targets_retain_the_current_table_before_dependency_validatio
     let session = Session::new(replacement);
     let rows = session.bind(false, &mut Vec::new()).unwrap();
     assert_eq!(rows[0].table_name, "public.other");
-    assert!(session.has_constraint_index(&rows[0].relation));
     assert!(session.peer_acquires("public.t", RelationLockMode::AccessExclusive));
     assert!(!session.peer_acquires("public.other", RelationLockMode::AccessShare));
 }

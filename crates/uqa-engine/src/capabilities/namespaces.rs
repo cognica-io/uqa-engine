@@ -153,34 +153,25 @@ impl SchemaPrivilegeRegistry for Engine {
     }
 }
 impl SchemaPrivilegeNotices for Engine {
-    fn schema_privilege_notice(&self, level: &str, message: &str) {
-        self.push_sql_notice(level, message);
+    fn schema_privilege_notice(&self, notice: uqa_sql::SQLNotice) {
+        self.push_sql_notice(notice);
     }
 }
 
-use std::collections::BTreeSet;
-use uqa_core::RelationIdentity;
 use uqa_execution::schema::namespaces::removal::{
     EmptySchemaRemovalContext, EmptySchemaRemovalPersistence, EmptySchemaRemovalState,
     SchemaDropNotices, SchemaRemovalContext, SchemaRemovalNames, SchemaRemovalPublication,
-    SchemaRemovalViews, SchemaTypeRoutineRemoval,
 };
 use uqa_sql::schema::namespaces::removal::{EmptySchemaCatalog, SchemaDropCatalog};
 
 impl Engine {
     pub(crate) fn schema_removal_context(&self) -> SchemaRemovalContext<'_> {
         SchemaRemovalContext {
+            deletion: self,
             tuples: self.schema_lock_context(),
             refresh: self,
             catalog: self,
             names: self,
-            types: self,
-            tables: self.table_removal_context(),
-            routines: self,
-            events: self,
-            foreign: self.foreign_removal_context(),
-            views: self,
-            sequences: self,
             locks: self,
             publication: self,
             notices: self,
@@ -221,76 +212,18 @@ impl SchemaDropCatalog for Engine {
     }
 }
 impl SchemaRemovalNames for Engine {
-    fn schema_tables(&self, schemas: &BTreeSet<String>) -> Vec<String> {
-        self.storage
-            .tables
-            .read()
-            .keys()
-            .filter(|relation| schemas.contains(&relation.schema))
-            .map(RelationIdentity::qualified_name)
-            .collect()
-    }
-    fn schema_foreign_tables(&self, schemas: &BTreeSet<String>) -> Vec<String> {
-        self.durable
-            .foreign_tables
-            .read()
-            .keys()
-            .filter(|relation| schemas.contains(&relation.schema))
-            .map(RelationIdentity::qualified_name)
-            .collect()
-    }
-    fn schema_views(&self, schemas: &BTreeSet<String>) -> Vec<String> {
-        self.durable
-            .views
-            .read()
-            .keys()
-            .filter(|relation| schemas.contains(&relation.schema))
-            .map(RelationIdentity::qualified_name)
-            .collect()
-    }
-    fn schema_sequences(&self, schemas: &BTreeSet<String>) -> Vec<String> {
-        self.durable
-            .sequences
-            .read()
-            .keys()
-            .filter(|relation| schemas.contains(&relation.schema))
-            .map(RelationIdentity::qualified_name)
-            .collect()
-    }
     fn graph_tables(&self, schema: &str) -> StorageBackendResult<Vec<String>> {
         self.schema_tables_in_execution(schema)
-    }
-}
-impl SchemaTypeRoutineRemoval for Engine {
-    fn drop_schema_types_and_routines(&self, schemas: &BTreeSet<String>) -> Result<(), SQLError> {
-        Engine::drop_schema_types_and_routines(self, schemas)
-    }
-}
-impl SchemaRemovalViews for Engine {
-    fn drop_views_depending_on_relations(&self, names: &[String]) -> StorageBackendResult<()> {
-        Engine::drop_views_depending_on_relations(self, names)
-    }
-    fn remaining_view_drop_targets(&self, names: &[String]) -> Result<Vec<String>, SQLError> {
-        Engine::remaining_view_drop_targets(self, names)
-    }
-    fn cascade_view_closure(&self, names: Vec<String>) -> Result<Vec<String>, SQLError> {
-        Engine::cascade_view_closure(self, names)
-    }
-    fn drop_views_inner(&self, names: &[String], cascade: bool) -> Result<(), SQLError> {
-        Engine::drop_views_inner(self, names, cascade)
     }
 }
 impl SchemaRemovalPublication for Engine {
     fn drop_graph(&self, name: &str) -> StorageBackendResult<()> {
         Engine::drop_graph(self, name).map(|_| ())
     }
-    fn drop_empty_schema(&self, name: &str) -> StorageBackendResult<()> {
-        self.drop_schema(name).map(|_| ())
-    }
 }
 impl SchemaDropNotices for Engine {
-    fn schema_drop_notice(&self, message: &str) {
-        self.push_sql_notice("NOTICE", message);
+    fn schema_drop_notice(&self, notice: uqa_sql::SQLNotice) {
+        self.push_sql_notice(notice);
     }
 }
 impl EmptySchemaRemovalState for Engine {

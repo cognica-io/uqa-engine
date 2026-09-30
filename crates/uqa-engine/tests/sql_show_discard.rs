@@ -113,9 +113,10 @@ fn session_replication_role_validates_values_privileges_and_transaction_scope() 
         .sql("SET session_replication_role = rep", &[])
         .unwrap_err();
     assert_eq!(invalid.sqlstate(), Some("22023"));
-    assert!(invalid
-        .to_string()
-        .contains("Available values: origin, replica, local"));
+    assert_eq!(
+        invalid.hint(),
+        Some("Available values: origin, replica, local.")
+    );
 
     eng.sql(
         "BEGIN; SET session_replication_role = replica; ROLLBACK",

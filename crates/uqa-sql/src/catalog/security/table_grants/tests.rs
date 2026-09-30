@@ -38,7 +38,7 @@ fn roles() -> BTreeMap<String, RoleDefinition> {
     }
     roles
 }
-type AppliedGrant = (TableSecurity, usize, Vec<(&'static str, String)>);
+type AppliedGrant = (TableSecurity, usize, Vec<crate::SQLNotice>);
 
 struct SessionRole<'a>(&'a str);
 
@@ -224,10 +224,10 @@ fn partial_grant_publishes_only_authorized_privileges_and_reports_a_warning() {
     assert_eq!(count, 1);
     assert_eq!(
         notices,
-        vec![(
-            "WARNING",
-            "not all privileges were granted for \"items\"".into()
-        )]
+        vec![
+            crate::SQLNotice::warning("not all privileges were granted for \"items\"")
+                .with_sqlstate("01007")
+        ]
     );
     assert!(role_has_privilege(
         &next,
@@ -259,7 +259,15 @@ fn absent_grant_authority_preserves_security_and_distinguishes_grant_and_revoke_
         let (next, count, notices) = apply(sql, "alice", &roles, &current).unwrap();
         assert_eq!(next, current);
         assert_eq!(count, 0);
-        assert_eq!(notices, vec![("WARNING", message.into())]);
+        let sqlstate = if sql.starts_with("GRANT") {
+            "01007"
+        } else {
+            "01006"
+        };
+        assert_eq!(
+            notices,
+            vec![crate::SQLNotice::warning(message).with_sqlstate(sqlstate)]
+        );
     }
 }
 

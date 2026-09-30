@@ -44,7 +44,7 @@ pub trait DatabasePrivilegePublication {
     fn refresh_catalog(&self) -> StorageBackendResult<()>;
     fn persist_security(&self, json: &str) -> Result<(), SQLError>;
     fn catalog_changed(&self);
-    fn notice(&self, level: &str, message: &str);
+    fn notice(&self, notice: uqa_sql::SQLNotice);
 }
 pub struct DatabasePrivilegeContext<'a> {
     pub names: &'a dyn RoleReferenceNames,
@@ -91,8 +91,8 @@ pub fn grant_database_privileges(
     }
     drop(memberships);
     drop(roles);
-    if let Some((level, message)) = notice {
-        context.publication.notice(level, &message);
+    if let Some(notice) = notice {
+        context.publication.notice(notice);
     }
     Ok(())
 }
@@ -100,7 +100,7 @@ pub fn grant_database_privileges(
 struct DatabasePrivilegeCandidate {
     current: BoundDatabaseSecurity,
     next: BoundDatabaseSecurity,
-    notice: Option<(&'static str, String)>,
+    notice: Option<uqa_sql::SQLNotice>,
 }
 
 fn prepare_privileges<'a>(

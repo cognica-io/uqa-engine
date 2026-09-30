@@ -100,7 +100,15 @@ impl Interpreter<'_> {
                 message: text,
             });
         }
-        self.services.runtime.push_diagnostic(level.as_str(), &text);
+        let severity = uqa_sql::NoticeSeverity::parse(level.as_str()).ok_or_else(|| {
+            SQLError::Internal(format!(
+                "PL/pgSQL RAISE level {} is not a notice",
+                level.as_str()
+            ))
+        })?;
+        self.services
+            .runtime
+            .push_notice(uqa_sql::SQLNotice::new(severity, text));
         Ok(Flow::Normal)
     }
 

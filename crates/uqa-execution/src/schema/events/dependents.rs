@@ -14,39 +14,6 @@ use uqa_sql::{
 };
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 impl EventLifecycleContext<'_> {
-    pub fn drop_rules_depending_on_relations_inner(
-        &self,
-        relations: &[String],
-    ) -> StorageBackendResult<()> {
-        let dependents = self
-            .lookup
-            .rules_depending_on_relations(relations)
-            .map_err(StorageBackendError::Other)?;
-        if dependents.is_empty() {
-            return Ok(());
-        }
-        let mut rules = self.catalog.registry.rules();
-        let next = uqa_sql::catalog::events::removal::removed_dependent_rules(&rules, &dependents)
-            .map_err(StorageBackendError::Other)?;
-        self.catalog
-            .publication
-            .persist_rules(&next)
-            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-        **rules = next;
-        drop(rules);
-        for (event_relation, name) in dependents {
-            self.notice(
-                "NOTICE",
-                &format!(
-                    "drop cascades to rule {name} on table {}",
-                    event_relation.qualified_name()
-                ),
-            );
-        }
-        self.catalog.changes.catalog_registry_changed();
-        Ok(())
-    }
-
     pub fn rewrite_event_routine_identity(
         &self,
         target: &uqa_sql::ast::FunctionBinding,
@@ -205,10 +172,7 @@ impl EventLifecycleContext<'_> {
                 if_exists: false,
                 cascade: true,
             })?;
-            self.notice(
-                "NOTICE",
-                &format!("drop cascades to trigger {name} on table {table}"),
-            );
+            self.notice(format!("drop cascades to trigger {name} on table {table}"));
         }
         for (event_relation, name) in dependent_rules {
             let event_table = event_relation.qualified_name();
@@ -218,10 +182,9 @@ impl EventLifecycleContext<'_> {
                 if_exists: false,
                 cascade: true,
             })?;
-            self.notice(
-                "NOTICE",
-                &format!("drop cascades to rule {name} on table {event_table}"),
-            );
+            self.notice(format!(
+                "drop cascades to rule {name} on table {event_table}"
+            ));
         }
         Ok(())
     }

@@ -25,7 +25,7 @@ pub trait SequenceCreationTransactions {
 
 pub fn run_create_sequence(
     transactions: &dyn SequenceCreationTransactions,
-    notices: &parking_lot::Mutex<Vec<(String, String)>>,
+    notices: &parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
     statement: &CreateSequence,
 ) -> Result<SQLResult, SQLError> {
     if !transactions.with_sequence_creation(Box::new(|context| {
@@ -38,10 +38,13 @@ pub fn run_create_sequence(
             &statement.ownership,
         )
     }))? {
-        notices.lock().push((
-            "NOTICE".into(),
-            format!("relation \"{}\" already exists, skipping", statement.name),
-        ));
+        notices.lock().push(
+            uqa_sql::SQLNotice::notice(format!(
+                "relation \"{}\" already exists, skipping",
+                statement.name
+            ))
+            .with_sqlstate("42P07"),
+        );
     }
     Ok(SQLResult::empty())
 }
@@ -55,12 +58,11 @@ pub trait SequenceAlterTransactions {
 
 pub fn run_alter_sequence(
     transactions: &dyn SequenceAlterTransactions,
-    notices: &parking_lot::Mutex<Vec<(String, String)>>,
+    notices: &parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
     statement: &AlterSequence,
 ) -> Result<SQLResult, SQLError> {
     if !transactions.with_sequence_write(Box::new(|context| alter_sequence(context, statement)))? {
-        notices.lock().push((
-            "NOTICE".into(),
+        notices.lock().push(uqa_sql::SQLNotice::notice(
             uqa_sql::catalog::resolution::missing_relation_notice(&statement.name)?,
         ));
     }

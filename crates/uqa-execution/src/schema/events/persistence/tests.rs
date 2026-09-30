@@ -18,6 +18,8 @@ impl EventRelationPersistence for UnavailableRelations {
 fn trigger() -> StoredTrigger {
     let Statement::CreateTrigger(definition)=uqa_sql::compile("CREATE TRIGGER saved BEFORE INSERT ON public.items FOR EACH ROW EXECUTE FUNCTION handler()").unwrap().remove(0) else {panic!("expected trigger")};
     StoredTrigger {
+        catalog_oid: None,
+        constraint_catalog_oid: None,
         definition,
         enabled: EventEnableMode::Origin,
         function_object_id: Some([1; 16]),
@@ -42,6 +44,7 @@ fn absent_catalog_returns_before_filtering_nonempty_event_snapshots() {
         panic!("expected rule")
     };
     let rule = StoredRule {
+        catalog_oid: None,
         definition,
         enabled: EventEnableMode::Origin,
         condition_plan: None,

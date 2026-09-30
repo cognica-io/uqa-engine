@@ -226,6 +226,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `ddl.schema-drop-cascade` | `M3` | `partial` |
 | `ddl.stored-relation-routine-dependencies` | `M3` | `partial` |
 | `ddl.domain-drop-cascade` | `M3` | `partial` |
+| `ddl.dependency-aware-deletion` | `M3` | `verified` |
 | `types.numeric-comparison-coherence` | `M4` | `verified` |
 | `types.time-timetz-key-coherence` | `M4` | `verified` |
 | `types.nonfinite-float-persistence` | `M4` | `verified` |

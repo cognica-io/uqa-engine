@@ -11,9 +11,7 @@ use super::roles::{
     locking::RoleLockContext,
 };
 use crate::catalog::{
-    context::CatalogContext,
-    projection::{resolve_regclass_kind_by_oid, sequence_relation_oid},
-    sequence::sequence_row,
+    context::CatalogContext, projection::resolve_regclass_kind_by_oid, sequence::sequence_row,
     sequence_introspection::SequenceIntrospectionCatalog,
 };
 use crate::row_locks::shared_objects::SharedObjectLockSession;
@@ -48,7 +46,7 @@ pub trait SequencePrivilegePublication {
     fn refresh_catalog(&self) -> StorageBackendResult<()>;
     fn security_write(&self) -> SequenceSecurityWrite<'_>;
     fn catalog_changed(&self);
-    fn notice(&self, level: &str, message: &str);
+    fn notice(&self, notice: uqa_sql::SQLNotice);
 }
 pub struct SequencePrivilegeContext<'a> {
     pub inquiry: SequencePrivilegeInquiry<'a>,
@@ -63,7 +61,7 @@ pub struct SequencePrivilegeContext<'a> {
 struct SequencePrivilegeCandidate<'a> {
     registry: SequenceSecurityWrite<'a>,
     updates: Vec<(String, RelationIdentity, BoundSequenceSecurity)>,
-    notices: Vec<(&'static str, String)>,
+    notices: Vec<uqa_sql::SQLNotice>,
 }
 
 impl SequencePrivilegeContext<'_> {
@@ -105,8 +103,8 @@ impl SequencePrivilegeContext<'_> {
         drop(registry);
         drop(memberships);
         drop(roles);
-        for (level, message) in notices {
-            self.publication.notice(level, &message);
+        for notice in notices {
+            self.publication.notice(notice);
         }
         if changed {
             self.publication.catalog_changed();
@@ -277,11 +275,12 @@ impl SequencePrivilegeContext<'_> {
         self.sequences.refresh_sequences().map_err(|error| {
             SQLError::Internal(format!("load sequences for privilege inquiry: {error}"))
         })?;
+        let catalog = self.catalog.catalog_read_view();
         if let Some((relation, _)) = self
             .sequences
             .object_ids()
             .iter()
-            .find(|(_, object_id)| sequence_relation_oid(**object_id) == oid)
+            .find(|(_, object_id)| catalog.sequence_catalog_oid(object_id) == oid)
         {
             return Ok(Some((relation.qualified_name(), relation.clone())));
         }

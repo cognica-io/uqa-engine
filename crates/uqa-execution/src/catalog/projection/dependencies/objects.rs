@@ -26,7 +26,7 @@ pub(super) const PLPGSQL_LANGUAGE: u32 = 13_647;
 
 /// A relation of the catalog and the kind `getRelationDescription` names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum RelationKind {
+pub enum RelationKind {
     Table,
     Index,
     Sequence,
@@ -54,6 +54,8 @@ pub(super) struct RelationObject {
     pub kind: RelationKind,
     /// Attributes in column-number order.
     pub columns: Vec<ColumnDef>,
+    /// The table an index belongs to.
+    pub table: Option<RelationIdentity>,
 }
 
 impl RelationObject {
@@ -65,14 +67,38 @@ impl RelationObject {
     }
 }
 
+/// The relation or domain a constraint belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ConstraintOwner {
+    Relation(u32),
+    Domain(u32),
+}
+
 /// An object that `getObjectDescription` names through the relation or roles it belongs to.
 #[derive(Debug, Clone)]
 pub(super) enum MemberObject {
-    Constraint { name: String, relation: Option<u32> },
-    AttributeDefault { relation: u32, column: i32 },
-    Rule { name: String, relation: u32 },
-    Trigger { name: String, relation: u32 },
-    Membership { member: u32, role: u32 },
+    Constraint {
+        name: String,
+        owner: ConstraintOwner,
+        /// A `NOT NULL` constraint, which is a property of its column.
+        not_null: bool,
+    },
+    AttributeDefault {
+        relation: u32,
+        column: i32,
+    },
+    Rule {
+        name: String,
+        relation: u32,
+    },
+    Trigger {
+        name: String,
+        relation: u32,
+    },
+    Membership {
+        member: u32,
+        role: u32,
+    },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -82,6 +108,7 @@ pub(super) struct CatalogObjects {
     routine_oids: BTreeMap<[u8; 16], u32>,
     /// The row type whose array type has the OID.
     row_type_arrays: BTreeMap<u32, u32>,
+    types: BTreeMap<u32, super::addresses::TypeObject>,
     namespaces: BTreeMap<String, u32>,
     members: BTreeMap<(u32, u32), MemberObject>,
     roles: BTreeMap<u32, String>,
@@ -187,9 +214,12 @@ impl CatalogObjects {
             self.unpin_row_type(oids);
         }
         for (identity, object_id) in snapshot.definitions.sequence_object_ids.iter() {
-            let oid = catalog_oid(uqa_sql::catalog::oids::stable_object_oid(
-                "relation", object_id,
-            ))?;
+            let oid = catalog_oid(
+                crate::catalog::sequence::catalog_oids::sequence_catalog_oid(
+                    &snapshot.definitions.sequence_catalog_oids,
+                    object_id,
+                ),
+            )?;
             // A sequence's row has the columns `pg_attribute` lists for it.
             let columns = [
                 ("last_value", ColumnType::BigInteger),
@@ -203,12 +233,11 @@ impl CatalogObjects {
         }
         for index in super::super::pg_catalog::catalog_index_relations(catalog, resolution)? {
             let columns = index_attributes(&index);
-            self.add_relation(
-                catalog_oid(index.oid())?,
-                index.relation.clone(),
-                RelationKind::Index,
-                columns,
-            );
+            let oid = catalog_oid(index.oid())?;
+            self.add_relation(oid, index.relation.clone(), RelationKind::Index, columns);
+            if let Some(relation) = self.relations.get_mut(&oid) {
+                relation.table = RelationIdentity::from_legacy_name(&index.table_name).ok();
+            }
         }
         // Catalog views and `information_schema` relations that `initdb` creates past the pinned range.
         for relation in uqa_sql::catalog::SystemRelation::all() {
@@ -239,19 +268,35 @@ impl CatalogObjects {
     }
 
     fn collect_types(&mut self, catalog: &CatalogReadView) {
+        use super::addresses::TypeObject;
         for definition in catalog.enums() {
-            self.unpin(ObjectAddress::whole(TYPE_CLASS, definition.oid));
-            self.unpin(ObjectAddress::whole(TYPE_CLASS, definition.array_oid));
+            self.add_type(definition.oid, TypeObject::Defined);
+            self.add_type(
+                definition.array_oid,
+                TypeObject::Array {
+                    element: definition.oid,
+                },
+            );
         }
         for domain in catalog.domains() {
-            self.unpin(ObjectAddress::whole(TYPE_CLASS, domain.oid));
+            self.add_type(domain.oid, TypeObject::Defined);
             if let Ok(array) = u32::try_from(uqa_sql::catalog::type_metadata::pg_domain_array_oid(
                 domain.oid,
                 domain.array_oid,
             )) {
-                self.unpin(ObjectAddress::whole(TYPE_CLASS, array));
+                self.add_type(
+                    array,
+                    TypeObject::Array {
+                        element: domain.oid,
+                    },
+                );
             }
         }
+    }
+
+    fn add_type(&mut self, oid: u32, object: super::addresses::TypeObject) {
+        self.types.insert(oid, object);
+        self.unpin(ObjectAddress::whole(TYPE_CLASS, oid));
     }
 
     fn add_relation(
@@ -268,16 +313,25 @@ impl CatalogObjects {
                 identity,
                 kind,
                 columns,
+                table: None,
             },
         );
         self.unpin(ObjectAddress::whole(RELATION_CLASS, oid));
     }
 
     fn unpin_row_type(&mut self, oids: uqa_sql::catalog::relation_oids::RelationCatalogOids) {
-        for oid in [oids.row_type, oids.array_type].into_iter().flatten() {
-            self.unpin(ObjectAddress::whole(TYPE_CLASS, oid));
-        }
-        if let (Some(row_type), Some(array)) = (oids.row_type, oids.array_type) {
+        use super::addresses::TypeObject;
+        let Some(row_type) = oids.row_type else {
+            return;
+        };
+        self.add_type(
+            row_type,
+            TypeObject::Row {
+                relation: oids.relation,
+            },
+        );
+        if let Some(array) = oids.array_type {
+            self.add_type(array, TypeObject::Array { element: row_type });
             self.row_type_arrays.insert(array, row_type);
         }
     }
@@ -319,6 +373,26 @@ impl CatalogObjects {
 
     pub(super) fn routine_oid(&self, object_id: &[u8; 16]) -> Option<u32> {
         self.routine_oids.get(object_id).copied()
+    }
+
+    pub(super) fn routine_object_id(&self, oid: u32) -> Option<[u8; 16]> {
+        self.routine_oids
+            .iter()
+            .find_map(|(object_id, routine)| (*routine == oid).then_some(*object_id))
+    }
+
+    pub(super) fn type_object(&self, oid: u32) -> Option<super::addresses::TypeObject> {
+        self.types.get(&oid).copied()
+    }
+
+    /// The members of one catalog, by OID.
+    pub(super) fn members_of_class(
+        &self,
+        class_id: u32,
+    ) -> impl Iterator<Item = (u32, &MemberObject)> + '_ {
+        self.members
+            .range((class_id, 0)..=(class_id, u32::MAX))
+            .map(|((_, oid), member)| (*oid, member))
     }
 
     pub(super) fn namespace_oid(&self, schema: &str) -> Option<u32> {

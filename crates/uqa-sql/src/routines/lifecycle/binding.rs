@@ -48,7 +48,7 @@ pub fn resolve_sql_function_drop_targets(
             Err(error) if stmt.if_exists && error.sqlstate() == Some("42704") => {
                 resolution
                     .notices
-                    .push(("NOTICE", format!("{error}, skipping")));
+                    .push(crate::SQLNotice::notice(format!("{error}, skipping")));
                 continue;
             }
             Err(error) => return Err(error),
@@ -78,10 +78,9 @@ pub fn resolve_sql_function_drop_targets(
                 None => format!("{}()", item.name),
             };
             if stmt.if_exists {
-                resolution.notices.push((
-                    "NOTICE",
-                    format!("{kind} {spelled} does not exist, skipping"),
-                ));
+                resolution.notices.push(crate::SQLNotice::notice(format!(
+                    "{kind} {spelled} does not exist, skipping"
+                )));
                 continue;
             }
             // The notice echoes the argument types as written; the error spells the resolved types as `format_type_be` does.

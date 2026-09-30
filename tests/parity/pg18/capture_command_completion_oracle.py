@@ -20,7 +20,7 @@ import os
 import sys
 
 
-def capture(queries, connection_string, include_rows=False, include_fields=False, include_details=False):
+def capture(queries, connection_string, include_rows=False, include_fields=False, include_details=False, include_notices=False):
     library = ctypes.util.find_library("pq")
     if library is None:
         raise RuntimeError("PostgreSQL libpq shared library was not found")
@@ -56,15 +56,30 @@ def capture(queries, connection_string, include_rows=False, include_fields=False
     fcolumn = function("PQftablecol", integer, pointer, integer)
     fformat = function("PQfformat", integer, pointer, integer)
     isnull = function("PQgetisnull", integer, pointer, integer, integer)
+    notice_receiver = ctypes.CFUNCTYPE(None, pointer, pointer)
+    set_notice_receiver = function("PQsetNoticeReceiver", pointer, pointer, notice_receiver, pointer)
+    notices = []
+
+    def diagnostic(result):
+        """The severity, SQLSTATE, message, DETAIL and HINT of an error or notice."""
+        fields = {}
+        for key, letter in (("severity", "V"), ("sqlstate", "C"), ("message", "M"), ("detail", "D"), ("hint", "H")):
+            text = field(result, ord(letter))
+            fields[key] = None if text is None else text.decode()
+        return fields
+
+    receiver = notice_receiver(lambda _argument, result: notices.append(diagnostic(result)))
     connection = connect(connection_string.encode())
     if not connection:
         raise RuntimeError("libpq could not allocate a connection")
     try:
         if status(connection):
             raise RuntimeError(error_message(connection).decode())
+        set_notice_receiver(connection, receiver, None)
         records = []
         version = None
         for sql in queries:
+            notices.clear()
             if not send(connection, sql.encode()):
                 raise RuntimeError(error_message(connection).decode())
             tags, error, results = [], None, []
@@ -114,6 +129,8 @@ def capture(queries, connection_string, include_rows=False, include_fields=False
             record = {"sql": sql, "command_tags": tags, "error": error}
             if include_rows or include_fields:
                 record["results"] = results
+            if include_notices:
+                record["notices"] = list(notices)
             records.append(record)
         if version is None or not version.startswith("PostgreSQL 18."):
             raise RuntimeError(f"expected a PostgreSQL 18 reference server, got {version!r}")
@@ -127,6 +144,7 @@ def main():
     parser.add_argument("--rows", action="store_true", help="also capture field names, PostgreSQL type OIDs, and every result row")
     parser.add_argument("--fields", action="store_true", help="also capture full result field descriptors and rows")
     parser.add_argument("--details", action="store_true", help="also capture the DETAIL and HINT fields of every error")
+    parser.add_argument("--notices", action="store_true", help="also capture the severity, SQLSTATE, message, DETAIL and HINT of every notice and warning")
     args = parser.parse_args()
     connection_string = os.environ.get("PG_COMPLETION_CONNECTION")
     if not connection_string:
@@ -135,7 +153,7 @@ def main():
     queries = [case["sql"] for case in fixture["cases"]]
     if not queries or queries[0] != "SELECT version()":
         raise RuntimeError("the first fixture query must identify the reference with SELECT version()")
-    result = capture(queries, connection_string, include_rows=args.rows, include_fields=args.fields, include_details=args.details)
+    result = capture(queries, connection_string, include_rows=args.rows, include_fields=args.fields, include_details=args.details, include_notices=args.notices)
     json.dump(result, sys.stdout, indent=2)
     sys.stdout.write("\n")
 

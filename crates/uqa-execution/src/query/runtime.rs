@@ -31,7 +31,7 @@ pub struct QueryRuntimeView<'a> {
     pub table_functions: &'a RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLTableFunction>>>,
     pub aggregate_functions:
         &'a RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLAggregateFunction>>>,
-    pub notices: &'a Mutex<Vec<(String, String)>>,
+    pub notices: &'a Mutex<Vec<uqa_sql::SQLNotice>>,
 }
 
 impl QueryRuntimeView<'_> {
@@ -117,7 +117,7 @@ impl QueryRuntimeView<'_> {
         ]
     }
 
-    pub fn push_diagnostic(&self, level: impl Into<String>, message: impl Into<String>) {
-        self.notices.lock().push((level.into(), message.into()));
+    pub fn push_notice(&self, notice: uqa_sql::SQLNotice) {
+        self.notices.lock().push(notice);
     }
 }

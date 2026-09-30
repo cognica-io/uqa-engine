@@ -26,6 +26,7 @@ pub mod events;
 
 pub mod table_alteration;
 
+pub mod deletion;
 pub mod removal;
 
 pub mod relation_alteration;

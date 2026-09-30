@@ -8,7 +8,6 @@
 
 pub mod binding;
 pub mod dependencies;
-pub mod diagnostics;
 pub mod lookup;
 pub mod names;
 pub mod relations;
@@ -25,39 +24,14 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
-use uqa_core::RelationIdentity;
 
 pub type RoutineRegistry = BTreeMap<String, Vec<Arc<SQLUserFunction>>>;
-
-pub struct SQLFunctionDropPlan {
-    pub domains: BTreeSet<u32>,
-    pub targets: Vec<RoutineDropTarget>,
-    pub dependents: RoutineObjectDependents,
-    pub notices: Vec<(&'static str, String)>,
-}
 
 #[derive(Default)]
 pub struct RoutineDropResolution {
     pub targets: Vec<RoutineDropTarget>,
     pub seen_targets: BTreeSet<RoutineDropTarget>,
-    pub notices: Vec<(&'static str, String)>,
-}
-
-pub struct RoutineObjectDependents {
-    pub indexes: Vec<RelationIdentity>,
-    pub views: Vec<String>,
-    pub columns: Vec<(String, String, bool)>,
-    pub defaults: Vec<(String, String, bool)>,
-    pub checks: Vec<(String, String, bool)>,
-    pub triggers: Vec<(String, String)>,
-    pub rules: Vec<(String, String)>,
-}
-
-#[derive(Default)]
-pub struct RoutineSchemaDependents {
-    pub columns: Vec<(String, String, bool)>,
-    pub defaults: Vec<(String, String, bool)>,
-    pub checks: Vec<(String, String, bool)>,
+    pub notices: Vec<crate::SQLNotice>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -79,6 +53,13 @@ impl RoutineDropTarget {
 
     pub fn label(&self) -> String {
         routine_signature_label(&self.name, &self.argument_types)
+    }
+
+    /// Whether `function`, an overload registered under the target's name, is the routine the target resolved: the same kind and signature, and the same identity when the target has one.
+    pub fn names(&self, function: &SQLUserFunction) -> bool {
+        function.def.is_procedure == self.is_procedure
+            && super::routine_signature_types(&function.def) == self.argument_types
+            && (self.object_id.is_none() || function.def.object_id == self.object_id)
     }
 
     pub fn binding(&self) -> FunctionBinding {

@@ -49,6 +49,7 @@ impl Fixture {
         reader.attributes.clear();
         let relation = RelationIdentity::new("public", "ids");
         let retained = SequenceReadSnapshot {
+            catalog_oids: std::sync::Arc::default(),
             sequences: Arc::new(BTreeMap::from([(
                 relation.clone(),
                 SequenceState::initial(1, 1, SequenceDataType::BigInt),

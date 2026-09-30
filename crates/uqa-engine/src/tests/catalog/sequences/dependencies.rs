@@ -4,18 +4,13 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use crate::{Engine, TableState};
+use crate::Engine;
 use std::cell::Cell;
 use std::sync::Arc;
 use uqa_core::RelationIdentity;
 use uqa_execution::{
     catalog::foreign::reads::ForeignTablesRead,
     schema::sequences::dependency_lifecycle::{SequenceDependencyCatalog, SequenceTableMetadata},
-};
-use uqa_sql::schema::sequences::implicit_ownership::StoredSequenceNames;
-use uqa_sql::schema::sequences::{
-    dependencies::analysis::{SequenceExpressionCatalog, SequenceExpressionObjectIdsRead},
-    dependents::SequenceSchemaDependent,
 };
 use uqa_storage::SequenceOwnerDependency;
 use uqa_storage::{SequenceOwner, StorageBackendResult};
@@ -33,80 +28,6 @@ fn foreign_table(engine: &Engine, declaration: &str) {
             &[],
         )
         .unwrap();
-}
-struct GuardObserver<'a> {
-    engine: &'a Engine,
-    table: Arc<TableState>,
-    ordinary_reads: Cell<usize>,
-    foreign_reads: Cell<usize>,
-}
-impl StoredSequenceNames for GuardObserver<'_> {
-    fn stored_sequence_name(&self, reference: &str) -> Result<String, String> {
-        StoredSequenceNames::stored_sequence_name(self.engine, reference)
-    }
-}
-impl SequenceExpressionCatalog for GuardObserver<'_> {
-    fn object_ids(&self) -> SequenceExpressionObjectIdsRead<'_> {
-        if self.table.columns.is_locked() {
-            assert!(
-                self.table.table_checks.is_locked(),
-                "both actual table metadata guards must survive expression analysis"
-            );
-            assert!(!self.engine.durable.foreign_tables.is_locked());
-            self.ordinary_reads.set(self.ordinary_reads.get() + 1);
-        } else {
-            assert!(!self.table.table_checks.is_locked());
-            assert!(
-                self.engine.durable.foreign_tables.is_locked(),
-                "foreign analysis must retain the real registry guard"
-            );
-            self.foreign_reads.set(self.foreign_reads.get() + 1);
-        }
-        SequenceExpressionCatalog::object_ids(self.engine)
-    }
-}
-#[test]
-fn dependency_analysis_retains_actual_table_and_foreign_guards_until_expression_reads_finish() {
-    let engine = Engine::new();
-    engine
-        .sql(
-            "CREATE SEQUENCE ids; CREATE TABLE items(value bigint DEFAULT nextval('ids'))",
-            &[],
-        )
-        .unwrap();
-    foreign_table(&engine, "value bigint DEFAULT nextval('ids')");
-    let table = engine.storage.tables.read()[&RelationIdentity::new("public", "items")].clone();
-    let observer = GuardObserver {
-        engine: &engine,
-        table: table.clone(),
-        ordinary_reads: Cell::new(0),
-        foreign_reads: Cell::new(0),
-    };
-    let mut context = engine.sequence_dependency_context();
-    context.expressions = &observer;
-    let dependents = context
-        .sequence_schema_expression_dependents("public.ids")
-        .unwrap();
-    assert_eq!(dependents.len(), 2);
-    assert!(dependents.contains(&SequenceSchemaDependent::Default {
-        table: "public.items".into(),
-        column: "value".into(),
-        foreign: false
-    }));
-    assert!(dependents.contains(&SequenceSchemaDependent::Default {
-        table: "public.foreign_items".into(),
-        column: "value".into(),
-        foreign: true
-    }));
-    assert_eq!(observer.ordinary_reads.get(), 1);
-    assert_eq!(observer.foreign_reads.get(), 1);
-    assert!(!table.columns.is_locked());
-    assert!(!table.table_checks.is_locked());
-    assert!(!engine.durable.foreign_tables.is_locked());
-    let identities = SequenceExpressionCatalog::object_ids(&engine);
-    assert!(engine.durable.sequence_object_ids.is_locked());
-    drop(identities);
-    assert!(!engine.durable.sequence_object_ids.is_locked());
 }
 struct CountedCatalog<'a> {
     engine: &'a Engine,

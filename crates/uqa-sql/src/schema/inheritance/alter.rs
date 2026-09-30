@@ -27,80 +27,20 @@ pub fn validate_row_type(
                 .as_ref()
                 .is_some_and(AutoIncrement::is_identity)
         }) {
-            return Err(routine(
-                "55000",
-                format!(
-                    "table \"{}\" being attached contains an identity column \"{}\"\nDETAIL: The new partition may not contain an identity column.",
+            return Err(SQLError::Diagnostic {
+                sqlstate: "55000".into(),
+                message: format!(
+                    "table \"{}\" being attached contains an identity column \"{}\"",
                     local_relation_name(child),
                     column.name
                 ),
-            ));
+                detail: Some("The new partition may not contain an identity column.".into()),
+                hint: None,
+            });
         }
     }
     for parent_column in parent_columns {
-        let Some(child_column) = child_columns
-            .iter()
-            .find(|column| column.name == parent_column.name)
-        else {
-            return Err(routine(
-                "42804",
-                format!("child table is missing column \"{}\"", parent_column.name),
-            ));
-        };
-        if parent_column.ty != child_column.ty {
-            return Err(routine(
-                "42804",
-                format!(
-                    "child table \"{}\" has different type for column \"{}\"",
-                    local_relation_name(child),
-                    parent_column.name
-                ),
-            ));
-        }
-        if parent_column.not_null && !child_column.not_null {
-            return Err(routine(
-                "42804",
-                format!(
-                    "column \"{}\" in child table \"{}\" must be marked NOT NULL",
-                    parent_column.name,
-                    local_relation_name(child)
-                ),
-            ));
-        }
-        match (&parent_column.generated, &child_column.generated) {
-            (None, None) | (Some(_), Some(_)) => {}
-            (Some(_), None) => {
-                return Err(routine(
-                    "42804",
-                    format!(
-                        "column \"{}\" in child table must be a generated column",
-                        parent_column.name
-                    ),
-                ))
-            }
-            (None, Some(_)) => {
-                return Err(routine(
-                    "42804",
-                    format!(
-                        "column \"{}\" in child table must not be a generated column",
-                        parent_column.name
-                    ),
-                ))
-            }
-        }
-        if let (Some(parent_generated), Some(child_generated)) =
-            (&parent_column.generated, &child_column.generated)
-        {
-            if parent_generated.kind != child_generated.kind {
-                return Err(routine(
-                    "42804",
-                    format!(
-                        "column \"{}\" inherits from generated column of different kind",
-                        parent_column.name
-                    ),
-                ));
-            }
-        }
+        validate_inherited_column(parent_column, child_columns, child)?;
     }
     if exact_columns {
         if let Some(extra) = child_columns.iter().find(|child_column| {
@@ -108,13 +48,89 @@ pub fn validate_row_type(
                 .iter()
                 .any(|parent_column| parent_column.name == child_column.name)
         }) {
-            return Err(routine(
-                "42804",
-                format!(
-                    "table \"{}\" contains column \"{}\" not found in parent \"{}\"\nDETAIL: The new partition may contain only the columns present in parent.",
+            return Err(SQLError::Diagnostic {
+                sqlstate: "42804".into(),
+                message: format!(
+                    "table \"{}\" contains column \"{}\" not found in parent \"{}\"",
                     local_relation_name(child),
                     extra.name,
                     local_relation_name(parent)
+                ),
+                detail: Some(
+                    "The new partition may contain only the columns present in parent.".into(),
+                ),
+                hint: None,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// A child's copy of one parent column: present, of the same type and nullability, and generated the same way.
+fn validate_inherited_column(
+    parent_column: &ColumnDef,
+    child_columns: &[ColumnDef],
+    child: &str,
+) -> Result<(), SQLError> {
+    let Some(child_column) = child_columns
+        .iter()
+        .find(|column| column.name == parent_column.name)
+    else {
+        return Err(routine(
+            "42804",
+            format!("child table is missing column \"{}\"", parent_column.name),
+        ));
+    };
+    if parent_column.ty != child_column.ty {
+        return Err(routine(
+            "42804",
+            format!(
+                "child table \"{}\" has different type for column \"{}\"",
+                local_relation_name(child),
+                parent_column.name
+            ),
+        ));
+    }
+    if parent_column.not_null && !child_column.not_null {
+        return Err(routine(
+            "42804",
+            format!(
+                "column \"{}\" in child table \"{}\" must be marked NOT NULL",
+                parent_column.name,
+                local_relation_name(child)
+            ),
+        ));
+    }
+    match (&parent_column.generated, &child_column.generated) {
+        (None, None) | (Some(_), Some(_)) => {}
+        (Some(_), None) => {
+            return Err(routine(
+                "42804",
+                format!(
+                    "column \"{}\" in child table must be a generated column",
+                    parent_column.name
+                ),
+            ))
+        }
+        (None, Some(_)) => {
+            return Err(routine(
+                "42804",
+                format!(
+                    "column \"{}\" in child table must not be a generated column",
+                    parent_column.name
+                ),
+            ))
+        }
+    }
+    if let (Some(parent_generated), Some(child_generated)) =
+        (&parent_column.generated, &child_column.generated)
+    {
+        if parent_generated.kind != child_generated.kind {
+            return Err(routine(
+                "42804",
+                format!(
+                    "column \"{}\" inherits from generated column of different kind",
+                    parent_column.name
                 ),
             ));
         }

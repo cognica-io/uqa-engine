@@ -8,7 +8,7 @@
 
 use crate::catalog::{CatalogReadView, RelationNameResolution};
 use uqa_core::RelationIdentity;
-use uqa_sql::{catalog::oids::stable_object_oid, SQLError};
+use uqa_sql::SQLError;
 
 pub(crate) struct RelationClaim {
     pub relation: RelationIdentity,
@@ -76,7 +76,10 @@ fn collect_relation_claims(
         append(
             relation,
             *object_id,
-            stable_object_oid("relation", object_id),
+            crate::catalog::sequence::catalog_oids::sequence_catalog_oid(
+                &definitions.sequence_catalog_oids,
+                object_id,
+            ),
         );
     }
     let indexes = if legacy {

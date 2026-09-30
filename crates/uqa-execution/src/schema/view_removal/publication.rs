@@ -47,7 +47,7 @@ pub(super) fn drop_view_state_inner(
         Ok(())
     } else {
         Err(SQLError::Internal(format!(
-            "view `{name}` disappeared after dependency preflight"
+            "view `{name}` disappeared before its removal"
         )))
     }
 }

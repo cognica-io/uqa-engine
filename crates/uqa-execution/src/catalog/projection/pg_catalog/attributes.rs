@@ -171,7 +171,7 @@ pub fn build_pg_attribute(
         }
     }
     for (_, _, object_id, _) in catalog.sequences()? {
-        let relid = crate::catalog::projection::sequence_relation_oid(object_id);
+        let relid = catalog.sequence_catalog_oid(&object_id);
         for (idx, column) in sequence_attribute_columns().iter().enumerate() {
             out.push(pg_attribute_row(
                 relid,

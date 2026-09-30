@@ -16,16 +16,6 @@ pub trait SchemaReferenceCatalog {
     fn sequence_for_binding(&self, reference: &str) -> Result<String, String>;
 }
 
-pub fn regclass_constant_oid(expression: &Expr) -> Option<i64> {
-    match expression {
-        Expr::TypedLiteral {
-            value: Value::Int(oid),
-            ty,
-        } if is_regclass(ty) => Some(*oid),
-        _ => None,
-    }
-}
-
 fn is_regclass(ty: &str) -> bool {
     ty.eq_ignore_ascii_case("regclass") || ty.eq_ignore_ascii_case("pg_catalog.regclass")
 }

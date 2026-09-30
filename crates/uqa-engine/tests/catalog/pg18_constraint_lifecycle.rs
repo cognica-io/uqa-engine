@@ -621,8 +621,12 @@ fn set_constraints_all_object_lifecycle_and_nested_execution_match_postgresql() 
         "42809",
         "constraint \"positive\" is not deferrable",
     );
-    assert!(engine.take_sql_notices().iter().any(|(level, message)| {
-        level == "WARNING" && message == "SET CONSTRAINTS can only be used in transaction blocks"
+    assert!(engine.take_sql_notices().iter().any(|notice| {
+        *notice
+            == uqa_engine::SQLNotice::warning(
+                "SET CONSTRAINTS can only be used in transaction blocks",
+            )
+            .with_sqlstate("25P01")
     }));
 
     exec(&engine, "BEGIN");
@@ -675,8 +679,12 @@ fn set_constraints_all_object_lifecycle_and_nested_execution_match_postgresql() 
     );
     engine.take_sql_notices();
     exec(&engine, "CALL insert_child_before_parent()");
-    assert!(!engine.take_sql_notices().iter().any(|(level, message)| {
-        level == "WARNING" && message == "SET CONSTRAINTS can only be used in transaction blocks"
+    assert!(!engine.take_sql_notices().iter().any(|notice| {
+        *notice
+            == uqa_engine::SQLNotice::warning(
+                "SET CONSTRAINTS can only be used in transaction blocks",
+            )
+            .with_sqlstate("25P01")
     }));
 
     exec(

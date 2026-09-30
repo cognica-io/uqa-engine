@@ -54,9 +54,8 @@ fn role_deletion_resolves_later_targets_after_prior_waits_for_every_provider() {
                         result.unwrap();
                     }
                     let expected_notices = if later == "IF_EXISTS" {
-                        vec![(
-                            "NOTICE".into(),
-                            "role \"absent\" does not exist, skipping".into(),
+                        vec![uqa_sql::SQLNotice::notice(
+                            "role \"absent\" does not exist, skipping",
                         )]
                     } else {
                         Vec::new()

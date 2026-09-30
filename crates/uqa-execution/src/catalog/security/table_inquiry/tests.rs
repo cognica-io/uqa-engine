@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::catalog::projection::legacy_sequence_relation_oid;
 use std::cell::Cell;
 use uqa_core::catalog_sequence::SequencePrivileges;
 use uqa_sql::{
@@ -63,7 +64,7 @@ fn sequence_oid_binding_and_comma_privileges_keep_one_authority_per_invocation()
     *fixture.after_read.borrow_mut() = Some(revoked);
     let context = fixture.context();
     let arguments = [
-        Value::Int(sequence_relation_oid([7; 16])),
+        Value::Int(legacy_sequence_relation_oid([7; 16])),
         Value::Str("SELECT, UPDATE".into()),
     ];
     assert_eq!(
@@ -139,7 +140,7 @@ fn removed_sequences_do_not_reappear_from_the_statement_catalog() {
     assert_eq!(
         context
             .has_table_privilege_value(&[
-                Value::Int(sequence_relation_oid([7; 16])),
+                Value::Int(legacy_sequence_relation_oid([7; 16])),
                 Value::Str("UPDATE".into())
             ])
             .unwrap(),
