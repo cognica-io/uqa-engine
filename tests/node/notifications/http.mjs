@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-import { test } from "node:test";
+import { testWithCleanup as test } from "./cleanup.mjs";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { createServer } from "node:http";
@@ -26,19 +26,19 @@ function headers(response, overrides = {}) {
   response.writeHead(200, { "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-store, no-transform", "x-request-id": fixture.request_id, ...overrides });
 }
-async function server(t, handler, tcp = false) {
+async function server(defer, handler, tcp = false) {
   const errors = [];
   const instance = (tcp ? createTCPServer : createServer)((...args) => {
     Promise.resolve().then(() => handler(...args)).catch((error) => { errors.push(error); args.at(-1).destroy(); });
   });
   const sockets = new Set();
   instance.on("connection", (socket) => { sockets.add(socket); socket.once("close", () => sockets.delete(socket)); });
-  await new Promise((resolve) => instance.listen(0, "127.0.0.1", resolve));
-  t.after(async () => {
+  defer(async () => {
     for (const socket of sockets) socket.destroy();
     await new Promise((resolve) => instance.close(resolve));
     assert.deepEqual(errors, []);
   });
+  await new Promise((resolve) => instance.listen(0, "127.0.0.1", resolve));
   return { url: "http://127.0.0.1:" + instance.address().port, sockets };
 }
 async function body(request) {
@@ -93,9 +93,9 @@ export function registerNotificationHTTPTests(packagePath) {
     assert.throws(() => retryAfter({ rawHeaders: ["Retry-After", "0", "retry-after", "0"] }, { retry }, at), code("PROTOCOL"));
   });
 
-  test("HTTP notification registration waits for actual ready and retains the exact original request", { timeout: 15000 }, async (t) => {
+  test("HTTP notification registration waits for actual ready and retains the exact original request", { timeout: 15000 }, async (defer) => {
     const head = deferred(); const release = deferred(); const closed = deferred();
-    const peer = await server(t, async (request, response) => {
+    const peer = await server(defer, async (request, response) => {
       assert.equal(request.url, "/v1/notifications/subscribe");
       assert.equal(request.headers.authorization, "Bearer secret-token");
       assert.equal(request.headers["accept-encoding"], "identity");
@@ -125,9 +125,9 @@ export function registerNotificationHTTPTests(packagePath) {
     assert.deepEqual(await sub.next(), { done: true, value: undefined });
   });
 
-  test("HTTP notifications abort actual pending readiness and idle receive, and return closes iteration", { timeout: 15000 }, async (t) => {
+  test("HTTP notifications abort actual pending readiness and idle receive, and return closes iteration", { timeout: 15000 }, async (defer) => {
     let calls = 0; const accepted = deferred(); const socketsClosed = [];
-    const peer = await server(t, (request, response) => {
+    const peer = await server(defer, (request, response) => {
       calls += 1; const closed = deferred(); socketsClosed.push(closed.promise); response.once("close", closed.resolve);
       headers(response); response.flushHeaders();
       if (calls > 1) response.write(fixture.ready);
@@ -152,9 +152,9 @@ export function registerNotificationHTTPTests(packagePath) {
     assert.equal(iter.isClosed, true);
   });
 
-  test("HTTP notification replacement exposes gap, then new identity before replacement values", { timeout: 15000 }, async (t) => {
+  test("HTTP notification replacement exposes gap, then new identity before replacement values", { timeout: 15000 }, async (defer) => {
     let calls = 0; const id = "request_2"; const epoch = "9fb52b7f-bdca-4db2-9ee0-490f99857202";
-    const peer = await server(t, async (request, response) => {
+    const peer = await server(defer, async (request, response) => {
       calls += 1;
       assert.equal(await body(request), fixture.valid_request);
       if (calls === 1) { headers(response); response.end(fixture.ready + fixture.notification + fixture.closed); }
@@ -176,9 +176,9 @@ export function registerNotificationHTTPTests(packagePath) {
     } finally { await sub.close(); }
   });
 
-  test("HTTP notification retry exhaustion retains original and last causes with exact attempt count", { timeout: 15000 }, async (t) => {
+  test("HTTP notification retry exhaustion retains original and last causes with exact attempt count", { timeout: 15000 }, async (defer) => {
     let calls = 0;
-    const peer = await server(t, (request, response) => {
+    const peer = await server(defer, (request, response) => {
       calls += 1;
       if (calls === 1) { headers(response); response.end(fixture.ready + fixture.closed); }
       else jsonError(response, 503, "NOTIFICATION_SOURCE_UNAVAILABLE", { "retry-after": "0" });
@@ -199,9 +199,9 @@ export function registerNotificationHTTPTests(packagePath) {
     assert.equal(calls, 3); await sub.close();
   });
 
-  test("HTTP notification queue overflow preserves its admitted prefix and authority loss discards unsent values", { timeout: 15000 }, async (t) => {
+  test("HTTP notification queue overflow preserves its admitted prefix and authority loss discards unsent values", { timeout: 15000 }, async (defer) => {
     let authority = false;
-    const peer = await server(t, (request, response) => {
+    const peer = await server(defer, (request, response) => {
       headers(response);
       response.end(fixture.ready + fixture.notification + (authority
         ? wire("error", { ...data(fixture.error), code: "NOTIFICATION_AUTHORITY_REVOKED", retryable: true })
@@ -218,9 +218,9 @@ export function registerNotificationHTTPTests(packagePath) {
     await assert.rejects(revoked.nextEvent(), code("AUTHORITY_REVOKED")); await revoked.close();
   });
 
-  test("HTTP notifications reject corrupt response headers, redirects and invalid bounded error envelopes", { timeout: 15000 }, async (t) => {
+  test("HTTP notifications reject corrupt response headers, redirects and invalid bounded error envelopes", { timeout: 15000 }, async (defer) => {
     let serve;
-    const peer = await server(t, (request, response) => serve(response));
+    const peer = await server(defer, (request, response) => serve(response));
     const engine = new HttpEngine(peer.url, "secret");
     for (const fields of [{ "content-type": "text/event-stream" }, { "content-encoding": "gzip" },
       { "cache-control": "no-store" }, { "x-request-id": [fixture.request_id, fixture.request_id] }]) {
@@ -242,9 +242,9 @@ export function registerNotificationHTTPTests(packagePath) {
     await assert.rejects(engine.subscribeNotifications(fixture.channels, { ...options, retry }), code("AUTHENTICATION"));
   });
 
-  test("HTTP notification readiness deadline is not extended by comments and idle silence stays typed", { timeout: 15000 }, async (t) => {
+  test("HTTP notification readiness deadline is not extended by comments and idle silence stays typed", { timeout: 15000 }, async (defer) => {
     let phase = 0;
-    const peer = await server(t, (request, response) => {
+    const peer = await server(defer, (request, response) => {
       headers(response);
       if (phase > 0) response.write(fixture.ready);
       if (phase === 0 || phase === 2) {
@@ -265,19 +265,19 @@ export function registerNotificationHTTPTests(packagePath) {
     assert.equal(healthy.isClosed, false); await healthy.close();
   });
 
-  test("HTTP notification TLS connection cancellation and malformed HTTP do not leak sockets", { timeout: 15000 }, async (t) => {
+  test("HTTP notification TLS connection cancellation and malformed HTTP do not leak sockets", { timeout: 15000 }, async (defer) => {
     const connected = deferred(); const closed = deferred();
-    const peer = await server(t, (socket) => { socket.once("close", closed.resolve); socket.on("data", () => connected.resolve()); }, true);
+    const peer = await server(defer, (socket) => { socket.once("close", closed.resolve); socket.on("data", () => connected.resolve()); }, true);
     const controller = new AbortController();
     const pending = new HttpEngine(peer.url.replace("http:", "https:"), "secret").subscribeNotifications(fixture.channels, { ...options, signal: controller.signal });
     await connected.promise; controller.abort(); await assert.rejects(pending, code("CANCELLED")); await closed.promise;
-    const corrupt = await server(t, (socket) => { socket.once("data", () => socket.end("HTTP/broken response\r\n\r\n")); }, true);
+    const corrupt = await server(defer, (socket) => { socket.once("data", () => socket.end("HTTP/broken response\r\n\r\n")); }, true);
     await assert.rejects(new HttpEngine(corrupt.url, "secret").subscribeNotifications(fixture.channels, options), code("PROTOCOL"));
   });
 
-  test("HTTP notification cancellation interrupts backoff without issuing another request", { timeout: 15000 }, async (t) => {
+  test("HTTP notification cancellation interrupts backoff without issuing another request", { timeout: 15000 }, async (defer) => {
     let calls = 0;
-    const peer = await server(t, (request, response) => { calls += 1; headers(response); response.end(fixture.ready + fixture.closed); });
+    const peer = await server(defer, (request, response) => { calls += 1; headers(response); response.end(fixture.ready + fixture.closed); });
     const controller = new AbortController();
     const sub = await new HttpEngine(peer.url, "secret").subscribeNotifications(fixture.channels, {
       ...options, signal: controller.signal, retry: { ...retry, episodeTimeoutMs: 20000, initialBackoffMs: 10000, maxBackoffMs: 10000 },
@@ -287,9 +287,9 @@ export function registerNotificationHTTPTests(packagePath) {
     await assert.rejects(pending, code("CANCELLED")); await sub.close(); assert.equal(calls, 1);
   });
 
-  test("HTTP notification corrupt terminal suffix and reused replacement epoch stay nonretryable", { timeout: 15000 }, async (t) => {
+  test("HTTP notification corrupt terminal suffix and reused replacement epoch stay nonretryable", { timeout: 15000 }, async (defer) => {
     let calls = 0; let suffix = true;
-    const peer = await server(t, (request, response) => {
+    const peer = await server(defer, (request, response) => {
       calls += 1; headers(response); response.end(fixture.ready + fixture.closed + (suffix ? "event: ready\n\n" : ""));
     });
     const engine = new HttpEngine(peer.url, "secret");
@@ -302,9 +302,9 @@ export function registerNotificationHTTPTests(packagePath) {
     await replaced.close(); assert.equal(calls, 2);
   });
 
-  test("HTTP notification server guidance cannot extend the reconnect episode and initial failures are not retried", { timeout: 15000 }, async (t) => {
+  test("HTTP notification server guidance cannot extend the reconnect episode and initial failures are not retried", { timeout: 15000 }, async (defer) => {
     let calls = 0; let initialFailure = false;
-    const peer = await server(t, (request, response) => {
+    const peer = await server(defer, (request, response) => {
       calls += 1;
       if (calls === 1 && !initialFailure) { headers(response); response.end(fixture.ready + fixture.closed); }
       else jsonError(response, 503, "NOTIFICATION_SOURCE_UNAVAILABLE", { "retry-after": "2" });
@@ -320,9 +320,9 @@ export function registerNotificationHTTPTests(packagePath) {
     assert.equal(calls, 1);
   });
 
-  test("HTTP notification cumulative input exceeds a frame limit while a consumer keeps exact FIFO order", { timeout: 15000 }, async (t) => {
+  test("HTTP notification cumulative input exceeds a frame limit while a consumer keeps exact FIFO order", { timeout: 15000 }, async (defer) => {
     const count = 400;
-    const peer = await server(t, (request, response) => {
+    const peer = await server(defer, (request, response) => {
       headers(response); response.write(fixture.ready);
       for (let n = 1; n <= count; n += 1) response.write(wire("notification", { ...data(fixture.notification), sequence: String(n) }));
     });
@@ -332,8 +332,8 @@ export function registerNotificationHTTPTests(packagePath) {
     } finally { await sub.close(); }
   });
 
-  test("HTTP notification header validation includes duplicates beyond Node's default header count", { timeout: 15000 }, async (t) => {
-    const peer = await server(t, (socket) => {
+  test("HTTP notification header validation includes duplicates beyond Node's default header count", { timeout: 15000 }, async (defer) => {
+    const peer = await server(defer, (socket) => {
       socket.once("data", () => socket.end("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\n" +
         "Cache-Control: no-store, no-transform\r\nX-Request-ID: request_1\r\n" + "X: v\r\n".repeat(2100) +
         "X-Request-ID: hidden_duplicate\r\nContent-Length: " + Buffer.byteLength(fixture.ready) + "\r\nConnection: close\r\n\r\n" + fixture.ready));
@@ -344,9 +344,9 @@ export function registerNotificationHTTPTests(packagePath) {
     }, code("PROTOCOL"));
   });
 
-  test("HTTP notification upgrade responses are protocol failures with completed socket cleanup", { timeout: 15000 }, async (t) => {
+  test("HTTP notification upgrade responses are protocol failures with completed socket cleanup", { timeout: 15000 }, async (defer) => {
     const closed = deferred();
-    const peer = await server(t, (socket) => {
+    const peer = await server(defer, (socket) => {
       socket.once("close", closed.resolve);
       socket.once("data", () => socket.write("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: test\r\n\r\n"));
     }, true);
