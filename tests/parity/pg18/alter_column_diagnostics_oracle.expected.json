@@ -1,0 +1,1551 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ac (id integer GENERATED ALWAYS AS IDENTITY, plain integer, filled integer DEFAULT 1, stored integer GENERATED ALWAYS AS (plain * 2) STORED, virt integer GENERATED ALWAYS AS (plain * 3) VIRTUAL, req integer NOT NULL)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE pm (at date NOT NULL, v integer) PARTITION BY RANGE (at)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE pm_2026 PARTITION OF pm FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE pm_2026 ALTER COLUMN v SET NOT NULL",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ih (id integer NOT NULL, note text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE ih_kid () INHERITS (ih)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attname, attnotnull, atthasdef, attgenerated, attidentity FROM pg_attribute WHERE attrelid = 'ac'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "attnotnull",
+            "atthasdef",
+            "attgenerated",
+            "attidentity"
+          ],
+          "type_oids": [
+            19,
+            16,
+            16,
+            18,
+            18
+          ],
+          "rows": [
+            [
+              "id",
+              "t",
+              "f",
+              "",
+              "a"
+            ],
+            [
+              "plain",
+              "f",
+              "f",
+              "",
+              ""
+            ],
+            [
+              "filled",
+              "f",
+              "t",
+              "",
+              ""
+            ],
+            [
+              "stored",
+              "f",
+              "t",
+              "s",
+              ""
+            ],
+            [
+              "virt",
+              "f",
+              "t",
+              "v",
+              ""
+            ],
+            [
+              "req",
+              "t",
+              "f",
+              "",
+              ""
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN nope SET DEFAULT 1",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"nope\" of relation \"ac\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN nope DROP DEFAULT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"nope\" of relation \"ac\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN nope SET NOT NULL",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"nope\" of relation \"ac\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN nope DROP NOT NULL",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"nope\" of relation \"ac\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN nope DROP EXPRESSION",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"nope\" of relation \"ac\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN nope DROP EXPRESSION IF EXISTS",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"nope\" of relation \"ac\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN nope SET EXPRESSION AS (1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"nope\" of relation \"ac\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN nope TYPE bigint",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"nope\" of relation \"ac\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN id SET DEFAULT 5",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "column \"id\" of relation \"ac\" is an identity column",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN id DROP DEFAULT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "column \"id\" of relation \"ac\" is an identity column",
+        "detail": null,
+        "hint": "Use ALTER TABLE ... ALTER COLUMN ... DROP IDENTITY instead."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN id DROP NOT NULL",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "column \"id\" of relation \"ac\" is an identity column",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN stored SET DEFAULT 5",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "column \"stored\" of relation \"ac\" is a generated column",
+        "detail": null,
+        "hint": "Use ALTER TABLE ... ALTER COLUMN ... SET EXPRESSION instead."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN stored DROP DEFAULT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "column \"stored\" of relation \"ac\" is a generated column",
+        "detail": null,
+        "hint": "Use ALTER TABLE ... ALTER COLUMN ... DROP EXPRESSION instead."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN virt SET DEFAULT 5",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "column \"virt\" of relation \"ac\" is a generated column",
+        "detail": null,
+        "hint": "Use ALTER TABLE ... ALTER COLUMN ... SET EXPRESSION instead."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN virt DROP DEFAULT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42601",
+        "message": "column \"virt\" of relation \"ac\" is a generated column",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN plain DROP EXPRESSION",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "column \"plain\" of relation \"ac\" is not a generated column",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN plain DROP EXPRESSION IF EXISTS",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "column \"plain\" of relation \"ac\" is not a generated column, skipping",
+          "detail": null,
+          "hint": null
+        }
+      ]
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN virt DROP EXPRESSION",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "ALTER TABLE / DROP EXPRESSION is not supported for virtual generated columns",
+        "detail": "Column \"virt\" of relation \"ac\" is a virtual generated column.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN plain SET EXPRESSION AS (1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "55000",
+        "message": "column \"plain\" of relation \"ac\" is not a generated column",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN ctid DROP NOT NULL",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot alter system column \"ctid\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN ctid SET NOT NULL",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot alter system column \"ctid\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN ctid SET DEFAULT '(0,1)'",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot alter system column \"ctid\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN xmin DROP DEFAULT",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot alter system column \"xmin\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN ctid DROP EXPRESSION",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot alter system column \"ctid\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN ctid SET EXPRESSION AS (1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot alter system column \"ctid\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN ctid TYPE text",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "0A000",
+        "message": "cannot alter system column \"ctid\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE pm_2026 ALTER COLUMN at DROP NOT NULL",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "column \"at\" is marked NOT NULL in parent table",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ih_kid ALTER COLUMN id DROP NOT NULL",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P16",
+        "message": "cannot drop inherited constraint \"ih_id_not_null\" of relation \"ih_kid\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN filled DROP DEFAULT",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attname, attnotnull, atthasdef, attgenerated, attidentity FROM pg_attribute WHERE attrelid = 'ac'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "attnotnull",
+            "atthasdef",
+            "attgenerated",
+            "attidentity"
+          ],
+          "type_oids": [
+            19,
+            16,
+            16,
+            18,
+            18
+          ],
+          "rows": [
+            [
+              "id",
+              "t",
+              "f",
+              "",
+              "a"
+            ],
+            [
+              "plain",
+              "f",
+              "f",
+              "",
+              ""
+            ],
+            [
+              "filled",
+              "f",
+              "f",
+              "",
+              ""
+            ],
+            [
+              "stored",
+              "f",
+              "t",
+              "s",
+              ""
+            ],
+            [
+              "virt",
+              "f",
+              "t",
+              "v",
+              ""
+            ],
+            [
+              "req",
+              "t",
+              "f",
+              "",
+              ""
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN plain DROP DEFAULT",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attname, attnotnull, atthasdef, attgenerated, attidentity FROM pg_attribute WHERE attrelid = 'ac'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "attnotnull",
+            "atthasdef",
+            "attgenerated",
+            "attidentity"
+          ],
+          "type_oids": [
+            19,
+            16,
+            16,
+            18,
+            18
+          ],
+          "rows": [
+            [
+              "id",
+              "t",
+              "f",
+              "",
+              "a"
+            ],
+            [
+              "plain",
+              "f",
+              "f",
+              "",
+              ""
+            ],
+            [
+              "filled",
+              "f",
+              "t",
+              "",
+              ""
+            ],
+            [
+              "stored",
+              "f",
+              "t",
+              "s",
+              ""
+            ],
+            [
+              "virt",
+              "f",
+              "t",
+              "v",
+              ""
+            ],
+            [
+              "req",
+              "t",
+              "f",
+              "",
+              ""
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN plain DROP NOT NULL",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attname, attnotnull, atthasdef, attgenerated, attidentity FROM pg_attribute WHERE attrelid = 'ac'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "attnotnull",
+            "atthasdef",
+            "attgenerated",
+            "attidentity"
+          ],
+          "type_oids": [
+            19,
+            16,
+            16,
+            18,
+            18
+          ],
+          "rows": [
+            [
+              "id",
+              "t",
+              "f",
+              "",
+              "a"
+            ],
+            [
+              "plain",
+              "f",
+              "f",
+              "",
+              ""
+            ],
+            [
+              "filled",
+              "f",
+              "t",
+              "",
+              ""
+            ],
+            [
+              "stored",
+              "f",
+              "t",
+              "s",
+              ""
+            ],
+            [
+              "virt",
+              "f",
+              "t",
+              "v",
+              ""
+            ],
+            [
+              "req",
+              "t",
+              "f",
+              "",
+              ""
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN req DROP NOT NULL",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attname, attnotnull, atthasdef, attgenerated, attidentity FROM pg_attribute WHERE attrelid = 'ac'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "attnotnull",
+            "atthasdef",
+            "attgenerated",
+            "attidentity"
+          ],
+          "type_oids": [
+            19,
+            16,
+            16,
+            18,
+            18
+          ],
+          "rows": [
+            [
+              "id",
+              "t",
+              "f",
+              "",
+              "a"
+            ],
+            [
+              "plain",
+              "f",
+              "f",
+              "",
+              ""
+            ],
+            [
+              "filled",
+              "f",
+              "t",
+              "",
+              ""
+            ],
+            [
+              "stored",
+              "f",
+              "t",
+              "s",
+              ""
+            ],
+            [
+              "virt",
+              "f",
+              "t",
+              "v",
+              ""
+            ],
+            [
+              "req",
+              "f",
+              "f",
+              "",
+              ""
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN stored DROP EXPRESSION",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attname, attnotnull, atthasdef, attgenerated, attidentity FROM pg_attribute WHERE attrelid = 'ac'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "attnotnull",
+            "atthasdef",
+            "attgenerated",
+            "attidentity"
+          ],
+          "type_oids": [
+            19,
+            16,
+            16,
+            18,
+            18
+          ],
+          "rows": [
+            [
+              "id",
+              "t",
+              "f",
+              "",
+              "a"
+            ],
+            [
+              "plain",
+              "f",
+              "f",
+              "",
+              ""
+            ],
+            [
+              "filled",
+              "f",
+              "t",
+              "",
+              ""
+            ],
+            [
+              "stored",
+              "f",
+              "f",
+              "",
+              ""
+            ],
+            [
+              "virt",
+              "f",
+              "t",
+              "v",
+              ""
+            ],
+            [
+              "req",
+              "t",
+              "f",
+              "",
+              ""
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ac ALTER COLUMN plain SET DEFAULT 7",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attname, attnotnull, atthasdef, attgenerated, attidentity FROM pg_attribute WHERE attrelid = 'ac'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum",
+      "command_tags": [
+        "SELECT 6"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "attname",
+            "attnotnull",
+            "atthasdef",
+            "attgenerated",
+            "attidentity"
+          ],
+          "type_oids": [
+            19,
+            16,
+            16,
+            18,
+            18
+          ],
+          "rows": [
+            [
+              "id",
+              "t",
+              "f",
+              "",
+              "a"
+            ],
+            [
+              "plain",
+              "f",
+              "t",
+              "",
+              ""
+            ],
+            [
+              "filled",
+              "f",
+              "t",
+              "",
+              ""
+            ],
+            [
+              "stored",
+              "f",
+              "t",
+              "s",
+              ""
+            ],
+            [
+              "virt",
+              "f",
+              "t",
+              "v",
+              ""
+            ],
+            [
+              "req",
+              "t",
+              "f",
+              "",
+              ""
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ONLY pm ALTER COLUMN at DROP NOT NULL",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attrelid::regclass::text AS relation, attname, attnotnull FROM pg_attribute WHERE attrelid IN ('pm'::regclass, 'pm_2026'::regclass) AND attnum > 0 ORDER BY 1, attnum",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relation",
+            "attname",
+            "attnotnull"
+          ],
+          "type_oids": [
+            25,
+            19,
+            16
+          ],
+          "rows": [
+            [
+              "pm",
+              "at",
+              "f"
+            ],
+            [
+              "pm",
+              "v",
+              "f"
+            ],
+            [
+              "pm_2026",
+              "at",
+              "t"
+            ],
+            [
+              "pm_2026",
+              "v",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE pm_2026 ALTER COLUMN at DROP NOT NULL",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attrelid::regclass::text AS relation, attname, attnotnull FROM pg_attribute WHERE attrelid IN ('pm'::regclass, 'pm_2026'::regclass) AND attnum > 0 ORDER BY 1, attnum",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relation",
+            "attname",
+            "attnotnull"
+          ],
+          "type_oids": [
+            25,
+            19,
+            16
+          ],
+          "rows": [
+            [
+              "pm",
+              "at",
+              "f"
+            ],
+            [
+              "pm",
+              "v",
+              "f"
+            ],
+            [
+              "pm_2026",
+              "at",
+              "f"
+            ],
+            [
+              "pm_2026",
+              "v",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE pm ALTER COLUMN at DROP NOT NULL",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attrelid::regclass::text AS relation, attname, attnotnull FROM pg_attribute WHERE attrelid IN ('pm'::regclass, 'pm_2026'::regclass) AND attnum > 0 ORDER BY 1, attnum",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relation",
+            "attname",
+            "attnotnull"
+          ],
+          "type_oids": [
+            25,
+            19,
+            16
+          ],
+          "rows": [
+            [
+              "pm",
+              "at",
+              "f"
+            ],
+            [
+              "pm",
+              "v",
+              "f"
+            ],
+            [
+              "pm_2026",
+              "at",
+              "f"
+            ],
+            [
+              "pm_2026",
+              "v",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "BEGIN",
+      "command_tags": [
+        "BEGIN"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ALTER TABLE ih ALTER COLUMN id DROP NOT NULL",
+      "command_tags": [
+        "ALTER TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT attrelid::regclass::text AS relation, attname, attnotnull FROM pg_attribute WHERE attrelid IN ('ih'::regclass, 'ih_kid'::regclass) AND attnum > 0 ORDER BY 1, attnum",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "relation",
+            "attname",
+            "attnotnull"
+          ],
+          "type_oids": [
+            25,
+            19,
+            16
+          ],
+          "rows": [
+            [
+              "ih",
+              "id",
+              "f"
+            ],
+            [
+              "ih",
+              "note",
+              "f"
+            ],
+            [
+              "ih_kid",
+              "id",
+              "f"
+            ],
+            [
+              "ih_kid",
+              "note",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "ROLLBACK",
+      "command_tags": [
+        "ROLLBACK"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

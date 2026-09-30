@@ -485,6 +485,8 @@ ALTER TABLE generated_totals ALTER COLUMN line_total SET EXPRESSION AS (quantity
 ALTER TABLE orders OWNER TO app_owner;
 ```
 
+`ALTER COLUMN` actions check their column as PostgreSQL does before they change anything: a name the relation lacks reports `42703` (`column "c" of relation "t" does not exist`) and a system column reports `0A000`. `SET DEFAULT` and `DROP DEFAULT` reject an identity column or a generated column with `42601` and PostgreSQL's hint to use `DROP IDENTITY`, `SET EXPRESSION` or `DROP EXPRESSION` instead. `SET EXPRESSION` and `DROP EXPRESSION` report `55000` for a column that is not generated, which `DROP EXPRESSION IF EXISTS` skips with a notice, and the expression of a virtual generated column cannot be dropped (`0A000`). `DROP NOT NULL` keeps an identity column NOT NULL (`42601`), and a partition's column while its parent's column is NOT NULL (`42P16`).
+
 Column renames preserve creation-bound references in SQL-standard function and procedure bodies, including SELECT, INSERT, UPDATE, DELETE, and MERGE. Bound table columns change while relation aliases, CTE outputs, function parameters, declared result columns, and view outputs retain their identities. The table owner may rename a column used by a routine in an inaccessible schema. Recreating the old column name does not redirect stored references. String-literal SQL bodies continue resolving their original source text at execution. Missing source columns report `42703`, and duplicate destination names report `42701` before mutation. The changes follow transaction and savepoint rollback, sibling-engine catalog refresh, and SQLite reopen.
 
 ```sql execute

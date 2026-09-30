@@ -147,6 +147,7 @@
       "execution.static-row-schema-and-spill-v1",
       "types.declared-identity-casts-and-catalog",
       "ddl.alter-type-and-migration",
+      "ddl.alter-column-diagnostics",
       "catalog.pg-database-locale",
       "catalog.user-routine-pseudotype-variadic-identity",
       "ddl.generated-columns",
@@ -680,6 +681,14 @@
       "supported_version": "Structural USING expressions evaluated per old row, atomic schema-and-data rollback, source-sensitive OID widths, supported migration type identity, explicit rejection of unknown migration types, range-to-paired-multirange rewrites, preserved WITHOUT OVERLAPS dependencies, incompatible PERIOD relationship rejection with SQLSTATE 42804, generated-expression validation, and durable reopen behavior",
       "status": "partial",
       "open_issue": "The complete PostgreSQL assignment-cast matrix, every remaining dependency kind, collation rewrites, domain checks, and upstream ALTER TYPE regression cases remain."
+    },
+    {
+      "id": "ddl.alter-column-diagnostics",
+      "postgresql_reference": "PostgreSQL 18.4 live SQLSTATEs, errors, details, hints, notices and catalog rows in tests/parity/pg18/alter_column_diagnostics_oracle.expected.json; ATExecColumnDefault, ATExecSetExpression, ATExecDropExpression and ATExecDropNotNull in src/backend/commands/tablecmds.c",
+      "uqa_test": "cargo test -p uqa-engine --test integration catalog::alter_column_diagnostics",
+      "supported_version": "Unreleased: 74 PostgreSQL 18.4 cases on memory and SQLite engines cover ALTER COLUMN SET and DROP DEFAULT, SET and DROP EXPRESSION, SET and DROP NOT NULL and TYPE: missing columns (42703), system columns (0A000), identity and stored or virtual generated columns (42601 with PostgreSQL's hints), columns that are not generated (55000, or a notice under IF EXISTS), virtual generation expressions (0A000 with its detail), and columns a partition or an inheritance child takes from its parent (42P16), including ONLY on a partitioned table",
+      "status": "verified",
+      "open_issue": null
     },
     {
       "id": "catalog.pg-database-locale",

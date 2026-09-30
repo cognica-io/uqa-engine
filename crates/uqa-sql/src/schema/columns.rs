@@ -72,15 +72,71 @@ pub fn append_registered_column(
     Ok(())
 }
 
-pub fn reject_default_change_on_generated_column(
-    catalog: &dyn crate::assignment::columns::AssignmentColumnCatalog,
+/// The column an `ALTER TABLE ... ALTER COLUMN` action names, as `get_attnum` finds it for `ATExecColumnDefault` and its siblings.
+pub fn altered_column<'a>(
     table: &str,
+    columns: &'a [crate::ast::ColumnDef],
     column: &str,
+) -> Result<&'a crate::ast::ColumnDef, SQLError> {
+    columns
+        .iter()
+        .find(|definition| definition.name == column)
+        .ok_or_else(|| missing_altered_column(table, column))
+}
+
+/// The error for an `ALTER COLUMN` target that is not a column of the relation: every relation has the system columns, which cannot be altered, and any other name does not exist.
+pub fn missing_altered_column(table: &str, column: &str) -> SQLError {
+    if POSTGRES_SYSTEM_COLUMNS.contains(&column) {
+        return SQLError::Routine {
+            sqlstate: "0A000".into(),
+            message: format!("cannot alter system column \"{column}\""),
+        };
+    }
+    undefined_relation_column(table, column)
+}
+
+/// `ATExecColumnDefault`'s checks of the column whose default `SET DEFAULT` (`setting`) or `DROP DEFAULT` changes: an identity column takes its values from its sequence and a generated column from its expression.
+pub fn validate_default_change(
+    table: &str,
+    column: &crate::ast::ColumnDef,
+    setting: bool,
 ) -> Result<(), SQLError> {
-    if crate::assignment::columns::generated_column_kind(catalog, table, column)?.is_some() {
-        return Err(SQLError::TypeMismatch(format!(
-            "column `{column}` of relation `{table}` is a generated column; use SET EXPRESSION or DROP EXPRESSION"
-        )));
+    let relation = uqa_core::RelationIdentity::from_legacy_name(table).map_err(|error| {
+        SQLError::Internal(format!("resolve ALTER TABLE target `{table}`: {error}"))
+    })?;
+    if column
+        .auto_increment
+        .as_ref()
+        .is_some_and(crate::ast::AutoIncrement::is_identity)
+    {
+        return Err(SQLError::Diagnostic {
+            sqlstate: "42601".into(),
+            message: format!(
+                "column \"{}\" of relation \"{}\" is an identity column",
+                column.name, relation.name
+            ),
+            detail: None,
+            hint: (!setting)
+                .then(|| "Use ALTER TABLE ... ALTER COLUMN ... DROP IDENTITY instead.".into()),
+        });
+    }
+    if let Some(generated) = &column.generated {
+        let hint = if setting {
+            Some("Use ALTER TABLE ... ALTER COLUMN ... SET EXPRESSION instead.")
+        } else if generated.kind == crate::ast::GeneratedColumnKind::Stored {
+            Some("Use ALTER TABLE ... ALTER COLUMN ... DROP EXPRESSION instead.")
+        } else {
+            None
+        };
+        return Err(SQLError::Diagnostic {
+            sqlstate: "42601".into(),
+            message: format!(
+                "column \"{}\" of relation \"{}\" is a generated column",
+                column.name, relation.name
+            ),
+            detail: None,
+            hint: hint.map(Into::into),
+        });
     }
     Ok(())
 }

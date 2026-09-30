@@ -191,6 +191,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `execution.static-row-schema-and-spill-v1` | `M3` | `partial` |
 | `types.declared-identity-casts-and-catalog` | `M3` | `partial` |
 | `ddl.alter-type-and-migration` | `M3` | `partial` |
+| `ddl.alter-column-diagnostics` | `M3` | `verified` |
 | `catalog.pg-database-locale` | `M3` | `partial` |
 | `plpgsql.datum-slots-and-bound-cursors` | `M4` | `partial` |
 | `sequences.nontransactional-values-and-catalog-state` | `M4` | `partial` |

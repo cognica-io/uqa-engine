@@ -96,11 +96,7 @@ pub fn drop_default<S: Clone + 'static>(
     table: &str,
     name: &str,
 ) -> Result<(), SQLError> {
-    uqa_sql::schema::columns::reject_default_change_on_generated_column(
-        context.analysis.columns,
-        table,
-        name,
-    )?;
+    alteration::validate_default_removal(&context.analysis, table, name)?;
     if !publish_property(
         context.transactions,
         table,
@@ -146,12 +142,18 @@ pub fn set_expression<S: Clone + 'static>(
         kind == GeneratedColumnKind::Stored,
     )
 }
+/// Drop a stored generated column's expression, or return the notice that skips a column that is not generated under `IF EXISTS`.
 pub fn drop_expression<S: Clone + 'static>(
     context: &ColumnAlterContext<'_, S>,
     table: &str,
     name: &str,
-) -> Result<(), SQLError> {
-    alteration::validate_drop_expression(&context.analysis, table, name)?;
+    if_exists: bool,
+) -> Result<Option<uqa_sql::SQLNotice>, SQLError> {
+    if let Some(notice) =
+        alteration::validate_drop_expression(&context.analysis, table, name, if_exists)?
+    {
+        return Ok(Some(notice));
+    }
     publish_property(
         context.transactions,
         table,
@@ -159,7 +161,7 @@ pub fn drop_expression<S: Clone + 'static>(
         ColumnProperty::Generated(None),
     )
     .map_err(|error| ddl_storage_error("ALTER COLUMN DROP EXPRESSION", error))?;
-    Ok(())
+    Ok(None)
 }
 pub fn alter_type<S: Clone + 'static>(
     context: &ColumnAlterContext<'_, S>,

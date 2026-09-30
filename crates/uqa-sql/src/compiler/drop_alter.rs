@@ -716,6 +716,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
             }
             AlterTableType::AtDropExpression => AlterTableAction::DropExpression {
                 name: cmd.name.clone(),
+                if_exists: cmd.missing_ok,
             },
             AlterTableType::AtSetNotNull => AlterTableAction::SetNotNull {
                 name: cmd.name.clone(),

@@ -6,6 +6,8 @@
 
 //! Consolidated catalog, DDL, and mutation integration tests.
 
+#[path = "catalog/alter_column_diagnostics.rs"]
+mod alter_column_diagnostics;
 #[path = "catalog/analyzer_revisions.rs"]
 mod analyzer_revisions;
 #[path = "catalog/capability_boundaries.rs"]

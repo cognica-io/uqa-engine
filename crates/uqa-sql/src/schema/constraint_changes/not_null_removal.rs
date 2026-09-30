@@ -30,11 +30,26 @@ pub fn validate_constraint_removal(
     reject_identity(table, column, "55000")
 }
 
-pub fn validate_column_removal(table: &str, column: &ColumnDef) -> Result<(), SQLError> {
+/// `ATExecDropNotNull`'s checks of a NOT NULL column: an identity column must stay NOT NULL, and so must a partition's column while its parent's is.
+pub fn validate_column_removal(
+    table: &str,
+    column: &ColumnDef,
+    parent_not_null: bool,
+) -> Result<(), SQLError> {
     if !column.not_null {
         return Ok(());
     }
-    reject_identity(table, column, "42601")
+    reject_identity(table, column, "42601")?;
+    if parent_not_null {
+        return Err(constraint_error(
+            "42P16",
+            format!(
+                "column \"{}\" is marked NOT NULL in parent table",
+                column.name
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn reject_identity(table: &str, column: &ColumnDef, sqlstate: &str) -> Result<(), SQLError> {
@@ -78,7 +93,7 @@ mod tests {
             Some("55000")
         );
         assert_eq!(
-            validate_column_removal("public.t", column)
+            validate_column_removal("public.t", column, false)
                 .unwrap_err()
                 .sqlstate(),
             Some("42601")
@@ -105,7 +120,7 @@ mod tests {
         for column in &table.columns {
             validate_constraint_removal("public.t", column, &TableConstraintSet::default())
                 .unwrap();
-            validate_column_removal("public.t", column).unwrap();
+            validate_column_removal("public.t", column, false).unwrap();
         }
     }
 }

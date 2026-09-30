@@ -268,6 +268,7 @@ pub enum AlterTableAction {
     },
     DropExpression {
         name: String,
+        if_exists: bool,
     },
     SetNotNull {
         name: String,
