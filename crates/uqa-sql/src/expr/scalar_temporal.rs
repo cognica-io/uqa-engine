@@ -139,10 +139,7 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
 
 fn undefined_uuid_extraction(name: &str, args: &[Value]) -> SQLError {
     let signature = args.iter().map(typeof_value).collect::<Vec<_>>().join(", ");
-    SQLError::Routine {
-        sqlstate: "42883".into(),
-        message: format!("function {name}({signature}) does not exist"),
-    }
+    SQLError::undefined_function_call(&format!("{name}({signature})"))
 }
 
 fn parse_roman_numeral(input: &str) -> Option<i64> {

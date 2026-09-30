@@ -299,21 +299,86 @@ pub(super) fn validate_window_function(
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<(), SQLError> {
     let lower = crate::semantics::builtin_function_dispatch_name(name);
+    if lower == "count" && args.is_empty() {
+        return Err(SQLError::Routine {
+            sqlstate: "42809".into(),
+            message: format!("{name}(*) must be used to call a parameterless aggregate function"),
+        });
+    }
+    if matches!(
+        lower.as_str(),
+        "percentile_cont" | "percentile_disc" | "mode"
+    ) {
+        return Err(SQLError::Routine {
+            sqlstate: "42809".into(),
+            message: format!("WITHIN GROUP is required for ordered-set aggregate {name}"),
+        });
+    }
     if matches!(
         (lower.as_str(), args.len()),
-        ("row_number" | "rank" | "dense_rank", 0)
-            | ("lag" | "lead", 1..=3)
-            | ("first_value" | "last_value", 1)
+        (
+            "row_number" | "rank" | "dense_rank" | "percent_rank" | "cume_dist",
+            0
+        ) | ("lag" | "lead", 1..=3)
+            | ("first_value" | "last_value" | "ntile", 1)
             | ("nth_value", 2)
-            | ("ntile", 1)
-            | ("sum" | "count" | "avg" | "min" | "max", 1)
+            | (
+                "sum"
+                    | "count"
+                    | "avg"
+                    | "min"
+                    | "max"
+                    | "array_agg"
+                    | "json_agg"
+                    | "jsonb_agg"
+                    | "bool_and"
+                    | "bool_or"
+                    | "stddev"
+                    | "stddev_samp"
+                    | "stddev_pop"
+                    | "variance"
+                    | "var_samp"
+                    | "var_pop",
+                1
+            )
+            | ("string_agg" | "json_object_agg" | "jsonb_object_agg", 2)
     ) || routines.has_registered_aggregate_function(name)
-        || resolve_sql_function(routines, name, None, args, schema, params, resolver)?.is_some()
     {
-        Ok(())
-    } else {
-        Err(undefined_function(name, args, schema, params, resolver))
+        return Ok(());
     }
+    let call = ScalarExpr::Func {
+        name: name.to_string(),
+        binding: None,
+        args: args.to_vec(),
+        distinct: false,
+        order_by: Vec::new(),
+        filter: None,
+    };
+    // A built-in aggregate reaching here has no overload for these arguments; any other function that resolves is an ordinary one.
+    if !crate::semantics::is_builtin_aggregate(&call)
+        && validate_scalar_function(
+            routines,
+            ScalarFunctionValidation {
+                name,
+                binding: None,
+                args,
+                order_by: &[],
+                expression: &call,
+                schema,
+                params,
+                resolver,
+            },
+        )
+        .is_ok()
+    {
+        return Err(SQLError::Routine {
+            sqlstate: "42809".into(),
+            message: format!(
+                "OVER specified, but {name} is not a window function nor an aggregate function"
+            ),
+        });
+    }
+    Err(undefined_function(name, args, schema, params, resolver))
 }
 
 pub(super) fn validate_table_function(
@@ -428,8 +493,5 @@ fn undefined_function(
         })
         .collect::<Vec<_>>()
         .join(", ");
-    SQLError::Routine {
-        sqlstate: "42883".into(),
-        message: format!("function {name}({signature}) does not exist"),
-    }
+    SQLError::undefined_function_call(&format!("{name}({signature})"))
 }

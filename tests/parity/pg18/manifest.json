@@ -132,7 +132,9 @@
       "functions.crc-checksums",
       "functions.gamma-functions",
       "functions.string-binary-lengths",
-      "functions.uuid-extraction"
+      "functions.uuid-extraction",
+      "query.window-frames",
+      "aggregates.null-and-enum-inputs"
     ],
     "M2": [
       "protocol.frontend-backend-3.2"
@@ -1081,6 +1083,22 @@
       "supported_version": "NOT NULL, CHECK, partition constraint and auto-updatable view WITH [CASCADED] CHECK OPTION violations report the failing row in DETAIL on memory and native SQLite: every column with output-function text for a role with table SELECT, otherwise the columns the role may select or the INSERT, UPDATE or MERGE supplied, listed by name, and no DETAIL when none qualifies; virtual generated columns print virtual, NULL prints null, and values longer than 64 bytes are clipped",
       "status": "partial",
       "open_issue": "A WITH CHECK OPTION violation through MERGE into a trigger-updatable view must describe the view row with the view's privileges."
+    },
+    {
+      "id": "query.window-frames",
+      "postgresql_reference": "PostgreSQL 18.4 live rows, SQLSTATEs, messages and hints in tests/parity/pg18/window_frames_oracle.expected.json; update_frameheadpos, update_frametailpos, row_is_in_frame and WinGetFuncArgInFrame in src/backend/executor/nodeWindowAgg.c; src/backend/utils/adt/windowfuncs.c; transformFrameOffset in src/backend/parser/parse_clause.c; https://www.postgresql.org/docs/18/sql-expressions.html#SYNTAX-WINDOW-FUNCTIONS",
+      "uqa_test": "cargo test -p uqa-engine --test integration queries::sql_window_frames; cargo test -p uqa-execution --lib window; cargo test -p uqa-sql --lib expr::in_range; cargo test -p uqa-sql --lib type_resolution::range_offsets",
+      "supported_version": "Unreleased: 51 PostgreSQL 18.4 cases on memory and SQLite engines cover the default RANGE frame ending at the current row's last peer, ROWS, RANGE and GROUPS frames with CURRENT ROW, offset and unbounded bounds, RANGE offsets selected and coerced through the in_range support of integer, numeric, floating-point, date, time, timestamp and interval keys with NULL ordering values, EXCLUDE CURRENT ROW, GROUP, TIES and NO OTHERS, first_value, last_value and nth_value, rank, dense_rank, percent_rank, cume_dist, row_number, ntile, lag and lead, every built-in and registered aggregate over a frame, named window references, query ORDER BY on columns the target list omits, and the frame, offset, argument and window-reference errors (42P20, 42P10, 22004, 22013, 22014, 22016, 0A000, 42883 and 42725 with PostgreSQL's hints)",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "aggregates.null-and-enum-inputs",
+      "postgresql_reference": "PostgreSQL 18.4 live rows, SQLSTATEs, messages and hints in tests/parity/pg18/aggregate_nulls_oracle.expected.json; array_agg_array_transfn in src/backend/utils/adt/array_userfuncs.c; https://www.postgresql.org/docs/18/functions-aggregate.html",
+      "uqa_test": "cargo test -p uqa-engine --test integration queries::sql_aggregate_nulls",
+      "supported_version": "Unreleased: 55 PostgreSQL 18.4 cases on memory and SQLite engines cover array_agg, json_agg, jsonb_agg and string_agg over NULL inputs with ORDER BY, DISTINCT, FILTER, empty inputs and window frames, array accumulation with its dimensionality and NULL-array errors, domain element types, and min, max, count, mode, percentile_disc, enum_range, grouping, ordering and window aggregates over enum values with inserted labels, with function resolution errors and hints for aggregates that take no such argument type",
+      "status": "verified",
+      "open_issue": null
     }
   ]
 }

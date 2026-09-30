@@ -20,6 +20,8 @@ mod operator_tree_full_surface;
 mod operator_tree_pipeline;
 #[path = "optimizer_passes.rs"]
 mod optimizer_passes;
+#[path = "queries/sql_aggregate_nulls.rs"]
+mod sql_aggregate_nulls;
 #[path = "sql_aggregates.rs"]
 mod sql_aggregates;
 #[path = "sql_blocking_spill.rs"]
@@ -98,3 +100,5 @@ mod sql_type_usage;
 mod sql_window;
 #[path = "sql_window_frame.rs"]
 mod sql_window_frame;
+#[path = "queries/sql_window_frames.rs"]
+mod sql_window_frames;

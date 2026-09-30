@@ -243,10 +243,7 @@ pub fn function_resolution_error(
         })
         .collect::<Vec<_>>()
         .join(", ");
-    SQLError::Routine {
-        sqlstate: sqlstate.into(),
-        message: format!("function {name}({arguments}) {suffix}"),
-    }
+    SQLError::function_call_resolution(sqlstate, &format!("{name}({arguments})"), suffix)
 }
 
 #[cfg(test)]

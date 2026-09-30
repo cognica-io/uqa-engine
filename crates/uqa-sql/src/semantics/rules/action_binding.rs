@@ -358,6 +358,8 @@ fn bind_rule_window_expression(
                         mode: frame.mode,
                         start: bind_frame_bound(&frame.start, resolver, scope, context)?,
                         end: bind_frame_bound(&frame.end, resolver, scope, context)?,
+                        between: frame.between,
+                        exclusion: frame.exclusion,
                     })
                 })
                 .transpose()?,

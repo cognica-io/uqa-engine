@@ -507,7 +507,7 @@ mod tests {
             Ok(None)
         }
     }
-    use crate::ast::FrameMode;
+    use crate::ast::{FrameExclusion, FrameMode};
     use crate::{ScalarFrameBound, ScalarWindowFrame, ScalarWindowSpec};
 
     #[test]
@@ -546,6 +546,8 @@ mod tests {
                         filter: None,
                     })),
                     end: ScalarFrameBound::CurrentRow,
+                    between: true,
+                    exclusion: FrameExclusion::NoOthers,
                 }),
             },
         };

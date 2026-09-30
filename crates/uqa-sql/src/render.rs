@@ -11,9 +11,8 @@ use std::fmt::Write as _;
 use uqa_core::{TemporalValue, Value};
 
 use crate::ast::{
-    CteBody, CteMaterialization, Expr, FrameBound, FrameMode, FromClause, JoinKind, LockWait,
-    NullsOrder, OrderBy, Projection, ReturningAliases, SelectStmt, SetOpKind, Statement,
-    TableFunction, WindowReferenceKind, WindowSpec, CTE,
+    CteBody, CteMaterialization, Expr, FromClause, JoinKind, LockWait, NullsOrder, OrderBy,
+    Projection, ReturningAliases, SelectStmt, SetOpKind, Statement, TableFunction, CTE,
 };
 use crate::SQLError;
 
@@ -21,6 +20,9 @@ mod commands;
 use commands::{delete_sql, insert_sql, merge_sql, update_sql};
 mod legacy_vector;
 pub use legacy_vector::legacy_vector_expression;
+mod window;
+pub use window::frame_clause_sql;
+use window::window_sql;
 
 /// Render one executable statement represented by UQA's durable SQL AST.
 pub fn statement_sql(statement: &Statement) -> Result<String, SQLError> {
@@ -495,41 +497,6 @@ fn render_expr(expression: &Expr) -> Result<String, SQLError> {
     })
 }
 
-fn window_sql(spec: &WindowSpec) -> String {
-    if let Some(reference) = &spec.reference {
-        if reference.kind == WindowReferenceKind::Direct
-            && spec.partition_by.is_empty()
-            && spec.order_by.is_empty()
-            && spec.frame.is_none()
-        {
-            return ident(&reference.name);
-        }
-    }
-    let mut parts = Vec::new();
-    if let Some(reference) = &spec.reference {
-        parts.push(ident(&reference.name));
-    }
-    if !spec.partition_by.is_empty() {
-        parts.push(format!("PARTITION BY {}", expr_list(&spec.partition_by)));
-    }
-    if !spec.order_by.is_empty() {
-        parts.push(format!("ORDER BY {}", order_by_sql(&spec.order_by)));
-    }
-    if let Some(frame) = &spec.frame {
-        parts.push(format!(
-            "{} BETWEEN {} AND {}",
-            match frame.mode {
-                FrameMode::Rows => "ROWS",
-                FrameMode::Range => "RANGE",
-                FrameMode::Groups => "GROUPS",
-            },
-            frame_bound_sql(&frame.start),
-            frame_bound_sql(&frame.end)
-        ));
-    }
-    format!("({})", parts.join(" "))
-}
-
 const fn binary_operator_sql(operator: crate::ast::BinaryOp) -> &'static str {
     match operator {
         crate::ast::BinaryOp::Equal => "=",
@@ -542,16 +509,6 @@ const fn binary_operator_sql(operator: crate::ast::BinaryOp) -> &'static str {
         crate::ast::BinaryOp::Subtract => "-",
         crate::ast::BinaryOp::Multiply => "*",
         crate::ast::BinaryOp::Divide => "/",
-    }
-}
-
-fn frame_bound_sql(bound: &FrameBound) -> String {
-    match bound {
-        FrameBound::UnboundedPreceding => "UNBOUNDED PRECEDING".into(),
-        FrameBound::UnboundedFollowing => "UNBOUNDED FOLLOWING".into(),
-        FrameBound::CurrentRow => "CURRENT ROW".into(),
-        FrameBound::Preceding(expression) => format!("{} PRECEDING", expr_sql(expression)),
-        FrameBound::Following(expression) => format!("{} FOLLOWING", expr_sql(expression)),
     }
 }
 

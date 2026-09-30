@@ -113,6 +113,8 @@ struct SchemaColdMetadata {
     /// Names supplied only when a document or native-function source opens.
     open_qualifiers: HashSet<Option<Box<str>>>,
     identity_layout: bool,
+    /// The physical width of the schema's own columns when [`RowSchema::with_outer_schema`] overlaid an enclosing query's columns after them; `None` when every column is the schema's own.
+    local_width: Option<usize>,
 }
 
 #[derive(Default)]
@@ -128,6 +130,7 @@ struct SchemaBuildMetadata {
     exact_unqualified_precedence: bool,
     extra_ambiguous_unqualified: HashSet<Box<str>>,
     extra_ambiguous_qualified: HashSet<ColumnIdentity>,
+    local_width: Option<usize>,
 }
 
 pub struct PhysicalLayout {

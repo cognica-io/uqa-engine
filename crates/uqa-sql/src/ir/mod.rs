@@ -13,7 +13,9 @@ pub use call_arguments::{
     scalar_call_arguments_with_control, validate_scalar_call_arguments, ScalarCallArgument,
 };
 
-use crate::ast::{BinaryOp, ColumnType, FrameMode, FunctionBinding, InternalColumnRef, NullsOrder};
+use crate::ast::{
+    BinaryOp, ColumnType, FrameExclusion, FrameMode, FunctionBinding, InternalColumnRef, NullsOrder,
+};
 use uqa_core::Value;
 
 /// Index into the query children owned by the enclosing expression plan.
@@ -125,6 +127,16 @@ pub struct ScalarWindowFrame {
     pub mode: FrameMode,
     pub start: ScalarFrameBound,
     pub end: ScalarFrameBound,
+    /// Whether the frame was written `BETWEEN start AND end`; see [`crate::ast::WindowFrame::between`].
+    #[serde(default = "frame_written_between")]
+    pub between: bool,
+    #[serde(default, skip_serializing_if = "FrameExclusion::is_no_others")]
+    pub exclusion: FrameExclusion,
+}
+
+/// Frames recorded before the spelling was kept were deparsed with `BETWEEN`.
+const fn frame_written_between() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]

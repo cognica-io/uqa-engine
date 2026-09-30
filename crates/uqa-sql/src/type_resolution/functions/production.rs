@@ -300,11 +300,20 @@ fn aggregate_sum_type(ty: &ColumnType) -> Option<ColumnType> {
         ColumnType::BigInteger | ColumnType::Numeric { .. } => numeric_type(),
         ColumnType::Real => ColumnType::Real,
         ColumnType::DoublePrecision => ColumnType::DoublePrecision,
+        ColumnType::Interval => ColumnType::Interval,
         _ => return None,
     })
 }
 
 fn aggregate_average_type(ty: &ColumnType) -> Option<ColumnType> {
+    match base_type(ty) {
+        ColumnType::Interval => Some(ColumnType::Interval),
+        other => aggregate_statistic_type(other),
+    }
+}
+
+/// `stddev`, `variance` and their variants, which take the numeric types only.
+fn aggregate_statistic_type(ty: &ColumnType) -> Option<ColumnType> {
     Some(match base_type(ty) {
         ColumnType::SmallInteger
         | ColumnType::Integer
@@ -313,6 +322,28 @@ fn aggregate_average_type(ty: &ColumnType) -> Option<ColumnType> {
         ColumnType::Real | ColumnType::DoublePrecision => ColumnType::DoublePrecision,
         _ => return None,
     })
+}
+
+/// The result type of a single-argument aggregate's overload for its argument type, `None` for an `unknown` argument. A known argument type that no overload takes fails as function resolution does.
+fn single_argument_aggregate_type(
+    name: &str,
+    argument: Option<&ColumnType>,
+    result_type: fn(&ColumnType) -> Option<ColumnType>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    match argument {
+        None => Ok(None),
+        Some(argument) => match result_type(argument) {
+            Some(result) => inline(result, control),
+            None => Err(super::super::function_resolution_error(
+                "42883",
+                name,
+                &[None],
+                std::slice::from_ref(&Some(argument.clone())),
+                "does not exist",
+            )),
+        },
+    }
 }
 
 fn numeric_unary_result_type(ty: &ColumnType) -> ColumnType {
@@ -647,10 +678,13 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         ),
         "count" | "row_number" | "rank" | "dense_rank" | "nextval" | "currval" | "lastval"
         | "setval" => inline(ColumnType::BigInteger, control),
-        "sum" => optional_inline(first().and_then(aggregate_sum_type), control),
-        "avg" => optional_inline(first().and_then(aggregate_average_type), control),
+        "percent_rank" | "cume_dist" => inline(ColumnType::DoublePrecision, control),
+        "sum" => single_argument_aggregate_type(name, effective(0), aggregate_sum_type, control),
+        "avg" => {
+            single_argument_aggregate_type(name, effective(0), aggregate_average_type, control)
+        }
         "stddev" | "stddev_samp" | "stddev_pop" | "variance" | "var_samp" | "var_pop" => {
-            optional_inline(first().and_then(aggregate_average_type), control)
+            single_argument_aggregate_type(name, effective(0), aggregate_statistic_type, control)
         }
         // A domain argument selects its base type's `min` or `max`; `min(anyenum)` does not accept a domain over an enum.
         "min" | "max" => match first() {
@@ -729,11 +763,18 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         "contains_op" | "contained_by_op" => {
             containment::resolve_operator_type_with_control(name, args, &argument_types, control)
         }
-        "bool_and" | "bool_or" | "every" | "starts_with" | "like" | "ilike" | "similar_to"
-        | "regexp_like" | "isfinite" | "json_contains" | "json_contained_by" | "json_has_key"
-        | "json_has_any_key" | "json_has_all_keys" | "jsonb_path_exists" | "jsonpath_exists"
-        | "jsonb_path_match" | "jsonpath_match" | "array_overlap" | "st_within" | "st_dwithin"
-        | "overlaps" => inline(ColumnType::Boolean, control),
+        "bool_and" | "bool_or" | "every" => single_argument_aggregate_type(
+            name,
+            effective(0),
+            |ty| matches!(base_type(ty), ColumnType::Boolean).then_some(ColumnType::Boolean),
+            control,
+        ),
+        "starts_with" | "like" | "ilike" | "similar_to" | "regexp_like" | "isfinite"
+        | "json_contains" | "json_contained_by" | "json_has_key" | "json_has_any_key"
+        | "json_has_all_keys" | "jsonb_path_exists" | "jsonpath_exists" | "jsonb_path_match"
+        | "jsonpath_match" | "array_overlap" | "st_within" | "st_dwithin" | "overlaps" => {
+            inline(ColumnType::Boolean, control)
+        }
         "coalesce" | "greatest" | "least" => common_argument_type(args, &argument_types, control),
         "concat_op" => concat_type(argument(0), argument(1), control),
         "ntile" | "position" | "strpos" | "ascii" | "width_bucket" | "regexp_count"

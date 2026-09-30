@@ -17,6 +17,7 @@ pub mod limit;
 pub mod operators;
 pub mod ordering;
 pub mod row_count;
+mod window_output;
 pub use operators::build_relational_operator;
 
 #[derive(Default)]

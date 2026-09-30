@@ -69,6 +69,8 @@ fn named_windows_resolve_inheritance_and_frames() {
             mode: crate::ast::FrameMode::Rows,
             start: crate::ast::FrameBound::UnboundedPreceding,
             end: crate::ast::FrameBound::CurrentRow,
+            between: true,
+            exclusion: crate::ast::FrameExclusion::NoOthers,
         })
     ));
 

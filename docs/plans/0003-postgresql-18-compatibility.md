@@ -241,6 +241,8 @@ The following compact ledger is the readable projection of the machine-readable 
 | `types.unknown-literal-coercion` | `M3` | `partial` |
 | `ddl.partition-bound-transformation` | `M3` | `partial` |
 | `dml.failing-row-details` | `M4` | `partial` |
+| `query.window-frames` | `M1` | `verified` |
+| `aggregates.null-and-enum-inputs` | `M1` | `verified` |
 
 <!-- pg18-manifest-status:end -->
 

@@ -44,14 +44,15 @@ pub struct OperatorResolutionError {
 impl FunctionResolutionError {
     #[must_use]
     pub fn sql_error(&self) -> crate::SQLError {
-        let (sqlstate, message) = match self {
-            Self::UndefinedFunction { signature } => (
-                "42883".to_string(),
-                format!("function {signature} does not exist"),
-            ),
-            Self::Operator(error) => (error.sqlstate.clone(), error.message.clone()),
-        };
-        crate::SQLError::Routine { sqlstate, message }
+        match self {
+            Self::UndefinedFunction { signature } => {
+                crate::SQLError::undefined_function_call(signature)
+            }
+            Self::Operator(error) => crate::SQLError::Routine {
+                sqlstate: error.sqlstate.clone(),
+                message: error.message.clone(),
+            },
+        }
     }
 }
 

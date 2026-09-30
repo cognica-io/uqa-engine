@@ -215,7 +215,7 @@ pub fn expr_is_null_free(expr: &ScalarExpr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{expr_contains_function, expr_has_unqualified_column, expr_qualifiers, ScalarExpr};
-    use crate::ast::FrameMode;
+    use crate::ast::{FrameExclusion, FrameMode};
     use crate::{ScalarFrameBound, ScalarWindowFrame, ScalarWindowSpec};
 
     #[test]
@@ -235,6 +235,8 @@ mod tests {
                         "frame_width".into(),
                     ))),
                     end: ScalarFrameBound::CurrentRow,
+                    between: true,
+                    exclusion: FrameExclusion::NoOthers,
                 }),
             },
         };

@@ -64,6 +64,44 @@ impl SQLError {
         }
     }
 
+    /// `ParseFuncOrColumn`'s error when no function matches a call: `signature` is the name with its argument types, as `func_signature_string` spells it.
+    pub fn undefined_function_call(signature: &str) -> Self {
+        Self::Diagnostic {
+            sqlstate: "42883".into(),
+            message: format!("function {signature} does not exist"),
+            detail: None,
+            hint: Some(
+                "No function matches the given name and argument types. You might need to add explicit type casts."
+                    .into(),
+            ),
+        }
+    }
+
+    /// `ParseFuncOrColumn`'s error when more than one function matches a call equally well.
+    pub fn ambiguous_function_call(signature: &str) -> Self {
+        Self::Diagnostic {
+            sqlstate: "42725".into(),
+            message: format!("function {signature} is not unique"),
+            detail: None,
+            hint: Some(
+                "Could not choose a best candidate function. You might need to add explicit type casts."
+                    .into(),
+            ),
+        }
+    }
+
+    /// A failed call resolution in `ParseFuncOrColumn`'s terms: `42883` when no function matches and `42725` when no candidate is best, each with its hint.
+    pub fn function_call_resolution(sqlstate: &str, signature: &str, suffix: &str) -> Self {
+        match (sqlstate, suffix) {
+            ("42883", "does not exist") => Self::undefined_function_call(signature),
+            ("42725", "is not unique") => Self::ambiguous_function_call(signature),
+            _ => Self::Routine {
+                sqlstate: sqlstate.into(),
+                message: format!("function {signature} {suffix}"),
+            },
+        }
+    }
+
     pub fn unknown_qualified_column(qualifier: &str, column: &str) -> Self {
         Self::Routine {
             sqlstate: "42703".into(),
@@ -121,6 +159,22 @@ impl From<pg_query::Error> for SQLError {
             {
                 SQLError::Routine {
                     sqlstate: "42601".into(),
+                    message,
+                }
+            }
+            // The grammar rejects impossible frame bounds as windowing errors.
+            pg_query::Error::Parse(message)
+                if matches!(
+                    message.as_str(),
+                    "frame start cannot be UNBOUNDED FOLLOWING"
+                        | "frame starting from following row cannot end with current row"
+                        | "frame end cannot be UNBOUNDED PRECEDING"
+                        | "frame starting from current row cannot have preceding rows"
+                        | "frame starting from following row cannot have preceding rows"
+                ) =>
+            {
+                SQLError::Routine {
+                    sqlstate: "42P20".into(),
                     message,
                 }
             }

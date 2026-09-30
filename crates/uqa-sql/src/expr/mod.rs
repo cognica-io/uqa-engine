@@ -20,6 +20,7 @@ use crate::result::ResultRow;
 mod array_transform;
 mod encoding;
 mod floating;
+mod in_range;
 mod json;
 mod json_strip;
 mod random;
@@ -93,6 +94,7 @@ pub use current_time::clock_timestamp_micros;
 pub use floating::{
     eval_float_arithmetic, eval_float_arithmetic_with_control, format_real, FloatWidth,
 };
+pub use in_range::in_range;
 #[cfg(test)]
 use scalar_dispatch::eval_scalar_function;
 use scalar_helpers::{point_xy, typeof_value};

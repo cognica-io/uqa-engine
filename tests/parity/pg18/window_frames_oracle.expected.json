@@ -1,0 +1,2286 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE wf (id integer, g integer, k integer, v integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO wf VALUES (1, 1, 1, 10), (2, 1, 1, 20), (3, 1, 2, NULL), (4, 1, 3, 40), (5, 2, 1, 5), (6, 2, NULL, 6), (7, 2, NULL, 7), (8, 2, 2, 8)",
+      "command_tags": [
+        "INSERT 0 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (ORDER BY k) AS s, count(*) OVER (ORDER BY k) AS n, count(v) OVER (ORDER BY k) AS nv, avg(v) OVER (ORDER BY k) AS a, min(v) OVER (ORDER BY k) AS lo, max(v) OVER (ORDER BY k) AS hi FROM wf ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "s",
+            "n",
+            "nv",
+            "a",
+            "lo",
+            "hi"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20,
+            20,
+            1700,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "35",
+              "3",
+              "3",
+              "11.6666666666666667",
+              "5",
+              "20"
+            ],
+            [
+              "2",
+              "35",
+              "3",
+              "3",
+              "11.6666666666666667",
+              "5",
+              "20"
+            ],
+            [
+              "3",
+              "43",
+              "5",
+              "4",
+              "10.7500000000000000",
+              "5",
+              "20"
+            ],
+            [
+              "4",
+              "83",
+              "6",
+              "5",
+              "16.6000000000000000",
+              "5",
+              "40"
+            ],
+            [
+              "5",
+              "35",
+              "3",
+              "3",
+              "11.6666666666666667",
+              "5",
+              "20"
+            ],
+            [
+              "6",
+              "96",
+              "8",
+              "7",
+              "13.7142857142857143",
+              "5",
+              "40"
+            ],
+            [
+              "7",
+              "96",
+              "8",
+              "7",
+              "13.7142857142857143",
+              "5",
+              "40"
+            ],
+            [
+              "8",
+              "43",
+              "5",
+              "4",
+              "10.7500000000000000",
+              "5",
+              "20"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (PARTITION BY g ORDER BY k) AS s, count(*) OVER (PARTITION BY g ORDER BY k) AS n FROM wf ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "s",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "30",
+              "2"
+            ],
+            [
+              "2",
+              "30",
+              "2"
+            ],
+            [
+              "3",
+              "30",
+              "3"
+            ],
+            [
+              "4",
+              "70",
+              "4"
+            ],
+            [
+              "5",
+              "5",
+              "1"
+            ],
+            [
+              "6",
+              "26",
+              "4"
+            ],
+            [
+              "7",
+              "26",
+              "4"
+            ],
+            [
+              "8",
+              "13",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (PARTITION BY g ORDER BY k DESC) AS s, count(*) OVER (PARTITION BY g ORDER BY k DESC NULLS LAST) AS n FROM wf ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "s",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "70",
+              "4"
+            ],
+            [
+              "2",
+              "70",
+              "4"
+            ],
+            [
+              "3",
+              "40",
+              "2"
+            ],
+            [
+              "4",
+              "40",
+              "1"
+            ],
+            [
+              "5",
+              "26",
+              "2"
+            ],
+            [
+              "6",
+              "13",
+              "4"
+            ],
+            [
+              "7",
+              "13",
+              "4"
+            ],
+            [
+              "8",
+              "21",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (ORDER BY k, id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS rows_frame, sum(v) OVER (ORDER BY k RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS range_frame, sum(v) OVER (ORDER BY k GROUPS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS groups_frame FROM wf ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "rows_frame",
+            "range_frame",
+            "groups_frame"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "10",
+              "35",
+              "35"
+            ],
+            [
+              "2",
+              "30",
+              "35",
+              "35"
+            ],
+            [
+              "3",
+              "35",
+              "43",
+              "43"
+            ],
+            [
+              "4",
+              "83",
+              "83",
+              "83"
+            ],
+            [
+              "5",
+              "35",
+              "35",
+              "35"
+            ],
+            [
+              "6",
+              "89",
+              "96",
+              "96"
+            ],
+            [
+              "7",
+              "96",
+              "96",
+              "96"
+            ],
+            [
+              "8",
+              "43",
+              "43",
+              "43"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (ORDER BY g, k) AS by_two_keys, count(*) OVER (ORDER BY g) AS by_group FROM wf ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "by_two_keys",
+            "by_group"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "30",
+              "4"
+            ],
+            [
+              "2",
+              "30",
+              "4"
+            ],
+            [
+              "3",
+              "30",
+              "4"
+            ],
+            [
+              "4",
+              "70",
+              "4"
+            ],
+            [
+              "5",
+              "75",
+              "8"
+            ],
+            [
+              "6",
+              "96",
+              "8"
+            ],
+            [
+              "7",
+              "96",
+              "8"
+            ],
+            [
+              "8",
+              "83",
+              "8"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER w AS s, count(*) OVER w AS n FROM wf WINDOW w AS (PARTITION BY g ORDER BY k) ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "s",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "30",
+              "2"
+            ],
+            [
+              "2",
+              "30",
+              "2"
+            ],
+            [
+              "3",
+              "30",
+              "3"
+            ],
+            [
+              "4",
+              "70",
+              "4"
+            ],
+            [
+              "5",
+              "5",
+              "1"
+            ],
+            [
+              "6",
+              "26",
+              "4"
+            ],
+            [
+              "7",
+              "26",
+              "4"
+            ],
+            [
+              "8",
+              "13",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (ORDER BY k RANGE UNBOUNDED PRECEDING) AS short_range, sum(v) OVER (ORDER BY k, id ROWS UNBOUNDED PRECEDING) AS short_rows FROM wf ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "short_range",
+            "short_rows"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "35",
+              "10"
+            ],
+            [
+              "2",
+              "35",
+              "30"
+            ],
+            [
+              "3",
+              "43",
+              "35"
+            ],
+            [
+              "4",
+              "83",
+              "83"
+            ],
+            [
+              "5",
+              "35",
+              "35"
+            ],
+            [
+              "6",
+              "96",
+              "89"
+            ],
+            [
+              "7",
+              "96",
+              "96"
+            ],
+            [
+              "8",
+              "43",
+              "43"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT k, sum(v) OVER (ORDER BY k) AS s FROM wf WHERE g = 2 ORDER BY id",
+      "command_tags": [
+        "SELECT 4"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "k",
+            "s"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "5"
+            ],
+            [
+              null,
+              "26"
+            ],
+            [
+              null,
+              "26"
+            ],
+            [
+              "2",
+              "13"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER () AS total, sum(v) OVER (PARTITION BY g) AS by_g, count(*) OVER (PARTITION BY g) AS n, max(v) OVER (PARTITION BY g) AS hi FROM wf ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "total",
+            "by_g",
+            "n",
+            "hi"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20,
+            20,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "96",
+              "70",
+              "4",
+              "40"
+            ],
+            [
+              "2",
+              "96",
+              "70",
+              "4",
+              "40"
+            ],
+            [
+              "3",
+              "96",
+              "70",
+              "4",
+              "40"
+            ],
+            [
+              "4",
+              "96",
+              "70",
+              "4",
+              "40"
+            ],
+            [
+              "5",
+              "96",
+              "26",
+              "4",
+              "8"
+            ],
+            [
+              "6",
+              "96",
+              "26",
+              "4",
+              "8"
+            ],
+            [
+              "7",
+              "96",
+              "26",
+              "4",
+              "8"
+            ],
+            [
+              "8",
+              "96",
+              "26",
+              "4",
+              "8"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (ORDER BY k RANGE BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) AS to_end, count(*) OVER (ORDER BY k RANGE BETWEEN CURRENT ROW AND CURRENT ROW) AS peers, sum(v) OVER (ORDER BY k GROUPS BETWEEN CURRENT ROW AND CURRENT ROW) AS peer_sum FROM wf ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "to_end",
+            "peers",
+            "peer_sum"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "96",
+              "3",
+              "35"
+            ],
+            [
+              "2",
+              "96",
+              "3",
+              "35"
+            ],
+            [
+              "3",
+              "61",
+              "2",
+              "8"
+            ],
+            [
+              "4",
+              "53",
+              "1",
+              "40"
+            ],
+            [
+              "5",
+              "96",
+              "3",
+              "35"
+            ],
+            [
+              "6",
+              "13",
+              "2",
+              "13"
+            ],
+            [
+              "7",
+              "13",
+              "2",
+              "13"
+            ],
+            [
+              "8",
+              "61",
+              "2",
+              "8"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, first_value(v) OVER w AS f, last_value(v) OVER w AS l, nth_value(v, 2) OVER w AS n2, nth_value(v, 4) OVER w AS n4 FROM (SELECT * FROM wf ORDER BY k, id) s WINDOW w AS (ORDER BY k) ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "f",
+            "l",
+            "n2",
+            "n4"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "10",
+              "5",
+              "20",
+              null
+            ],
+            [
+              "2",
+              "10",
+              "5",
+              "20",
+              null
+            ],
+            [
+              "3",
+              "10",
+              "8",
+              "20",
+              null
+            ],
+            [
+              "4",
+              "10",
+              "40",
+              "20",
+              null
+            ],
+            [
+              "5",
+              "10",
+              "5",
+              "20",
+              null
+            ],
+            [
+              "6",
+              "10",
+              "7",
+              "20",
+              null
+            ],
+            [
+              "7",
+              "10",
+              "7",
+              "20",
+              null
+            ],
+            [
+              "8",
+              "10",
+              "8",
+              "20",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, first_value(v) OVER w AS f, last_value(v) OVER w AS l, nth_value(v, 2) OVER w AS n2 FROM (SELECT * FROM wf ORDER BY g, k, id) s WINDOW w AS (PARTITION BY g ORDER BY k) ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "f",
+            "l",
+            "n2"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "10",
+              "20",
+              "20"
+            ],
+            [
+              "2",
+              "10",
+              "20",
+              "20"
+            ],
+            [
+              "3",
+              "10",
+              null,
+              "20"
+            ],
+            [
+              "4",
+              "10",
+              "40",
+              "20"
+            ],
+            [
+              "5",
+              "5",
+              "5",
+              null
+            ],
+            [
+              "6",
+              "5",
+              "7",
+              "8"
+            ],
+            [
+              "7",
+              "5",
+              "7",
+              "8"
+            ],
+            [
+              "8",
+              "5",
+              "8",
+              "8"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, last_value(v) OVER (w ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS rows_last, last_value(v) OVER (w RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS range_last, last_value(v) OVER (w GROUPS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS groups_last FROM (SELECT * FROM wf ORDER BY k, id) s WINDOW w AS (ORDER BY k) ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "rows_last",
+            "range_last",
+            "groups_last"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "10",
+              "5",
+              "5"
+            ],
+            [
+              "2",
+              "20",
+              "5",
+              "5"
+            ],
+            [
+              "3",
+              null,
+              "8",
+              "8"
+            ],
+            [
+              "4",
+              "40",
+              "40",
+              "40"
+            ],
+            [
+              "5",
+              "5",
+              "5",
+              "5"
+            ],
+            [
+              "6",
+              "6",
+              "7",
+              "7"
+            ],
+            [
+              "7",
+              "7",
+              "7",
+              "7"
+            ],
+            [
+              "8",
+              "8",
+              "8",
+              "8"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, first_value(v) OVER (w RANGE BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) AS range_first, first_value(v) OVER (w GROUPS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING) AS next_group_first, last_value(v) OVER (w RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS whole_last FROM (SELECT * FROM wf ORDER BY k, id) s WINDOW w AS (ORDER BY k) ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "range_first",
+            "next_group_first",
+            "whole_last"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "10",
+              null,
+              "7"
+            ],
+            [
+              "2",
+              "10",
+              null,
+              "7"
+            ],
+            [
+              "3",
+              null,
+              "40",
+              "7"
+            ],
+            [
+              "4",
+              "40",
+              "6",
+              "7"
+            ],
+            [
+              "5",
+              "10",
+              null,
+              "7"
+            ],
+            [
+              "6",
+              "6",
+              null,
+              "7"
+            ],
+            [
+              "7",
+              "6",
+              null,
+              "7"
+            ],
+            [
+              "8",
+              null,
+              "40",
+              "7"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, first_value(v) OVER w AS f, last_value(v) OVER w AS l, nth_value(v, 2) OVER w AS n2, count(*) OVER w AS n FROM wf WINDOW w AS (ORDER BY id ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "f",
+            "l",
+            "n2",
+            "n"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "10",
+              "20",
+              "20",
+              "2"
+            ],
+            [
+              "2",
+              "10",
+              null,
+              "20",
+              "3"
+            ],
+            [
+              "3",
+              "20",
+              "40",
+              null,
+              "3"
+            ],
+            [
+              "4",
+              null,
+              "5",
+              "40",
+              "3"
+            ],
+            [
+              "5",
+              "40",
+              "6",
+              "5",
+              "3"
+            ],
+            [
+              "6",
+              "5",
+              "7",
+              "6",
+              "3"
+            ],
+            [
+              "7",
+              "6",
+              "8",
+              "7",
+              "3"
+            ],
+            [
+              "8",
+              "7",
+              "8",
+              "8",
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, first_value(v) OVER w AS f, sum(v) OVER w AS s, count(*) OVER w AS n, count(v) OVER w AS nv, max(v) OVER w AS hi FROM wf WINDOW w AS (ORDER BY id ROWS BETWEEN 2 FOLLOWING AND 3 FOLLOWING) ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "f",
+            "s",
+            "n",
+            "nv",
+            "hi"
+          ],
+          "type_oids": [
+            23,
+            23,
+            20,
+            20,
+            20,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              null,
+              "40",
+              "2",
+              "1",
+              "40"
+            ],
+            [
+              "2",
+              "40",
+              "45",
+              "2",
+              "2",
+              "40"
+            ],
+            [
+              "3",
+              "5",
+              "11",
+              "2",
+              "2",
+              "6"
+            ],
+            [
+              "4",
+              "6",
+              "13",
+              "2",
+              "2",
+              "7"
+            ],
+            [
+              "5",
+              "7",
+              "15",
+              "2",
+              "2",
+              "8"
+            ],
+            [
+              "6",
+              "8",
+              "8",
+              "1",
+              "1",
+              "8"
+            ],
+            [
+              "7",
+              null,
+              null,
+              "0",
+              "0",
+              null
+            ],
+            [
+              "8",
+              null,
+              null,
+              "0",
+              "0",
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (ORDER BY k RANGE BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS near, count(*) OVER (ORDER BY k RANGE BETWEEN 1 PRECEDING AND CURRENT ROW) AS back_one, count(*) OVER (ORDER BY k RANGE BETWEEN CURRENT ROW AND 1 FOLLOWING) AS ahead_one FROM wf ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "near",
+            "back_one",
+            "ahead_one"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "43",
+              "3",
+              "5"
+            ],
+            [
+              "2",
+              "43",
+              "3",
+              "5"
+            ],
+            [
+              "3",
+              "83",
+              "5",
+              "3"
+            ],
+            [
+              "4",
+              "48",
+              "3",
+              "1"
+            ],
+            [
+              "5",
+              "43",
+              "3",
+              "5"
+            ],
+            [
+              "6",
+              "13",
+              "2",
+              "2"
+            ],
+            [
+              "7",
+              "13",
+              "2",
+              "2"
+            ],
+            [
+              "8",
+              "83",
+              "5",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (ORDER BY k DESC RANGE BETWEEN 1 PRECEDING AND CURRENT ROW) AS desc_back, count(*) OVER (ORDER BY k NULLS FIRST RANGE BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS nulls_first FROM wf ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "desc_back",
+            "nulls_first"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "43",
+              "5"
+            ],
+            [
+              "2",
+              "43",
+              "5"
+            ],
+            [
+              "3",
+              "48",
+              "6"
+            ],
+            [
+              "4",
+              "40",
+              "3"
+            ],
+            [
+              "5",
+              "43",
+              "5"
+            ],
+            [
+              "6",
+              "13",
+              "2"
+            ],
+            [
+              "7",
+              "13",
+              "2"
+            ],
+            [
+              "8",
+              "48",
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (ORDER BY k GROUPS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS near_groups, count(*) OVER (ORDER BY k GROUPS BETWEEN 1 PRECEDING AND 1 PRECEDING) AS previous_group FROM wf ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "near_groups",
+            "previous_group"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "43",
+              "0"
+            ],
+            [
+              "2",
+              "43",
+              "0"
+            ],
+            [
+              "3",
+              "83",
+              "3"
+            ],
+            [
+              "4",
+              "61",
+              "2"
+            ],
+            [
+              "5",
+              "43",
+              "0"
+            ],
+            [
+              "6",
+              "53",
+              "1"
+            ],
+            [
+              "7",
+              "53",
+              "1"
+            ],
+            [
+              "8",
+              "83",
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (ORDER BY k RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING EXCLUDE CURRENT ROW) AS ex_current, sum(v) OVER (ORDER BY k RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING EXCLUDE GROUP) AS ex_group, sum(v) OVER (ORDER BY k RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING EXCLUDE TIES) AS ex_ties, sum(v) OVER (ORDER BY k RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING EXCLUDE NO OTHERS) AS ex_none FROM wf ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "ex_current",
+            "ex_group",
+            "ex_ties",
+            "ex_none"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "86",
+              "61",
+              "71",
+              "96"
+            ],
+            [
+              "2",
+              "76",
+              "61",
+              "81",
+              "96"
+            ],
+            [
+              "3",
+              "96",
+              "88",
+              "88",
+              "96"
+            ],
+            [
+              "4",
+              "56",
+              "56",
+              "96",
+              "96"
+            ],
+            [
+              "5",
+              "91",
+              "61",
+              "66",
+              "96"
+            ],
+            [
+              "6",
+              "90",
+              "83",
+              "89",
+              "96"
+            ],
+            [
+              "7",
+              "89",
+              "83",
+              "90",
+              "96"
+            ],
+            [
+              "8",
+              "88",
+              "88",
+              "96",
+              "96"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, first_value(v) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING EXCLUDE CURRENT ROW) AS f_ex, last_value(v) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING EXCLUDE CURRENT ROW) AS l_ex, nth_value(v, 2) OVER (ORDER BY k RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING EXCLUDE GROUP) AS n2_ex, count(*) OVER (ORDER BY k GROUPS BETWEEN 1 PRECEDING AND 1 FOLLOWING EXCLUDE TIES) AS n_ties FROM (SELECT * FROM wf ORDER BY k, id) s ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "f_ex",
+            "l_ex",
+            "n2_ex",
+            "n_ties"
+          ],
+          "type_oids": [
+            23,
+            23,
+            23,
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "20",
+              "20",
+              "8",
+              "3"
+            ],
+            [
+              "2",
+              "10",
+              null,
+              "8",
+              "3"
+            ],
+            [
+              "3",
+              "20",
+              "40",
+              "20",
+              "5"
+            ],
+            [
+              "4",
+              null,
+              "5",
+              "20",
+              "5"
+            ],
+            [
+              "5",
+              "40",
+              "6",
+              "8",
+              "3"
+            ],
+            [
+              "6",
+              "5",
+              "7",
+              "20",
+              "2"
+            ],
+            [
+              "7",
+              "6",
+              "8",
+              "20",
+              "2"
+            ],
+            [
+              "8",
+              "7",
+              "7",
+              "20",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (w RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS s FROM wf WINDOW w AS (ORDER BY k ROWS UNBOUNDED PRECEDING)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P20",
+        "message": "cannot copy window \"w\" because it has a frame clause",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (w) AS s FROM wf WINDOW w AS (ORDER BY k ROWS UNBOUNDED PRECEDING)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P20",
+        "message": "cannot copy window \"w\" because it has a frame clause",
+        "detail": null,
+        "hint": "Omit the parentheses in this OVER clause."
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER w AS s FROM wf WINDOW w AS (ORDER BY k, id ROWS UNBOUNDED PRECEDING) ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "s"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "10"
+            ],
+            [
+              "2",
+              "30"
+            ],
+            [
+              "3",
+              "35"
+            ],
+            [
+              "4",
+              "83"
+            ],
+            [
+              "5",
+              "35"
+            ],
+            [
+              "6",
+              "89"
+            ],
+            [
+              "7",
+              "96"
+            ],
+            [
+              "8",
+              "43"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (w ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS s FROM wf WINDOW w AS (PARTITION BY g), w2 AS (w ORDER BY id) ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "s"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "10"
+            ],
+            [
+              "2",
+              "30"
+            ],
+            [
+              "3",
+              "20"
+            ],
+            [
+              "4",
+              "40"
+            ],
+            [
+              "5",
+              "5"
+            ],
+            [
+              "6",
+              "11"
+            ],
+            [
+              "7",
+              "13"
+            ],
+            [
+              "8",
+              "15"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (w2 ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS s FROM wf WINDOW w AS (PARTITION BY g), w2 AS (w ORDER BY id) ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "s"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "10"
+            ],
+            [
+              "2",
+              "30"
+            ],
+            [
+              "3",
+              "20"
+            ],
+            [
+              "4",
+              "40"
+            ],
+            [
+              "5",
+              "5"
+            ],
+            [
+              "6",
+              "11"
+            ],
+            [
+              "7",
+              "13"
+            ],
+            [
+              "8",
+              "15"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER w FROM wf WINDOW w AS (ORDER BY k), w AS (ORDER BY id)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P20",
+        "message": "window \"w\" is already defined",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER missing_window FROM wf",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42704",
+        "message": "window \"missing_window\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (w ORDER BY id) AS s FROM wf WINDOW w AS (ORDER BY k)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P20",
+        "message": "cannot override ORDER BY clause of window \"w\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (w PARTITION BY g) AS s FROM wf WINDOW w AS (ORDER BY k)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P20",
+        "message": "cannot override PARTITION BY clause of window \"w\"",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, rank() OVER w AS r, dense_rank() OVER w AS dr, percent_rank() OVER w AS pr, cume_dist() OVER w AS cd FROM wf WINDOW w AS (ORDER BY k) ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "r",
+            "dr",
+            "pr",
+            "cd"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20,
+            701,
+            701
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "1",
+              "0",
+              "0.375"
+            ],
+            [
+              "2",
+              "1",
+              "1",
+              "0",
+              "0.375"
+            ],
+            [
+              "3",
+              "4",
+              "2",
+              "0.42857142857142855",
+              "0.625"
+            ],
+            [
+              "4",
+              "6",
+              "3",
+              "0.7142857142857143",
+              "0.75"
+            ],
+            [
+              "5",
+              "1",
+              "1",
+              "0",
+              "0.375"
+            ],
+            [
+              "6",
+              "7",
+              "4",
+              "0.8571428571428571",
+              "1"
+            ],
+            [
+              "7",
+              "7",
+              "4",
+              "0.8571428571428571",
+              "1"
+            ],
+            [
+              "8",
+              "4",
+              "2",
+              "0.42857142857142855",
+              "0.625"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, row_number() OVER w AS rn, ntile(3) OVER w AS t, lag(v) OVER w AS prev, lead(v, 2, -1) OVER w AS next2 FROM wf WINDOW w AS (PARTITION BY g ORDER BY id) ORDER BY id",
+      "command_tags": [
+        "SELECT 8"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "rn",
+            "t",
+            "prev",
+            "next2"
+          ],
+          "type_oids": [
+            23,
+            20,
+            23,
+            23,
+            23
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "1",
+              null,
+              null
+            ],
+            [
+              "2",
+              "2",
+              "1",
+              "10",
+              "40"
+            ],
+            [
+              "3",
+              "3",
+              "2",
+              "20",
+              "-1"
+            ],
+            [
+              "4",
+              "4",
+              "3",
+              null,
+              "-1"
+            ],
+            [
+              "5",
+              "1",
+              "1",
+              null,
+              "7"
+            ],
+            [
+              "6",
+              "2",
+              "1",
+              "5",
+              "8"
+            ],
+            [
+              "7",
+              "3",
+              "2",
+              "6",
+              "-1"
+            ],
+            [
+              "8",
+              "4",
+              "3",
+              "7",
+              "-1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, nth_value(v, 0) OVER (ORDER BY id) FROM wf",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22016",
+        "message": "argument of nth_value must be greater than zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, ntile(0) OVER (ORDER BY id) FROM wf",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22014",
+        "message": "argument of ntile must be greater than zero",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (ORDER BY k RANGE BETWEEN -1 PRECEDING AND CURRENT ROW) FROM wf",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22013",
+        "message": "invalid preceding or following size in window function",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (ORDER BY id ROWS BETWEEN -1 PRECEDING AND CURRENT ROW) FROM wf",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22013",
+        "message": "frame starting offset must not be negative",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (ORDER BY g, k RANGE BETWEEN 1 PRECEDING AND CURRENT ROW) FROM wf",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P20",
+        "message": "RANGE with offset PRECEDING/FOLLOWING requires exactly one ORDER BY column",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (RANGE BETWEEN 1 PRECEDING AND CURRENT ROW) FROM wf",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P20",
+        "message": "RANGE with offset PRECEDING/FOLLOWING requires exactly one ORDER BY column",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (GROUPS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM wf",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P20",
+        "message": "GROUPS mode requires an ORDER BY clause",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (ORDER BY k ROWS BETWEEN UNBOUNDED FOLLOWING AND CURRENT ROW) FROM wf",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P20",
+        "message": "frame start cannot be UNBOUNDED FOLLOWING",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (ORDER BY k ROWS BETWEEN CURRENT ROW AND UNBOUNDED PRECEDING) FROM wf",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P20",
+        "message": "frame end cannot be UNBOUNDED PRECEDING",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, sum(v) OVER (ORDER BY k ROWS BETWEEN 1 FOLLOWING AND CURRENT ROW) FROM wf",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P20",
+        "message": "frame starting from following row cannot have preceding rows",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE wr (id integer, n numeric, d date)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "INSERT INTO wr VALUES (1, 1.0, '2024-01-01'), (2, 1.5, '2024-01-02'), (3, 2.5, '2024-01-04'), (4, NULL, NULL), (5, 4.0, '2024-01-08')",
+      "command_tags": [
+        "INSERT 0 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, count(*) OVER (ORDER BY n RANGE BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS near_numeric, sum(n) OVER (ORDER BY n RANGE BETWEEN 0.5 PRECEDING AND CURRENT ROW) AS back_half FROM wr ORDER BY id",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "near_numeric",
+            "back_half"
+          ],
+          "type_oids": [
+            23,
+            20,
+            1700
+          ],
+          "rows": [
+            [
+              "1",
+              "2",
+              "1.0"
+            ],
+            [
+              "2",
+              "3",
+              "2.5"
+            ],
+            [
+              "3",
+              "2",
+              "2.5"
+            ],
+            [
+              "4",
+              "1",
+              null
+            ],
+            [
+              "5",
+              "1",
+              "4.0"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT id, count(*) OVER (ORDER BY d RANGE BETWEEN '2 days' PRECEDING AND CURRENT ROW) AS two_days, count(*) OVER (ORDER BY d DESC RANGE BETWEEN CURRENT ROW AND '3 days' FOLLOWING) AS three_days_back FROM wr ORDER BY id",
+      "command_tags": [
+        "SELECT 5"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "id",
+            "two_days",
+            "three_days_back"
+          ],
+          "type_oids": [
+            23,
+            20,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "2",
+              "2"
+            ],
+            [
+              "3",
+              "2",
+              "3"
+            ],
+            [
+              "4",
+              "1",
+              "1"
+            ],
+            [
+              "5",
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP TABLE wr",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "DROP TABLE wf",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

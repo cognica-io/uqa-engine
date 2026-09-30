@@ -46,8 +46,5 @@ pub fn unknown_function_error(name: &str, args: &[(Option<String>, Value)]) -> S
         })
         .collect::<Vec<_>>()
         .join(", ");
-    SQLError::Routine {
-        sqlstate: "42883".into(),
-        message: format!("function {name}({types}) does not exist"),
-    }
+    SQLError::undefined_function_call(&format!("{name}({types})"))
 }

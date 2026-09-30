@@ -136,6 +136,11 @@ pub struct WindowFrame {
     pub mode: FrameMode,
     pub start: FrameBound,
     pub end: FrameBound,
+    /// Whether the frame was written `BETWEEN start AND end`. A frame that names only its start, such as `ROWS UNBOUNDED PRECEDING`, ends at the current row, and the definition is deparsed as it was written.
+    #[serde(default = "super::default_true")]
+    pub between: bool,
+    #[serde(default, skip_serializing_if = "FrameExclusion::is_no_others")]
+    pub exclusion: FrameExclusion,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -143,6 +148,36 @@ pub enum FrameMode {
     Rows,
     Range,
     Groups,
+}
+
+/// The frame exclusion clause: the rows of the frame that a window function or aggregate does not see.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FrameExclusion {
+    #[default]
+    NoOthers,
+    CurrentRow,
+    /// The current row and its peers.
+    Group,
+    /// The peers of the current row, but not the current row itself.
+    Ties,
+}
+
+impl FrameExclusion {
+    #[must_use]
+    pub const fn is_no_others(&self) -> bool {
+        matches!(self, Self::NoOthers)
+    }
+
+    /// The clause as `pg_get_viewdef` spells it, or `None` for `EXCLUDE NO OTHERS`, which it omits.
+    #[must_use]
+    pub const fn sql(self) -> Option<&'static str> {
+        match self {
+            Self::NoOthers => None,
+            Self::CurrentRow => Some("EXCLUDE CURRENT ROW"),
+            Self::Group => Some("EXCLUDE GROUP"),
+            Self::Ties => Some("EXCLUDE TIES"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -387,7 +387,7 @@ FROM samples;
 
 ## Window functions
 
-Ranking and offset windows are `row_number`, `rank`, `dense_rank`, `lag`, `lead`, and `ntile`. Aggregate windows are `sum`, `count`, `avg`, `min`, and `max`.
+The window functions are `row_number`, `rank`, `dense_rank`, `percent_rank`, `cume_dist`, `ntile`, `lag`, `lead`, `first_value`, `last_value`, and `nth_value`, and every built-in or registered aggregate can be computed over a window. [Window functions](03-queries-and-dml.md#window-functions) describes peers, frames, and exclusions. Calling an ordinary function with `OVER` is `42809`, as is calling `count()` without `*` or an ordered-set aggregate without `WITHIN GROUP`.
 
 ## General table functions
 

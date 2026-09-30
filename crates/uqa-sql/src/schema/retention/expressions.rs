@@ -128,6 +128,8 @@ impl<'a> Walker<'a> {
             mode: _,
             start,
             end,
+            between: _,
+            exclusion: _,
         }) = frame
         {
             for bound in [start, end] {

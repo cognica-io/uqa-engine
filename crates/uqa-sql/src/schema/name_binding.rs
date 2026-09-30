@@ -520,9 +520,19 @@ impl RowSchema {
                 open_qualifiers: input.index.cold.open_qualifiers.clone(),
                 extra_ambiguous_unqualified: input.index.ambiguous_unqualified.clone(),
                 extra_ambiguous_qualified: input.index.ambiguous_qualified.clone(),
+                local_width: input.index.cold.local_width,
                 ..SchemaBuildMetadata::default()
             },
         )
+    }
+
+    /// Whether a column reference resolves to one of the schema's own columns rather than to an enclosing query's column overlaid by [`Self::with_outer_schema`], as `contain_vars_of_level(n, 0)` distinguishes them.
+    pub fn resolves_local_column(&self, qualifier: Option<&str>, column: &str) -> bool {
+        let slot = match qualifier {
+            Some(qualifier) => self.qualified_slot(qualifier, column),
+            None => self.column_slot(column),
+        };
+        slot.is_some_and(|slot| self.index.cold.local_width.is_none_or(|width| slot < width))
     }
 
     /// Add binding-only identities and preserve collisions as ambiguous names. This models SQL scopes that expose a hidden generated column for explicit lookup while deliberately excluding it from wildcard expansion.

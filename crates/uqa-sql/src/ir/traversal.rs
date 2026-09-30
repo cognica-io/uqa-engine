@@ -497,7 +497,7 @@ fn frame_has(bound: &ScalarFrameBound, predicate: fn(&ScalarExpr) -> bool) -> bo
 #[cfg(test)]
 mod tests {
     use super::{ScalarExpr, ScalarFrameBound};
-    use crate::ast::FrameMode;
+    use crate::ast::{FrameExclusion, FrameMode};
     use uqa_core::Value;
 
     #[test]
@@ -549,6 +549,8 @@ mod tests {
                     mode: FrameMode::Rows,
                     start: ScalarFrameBound::Preceding(Box::new(ScalarExpr::Param(0))),
                     end: ScalarFrameBound::CurrentRow,
+                    between: true,
+                    exclusion: FrameExclusion::NoOthers,
                 }),
             },
         };

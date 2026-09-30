@@ -42,6 +42,8 @@ mod operators;
 mod overload_resolution;
 mod qualified_column;
 mod range;
+mod range_offsets;
+pub use range_offsets::range_frame_offset_type;
 mod reverse;
 mod routine_signature;
 mod scalar_input;

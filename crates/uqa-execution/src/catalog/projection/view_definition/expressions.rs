@@ -10,7 +10,7 @@ use std::fmt::Write as _;
 
 use crate::{ScalarFrameBound, ScalarWindowSpec};
 use uqa_core::Value;
-use uqa_sql::ast::{BinaryOp, Expr, FrameMode, FunctionBinding, FunctionDispatch};
+use uqa_sql::ast::{BinaryOp, Expr, FunctionBinding, FunctionDispatch};
 use uqa_sql::ir::ScalarExpr;
 use uqa_sql::plan::QueryPlan;
 
@@ -534,15 +534,12 @@ impl Deparser<'_> {
             parts.push(format!("ORDER BY {}", order.join(", ")));
         }
         if let Some(frame) = &spec.frame {
-            let mode = match frame.mode {
-                FrameMode::Rows => "ROWS",
-                FrameMode::Range => "RANGE",
-                FrameMode::Groups => "GROUPS",
-            };
-            parts.push(format!(
-                "{mode} BETWEEN {} AND {}",
-                self.frame_bound(&frame.start, scope, subqueries)?,
-                self.frame_bound(&frame.end, scope, subqueries)?
+            parts.push(uqa_sql::render::frame_clause_sql(
+                frame.mode,
+                &self.frame_bound(&frame.start, scope, subqueries)?,
+                &self.frame_bound(&frame.end, scope, subqueries)?,
+                frame.between,
+                frame.exclusion,
             ));
         }
         Ok(parts.join(" "))

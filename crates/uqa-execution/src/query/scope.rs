@@ -156,7 +156,7 @@ mod tests {
     use super::{expr_contains_subquery, CteScope};
     use crate::ScalarExpr;
     use crate::ScalarFrameBound;
-    use uqa_sql::ast::FrameMode;
+    use uqa_sql::ast::{FrameExclusion, FrameMode};
 
     #[test]
     fn empty_row_lock_scopes_leave_non_locking_state_unallocated() {
@@ -183,6 +183,8 @@ mod tests {
                     mode: FrameMode::Rows,
                     start: ScalarFrameBound::Preceding(Box::new(ScalarExpr::ScalarSubquery(0))),
                     end: ScalarFrameBound::CurrentRow,
+                    between: true,
+                    exclusion: FrameExclusion::NoOthers,
                 }),
             },
         };

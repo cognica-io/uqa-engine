@@ -9,6 +9,7 @@
 mod functions;
 mod query_sources;
 mod references;
+mod windows;
 
 pub(super) use query_sources::{with_projected_open_columns, with_query_source_columns};
 
@@ -44,6 +45,7 @@ struct AliasReferenceScope<'a> {
 }
 
 impl SchemaScope {
+    /// Check a query block's clauses in `transformSelectStmt`'s order after its target list: `WHERE`, `GROUP BY`, `HAVING`, `DISTINCT ON`, `ORDER BY`, `LIMIT` and `OFFSET`, then its window frames.
     pub(super) fn validate_query_block_clauses(
         &mut self,
         engine: &dyn RoutineResolution,
@@ -130,6 +132,15 @@ impl SchemaScope {
                 params,
             )?;
         }
+        self.validate_window_frames(
+            engine,
+            block,
+            &windows::WindowFrameScope {
+                source,
+                subqueries: &block.subqueries,
+                params,
+            },
+        )?;
         crate::semantics::grouping_sets::validate_grouped_expressions(engine, block, source, params)
     }
 

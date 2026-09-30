@@ -439,12 +439,17 @@ pub(super) fn common_type_with_control(
             | (ColumnType::TimestampTz, ColumnType::Date | ColumnType::Timestamp) => {
                 ColumnType::TimestampTz
             }
-            (ColumnType::Array(left), ColumnType::Array(right)) => {
+            (ColumnType::Array(_), ColumnType::Array(_)) => {
+                // An array type does not fix its number of dimensions: `integer[][]` is `integer[]`, so arrays meet at their element types, and each value keeps its own dimensions.
                 return ColumnType::array_with_control(
-                    common_type_with_control(left, right, control)?,
+                    common_type_with_control(
+                        innermost_array_element(left),
+                        innermost_array_element(right),
+                        control,
+                    )?,
                     control,
                 )
-                .map_err(Into::into)
+                .map_err(Into::into);
             }
             _ => {
                 return Err(SQLError::TypeMismatch(format!(
@@ -461,6 +466,14 @@ pub(super) fn common_type_with_control(
 }
 
 pub(super) mod case;
+
+/// The element type below every array level of `ty`.
+fn innermost_array_element(mut ty: &ColumnType) -> &ColumnType {
+    while let ColumnType::Array(element) = ty {
+        ty = element;
+    }
+    ty
+}
 
 fn is_integral_type(ty: &ColumnType) -> bool {
     matches!(

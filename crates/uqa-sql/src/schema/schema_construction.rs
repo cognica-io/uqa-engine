@@ -209,6 +209,7 @@ impl RowSchema {
             exact_unqualified_precedence,
             extra_ambiguous_unqualified,
             extra_ambiguous_qualified,
+            local_width,
         } = metadata;
         debug_assert_eq!(columns.len(), slots.len());
         debug_assert_eq!(columns.len(), identities.len());
@@ -285,6 +286,7 @@ impl RowSchema {
                     binding_only,
                     open_qualifiers,
                     identity_layout,
+                    local_width,
                 }),
             }),
         }
