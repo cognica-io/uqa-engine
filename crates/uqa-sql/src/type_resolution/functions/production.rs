@@ -800,13 +800,26 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
 #[cfg(test)]
 mod tests;
 
-/// The result type of the `min` or `max` overload that `PostgreSQL` 18 selects for an argument type, or `None` when no overload accepts it. An aggregate's result carries no type modifier; `varchar`, `name` and `"char"` reach `min(text)` by implicit coercion to the preferred string type, and so does an unknown argument.
+/// The result type of the `min` or `max` overload that `PostgreSQL` 18 selects for an argument type, or `None` when no overload accepts it. An aggregate's result carries no type modifier; `varchar`, `name`, `"char"` and `pg_node_tree` reach `min(text)` by implicit coercion to the preferred string type, and so does an unknown argument. The OID alias types reach `min(oid)` by their implicit casts, and `int2vector` and `oidvector` match `anyarray` as array types.
 fn min_max_result_type(argument: Option<&ColumnType>) -> Option<ColumnType> {
     Some(match argument {
         None
         | Some(
-            ColumnType::Text | ColumnType::Varchar(_) | ColumnType::Name | ColumnType::InternalChar,
+            ColumnType::Text
+            | ColumnType::Varchar(_)
+            | ColumnType::Name
+            | ColumnType::InternalChar
+            | ColumnType::PgNodeTree,
         ) => ColumnType::Text,
+        Some(
+            ColumnType::Regproc
+            | ColumnType::Regprocedure
+            | ColumnType::Regclass
+            | ColumnType::Regnamespace
+            | ColumnType::Regrole
+            | ColumnType::Regtype,
+        ) => ColumnType::Oid,
+        Some(ty @ (ColumnType::Int2Vector | ColumnType::OidVector)) => ty.clone(),
         Some(ColumnType::Bpchar | ColumnType::Character(_)) => ColumnType::Bpchar,
         Some(ColumnType::Numeric { .. }) => ColumnType::Numeric {
             precision: None,

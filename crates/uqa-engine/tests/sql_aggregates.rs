@@ -954,6 +954,8 @@ fn group_by_alias() {
     assert_eq!(counts.get("B").copied(), Some(1));
 }
 
+#[path = "sql_aggregates/min_max_overloads.rs"]
+mod min_max_overloads;
 #[path = "sql_aggregates/numeric_statistics.rs"]
 mod numeric_statistics;
 
