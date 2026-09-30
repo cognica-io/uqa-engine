@@ -168,6 +168,51 @@ fn objects_take_oids_in_creation_order_from_first_normal_object_id() {
     assert_eq!(order[order.len() - 1].1 % 2, 1, "{order:?}");
 }
 
+/// `ALTER COLUMN ... SET DEFAULT` stores the new default under an OID drawn when it runs, replacing the row of a default it replaces, and `DROP DEFAULT` removes the row, as `StoreAttrDefault` and `RemoveAttrDefault` do.
+fn replaced_defaults_take_new_oids(engine: &Engine) {
+    for sql in [
+        "CREATE TABLE defaulted (plain integer, filled integer DEFAULT 1)",
+        "ALTER TABLE defaulted ALTER COLUMN plain SET DEFAULT 2",
+        "ALTER TABLE defaulted ALTER COLUMN filled SET DEFAULT 3",
+    ] {
+        engine.sql(sql, &[]).unwrap();
+    }
+    let table = oid(engine, "SELECT 'defaulted'::regclass::oid::bigint");
+    let defaults = oids(
+        engine,
+        "SELECT oid::bigint FROM pg_attrdef WHERE adrelid = 'defaulted'::regclass ORDER BY adnum",
+    );
+    assert_eq!(defaults.len(), 2, "{defaults:?}");
+    assert!(
+        table < defaults[0] && defaults[0] < defaults[1],
+        "{table} {defaults:?}"
+    );
+    engine
+        .sql(
+            "ALTER TABLE defaulted ALTER COLUMN filled DROP DEFAULT",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        oids(
+            engine,
+            "SELECT oid::bigint FROM pg_attrdef WHERE adrelid = 'defaulted'::regclass"
+        ),
+        [defaults[0]]
+    );
+}
+
+#[test]
+fn replaced_defaults_take_new_oids_memory() {
+    replaced_defaults_take_new_oids(&Engine::new());
+}
+
+#[test]
+fn replaced_defaults_take_new_oids_sqlite() {
+    let directory = tempfile::tempdir().unwrap();
+    replaced_defaults_take_new_oids(&Engine::open(&directory.path().join("defaults.db")).unwrap());
+}
+
 fn open_sqlite(path: &Path) -> Engine {
     Engine::open(path).unwrap()
 }

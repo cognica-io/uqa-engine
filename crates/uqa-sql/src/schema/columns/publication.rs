@@ -7,6 +7,7 @@
 //! Mutate a declared column candidate before its catalog publication.
 use crate::ast::{ColumnDef, ColumnType, Expr, GeneratedColumn};
 
+#[derive(Clone)]
 pub enum ColumnProperty<'a> {
     Default(Option<Expr>),
     Generated(Option<GeneratedColumn>),

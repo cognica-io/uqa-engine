@@ -75,17 +75,25 @@ fn set_column_property(
         }
         _ => {}
     }
-    let mut guard = state.write_columns();
-    let mut next = guard.columns().to_vec();
-    publication::apply_property(&mut next, &table_name, column, property)
+    // Reserving the OID of a stored expression reads a catalog snapshot, which includes this table's columns, so it precedes the columns' write guard. The relation lock of the altering statement keeps the column as the candidate saw it.
+    let mut candidate = state.columns();
+    publication::apply_property(&mut candidate, &table_name, column, property.clone())
         .map_err(StorageBackendError::Other)?;
-    let definition = publication::column_mut(&mut next, &table_name, column)
+    let definition = publication::column_mut(&mut candidate, &table_name, column)
         .map_err(StorageBackendError::Other)?;
     uqa_sql::schema::constraint_metadata::identity::materialize_default_oid(
         definition,
         &mut context.identity_allocator(),
     )
     .map_err(|error| StorageBackendError::backend("column default identity", error))?;
+    let default_catalog_oid = definition.default_catalog_oid;
+    let mut guard = state.write_columns();
+    let mut next = guard.columns().to_vec();
+    publication::apply_property(&mut next, &table_name, column, property)
+        .map_err(StorageBackendError::Other)?;
+    publication::column_mut(&mut next, &table_name, column)
+        .map_err(StorageBackendError::Other)?
+        .default_catalog_oid = default_catalog_oid;
     state.mark_statistics_dirty()?;
     state.persist_columns(&next)?;
     guard.publish(next);
