@@ -18,7 +18,7 @@ use crate::{
         security::table::TableAclPrivilege,
     },
     plpgsql::bind_expr,
-    routines::{routine_signature_types, CompiledFunctionBody, SQLUserFunction},
+    routines::{routine_signature_types, SQLUserFunction},
     type_resolution::canonical_routine_type_name,
     SQLError,
 };
@@ -163,7 +163,7 @@ impl EventAnalysisContext<'_> {
                 message: format!("function {} must return type trigger", function.def.name),
             });
         }
-        if !matches!(function.compiled, CompiledFunctionBody::PLpgSQL(_)) {
+        if function.def.language != "plpgsql" {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),
                 message: "only LANGUAGE plpgsql trigger functions are executable".into(),
@@ -494,12 +494,16 @@ impl EventAnalysisContext<'_> {
     ) -> Result<bool, SQLError> {
         validate_trigger_condition_references(definition, columns, condition)?;
         let bound = bind_expr(condition, &mut TriggerConditionTypeResolver { columns })?;
-        let mut plan = crate::plan::ExpressionPlan::lower_with(bound, &|name: &str| {
+        let lowered = crate::plan::ExpressionPlan::lower_with(bound, &|name: &str| {
             self.routines.has_registered_aggregate_function(name)
         });
+        let mut plan = lowered.clone();
         let ty =
             self.stored_routines
                 .bind_expression(&mut plan, &[], &crate::RowSchema::default())?;
+        // Bound identities and constants belong to the syntax as written, before a boolean coercion rewrites it.
+        let sites = crate::binding::syntax_sites::expression_syntax_sites(&lowered, &plan)?;
+        let changed = crate::catalog::stored_ast::bind_stored_expression_sites(condition, &sites)?;
         if !ty.as_ref().is_some_and(is_boolean_type) {
             if let Expr::Literal(value @ (Value::Str(_) | Value::FixedChar(_))) = condition {
                 *value = crate::expr::cast_value(value, "boolean")?;
@@ -520,9 +524,7 @@ impl EventAnalysisContext<'_> {
             condition,
             None,
         )?;
-        let references =
-            crate::binding::stored_routines::collect_expression_routine_references(&plan)?;
-        crate::catalog::stored_ast::bind_stored_expression_routines(condition, &references)
+        Ok(changed)
     }
 }
 

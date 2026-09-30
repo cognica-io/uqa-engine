@@ -1,0 +1,913 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 5 IN ('5', '6') AS in_list, 5 NOT IN ('7') AS not_in, 5 BETWEEN '1' AND '9' AS between_bounds, 5 BETWEEN SYMMETRIC '9' AND '1' AS symmetric_bounds",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "in_list",
+            "not_in",
+            "between_bounds",
+            "symmetric_bounds"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 5 = ANY ('{5,6}') AS any_literal, 5 = ALL ('{5,5}') AS all_literal, '5' = ANY (ARRAY[5, 6]) AS unknown_needle, '7' <> ALL (ARRAY[5, 6]) AS unknown_all",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "any_literal",
+            "all_literal",
+            "unknown_needle",
+            "unknown_all"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT true = 't' AS boolean_input, 'a'::bytea = 'a' AS bytea_input, '{\"a\":1}'::jsonb = '{\"a\": 1}' AS jsonb_input, ARRAY[1, 2] = '{1,2}' AS array_input, '1 day'::interval = '24 hours' AS interval_input",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "boolean_input",
+            "bytea_input",
+            "jsonb_input",
+            "array_input",
+            "interval_input"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 'ab'::char(4) = 'ab  ' AS padded_bpchar, 'abc'::name = 'abc' AS name_input, 'x'::text IN ('x', 'y') AS text_list",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "padded_bpchar",
+            "name_input",
+            "text_list"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT nullif(5, '5') AS nullif_right, nullif('5', 5) AS nullif_left, 5 IS DISTINCT FROM '5' AS distinct_unknown, '5' IS NOT DISTINCT FROM 5 AS not_distinct_unknown",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "nullif_right",
+            "nullif_left",
+            "distinct_unknown",
+            "not_distinct_unknown"
+          ],
+          "type_oids": [
+            23,
+            23,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              null,
+              null,
+              "f",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT array_append(ARRAY[1, 2], '3') AS appended, array_prepend('0', ARRAY[1]) AS prepended, array_cat(ARRAY[1], '{2,3}') AS concatenated, array_remove(ARRAY[1, 2], '2') AS removed, array_replace(ARRAY[1, 2], '2', '5') AS replaced",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "appended",
+            "prepended",
+            "concatenated",
+            "removed",
+            "replaced"
+          ],
+          "type_oids": [
+            1007,
+            1007,
+            1007,
+            1007,
+            1007
+          ],
+          "rows": [
+            [
+              "{1,2,3}",
+              "{0,1}",
+              "{1,2,3}",
+              "{1}",
+              "{1,5}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT array_position(ARRAY[1, 2, 1], '1', '2') AS position_from, array_positions(ARRAY[1, 2, 2], '2') AS positions",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "position_from",
+            "positions"
+          ],
+          "type_oids": [
+            23,
+            1007
+          ],
+          "rows": [
+            [
+              "3",
+              "{2,3}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE coercion_dates (d date)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO coercion_dates VALUES ('2024-01-02')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT d IN ('2024-01-02', '2024-01-03') AS in_dates, d BETWEEN '2024-01-01' AND '2024-01-05' AS between_dates, d = ANY ('{2024-01-02}') AS any_dates FROM coercion_dates",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "in_dates",
+            "between_dates",
+            "any_dates"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "t",
+              "t",
+              "t"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 5 IN ('x')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 5 = ANY (5)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42809",
+        "message": "op ANY/ALL (array) requires array on right side"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 1 IN ('a'::text)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "operator does not exist: integer = text"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT 5 BETWEEN 'x' AND 9",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22P02",
+        "message": "invalid input syntax for type integer: \"x\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT format('%s|%I|%L', 'it''s', 'Ab', 'x') AS quoted",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "quoted"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "it's|\"Ab\"|'x'"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT format('%5s|%-5s|%2$s|%1$s', 'a', 'b') AS positioned",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "positioned"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "    a|b    |b|a"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT format('%*s|%-*s|%*3$s', 4, 'x', 3, 'y') AS widths",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "widths"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "   x|y  |  y"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT format('%L|%s|%I', NULL, NULL, 'a b') AS null_handling",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "null_handling"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "NULL||\"a b\""
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT format('%s|%L|%L', true, 12.5, E'O''Reilly\\\\') AS outputs",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "outputs"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "t|'12.5'|E'O''Reilly\\\\'"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT format('%*s|%*s', NULL, 'x', -3, 'y') AS null_and_negative_width",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "null_and_negative_width"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "x|y  "
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT format(NULL, 1) AS null_format, format('100%%') AS percent",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "null_format",
+            "percent"
+          ],
+          "type_oids": [
+            25,
+            25
+          ],
+          "rows": [
+            [
+              null,
+              "100%"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT format('%I', NULL)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22004",
+        "message": "null values cannot be formatted as an SQL identifier"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT format('%d', 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "unrecognized format() type specifier \"d\""
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT format('%s %s', 'a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "too few arguments for format()"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT format('%0$s', 'a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "format specifies argument 0, but arguments are numbered from 1"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT format('abc%')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "unterminated format() type specifier"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT format('%1', 'a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "unterminated format() type specifier"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT format('%*1s', 5, 'a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "width argument position must be ended by \"$\""
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE window_names (x integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO window_names VALUES (2), (1), (1)",
+      "command_tags": [
+        "INSERT 0 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT x, rank() OVER (ORDER BY x) FROM window_names ORDER BY x, rank",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "rank"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "1",
+              "1"
+            ],
+            [
+              "1",
+              "1"
+            ],
+            [
+              "2",
+              "3"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT x, row_number() OVER (ORDER BY x) FROM window_names ORDER BY row_number DESC",
+      "command_tags": [
+        "SELECT 3"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "x",
+            "row_number"
+          ],
+          "type_oids": [
+            23,
+            20
+          ],
+          "rows": [
+            [
+              "2",
+              "3"
+            ],
+            [
+              "1",
+              "2"
+            ],
+            [
+              "1",
+              "1"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE whole_rows (id integer, t text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO whole_rows VALUES (1, 'a')",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SELECT r::text AS alias_row FROM whole_rows r",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_row"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "(1,a)"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT to_json(r) AS alias_json, row_to_json(r) AS alias_row_json FROM whole_rows r",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "alias_json",
+            "alias_row_json"
+          ],
+          "type_oids": [
+            114,
+            114
+          ],
+          "rows": [
+            [
+              "{\"id\":1,\"t\":\"a\"}",
+              "{\"id\":1,\"t\":\"a\"}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT row_to_json(whole_rows) AS table_row_json FROM whole_rows",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "table_row_json"
+          ],
+          "type_oids": [
+            114
+          ],
+          "rows": [
+            [
+              "{\"id\":1,\"t\":\"a\"}"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT concat(VARIADIC ARRAY['a', 'b']) AS c1, concat(VARIADIC NULL::text[]) IS NULL AS c2, concat_ws(',', VARIADIC ARRAY['a', 'b']) AS c3, concat_ws(',', VARIADIC NULL::text[]) IS NULL AS c4, format('%s-%s', VARIADIC ARRAY['a', 'b']) AS f1, concat(VARIADIC ARRAY[['a', 'b'], ['c', 'd']]) AS m1",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "c1",
+            "c2",
+            "c3",
+            "c4",
+            "f1",
+            "m1"
+          ],
+          "type_oids": [
+            25,
+            16,
+            25,
+            16,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "ab",
+              "t",
+              "a,b",
+              "t",
+              "a-b",
+              "abcd"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT json_build_array(VARIADIC ARRAY[1, 2]) AS j1, json_build_object(VARIADIC ARRAY['a', '1']) AS j2, json_build_array(VARIADIC NULL::int[]) IS NULL AS j3, jsonb_build_array(VARIADIC ARRAY['x']) AS j4, num_nulls(VARIADIC ARRAY[1, NULL]) AS n1, num_nulls(VARIADIC NULL::int[]) IS NULL AS n2, num_nonnulls(VARIADIC ARRAY[1, NULL, 3]) AS n3, concat(VARIADIC '{}'::text[]) AS c5, format('x', VARIADIC ARRAY[]::text[]) AS f2",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "j1",
+            "j2",
+            "j3",
+            "j4",
+            "n1",
+            "n2",
+            "n3",
+            "c5",
+            "f2"
+          ],
+          "type_oids": [
+            114,
+            114,
+            16,
+            3802,
+            23,
+            16,
+            23,
+            25,
+            25
+          ],
+          "rows": [
+            [
+              "[1, 2]",
+              "{\"a\" : \"1\"}",
+              "t",
+              "[\"x\"]",
+              "1",
+              "t",
+              "2",
+              "",
+              "x"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "SELECT format('%s', VARIADIC NULL::text[])",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "too few arguments for format()"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT concat(VARIADIC 5)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42804",
+        "message": "VARIADIC argument must be an array"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT json_build_object(VARIADIC ARRAY['a'])",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "argument list must have even number of elements"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT jsonb_build_object('a')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "argument list must have even number of elements"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT json_build_object(NULL, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22004",
+        "message": "null value not allowed for object key"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT jsonb_build_object(NULL, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "argument 1: key must not be null"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT json_object_agg(k, v) FROM (VALUES (NULL::text, 1)) t(k, v)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22004",
+        "message": "null value not allowed for object key"
+      },
+      "results": []
+    },
+    {
+      "sql": "SELECT jsonb_object_agg(k, v) FROM (VALUES (NULL::text, 1)) t(k, v)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "22023",
+        "message": "field name must not be null"
+      },
+      "results": []
+    },
+    {
+      "sql": "DROP TABLE coercion_dates, window_names, whole_rows",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

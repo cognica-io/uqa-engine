@@ -149,8 +149,12 @@ impl ForeignSchemaContext<'_> {
                 None,
             )?;
         }
+        let binding = self.bindings.binding_scope()?;
         crate::schema::generated::prepare_generated_columns(
-            self.schema,
+            &SchemaBindingContext {
+                catalog: self.schema,
+                binding: &binding.context(),
+            },
             &qualifier,
             columns,
             &[],

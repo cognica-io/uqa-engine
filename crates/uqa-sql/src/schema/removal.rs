@@ -60,6 +60,7 @@ pub fn drop_relation_kind(kind: DropKind) -> &'static str {
         DropKind::Index => "index",
         DropKind::Schema => "schema",
         DropKind::Domain => "domain",
+        DropKind::Type => "type",
     }
 }
 

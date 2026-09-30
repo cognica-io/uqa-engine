@@ -29,6 +29,8 @@ pub trait ViewPlanBinding {
         plan: &mut QueryPlan,
         params: &[SQLParam],
     ) -> Result<RowSchema, SQLError>;
+    /// Record the user-defined types that the plan casts to by identity.
+    fn bind_type_identities(&self, plan: &mut QueryPlan) -> Result<(), SQLError>;
 }
 pub trait MaterializedViewAccess {
     fn ensure_maintenance(&self, name: &str, view: &StoredView) -> Result<(), SQLError>;
@@ -44,6 +46,7 @@ pub trait ViewQueryOwners {
 }
 pub struct ViewCreationContext<'a> {
     pub catalog: &'a dyn ViewCreationCatalog,
+    pub identities: crate::catalog::identity::CatalogIdentityReservationContext<'a>,
     pub locks: &'a dyn crate::row_locks::binding::RelationDefinitionSession,
     pub views: &'a dyn ViewAlterCatalog,
     pub namespace: crate::schema::namespaces::relations::RelationCreationContext<'a>,

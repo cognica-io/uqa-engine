@@ -173,6 +173,7 @@ pub fn raise_text(value: &Value) -> Result<String, SQLError> {
         Value::Temporal(t) => t.to_sql_string(),
         Value::Json(text) | Value::JsonB(text) => text.clone(),
         Value::Array(_) | Value::LegacyVector(_) => crate::expr::value_to_string(value)?,
+        Value::Enum(value) => return Err(crate::expr::catalog_output_required(value)),
         Value::Bytes(b) => {
             use std::fmt::Write as _;
             let mut out = String::with_capacity(2 + b.len() * 2);

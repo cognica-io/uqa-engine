@@ -30,6 +30,8 @@ pub struct MutationAssignmentContext<'a, S: Clone + 'static> {
     pub rows: MutationRowContext<'a>,
     pub expressions: MutationExpressionContext<'a, S>,
     pub scopes: &'a dyn RowLockScopeSource<S>,
+    /// Output and authority for describing a row that violates a view check option.
+    pub diagnostics: &'a dyn super::constraints::context::ConstraintDiagnosticSource,
 }
 impl<S: Clone + 'static> Copy for MutationAssignmentContext<'_, S> {}
 #[derive(Clone, Copy)]
@@ -309,13 +311,25 @@ pub fn validate_view_checks<S: Clone + 'static>(
             params,
         )?;
         if !uqa_sql::expr::truthy(&value) {
-            return Err(SQLError::Routine {
+            let columns = services
+                .columns
+                .try_describe_table(table)
+                .map_err(|error| dml_storage_error("view check option", error))?
+                .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+            return Err(SQLError::Diagnostic {
                 sqlstate: "44000".into(),
                 message: format!(
                     "new row violates check option for view \"{}\"",
                     RelationIdentity::from_legacy_name(&check.view)
                         .map_or_else(|_| check.view.clone(), |relation| relation.name)
                 ),
+                detail: super::constraints::failing_row_detail(
+                    services.diagnostics,
+                    table,
+                    &columns,
+                    document,
+                )?,
+                hint: None,
             });
         }
     }
@@ -333,6 +347,7 @@ pub fn refresh_stored_generated_columns<S: Clone + 'static>(
         .map_err(|error| SQLError::Internal(format!("read generated columns: {error}")))?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
     super::generated::refresh_stored_generated_columns(
+        services.assignment,
         &columns,
         document,
         &mut |expression, row, schema| {

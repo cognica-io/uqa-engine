@@ -62,6 +62,7 @@ pub fn append_column_keys(columns: &[ColumnDef], constraints: &mut Vec<TableKeyC
         }
         constraints.push(TableKeyConstraint {
             catalog_identity: None,
+            index_identity: None,
             name: None,
             kind,
             columns: vec![column.name.clone()],

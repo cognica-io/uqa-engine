@@ -23,6 +23,7 @@ impl Engine {
                     .map_err(|error| SQLError::Internal(error.to_string()))
             },
             publication: self,
+            enums: self,
             changes: self,
         }
     }
@@ -69,6 +70,7 @@ impl Engine {
             catalog: self,
             views: self,
             publication: self,
+            enums: self,
             tables: self,
             foreign: self,
             indexes: self,
@@ -197,14 +199,14 @@ use uqa_execution::schema::domains::removal::{
 };
 use uqa_sql::catalog::security::BoundSchemaSecurity;
 use uqa_sql::schema::domains::removal::{
-    DomainDropAuthority, DomainDropBinding, DomainDropCatalog,
+    TypeObjectAuthority, TypeObjectBinding, TypeObjectCatalog,
 };
 
 impl Engine {
     pub(crate) fn domain_removal_context(&self) -> DomainRemovalContext<'_> {
         DomainRemovalContext {
             refresh: self,
-            binding: DomainDropBinding {
+            binding: TypeObjectBinding {
                 catalog: self,
                 authority: self,
                 session: self,
@@ -214,26 +216,41 @@ impl Engine {
         }
     }
 }
-impl DomainDropCatalog for Engine {
+impl TypeObjectCatalog for Engine {
     fn schema_security(&self, name: &str) -> Option<BoundSchemaSecurity> {
         self.schema_security_for_privilege(name)
     }
-    fn resolve_domain_drop_type(&self, name: &str) -> Result<Option<i64>, SQLError> {
-        uqa_execution::catalog::projection::resolve_regobject_oid(
-            &self.catalog_execution(),
-            &ColumnType::Regtype,
-            name,
-        )
+    fn resolve_drop_type_oid(&self, name: &str) -> Result<Option<i64>, SQLError> {
+        uqa_execution::catalog::projection::resolve_type_object_oid(&self.catalog_execution(), name)
     }
-    fn format_domain_drop_type(&self, oid: i64) -> Result<Option<String>, String> {
-        uqa_execution::catalog::projection::resolve_regtype_output(
-            &self.catalog_execution(),
-            &ColumnType::Regtype,
-            oid,
-        )
+    fn format_drop_type(&self, oid: i64) -> Result<Option<String>, String> {
+        uqa_execution::catalog::projection::format_type_object(&self.catalog_execution(), oid)
+    }
+    fn enum_by_type_oid(&self, oid: u32) -> Option<uqa_sql::catalog::enum_type::StoredEnum> {
+        self.durable
+            .enums
+            .read()
+            .values()
+            .find(|definition| definition.oid == oid || definition.array_oid == oid)
+            .cloned()
+    }
+    fn user_array_element(&self, oid: u32) -> Option<u32> {
+        self.durable.domains.read().values().find_map(|domain| {
+            (uqa_sql::catalog::type_metadata::pg_type_array_oid(&domain.column_type())
+                == i64::from(oid))
+            .then_some(domain.oid)
+        })
+    }
+    fn row_type_relation(
+        &self,
+        oid: u32,
+    ) -> Option<uqa_sql::schema::domains::removal::RowTypeRelation> {
+        uqa_execution::catalog::projection::row_type_relation(&self.catalog_execution(), oid)
+            .ok()
+            .flatten()
     }
 }
-impl DomainDropAuthority for Engine {
+impl TypeObjectAuthority for Engine {
     fn schema_usage(&self, schema: &str, role: &RoleReference) -> bool {
         self.schema_has_privilege_for_role(
             schema,

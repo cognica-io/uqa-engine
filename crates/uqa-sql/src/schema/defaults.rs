@@ -52,18 +52,25 @@ pub fn validate_default_expression(
         expression,
         Some(target),
     )?;
-    bind_stored_schema_expression_routines(context, expression, expression.clone())?;
+    crate::catalog::stored_ast::fold_assigned_stored_literal(
+        expression,
+        target,
+        crate::FunctionTypeResolver::enum_labels(context.catalog),
+    )?;
+    bind_stored_schema_expression(context, expression, expression.clone())?;
     Ok(())
 }
 
-pub fn bind_stored_schema_expression_routines(
+/// Bind a copy of stored schema expression syntax and carry its exact routine identities, user-defined type identities and enum constants back into the syntax. `typed_expression` is the syntax with its column references replaced by typed placeholders.
+pub fn bind_stored_schema_expression(
     context: &SchemaBindingContext<'_, '_>,
     expression: &mut Expr,
     typed_expression: Expr,
 ) -> Result<bool, SQLError> {
-    let mut plan = crate::plan::ExpressionPlan::lower_with(typed_expression, &|name: &str| {
+    let lowered = crate::plan::ExpressionPlan::lower_with(typed_expression, &|name: &str| {
         context.catalog.has_registered_aggregate_function(name)
     });
+    let mut plan = lowered.clone();
     crate::binding::bind_expression_plan_routines_for_storage(
         context.catalog,
         &mut plan,
@@ -71,8 +78,8 @@ pub fn bind_stored_schema_expression_routines(
         context.binding,
         &RowSchema::default(),
     )?;
-    let references = crate::binding::stored_routines::collect_expression_routine_references(&plan)?;
-    crate::catalog::stored_ast::bind_stored_expression_routines(expression, &references)
+    let sites = crate::binding::syntax_sites::expression_syntax_sites(&lowered, &plan)?;
+    crate::catalog::stored_ast::bind_stored_expression_sites(expression, &sites)
 }
 
 fn default_error(sqlstate: &str, message: &str) -> SQLError {

@@ -183,6 +183,7 @@ pub(in crate::compiler) fn compile_create_table(
                         let key_columns = extract_strings(&cstr.keys)?;
                         key_constraints.push(TableKeyConstraint {
                             catalog_identity: None,
+                            index_identity: None,
                             name: constraint_name(&cstr.conname),
                             kind,
                             columns: key_columns,
@@ -405,6 +406,7 @@ pub(in crate::compiler) fn compile_column_key_constraints(
         };
         keys.push(TableKeyConstraint {
             catalog_identity: None,
+            index_identity: None,
             name: constraint_name(&constraint.conname),
             kind,
             columns: vec![column.colname.clone()],

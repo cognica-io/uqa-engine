@@ -529,10 +529,10 @@ fn require_containment_operands(name: &str, args: &[GenerationType]) -> Result<(
         Ok(())
     } else {
         let symbol = if name == "contains_op" { "@>" } else { "<@" };
-        Err(SQLError::TypeMismatch(format!(
-            "operator does not exist: {} {symbol} {}",
-            generation_type_name(&args[0]),
-            generation_type_name(&args[1])
-        )))
+        Err(crate::type_resolution::undefined_binary_operator_named(
+            &generation_type_name(&args[0]),
+            symbol,
+            &generation_type_name(&args[1]),
+        ))
     }
 }

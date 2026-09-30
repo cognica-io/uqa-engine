@@ -164,6 +164,11 @@ fn is_catalog_scalar(name: &str) -> bool {
             | "pg_get_ruledef"
             | "pg_get_viewdef"
             | "pg_get_indexdef"
+            | "pg_get_constraintdef"
+            | "pg_get_function_arguments"
+            | "pg_get_function_identity_arguments"
+            | "pg_get_function_result"
+            | "pg_get_function_sqlbody"
             | "format_type"
             | "pg_has_role"
             | "pg_get_userbyid"
@@ -171,6 +176,7 @@ fn is_catalog_scalar(name: &str) -> bool {
             | "has_schema_privilege"
             | "has_sequence_privilege"
             | "has_function_privilege"
+            | "has_type_privilege"
     )
 }
 
@@ -213,6 +219,24 @@ pub fn catalog_scalar_value(
             crate::catalog::projection::pg_get_viewdef_value(&context.catalog, arguments)
         }
         "format_type" => crate::catalog::projection::format_type_value(&context.catalog, arguments),
+        "pg_get_constraintdef" => {
+            crate::catalog::projection::pg_get_constraintdef_value(&context.catalog, arguments)
+        }
+        "pg_get_function_arguments" => {
+            crate::catalog::projection::pg_get_function_arguments_value(&context.catalog, arguments)
+        }
+        "pg_get_function_identity_arguments" => {
+            crate::catalog::projection::pg_get_function_identity_arguments_value(
+                &context.catalog,
+                arguments,
+            )
+        }
+        "pg_get_function_result" => {
+            crate::catalog::projection::pg_get_function_result_value(&context.catalog, arguments)
+        }
+        "pg_get_function_sqlbody" => {
+            crate::catalog::projection::pg_get_function_sqlbody_value(&context.catalog, arguments)
+        }
         "pg_get_indexdef" => {
             crate::catalog::projection::pg_get_indexdef_value(&context.catalog, arguments)
         }
@@ -238,6 +262,10 @@ pub fn catalog_scalar_value(
                 arguments,
             )
         }
+        "has_type_privilege" => crate::catalog::security::type_inquiry::has_type_privilege_value(
+            &context.catalog,
+            arguments,
+        ),
         "has_sequence_privilege" => context
             .sequence_privileges
             .has_sequence_privilege_value(arguments),

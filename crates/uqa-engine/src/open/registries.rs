@@ -18,6 +18,7 @@ impl Engine {
         mode: super::CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
         self.restore_sequences_from_catalog(catalog, mode.allows_migration())?;
+        self.restore_enums_from_catalog(catalog)?;
         let domains = self.restore_domains_from_catalog(catalog, mode.allows_migration())?;
         *self.durable.system_relation_security.write() =
             uqa_execution::catalog::security::system_relations::restore(

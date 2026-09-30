@@ -19,6 +19,7 @@ fn domain() -> ColumnType {
         schema: "public".into(),
         name: "d".into(),
         oid: 16384,
+        array_oid: None,
         base: Box::new(ColumnType::Integer),
     }
 }

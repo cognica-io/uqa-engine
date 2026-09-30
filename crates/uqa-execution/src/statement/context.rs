@@ -68,6 +68,11 @@ pub trait StatementExecutionInputs<S: Clone + 'static> {
     fn notification_subscriptions_required(&self) -> bool {
         false
     }
+
+    /// The session search path, which diagnostics use to qualify types it does not include. `None` leaves type names unqualified.
+    fn diagnostic_search_path(&self) -> Option<Vec<String>> {
+        None
+    }
 }
 
 pub trait StatementMutationInputs<S: Clone + 'static> {

@@ -106,12 +106,5 @@ fn is_date_timestamp(ty: &ColumnType) -> bool {
 }
 
 fn undefined_equality_operator(left: &ColumnType, right: &ColumnType) -> SQLError {
-    SQLError::Routine {
-        sqlstate: "42883".into(),
-        message: format!(
-            "operator does not exist: {} = {}",
-            left.sql_name(),
-            right.sql_name()
-        ),
-    }
+    super::undefined_binary_operator(Some(left), "=", Some(right))
 }

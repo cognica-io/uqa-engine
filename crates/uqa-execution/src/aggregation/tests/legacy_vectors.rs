@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::aggregation::ordering::AggregateSortKey;
 
 fn dimensionless_oidvector() -> Value {
     Value::LegacyVector(
@@ -54,7 +55,7 @@ fn legacy_vector_ordered_aggregates_preserve_errors_across_memory_and_merge_runs
         for count in [1, 2, 18] {
             let mut builtin = AggregateValueBuffer::new(budget);
             let mut registered = RegisteredAggregateBuffer::new(budget);
-            let keys = vec![(dimensionless_oidvector(), false)];
+            let keys = vec![AggregateSortKey::ascending(dimensionless_oidvector())];
             let builtin_result = (|| {
                 for value in 0..count {
                     builtin.push(Value::Int(value), keys.clone())?;
@@ -85,8 +86,8 @@ fn legacy_vector_ordered_aggregates_preserve_errors_across_memory_and_merge_runs
                 .push(
                     Value::Int(value),
                     vec![
-                        (Value::Int(value), false),
-                        (dimensionless_oidvector(), false),
+                        AggregateSortKey::ascending(Value::Int(value)),
+                        AggregateSortKey::ascending(dimensionless_oidvector()),
                     ],
                 )
                 .unwrap();
@@ -122,7 +123,7 @@ fn legacy_vector_extrema_use_postgresql_array_aggregate_order() {
                 for position in if reversed { [1, 0] } else { [0, 1] } {
                     accumulator.observe(&values[position]).unwrap();
                 }
-                let value = aggregate_value(name, &accumulator).unwrap();
+                let value = aggregate_value(name, &accumulator, None).unwrap();
                 assert_eq!(
                     cast_value(&value, "text").unwrap(),
                     Value::Str(case["rows"][0][index].as_str().unwrap().into()),
@@ -143,7 +144,7 @@ fn legacy_vector_json_object_keys_match_postgresql_errors_in_memory_and_spill() 
                 accumulator
                     .observe(&Value::List(vec![value.clone(), Value::Int(1)]))
                     .unwrap();
-                let error = aggregate_value(name, &accumulator).unwrap_err();
+                let error = aggregate_value(name, &accumulator, None).unwrap_err();
                 assert_eq!(error.sqlstate(), Some("22023"));
                 assert_eq!(
                     error.to_string(),
@@ -175,7 +176,7 @@ fn legacy_vector_distinct_aggregates_compare_before_deduplicating_in_memory_and_
                     for _ in 0..count {
                         acc.distinct.insert(&input, Vec::new())?;
                     }
-                    aggregate_value("count", &acc)
+                    aggregate_value("count", &acc, None)
                 })();
                 if count == 1 {
                     let expected = if registered { input } else { Value::Int(1) };

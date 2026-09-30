@@ -7,22 +7,26 @@
 //! Virtual `pg_catalog.pg_proc` relation builder.
 
 use super::builtin_routines::PG18_BUILTIN_ROUTINE_GROUPS;
-use super::expression_text::schema_expr_text;
-use super::helpers::acl::acl_identifier;
+use super::helpers::acl::object_acl_items;
 use super::helpers::oids::{
     current_user_oid, namespace_oid, schema_oid, split_schema_name, stable_object_oid, stable_oid,
 };
 use super::helpers::rows::{
     bool_value, catalog_array, catalog_oidvector, catalog_usize, int_value, row, str_value,
 };
-use super::helpers::type_metadata::{routine_type_oid, routine_variadic_element_oid};
+use super::helpers::type_metadata::routine_variadic_element_oid;
+use super::regtypes::catalog_routine_type_oid;
 use crate::catalog::CatalogReadView;
 use uqa_core::Value;
 use uqa_sql::registry::registered_names;
 use uqa_sql::routines::{builtin_routine_support_oid, SQLUserFunction};
 use uqa_sql::{ResultRow, SQLError};
 
+/// The routine's public OID: the recorded one, or for a routine created before OIDs were recorded, the one its identity derives.
 pub fn user_routine_catalog_oid(function: &SQLUserFunction) -> Result<i64, SQLError> {
+    if let Some(oid) = function.def.catalog_oid {
+        return Ok(i64::from(oid));
+    }
     let object_id = function.def.object_id.ok_or_else(|| {
         SQLError::Internal(format!(
             "routine `{}` has no catalog object identity",
@@ -32,11 +36,29 @@ pub fn user_routine_catalog_oid(function: &SQLUserFunction) -> Result<i64, SQLEr
     Ok(stable_object_oid("proc", &object_id))
 }
 
+/// Whether a routine holds `oid` in `pg_proc`: a user routine, or a registered function, whose OID derives from its name.
+pub fn routine_oid_in_use(
+    routines: &std::collections::BTreeMap<String, Vec<std::sync::Arc<SQLUserFunction>>>,
+    oid: i64,
+) -> Result<bool, SQLError> {
+    for function in routines.values().flatten() {
+        if user_routine_catalog_oid(function)? == oid {
+            return Ok(true);
+        }
+    }
+    Ok(registered_names()
+        .into_iter()
+        .any(|name| stable_oid("proc", name) == oid))
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "preserves catalog column and OID order"
 )]
-pub fn build_pg_proc(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
+pub fn build_pg_proc(
+    catalog: &CatalogReadView,
+    resolution: &crate::catalog::RelationNameResolution,
+) -> Result<Vec<ResultRow>, SQLError> {
     let mut rows: Vec<ResultRow> = PG18_BUILTIN_ROUTINE_GROUPS
         .iter()
         .flat_map(|group| group.iter())
@@ -193,8 +215,10 @@ pub fn build_pg_proc(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLErr
         let argument_defaults = input_params
             .iter()
             .filter_map(|parameter| parameter.default.as_ref())
-            .map(schema_expr_text)
-            .collect::<Vec<_>>();
+            .map(|default| {
+                super::view_definition::stored_expression_text(catalog, resolution, default)
+            })
+            .collect::<Result<Vec<_>, SQLError>>()?;
         let argument_defaults = if argument_defaults.is_empty() {
             Value::Null
         } else {
@@ -202,7 +226,7 @@ pub fn build_pg_proc(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLErr
         };
         let argument_type_oids = input_params
             .iter()
-            .map(|parameter| int_value(routine_type_oid(&parameter.type_name)))
+            .map(|parameter| int_value(catalog_routine_type_oid(catalog, &parameter.type_name)))
             .collect::<Vec<_>>();
         let has_non_input_mode = def
             .params
@@ -212,7 +236,9 @@ pub fn build_pg_proc(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLErr
             catalog_array(
                 def.params
                     .iter()
-                    .map(|parameter| int_value(routine_type_oid(&parameter.type_name)))
+                    .map(|parameter| {
+                        int_value(catalog_routine_type_oid(catalog, &parameter.type_name))
+                    })
                     .collect(),
                 "pg_proc.proallargtypes",
             )?
@@ -257,7 +283,15 @@ pub fn build_pg_proc(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLErr
             .params
             .iter()
             .find(|parameter| parameter.mode == uqa_sql::ast::FunctionParamMode::Variadic)
-            .map(|parameter| routine_variadic_element_oid(&parameter.type_name))
+            .map(|parameter| {
+                // A user-defined element type is named by identity, whose OID is the element's.
+                let canonical =
+                    uqa_sql::type_resolution::canonical_routine_type_name(&parameter.type_name);
+                match uqa_sql::ast::UserTypeIdentity::parse(&canonical) {
+                    Some(identity) if identity.dimensions > 0 => Ok(i64::from(identity.oid)),
+                    _ => routine_variadic_element_oid(&parameter.type_name),
+                }
+            })
             .transpose()?
             .unwrap_or(0);
         let return_type_oid = if def.is_procedure {
@@ -269,10 +303,12 @@ pub fn build_pg_proc(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLErr
         } else {
             match &def.returns {
                 uqa_sql::ast::FunctionReturns::Scalar { type_name }
-                | uqa_sql::ast::FunctionReturns::SetOf { type_name } => routine_type_oid(type_name),
+                | uqa_sql::ast::FunctionReturns::SetOf { type_name } => {
+                    catalog_routine_type_oid(catalog, type_name)
+                }
                 uqa_sql::ast::FunctionReturns::Table | uqa_sql::ast::FunctionReturns::None => {
                     match def.output_params().as_slice() {
-                        [output] => routine_type_oid(&output.type_name),
+                        [output] => catalog_routine_type_oid(catalog, &output.type_name),
                         [] => 2278,
                         _ => 2249,
                     }
@@ -366,29 +402,11 @@ fn routine_acl_catalog_value(
     catalog: &CatalogReadView,
     def: &uqa_sql::ast::CreateFunction,
 ) -> Result<Value, SQLError> {
-    use uqa_sql::catalog::roles::identity::RoleSubject;
-    let roles = &catalog.snapshot().definitions.roles;
-    let name = |identity: uqa_core::catalog_role::RoleIdentity| {
-        identity
-            .role_name(roles)
-            .map(acl_identifier)
-            .ok_or_else(|| {
-                SQLError::Internal("routine ACL references a missing role incarnation".into())
-            })
-    };
     let Some(acl) = def.execute_acl.as_ref() else {
         return Ok(Value::Null);
     };
-    let entries = acl
-        .iter()
-        .map(|entry| {
-            let grantee = entry.role.map(&name).transpose()?.unwrap_or_default();
-            let grantor = name(entry.grantor)?;
-            Ok(str_value(format!(
-                "{grantee}=X{}/{grantor}",
-                if entry.grant_option { "*" } else { "" }
-            )))
-        })
-        .collect::<Result<Vec<_>, SQLError>>()?;
-    catalog_array(entries, "pg_proc.proacl")
+    catalog_array(
+        object_acl_items(&catalog.snapshot().definitions.roles, acl, 'X', "routine")?,
+        "pg_proc.proacl",
+    )
 }

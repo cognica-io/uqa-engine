@@ -47,7 +47,7 @@ fn legacy_vectors_preserve_postgresql_json_element_categories_and_array_shape() 
             ),
         ] {
             assert_eq!(
-                super::super::value_to_json_text(&value),
+                super::super::value_to_json_text(&value).unwrap(),
                 expected.to_string()
             );
             assert_eq!(super::super::value_to_json(&value), expected);
@@ -235,7 +235,7 @@ fn assignment_carrier_keeps_json_strings_float_conversion_and_lossy_bytes_distin
         Value::Bytes(vec![b'a', 0xff, b'b']),
         Value::List(vec![Value::Str("true".into()), Value::Str("plain".into())]),
     ]);
-    let expected = core_value_to_json(&nested).to_string();
+    let expected = core_value_to_json(&nested).unwrap().to_string();
     let output = value_to_text_with_control(&nested, &control).unwrap();
     assert_eq!(&**output, expected);
     assert_ne!(&**output, super::super::value_to_json(&nested).to_string());

@@ -36,30 +36,55 @@ pub fn set_command_completion(
     result.command_tag = Some(command_completion(command, result, transaction_failed));
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "exhaustive SQL command completion mapping"
-)]
 fn command_completion(
     command: &CommandPlan,
     result: &SQLResult,
     transaction_failed: bool,
 ) -> String {
-    let tag = match command {
-        CommandPlan::Insert(_) => return format!("INSERT 0 {}", result.affected_rows),
-        CommandPlan::Update(_) => return format!("UPDATE {}", result.affected_rows),
-        CommandPlan::Delete(_) => return format!("DELETE {}", result.affected_rows),
-        CommandPlan::Merge(_) => return format!("MERGE {}", result.affected_rows),
+    match command {
+        CommandPlan::Insert(_) => format!("INSERT 0 {}", result.affected_rows),
+        CommandPlan::Update(_) => format!("UPDATE {}", result.affected_rows),
+        CommandPlan::Delete(_) => format!("DELETE {}", result.affected_rows),
+        CommandPlan::Merge(_) => format!("MERGE {}", result.affected_rows),
+        CommandPlan::FetchCursor(fetch) if fetch.move_only => {
+            format!("MOVE {}", result.affected_rows)
+        }
+        CommandPlan::FetchCursor(_) => format!("FETCH {}", result.rows.len()),
         CommandPlan::CreateTableAs { .. } | CommandPlan::CreateMaterializedView { .. } => {
             unreachable!("population execution owns completion")
         }
-        CommandPlan::FetchCursor(fetch) => {
-            return if fetch.move_only {
-                format!("MOVE {}", result.affected_rows)
-            } else {
-                format!("FETCH {}", result.rows.len())
-            };
+        CommandPlan::Execute { .. } => {
+            unreachable!("EXECUTE preserves delegated command completion")
         }
+        CommandPlan::Transaction(statement) => {
+            transaction_completion(statement, transaction_failed).to_string()
+        }
+        command => command_tag_name(command).to_string(),
+    }
+}
+
+/// The tag of a command without its row count, as `CreateCommandName` names a command in diagnostics such as the read-only transaction error.
+#[expect(clippy::too_many_lines, reason = "exhaustive SQL command tag mapping")]
+pub fn command_tag_name(command: &CommandPlan) -> &'static str {
+    match command {
+        CommandPlan::Insert(_) => "INSERT",
+        CommandPlan::Update(_) => "UPDATE",
+        CommandPlan::Delete(_) => "DELETE",
+        CommandPlan::Merge(_) => "MERGE",
+        CommandPlan::FetchCursor(fetch) => {
+            if fetch.move_only {
+                "MOVE"
+            } else {
+                "FETCH"
+            }
+        }
+        CommandPlan::CreateTableAs {
+            select_into: true, ..
+        } => "SELECT INTO",
+        CommandPlan::CreateTableAs { .. } => "CREATE TABLE AS",
+        CommandPlan::CreateMaterializedView { .. } => "CREATE MATERIALIZED VIEW",
+        CommandPlan::Execute { .. } => "EXECUTE",
+        CommandPlan::Transaction(statement) => transaction_completion(statement, false),
         CommandPlan::CreateTable(_) | CommandPlan::CreateTableIfNotExists(_) => "CREATE TABLE",
         CommandPlan::CreateIndex(_) => "CREATE INDEX",
         CommandPlan::RenameIndex(_) => "ALTER INDEX",
@@ -72,6 +97,7 @@ fn command_completion(
             DropKind::Schema => "DROP SCHEMA",
             DropKind::Sequence => "DROP SEQUENCE",
             DropKind::Domain => "DROP DOMAIN",
+            DropKind::Type => "DROP TYPE",
         },
         CommandPlan::AlterTable(statement) => match statement.actions.as_slice() {
             [AlterTableAction::RenameTrigger { .. }] => "ALTER TRIGGER",
@@ -106,9 +132,6 @@ fn command_completion(
         CommandPlan::LockTable(_) => "LOCK TABLE",
         CommandPlan::Vacuum(_) => "VACUUM",
         CommandPlan::Truncate { .. } => "TRUNCATE TABLE",
-        CommandPlan::Transaction(statement) => {
-            transaction_completion(statement, transaction_failed)
-        }
         CommandPlan::DeclareCursor { .. } => "DECLARE CURSOR",
         CommandPlan::CloseCursor { name } => {
             if name.is_some() {
@@ -119,11 +142,15 @@ fn command_completion(
         }
         CommandPlan::CreateSequence(_) => "CREATE SEQUENCE",
         CommandPlan::CreateDomain(_) => "CREATE DOMAIN",
+        CommandPlan::CreateEnum(_) => "CREATE TYPE",
+        CommandPlan::AlterEnum(_) => "ALTER TYPE",
+        CommandPlan::AlterTypeObject(statement) => match statement.kind {
+            crate::ast::TypeObjectKind::Type => "ALTER TYPE",
+            crate::ast::TypeObjectKind::Domain => "ALTER DOMAIN",
+        },
+        CommandPlan::GrantType(statement) => grant_completion(statement.is_grant),
         CommandPlan::AlterSequence(_) => "ALTER SEQUENCE",
         CommandPlan::Prepare { .. } => "PREPARE",
-        CommandPlan::Execute { .. } => {
-            unreachable!("EXECUTE preserves delegated command completion")
-        }
         CommandPlan::Deallocate { name } => {
             if name.is_some() {
                 "DEALLOCATE"
@@ -173,8 +200,7 @@ fn command_completion(
         CommandPlan::DropRule(_) => "DROP RULE",
         CommandPlan::DoBlock { .. } => "DO",
         CommandPlan::Call { .. } => "CALL",
-    };
-    tag.to_string()
+    }
 }
 
 pub const fn transaction_completion(statement: &TransactionStmt, failed: bool) -> &'static str {

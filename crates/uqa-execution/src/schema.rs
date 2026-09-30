@@ -35,8 +35,10 @@ pub mod view_creation;
 pub mod view_dependencies;
 
 pub mod domains;
+pub mod enums;
 pub mod foreign_table_alteration;
 pub mod namespaces;
+pub mod types;
 
 pub mod view_references;
 pub mod view_removal;

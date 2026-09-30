@@ -51,11 +51,26 @@ impl RoutineTypeCatalog for Engine {
             name,
         )
     }
-    fn resolve_catalog_domain_type_by_oid(&self, oid: u32) -> Option<ColumnType> {
-        uqa_execution::catalog::projection::resolve_catalog_domain_type_by_oid(
+    fn resolve_catalog_user_type_by_oid(&self, oid: u32) -> Option<ColumnType> {
+        uqa_execution::catalog::projection::resolve_catalog_user_type_by_oid(
             &self.catalog_execution(),
             oid,
         )
+    }
+    fn require_type_usage(&self, ty: &ColumnType) -> Result<(), SQLError> {
+        uqa_execution::catalog::security::type_inquiry::require_type_usage(
+            &self.catalog_execution(),
+            ty,
+        )
+    }
+}
+impl uqa_execution::routines::invocation::bodies::RoutineBodySession for Engine {
+    fn retain_routine_body(
+        &self,
+        function: &uqa_sql::routines::SQLUserFunction,
+        body: uqa_sql::routines::CompiledFunctionBody,
+    ) -> Result<(), SQLError> {
+        self.session.routine_bodies.retain(function, body)
     }
 }
 impl StoredMergeColumnCatalog for Engine {
@@ -222,13 +237,17 @@ impl Engine {
             definition: self.routine_definition_context(),
             support: self,
             configuration: self,
+            bodies: self,
         }
     }
+    /// Registration locks the routine's name and allocates its OID in a transaction, as every definition statement does.
     #[cfg(test)]
     pub(crate) fn register_sql_function(&self, def: CreateFunction) -> Result<(), SQLError> {
-        uqa_execution::routines::registration::register_sql_function(
-            &self.routine_registration_context(),
-            def,
-        )
+        self.with_implicit_definition_transaction(|engine| {
+            uqa_execution::routines::registration::register_sql_function(
+                &engine.routine_registration_context(),
+                def,
+            )
+        })
     }
 }

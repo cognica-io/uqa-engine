@@ -28,9 +28,14 @@ impl Task for SQLTask {
     type JsValue = SQLResult;
 
     fn compute(&mut self) -> Result<Self::Output> {
-        self.engine
+        let mut result = self
+            .engine
             .sql(&self.query, &self.params)
-            .map_err(runtime_error)
+            .map_err(runtime_error)?;
+        self.engine
+            .render_enum_labels(&mut result)
+            .map_err(runtime_error)?;
+        Ok(result)
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -53,7 +58,9 @@ impl Task for SQLBatchTask {
             .iter()
             .map(|(sql, params)| (sql.as_str(), params.as_slice()))
             .collect();
-        self.engine.sql_batch(&borrowed).map_err(runtime_error)
+        self.engine
+            .sql_batch_with_labels(&borrowed)
+            .map_err(runtime_error)
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {

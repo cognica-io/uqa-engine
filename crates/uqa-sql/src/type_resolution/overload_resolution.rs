@@ -47,7 +47,9 @@ pub use signature::match_function_signature;
 pub(super) use signature::{match_signature_with_control, SignatureParameters};
 
 mod type_names;
-pub use type_names::{canonical_column_type_name, canonical_routine_type_name};
+pub use type_names::{
+    canonical_column_type_name, canonical_routine_type_name, parse_enum_type_identity,
+};
 pub(super) use type_names::{
     canonical_column_type_name_with_control, canonical_routine_type_name_with_control,
 };
@@ -130,6 +132,11 @@ pub fn routine_type_category(type_name: &str) -> char {
 fn canonical_type_category(canonical: &str) -> char {
     if canonical.ends_with("[]") {
         return 'A';
+    }
+    if crate::ast::UserTypeIdentity::parse(canonical)
+        .is_some_and(|identity| identity.kind == crate::ast::UserTypeKind::Enum)
+    {
+        return 'E';
     }
     match canonical {
         "bool" => 'B',
@@ -360,10 +367,11 @@ mod tests {
             schema: "public".into(),
             name: "integer_domain".into(),
             oid: 99_999,
+            array_oid: None,
             base: Box::new(ColumnType::Integer),
         };
         let domain_match = match_function_signature(
-            &[parameter("value", "public.integer_domain", false)],
+            &[parameter("value", "domain#99999", false)],
             &[None],
             &[Some(domain.clone())],
         )
@@ -413,6 +421,7 @@ mod tests {
             schema: "public".into(),
             name: "integer_domain".into(),
             oid: 99_999,
+            array_oid: None,
             base: Box::new(ColumnType::Integer),
         };
         let mut candidates = vec![

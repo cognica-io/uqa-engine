@@ -103,6 +103,7 @@ fn restore_view(
                     materialized_rows: Vec::new(),
                     materialized_column_types: Vec::new(),
                     populated: true,
+                    catalog_oids: None,
                 },
                 true,
             ),

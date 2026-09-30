@@ -29,6 +29,11 @@ impl RelationCreationContext<'_> {
         self.reserve_type_destination(&identity)
     }
 
+    /// Whether any type, including a relation row type or a generated array type, already uses this name. This does not reserve the name.
+    pub fn type_name_in_use(&self, identity: &RelationIdentity) -> bool {
+        creation::type_name_in_use(self.relations, identity)
+    }
+
     fn reserve_type_destination(&self, identity: &RelationIdentity) -> Result<(), SQLError> {
         reserve_catalog_name(
             self.locks,

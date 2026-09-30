@@ -505,8 +505,8 @@ pub fn collect_session_portal_routine_dependencies(
         if !visiting_routines.insert(key.clone()) {
             continue;
         }
-        match &function.compiled {
-            crate::routines::CompiledFunctionBody::SQL(plans) => {
+        match crate::routines::analyzable_routine_body(inputs.routines, &function)?.as_deref() {
+            Some(crate::routines::CompiledFunctionBody::SQL(plans)) => {
                 for plan in plans {
                     match plan {
                         crate::plan::UnifiedPlan::Query(query) => {
@@ -527,9 +527,11 @@ pub fn collect_session_portal_routine_dependencies(
                     }
                 }
             }
-            crate::routines::CompiledFunctionBody::PLpgSQL(_) => {
+            Some(crate::routines::CompiledFunctionBody::PLpgSQL(_)) => {
                 *dependencies = SessionPortalTableDependencies::all();
             }
+            // A body that does not compile cannot run in this session, so it reads no relation.
+            None => {}
         }
         visiting_routines.remove(&key);
         if dependencies.is_all() {

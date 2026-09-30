@@ -98,6 +98,9 @@ impl SharedObjectLockSession for Catalog {
         }
         Ok(())
     }
+    fn next_catalog_oid(&self) -> Result<u32, SQLError> {
+        self.locks.catalog_oids().next_oid(None, || Ok(None))
+    }
 }
 
 #[test]

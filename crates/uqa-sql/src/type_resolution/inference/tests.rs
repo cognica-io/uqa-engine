@@ -22,6 +22,7 @@ fn domain() -> ColumnType {
         schema: "public".into(),
         name: "positive_integer".into(),
         oid: 90001,
+        array_oid: None,
         base: Box::new(ColumnType::Integer),
     }
 }

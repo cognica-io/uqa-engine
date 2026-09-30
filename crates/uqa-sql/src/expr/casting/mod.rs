@@ -488,10 +488,10 @@ pub fn negate_value_with_control(
                 .checked_neg()
                 .ok_or_else(|| out_of_range("interval"))?,
         })),
-        _ => Err(SQLError::TypeMismatch(format!(
-            "operator does not exist: - {}",
-            source.as_str()
-        ))),
+        _ => Err(crate::type_resolution::undefined_prefix_operator(
+            "-",
+            postgres_type_display_name(source.as_str()),
+        )),
     }?;
     Ok(control.finish(result, control.empty_reservation())?)
 }
@@ -513,6 +513,7 @@ fn canonical_cast_source_with_control(
         Value::Json(_) => "json",
         Value::JsonB(_) => "jsonb",
         Value::Array(_) => "anyarray",
+        Value::Enum(_) => "anyenum",
         Value::LegacyVector(vector) => vector.kind().type_name(),
         Value::List(_) => "anyarray",
         Value::Row(_) | Value::Record(_) => "record",

@@ -182,49 +182,6 @@ pub(super) fn eval(
     }
 }
 
-pub(super) fn ordinary_format(args: &[Value]) -> Result<Value> {
-    use crate::expr::{coerce_i64, value_to_string};
-    fn format_argument_to_string(value: &Value) -> Result<String> {
-        Ok(match value {
-            Value::Bool(true) => "t".into(),
-            Value::Bool(false) => "f".into(),
-            other => value_to_string(other)?,
-        })
-    }
-    if args.is_empty() {
-        return Err(SQLError::TypeMismatch(
-            "format needs a format string".into(),
-        ));
-    }
-    let fmt = value_to_string(&args[0])?;
-    let mut out = String::with_capacity(fmt.len());
-    let mut iter = fmt.chars().peekable();
-    let mut idx = 1usize;
-    while let Some(c) = iter.next() {
-        if c == '%' {
-            match iter.next() {
-                Some('s') | Some('I') | Some('L') => {
-                    out.push_str(&format_argument_to_string(
-                        args.get(idx).unwrap_or(&Value::Null),
-                    )?);
-                    idx += 1;
-                }
-                Some('d') => {
-                    let n = args.get(idx).and_then(|v| coerce_i64(v)).unwrap_or(0);
-                    out.push_str(&n.to_string());
-                    idx += 1;
-                }
-                Some('%') => out.push('%'),
-                Some(other) => out.push(other),
-                None => out.push('%'),
-            }
-        } else {
-            out.push(c);
-        }
-    }
-    Ok(Value::Str(out))
-}
-
 fn encode(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
     let arity = if name == "md5" { 1 } else { 2 };
     if args.len() != arity {

@@ -177,6 +177,16 @@ impl RelationCreationContext<'_> {
     pub fn resolve_persistent_name(&self, name: &str) -> Result<String, SQLError> {
         let (schema, relation) =
             RelationIdentity::parse_reference(name).map_err(SQLError::Unsupported)?;
+        let schema = self.resolve_creation_schema(schema)?;
+        Ok(RelationIdentity::new(schema, relation).qualified_name())
+    }
+    /// `LookupCreationNamespace` for an explicit schema: the schema must exist and allow CREATE for the current role.
+    pub fn creation_namespace(&self, schema: &str) -> Result<String, SQLError> {
+        let schema = self.resolve_creation_schema(Some(schema.to_string()))?;
+        self.ensure_namespace_create(&schema)?;
+        Ok(schema)
+    }
+    fn resolve_creation_schema(&self, schema: Option<String>) -> Result<String, SQLError> {
         let current_user = self.names.current_role();
         for attempt in 0..2 {
             self.runtime
@@ -189,7 +199,7 @@ impl RelationCreationContext<'_> {
                 &current_user,
             );
             if let Some(schema) = resolved {
-                return Ok(RelationIdentity::new(schema, relation).qualified_name());
+                return Ok(schema);
             }
             if attempt == 0 && self.runtime.backend_transaction_is_deferred() {
                 self.runtime.fence_catalog_writer_and_refresh_snapshot()?;

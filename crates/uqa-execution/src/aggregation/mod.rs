@@ -27,6 +27,7 @@ const AGGREGATE_MERGE_FAN_IN: usize = 16;
 mod accumulator;
 mod adaptive;
 mod analysis;
+mod array_inputs;
 mod distinct;
 mod executor;
 mod finalize;

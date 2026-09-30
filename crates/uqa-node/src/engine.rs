@@ -146,10 +146,12 @@ impl Engine {
     #[napi]
     pub fn sql_sync(&self, query: String, params: Option<Vec<ParamInput>>) -> Result<SQLResult> {
         let params = params_from_input(params)?;
-        self.inner()?
-            .sql(&query, &params)
-            .map_err(runtime_error)?
-            .try_into()
+        let engine = self.inner()?;
+        let mut result = engine.sql(&query, &params).map_err(runtime_error)?;
+        engine
+            .render_enum_labels(&mut result)
+            .map_err(runtime_error)?;
+        result.try_into()
     }
 
     #[napi(ts_return_type = "Promise<Array<SQLResult>>")]
@@ -174,7 +176,7 @@ impl Engine {
             .map(|(sql, params)| (sql.as_str(), params.as_slice()))
             .collect();
         self.inner()?
-            .sql_batch(&borrowed)
+            .sql_batch_with_labels(&borrowed)
             .map_err(runtime_error)?
             .into_iter()
             .map(SQLResult::try_from)

@@ -52,6 +52,7 @@ fn change_bound_view_column(
         bound,
         pretty: false,
         wrap: 0,
+        standalone: false,
     };
     let rename = Rename {
         table,

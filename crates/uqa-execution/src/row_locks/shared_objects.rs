@@ -38,6 +38,8 @@ pub trait SharedObjectLockSession {
         mode: RelationLockMode,
     ) -> Result<ScopedRelationLock<'_>, SQLError>;
     fn refresh_shared_catalog(&self) -> Result<(), SQLError>;
+    /// The next OID of the database's counter, as [`crate::catalog::identity::CatalogOidCounter::next_oid`] advances it.
+    fn next_catalog_oid(&self) -> Result<u32, SQLError>;
 }
 
 #[cfg(test)]

@@ -113,6 +113,12 @@ pub enum ColumnType {
         oid: u32,
         base: Box<ColumnType>,
     },
+    /// A user-defined enum. Handlers exchange its label text; label order is not lexical, so handlers must not evaluate order predicates on it.
+    Enum {
+        schema: String,
+        name: String,
+        oid: u32,
+    },
     /// An array whose element metadata is preserved across the SQL/FDW boundary.
     Array(Box<ColumnType>),
 }

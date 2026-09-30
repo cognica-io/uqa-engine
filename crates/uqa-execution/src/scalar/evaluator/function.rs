@@ -37,6 +37,19 @@ pub(super) fn evaluate_function(
         return plain(Value::Null, control);
     }
     let arguments = eval_call_arguments_with_control(args, context, control)?;
+    let arguments = if binding.is_none_or(|binding| binding.builtin) {
+        match super::super::call_arguments::expand_variadic_any_arguments(
+            binding.map_or(name, |binding| binding.name.as_str()),
+            args,
+            arguments,
+            control,
+        )? {
+            Some(arguments) => arguments,
+            None => return plain(Value::Null, control),
+        }
+    } else {
+        arguments
+    };
     if control.budget().is_some() {
         return uqa_sql::expr::eval_generated_function_call_with_control(
             name, binding, arguments, control,

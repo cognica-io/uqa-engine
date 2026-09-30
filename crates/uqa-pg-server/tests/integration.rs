@@ -8,5 +8,7 @@
 mod client;
 #[path = "server/concurrent_transactions.rs"]
 mod concurrent_transactions;
+#[path = "server/enums.rs"]
+mod enums;
 #[path = "server/simple_query.rs"]
 mod simple_query;

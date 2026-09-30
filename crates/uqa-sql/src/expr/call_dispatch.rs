@@ -56,6 +56,18 @@ fn eval_function_call_inner(
 ) -> Result<Value> {
     let lower = normalized_function_name(name);
     let lower = lower.as_ref();
+    let call_args = if super::enums::call_applies_output_functions(lower, &call_args)
+        && call_args
+            .iter()
+            .any(|(_, value)| super::enums::contains_enum_carrier(value))
+    {
+        super::enums::render_call_arguments(
+            ctx.engine.and_then(super::EngineHook::enum_labels),
+            call_args,
+        )?
+    } else {
+        call_args
+    };
     let evaluated: Vec<Value> = call_args.iter().map(|(_, value)| value.clone()).collect();
 
     if let Some(result) = super::current_time::eval_current_time(lower, &evaluated, Some(ctx)) {

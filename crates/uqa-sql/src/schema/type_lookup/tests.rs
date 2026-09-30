@@ -43,6 +43,7 @@ fn declared_lookup_borrows_exact_types_and_matches_unqualified_physical_schema()
         schema: "Quoted.Schema".into(),
         name: "Domain.Name".into(),
         oid: 123,
+        array_oid: None,
         base: Box::new(ColumnType::Numeric {
             precision: Some(7),
             scale: Some(2),
@@ -107,6 +108,7 @@ fn borrowed_generated_type_binding_matches_existing_schema_semantics() {
         schema: "Typed.Schema".into(),
         name: "Small Domain".into(),
         oid: 456,
+        array_oid: None,
         base: Box::new(ColumnType::SmallInteger),
     };
     columns[3].ty = ColumnType::Array(Box::new(columns[0].ty.clone()));

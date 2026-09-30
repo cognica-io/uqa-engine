@@ -191,7 +191,12 @@ impl Binder<'_, '_> {
                 return Ok(());
             }
         }
-        let ty = target.sql_name_with_control(&self.control)?;
+        if let Some(folded) = self.fold_enum_literal(expression, &target)? {
+            *expression = folded;
+            return Ok(());
+        }
+        // The cast is resolved again at evaluation, so a user-defined type is named by identity rather than by a search-path-dependent name.
+        let ty = self.control.copy_text(&target.catalog_name())?;
         self.install_cast(expression, ty)
     }
 
@@ -200,7 +205,7 @@ impl Binder<'_, '_> {
         expression: &mut ScalarExpr,
         ty: &ColumnType,
     ) -> Result<(), SQLError> {
-        let name = ty.sql_name_with_control(&self.control)?;
+        let name = self.control.copy_text(&ty.catalog_name())?;
         if matches!(expression, ScalarExpr::Cast {ty, ..} if ty.eq_ignore_ascii_case(&name)) {
             return Ok(());
         }
@@ -299,6 +304,15 @@ impl Binder<'_, '_> {
             | crate::ScalarFrameBound::UnboundedFollowing
             | crate::ScalarFrameBound::CurrentRow => Ok(()),
         }
+    }
+}
+
+/// A catalog type created by a user, or an array of one.
+pub(super) fn is_user_defined_type(ty: &ColumnType) -> bool {
+    match ty {
+        ColumnType::Enum(_) | ColumnType::Domain { .. } => true,
+        ColumnType::Array(element) => is_user_defined_type(element),
+        _ => false,
     }
 }
 

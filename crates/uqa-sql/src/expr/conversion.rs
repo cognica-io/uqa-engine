@@ -10,6 +10,14 @@ use super::{out_of_range, ArrayValue, DecimalValue, Result, SQLError, Value};
 
 use uqa_core::memory::{Produced, ProductionControl, ProductionString, ProductionVec};
 
+/// A value whose text is owned by the SQL catalog reached a context-free conversion. Catalog-aware callers render these carriers before delegating here.
+pub fn catalog_output_required(value: &uqa_core::EnumValue) -> SQLError {
+    SQLError::Internal(format!(
+        "enum value of type OID {} requires catalog-aware output",
+        value.type_oid()
+    ))
+}
+
 /// Produce SQL text, including errors from type output functions.
 pub fn value_to_string(value: &Value) -> Result<String> {
     value_to_string_with_control(value, &ProductionControl::uncontrolled())
@@ -41,6 +49,7 @@ pub fn value_to_string_with_control(
         Value::Record(fields) => {
             composite_value_to_string(fields.iter().map(|(_, value)| value), control)?
         }
+        Value::Enum(value) => return Err(catalog_output_required(value)),
         Value::Bytes(values) => {
             const HEX: &[u8; 16] = b"0123456789abcdef";
             let mut text = ProductionString::new(*control);
@@ -319,19 +328,6 @@ pub(super) fn gcd_i64(a: i64, b: i64) -> Result<i64> {
         b = r;
     }
     i64::try_from(a).map_err(|_| out_of_range("bigint"))
-}
-
-/// Best-effort `Value -> i64`. Returns `None` for shapes that do not
-/// have a well-defined integer projection (e.g. `Value::Null`).
-pub(super) fn coerce_i64(v: &Value) -> Option<i64> {
-    match v {
-        Value::Int(n) => Some(*n),
-        Value::Float(f) => float_to_i64_trunc(*f).ok(),
-        Value::Decimal(d) => d.to_i64_trunc(),
-        Value::Bool(b) => Some(i64::from(*b)),
-        Value::Str(s) | Value::FixedChar(s) => s.parse().ok(),
-        _ => None,
-    }
 }
 
 /// Coerce a [`Value`] into a `Vec<f32>` if it is a homogeneous numeric

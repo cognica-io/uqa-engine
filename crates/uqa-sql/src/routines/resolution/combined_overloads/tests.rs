@@ -8,7 +8,7 @@ use super::*;
 use crate::routines::{
     declaration::RoutineTypeCatalog,
     resolution::{RoutineOverloadCatalog, RoutineTypeSnapshot},
-    CompiledFunctionBody,
+    CompiledFunctionBody, RoutineBody,
 };
 
 struct Catalog {
@@ -25,10 +25,10 @@ impl Catalog {
                 else {
                     unreachable!()
                 };
-                Arc::new(SQLUserFunction {
-                    def: *def,
-                    compiled: CompiledFunctionBody::SQL(Vec::new()),
-                })
+                Arc::new(SQLUserFunction::new(
+                    *def,
+                    RoutineBody::Bound(Arc::new(CompiledFunctionBody::SQL(Vec::new()))),
+                ))
             })
             .collect();
         Self {
@@ -51,8 +51,12 @@ impl RoutineTypeCatalog for Catalog {
         ColumnType::from_sql_name(name)
     }
 
-    fn resolve_catalog_domain_type_by_oid(&self, _: u32) -> Option<ColumnType> {
+    fn resolve_catalog_user_type_by_oid(&self, _: u32) -> Option<ColumnType> {
         None
+    }
+
+    fn require_type_usage(&self, _: &ColumnType) -> Result<(), SQLError> {
+        Ok(())
     }
 }
 

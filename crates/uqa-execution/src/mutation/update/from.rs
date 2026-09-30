@@ -32,6 +32,9 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     ctes: &mut CteScope<S>,
 ) -> Result<SQLResult, SQLError> {
+    let _supplied_columns = crate::mutation::supplied_columns::SuppliedColumnsScope::enter(
+        crate::mutation::supplied_columns::update_supplied_columns(&stmt.assignments),
+    );
     let from_rows = crate::query::sources::build_join_spill_with_ctes(
         &read_context.query.source,
         from_clause,

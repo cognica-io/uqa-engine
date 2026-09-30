@@ -358,6 +358,12 @@ impl UnifiedPlan {
             Statement::CreateSequence(value) => {
                 Self::Command(Box::new(CommandPlan::CreateSequence(value)))
             }
+            Statement::CreateEnum(value) => Self::Command(Box::new(CommandPlan::CreateEnum(value))),
+            Statement::AlterEnum(value) => Self::Command(Box::new(CommandPlan::AlterEnum(value))),
+            Statement::AlterTypeObject(value) => {
+                Self::Command(Box::new(CommandPlan::AlterTypeObject(value)))
+            }
+            Statement::GrantType(value) => Self::Command(Box::new(CommandPlan::GrantType(value))),
             Statement::CreateDomain(value) => {
                 Self::Command(Box::new(CommandPlan::CreateDomain(value)))
             }
@@ -369,6 +375,7 @@ impl UnifiedPlan {
                 if_not_exists,
                 column_names,
                 with_no_data,
+                select_into,
                 persistence,
                 on_commit,
                 body,
@@ -377,6 +384,7 @@ impl UnifiedPlan {
                 if_not_exists,
                 column_names,
                 with_no_data,
+                select_into,
                 persistence,
                 on_commit,
                 query: Box::new(QueryPlan::lower_with(*body, aggregates)),
@@ -562,6 +570,10 @@ impl CommandPlan {
             Self::CloseCursor { .. } => "CloseCursor",
             Self::CreateSequence(_) => "CreateSequence",
             Self::CreateDomain(_) => "CreateDomain",
+            Self::CreateEnum(_) => "CreateEnum",
+            Self::AlterEnum(_) => "AlterEnum",
+            Self::AlterTypeObject(_) => "AlterTypeObject",
+            Self::GrantType(_) => "GrantType",
             Self::AlterSequence(_) => "AlterSequence",
             Self::CreateTableAs { .. } => "CreateTableAs",
             Self::Prepare { .. } => "Prepare",

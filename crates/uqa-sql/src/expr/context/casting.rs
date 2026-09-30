@@ -106,9 +106,34 @@ pub fn cast_value_with_type_resolution_with_control(
         .map(|ty| ty.retain_external_with_control(control))
         .transpose()?;
     control.check()?;
+    let resolved_source_type = match (engine, source_ty) {
+        (Some(engine), Some(source)) => engine
+            .resolve_type_name(source)
+            .map_err(SQLError::Internal)?,
+        _ => None,
+    };
     if let (Some(engine), Some(target)) = (engine, resolved_target.as_deref()) {
         if let Some(value) = engine.cast_domain(value, source_ty, target)? {
             return Ok(control.retain_external_value(value)?);
+        }
+        if let Some(value) = super::super::enums::cast_to_enum(
+            engine.enum_labels(),
+            value,
+            resolved_source_type.as_ref(),
+            target,
+        )? {
+            return Ok(control.retain_external_value(value)?);
+        }
+        if let Value::Enum(label) = value {
+            let output =
+                super::super::enums::enum_output_for_cast(engine.enum_labels(), label, target)?;
+            return cast_value_with_type_resolution_with_control(
+                &output,
+                Some("text"),
+                target_ty,
+                Some(engine),
+                control,
+            );
         }
         control.check()?;
         if matches!(target, ColumnType::Array(_)) && requires_catalog_array_cast(target) {
@@ -210,6 +235,7 @@ fn resolve_regobject_input(
 ) -> Result<Option<i64>> {
     enum ObjectKind {
         Relation,
+        RoutineName,
         Routine,
         Role,
         Namespace,
@@ -217,6 +243,10 @@ fn resolve_regobject_input(
     }
     let kind = if target_ty.eq_ignore_ascii_case("regclass") {
         ObjectKind::Relation
+    } else if matches!(target_column_type, Some(ColumnType::Regproc))
+        || target_ty.eq_ignore_ascii_case("regproc")
+    {
+        ObjectKind::RoutineName
     } else if target_ty.eq_ignore_ascii_case("regprocedure") {
         ObjectKind::Routine
     } else if target_ty.eq_ignore_ascii_case("regrole") {
@@ -230,6 +260,8 @@ fn resolve_regobject_input(
     };
     let oid = match kind {
         ObjectKind::Relation => engine.resolve_regclass_input(name)?,
+        // `regprocin` reports its own missing and ambiguous names.
+        ObjectKind::RoutineName => return engine.resolve_regproc(name),
         ObjectKind::Routine => engine
             .resolve_regprocedure(name)
             .map_err(SQLError::Internal)?,
@@ -246,7 +278,9 @@ fn resolve_regobject_input(
         ObjectKind::Routine => ("42883", format!("function {name} does not exist")),
         ObjectKind::Role => ("42704", format!("role \"{name}\" does not exist")),
         ObjectKind::Namespace => ("3F000", format!("schema \"{name}\" does not exist")),
-        ObjectKind::Type => unreachable!("unresolved regtype uses ordinary conversion"),
+        ObjectKind::Type | ObjectKind::RoutineName => {
+            unreachable!("regtype and regproc input return before reporting a missing object")
+        }
     };
     Err(SQLError::Routine {
         sqlstate: sqlstate.into(),
@@ -256,7 +290,7 @@ fn resolve_regobject_input(
 
 fn requires_catalog_array_cast(ty: &ColumnType) -> bool {
     match ty {
-        ColumnType::Domain { .. } | ColumnType::Regtype => true,
+        ColumnType::Domain { .. } | ColumnType::Regtype | ColumnType::Enum(_) => true,
         ColumnType::Array(element) => requires_catalog_array_cast(element),
         _ => false,
     }
@@ -273,7 +307,8 @@ fn cast_catalog_array(
         return Ok(control.finish(Value::Null, control.empty_reservation())?);
     }
     let source_element = source.map(|name| name.trim_end_matches("[]"));
-    let target_element = array_leaf_type(target).sql_name_with_control(control)?;
+    let leaf = array_leaf_type(target);
+    let target_element = control.copy_text(&leaf.catalog_name())?;
     let target_name = target.sql_name_with_control(control)?;
     cast_array(
         value,

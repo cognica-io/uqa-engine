@@ -16,10 +16,7 @@ use uqa_sql::ast::{
     ColumnType, CreateTable, DeferredCreateTable, OnCommitAction, RelationPersistence,
     TableConstraintSet, TableHierarchy,
 };
-use uqa_sql::schema::table_creation::{
-    declaration::{self, CreateTableAnalysisContext},
-    validate_create_table_columns,
-};
+use uqa_sql::schema::table_creation::declaration::{self, CreateTableAnalysisContext};
 use uqa_sql::{SQLError, SQLResult};
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
@@ -47,6 +44,12 @@ pub trait TableCreationPublication {
         -> StorageBackendResult<()>;
     fn persist_schema(&self, table: &str) -> StorageBackendResult<bool>;
     fn refresh_value_indexes(&self, table: &str) -> StorageBackendResult<()>;
+    /// Reject a new partition whose bound accepts a row already stored in the parent's default partition.
+    fn validate_default_partition_rows(
+        &self,
+        parent: &str,
+        bound: &uqa_sql::ast::PartitionBound,
+    ) -> Result<(), SQLError>;
 }
 pub struct CreateTableContext<'a> {
     pub creation: crate::schema::namespaces::relations::RelationCreationContext<'a>,
@@ -66,9 +69,14 @@ pub fn run_create_table(
     context: &CreateTableContext<'_>,
     mut table: CreateTable,
 ) -> Result<SQLResult, SQLError> {
-    validate_create_table_columns(&table)?;
     let owner = context.creation.bind_owner()?;
-    let Some(name) = preflight(context, &table.name, table.persistence, table.if_not_exists)?
+    let Some(name) = preflight(
+        context,
+        &table.name,
+        table.persistence,
+        table.if_not_exists,
+        ExistingRelation::Deferred,
+    )?
     else {
         return Ok(SQLResult::empty());
     };
@@ -80,19 +88,33 @@ pub fn run_create_table_if_not_exists(
     deferred: DeferredCreateTable,
 ) -> Result<SQLResult, SQLError> {
     let owner = context.creation.bind_owner()?;
-    let Some(name) = preflight(context, &deferred.name, deferred.persistence, true)? else {
+    let Some(name) = preflight(
+        context,
+        &deferred.name,
+        deferred.persistence,
+        true,
+        ExistingRelation::Deferred,
+    )?
+    else {
         return Ok(SQLResult::empty());
     };
     let mut table = uqa_sql::resolve_deferred_create_table(&deferred)?;
-    validate_create_table_columns(&table)?;
     table.name = name;
     create_after_preflight(context, table, &owner)
+}
+
+/// When a relation that already has the name is an error. `transformCreateStmt` skips `IF NOT EXISTS` before the columns are described, but `heap_create_with_catalog` reports the collision only after `BuildDescForRelation` and `CheckAttributeNamesTypes` accepted them.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ExistingRelation {
+    Deferred,
+    Reported,
 }
 fn preflight(
     context: &CreateTableContext<'_>,
     name: &str,
     persistence: RelationPersistence,
     if_not_exists: bool,
+    existing: ExistingRelation,
 ) -> Result<Option<String>, SQLError> {
     if persistence != RelationPersistence::Temporary {
         context.namespace.prepare_writer()?;
@@ -113,10 +135,12 @@ fn preflight(
             ));
             return Ok(None);
         }
-        return Err(SQLError::Routine {
-            sqlstate: "42P07".into(),
-            message: format!("relation \"{local}\" already exists"),
-        });
+        if existing == ExistingRelation::Reported {
+            return Err(SQLError::Routine {
+                sqlstate: "42P07".into(),
+                message: format!("relation \"{local}\" already exists"),
+            });
+        }
     }
     Ok(Some(name))
 }
@@ -127,8 +151,25 @@ fn create_after_preflight(
 ) -> Result<SQLResult, SQLError> {
     declaration::prepare_create_table_declaration(&context.analysis, &mut table)?;
     context.creation.retain_owner(owner)?;
-    if preflight(context, &table.name, table.persistence, table.if_not_exists)?.is_none() {
+    if preflight(
+        context,
+        &table.name,
+        table.persistence,
+        table.if_not_exists,
+        ExistingRelation::Reported,
+    )?
+    .is_none()
+    {
         return Ok(SQLResult::empty());
+    }
+    declaration::bind_create_table_relation(&context.analysis, &mut table)?;
+    if let (Some(parent), Some(bound)) = (
+        table.hierarchy.parents.first(),
+        table.hierarchy.partition_bound.as_ref(),
+    ) {
+        context
+            .publication
+            .validate_default_partition_rows(parent, bound)?;
     }
     implicit::materialize_implicit_sequences(
         &context.sequences,
@@ -171,6 +212,8 @@ fn create_after_preflight(
         foreign_keys: table.foreign_keys.clone(),
         key_constraints: table.key_constraints.clone(),
         hierarchy: table.hierarchy.clone(),
+        // The created relation's state carries its OIDs; publication records them.
+        catalog_oids: None,
     };
     context
         .schema_transactions

@@ -30,6 +30,7 @@ impl Engine {
     fn view_creation_context(&self) -> ViewCreationContext<'_> {
         ViewCreationContext {
             catalog: self,
+            identities: self.catalog_identity_reservation_context(),
             views: self,
             locks: self,
             namespace: self.relation_creation_context(),
@@ -79,6 +80,11 @@ impl ViewPlanBinding for Engine {
         uqa_execution::query::binding::bind_query_plan_routines_for_storage(
             self, plan, params, &scope, None,
         )
+    }
+    fn bind_type_identities(&self, plan: &mut QueryPlan) -> Result<(), SQLError> {
+        uqa_sql::binding::stored_types::bind_query_plan_type_identities(plan, &mut |name| {
+            uqa_sql::FunctionTypeResolver::resolve_type_name(self, name)
+        })
     }
 }
 

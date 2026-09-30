@@ -83,6 +83,8 @@ pub struct DomainDependencyContext<'a> {
     pub catalog: &'a dyn DomainDependencyCatalog,
     pub views: &'a dyn DomainViewDependencies,
     pub publication: &'a dyn DomainRegistryPublication,
+    /// Enum targets share this dependency closure; their definitions leave the enum registry at commit.
+    pub enums: &'a dyn crate::catalog::enum_type::EnumRegistryPublication,
     pub tables: &'a dyn DomainTableRemoval,
     pub foreign: &'a dyn DomainForeignRemoval,
     pub indexes: &'a dyn DomainIndexRemoval,
@@ -291,6 +293,15 @@ pub fn commit_domain_drop(
     drop_domain_schema_dependents(context, &dependents)?;
     analysis::remove_domain_references(context.types, &mut registry, targets)?;
     crate::catalog::domain::publish(context.publication, &before, registry)?;
+    let enums_before = context.enums.enum_registry().clone();
+    if enums_before
+        .values()
+        .any(|definition| targets.contains(&definition.oid))
+    {
+        let mut enums = enums_before.clone();
+        enums.retain(|_, definition| !targets.contains(&definition.oid));
+        crate::catalog::enum_type::publish(context.enums, &enums_before, enums)?;
+    }
     context.changes.catalog_registry_changed();
     Ok(())
 }

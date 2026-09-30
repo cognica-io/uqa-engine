@@ -178,6 +178,7 @@ fn transaction_characteristics(
     Ok(characteristics)
 }
 
+/// Map `pg_query`'s `DiscardMode` enum (1=ALL, 2=PLANS, 3=SEQUENCES, 4=TEMP) to the AST's [`crate::ast::DiscardTarget`].
 pub(super) fn discard_target(mode: i32) -> Result<crate::ast::DiscardTarget> {
     use crate::ast::DiscardTarget;
     match mode {

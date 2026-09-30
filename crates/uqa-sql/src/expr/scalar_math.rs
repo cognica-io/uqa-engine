@@ -10,11 +10,12 @@ use super::conversion::{float1_with_control, to_f64_with_control, to_i64_with_co
 use super::{float_to_i64_trunc, out_of_range, DecimalValue, Result, SQLError, Value};
 use uqa_core::memory::{Produced, ProductionControl};
 
+mod format;
 mod text;
 
 pub(super) fn eval_math_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
     if name == "format" {
-        return Some(text::ordinary_format(args));
+        return Some(format::format(args));
     }
     if name == "random" {
         // Lightweight pseudo-random value derived from system time.

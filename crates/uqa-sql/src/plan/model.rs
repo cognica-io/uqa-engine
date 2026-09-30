@@ -630,12 +630,19 @@ pub enum CommandPlan {
     },
     CreateSequence(crate::ast::CreateSequence),
     CreateDomain(crate::ast::CreateDomain),
+    CreateEnum(crate::ast::CreateEnum),
+    AlterEnum(crate::ast::AlterEnum),
+    AlterTypeObject(crate::ast::AlterTypeObject),
+    GrantType(crate::ast::GrantTypeStmt),
     AlterSequence(crate::ast::AlterSequence),
     CreateTableAs {
         name: String,
         if_not_exists: bool,
         column_names: Vec<String>,
         with_no_data: bool,
+        /// Written as `SELECT ... INTO`, which `PostgreSQL` tags `SELECT INTO`.
+        #[serde(default)]
+        select_into: bool,
         persistence: crate::ast::RelationPersistence,
         on_commit: crate::ast::OnCommitAction,
         query: Box<QueryPlan>,

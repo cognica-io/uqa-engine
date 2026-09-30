@@ -130,6 +130,7 @@ pub mod values;
 
 pub mod rows_from;
 
+mod acl;
 mod analyzers;
 pub use analyzers::analyze_text;
 pub mod context;

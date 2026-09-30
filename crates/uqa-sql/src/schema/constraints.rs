@@ -27,7 +27,7 @@ impl CheckConditionTypeResolver<'_> {
             .ok_or_else(|| SQLError::UnknownColumn(name.to_string()))?;
         Ok(ResolvedVariable {
             value: Value::Null,
-            declared_type: Some(definition.ty.sql_name()),
+            declared_type: Some(definition.ty.catalog_name()),
         })
     }
 
@@ -115,7 +115,7 @@ pub fn validate_check_expression(
         }
         Some(_) => Ok(()),
     }?;
-    bind_stored_check_expression_routines(context, table, qualifier, columns, expression)?;
+    bind_stored_check_expression(context, table, qualifier, columns, expression)?;
     super::generated::bind_schema_column_references(expression, qualifier);
     super::generated::bind_schema_column_references(expression, table);
     let relation = crate::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
@@ -123,7 +123,7 @@ pub fn validate_check_expression(
     Ok(())
 }
 
-pub fn bind_stored_check_expression_routines(
+pub fn bind_stored_check_expression(
     context: &SchemaBindingContext<'_, '_>,
     table: &str,
     qualifier: &str,
@@ -138,7 +138,7 @@ pub fn bind_stored_check_expression_routines(
             columns,
         },
     )?;
-    super::defaults::bind_stored_schema_expression_routines(context, expression, typed_expression)
+    super::defaults::bind_stored_schema_expression(context, expression, typed_expression)
 }
 
 pub fn validate_foreign_key_definition(

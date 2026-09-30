@@ -275,6 +275,7 @@ impl Engine {
             .map(|(relation, table)| {
                 let snapshot = CatalogTableSnapshot {
                     object_id: table.object_id(),
+                    catalog_oids: table.relation_oids(),
                     security: table.security.snapshot(),
                     columns: table.columns.snapshot(),
                     columns_declared: *table.columns_declared.read(),
@@ -296,6 +297,7 @@ impl Engine {
                 role_memberships: durable.role_memberships.clone(),
 
                 domains: durable.domains.clone(),
+                enums: durable.enums.clone(),
                 graphs: durable.graphs.clone(),
                 views: durable.views.clone(),
                 catalog_indexes: durable.catalog_indexes.clone(),
@@ -640,7 +642,9 @@ mod view_creation;
 mod view_restoration;
 
 mod domains;
+mod enums;
 mod namespaces;
+mod type_lifecycle;
 
 mod index_routines;
 mod view_dependencies;

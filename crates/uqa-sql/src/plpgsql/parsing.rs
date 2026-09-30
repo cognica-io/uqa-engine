@@ -22,7 +22,7 @@ pub fn parse_function(def: &CreateFunction) -> Result<PLpgSQLFunction> {
             "PL/pgSQL parser invoked on a SQL-standard body".into(),
         ));
     };
-    let text = synthesize_create_text(def, body);
+    let text = synthesize_create_text(def, body, &|type_name| Ok(type_name.to_string()))?;
     parse_plpgsql_text(&text)
 }
 
@@ -36,10 +36,34 @@ pub fn parse_function_with_catalog(
             "PL/pgSQL parser invoked on a SQL-standard body".into(),
         ));
     };
-    lower_plpgsql_json(&pg_query::parse_plpgsql_with_catalog(
-        &synthesize_create_text(def, body),
-        catalog,
-    )?)
+    let text = synthesize_create_text(def, body, &|type_name| {
+        catalog_type_spelling(catalog, type_name)
+    })?;
+    lower_plpgsql_json(&pg_query::parse_plpgsql_with_catalog(&text, catalog)?)
+}
+
+/// Signatures name user-defined types by identity; the synthesized declaration spells them by their current qualified name, which the snapshot resolves to the same OID.
+fn catalog_type_spelling(catalog: &pg_query::PlpgsqlCatalog, type_name: &str) -> Result<String> {
+    let Some(identity) = crate::ast::UserTypeIdentity::parse(type_name) else {
+        return Ok(type_name.to_string());
+    };
+    let missing = || SQLError::Internal(format!("cache lookup failed for type {}", identity.oid));
+    let ty = catalog
+        .types
+        .iter()
+        .find(|ty| ty.oid == identity.oid)
+        .ok_or_else(missing)?;
+    let schema = catalog
+        .namespaces
+        .iter()
+        .find_map(|(name, oid)| (*oid == ty.namespace_oid).then_some(name))
+        .ok_or_else(missing)?;
+    Ok(format!(
+        "{}.{}{}",
+        quote_ident(schema),
+        quote_ident(&ty.name),
+        "[]".repeat(identity.dimensions)
+    ))
 }
 
 /// Parse an anonymous block using the engine's catalog type snapshot.
@@ -64,7 +88,11 @@ pub fn parse_do_block(body: &str) -> Result<PLpgSQLFunction> {
 /// Canonical `CREATE FUNCTION` / `CREATE PROCEDURE` text used solely
 /// to feed the `PL/pgSQL` parser (parameter DEFAULTs are resolved at
 /// call time and intentionally omitted).
-pub(super) fn synthesize_create_text(def: &CreateFunction, body: &str) -> String {
+pub(super) fn synthesize_create_text(
+    def: &CreateFunction,
+    body: &str,
+    spell_type: &dyn Fn(&str) -> Result<String>,
+) -> Result<String> {
     let mut sql = String::new();
     sql.push_str(if def.is_procedure {
         "CREATE PROCEDURE "
@@ -92,18 +120,18 @@ pub(super) fn synthesize_create_text(def: &CreateFunction, body: &str) -> String
             sql.push_str(&quote_ident(&p.name));
             sql.push(' ');
         }
-        sql.push_str(&p.type_name);
+        sql.push_str(&spell_type(&p.type_name)?);
     }
     sql.push(')');
     match &def.returns {
         FunctionReturns::None => {}
         FunctionReturns::Scalar { type_name } => {
             sql.push_str(" RETURNS ");
-            sql.push_str(type_name);
+            sql.push_str(&spell_type(type_name)?);
         }
         FunctionReturns::SetOf { type_name } => {
             sql.push_str(" RETURNS SETOF ");
-            sql.push_str(type_name);
+            sql.push_str(&spell_type(type_name)?);
         }
         FunctionReturns::Table => {
             sql.push_str(" RETURNS TABLE(");
@@ -118,7 +146,7 @@ pub(super) fn synthesize_create_text(def: &CreateFunction, body: &str) -> String
                 first_col = false;
                 sql.push_str(&quote_ident(&p.name));
                 sql.push(' ');
-                sql.push_str(&p.type_name);
+                sql.push_str(&spell_type(&p.type_name)?);
             }
             sql.push(')');
         }
@@ -129,7 +157,7 @@ pub(super) fn synthesize_create_text(def: &CreateFunction, body: &str) -> String
     sql.push_str(body);
     sql.push_str(&tag);
     sql.push_str(" LANGUAGE plpgsql;");
-    sql
+    Ok(sql)
 }
 
 pub(super) fn quote_ident(name: &str) -> String {

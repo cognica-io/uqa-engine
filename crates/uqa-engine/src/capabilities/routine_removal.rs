@@ -29,6 +29,14 @@ impl RoutineNameCatalog for Engine {
     fn schema_has_usage(&self, schema: &str, role: &RoleReference) -> bool {
         self.schema_has_privilege_for_role(schema, role, SchemaAclPrivilege::Usage)
     }
+    fn routine_type_display(&self, type_name: &str) -> String {
+        // Pseudo-types such as `anyelement` have no catalog column type and keep their names.
+        uqa_execution::catalog::projection::resolve_catalog_column_type(
+            &self.catalog_execution(),
+            type_name,
+        )
+        .map_or_else(|| type_name.to_string(), |ty| ty.display_name())
+    }
 }
 
 use std::{collections::BTreeSet, sync::Arc};

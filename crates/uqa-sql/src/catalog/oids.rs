@@ -6,6 +6,9 @@
 
 //! Stable identities for SQL catalog objects.
 
+/// The first OID a user-created object receives (`FirstNormalObjectId`); lower OIDs belong to the system catalogs.
+pub const FIRST_NORMAL_OBJECT_ID: u32 = 16_384;
+
 pub fn stable_oid(kind: &str, name: &str) -> i64 {
     let mut hash = 14_695_981_039_346_656_037_u64;
     for byte in kind.bytes().chain(*b":").chain(name.bytes()) {

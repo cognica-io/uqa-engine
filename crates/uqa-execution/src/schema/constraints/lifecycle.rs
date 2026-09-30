@@ -68,8 +68,12 @@ pub fn add_foreign_key_constraint(
         .constraint_names()
         .ensure_available(table, constraint.name.as_deref())?;
     constraints.foreign_keys.push(constraint);
+    let binding = context.publication.bindings.bindings.binding_scope()?;
     uqa_sql::schema::generated::prepare_generated_columns(
-        context.publication.bindings.schema,
+        &uqa_sql::schema::SchemaBindingContext {
+            catalog: context.publication.bindings.schema,
+            binding: &binding.context(),
+        },
         qualifier,
         &mut columns,
         &constraints.key_constraints,
@@ -404,8 +408,12 @@ pub fn add_key_constraint(
         .catalog
         .try_foreign_keys(table)
         .map_err(|error| ddl_storage_error("ALTER TABLE ADD CONSTRAINT", error))?;
+    let binding = context.publication.bindings.bindings.binding_scope()?;
     uqa_sql::schema::generated::prepare_generated_columns(
-        context.publication.bindings.schema,
+        &uqa_sql::schema::SchemaBindingContext {
+            catalog: context.publication.bindings.schema,
+            binding: &binding.context(),
+        },
         qualifier,
         &mut columns,
         &key_constraints,

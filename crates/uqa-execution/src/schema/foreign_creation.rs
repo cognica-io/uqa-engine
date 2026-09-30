@@ -98,10 +98,12 @@ impl ForeignCreationContext<'_> {
         self.changes.catalog_registry_changed();
         Ok(())
     }
+    /// Resolve the new foreign table's name. `IF NOT EXISTS` skips an existing relation before the columns are described, but `heap_create_with_catalog` reports the collision only after `BuildDescForRelation` accepted them, so an early preflight passes it on.
     fn preflight_foreign_table_creation(
         &self,
         name: &str,
         if_not_exists: bool,
+        report_existing: bool,
     ) -> Result<Option<(String, RelationIdentity)>, uqa_sql::SQLError> {
         self.namespace
             .synchronize_catalog_registries()
@@ -126,6 +128,9 @@ impl ForeignCreationContext<'_> {
                     format!("relation \"{}\" already exists, skipping", relation.name),
                 ));
                 return Ok(None);
+            }
+            if !report_existing {
+                return Ok(Some((name, relation)));
             }
             return Err(uqa_sql::SQLError::Routine {
                 sqlstate: "42P07".into(),
@@ -175,7 +180,8 @@ impl ForeignCreationContext<'_> {
             validate_foreign_table_schema_envelope(&columns)?;
         }
         let owner = self.creation.bind_owner()?;
-        let Some((_, relation)) = self.preflight_foreign_table_creation(name, if_not_exists)?
+        let Some((_, relation)) =
+            self.preflight_foreign_table_creation(name, if_not_exists, false)?
         else {
             return Ok(());
         };
@@ -210,9 +216,12 @@ impl ForeignCreationContext<'_> {
                 &column.ty,
             )?;
         }
+        for column in &columns {
+            self.schema.types.require_type_usage(&column.ty)?;
+        }
         self.creation.retain_owner(&target.owner)?;
         let Some((_, relation)) =
-            self.preflight_foreign_table_creation(name, target.if_not_exists)?
+            self.preflight_foreign_table_creation(name, target.if_not_exists, true)?
         else {
             return Ok(());
         };
@@ -223,6 +232,13 @@ impl ForeignCreationContext<'_> {
             &mut columns,
             uqa_sql::ast::RelationPersistence::Permanent,
         )?;
+        // `DefineRelation` allocates the relation's OIDs before those of its constraints.
+        let catalog_oids = self
+            .identities
+            .allocator(crate::catalog::identity::allocate_catalog_object_id)
+            .allocate_relation_oids(
+                uqa_sql::catalog::relation_oids::RelationOidKind::ForeignTable,
+            )?;
         self.schema.prepare_foreign_table_schema(
             name,
             &mut columns,
@@ -251,6 +267,7 @@ impl ForeignCreationContext<'_> {
         let table = StoredForeignTable {
             name: name.to_string(),
             object_id,
+            catalog_oids: Some(catalog_oids),
             server_name,
             columns,
             checks,
@@ -323,7 +340,8 @@ impl ForeignCreationContext<'_> {
         deferred: DeferredCreateForeignTable,
     ) -> Result<(), SQLError> {
         let owner = self.creation.bind_owner()?;
-        let Some((_, relation)) = self.preflight_foreign_table_creation(&deferred.name, true)?
+        let Some((_, relation)) =
+            self.preflight_foreign_table_creation(&deferred.name, true, false)?
         else {
             return Ok(());
         };

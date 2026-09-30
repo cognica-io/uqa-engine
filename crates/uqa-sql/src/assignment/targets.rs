@@ -151,11 +151,11 @@ pub fn validate_assignment_source<E>(
                 format!(
                     "column \"{}\" is of type {} but expression is of type {}",
                     target.column,
-                    required.sql_name(),
-                    source.sql_name()
+                    required.display_name(),
+                    source.display_name()
                 )
             } else {
-                format!("subscripted assignment to \"{}\" requires type {} but expression is of type {}", target.column, required.sql_name(), source.sql_name())
+                format!("subscripted assignment to \"{}\" requires type {} but expression is of type {}", target.column, required.display_name(), source.display_name())
             };
             return Err(SQLError::Diagnostic {
                 sqlstate: "42804".into(),

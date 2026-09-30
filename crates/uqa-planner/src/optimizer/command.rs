@@ -184,6 +184,10 @@ pub(super) fn optimize_command(
         | CommandPlan::CloseCursor { .. }
         | CommandPlan::CreateSequence(_)
         | CommandPlan::CreateDomain(_)
+        | CommandPlan::CreateEnum(_)
+        | CommandPlan::AlterEnum(_)
+        | CommandPlan::AlterTypeObject(_)
+        | CommandPlan::GrantType(_)
         | CommandPlan::AlterSequence(_)
         | CommandPlan::Deallocate { .. }
         | CommandPlan::CreateForeignServer(_)

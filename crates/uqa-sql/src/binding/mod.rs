@@ -38,6 +38,7 @@ pub use projection::{
 };
 pub use routine_binding::{
     bind_expression_plan_routines_for_storage, bind_query_plan_routines_for_storage,
+    bind_syntax_query_plan_routines,
 };
 pub use scope::{
     analyze_expression_plan_type, analyze_query_plan_schema,
@@ -86,6 +87,8 @@ struct SchemaScope {
     visiting_views: BTreeSet<String>,
     validate_references: bool,
     stored_expression_outer: Option<RowSchema>,
+    /// Keep `*` projections and `GROUP BY` output-name references as written, so a bound copy of stored syntax still corresponds to that syntax node for node.
+    preserve_syntax_shape: bool,
 }
 
 fn non_returning_cte_error(name: &str) -> SQLError {
@@ -105,6 +108,7 @@ impl SchemaScope {
             visiting_views: BTreeSet::new(),
             validate_references: false,
             stored_expression_outer: None,
+            preserve_syntax_shape: false,
         })
     }
 
@@ -124,6 +128,7 @@ impl SchemaScope {
             visiting_views: BTreeSet::new(),
             validate_references: true,
             stored_expression_outer: None,
+            preserve_syntax_shape: false,
         }
     }
 
@@ -355,6 +360,7 @@ impl SchemaScope {
                 routines, expression, schema, None, params, &resolver,
             )?;
         }
+        crate::type_resolution::validate_catalog_literals(expression, schema, params, &resolver)?;
         crate::scalar_type_with_resolver(expression, schema, params, &resolver)
     }
 
@@ -963,13 +969,15 @@ impl SchemaScope {
 }
 
 #[cfg(test)]
-mod fixture;
+pub(crate) mod fixture;
 
 pub mod correlation;
 
 pub mod stored_columns;
 pub mod stored_relations;
 pub mod stored_routines;
+pub mod stored_types;
+pub mod syntax_sites;
 
 pub mod scoped_types;
 pub mod snapshot;

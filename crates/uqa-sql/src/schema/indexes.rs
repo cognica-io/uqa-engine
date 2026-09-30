@@ -120,6 +120,7 @@ pub(super) fn bind_index_expression(
             format!("set-returning functions are not allowed in {context}s"),
         ));
     }
+    let lowered = plan.clone();
     let ty = crate::binding::bind_expression_plan_routines_for_storage(
         engine,
         &mut plan,
@@ -127,8 +128,8 @@ pub(super) fn bind_index_expression(
         binding,
         &schema,
     )?;
-    let references = crate::binding::stored_routines::collect_expression_routine_references(&plan)?;
-    crate::catalog::stored_ast::bind_stored_expression_routines(expression, &references)?;
+    let sites = crate::binding::syntax_sites::expression_syntax_sites(&lowered, &plan)?;
+    crate::catalog::stored_ast::bind_stored_expression_sites(expression, &sites)?;
     Ok(ty)
 }
 

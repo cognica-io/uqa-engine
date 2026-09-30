@@ -42,9 +42,7 @@ impl Deparser<'_> {
                 "executor-only column reached view SQL reconstruction".into(),
             )),
             ScalarExpr::Literal(value) => literal(value),
-            ScalarExpr::TypedLiteral { value, ty, .. } => {
-                Ok(format!("({})::{ty}", literal(value)?))
-            }
+            ScalarExpr::TypedLiteral { value, ty, .. } => self.typed_literal(value, ty),
             ScalarExpr::Param(index) => Ok(format!("${index}")),
             ScalarExpr::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs, scope, subqueries),
             ScalarExpr::And(items) | ScalarExpr::Or(items) => {
@@ -237,13 +235,17 @@ impl Deparser<'_> {
         self.query(query, &scope.child(), None)
     }
 
-    fn cast(
+    pub(super) fn cast(
         &self,
         expr: &ScalarExpr,
         ty: &str,
         scope: &Scope,
         subqueries: &[QueryPlan],
     ) -> Result<String, SQLError> {
+        if let Some(rendered) = self.coercion(expr, ty, scope, subqueries)? {
+            return Ok(rendered);
+        }
+        let display = self.type_display(ty);
         let ty = type_name(ty);
         if let ScalarExpr::Literal(value) = expr {
             if matches!(value, Value::Str(_))
@@ -257,7 +259,7 @@ impl Deparser<'_> {
                     return literal(&converted);
                 }
                 return Ok(format!(
-                    "{}::{ty}",
+                    "{}::{display}",
                     uqa_sql::render::expression_sql(&Expr::Literal(value.clone()))?
                 ));
             }
@@ -266,17 +268,17 @@ impl Deparser<'_> {
             }
             if matches!(value, Value::Str(_) | Value::Null) {
                 let value = uqa_sql::render::expression_sql(&Expr::Literal(value.clone()))?;
-                return Ok(format!("{value}::{ty}"));
+                return Ok(format!("{value}::{display}"));
             }
         }
         let value = self.expression(expr, scope, subqueries)?;
         if self.pretty {
             Ok(format!(
-                "{}::{ty}",
+                "{}::{display}",
                 self.operand(expr, 80, false, scope, subqueries)?
             ))
         } else {
-            Ok(format!("({value})::{ty}"))
+            Ok(format!("({value})::{display}"))
         }
     }
 
@@ -470,7 +472,12 @@ impl Deparser<'_> {
         scope: &Scope,
         subqueries: &[QueryPlan],
     ) -> Result<String, SQLError> {
-        let indent = " ".repeat(scope.indent + 8);
+        // A standalone expression starts at indentation level zero; query clauses indent their expressions one level.
+        let indent = " ".repeat(if self.standalone {
+            scope.indent
+        } else {
+            scope.indent + 8
+        });
         let mut rendered = format!("\n{indent}CASE");
         if let Some(base) = base {
             rendered.push(' ');
@@ -561,7 +568,7 @@ impl Deparser<'_> {
     }
 }
 
-fn literal(value: &Value) -> Result<String, SQLError> {
+pub(super) fn literal(value: &Value) -> Result<String, SQLError> {
     match value {
         Value::Str(value) => Ok(format!("'{}'::text", value.replace('\'', "''"))),
         Value::Int(value) if i32::try_from(*value).is_err() => Ok(format!("'{value}'::bigint")),
@@ -605,7 +612,7 @@ fn literal_has_type(value: &Value, ty: &str) -> bool {
     }
 }
 
-fn type_name(ty: &str) -> String {
+pub(super) fn type_name(ty: &str) -> String {
     match ty.to_ascii_lowercase().as_str() {
         "int" | "int4" => "integer".into(),
         "int8" => "bigint".into(),

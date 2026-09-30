@@ -96,7 +96,8 @@ fn scalar_parameter(value: &Value) -> Result<SQLParameter, HttpEngineError> {
         Value::Bool(value) => SQLParameter::Boolean { value: *value },
         Value::Int(value) => SQLParameter::Int64 { value: *value },
         Value::Float(value) if value.is_finite() => SQLParameter::Float64 { value: *value },
-        Value::Float(_) => return Err(HttpEngineError::InvalidParameter),
+        // Enum carriers name a database-local type OID; clients send labels as text parameters.
+        Value::Float(_) | Value::Enum(_) => return Err(HttpEngineError::InvalidParameter),
         Value::Str(value) => SQLParameter::Text {
             value: value.clone(),
         },
@@ -130,6 +131,7 @@ fn finite_value(value: &Value) -> bool {
         Value::Record(values) => values.iter().all(|(_, value)| finite_value(value)),
         Value::Map(values) => values.values().all(finite_value),
         Value::Null
+        | Value::Enum(_)
         | Value::LegacyVector(_)
         | Value::Void
         | Value::Bool(_)

@@ -165,6 +165,9 @@ impl RowLayout {
             .map_err(|error| match error {
                 uqa_core::ValueRetentionError::Memory(error) => error.into(),
                 uqa_core::ValueRetentionError::Cancelled(error) => error.into(),
+                error @ uqa_core::ValueRetentionError::Malformed { .. } => {
+                    uqa_storage::StorageBackendError::Other(error.to_string())
+                }
             })
     }
 }

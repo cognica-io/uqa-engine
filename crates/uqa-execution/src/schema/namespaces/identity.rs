@@ -67,12 +67,11 @@ pub(super) fn reserve_creation(
         });
     }
     name_guard.retain();
-    let oid = crate::catalog::identity::reserve_catalog_oid(
+    let oid = crate::catalog::identity::reserve_new_catalog_oid(
         context.locks,
         SCHEMA_CATALOG_CLASS_ID,
         "schema",
         |oid| Ok(oid_in_use(context.schemas, oid)),
-        || crate::catalog::identity::allocate_catalog_oid("schema"),
     )?;
     new_tuple(oid).map_err(|error| SQLError::Internal(error.to_string()))
 }

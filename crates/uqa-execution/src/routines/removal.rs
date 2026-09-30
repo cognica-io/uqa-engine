@@ -66,8 +66,13 @@ pub fn preflight_sql_function_drop(
         "function"
     };
     let registry = context.registry.routine_snapshot();
-    let mut resolution =
-        analysis_binding::resolve_sql_function_drop_targets(context.names, stmt, &registry, kind)?;
+    let mut resolution = analysis_binding::resolve_sql_function_drop_targets(
+        context.names,
+        context.bodies.compilation.analysis.types,
+        stmt,
+        &registry,
+        kind,
+    )?;
     ensure_routine_drop_owners(context, &registry, &resolution.targets)?;
     let cascaded_routines =
         expand_stored_routine_drop_dependents(context, &registry, stmt.cascade, &mut resolution)?;
@@ -97,7 +102,14 @@ pub fn preflight_sql_function_drop(
     }
     let dependents = routine_object_dependents(context, &resolution.targets, stmt.cascade)?;
     if stmt.cascade {
-        append_routine_cascade_notice(&mut resolution.notices, &cascaded_routines, &dependents);
+        // `getObjectDescription` names every routine kind a function.
+        let cascaded = cascaded_routines
+            .iter()
+            .map(|target| {
+                routine_drop_display_label(context, target).map(|label| format!("function {label}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        append_routine_cascade_notice(&mut resolution.notices, cascaded, &dependents);
     }
     Ok(SQLFunctionDropPlan {
         domains,

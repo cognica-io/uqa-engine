@@ -39,6 +39,14 @@ pub fn convert_value_to_column_type_with_control(
             sqlstate: "42704".into(),
             message: format!("type \"{name}\" does not exist"),
         }),
+        // Label input needs the catalog; catalog-aware assignment converts text before this context-free step.
+        ColumnType::Enum(reference) => match &*value {
+            Value::Enum(label) if label.type_oid() == reference.oid => Ok(value),
+            _ => Err(SQLError::Internal(format!(
+                "enum input for type OID {} requires catalog-aware conversion",
+                reference.oid
+            ))),
+        },
         ColumnType::SmallInteger => cast_value_from_with_control(&value, "smallint", None, control),
         ColumnType::Integer => cast_value_from_with_control(&value, "integer", None, control),
         ColumnType::BigInteger => cast_value_from_with_control(&value, "bigint", None, control),
@@ -89,11 +97,9 @@ pub fn convert_value_to_column_type_with_control(
         ColumnType::JsonB => cast_value_from_with_control(&value, "jsonb", None, control),
         ColumnType::Bytea => match &*value {
             Value::Bytes(_) => Ok(value),
-            Value::Str(_) => {
-                let (Value::Str(text), memory) = value.into_parts() else {
-                    unreachable!();
-                };
-                Ok(control.finish(Value::Bytes(text.into_bytes()), memory)?)
+            // Text reaches assignment only as an `unknown` literal, which `byteain` parses in its hex or escape format.
+            Value::Str(_) | Value::FixedChar(_) => {
+                cast_value_from_with_control(&value, "bytea", None, control)
             }
             _ => {
                 let (text, memory) = value_to_text_with_control(&value, control)?.into_parts();

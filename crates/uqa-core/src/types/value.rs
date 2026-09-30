@@ -8,7 +8,7 @@
 
 use super::{
     jsonb::compare_jsonb_text, ArrayValue, BTreeMap, DecimalValue, Deserialize, Deserializer,
-    LegacyVectorValue, Serialize, Serializer, TemporalValue,
+    EnumValue, LegacyVectorValue, Serialize, Serializer, TemporalValue,
 };
 
 pub(super) mod comparison_control;
@@ -62,6 +62,9 @@ pub enum Value {
     Record(Vec<(String, Value)>),
     /// JSON/document object value. This is not a SQL composite record.
     Map(BTreeMap<String, Value>),
+    /// Label of a user-defined enum type. The immutable label key orders
+    /// values in declaration order; label text is resolved from the catalog.
+    Enum(EnumValue),
 }
 
 impl Value {
@@ -111,6 +114,14 @@ struct TaggedRow<'a> {
 }
 
 #[derive(Serialize)]
+struct TaggedEnum<'a> {
+    #[serde(rename = "$uqa_type")]
+    kind: &'static str,
+    type_oid: u32,
+    key: &'a super::EnumLabelKey,
+}
+
+#[derive(Serialize)]
 struct TaggedRecord<'a> {
     #[serde(rename = "$uqa_type")]
     kind: &'static str,
@@ -134,30 +145,11 @@ impl Serialize for Value {
                 value,
             }
             .serialize(serializer),
-            Self::Bytes(value) => {
-                const DIGITS: &[u8; 16] = b"0123456789abcdef";
-
-                let capacity = value.len().checked_mul(2).ok_or_else(|| {
-                    <S::Error as serde::ser::Error>::custom(
-                        "byte value hex representation exceeds the addressable range",
-                    )
-                })?;
-                let mut hex = String::new();
-                hex.try_reserve_exact(capacity).map_err(|error| {
-                    <S::Error as serde::ser::Error>::custom(format!(
-                        "cannot allocate byte value hex representation: {error}"
-                    ))
-                })?;
-                for byte in value {
-                    hex.push(char::from(DIGITS[usize::from(byte >> 4)]));
-                    hex.push(char::from(DIGITS[usize::from(byte & 0x0f)]));
-                }
-                TaggedBytes {
-                    kind: "bytes",
-                    hex: &hex,
-                }
-                .serialize(serializer)
+            Self::Bytes(value) => TaggedBytes {
+                kind: "bytes",
+                hex: &hex_text::<S::Error>(value)?,
             }
+            .serialize(serializer),
             Self::Temporal(value) => value.serialize(serializer),
             Self::Decimal(value) => value.serialize(serializer),
             Self::Json(value) | Self::JsonB(value) => TaggedText {
@@ -188,8 +180,35 @@ impl Serialize for Value {
             }
             .serialize(serializer),
             Self::Map(value) => value.serialize(serializer),
+            Self::Enum(value) => TaggedEnum {
+                kind: "enum",
+                type_oid: value.type_oid(),
+                key: value.key(),
+            }
+            .serialize(serializer),
         }
     }
+}
+
+/// Lowercase hexadecimal text with fallible allocation for serialized byte payloads.
+fn hex_text<E: serde::ser::Error>(bytes: &[u8]) -> std::result::Result<String, E> {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+
+    let capacity = bytes
+        .len()
+        .checked_mul(2)
+        .ok_or_else(|| E::custom("byte value hex representation exceeds the addressable range"))?;
+    let mut hex = String::new();
+    hex.try_reserve_exact(capacity).map_err(|error| {
+        E::custom(format!(
+            "cannot allocate byte value hex representation: {error}"
+        ))
+    })?;
+    for byte in bytes {
+        hex.push(char::from(DIGITS[usize::from(byte >> 4)]));
+        hex.push(char::from(DIGITS[usize::from(byte & 0x0f)]));
+    }
+    Ok(hex)
 }
 
 /// Hand-written [`Deserialize`] for scalar JSON values, explicit tagged
@@ -456,6 +475,7 @@ impl Ord for Value {
             }
             (Value::Record(a), Value::Record(b)) => compare_postgres_record_values(a, b),
             (Value::Map(a), Value::Map(b)) => a.cmp(b),
+            (Value::Enum(a), Value::Enum(b)) => a.cmp(b),
             _ => discriminant(self).cmp(&discriminant(other)),
         }
     }
@@ -478,6 +498,7 @@ fn discriminant(v: &Value) -> u8 {
         Value::Record(_) => 12,
         Value::Map(_) => 13,
         Value::LegacyVector(_) => 14,
+        Value::Enum(_) => 15,
     }
 }
 

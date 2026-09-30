@@ -65,6 +65,7 @@ impl BuiltinRoutineCatalogEntry {
         match self.oid {
             3078 => Some(&[26, 20, 20, 20, 20, 16, 20, 26]),
             6427 => Some(&[2205, 20, 16]),
+            1689 => Some(&[1034, 26, 26, 25, 16]),
             _ => None,
         }
     }
@@ -73,16 +74,17 @@ impl BuiltinRoutineCatalogEntry {
         match self.oid {
             3078 => Some(&["i", "o", "o", "o", "o", "o", "o", "o"]),
             6427 => Some(&["i", "o", "o"]),
+            1689 => Some(&["i", "o", "o", "o", "o"]),
             _ => None,
         }
     }
 
     pub const fn returns_set(self) -> bool {
-        self.oid == 3035
+        matches!(self.oid, 3035 | 1689)
     }
 
     pub const fn estimated_rows(self) -> f64 {
-        if self.oid == 3035 {
+        if self.returns_set() {
             10.0
         } else {
             0.0
@@ -141,7 +143,9 @@ const BIT_LENGTH_SQL_BODY_SUFFIX: &str = concat!(
 
 const FALSE_NODE: &str = "({CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location -1 :constvalue 1 [ 0 0 0 0 0 0 0 0 ]})";
 
+mod arrays;
 mod definitions;
+mod enums;
 mod notifications;
 mod privileges;
 mod ranges;
@@ -168,6 +172,8 @@ const fn subscript_handler(oid: i64, name: &'static str) -> BuiltinRoutineCatalo
 
 pub const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] = &[
     scalar::ROUTINES,
+    arrays::ROUTINES,
+    enums::ROUTINES,
     definitions::ROUTINES,
     notifications::ROUTINES,
     privileges::ROUTINES,

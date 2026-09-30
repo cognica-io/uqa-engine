@@ -19,15 +19,18 @@ pub trait RoutineTypeCatalog {
     fn try_describe_table(&self, reference: &str) -> Result<Option<Vec<ColumnDef>>, String>;
     fn resolve_catalog_column_type(&self, name: &str) -> Option<ColumnType>;
     fn resolve_catalog_column_type_name(&self, name: &str) -> Result<ColumnType, SQLError>;
-    fn resolve_catalog_domain_type_by_oid(&self, oid: u32) -> Option<ColumnType>;
+    fn resolve_catalog_user_type_by_oid(&self, oid: u32) -> Option<ColumnType>;
+    /// `USAGE` on a type a routine declares, as [`crate::FunctionTypeResolver::require_type_usage`] requires it.
+    fn require_type_usage(&self, ty: &ColumnType) -> Result<(), SQLError>;
 }
 
+/// Resolve the declared argument and result types, as `interpret_function_parameter_list` and `compute_return_type` do: each argument in order and then the result requires `USAGE` on its type.
 pub fn resolve_routine_type_references(
     catalog: &dyn RoutineTypeCatalog,
     def: &mut CreateFunction,
 ) -> Result<(), SQLError> {
     for parameter in &mut def.params {
-        parameter.type_name = resolve_routine_type_name_with_reference(
+        parameter.type_name = resolve_used_routine_type(
             catalog,
             &parameter.type_name,
             ROUTINE_PARAMETER_PSEUDO_TYPES,
@@ -37,7 +40,7 @@ pub fn resolve_routine_type_references(
     }
     match &mut def.returns {
         FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
-            *type_name = resolve_routine_type_name_with_reference(
+            *type_name = resolve_used_routine_type(
                 catalog,
                 type_name,
                 ROUTINE_RESULT_PSEUDO_TYPES,
@@ -157,12 +160,62 @@ const ROUTINE_RESULT_PSEUDO_TYPES: &[&str] = &[
     "anycompatiblemultirange",
 ];
 
+/// A declared routine type: a pseudo-type by name, or a catalog type.
+enum DeclaredRoutineType {
+    Pseudo(String),
+    Catalog(ColumnType),
+}
+
+impl DeclaredRoutineType {
+    /// A user-defined type is recorded by identity, so the signature survives renames and does not depend on the search path.
+    fn into_catalog_name(self) -> String {
+        match self {
+            Self::Pseudo(name) => name,
+            Self::Catalog(ty) => ty.catalog_name(),
+        }
+    }
+}
+
+/// Resolve a declared argument or result type and require `USAGE` on it. Pseudo-types keep their default privileges.
+fn resolve_used_routine_type(
+    catalog: &dyn RoutineTypeCatalog,
+    type_name: &str,
+    allowed_pseudo_types: &[&str],
+    structured_reference: Option<&RoutineColumnTypeReference>,
+) -> Result<String, SQLError> {
+    let declared = resolve_declared_routine_type(
+        catalog,
+        type_name,
+        allowed_pseudo_types,
+        structured_reference,
+    )?;
+    if let DeclaredRoutineType::Catalog(ty) = &declared {
+        catalog.require_type_usage(ty)?;
+    }
+    Ok(declared.into_catalog_name())
+}
+
 fn resolve_routine_type_name_with_reference(
     catalog: &dyn RoutineTypeCatalog,
     type_name: &str,
     allowed_pseudo_types: &[&str],
     structured_reference: Option<&RoutineColumnTypeReference>,
 ) -> Result<String, SQLError> {
+    resolve_declared_routine_type(
+        catalog,
+        type_name,
+        allowed_pseudo_types,
+        structured_reference,
+    )
+    .map(DeclaredRoutineType::into_catalog_name)
+}
+
+fn resolve_declared_routine_type(
+    catalog: &dyn RoutineTypeCatalog,
+    type_name: &str,
+    allowed_pseudo_types: &[&str],
+    structured_reference: Option<&RoutineColumnTypeReference>,
+) -> Result<DeclaredRoutineType, SQLError> {
     let mut base = type_name.trim();
     let mut array_dimensions = 0usize;
     while let Some(element) = base.strip_suffix("[]") {
@@ -201,7 +254,7 @@ fn resolve_routine_type_name_with_reference(
                     message: format!("type `{type_name}` does not exist"),
                 });
             }
-            return Ok(canonical);
+            return Ok(DeclaredRoutineType::Pseudo(canonical));
         }
         catalog.resolve_catalog_column_type_name(base)?
     };
@@ -209,7 +262,7 @@ fn resolve_routine_type_name_with_reference(
     for _ in 0..array_dimensions {
         resolved = ColumnType::Array(Box::new(resolved));
     }
-    Ok(resolved.sql_name())
+    Ok(DeclaredRoutineType::Catalog(resolved))
 }
 
 pub fn resolve_plpgsql_datum_types(
@@ -223,9 +276,10 @@ pub fn resolve_plpgsql_datum_types(
         if variable.type_reference.is_none() {
             if let Some(ty) = variable
                 .type_oid
-                .and_then(|oid| catalog.resolve_catalog_domain_type_by_oid(oid))
+                .and_then(|oid| catalog.resolve_catalog_user_type_by_oid(oid))
             {
-                variable.type_name = ty.sql_name();
+                // The compiled function names the variable's type by identity, as a compiled PL/pgSQL function holds type OIDs: a later rename does not change which type it means.
+                variable.type_name = ty.catalog_name();
                 continue;
             }
         }

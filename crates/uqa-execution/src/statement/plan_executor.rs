@@ -824,6 +824,34 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 )?;
                 Ok(SQLResult::empty())
             }
+            CommandPlan::CreateEnum(statement) => {
+                crate::schema::enums::create_enum(
+                    &self.context.schemas.inputs.enum_type_context(),
+                    statement.clone(),
+                )?;
+                Ok(SQLResult::empty())
+            }
+            CommandPlan::AlterEnum(statement) => {
+                crate::schema::enums::alter_enum(
+                    &self.context.schemas.inputs.enum_type_context(),
+                    statement.clone(),
+                )?;
+                Ok(SQLResult::empty())
+            }
+            CommandPlan::AlterTypeObject(statement) => {
+                crate::schema::types::alter_type_object(
+                    &self.context.schemas.inputs.type_lifecycle_context(),
+                    statement.clone(),
+                )?;
+                Ok(SQLResult::empty())
+            }
+            CommandPlan::GrantType(statement) => {
+                crate::schema::types::grant_type(
+                    &self.context.schemas.inputs.type_lifecycle_context(),
+                    statement,
+                )?;
+                Ok(SQLResult::empty())
+            }
             CommandPlan::AlterSequence(statement) => {
                 crate::schema::sequences::entry::run_alter_sequence(
                     self.context.schemas.sequence_alteration,
@@ -839,6 +867,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 persistence,
                 on_commit,
                 query,
+                ..
             } => crate::schema::ctas::entry::run_create_table_as(
                 self.context.schemas.tables_as,
                 CreateTableAsExecution {

@@ -8,7 +8,7 @@
 
 use super::{
     catalog::RoutineMutationContext,
-    compilation::{compile_persisted_sql_function, StoredRoutineCompilationContext},
+    compilation::{persisted_routine_body, StoredRoutineCompilationContext},
 };
 use crate::schema::{
     namespaces::NamespaceCatalogRefresh, relation_alteration::RoleTargetSchemaAccess,
@@ -164,8 +164,8 @@ fn rewrite_routine_owned_dependency_identity(
             let changed =
                 analysis::rewrite_routine_owned_dependency_identity(&mut def, target, new_name)?;
             if changed {
-                let compiled = compile_persisted_sql_function(&context.compilation, &def)?;
-                next_overloads.push(Arc::new(SQLUserFunction { def, compiled }));
+                let body = persisted_routine_body(&context.compilation, &def)?;
+                next_overloads.push(Arc::new(SQLUserFunction::new(def, body)));
             } else {
                 next_overloads.push(function);
             }

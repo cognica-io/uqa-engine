@@ -189,7 +189,7 @@ fn operator_identity_survives_lowering_serialization_and_display_name_changes() 
         );
         for rendered in [
             crate::render::expression_sql(&expr).unwrap(),
-            crate::catalog::expression_text::schema_expr_text(&expr),
+            crate::catalog::expression_text::schema_expr_text(&expr).unwrap(),
         ] {
             assert_eq!(
                 eval(&expression(&rendered), &EvalContext::new(None, &[])).unwrap(),

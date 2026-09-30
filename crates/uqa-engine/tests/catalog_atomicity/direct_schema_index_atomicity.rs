@@ -43,6 +43,7 @@ fn direct_constraint_replacement_publishes_only_after_catalog_success() {
         .unwrap();
     let constraint = uqa_sql::ast::TableKeyConstraint {
         catalog_identity: None,
+        index_identity: None,
         name: Some("constrained_id_key".to_string()),
         kind: uqa_sql::ast::TableKeyConstraintKind::Unique,
         columns: vec!["id".to_string()],

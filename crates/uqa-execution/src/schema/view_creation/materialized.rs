@@ -105,8 +105,13 @@ pub fn register_materialized_view_plan(
             });
         }
         let query_schema = context.bindings.bind_routines(&mut plan, params)?;
+        context.bindings.bind_type_identities(&mut plan)?;
         reject_regrole_constants(context, &mut plan)?;
         let output_columns = create_view_output_columns(&query_schema, column_names)?;
+        // BuildDescForRelation requires USAGE on every column's type before CheckAttributeNamesTypes rejects system column names and pseudo-types.
+        for ty in query_schema.column_types().iter().flatten() {
+            context.routines.require_type_usage(ty)?;
+        }
         for column in &output_columns {
             uqa_sql::schema::columns::validate_postgres_column_name(column)?;
         }
@@ -132,6 +137,7 @@ pub fn register_materialized_view_plan(
         })?;
         context.locks.prepare_definition_write()?;
         context.namespace.ensure_create(&name)?;
+        let catalog_oids = super::registration::allocate_view_oids(context)?;
         let view = StoredView {
             security: uqa_sql::catalog::security::BoundTableSecurity::owner(owner.identity()),
             definition: uqa_sql::catalog::stored_view::StoredViewDefinition {
@@ -148,6 +154,7 @@ pub fn register_materialized_view_plan(
                 materialized_rows,
                 materialized_column_types,
                 populated: !with_no_data,
+                catalog_oids: Some(catalog_oids),
             },
         };
         publication::publish_materialized_view(

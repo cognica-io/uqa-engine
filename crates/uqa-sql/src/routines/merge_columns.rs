@@ -188,17 +188,3 @@ pub fn statement_has_removed_merge_target(
     )?;
     Ok(changed)
 }
-
-pub fn routine_has_removed_merge_target(
-    catalog: &dyn StoredMergeColumnCatalog,
-    definition: &crate::ast::CreateFunction,
-) -> Result<bool, SQLError> {
-    let crate::ast::FunctionBody::Statements(statements) = &definition.body else {
-        return Ok(false);
-    };
-    let mut changed = false;
-    for statement in statements {
-        changed |= statement_has_removed_merge_target(catalog, statement)?;
-    }
-    Ok(changed)
-}

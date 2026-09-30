@@ -134,12 +134,24 @@ pub enum FunctionBody {
     Statements(Vec<Statement>),
 }
 
+/// How a SQL-standard body was written; `pg_get_function_sqlbody` reproduces it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SQLBodyForm {
+    /// `RETURN expr`, stored as one `SELECT expr`.
+    Return,
+    /// `BEGIN ATOMIC stmt; ... END`.
+    Atomic,
+}
+
 /// `CREATE [OR REPLACE] FUNCTION | PROCEDURE`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateFunction {
     /// Stable catalog identity. The engine assigns this once when the routine is created and preserves it across replacement and rename.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub object_id: Option<[u8; 16]>,
+    /// The public OID allocated when the routine was created; replacement and rename keep it. Routines created before OIDs were recorded derive it from their identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_oid: Option<u32>,
     pub name: String,
     pub or_replace: bool,
     pub is_procedure: bool,
@@ -151,6 +163,9 @@ pub struct CreateFunction {
     /// Lower-cased language name (`plpgsql`, `sql`).
     pub language: String,
     pub body: FunctionBody,
+    /// The written form of a SQL-standard body. Definitions stored before the form was recorded omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sql_body_form: Option<SQLBodyForm>,
     /// Effective schema search path captured when a SQL-standard body or parameter default is catalog-bound. String and PL/pgSQL bodies keep dynamic lookup, but their parameter defaults still use this captured path.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub creation_search_path: Vec<String>,

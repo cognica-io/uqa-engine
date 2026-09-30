@@ -16,6 +16,8 @@ mod assignment_target;
 mod constraints;
 mod cte;
 mod domains;
+mod enum_functions;
+mod enums;
 mod events;
 mod expressions;
 mod from;
@@ -24,6 +26,7 @@ mod indexes;
 mod interval;
 mod locking;
 mod namespaces;
+mod object_acl;
 mod ranges;
 mod relation_hierarchy;
 mod relation_lifecycle;
@@ -31,6 +34,8 @@ mod role_specification;
 mod routine_security;
 mod routines;
 mod sequence;
+mod type_lifecycle;
+mod type_privileges;
 mod types;
 
 pub use acl_role_specification::AclRoleSpecification;
@@ -38,6 +43,8 @@ pub use assignment_target::{AssignmentStep, AssignmentTarget};
 pub use constraints::*;
 pub use cte::*;
 pub use domains::*;
+pub use enum_functions::EnumFunctionOperation;
+pub use enums::*;
 pub use events::*;
 pub use expressions::*;
 pub use from::*;
@@ -46,6 +53,7 @@ pub use indexes::*;
 pub use interval::*;
 pub use locking::*;
 pub use namespaces::*;
+pub use object_acl::ObjectAclEntry;
 pub use ranges::*;
 pub use relation_hierarchy::*;
 pub use relation_lifecycle::*;
@@ -53,6 +61,8 @@ pub use role_specification::RoleSpecification;
 pub use routine_security::*;
 pub use routines::*;
 pub use sequence::*;
+pub use type_lifecycle::*;
+pub use type_privileges::*;
 pub use types::*;
 
 const fn default_include_descendants() -> bool {
@@ -129,6 +139,8 @@ pub enum DropKind {
     Schema,
     Sequence,
     Domain,
+    /// `DROP TYPE`, which removes user-defined types of every implemented kind.
+    Type,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -524,6 +536,10 @@ pub struct VacuumStmt {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Statement {
     CreateDomain(CreateDomain),
+    CreateEnum(CreateEnum),
+    AlterEnum(AlterEnum),
+    AlterTypeObject(AlterTypeObject),
+    GrantType(GrantTypeStmt),
     CreateTable(CreateTable),
     CreateTableIfNotExists(DeferredCreateTable),
     CreateIndex(CreateIndex),
@@ -682,6 +698,9 @@ pub enum Statement {
         column_names: Vec<String>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         with_no_data: bool,
+        /// Written as `SELECT ... INTO`, which `PostgreSQL` tags `SELECT INTO`.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        select_into: bool,
         #[serde(default)]
         persistence: RelationPersistence,
         #[serde(default)]

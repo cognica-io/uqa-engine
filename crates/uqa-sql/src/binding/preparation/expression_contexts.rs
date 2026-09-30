@@ -10,6 +10,7 @@ use super::{
     error, ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr,
 };
 use crate::ast::BinaryOp;
+use uqa_core::Value;
 
 impl Preparation<'_> {
     pub(super) fn cast_expression(
@@ -20,6 +21,10 @@ impl Preparation<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<ColumnType, SQLError> {
         let target = self.type_name(ty)?;
+        // Parse analysis converts an untyped literal with the enum's input function before any assignment checks.
+        if let ScalarExpr::Literal(value @ (Value::Str(_) | Value::Null)) = expr {
+            crate::expr::enums::fold_unknown_literal(self.routines.enum_labels(), value, &target)?;
+        }
         let mut source =
             if let (ScalarExpr::Array(items), ColumnType::Array(element)) = (expr, &target) {
                 let mut items = items

@@ -30,6 +30,7 @@ impl RowLockManager {
         Self {
             next_session: AtomicU64::new(1),
             next_transaction_xid: AtomicU64::new(3),
+            catalog_oids: crate::catalog::identity::CatalogOidCounter::default(),
             relation_ids: Mutex::new(HashMap::new()),
             relation_identities: Mutex::new(HashMap::new()),
             next_table: AtomicU64::new(1),
@@ -108,6 +109,11 @@ impl RowLockManager {
                 return Ok(xid);
             }
         }
+    }
+
+    /// The database's OID counter for storage without durable identifier reservations; storage with them keeps the counter's position itself.
+    pub const fn catalog_oids(&self) -> &crate::catalog::identity::CatalogOidCounter {
+        &self.catalog_oids
     }
 
     pub fn table_key(&self, table: &str) -> u64 {

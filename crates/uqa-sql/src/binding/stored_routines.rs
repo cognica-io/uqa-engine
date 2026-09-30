@@ -13,7 +13,7 @@ use crate::plan::{
     SourcePlan, UnifiedPlan, UpdatePlan,
 };
 use crate::SQLError;
-use crate::{RowSchema, ScalarExpr, ScalarFrameBound};
+use crate::{RowSchema, ScalarExpr};
 
 use crate::{binding::context::BindingContext, routines::RoutineResolution};
 use uqa_core::Value;
@@ -26,7 +26,8 @@ pub struct CatalogRoutineContext<'a, 'q> {
 
 pub struct BoundStatementRoutines {
     pub query: Option<QueryPlan>,
-    pub references: Vec<BoundRoutineReference>,
+    /// What binding recorded for the statement's syntax, in syntax order.
+    pub sites: super::syntax_sites::SyntaxSites,
 }
 
 #[derive(Debug, Clone)]
@@ -43,30 +44,39 @@ struct CommandRoutineInputs {
     outer: RowSchema,
 }
 
+/// Bind a copy of a catalog-owned statement lowered from its stored syntax; `params` types the positional parameters its syntax references.
 pub fn bind_catalog_statement_routines(
     context: &CatalogRoutineContext<'_, '_>,
     plan: &UnifiedPlan,
+    params: &[crate::SQLParam],
 ) -> Result<BoundStatementRoutines, SQLError> {
-    let query = match plan {
+    let lowered = match plan {
         UnifiedPlan::Query(query) => {
             let mut query = (**query).clone();
             mark_query_relations_bound(&mut query);
-            crate::binding::bind_query_plan_routines_for_storage(
-                context.routines,
-                &mut query,
-                &[],
-                context.binding,
-                None,
-            )?;
-            Some(query)
+            Some((query, None))
         }
-        UnifiedPlan::Command(command) => bind_command_statement_routines(context, command)?,
+        UnifiedPlan::Command(command) => command_statement_query(context, command)?,
     };
-    let mut references = Vec::new();
-    if let Some(query) = &query {
-        collect_query_routine_references(query, &mut references)?;
-    }
-    Ok(BoundStatementRoutines { query, references })
+    let Some((lowered, outer)) = lowered else {
+        return Ok(BoundStatementRoutines {
+            query: None,
+            sites: super::syntax_sites::SyntaxSites::default(),
+        });
+    };
+    let mut query = lowered.clone();
+    crate::binding::bind_syntax_query_plan_routines(
+        context.routines,
+        &mut query,
+        params,
+        context.binding,
+        outer.as_ref(),
+    )?;
+    let sites = super::syntax_sites::query_syntax_sites(&lowered, &query)?;
+    Ok(BoundStatementRoutines {
+        query: Some(query),
+        sites,
+    })
 }
 
 pub fn mark_catalog_statement_relations_bound(plan: &mut UnifiedPlan) -> Result<(), SQLError> {
@@ -129,17 +139,17 @@ pub fn mark_catalog_statement_relations_bound(plan: &mut UnifiedPlan) -> Result<
     Ok(())
 }
 
-fn bind_command_statement_routines(
+/// A command's syntax as one query whose select list holds the command's expressions in syntax order, so the command binds and reads back like a query. `DEFAULT` markers have no scalar syntax to bind.
+fn command_statement_query(
     context: &CatalogRoutineContext<'_, '_>,
     command: &CommandPlan,
-) -> Result<Option<QueryPlan>, SQLError> {
+) -> Result<Option<(QueryPlan, Option<RowSchema>)>, SQLError> {
     let Some(inputs) = command_statement_routine_inputs(context, command)? else {
         return Ok(None);
     };
     let projections = inputs
         .expressions
         .into_iter()
-        .filter(|expression| expression_contains_routine(expression, &inputs.subqueries))
         .filter(|expression| !matches!(expression, ScalarExpr::Default))
         .map(|expr| ProjectionPlan { expr, alias: None })
         .chain(std::iter::once(ProjectionPlan {
@@ -171,14 +181,7 @@ fn bind_command_statement_routines(
         })),
     };
     mark_query_relations_bound(&mut query);
-    crate::binding::bind_query_plan_routines_for_storage(
-        context.routines,
-        &mut query,
-        &[],
-        context.binding,
-        Some(&inputs.outer),
-    )?;
-    Ok(Some(query))
+    Ok(Some((query, Some(inputs.outer))))
 }
 
 fn command_statement_routine_inputs(
@@ -380,12 +383,6 @@ fn delete_statement_routine_inputs(
     })
 }
 
-fn expression_contains_routine(expression: &ScalarExpr, subqueries: &[QueryPlan]) -> bool {
-    let mut references = Vec::new();
-    collect_scalar_routine_references(expression, subqueries, &mut references).is_ok()
-        && !references.is_empty()
-}
-
 fn statement_target_outer_schema(
     context: &CatalogRoutineContext<'_, '_>,
     table: &str,
@@ -415,305 +412,11 @@ fn statement_target_outer_schema(
     ))
 }
 
+/// Routine identities of a bound stored expression in syntax order.
 pub fn collect_expression_routine_references(
     expression: &crate::plan::ExpressionPlan,
 ) -> Result<Vec<BoundRoutineReference>, SQLError> {
-    let mut references = Vec::new();
-    collect_scalar_routine_references(&expression.scalar, &expression.subqueries, &mut references)?;
-    Ok(references)
-}
-
-fn collect_query_routine_references(
-    query: &QueryPlan,
-    references: &mut Vec<BoundRoutineReference>,
-) -> Result<(), SQLError> {
-    for cte in &query.ctes {
-        collect_cte_routine_references(&cte.body, references)?;
-        if let Some(cycle) = &cte.cycle {
-            collect_scalar_routine_references(&cycle.mark_value, &[], references)?;
-            collect_scalar_routine_references(&cycle.mark_default, &[], references)?;
-        }
-    }
-    match &query.root {
-        RelationalPlan::QueryBlock(block) => {
-            if let Some(source) = &block.from {
-                collect_source_routine_references(source, &block.subqueries, references)?;
-            }
-            for projection in &block.projections {
-                collect_scalar_routine_references(&projection.expr, &block.subqueries, references)?;
-            }
-            if let Some(expression) = &block.r#where {
-                collect_scalar_routine_references(expression, &block.subqueries, references)?;
-            }
-            for expression in &block.group_by {
-                collect_scalar_routine_references(expression, &block.subqueries, references)?;
-            }
-            for expression in block.grouping_sets.iter().flatten() {
-                collect_scalar_routine_references(expression, &block.subqueries, references)?;
-            }
-            if let Some(expression) = &block.having {
-                collect_scalar_routine_references(expression, &block.subqueries, references)?;
-            }
-            for order in &block.order_by {
-                collect_scalar_routine_references(&order.expr, &block.subqueries, references)?;
-            }
-            if let Some(expression) = &block.limit {
-                collect_scalar_routine_references(expression, &block.subqueries, references)?;
-            }
-            if let Some(expression) = &block.offset {
-                collect_scalar_routine_references(expression, &block.subqueries, references)?;
-            }
-            for expression in &block.distinct_on {
-                collect_scalar_routine_references(expression, &block.subqueries, references)?;
-            }
-        }
-        RelationalPlan::SetOp {
-            left,
-            right,
-            order_by,
-            limit,
-            offset,
-            subqueries,
-            ..
-        } => {
-            collect_query_routine_references(left, references)?;
-            collect_query_routine_references(right, references)?;
-            for order in order_by {
-                collect_scalar_routine_references(&order.expr, subqueries, references)?;
-            }
-            if let Some(expression) = limit {
-                collect_scalar_routine_references(expression, subqueries, references)?;
-            }
-            if let Some(expression) = offset {
-                collect_scalar_routine_references(expression, subqueries, references)?;
-            }
-        }
-        RelationalPlan::Values { rows, subqueries } => {
-            for expression in rows.iter().flatten() {
-                collect_scalar_routine_references(expression, subqueries, references)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn collect_source_routine_references(
-    source: &SourcePlan,
-    subqueries: &[QueryPlan],
-    references: &mut Vec<BoundRoutineReference>,
-) -> Result<(), SQLError> {
-    match source {
-        SourcePlan::Table { .. } => {}
-        SourcePlan::Join {
-            left, right, on, ..
-        } => {
-            collect_source_routine_references(left, subqueries, references)?;
-            collect_source_routine_references(right, subqueries, references)?;
-            if let Some(expression) = on {
-                collect_scalar_routine_references(expression, subqueries, references)?;
-            }
-        }
-        SourcePlan::Values { rows, .. } => {
-            for expression in rows.iter().flatten() {
-                collect_scalar_routine_references(expression, subqueries, references)?;
-            }
-        }
-        SourcePlan::Function {
-            name,
-            binding,
-            args,
-            ..
-        } => {
-            references.push(BoundRoutineReference {
-                name: name.clone(),
-                binding: binding.clone(),
-            });
-            for expression in args {
-                collect_scalar_routine_references(expression, subqueries, references)?;
-            }
-        }
-        SourcePlan::FunctionGroup { functions, .. } => {
-            for function in functions {
-                references.push(BoundRoutineReference {
-                    name: function.name.clone(),
-                    binding: function.binding.clone(),
-                });
-                for expression in &function.args {
-                    collect_scalar_routine_references(expression, subqueries, references)?;
-                }
-            }
-        }
-        SourcePlan::Subquery { body, .. } => {
-            collect_query_routine_references(body, references)?;
-        }
-    }
-    Ok(())
-}
-
-fn collect_scalar_routine_references(
-    expression: &ScalarExpr,
-    subqueries: &[QueryPlan],
-    references: &mut Vec<BoundRoutineReference>,
-) -> Result<(), SQLError> {
-    match expression {
-        ScalarExpr::Func {
-            name,
-            binding,
-            args,
-            order_by,
-            filter,
-            ..
-        } => {
-            for argument in args {
-                collect_scalar_routine_references(argument, subqueries, references)?;
-            }
-            for order in order_by {
-                collect_scalar_routine_references(&order.expr, subqueries, references)?;
-            }
-            if let Some(filter) = filter {
-                collect_scalar_routine_references(filter, subqueries, references)?;
-            }
-            references.push(BoundRoutineReference {
-                name: name.clone(),
-                binding: binding.clone(),
-            });
-        }
-        ScalarExpr::Array(items)
-        | ScalarExpr::Row(items)
-        | ScalarExpr::And(items)
-        | ScalarExpr::Or(items) => collect_many_routine_references(items, subqueries, references)?,
-        ScalarExpr::Binary { lhs, rhs, .. } => {
-            collect_scalar_routine_references(lhs, subqueries, references)?;
-            collect_scalar_routine_references(rhs, subqueries, references)?;
-        }
-        ScalarExpr::UnaryMinus(inner)
-        | ScalarExpr::Not(inner)
-        | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. } => {
-            collect_scalar_routine_references(inner, subqueries, references)?;
-        }
-        ScalarExpr::Between { expr, low, high } => {
-            collect_scalar_routine_references(expr, subqueries, references)?;
-            collect_scalar_routine_references(low, subqueries, references)?;
-            collect_scalar_routine_references(high, subqueries, references)?;
-        }
-        ScalarExpr::InList { expr, list, .. } => {
-            collect_scalar_routine_references(expr, subqueries, references)?;
-            for item in list {
-                collect_scalar_routine_references(item, subqueries, references)?;
-            }
-        }
-        ScalarExpr::WindowCall { name, args, spec } => {
-            collect_window_routine_references(name, args, spec, subqueries, references)?;
-        }
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => collect_case_routine_references(
-            base.as_deref(),
-            when,
-            else_branch.as_deref(),
-            subqueries,
-            references,
-        )?,
-        ScalarExpr::ScalarSubquery(index)
-        | ScalarExpr::Exists {
-            subquery: index, ..
-        } => {
-            let query = subqueries.get(*index).ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "stored catalog routine binding cannot resolve subquery slot {index}"
-                ))
-            })?;
-            collect_query_routine_references(query, references)?;
-        }
-        ScalarExpr::InSubquery {
-            expr,
-            subquery: index,
-            ..
-        } => {
-            collect_scalar_routine_references(expr, subqueries, references)?;
-            let query = subqueries.get(*index).ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "stored catalog routine binding cannot resolve subquery slot {index}"
-                ))
-            })?;
-            collect_query_routine_references(query, references)?;
-        }
-        ScalarExpr::Star
-        | ScalarExpr::QualifiedStar(_)
-        | ScalarExpr::Default
-        | ScalarExpr::Column(_)
-        | ScalarExpr::Position(_)
-        | ScalarExpr::InternalColumn(_)
-        | ScalarExpr::QualifiedColumn { .. }
-        | ScalarExpr::Literal(_)
-        | ScalarExpr::TypedLiteral { .. }
-        | ScalarExpr::Param(_) => {}
-    }
-    Ok(())
-}
-
-fn collect_many_routine_references(
-    expressions: &[ScalarExpr],
-    subqueries: &[QueryPlan],
-    references: &mut Vec<BoundRoutineReference>,
-) -> Result<(), SQLError> {
-    for expression in expressions {
-        collect_scalar_routine_references(expression, subqueries, references)?;
-    }
-    Ok(())
-}
-
-fn collect_case_routine_references(
-    base: Option<&ScalarExpr>,
-    when: &[(ScalarExpr, ScalarExpr)],
-    else_branch: Option<&ScalarExpr>,
-    subqueries: &[QueryPlan],
-    references: &mut Vec<BoundRoutineReference>,
-) -> Result<(), SQLError> {
-    if let Some(base) = base {
-        collect_scalar_routine_references(base, subqueries, references)?;
-    }
-    for (condition, result) in when {
-        collect_scalar_routine_references(condition, subqueries, references)?;
-        collect_scalar_routine_references(result, subqueries, references)?;
-    }
-    if let Some(branch) = else_branch {
-        collect_scalar_routine_references(branch, subqueries, references)?;
-    }
-    Ok(())
-}
-
-fn collect_window_routine_references(
-    name: &str,
-    args: &[ScalarExpr],
-    spec: &crate::ScalarWindowSpec,
-    subqueries: &[QueryPlan],
-    references: &mut Vec<BoundRoutineReference>,
-) -> Result<(), SQLError> {
-    for argument in args {
-        collect_scalar_routine_references(argument, subqueries, references)?;
-    }
-    for expression in &spec.partition_by {
-        collect_scalar_routine_references(expression, subqueries, references)?;
-    }
-    for order in &spec.order_by {
-        collect_scalar_routine_references(&order.expr, subqueries, references)?;
-    }
-    if let Some(frame) = &spec.frame {
-        for bound in [&frame.start, &frame.end] {
-            if let ScalarFrameBound::Preceding(inner) | ScalarFrameBound::Following(inner) = bound {
-                collect_scalar_routine_references(inner, subqueries, references)?;
-            }
-        }
-    }
-    references.push(BoundRoutineReference {
-        name: name.to_string(),
-        binding: None,
-    });
-    Ok(())
+    Ok(super::syntax_sites::expression_syntax_sites(expression, expression)?.routines)
 }
 
 fn mark_cte_relations_bound(body: &mut crate::plan::CtePlanBody) {
@@ -746,40 +449,6 @@ fn mark_cte_relations_bound(body: &mut crate::plan::CtePlanBody) {
             if let Some(source) = command.source_input_mut() {
                 mark_source_relations_bound(source);
             }
-        }
-    }
-}
-
-fn collect_cte_routine_references(
-    body: &crate::plan::CtePlanBody,
-    references: &mut Vec<BoundRoutineReference>,
-) -> Result<(), SQLError> {
-    match body {
-        crate::plan::CtePlanBody::Query(query) => {
-            collect_query_routine_references(query, references)
-        }
-        crate::plan::CtePlanBody::Command(command) => {
-            for cte in command.ctes() {
-                collect_cte_routine_references(&cte.body, references)?;
-                if let Some(cycle) = &cte.cycle {
-                    collect_scalar_routine_references(&cycle.mark_value, &[], references)?;
-                    collect_scalar_routine_references(&cycle.mark_default, &[], references)?;
-                }
-            }
-            for query in command.query_inputs() {
-                collect_query_routine_references(query, references)?;
-            }
-            if let Some(source) = command.source_input() {
-                collect_source_routine_references(source, command.scalar_subqueries(), references)?;
-            }
-            for expression in command.expressions() {
-                collect_scalar_routine_references(
-                    expression,
-                    command.scalar_subqueries(),
-                    references,
-                )?;
-            }
-            Ok(())
         }
     }
 }

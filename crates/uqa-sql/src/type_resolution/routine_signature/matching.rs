@@ -45,9 +45,6 @@ pub fn match_routine_signature(
         let Some(polymorphic) = routine_polymorphic_type(&parameter.type_name) else {
             continue;
         };
-        if !polymorphic.has_actual_carrier() {
-            return Ok(None);
-        }
         match polymorphic.family() {
             RoutinePolymorphicFamily::Simple => {
                 simple_used = true;
@@ -76,9 +73,6 @@ pub fn match_routine_signature(
             continue;
         };
         let Some(actual) = call.argument_types[argument_index].as_ref() else {
-            if !polymorphic.has_actual_carrier() {
-                return Ok(None);
-            }
             continue;
         };
         if !collect_polymorphic_actual(
@@ -144,24 +138,26 @@ pub fn match_routine_signature(
                 && mapping.variadic_mode == RoutineVariadicMode::Pack,
         );
         let actual = call.argument_types[argument_index].as_ref();
-        let Some(mut target) = resolve_target(&effective_declared, actual, &substitutions) else {
+        let declared = parameters[parameter_index].column_type.as_ref().map(|ty| {
+            if Some(parameter_index) == mapping.variadic_index
+                && mapping.variadic_mode == RoutineVariadicMode::Pack
+            {
+                if let ColumnType::Array(element) = ty {
+                    return element.as_ref().clone();
+                }
+            }
+            ty.clone()
+        });
+        let Some(mut target) = resolve_target(
+            &effective_declared,
+            declared.as_ref(),
+            actual,
+            &substitutions,
+        ) else {
             return Ok(None);
         };
         if routine_polymorphic_type(&effective_declared).is_none() {
-            target.column_type = parameters[parameter_index]
-                .column_type
-                .as_ref()
-                .map(|ty| {
-                    if Some(parameter_index) == mapping.variadic_index
-                        && mapping.variadic_mode == RoutineVariadicMode::Pack
-                    {
-                        if let ColumnType::Array(element) = ty {
-                            return element.as_ref().clone();
-                        }
-                    }
-                    ty.clone()
-                })
-                .or(target.column_type);
+            target.column_type = declared.or(target.column_type);
         }
         if let Some(actual) = actual {
             if routine_polymorphic_type(&effective_declared).is_none() {
@@ -200,7 +196,12 @@ pub fn match_routine_signature(
         let actual = mapping.slots[parameter_index]
             .first()
             .and_then(|argument_index| call.argument_types[*argument_index].as_ref());
-        let Some(target) = resolve_target(&parameter.type_name, actual, &substitutions) else {
+        let Some(target) = resolve_target(
+            &parameter.type_name,
+            parameter.column_type.as_ref(),
+            actual,
+            &substitutions,
+        ) else {
             return Ok(None);
         };
         parameter_types.push(target.type_name);
@@ -237,10 +238,11 @@ pub fn match_routine_signature(
     Ok(Some(MatchedRoutineSignature {
         declared_identity,
         argument_targets,
+        // Invocation re-resolves the source types, so user-defined types are recorded by OID identity rather than by a name the search path may not reach.
         argument_sources: call
             .argument_types
             .iter()
-            .map(|ty| ty.as_ref().map(ColumnType::sql_name))
+            .map(|ty| ty.as_ref().map(ColumnType::catalog_name))
             .collect(),
         argument_positions: mapping.argument_positions,
         coercion_targets,

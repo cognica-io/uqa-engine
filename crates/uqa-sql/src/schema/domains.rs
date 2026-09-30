@@ -34,13 +34,15 @@ pub fn prepare_domain_definition(
         ColumnType::Void | ColumnType::Record | ColumnType::AnyArray
     ) {
         return Err(domain_error(
-            "42809",
+            "42804",
             format!(
                 "\"{}\" is not a valid base type for a domain",
                 definition.base.sql_name()
             ),
         ));
     }
+    // DefineDomain requires USAGE on the base type once it is known to be valid for a domain.
+    context.catalog.require_type_usage(&definition.base)?;
     if definition.collation.is_some() {
         return Err(SQLError::Unsupported(
             "domain collation binding is not implemented".into(),
@@ -80,7 +82,7 @@ impl VariableResolver for DomainValueResolver<'_> {
         }
         Ok(Some(ResolvedVariable {
             value: Value::Null,
-            declared_type: Some(self.0.sql_name()),
+            declared_type: Some(self.0.catalog_name()),
         }))
     }
 
@@ -147,7 +149,9 @@ fn bind_domain_check(
             ty: "boolean".into(),
         };
     }
-    super::defaults::bind_stored_schema_expression_routines(context, expression, typed)?;
+    // The stored syntax includes the boolean cast, so its typed copy does too.
+    let typed = bind_expr(expression, &mut DomainValueResolver(base))?;
+    super::defaults::bind_stored_schema_expression(context, expression, typed)?;
     Ok(())
 }
 

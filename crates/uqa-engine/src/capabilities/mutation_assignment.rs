@@ -63,6 +63,7 @@ impl Engine {
             rows: self.mutation_row_context(),
             expressions: self.mutation_expression_context(),
             scopes: self,
+            diagnostics: self,
         }
     }
     pub(crate) fn insert_identity_context(&self) -> InsertIdentityContext<'_> {

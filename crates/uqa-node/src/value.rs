@@ -70,6 +70,10 @@ pub(super) unsafe fn value_to_napi(env: sys::napi_env, value: Value) -> Result<s
             }
             Value::Bytes(value) => Buffer::to_napi_value(env, Buffer::from(value)),
             Value::Temporal(value) => String::to_napi_value(env, value.to_sql_string()),
+            // Result conversion renders enum columns through the engine catalog before reaching this context-free converter.
+            Value::Enum(value) => Err(Error::from_reason(
+                uqa_sql::expr::catalog_output_required(&value).to_string(),
+            )),
             Value::LegacyVector(vector) => value_to_napi(env, Value::Array(vector.into_array())),
             Value::Array(array) => Vec::<JSValue>::to_napi_value(
                 env,

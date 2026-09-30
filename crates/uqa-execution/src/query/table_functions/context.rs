@@ -22,6 +22,8 @@ pub trait TableFunctionSession {
     fn listening_channels(&self) -> Vec<String>;
     fn sequence_data(&self, args: &[Value]) -> Result<Value, SQLError>;
     fn sequence_parameters(&self, args: &[Value]) -> Result<Value, SQLError>;
+    /// The OID of the role with this name in the statement's catalog.
+    fn role_oid(&self, name: &str) -> Result<Option<i64>, SQLError>;
 }
 
 pub trait AnalyzerTableFunctions: crate::query::scalar_projection::AnalyzerRevisions {
@@ -60,6 +62,8 @@ pub struct TableFunctionContext<'a> {
     pub joins: &'a dyn OperatorJoinBinding,
     pub params: &'a [SQLParam],
     pub eval_hook: &'a dyn EngineHook,
+    /// Catalog types and routines for binding argument expressions before evaluation.
+    pub resolver: &'a dyn uqa_sql::FunctionTypeResolver,
     pub subquery_runner: &'a dyn PhysicalSubqueryRunner,
     pub subqueries: &'a [QueryPlan],
 }

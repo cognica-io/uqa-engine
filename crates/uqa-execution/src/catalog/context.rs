@@ -105,28 +105,44 @@ impl CatalogContext<'_> {
             .get(&relation)
             .copied())
     }
-    pub fn resolve_domain_type(&self, name: &str) -> Option<ColumnType> {
+    /// Resolve a user-defined type name: a domain, an enum, or an enum's generated array type. An unqualified name uses the first search-path schema that defines any type with that name.
+    pub fn resolve_user_type(&self, name: &str) -> Option<ColumnType> {
         let names = uqa_sql::compiler::parse_regobject_name(name)?;
         let catalog = self.catalog_read_view();
-        let domains = &catalog.snapshot().definitions.domains;
-        if let [schema, local] = names.as_slice() {
-            return domains
+        let in_schema = |schema: &str, local: &str| {
+            let definitions = &catalog.snapshot().definitions;
+            definitions
+                .domains
                 .values()
-                .find(|domain| domain.identity.schema == *schema && domain.identity.name == *local)
-                .map(uqa_sql::catalog::domain::StoredDomain::column_type);
+                .find(|domain| domain.identity.schema == schema && domain.identity.name == local)
+                .map(uqa_sql::catalog::domain::StoredDomain::column_type)
+                .or_else(|| {
+                    definitions
+                        .enums
+                        .values()
+                        .filter(|definition| definition.identity.schema == schema)
+                        .find_map(|definition| {
+                            if definition.identity.name == local {
+                                Some(definition.column_type())
+                            } else if definition.array_name == local {
+                                Some(ColumnType::Array(Box::new(definition.column_type())))
+                            } else {
+                                None
+                            }
+                        })
+                })
+        };
+        if let [schema, local] = names.as_slice() {
+            return in_schema(schema, local);
         }
         let [local] = names.as_slice() else {
             return None;
         };
-        for schema in self.session.relation_name_resolution().search_path() {
-            if let Some(domain) = domains
-                .values()
-                .find(|domain| domain.identity.schema == *schema && domain.identity.name == *local)
-            {
-                return Some(domain.column_type());
-            }
-        }
-        None
+        self.session
+            .relation_name_resolution()
+            .search_path()
+            .iter()
+            .find_map(|schema| in_schema(schema, local))
     }
     pub fn schema_security_for_privilege(&self, schema: &str) -> Option<BoundSchemaSecurity> {
         self.schema_security_in(&self.catalog_read_view(), schema)

@@ -8,9 +8,11 @@
 
 mod format_type;
 pub mod relation_oid;
+mod row_types;
 pub use format_type::format_type_value;
 use relation_oid::lookup_regclass_oid;
 pub use relation_oid::resolve_bound_regclass_oid;
+pub use row_types::{format_type_object, resolve_type_object_oid, row_type_relation};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -32,7 +34,9 @@ use procedures::lookup_regprocedure_oid;
 pub use procedures::resolve_regprocedure_input_oid;
 
 pub use type_names::{
-    named_type_exists, resolve_catalog_column_type, resolve_catalog_domain_type_by_oid,
+    catalog_routine_type_oid, catalog_type_display_name, catalog_user_type_identity,
+    named_type_exists, resolve_catalog_column_type, resolve_catalog_user_type_by_oid,
+    CatalogEnumLabels,
 };
 
 fn cross_database_reference(name: &str) -> SQLError {
@@ -209,53 +213,94 @@ pub fn resolve_regprocedure_oid(
     lookup_regprocedure_oid(context, name).map_err(|error| error.to_string())
 }
 
+/// `to_regproc`: `NULL` where `regprocin` would reject the name.
 fn lookup_regproc_oid(context: &CatalogContext<'_>, name: &str) -> Result<Option<i64>, SQLError> {
+    match resolve_regproc_input_oid(context, name) {
+        Ok(oid) => Ok(Some(oid)),
+        Err(SQLError::Routine { sqlstate, .. })
+            if matches!(
+                sqlstate.as_str(),
+                "22P02" | "22003" | "42602" | "42883" | "42725" | "3F000"
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// `regprocin`: a routine name, optionally qualified, that names exactly one routine the search path finds.
+pub fn resolve_regproc_input_oid(
+    context: &CatalogContext<'_>,
+    name: &str,
+) -> Result<i64, SQLError> {
+    let input_error = |sqlstate: &str, message: String| SQLError::Routine {
+        sqlstate: sqlstate.into(),
+        message,
+    };
+    if name == "-" {
+        return Ok(0);
+    }
     match numeric_regobject_oid(name) {
-        NumericRegobjectOid::Valid(oid) => return Ok(Some(oid)),
-        NumericRegobjectOid::InvalidSyntax | NumericRegobjectOid::OutOfRange => return Ok(None),
+        NumericRegobjectOid::Valid(oid) => return Ok(oid),
+        NumericRegobjectOid::InvalidSyntax => {
+            return Err(input_error(
+                "22P02",
+                format!("invalid input syntax for type oid: \"{name}\""),
+            ))
+        }
+        NumericRegobjectOid::OutOfRange => {
+            return Err(input_error("22003", "OID out of range".into()))
+        }
         NumericRegobjectOid::NotNumeric => {}
     }
-    let Some(names) = uqa_sql::parse_regobject_name(name) else {
-        return Ok(None);
-    };
+    let names = uqa_sql::parse_regobject_name(name)
+        .ok_or_else(|| input_error("42602", format!("invalid name syntax: \"{name}\"")))?;
     let (schema, local) = object_name(&names)?;
     let catalog = regtype_output_catalog(context)?;
-    if let Some(schema) = schema {
-        let Some(namespace_oid) = catalog
+    let namespace_oid = |schema: &str| {
+        catalog
             .namespaces
             .iter()
             .find_map(|(oid, name)| (name == schema).then_some(*oid))
-        else {
-            return Ok(None);
-        };
-        let mut matches = catalog.procs.iter().filter_map(|(oid, entry)| {
-            (entry.namespace_oid == namespace_oid && entry.name == *local).then_some(*oid)
-        });
-        let first = matches.next();
-        return Ok(first.filter(|_| matches.next().is_none()));
-    }
-
+    };
     let mut visible = BTreeMap::<Vec<i64>, i64>::new();
-    for schema in context
-        .current_schema_names(true)
-        .map_err(|error| SQLError::Internal(error.to_string()))?
-    {
-        let Some(namespace_oid) = catalog
-            .namespaces
-            .iter()
-            .find_map(|(oid, name)| (name == &schema).then_some(*oid))
-        else {
-            continue;
-        };
+    if let Some(schema) = schema {
+        let namespace = namespace_oid(schema)
+            .ok_or_else(|| input_error("3F000", format!("schema \"{schema}\" does not exist")))?;
         for (oid, entry) in &catalog.procs {
-            if entry.namespace_oid == namespace_oid && entry.name == *local {
+            if entry.namespace_oid == namespace && entry.name == *local {
                 visible.entry(entry.argument_types.clone()).or_insert(*oid);
+            }
+        }
+    } else {
+        // A routine hides one with the same arguments later in the search path.
+        for schema in context
+            .current_schema_names(true)
+            .map_err(|error| SQLError::Internal(error.to_string()))?
+        {
+            let Some(namespace) = namespace_oid(&schema) else {
+                continue;
+            };
+            for (oid, entry) in &catalog.procs {
+                if entry.namespace_oid == namespace && entry.name == *local {
+                    visible.entry(entry.argument_types.clone()).or_insert(*oid);
+                }
             }
         }
     }
     let mut matches = visible.into_values();
-    let first = matches.next();
-    Ok(first.filter(|_| matches.next().is_none()))
+    match (matches.next(), matches.next()) {
+        (Some(oid), None) => Ok(oid),
+        (None, _) => Err(input_error(
+            "42883",
+            format!("function \"{name}\" does not exist"),
+        )),
+        (Some(_), Some(_)) => Err(input_error(
+            "42725",
+            format!("more than one function named \"{name}\""),
+        )),
+    }
 }
 
 fn lookup_regnamespace_oid(
@@ -507,7 +552,7 @@ impl RegtypeOutputCatalog {
         let mut procs = BTreeMap::new();
         let mut proc_name_counts = BTreeMap::new();
         let mut proc_names_by_namespace = BTreeMap::<i64, BTreeSet<String>>::new();
-        for row in build_pg_proc(&catalog)? {
+        for row in build_pg_proc(&catalog, &resolution)? {
             let Some(oid) = catalog_int(&row, "oid") else {
                 continue;
             };
@@ -546,7 +591,7 @@ impl RegtypeOutputCatalog {
                 .is_some_and(|count| *count > 1);
         }
 
-        let types = build_pg_type(&catalog)
+        let types = build_pg_type(&catalog, &resolution)?
             .into_iter()
             .filter_map(|row| {
                 Some((
@@ -578,6 +623,22 @@ fn regtype_output_catalog(
     context
         .cache
         .get_or_try_init(|| RegtypeOutputCatalog::build(context))
+}
+
+/// The type whose privileges govern `oid`: a generated array type answers with its element type, as `pg_type_aclmask` does. `None` when no type has the OID.
+pub fn type_privilege_oid(context: &CatalogContext<'_>, oid: i64) -> Result<Option<i64>, SQLError> {
+    let catalog = regtype_output_catalog(context)?;
+    let Some(entry) = catalog.types.get(&oid) else {
+        return Ok(None);
+    };
+    if catalog
+        .types
+        .get(&entry.element_oid)
+        .is_some_and(|element| element.array_oid == oid)
+    {
+        return Ok(Some(entry.element_oid));
+    }
+    Ok(Some(oid))
 }
 
 pub fn routine_oid_exists(context: &CatalogContext<'_>, oid: i64) -> Result<bool, SQLError> {

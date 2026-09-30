@@ -122,6 +122,7 @@ impl Engine {
             doc_count_dirty: AtomicBool::new(source.doc_count_dirty.load(Ordering::Acquire)),
             persistence: source.persistence,
             on_commit: source.on_commit,
+            catalog_oids: source.recorded_catalog_oids(),
         }))
     }
 }

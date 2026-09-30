@@ -13,6 +13,7 @@ fn domain(base: ColumnType) -> ColumnType {
         schema: "app".into(),
         name: "bounded".into(),
         oid: 91_001,
+        array_oid: None,
         base: Box::new(base),
     }
 }
@@ -157,6 +158,7 @@ fn optional_operand_inference_does_not_swallow_allocation_failure() {
         schema: "app".into(),
         name: "n".repeat(4096),
         oid: 91_002,
+        array_oid: None,
         base: Box::new(ColumnType::Integer),
     };
     let schema = RowSchema::with_types(vec!["value".into()], vec![Some(ty)]);

@@ -20,6 +20,7 @@ use uqa_sql::semantics::projection_columns;
 use uqa_sql::{SQLError, SQLParam};
 
 mod planning;
+mod running;
 
 pub use planning::expr_has_window;
 use planning::rewrite_window_expr;
@@ -410,13 +411,14 @@ fn emit_window_partition(
 
     let aggregate_name =
         matches!(name.as_str(), "sum" | "count" | "avg" | "min" | "max").then_some(name.as_str());
+    // With ORDER BY, the default frame is RANGE UNBOUNDED PRECEDING, which ends at the current row's last peer.
     let frame = slot.spec.frame.as_ref().map_or_else(
         || {
             if slot.spec.order_by.is_empty() {
                 None
             } else {
                 Some((
-                    FrameMode::Rows,
+                    FrameMode::Range,
                     ScalarFrameBound::UnboundedPreceding,
                     ScalarFrameBound::CurrentRow,
                 ))
@@ -443,21 +445,21 @@ fn emit_window_partition(
                 )?;
                 accumulator.observe(&value)?;
             }
-            whole_partition_value = Some(aggregate_value(aggregate_name, &accumulator)?);
-        } else if matches!(
-            frame,
-            Some((
-                FrameMode::Rows,
-                ScalarFrameBound::UnboundedPreceding,
-                ScalarFrameBound::CurrentRow
-            ))
-        ) {
-            prefix_accumulator = Some(typed_window_accumulator(
+            whole_partition_value = Some(aggregate_value(
                 aggregate_name,
-                &slot.args,
-                &partition_schema,
-                params,
+                &accumulator,
+                eval_hook.enum_labels(),
             )?);
+        } else if let Some((
+            mode,
+            ScalarFrameBound::UnboundedPreceding,
+            ScalarFrameBound::CurrentRow,
+        )) = &frame
+        {
+            prefix_accumulator = Some(running::RunningWindowAggregate::new(
+                typed_window_accumulator(aggregate_name, &slot.args, &partition_schema, params)?,
+                !matches!(mode, FrameMode::Rows),
+            ));
         }
     }
 
@@ -525,18 +527,19 @@ fn emit_window_partition(
             "sum" | "count" | "avg" | "min" | "max" => {
                 if let Some(value) = whole_partition_value.as_ref() {
                     value.clone()
-                } else if let Some(accumulator) = prefix_accumulator.as_mut() {
-                    let value = window_aggregate_argument(
-                        &name,
-                        &slot.args,
-                        &partition_schema,
-                        &row,
+                } else if let Some(running) = prefix_accumulator.as_mut() {
+                    let mut rows = running::PartitionRows {
+                        partition: &mut *partition,
+                        name: &name,
+                        slot,
+                        schema: &partition_schema,
                         params,
                         eval_hook,
                         subquery_runner,
-                    )?;
-                    accumulator.observe(&value)?;
-                    aggregate_value(&name, accumulator)?
+                    };
+                    running.value_at(index, &order_key, &mut rows, len, |accumulator| {
+                        aggregate_value(&name, accumulator, eval_hook.enum_labels())
+                    })?
                 } else {
                     let (mode, start, end) = frame.as_ref().ok_or_else(|| {
                         SQLError::Internal(
@@ -758,7 +761,7 @@ fn evaluate_spilled_window_frame(
             accumulator.observe(&value)?;
         }
     }
-    aggregate_value(name, &accumulator)
+    aggregate_value(name, &accumulator, eval_hook.enum_labels())
 }
 
 #[expect(

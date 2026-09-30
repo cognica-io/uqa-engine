@@ -9,18 +9,21 @@
 use std::fmt::Write as _;
 
 use crate::ast::Expr;
+use crate::SQLError;
 use uqa_core::Value;
 
-pub fn default_expr_text(expr: Option<&Expr>) -> Value {
-    expr.map_or(Value::Null, |expr| Value::Str(schema_expr_text(expr)))
+pub fn default_expr_text(expr: Option<&Expr>) -> Result<Value, SQLError> {
+    expr.map_or(Ok(Value::Null), |expr| {
+        schema_expr_text(expr).map(Value::Str)
+    })
 }
 
 #[expect(
     clippy::too_many_lines,
     reason = "preserves catalog column and OID order"
 )]
-pub fn schema_expr_text(expr: &Expr) -> String {
-    match expr {
+pub fn schema_expr_text(expr: &Expr) -> Result<String, SQLError> {
+    Ok(match expr {
         Expr::Star => "*".into(),
         Expr::QualifiedStar(qualifier) => format!("{qualifier}.*"),
         Expr::Default => "DEFAULT".into(),
@@ -31,8 +34,8 @@ pub fn schema_expr_text(expr: &Expr) -> String {
         Expr::InternalColumn(column) => {
             unreachable!("executor-only column {column:?} reached catalog SQL rendering")
         }
-        Expr::Literal(value) => schema_literal_text(value),
-        Expr::TypedLiteral { value, ty } => format!("({})::{ty}", schema_literal_text(value)),
+        Expr::Literal(value) => schema_literal_text(value)?,
+        Expr::TypedLiteral { value, ty } => format!("({})::{ty}", schema_literal_text(value)?),
         Expr::Param(index) => format!("${index}"),
         Expr::Func {
             name,
@@ -48,15 +51,19 @@ pub fn schema_expr_text(expr: &Expr) -> String {
             {
                 match args.as_slice() {
                     [argument] if operator.arity() == 1 => {
-                        return format!("({} {})", operator.symbol(), schema_expr_text(argument))
+                        return Ok(format!(
+                            "({} {})",
+                            operator.symbol(),
+                            schema_expr_text(argument)?
+                        ))
                     }
                     [left, right] if operator.arity() == 2 => {
-                        return format!(
+                        return Ok(format!(
                             "({} {} {})",
-                            schema_expr_text(left),
+                            schema_expr_text(left)?,
                             operator.symbol(),
-                            schema_expr_text(right)
-                        )
+                            schema_expr_text(right)?
+                        ))
                     }
                     _ => {}
                 }
@@ -64,7 +71,7 @@ pub fn schema_expr_text(expr: &Expr) -> String {
             let mut rendered_args = args
                 .iter()
                 .map(schema_expr_text)
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, SQLError>>()?
                 .join(", ");
             if *distinct {
                 rendered_args = format!("DISTINCT {rendered_args}");
@@ -79,9 +86,12 @@ pub fn schema_expr_text(expr: &Expr) -> String {
                             Some(crate::ast::NullsOrder::Last) => " NULLS LAST",
                             None => "",
                         };
-                        format!("{}{direction}{nulls}", schema_expr_text(&order.expr))
+                        Ok(format!(
+                            "{}{direction}{nulls}",
+                            schema_expr_text(&order.expr)?
+                        ))
                     })
-                    .collect::<Vec<_>>()
+                    .collect::<Result<Vec<_>, SQLError>>()?
                     .join(", ");
                 if !rendered_args.is_empty() {
                     rendered_args.push(' ');
@@ -94,7 +104,7 @@ pub fn schema_expr_text(expr: &Expr) -> String {
                 write!(
                     &mut rendered,
                     " FILTER (WHERE {})",
-                    schema_expr_text(filter)
+                    schema_expr_text(filter)?
                 )
                 .expect("writing to a String cannot fail");
             }
@@ -105,7 +115,7 @@ pub fn schema_expr_text(expr: &Expr) -> String {
             items
                 .iter()
                 .map(schema_expr_text)
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, SQLError>>()?
                 .join(", ")
         ),
         Expr::Row(items) => format!(
@@ -113,12 +123,12 @@ pub fn schema_expr_text(expr: &Expr) -> String {
             items
                 .iter()
                 .map(schema_expr_text)
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, SQLError>>()?
                 .join(", ")
         ),
         Expr::Binary { op, lhs, rhs } => format!(
             "({} {} {})",
-            schema_expr_text(lhs),
+            schema_expr_text(lhs)?,
             match op {
                 crate::ast::BinaryOp::Equal => "=",
                 crate::ast::BinaryOp::NotEqual => "<>",
@@ -131,16 +141,16 @@ pub fn schema_expr_text(expr: &Expr) -> String {
                 crate::ast::BinaryOp::Multiply => "*",
                 crate::ast::BinaryOp::Divide => "/",
             },
-            schema_expr_text(rhs)
+            schema_expr_text(rhs)?
         ),
-        Expr::Not(inner) => format!("(NOT {})", schema_expr_text(inner)),
-        Expr::UnaryMinus(inner) => format!("(-{})", schema_expr_text(inner)),
+        Expr::Not(inner) => format!("(NOT {})", schema_expr_text(inner)?),
+        Expr::UnaryMinus(inner) => format!("(-{})", schema_expr_text(inner)?),
         Expr::And(items) => format!(
             "({})",
             items
                 .iter()
                 .map(schema_expr_text)
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, SQLError>>()?
                 .join(" AND ")
         ),
         Expr::Or(items) => format!(
@@ -148,19 +158,19 @@ pub fn schema_expr_text(expr: &Expr) -> String {
             items
                 .iter()
                 .map(schema_expr_text)
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, SQLError>>()?
                 .join(" OR ")
         ),
         Expr::IsNull { expr, negated } => format!(
             "({} IS {}NULL)",
-            schema_expr_text(expr),
+            schema_expr_text(expr)?,
             if *negated { "NOT " } else { "" }
         ),
         Expr::Between { expr, low, high } => format!(
             "({} BETWEEN {} AND {})",
-            schema_expr_text(expr),
-            schema_expr_text(low),
-            schema_expr_text(high)
+            schema_expr_text(expr)?,
+            schema_expr_text(low)?,
+            schema_expr_text(high)?
         ),
         Expr::InList {
             expr,
@@ -168,11 +178,11 @@ pub fn schema_expr_text(expr: &Expr) -> String {
             negated,
         } => format!(
             "({} {}IN ({}))",
-            schema_expr_text(expr),
+            schema_expr_text(expr)?,
             if *negated { "NOT " } else { "" },
             list.iter()
                 .map(schema_expr_text)
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, SQLError>>()?
                 .join(", ")
         ),
         Expr::WindowCall { name, args, .. } => format!(
@@ -180,7 +190,7 @@ pub fn schema_expr_text(expr: &Expr) -> String {
             name,
             args.iter()
                 .map(schema_expr_text)
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, SQLError>>()?
                 .join(", ")
         ),
         Expr::Case {
@@ -191,25 +201,25 @@ pub fn schema_expr_text(expr: &Expr) -> String {
             let mut rendered = "CASE".to_string();
             if let Some(base) = base {
                 rendered.push(' ');
-                rendered.push_str(&schema_expr_text(base));
+                rendered.push_str(&schema_expr_text(base)?);
             }
             for (condition, result) in when {
                 write!(
                     &mut rendered,
                     " WHEN {} THEN {}",
-                    schema_expr_text(condition),
-                    schema_expr_text(result)
+                    schema_expr_text(condition)?,
+                    schema_expr_text(result)?
                 )
                 .expect("writing to a String cannot fail");
             }
             if let Some(else_branch) = else_branch {
-                write!(&mut rendered, " ELSE {}", schema_expr_text(else_branch))
+                write!(&mut rendered, " ELSE {}", schema_expr_text(else_branch)?)
                     .expect("writing to a String cannot fail");
             }
             rendered.push_str(" END");
             rendered
         }
-        Expr::Cast { expr, ty } => format!("({})::{ty}", schema_expr_text(expr)),
+        Expr::Cast { expr, ty } => format!("({})::{ty}", schema_expr_text(expr)?),
         Expr::ScalarSubquery(body) => format!("({body:?})"),
         Expr::Exists { body, negated } => {
             format!("{}EXISTS ({body:?})", if *negated { "NOT " } else { "" })
@@ -220,14 +230,14 @@ pub fn schema_expr_text(expr: &Expr) -> String {
             negated,
         } => format!(
             "({} {}IN ({body:?}))",
-            schema_expr_text(expr),
+            schema_expr_text(expr)?,
             if *negated { "NOT " } else { "" }
         ),
-    }
+    })
 }
 
-fn schema_literal_text(value: &Value) -> String {
-    match value {
+fn schema_literal_text(value: &Value) -> Result<String, SQLError> {
+    Ok(match value {
         Value::Null => "NULL".into(),
         Value::Void => "''::void".into(),
         Value::Bool(value) => if *value { "true" } else { "false" }.into(),
@@ -248,6 +258,7 @@ fn schema_literal_text(value: &Value) -> String {
         Value::Decimal(value) => format!("{value:?}"),
         Value::Json(value) => format!("'{}'::json", value.replace('\'', "''")),
         Value::JsonB(value) => format!("'{}'::jsonb", value.replace('\'', "''")),
+        Value::Enum(value) => return Err(crate::expr::catalog_output_required(value)),
         Value::LegacyVector(vector) => crate::render::legacy_vector_expression(vector)
             .expect("stored SQL vector has SQL-produced bounds"),
         Value::Array(array)
@@ -258,9 +269,7 @@ fn schema_literal_text(value: &Value) -> String {
         {
             format!(
                 "'{}'",
-                crate::expr::array_value_to_string(array)
-                    .expect("stored array literal text")
-                    .replace('\'', "''")
+                crate::expr::array_value_to_string(array)?.replace('\'', "''")
             )
         }
         Value::Array(array) => format!(
@@ -269,7 +278,7 @@ fn schema_literal_text(value: &Value) -> String {
                 .elements()
                 .iter()
                 .map(schema_literal_text)
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, SQLError>>()?
                 .join(", ")
         ),
         Value::List(values) => format!(
@@ -277,7 +286,7 @@ fn schema_literal_text(value: &Value) -> String {
             values
                 .iter()
                 .map(schema_literal_text)
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, SQLError>>()?
                 .join(", ")
         ),
         Value::Row(values) => format!(
@@ -285,7 +294,7 @@ fn schema_literal_text(value: &Value) -> String {
             values
                 .iter()
                 .map(schema_literal_text)
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, SQLError>>()?
                 .join(", ")
         ),
         Value::Record(fields) => format!(
@@ -293,7 +302,7 @@ fn schema_literal_text(value: &Value) -> String {
             fields
                 .iter()
                 .map(|(_, value)| schema_literal_text(value))
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, SQLError>>()?
                 .join(", ")
         ),
         Value::Map(value) => format!(
@@ -302,5 +311,5 @@ fn schema_literal_text(value: &Value) -> String {
                 .expect("serializing an in-memory Value map cannot fail")
                 .replace('\'', "''")
         ),
-    }
+    })
 }

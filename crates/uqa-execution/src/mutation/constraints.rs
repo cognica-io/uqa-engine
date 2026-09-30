@@ -19,6 +19,7 @@ use crate::mutation::{
 pub use context::ConstraintContext;
 pub use deferred::validate_deferred_foreign_key_checks;
 pub(crate) use diagnostics::duplicate_index_key_detail;
+pub use diagnostics::failing_row_detail;
 use index_keys::EnforcedKeyExecution;
 pub use keys::{
     lock_document_key_dependencies, validate_key_constraints,
@@ -141,7 +142,7 @@ fn validate_document_non_key_constraints_with_old(
     };
     let document = logical_document.as_ref().unwrap_or(document);
 
-    validate_not_null_columns(&definitions, table, document)?;
+    validate_not_null_columns(context, &definitions, table, document)?;
 
     for constraint in check_constraints {
         if !constraint.enforced {
@@ -168,11 +169,18 @@ fn validate_document_non_key_constraints_with_old(
             let label = constraint.name.unwrap_or_else(|| "<unnamed>".into());
             let relation = uqa_core::RelationIdentity::from_legacy_name(table)
                 .map_or_else(|_| table.to_string(), |identity| identity.name);
-            return Err(SQLError::Routine {
+            return Err(SQLError::Diagnostic {
                 sqlstate: "23514".into(),
                 message: format!(
                     "new row for relation \"{relation}\" violates check constraint \"{label}\""
                 ),
+                detail: diagnostics::failing_row_detail(
+                    context.diagnostics,
+                    table,
+                    &definitions,
+                    document,
+                )?,
+                hint: None,
             });
         }
     }
@@ -345,6 +353,7 @@ fn foreign_key_parent_index(
 }
 
 fn validate_not_null_columns(
+    context: ConstraintContext<'_>,
     definitions: &[uqa_sql::ast::ColumnDef],
     table: &str,
     document: &Document,
@@ -359,12 +368,21 @@ fn validate_not_null_columns(
         }
         match document.get(&col_def.name) {
             Some(Value::Null) | None => {
-                return Err(SQLError::Routine {
+                let relation = uqa_core::RelationIdentity::from_legacy_name(table)
+                    .map_or_else(|_| table.to_string(), |identity| identity.name);
+                return Err(SQLError::Diagnostic {
                     sqlstate: "23502".into(),
                     message: format!(
-                        "null value in column \"{}\" of relation \"{table}\" violates not-null constraint",
+                        "null value in column \"{}\" of relation \"{relation}\" violates not-null constraint",
                         col_def.name
                     ),
+                    detail: diagnostics::failing_row_detail(
+                        context.diagnostics,
+                        table,
+                        definitions,
+                        document,
+                    )?,
+                    hint: None,
                 });
             }
             _ => {}

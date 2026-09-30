@@ -139,6 +139,14 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         )
     }
 
+    fn resolve_regproc(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
+        uqa_execution::catalog::projection::resolve_regproc_input_oid(
+            &self.engine.catalog_execution(),
+            name,
+        )
+        .map(Some)
+    }
+
     fn resolve_regprocedure(&self, name: &str) -> std::result::Result<Option<i64>, String> {
         uqa_execution::catalog::projection::resolve_regprocedure_oid(
             &self.engine.catalog_execution(),
@@ -184,6 +192,10 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         )
     }
 
+    fn enum_labels(&self) -> Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog> {
+        Some(self.engine)
+    }
+
     fn nextval(&self, name: &str) -> std::result::Result<i64, SQLError> {
         self.engine.nextval_sql(name)
     }
@@ -211,7 +223,10 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         args: &[Value],
     ) -> Option<std::result::Result<Value, SQLError>> {
         let registration = self.runtime.lookup_scalar_function(name)?;
-        Some(registration.function.call(args))
+        Some(
+            uqa_sql::expr::enums::render_host_arguments(Some(self.engine), args)
+                .and_then(|args| registration.function.call(&args)),
+        )
     }
 
     fn call_bound_builtin_function(

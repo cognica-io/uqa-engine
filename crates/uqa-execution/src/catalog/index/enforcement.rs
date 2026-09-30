@@ -67,6 +67,7 @@ pub fn enforced_keys(
                 constraint_owned: false,
                 constraint: TableKeyConstraint {
                     catalog_identity: None,
+                    index_identity: None,
                     name: Some(index.relation.name.clone()),
                     kind: TableKeyConstraintKind::Unique,
                     columns: index_keys

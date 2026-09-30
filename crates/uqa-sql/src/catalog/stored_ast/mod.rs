@@ -15,11 +15,13 @@ use uqa_core::RelationIdentity;
 mod expressions;
 mod merge;
 mod routines;
+mod sites;
 mod sources;
 mod types;
 pub use expressions::*;
 pub use merge::visit_stored_statement_merges;
 pub use routines::*;
+pub use sites::*;
 pub use sources::*;
 pub use types::*;
 

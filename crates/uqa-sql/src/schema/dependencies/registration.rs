@@ -190,7 +190,7 @@ fn bind_check_routines(
     expression: &mut Expr,
 ) -> Result<bool, SQLError> {
     let binding = context.bindings.binding_scope()?;
-    crate::schema::constraints::bind_stored_check_expression_routines(
+    crate::schema::constraints::bind_stored_check_expression(
         &SchemaBindingContext {
             catalog: context.schema,
             binding: &binding.context(),
@@ -207,7 +207,7 @@ fn bind_default_routines(
     typed: Expr,
 ) -> Result<bool, SQLError> {
     let binding = context.bindings.binding_scope()?;
-    crate::schema::defaults::bind_stored_schema_expression_routines(
+    crate::schema::defaults::bind_stored_schema_expression(
         &SchemaBindingContext {
             catalog: context.schema,
             binding: &binding.context(),

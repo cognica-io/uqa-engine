@@ -23,6 +23,12 @@ impl ColumnType {
         .to_string()
     }
 
+    /// A name that resolves back to this exact type independently of the search path and of later renames: the OID identity of a user-defined type, and the SQL name of a built-in type.
+    #[must_use]
+    pub fn catalog_name(&self) -> String {
+        self.user_type_identity().unwrap_or_else(|| self.sql_name())
+    }
+
     /// Name emitted by `PostgreSQL`'s regtype output, including `pg_typeof`.
     #[must_use]
     pub fn regtype_name(&self) -> String {
@@ -103,6 +109,11 @@ impl fmt::Display for TypeName<'_> {
         }
         match self.ty {
             ColumnType::Named(name) => f.write_str(name),
+            // Regtype output qualifies a user-defined type whose schema is not visible, as `format_type_be` does; other spellings name an enum without its schema.
+            ColumnType::Enum(reference) if self.regtype => f.write_str(
+                &super::display::visible_type_name(&reference.schema, &reference.name),
+            ),
+            ColumnType::Enum(reference) => f.write_str(&crate::expr::quote_ident(&reference.name)),
             ColumnType::SmallInteger => f.write_str("smallint"),
             ColumnType::Integer => f.write_str("integer"),
             ColumnType::BigInteger => f.write_str("bigint"),
@@ -170,11 +181,15 @@ impl fmt::Display for TypeName<'_> {
             ColumnType::Multirange(subtype) => f.write_str(subtype.multirange_name()),
             ColumnType::Vector(dimension) => write!(f, "vector({dimension})"),
             ColumnType::Tensor(dimension) => write!(f, "tensor({dimension})"),
-            ColumnType::Domain { schema, name, .. } => {
-                crate::compiler::write_relation_component(schema, f)?;
-                f.write_str(".")?;
-                crate::compiler::write_relation_component(name, f)
+            ColumnType::Domain { schema, name, .. } if self.regtype => {
+                f.write_str(&super::display::visible_type_name(schema, name))
             }
+            ColumnType::Domain { schema, name, .. } => write!(
+                f,
+                "{}.{}",
+                crate::expr::quote_ident(schema),
+                crate::expr::quote_ident(name)
+            ),
         }
     }
 }

@@ -104,8 +104,8 @@ fn validate_jsonb_numbers(value: &serde_json::Value) -> Result<()> {
 
 /// Render an engine value as `PostgreSQL` JSON input text without losing the
 /// lexical representation of values already typed as `json` or `jsonb`.
-pub fn value_to_json_text(value: &Value) -> String {
-    match value {
+pub fn value_to_json_text(value: &Value) -> Result<String> {
+    Ok(match value {
         Value::Null => "null".to_string(),
         Value::Void => "\"\"".to_string(),
         Value::Bool(value) => value.to_string(),
@@ -126,17 +126,21 @@ pub fn value_to_json_text(value: &Value) -> String {
         }
         Value::Temporal(value) => serde_json::Value::String(value.to_sql_string()).to_string(),
         Value::Json(text) | Value::JsonB(text) => text.clone(),
+        Value::Enum(value) => return Err(super::catalog_output_required(value)),
         Value::LegacyVector(vector) => legacy_vector_json(vector).to_string(),
         Value::Array(array) => {
             let values = array
                 .elements()
                 .iter()
                 .map(value_to_json_text)
-                .collect::<Vec<_>>();
+                .collect::<Result<Vec<_>>>()?;
             format!("[{}]", values.join(","))
         }
         Value::List(values) => {
-            let values = values.iter().map(value_to_json_text).collect::<Vec<_>>();
+            let values = values
+                .iter()
+                .map(value_to_json_text)
+                .collect::<Result<Vec<_>>>()?;
             format!("[{}]", values.join(","))
         }
         Value::Row(values) => record_json_text(
@@ -144,21 +148,21 @@ pub fn value_to_json_text(value: &Value) -> String {
                 .iter()
                 .enumerate()
                 .map(|(index, value)| (format!("f{}", index + 1), value)),
-        ),
+        )?,
         Value::Record(fields) => {
-            record_json_text(fields.iter().map(|(name, value)| (name.clone(), value)))
+            record_json_text(fields.iter().map(|(name, value)| (name.clone(), value)))?
         }
         Value::Map(values) => {
             let values = values
                 .iter()
                 .map(|(key, value)| {
                     let key = serde_json::Value::String(key.clone()).to_string();
-                    format!("{key}:{}", value_to_json_text(value))
+                    Ok(format!("{key}:{}", value_to_json_text(value)?))
                 })
-                .collect::<Vec<_>>();
+                .collect::<Result<Vec<_>>>()?;
             format!("{{{}}}", values.join(","))
         }
-    }
+    })
 }
 
 fn legacy_vector_json(vector: &uqa_core::LegacyVectorValue) -> serde_json::Value {
@@ -179,15 +183,15 @@ fn legacy_vector_json(vector: &uqa_core::LegacyVectorValue) -> serde_json::Value
     )
 }
 
-fn record_json_text<'a>(fields: impl IntoIterator<Item = (String, &'a Value)>) -> String {
+fn record_json_text<'a>(fields: impl IntoIterator<Item = (String, &'a Value)>) -> Result<String> {
     let fields = fields
         .into_iter()
         .map(|(name, value)| {
             let name = serde_json::Value::String(name).to_string();
-            format!("{name}:{}", value_to_json_text(value))
+            Ok(format!("{name}:{}", value_to_json_text(value)?))
         })
-        .collect::<Vec<_>>();
-    format!("{{{}}}", fields.join(","))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(format!("{{{}}}", fields.join(",")))
 }
 
 pub(super) fn json_build_array_value(args: &[Value], jsonb: bool) -> Result<Value> {
@@ -195,7 +199,7 @@ pub(super) fn json_build_array_value(args: &[Value], jsonb: bool) -> Result<Valu
         "[{}]",
         args.iter()
             .map(value_to_json_text)
-            .collect::<Vec<_>>()
+            .collect::<Result<Vec<_>>>()?
             .join(", ")
     );
     if jsonb {
@@ -227,21 +231,39 @@ pub fn validate_json_object_key_type(value: &Value) -> Result<()> {
 }
 
 pub(super) fn json_build_object_value(args: &[Value], jsonb: bool) -> Result<Value> {
+    let function = if jsonb {
+        "jsonb_build_object()"
+    } else {
+        "json_build_object()"
+    };
     if !args.len().is_multiple_of(2) {
-        return Err(SQLError::TypeMismatch(
-            "json_build_object requires an even number of args".into(),
-        ));
+        return Err(SQLError::Diagnostic {
+            sqlstate: "22023".into(),
+            message: "argument list must have even number of elements".into(),
+            detail: None,
+            hint: Some(format!(
+                "The arguments of {function} must consist of alternating keys and values."
+            )),
+        });
     }
     let mut fields = Vec::with_capacity(args.len() / 2);
-    for pair in args.chunks_exact(2) {
+    for (index, pair) in args.chunks_exact(2).enumerate() {
         if matches!(pair[0], Value::Null) {
-            return Err(SQLError::TypeMismatch(
-                "json_build_object key must not be NULL".into(),
-            ));
+            return Err(if jsonb {
+                SQLError::Routine {
+                    sqlstate: "22023".into(),
+                    message: format!("argument {}: key must not be null", index * 2 + 1),
+                }
+            } else {
+                SQLError::Routine {
+                    sqlstate: "22004".into(),
+                    message: "null value not allowed for object key".into(),
+                }
+            });
         }
         validate_json_object_key_type(&pair[0])?;
         let key = serde_json::Value::String(super::value_to_string(&pair[0])?).to_string();
-        fields.push(format!("{key} : {}", value_to_json_text(&pair[1])));
+        fields.push(format!("{key} : {}", value_to_json_text(&pair[1])?));
     }
     let text = format!("{{{}}}", fields.join(", "));
     if jsonb {
@@ -313,6 +335,10 @@ pub(super) fn value_to_json(v: &Value) -> serde_json::Value {
             }
             serde_json::Value::Object(obj)
         }
+        Value::Enum(value) => panic!(
+            "test JSON has no enum label for type OID {}",
+            value.type_oid()
+        ),
     }
 }
 

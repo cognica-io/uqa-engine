@@ -34,6 +34,19 @@ impl TableAuthorizationContext<'_> {
         name: &str,
         keys: &[uqa_sql::ast::IndexKey],
     ) -> Result<bool, SQLError> {
+        let columns = keys
+            .iter()
+            .map(uqa_sql::ast::IndexKey::column)
+            .collect::<Vec<_>>();
+        self.can_view_key_columns(name, &columns)
+    }
+
+    /// Whether a key-valued diagnostic may show its values: SELECT on the table, or SELECT on every key column when no key is an expression (`None`).
+    pub fn can_view_key_columns(
+        &self,
+        name: &str,
+        keys: &[Option<&str>],
+    ) -> Result<bool, SQLError> {
         let (_, table) = self.bound_table_for_security(name)?;
         let bound = table.security();
         let roles = self.roles.role_definitions();
@@ -47,7 +60,7 @@ impl TableAuthorizationContext<'_> {
         Ok(
             role_has_privilege(&security, &subject, check, &roles, &memberships)
                 || keys.iter().all(|key| {
-                    key.column().is_some_and(|column| {
+                    key.is_some_and(|column| {
                         column_privilege_check(
                             &security,
                             column,
@@ -96,6 +109,46 @@ impl TableAuthorizationContext<'_> {
             sqlstate: "42501".into(),
             message: format!("permission denied for table {}", relation.name),
         })
+    }
+    /// `ExecBuildSlotValueDescription` access: table SELECT shows every column; otherwise the role sees the columns it may select or the statement supplied, and nothing when none qualifies.
+    pub fn failing_row_access(
+        &self,
+        name: &str,
+        supplied: &[String],
+    ) -> Result<Option<uqa_sql::semantics::row_description::RowDescriptionAccess>, SQLError> {
+        let (_, table) = self.bound_table_for_security(name)?;
+        let bound = table.security();
+        let roles = self.roles.role_definitions();
+        let memberships = self.roles.role_memberships();
+        let security = bound.resolve(&roles).map_err(SQLError::Internal)?;
+        let subject = self.names.current_role();
+        let check = TablePrivilegeCheck {
+            privilege: TableAclPrivilege::Select,
+            grant_option: false,
+        };
+        if role_has_privilege(&security, &subject, check, &roles, &memberships) {
+            return Ok(Some(
+                uqa_sql::semantics::row_description::RowDescriptionAccess::Table,
+            ));
+        }
+        let visible = table
+            .columns()
+            .iter()
+            .filter(|column| {
+                supplied.contains(&column.name)
+                    || column_privilege_check(
+                        &security,
+                        &column.name,
+                        &subject,
+                        check,
+                        &roles,
+                        &memberships,
+                    )
+            })
+            .map(|column| column.name.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        Ok((!visible.is_empty())
+            .then_some(uqa_sql::semantics::row_description::RowDescriptionAccess::Columns(visible)))
     }
     pub fn bound_table_column_names(&self, name: &str) -> Result<Vec<String>, SQLError> {
         let (_, table) = self.bound_table_for_security(name)?;

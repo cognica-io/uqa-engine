@@ -69,14 +69,7 @@ pub(super) fn resolve_operator_type_with_control(
             control.finish(ColumnType::Boolean, control.empty_reservation())?,
         ));
     }
-    Err(SQLError::Routine {
-        sqlstate: "42883".into(),
-        message: format!(
-            "operator does not exist: {} {symbol} {}",
-            type_name(left),
-            type_name(right)
-        ),
-    })
+    Err(super::undefined_binary_operator(left, symbol, right))
 }
 
 pub(super) fn bind_unknown_arguments(
@@ -209,10 +202,6 @@ fn supported_type(ty: &ColumnType) -> bool {
             | ColumnType::Range(_)
             | ColumnType::Multirange(_)
     )
-}
-
-fn type_name(ty: Option<&ColumnType>) -> String {
-    ty.map_or_else(|| "unknown".into(), ColumnType::sql_name)
 }
 
 fn operator_symbol(name: &str) -> &'static str {

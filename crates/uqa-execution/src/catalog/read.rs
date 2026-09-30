@@ -530,6 +530,16 @@ impl CatalogReadView {
         self.snapshot.definitions.domains.values()
     }
 
+    pub fn enums(&self) -> impl Iterator<Item = &uqa_sql::catalog::enum_type::StoredEnum> {
+        self.snapshot.definitions.enums.values()
+    }
+
+    /// Resolve an enum by its type OID or by the OID of its generated array type.
+    pub fn enum_by_type_oid(&self, oid: u32) -> Option<&uqa_sql::catalog::enum_type::StoredEnum> {
+        self.enums()
+            .find(|definition| definition.oid == oid || definition.array_oid == oid)
+    }
+
     pub fn sql_functions(
         &self,
         resolution: &RelationNameResolution,

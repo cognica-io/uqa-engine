@@ -96,8 +96,11 @@ pub mod table_inquiry;
 pub mod view_ownership;
 
 pub mod grants;
+pub mod object_acl;
 pub mod system_relations;
 pub mod table_grants;
+pub mod type_inquiry;
+pub mod type_privileges;
 
 pub mod view_authorization;
 

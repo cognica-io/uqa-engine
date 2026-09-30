@@ -17,7 +17,7 @@ use super::{
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct RegisteredAggregateRecord {
     pub(super) values: Vec<Value>,
-    pub(super) sort_keys: Vec<(Value, bool)>,
+    pub(super) sort_keys: Vec<super::ordering::AggregateSortKey>,
     pub(super) sequence: u64,
 }
 
@@ -53,7 +53,7 @@ impl RegisteredAggregateBuffer {
     pub(super) fn push(
         &mut self,
         values: Vec<Value>,
-        sort_keys: Vec<(Value, bool)>,
+        sort_keys: Vec<super::ordering::AggregateSortKey>,
     ) -> Result<(), SQLError> {
         let next_sequence = self.next_sequence.checked_add(1).ok_or_else(|| {
             SQLError::Internal("registered aggregate value sequence overflow".into())

@@ -234,7 +234,8 @@ pub(crate) fn value_type_with_control(
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
     control.check()?;
     let scalar = match value {
-        Value::Null | Value::Map(_) => None,
+        // A runtime enum carrier knows only its type OID; declared expression types supply the enum's identity.
+        Value::Null | Value::Map(_) | Value::Enum(_) => None,
         Value::Void => Some(ColumnType::Void),
         Value::Row(_) | Value::Record(_) => Some(ColumnType::Record),
         Value::Bool(_) => Some(ColumnType::Boolean),
@@ -358,6 +359,43 @@ pub fn common_type(left: &ColumnType, right: &ColumnType) -> Result<ColumnType, 
             .into_uncontrolled()
             .expect("ordinary common type has no reservation")
     })
+}
+
+/// `select_common_type` over typed and `unknown` (`None`) inputs: only inputs of exactly one type keep that type, which is how a domain survives; otherwise domains are reduced to their base types before the pairwise rules. `unknown` inputs alone resolve to `text`, and `None` means the known types have no common type.
+pub(super) fn select_common_input_type_with_control(
+    types: &[Option<&ColumnType>],
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    control.check()?;
+    if let Some(Some(first)) = types.first() {
+        if types.iter().all(|ty| ty.is_some_and(|ty| ty == *first)) {
+            return first
+                .clone_with_control(control)
+                .map(Some)
+                .map_err(Into::into);
+        }
+    }
+    let mut selected: Option<Produced<ColumnType>> = None;
+    for ty in types.iter().flatten() {
+        let ty = base_type(ty);
+        selected = Some(match selected {
+            None => ty.clone_with_control(control)?,
+            Some(current) => match common_type_with_control(&current, ty, control) {
+                Ok(common) => common,
+                Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => {
+                    return Err(error)
+                }
+                Err(_) => return Ok(None),
+            },
+        });
+    }
+    match selected {
+        Some(selected) => Ok(Some(selected)),
+        None => control
+            .finish(ColumnType::Text, control.empty_reservation())
+            .map(Some)
+            .map_err(Into::into),
+    }
 }
 
 /// Preserve the existing common-type rules while the selected type owns its copied names and array boxes.

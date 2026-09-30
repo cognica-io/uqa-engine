@@ -99,6 +99,10 @@ impl context::PhysicalExplainPlanning for Engine {
     }
 }
 impl context::StatementExecutionInputs<StatementReadSnapshot> for Engine {
+    fn diagnostic_search_path(&self) -> Option<Vec<String>> {
+        Some(self.session.state.read().search_path.clone())
+    }
+
     fn notification_subscriptions_required(&self) -> bool {
         Engine::notification_subscriptions_required(self)
     }

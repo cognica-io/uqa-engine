@@ -21,12 +21,23 @@ pub fn validate_restored_view_object_ids(
     views: &BTreeMap<RelationIdentity, StoredView>,
 ) -> Result<(), String> {
     let mut object_ids = BTreeSet::new();
+    let mut oids = BTreeSet::new();
     for (relation, view) in views {
         if !object_ids.insert(view.object_id) {
             return Err(format!(
                 "view `{}` has a duplicate object identity",
                 relation.qualified_name()
             ));
+        }
+        if let Some(recorded) = view.catalog_oids {
+            if !recorded.is_valid_for(crate::catalog::relation_oids::RelationOidKind::View)
+                || !recorded.claimed().all(|oid| oids.insert(oid))
+            {
+                return Err(format!(
+                    "view `{}` records invalid catalog OIDs",
+                    relation.qualified_name()
+                ));
+            }
         }
     }
     Ok(())

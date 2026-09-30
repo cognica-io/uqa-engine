@@ -113,66 +113,68 @@ fn prepare_privileges<'a>(
     )?;
     let grantees = analysis::binding::bind_routine_grantees(&grantees, &roles)?;
     let memberships = context.catalog.roles.role_memberships();
-    let registry = context.catalog.registry.routines_write();
+    let snapshot = context.catalog.registry.routine_snapshot();
     let mut resolved = Vec::with_capacity(stmt.items.len());
-    for item in &stmt.items {
-        let (name, position) = resolve_sql_routine_alter_target(
-            context.catalog.names,
-            &registry,
-            &item.name,
-            item.arg_types.as_deref(),
-            stmt.kind,
-        )?;
-        let function = registry[&name][position].clone();
+    for (name, position) in resolve_privilege_targets(context, stmt, &snapshot)? {
         let grantor = analysis::select_routine_acl_grantor(
-            &function.def,
+            &snapshot[&name][position].def,
             &current_user,
             &roles,
             &memberships,
         )?;
         resolved.push((name, position, grantor));
     }
+    let registry = context.catalog.registry.routines_write();
+    for (name, position, _) in &resolved {
+        let current = registry
+            .get(name)
+            .and_then(|overloads| overloads.get(*position));
+        if current.map(|function| function.def.object_id)
+            != Some(snapshot[name][*position].def.object_id)
+        {
+            return Err(SQLError::Internal(format!(
+                "resolved GRANT routine target `{name}` changed before mutation"
+            )));
+        }
+    }
     let mut next = registry.clone();
     let mut notices = Vec::new();
     let mut dependencies = BTreeSet::new();
     for (name, position, grantor) in resolved {
         let existing = next[&name][position].clone();
-        let Some(grantor) = grantor else {
+        let mut def = existing.def.clone();
+        if let Some(grantor) = grantor {
+            if stmt.is_grant {
+                for grantee in &grantees {
+                    analysis::grant_routine_acl(&mut def, *grantee, grantor, stmt.grant_option)?;
+                }
+            } else {
+                let mut revoked = false;
+                for grantee in &grantees {
+                    revoked |= analysis::revoke_routine_acl(
+                        &mut def,
+                        *grantee,
+                        grantor,
+                        stmt.grant_option_only,
+                        stmt.revoke_behavior == RoutineRevokeBehavior::Cascade,
+                    )?;
+                }
+                if !revoked {
+                    notices.push(analysis::routine_acl_warning(false, &existing.def.name));
+                }
+            }
+        } else {
             notices.push(analysis::routine_acl_warning(
                 stmt.is_grant,
                 &existing.def.name,
             ));
-            continue;
-        };
-        let mut def = existing.def.clone();
-        let changed = if stmt.is_grant {
-            for grantee in &grantees {
-                analysis::grant_routine_acl(&mut def, *grantee, grantor, stmt.grant_option)?;
-            }
-            def.execute_acl != existing.def.execute_acl
-        } else {
-            let mut changed = false;
-            for grantee in &grantees {
-                changed |= analysis::revoke_routine_acl(
-                    &mut def,
-                    *grantee,
-                    grantor,
-                    stmt.grant_option_only,
-                    stmt.revoke_behavior == RoutineRevokeBehavior::Cascade,
-                )?;
-            }
-            if !changed {
-                notices.push(analysis::routine_acl_warning(false, &existing.def.name));
-            }
-            changed
-        };
+        }
+        // The command stores the ACL even when it grants or revokes nothing.
+        analysis::make_routine_acl_explicit(&mut def)?;
         analysis::binding::added_routine_acl_roles(&existing.def, &def, &roles, &mut dependencies)?;
-        if changed {
+        if def.execute_acl != existing.def.execute_acl {
             next.get_mut(&name).expect("resolved routine key")[position] =
-                Arc::new(SQLUserFunction {
-                    def,
-                    compiled: existing.compiled.clone(),
-                });
+                Arc::new(SQLUserFunction::new(def, existing.body.clone()));
         }
     }
     Ok(RoleDependencyCandidate {
@@ -185,4 +187,30 @@ fn prepare_privileges<'a>(
         roles,
         dependencies,
     })
+}
+
+/// `objectNamesToOids`: every named routine resolves before any grantor is chosen. Lookup diagnostics read the type catalog, so resolution uses a snapshot rather than the registry the caller later holds for writing.
+fn resolve_privilege_targets(
+    context: &RoutinePrivilegeContext<'_>,
+    stmt: &GrantRoutineStmt,
+    registry: &RoutineRegistry,
+) -> Result<Vec<(String, usize)>, SQLError> {
+    stmt.items
+        .iter()
+        .map(|item| {
+            let requested_types = uqa_sql::routines::declaration::resolve_routine_identity_types(
+                context.types,
+                item.arg_types.as_deref(),
+                &[],
+                "GRANT routine",
+            )?;
+            resolve_sql_routine_alter_target(
+                context.catalog.names,
+                registry,
+                &item.name,
+                requested_types.as_deref(),
+                stmt.kind,
+            )
+        })
+        .collect()
 }

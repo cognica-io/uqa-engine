@@ -48,6 +48,19 @@ impl RoutineOverloadCatalog for Engine {
 }
 
 impl RoutineResolution for Engine {
+    fn routine_body(
+        &self,
+        function: &SQLUserFunction,
+    ) -> Result<Arc<uqa_sql::routines::CompiledFunctionBody>, SQLError> {
+        self.session.routine_bodies.body(function, |def| {
+            uqa_execution::routines::invocation::bodies::compile_session_body(
+                self,
+                &self.routine_definition_context().compilation.analysis,
+                def,
+            )
+        })
+    }
+
     fn lookup_bound_sql_functions(&self, name: &str) -> Option<Vec<Arc<SQLUserFunction>>> {
         Engine::lookup_bound_sql_functions(self, name)
     }
@@ -149,6 +162,17 @@ impl FunctionTypeResolver for Engine {
 
     fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
         self.routine_overload_context().resolve_type_name(name)
+    }
+
+    fn enum_labels(&self) -> Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog> {
+        Some(self)
+    }
+
+    fn require_type_usage(&self, ty: &ColumnType) -> Result<(), SQLError> {
+        uqa_execution::catalog::security::type_inquiry::require_type_usage(
+            &self.catalog_execution(),
+            ty,
+        )
     }
 
     fn resolve_function_type(

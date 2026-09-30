@@ -216,6 +216,17 @@ impl uqa_execution::schema::table_creation::TableCreationPublication for Engine 
     ) -> uqa_storage::StorageBackendResult<()> {
         self.install_table_hierarchy(table, hierarchy)
     }
+    fn validate_default_partition_rows(
+        &self,
+        parent: &str,
+        bound: &uqa_sql::ast::PartitionBound,
+    ) -> Result<(), SQLError> {
+        uqa_execution::schema::hierarchy::validate_default_partition_exclusion(
+            &self.hierarchy_execution_context(),
+            parent,
+            bound,
+        )
+    }
     fn persist_schema(&self, table: &str) -> uqa_storage::StorageBackendResult<bool> {
         self.try_persist_table_schema(table)
     }

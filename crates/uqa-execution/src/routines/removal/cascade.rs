@@ -71,7 +71,7 @@ pub fn drop_schema_types_and_routines(
 ) -> Result<(), SQLError> {
     let registry = context.registry.routine_snapshot();
     let mut resolution = analysis_relations::schema_routine_drop_targets(&registry, schemas)?;
-    let mut domains = context
+    let mut domains: BTreeSet<u32> = context
         .domains
         .catalog
         .domain_definitions()
@@ -79,6 +79,15 @@ pub fn drop_schema_types_and_routines(
         .filter(|domain| schemas.contains(&domain.identity.schema))
         .map(|domain| domain.oid)
         .collect();
+    // Enum types of the schemas go with them, as DROP SCHEMA ... CASCADE drops every type in the schema.
+    domains.extend(
+        context
+            .catalog
+            .catalog_read_view()
+            .enums()
+            .filter(|definition| schemas.contains(&definition.identity.schema))
+            .map(|definition| definition.oid),
+    );
     expand_routine_domain_drop(context, &registry, &mut resolution, &mut domains)?;
     let dependents = routine_object_dependents(context, &resolution.targets, true)?;
     commit_sql_function_drop(

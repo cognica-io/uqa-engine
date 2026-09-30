@@ -654,6 +654,10 @@ impl Statement {
     pub fn upgrade_legacy_serialized_dispatches(&mut self) -> bool {
         match self {
             Self::Select(select) => select.upgrade_legacy_serialized_dispatches(),
+            Self::CreateEnum(_)
+            | Self::AlterEnum(_)
+            | Self::AlterTypeObject(_)
+            | Self::GrantType(_) => false,
             Self::CreateDomain(domain) => {
                 let mut changed = upgrade_optional(&mut domain.default);
                 for check in &mut domain.checks {

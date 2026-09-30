@@ -22,20 +22,67 @@ pub fn compare_extrema(left: &Value, right: &Value) -> Result<Ordering, SQLError
     )
 }
 
+/// One evaluated aggregate `ORDER BY` key with its direction and NULL placement.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AggregateSortKey {
+    pub(super) value: Value,
+    pub(super) descending: bool,
+    pub(super) nulls_first: bool,
+}
+
+impl AggregateSortKey {
+    /// A key of an aggregate's `ORDER BY` item; NULLs come first by default only when descending.
+    pub(super) fn ordered(value: Value, order: &uqa_sql::ScalarOrder) -> Self {
+        Self {
+            value,
+            descending: order.descending,
+            nulls_first: order.nulls.map_or(order.descending, |nulls| {
+                nulls == uqa_sql::ast::NullsOrder::First
+            }),
+        }
+    }
+
+    /// The default ascending key, with NULLs last.
+    pub(super) fn ascending(value: Value) -> Self {
+        Self::directed(value, false)
+    }
+
+    /// A key with `PostgreSQL`'s default NULL placement for its direction.
+    pub(super) fn directed(value: Value, descending: bool) -> Self {
+        Self {
+            value,
+            descending,
+            nulls_first: descending,
+        }
+    }
+}
+
 pub(super) fn compare_sort_keys(
-    left: &[(Value, bool)],
-    right: &[(Value, bool)],
+    left: &[AggregateSortKey],
+    right: &[AggregateSortKey],
 ) -> Result<Ordering, SQLError> {
-    for ((left, descending), (right, _)) in left.iter().zip(right) {
-        let ordering = uqa_sql::expr::compare_typed_values_with_control(
-            left,
-            right,
-            &ProductionControl::uncontrolled(),
-        )?;
-        let ordering = if *descending {
-            ordering.reverse()
-        } else {
-            ordering
+    for (left, right) in left.iter().zip(right) {
+        let ordering = match (
+            matches!(left.value, Value::Null),
+            matches!(right.value, Value::Null),
+        ) {
+            (true, true) => Ordering::Equal,
+            (true, false) if left.nulls_first => Ordering::Less,
+            (true, false) => Ordering::Greater,
+            (false, true) if left.nulls_first => Ordering::Greater,
+            (false, true) => Ordering::Less,
+            (false, false) => {
+                let ordering = uqa_sql::expr::compare_typed_values_with_control(
+                    &left.value,
+                    &right.value,
+                    &ProductionControl::uncontrolled(),
+                )?;
+                if left.descending {
+                    ordering.reverse()
+                } else {
+                    ordering
+                }
+            }
         };
         if !ordering.is_eq() {
             return Ok(ordering);

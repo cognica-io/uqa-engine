@@ -44,6 +44,18 @@ impl Session {
         self.available_class(CatalogOidClass::Constraint, oid)
     }
 
+    /// Move the database's counter so that its next OID is `oid`.
+    fn continue_counter_at(&self, oid: i64) {
+        let previous = u32::try_from(oid - 1).unwrap();
+        assert_eq!(
+            self.locks
+                .catalog_oids()
+                .next_oid(None, || Ok(Some(previous - 1)))
+                .unwrap(),
+            previous
+        );
+    }
+
     fn available_class(&self, class: CatalogOidClass, oid: i64) -> bool {
         let key = self.locks.shared_catalog_key(SharedCatalogLock::Object {
             class_id: class.class_id(),
@@ -67,6 +79,7 @@ impl Session {
 #[test]
 fn relation_addresses_exclude_hidden_relations_before_and_after_wait_and_release_losing_locks() {
     let object = [90; 16];
+    // The hidden foreign table keeps the OID its identity derived before OIDs were stored.
     let candidate = uqa_sql::catalog::oids::stable_object_oid("relation", &object);
     for after_refresh in [false, true] {
         let session = Session::new();
@@ -75,11 +88,12 @@ fn relation_addresses_exclude_hidden_relations_before_and_after_wait_and_release
         } else {
             *session.current.write() = occupied(50001);
         }
+        session.continue_counter_at(candidate);
         let allocated = session
             .allocator()
-            .allocate_catalog_oid(CatalogOidClass::Relation, &object)
+            .allocate_catalog_oid(CatalogOidClass::Relation, &[7; 16])
             .unwrap();
-        assert_ne!(allocated, candidate);
+        assert_eq!(allocated, candidate + 1);
         assert!(session.available_class(CatalogOidClass::Relation, candidate));
         assert!(!session.available_class(CatalogOidClass::Relation, allocated));
         // Relation and constraint OIDs occupy different lock classes.
@@ -210,6 +224,9 @@ impl SharedObjectLockSession for Session {
         }
         Ok(())
     }
+    fn next_catalog_oid(&self) -> Result<u32, SQLError> {
+        self.locks.catalog_oids().next_oid(None, || Ok(None))
+    }
 }
 
 fn occupied(oid: i64) -> CatalogReadView {
@@ -233,6 +250,7 @@ fn occupied(oid: i64) -> CatalogReadView {
         crate::catalog::foreign::StoredForeignTable {
             name: "hidden_schema.peer".into(),
             object_id: [90; 16],
+            catalog_oids: None,
             server_name: "memory".into(),
             columns,
             checks: Vec::new(),
@@ -264,8 +282,11 @@ fn domain_occupied(oid: i64) -> CatalogReadView {
             identity: uqa_core::RelationIdentity::new("hidden_schema", "peer"),
             object_id: [90; 16],
             oid: uqa_sql::catalog::domain::domain_object_oid(&[90; 16]),
+            array_oid: None,
             owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
             definition,
+            array_name: None,
+            usage_acl: None,
         },
     )])
     .into();
@@ -275,7 +296,7 @@ fn domain_occupied(oid: i64) -> CatalogReadView {
 #[test]
 fn domain_constraints_exclude_colliding_addresses_before_and_after_catalog_refresh() {
     let object = [12; 16];
-    let candidate = uqa_sql::catalog::oids::stable_object_oid("constraint", &object);
+    let candidate = i64::from(super::super::FIRST_NORMAL_OBJECT_ID);
     for after_refresh in [false, true] {
         let session = Session::new();
         if after_refresh {
@@ -287,7 +308,7 @@ fn domain_constraints_exclude_colliding_addresses_before_and_after_catalog_refre
             .allocator()
             .allocate_catalog_oid(CatalogOidClass::Constraint, &object)
             .unwrap();
-        assert_ne!(oid, candidate);
+        assert_eq!(oid, candidate + 1);
         assert!(session.available(candidate));
         assert!(!session.available(oid));
         session.locks.release_mark_above(1, 2);
@@ -336,8 +357,7 @@ fn supplied_constraint_addresses_cannot_claim_an_existing_domain_incarnation() {
 #[test]
 fn allocation_uses_current_authority_independent_metadata_before_and_after_refresh() {
     let object = [12; 16];
-    let candidate = uqa_sql::catalog::oids::stable_object_oid("constraint", &object);
-    assert!(candidate >= 16_384);
+    let candidate = i64::from(super::super::FIRST_NORMAL_OBJECT_ID);
     for after_refresh in [false, true] {
         let session = Session::new();
         if after_refresh {
@@ -349,7 +369,7 @@ fn allocation_uses_current_authority_independent_metadata_before_and_after_refre
             .allocator()
             .allocate_catalog_oid(CatalogOidClass::Constraint, &object)
             .unwrap();
-        assert_ne!(oid, candidate);
+        assert_eq!(oid, candidate + 1);
         assert!(session.available(candidate));
         assert!(!session.available(oid));
         session.locks.release_mark_above(1, 2);
@@ -358,11 +378,30 @@ fn allocation_uses_current_authority_independent_metadata_before_and_after_refre
 }
 
 #[test]
+fn allocation_follows_the_database_counter_in_creation_order() {
+    let session = Session::new();
+    let mut allocator = session.allocator();
+    let oids = [
+        CatalogOidClass::Relation,
+        CatalogOidClass::Type,
+        CatalogOidClass::Constraint,
+    ]
+    .map(|class| allocator.allocate_catalog_oid(class, &[12; 16]).unwrap());
+    assert_eq!(oids, [16_384, 16_385, 16_386]);
+    assert_eq!(
+        allocator
+            .allocate_catalog_oid_matching(CatalogOidClass::EnumLabel, |oid| oid % 2 == 0)
+            .unwrap(),
+        16_388
+    );
+}
+
+#[test]
 fn allocation_excludes_preexisting_and_new_addresses_in_the_same_unpublished_candidate() {
     let session = Session::new();
     let mut allocator = session.allocator();
     let object = [12; 16];
-    let existing = uqa_sql::catalog::oids::stable_object_oid("constraint", &object);
+    let existing = i64::from(super::super::FIRST_NORMAL_OBJECT_ID);
     allocator
         .include_catalog_identity(
             &uqa_core::RelationIdentity::new("public", "target"),
@@ -401,8 +440,7 @@ fn allocation_keeps_sqlstate_through_the_storage_error_boundary_and_releases_fai
             uqa_sql::catalog::errors::storage_error("materialize", &failure).sqlstate(),
             Some(code)
         );
-        let oid = uqa_sql::catalog::oids::stable_object_oid("constraint", &[12; 16]);
-        assert!(session.available(oid));
+        assert!(session.available(i64::from(super::super::FIRST_NORMAL_OBJECT_ID)));
     }
 }
 
@@ -500,4 +538,44 @@ fn supplied_identity_reservation_releases_failures_and_preserves_sqlstate() {
         );
         assert!(session.available(50001));
     }
+}
+
+#[test]
+fn relation_oids_follow_heap_create_with_catalog_order() {
+    use uqa_sql::catalog::relation_oids::{RelationCatalogOids, RelationOidKind};
+    let session = Session::new();
+    let mut allocator = session.allocator();
+    assert_eq!(
+        allocator
+            .allocate_relation_oids(RelationOidKind::Table)
+            .unwrap(),
+        RelationCatalogOids {
+            relation: 16_384,
+            array_type: Some(16_385),
+            row_type: Some(16_386),
+            rule: None,
+        }
+    );
+    assert_eq!(
+        allocator
+            .allocate_relation_oids(RelationOidKind::View)
+            .unwrap(),
+        RelationCatalogOids {
+            relation: 16_387,
+            array_type: Some(16_388),
+            row_type: Some(16_389),
+            rule: Some(16_390),
+        }
+    );
+    assert_eq!(
+        allocator
+            .allocate_relation_oids(RelationOidKind::Sequence)
+            .unwrap(),
+        RelationCatalogOids {
+            relation: 16_391,
+            row_type: None,
+            array_type: None,
+            rule: None,
+        }
+    );
 }

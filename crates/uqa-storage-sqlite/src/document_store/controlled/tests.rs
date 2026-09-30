@@ -7,7 +7,10 @@
 use super::*;
 use crate::document_store::{blob as ordinary, typed_value::StoredValue};
 use std::collections::BTreeMap;
-use uqa_core::{ArrayValue, DecimalValue, LegacyVectorKind, LegacyVectorValue, TemporalValue};
+use uqa_core::{
+    ArrayValue, DecimalValue, EnumLabelKey, EnumValue, LegacyVectorKind, LegacyVectorValue,
+    TemporalValue,
+};
 
 mod identities;
 mod native;
@@ -30,7 +33,7 @@ fn parity(input: &[u8]) {
             );
             drop(actual);
         }
-        (Err(_), Err(JsonReadError::InvalidJson)) => {}
+        (Err(_), Err(JsonReadError::InvalidJson | JsonReadError::Malformed { .. })) => {}
         (expected, actual) => {
             panic!("typed parity failed for {input:?}: {expected:?} / {actual:?}")
         }
@@ -88,6 +91,20 @@ fn typed_blob_round_trips_every_persisted_variant() {
             ])
             .unwrap(),
         ),
+        Value::Enum(EnumValue::new(
+            16_390,
+            EnumLabelKey::from_bytes(vec![0, 255, 7]).unwrap(),
+        )),
+        Value::Array(
+            ArrayValue::try_new(vec![
+                Value::Enum(EnumValue::new(
+                    u32::MAX,
+                    EnumLabelKey::from_bytes(vec![64]).unwrap(),
+                )),
+                Value::Null,
+            ])
+            .unwrap(),
+        ),
     ];
     for value in &scalars {
         parity(&encoded(value.clone()));
@@ -133,6 +150,17 @@ fn typed_envelopes_preserve_serde_sequence_duplicate_and_ignored_field_rules() {
         r#"{"kind":"bytes","value":[256]}"#,
         r#"{"kind":"int","value":1.0}"#,
         r#"{"kind":"float_bits","value":18446744073709551615}"#,
+        r#"{"kind":"enum","value":{"type_oid":7,"key":"40"}}"#,
+        r#"{"kind":"enum","value":[7,"40"]}"#,
+        r#"{"kind":"enum","value":{"key":"40","type_oid":7}}"#,
+        r#"{"kind":"enum","value":{"type_oid":7,"key":"40","extra":1}}"#,
+        r#"{"kind":"enum","value":{"type_oid":7}}"#,
+        r#"{"kind":"enum","value":{"type_oid":4294967296,"key":"40"}}"#,
+        r#"{"kind":"enum","value":{"type_oid":-1,"key":"40"}}"#,
+        r#"{"kind":"enum","value":{"type_oid":7,"key":"4000"}}"#,
+        r#"{"kind":"enum","value":{"type_oid":7,"key":""}}"#,
+        r#"{"kind":"enum","value":{"type_oid":7,"key":"zz"}}"#,
+        r#"{"kind":"enum","value":{"type_oid":7,"key":"40","key":"41"}}"#,
     ] {
         parity(input.as_bytes());
     }

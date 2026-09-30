@@ -27,14 +27,64 @@ use crate::type_resolution::{
     RankedFunctionMatch, ResolvedFunctionOverload,
 };
 use crate::SQLError;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
-/// A registered routine: the persistable definition plus its
-/// pre-compiled body.
+/// A registered routine: the persistable definition and its body as the catalog keeps it.
 #[derive(Clone)]
 pub struct SQLUserFunction {
     pub def: CreateFunction,
-    pub compiled: CompiledFunctionBody,
+    pub body: RoutineBody,
+    version: OnceLock<u64>,
+}
+
+impl SQLUserFunction {
+    #[must_use]
+    pub const fn new(def: CreateFunction, body: RoutineBody) -> Self {
+        Self {
+            def,
+            body,
+            version: OnceLock::new(),
+        }
+    }
+
+    /// A fingerprint of the definition. It changes whenever the routine's catalog entry changes, as `cached_function_compile` notices a new `pg_proc` tuple by its `xmin` and `ctid`, and it survives reloading the unchanged definition from storage.
+    pub fn definition_version(&self) -> Result<u64, SQLError> {
+        if let Some(version) = self.version.get() {
+            return Ok(*version);
+        }
+        let encoded = serde_json::to_vec(&self.def).map_err(|error| {
+            SQLError::Internal(format!(
+                "encode routine `{}` definition: {error}",
+                self.def.name
+            ))
+        })?;
+        // FNV-1a over the encoded definition.
+        let version = encoded
+            .iter()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+                (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+            });
+        Ok(*self.version.get_or_init(|| version))
+    }
+}
+
+/// A routine body as the catalog keeps it. A SQL-standard body is bound when the routine is defined, as `PostgreSQL` stores `prosqlbody` as parse trees that name objects by OID. A body given as a string is compiled by each session that uses the routine, as the backend function cache compiles `prosrc`, so its names resolve when that session first needs them.
+#[derive(Clone)]
+pub enum RoutineBody {
+    Bound(Arc<CompiledFunctionBody>),
+    Source,
+}
+
+/// The body a static analysis sees, or `None` when the body does not compile in this session. Such a routine cannot run in the session, and running it reports the compilation error, as `PostgreSQL` compiles a routine only when it runs; internal failures still propagate.
+pub fn analyzable_routine_body(
+    resolution: &(impl RoutineResolution + ?Sized),
+    function: &SQLUserFunction,
+) -> Result<Option<Arc<CompiledFunctionBody>>, SQLError> {
+    match resolution.routine_body(function) {
+        Ok(body) => Ok(Some(body)),
+        Err(SQLError::Internal(message)) => Err(SQLError::Internal(message)),
+        Err(_) => Ok(None),
+    }
 }
 
 /// Executable form of a routine body.
@@ -59,6 +109,20 @@ pub fn is_routine_namespace_lookup_error(error: &SQLError) -> bool {
 pub trait RoutineResolution: FunctionTypeResolver {
     fn has_registered_scalar_function(&self, _name: &str) -> bool {
         false
+    }
+
+    /// The compiled body of a routine as this session executes it: a bound body as defined, or a source body as this session compiled it. A resolver without a session holds only bound bodies.
+    fn routine_body(
+        &self,
+        function: &SQLUserFunction,
+    ) -> Result<Arc<CompiledFunctionBody>, SQLError> {
+        match &function.body {
+            RoutineBody::Bound(body) => Ok(Arc::clone(body)),
+            RoutineBody::Source => Err(SQLError::Internal(format!(
+                "routine `{}` has no session to compile its body",
+                function.def.name
+            ))),
+        }
     }
 
     fn has_registered_table_function(&self, _name: &str) -> bool {

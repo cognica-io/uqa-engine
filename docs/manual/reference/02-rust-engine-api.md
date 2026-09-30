@@ -65,6 +65,19 @@ When projected labels repeat, `SQLResult` retains the distinct final values in a
 
 `REGTYPE` results, including `pg_typeof`, use `Value::Int` for the catalog OID. Request `pg_typeof(expression)::text` for the visible type name, or use `sql::format_postgres_text(value, column_type, Some(&engine))` with the result's declared type. `sql::postgres_result_type` returns the PostgreSQL type OID, size, and modifier; scalar domain results expose their base type in a PostgreSQL client descriptor.
 
+### Enum labels in results
+
+Enum results arrive as `Value::Enum`, which carries the type OID and an immutable label key rather than the label text, because a label can be renamed without rewriting stored values. `sql::format_postgres_text(value, column_type, Some(&engine))` renders the current label, including inside arrays and records. `Engine::render_enum_labels(&mut result)` replaces every enum value of a result by its label while keeping the declared column types, as a PostgreSQL client receives enum values; it reports an error if a value's type has since been dropped. `Engine::sql_batch_with_labels` runs a batch like `Engine::sql_batch` and renders each result before the next statement runs, so a later statement that drops the type cannot invalidate an earlier result. The Python, Node.js and browser bindings, the Arrow and Parquet `QueryBuilder` outputs, and arguments passed to registered host functions use these labels.
+
+```rust
+let engine = uqa_engine::Engine::new();
+engine.sql("CREATE TYPE mood AS ENUM ('sad', 'happy')", &[])?;
+let mut result = engine.sql("SELECT 'happy'::mood AS m", &[])?;
+engine.render_enum_labels(&mut result)?;
+assert_eq!(result.value_at(0, 0), Some(&uqa_core::Value::Str("happy".into())));
+# Ok::<(), uqa_engine::SQLError>(())
+```
+
 ### Simple Query messages
 
 `Engine::sql_simple_query(query, params, consume)` accepts a SQL message containing zero or more statements and a `FnMut(&SQLResult) -> Result<(), SQLError>` callback. It parses the complete message before executing any statement, then delivers results in statement order. An empty message delivers one empty result with no `command_tag`.
@@ -158,7 +171,7 @@ Schema and namespace lookup/enumeration, current-schema resolution, index metada
 
 Public text, profiled text, KNN, vector similarity, model-calibrated vector and hybrid search use this same boundary before planning or accessing analyzers and indexes. Their table binding retains an identity-checked AccessShare lock. `bayesian_params_for`, `calibration_report`, `deep_predict` and public `EngineDriver::execute_node` also enter the selected transaction before reading their inputs. Queries that may persist automatic calibration own a writable rollback snapshot when necessary, including on memory engines. Read-only transactions estimate missing or stale automatic calibration from their selected corpus without reserving a parameter writer or publishing parameters; explicit parameter saves and learning still report `25006`. A later writable query estimates and persists parameters normally. A later query error rolls back any calibration publication, and parameter names retain the caller's original table spelling. Graph reads, graph/label/path-index lookup and listing, and `run_cypher` use the same session defaults and first-snapshot boundary. Errors returned by these operations abort an active frame or savepoint; owned implicit frames finish before results are returned. Nested calls retain their enclosing statement's view, and physical worker adapters use that existing scope.
 
-`Engine::sql_batch` executes a slice of SQL statement and parameter pairs in one transaction. A statement failure requests rollback; an indeterminate completion follows the resolution contract above.
+`Engine::sql_batch` executes a slice of SQL statement and parameter pairs in one transaction. A statement failure requests rollback; an indeterminate completion follows the resolution contract above. `Engine::sql_batch_with_labels` has the same transaction contract and returns [enum labels](#enum-labels-in-results).
 
 ```rust
 use uqa_core::Value;

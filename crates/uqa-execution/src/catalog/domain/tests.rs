@@ -30,9 +30,12 @@ fn legacy() -> BTreeMap<String, StoredDomain<String>> {
         StoredDomain {
             object_id: [1; 16],
             oid: uqa_sql::catalog::domain::domain_object_oid(&[1; 16]),
+            array_oid: None,
             identity: RelationIdentity::new("public", "positive"),
             owner: "uqa".into(),
             definition,
+            array_name: None,
+            usage_acl: None,
         },
     )])
 }

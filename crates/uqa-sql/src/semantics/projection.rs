@@ -25,6 +25,7 @@ pub fn projection_label_at(proj: &ProjectionPlan) -> String {
         ScalarExpr::QualifiedColumn { column, .. } => column.clone(),
         ScalarExpr::Star | ScalarExpr::QualifiedStar(_) => "*".into(),
         ScalarExpr::Func { name, binding, .. } => function_projection_label(name, binding.as_ref()),
+        ScalarExpr::WindowCall { name, .. } => function_projection_label(name, None),
         _ => "?column?".into(),
     }
 }

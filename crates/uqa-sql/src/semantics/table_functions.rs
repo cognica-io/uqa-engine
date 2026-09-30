@@ -88,6 +88,7 @@ pub fn validate_table_function_column_definition(
             | "jsonb_each_text"
             | "pg_get_sequence_data"
             | "pg_sequence_parameters"
+            | "aclexplode"
     ) {
         return Err(redundant_out_column_definition_error());
     }
@@ -212,6 +213,7 @@ fn has_builtin_table_function_overloads(name: &str) -> bool {
             | "jsonb_each_text"
             | "pg_get_sequence_data"
             | "pg_sequence_parameters"
+            | "aclexplode"
     )
 }
 
@@ -283,6 +285,11 @@ fn builtin_table_function_overloads(
         "pg_sequence_parameters" => {
             vec![overload(vec![ColumnType::Oid], 0, ColumnType::Record)]
         }
+        "aclexplode" => vec![overload(
+            vec![ColumnType::Array(Box::new(ColumnType::AclItem))],
+            0,
+            ColumnType::Record,
+        )],
         _ => Vec::new(),
     }
 }
@@ -307,6 +314,7 @@ pub fn is_builtin_table_function(name: &str) -> bool {
             | "jsonb_each_text"
             | "pg_get_sequence_data"
             | "pg_sequence_parameters"
+            | "aclexplode"
             | "create_analyzer"
             | "drop_analyzer"
             | "list_analyzers"
@@ -348,6 +356,12 @@ pub fn table_function_empty_schema(
                 vec!["key".into(), "value".into()]
             }
             "pg_get_sequence_data" => vec!["last_value".into(), "is_called".into()],
+            "aclexplode" => vec![
+                "grantor".into(),
+                "grantee".into(),
+                "privilege_type".into(),
+                "is_grantable".into(),
+            ],
             "pg_sequence_parameters" => vec![
                 "start_value".into(),
                 "minimum_value".into(),
@@ -548,6 +562,12 @@ pub fn table_function_column_types(
                 Some(ColumnType::Boolean),
                 Some(ColumnType::BigInteger),
                 Some(ColumnType::Oid),
+            ],
+            "aclexplode" => vec![
+                Some(ColumnType::Oid),
+                Some(ColumnType::Oid),
+                Some(ColumnType::Text),
+                Some(ColumnType::Boolean),
             ],
             "pagerank" | "graph_pagerank" | "hits" | "graph_hits" | "betweenness"
             | "graph_betweenness" => vec![

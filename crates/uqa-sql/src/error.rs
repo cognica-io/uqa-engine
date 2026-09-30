@@ -93,6 +93,22 @@ impl SQLError {
             SQLError::Internal(_) => Some("XX000"), // internal_error
         }
     }
+
+    /// `PostgreSQL` DETAIL field, reported separately from the primary message.
+    pub fn detail(&self) -> Option<&str> {
+        match self {
+            SQLError::Diagnostic { detail, .. } => detail.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// `PostgreSQL` HINT field, reported separately from the primary message.
+    pub fn hint(&self) -> Option<&str> {
+        match self {
+            SQLError::Diagnostic { hint, .. } => hint.as_deref(),
+            _ => None,
+        }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, SQLError>;
@@ -116,6 +132,15 @@ impl From<pg_query::Error> for SQLError {
                     message,
                 }
             }
+            // The PL/pgSQL parser looks up declared types as parse_datatype does, which reports a missing type as an undefined object.
+            pg_query::Error::Parse(message)
+                if message.starts_with("type \"") && message.ends_with("\" does not exist") =>
+            {
+                SQLError::Routine {
+                    sqlstate: "42704".into(),
+                    message,
+                }
+            }
             pg_query::Error::Parse(message) => SQLError::Parse(message),
             other => SQLError::Parse(other.to_string()),
         }
@@ -136,6 +161,10 @@ impl From<uqa_core::ValueRetentionError> for SQLError {
         match error {
             uqa_core::ValueRetentionError::Memory(error) => error.into(),
             uqa_core::ValueRetentionError::Cancelled(error) => error.into(),
+            error @ uqa_core::ValueRetentionError::Malformed { .. } => Self::Routine {
+                sqlstate: "XX001".into(),
+                message: error.to_string(),
+            },
         }
     }
 }

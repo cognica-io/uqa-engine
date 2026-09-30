@@ -50,7 +50,11 @@
     "prepared_plan_settings": "tests/parity/pg18/prepared_plan_settings_oracle.expected.json",
     "prepared_plan_types": "tests/parity/pg18/prepared_plan_types_oracle.expected.json",
     "concurrent_writes": "tests/parity/pg18/concurrent_writes.expected.json",
-    "routine_kind_selection": "tests/parity/pg18/routine_kind_selection_oracle.expected.txt"
+    "routine_kind_selection": "tests/parity/pg18/routine_kind_selection_oracle.expected.txt",
+    "enum_types": "tests/parity/pg18/enum_types_oracle.expected.json",
+    "literal_coercion": "tests/parity/pg18/literal_coercion_oracle.expected.json",
+    "partition_bounds": "tests/parity/pg18/partition_bounds_oracle.expected.json",
+    "failing_row_details": "tests/parity/pg18/failing_row_detail_oracle.expected.json"
   },
   "parser_chain": {
     "crate": "crates/uqa-pg-query",
@@ -157,7 +161,10 @@
       "execution.sql-value-clocks",
       "ddl.schema-drop-cascade",
       "ddl.stored-relation-routine-dependencies",
-      "ddl.domain-drop-cascade"
+      "ddl.domain-drop-cascade",
+      "types.enum-declarations-and-values",
+      "types.unknown-literal-coercion",
+      "ddl.partition-bound-transformation"
     ],
     "M4": [
       "dml.returning-row-images-extended",
@@ -196,7 +203,8 @@
       "types.jsonb-numeric-order",
       "aggregates.mode-equality-and-ties",
       "types.legacy-vector-coherence",
-      "dml.assignment-subscripts"
+      "dml.assignment-subscripts",
+      "dml.failing-row-details"
     ],
     "M5": [
       "protocol.frontend-backend-3.2-extended",
@@ -662,7 +670,7 @@
       "uqa_test": "cargo test -p uqa-sql expr::casting::tests; cargo test -p uqa-execution --lib regclass_cast_preserves_postgresql_type_identity; cargo test -p uqa-engine --test integration catalog::sql_information_schema::pg18_routines::postgresql_18_regprocedure_resolves_exact_routine_identities_and_catalog_metadata; cargo test -p uqa-engine --test integration functions::pg18_semantics::; cargo test -p uqa-engine --test integration functions::sql_plpgsql::scalar_and_resolution::refcursor_parameters_returns_and_open_portals_share_session_state; cargo test -p uqa-engine --test integration catalog::sql_information_schema::; cargo test -p uqa-engine --test integration catalog::sql_type_migration_temporal::; python3 tests/parity/pg18/run_routines_stateful.py --suite roles; python3 tests/parity/pg18/run_routines_stateful.py --suite type-temporal; python3 tests/parity/pg18/run_diff.py",
       "supported_version": "Implemented scalar width identities, source-sensitive OID/XID/bytea casts, PostgreSQL space-separated int2vector/oidvector text and COPY output, catalog-aware scalar and array regproc/regclass/regnamespace/regtype text casts and output including zero, unresolved, qualification, built-in alias, NULL, and supported virtual-catalog OID behavior, direct regnamespace schema-name-to-OID input with catalog comparison and exact hard-input errors, exact scalar regprocedure signature-to-OID input and search-path-aware output for user functions, procedures, and built-ins with OID carrier and missing-overload errors, regprocedure and _regprocedure pg_type identities, and the four regprocedure I/O pg_proc rows, refcursor declared and catalog identity over its session-portal name carrier, built-in/domain/pseudo/composite pg_type metadata, information_schema_catalog_name identity, and all six PostgreSQL built-in range/multirange families with declared identity, canonical text I/O, constructors, accessors, overlap, containment, adjacency, range_merge, simple and compatible polymorphic routine substitution, pg_type, pg_range, and pg_proc metadata across storage, generated expressions, foreign tables, reopen, and supported schema rewrites",
       "status": "partial",
-      "open_issue": "The full assignment-cast matrix, pg_proc rows for every remaining type I/O routine, collations, user composites, enum carriers and polymorphism, user-defined ranges and their polymorphism, typmods, domain constraints, binary formats, and complete range ordering and arithmetic remain."
+      "open_issue": "The full assignment-cast matrix, pg_proc rows for every remaining type I/O routine, collations, user composites, user-defined ranges and their polymorphism, typmods, domain constraints, binary formats, and complete range ordering and arithmetic remain."
     },
     {
       "id": "ddl.alter-type-and-migration",
@@ -1023,6 +1031,38 @@
       "supported_version": "Unreleased: preserve ordered array element/slice targets through binding, INSERT VALUES/SELECT, UPDATE, ON CONFLICT, MERGE and automatic views. Bounds and RHS use the original row; partial writes compose before array-domain checks. Stored SQL functions/rules retain targets and dependencies after rename, old-name reuse and reopen. Generated columns, unique indexes and rejecting domain/trigger histories preserve atomicity. Unique-key DETAIL preserves structural expressions, type output and SELECT authorization. Linux Docker passes all 456 oracle/provider/preparation combinations, 255 Core and 998 SQL unit tests across affected changes, all 809 current Execution tests (two pre-existing ignored), the manual SQL harness and strict Clippy. Review correction rejects untyped partial view targets before RHS/trigger effects; all 467 selected Engine tests plus the twelve-path native-callback regression pass. Final product 5c7723c0 passes full Linux/macOS Rust CI, JavaScript/WASM and Python (36037283997, 36037285505, 36037288625), including every unchanged native/WASM Nori allocation gate. The review finding is resolved; merge awaits the protected-branch approval rule.",
       "status": "verified",
       "open_issue": null
+    },
+    {
+      "id": "types.enum-declarations-and-values",
+      "postgresql_reference": "PostgreSQL 18.4 live command tags, result rows, type OIDs, SQLSTATEs and messages in tests/parity/pg18/enum_types_oracle.expected.json; https://www.postgresql.org/docs/18/datatype-enum.html; https://www.postgresql.org/docs/18/sql-createtype.html; https://www.postgresql.org/docs/18/sql-altertype.html; https://www.postgresql.org/docs/18/functions-enum.html",
+      "uqa_test": "cargo test -p uqa-core --lib enum_value; cargo test -p uqa-sql --lib catalog::enum_type; cargo test -p uqa-engine --test integration queries::sql_enums; cargo test -p uqa-pg-server --test integration enums",
+      "supported_version": "293 PostgreSQL 18.4 statements on memory, native SQLite, SQLite Key/Value and redb engines and over TCP: CREATE TYPE AS ENUM, ALTER TYPE ADD VALUE [IF NOT EXISTS] [BEFORE | AFTER] and RENAME VALUE with PostgreSQL check order and float4 sort positions, immutable order-preserving label keys, uncommitted-label safety (55P04) with transaction and savepoint scope, comparisons, arrays, casts and unknown-literal input, the anyenum support functions, min and max, JSON output, anyenum routines, pg_type, pg_enum and pg_proc rows, DROP TYPE dependencies, LIST, RANGE and HASH partitioning by enum keys, enum expressions in stored generated columns and partition keys, and virtual generated column restrictions; reopen tests on the three persistent providers; Python, Node.js, browser WASM and Arrow results carry current labels",
+      "status": "partial",
+      "open_issue": "Stored expressions such as views, defaults, CHECK constraints, generated columns, index expressions, partition keys, rules and trigger conditions must hold enum constants by label identity so that RENAME VALUE cannot reinterpret them, their deparsed text must spell such constants as 'label'::type, and dependency errors must carry PostgreSQL's DETAIL listing; the type object lifecycle unit of docs/plans/0016-extension-packages-and-types.md owns this work."
+    },
+    {
+      "id": "types.unknown-literal-coercion",
+      "postgresql_reference": "PostgreSQL 18.4 live rows, SQLSTATEs and messages in tests/parity/pg18/literal_coercion_oracle.expected.json; https://www.postgresql.org/docs/18/typeconv-oper.html; https://www.postgresql.org/docs/18/typeconv-func.html; https://www.postgresql.org/docs/18/functions-string.html#FUNCTIONS-STRING-FORMAT",
+      "uqa_test": "cargo test -p uqa-engine --test integration queries::sql_literal_coercion; cargo test -p uqa-sql --lib type_resolution::introspection",
+      "supported_version": "Operator-selected coercion of unknown operands for comparisons, IN lists, BETWEEN, ANY and ALL, NULLIF and IS DISTINCT FROM; anycompatible array-function arguments; PostgreSQL format() specifiers, positions, widths and diagnostics; explicit VARIADIC arrays for VARIADIC \"any\" built-ins; JSON builder and object-aggregate NULL-key diagnostics; window output names in ORDER BY; and whole-row values without hidden system columns, on memory and native SQLite",
+      "status": "partial",
+      "open_issue": "An unknown literal coerced to a built-in type in a relational predicate is converted when rows are compared instead of during parse analysis, so invalid input against an empty relation is not reported."
+    },
+    {
+      "id": "ddl.partition-bound-transformation",
+      "postgresql_reference": "PostgreSQL 18.4 live command tags, rows, SQLSTATEs, messages, DETAIL and HINT in tests/parity/pg18/partition_bounds_oracle.expected.json; https://www.postgresql.org/docs/18/sql-createtable.html; https://www.postgresql.org/docs/18/ddl-partitioning.html",
+      "uqa_test": "cargo test -p uqa-engine --test integration queries::sql_partition_bounds; cargo test -p uqa-sql --lib semantics::partition",
+      "supported_version": "132 PostgreSQL 18.4 statements on memory and native SQLite: bound values coerced to their key types in assignment context and evaluated once, bound expression restrictions, NULL and infinite range bounds, strategy and width diagnostics, pg_get_expr spelling by key type, default-partition conflicts, overlap reports naming the partition PostgreSQL names, the hash modulus chain, routing failures with the failing row's partition key, ATTACH PARTITION bound transformation, and partition key restrictions for system and generated columns, mutable functions and constants",
+      "status": "partial",
+      "open_issue": "Hash partitioning over the remaining hashable built-in types, default operator class diagnostics for partition keys, and the failing-row DETAIL of direct partition inserts remain; the operator family unit of docs/plans/0016-extension-packages-and-types.md owns hash support selection."
+    },
+    {
+      "id": "dml.failing-row-details",
+      "postgresql_reference": "PostgreSQL 18.4 live SQLSTATEs, messages, DETAIL and HINT in tests/parity/pg18/failing_row_detail_oracle.expected.json; PostgreSQL REL_18_STABLE execMain.c ExecBuildSlotValueDescription and ExecWithCheckOptions",
+      "uqa_test": "cargo test -p uqa-engine --test integration queries::sql_failing_row_details; cargo test -p uqa-sql --lib semantics::row_description; cargo test -p uqa-execution --lib mutation::supplied_columns",
+      "supported_version": "NOT NULL, CHECK, partition constraint and auto-updatable view WITH [CASCADED] CHECK OPTION violations report the failing row in DETAIL on memory and native SQLite: every column with output-function text for a role with table SELECT, otherwise the columns the role may select or the INSERT, UPDATE or MERGE supplied, listed by name, and no DETAIL when none qualifies; virtual generated columns print virtual, NULL prints null, and values longer than 64 bytes are clipped",
+      "status": "partial",
+      "open_issue": "A WITH CHECK OPTION violation through MERGE into a trigger-updatable view must describe the view row with the view's privileges."
     }
   ]
 }

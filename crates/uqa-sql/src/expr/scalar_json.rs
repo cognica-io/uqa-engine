@@ -45,7 +45,7 @@ fn to_json(name: &str, args: &[Value]) -> Result<Value> {
     if args.len() != 1 {
         return Err(SQLError::TypeMismatch("to_json takes 1 arg".into()));
     }
-    let text = json::value_to_json_text(&args[0]);
+    let text = json::value_to_json_text(&args[0])?;
     if name == "to_jsonb" {
         json::typed_json_value(&json::parse_json(&text)?, true)
     } else {

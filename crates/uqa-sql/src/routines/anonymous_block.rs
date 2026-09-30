@@ -28,6 +28,7 @@ pub fn compile_do_block(
     crate::routines::declaration::resolve_plpgsql_datum_types(types, &mut parsed)?;
     let def = CreateFunction {
         object_id: None,
+        catalog_oid: None,
         name: "inline_code_block".into(),
         or_replace: false,
         is_procedure: false,
@@ -38,6 +39,7 @@ pub fn compile_do_block(
         return_type_reference: None,
         language: "plpgsql".into(),
         body: crate::ast::FunctionBody::Source(body.to_string()),
+        sql_body_form: None,
         creation_search_path: Vec::new(),
         volatility: crate::ast::FunctionVolatility::Volatile,
         strict: false,

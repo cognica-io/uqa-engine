@@ -29,10 +29,12 @@ use super::routines::{
     compile_grant_role,
 };
 use super::sequences::{compile_alter_sequence, compile_create_sequence};
+use super::type_lifecycle;
 use super::{
     compile_create_index, compile_create_table, compile_insert, compile_values_lists, Node,
     NodeEnum, Result, SQLError, Statement,
 };
+use pg_query::protobuf::SelectStmt;
 
 /// A syntactically valid statement retaining its exact source slice. Compilation is separate so an execution boundary can analyze statements in order after preceding commands have completed.
 #[derive(Debug, Clone)]
@@ -181,6 +183,39 @@ fn compile_create_foreign_table_statement(
     }
 }
 
+/// `ALTER TYPE | DOMAIN ... RENAME` changes a type object; other `RENAME` forms change relations, columns, constraints and routines.
+fn compile_rename_statement(statement: &pg_query::protobuf::RenameStmt) -> Result<Statement> {
+    match type_lifecycle::type_object_kind(statement.rename_type()) {
+        Some(kind) => type_lifecycle::compile_type_rename(statement, kind),
+        None => compile_rename(statement),
+    }
+}
+
+fn compile_alter_object_schema_statement(
+    statement: &pg_query::protobuf::AlterObjectSchemaStmt,
+) -> Result<Statement> {
+    match type_lifecycle::type_object_kind(statement.object_type()) {
+        Some(kind) => type_lifecycle::compile_type_set_schema(statement, kind),
+        None => compile_alter_object_schema(statement),
+    }
+}
+
+fn compile_alter_owner_statement(
+    statement: &pg_query::protobuf::AlterOwnerStmt,
+) -> Result<Statement> {
+    match type_lifecycle::type_object_kind(statement.object_type()) {
+        Some(kind) => type_lifecycle::compile_type_owner(statement, kind),
+        None => compile_alter_routine_owner(statement),
+    }
+}
+
+fn compile_grant_statement(statement: &pg_query::protobuf::GrantStmt) -> Result<Statement> {
+    match type_lifecycle::type_object_kind(statement.objtype()) {
+        Some(kind) => type_lifecycle::compile_grant_type(statement, kind),
+        None => compile_grant(statement),
+    }
+}
+
 pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
     let Some(inner) = node.node.as_ref() else {
         return Err(SQLError::Unsupported("empty statement".into()));
@@ -189,22 +224,7 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::CreateStmt(stmt) => compile_create_table_statement(stmt),
         NodeEnum::IndexStmt(stmt) => compile_create_index(stmt).map(Statement::CreateIndex),
         NodeEnum::InsertStmt(stmt) => compile_insert(stmt).map(Statement::Insert),
-        NodeEnum::SelectStmt(stmt) => {
-            // Standalone `VALUES (...) (...)` parses as a SelectStmt
-            // with empty target_list + populated values_lists. Treat
-            // it as a relation-producing statement directly.
-            if stmt.target_list.is_empty()
-                && !stmt.values_lists.is_empty()
-                && stmt.locking_clause.is_empty()
-                && stmt.sort_clause.is_empty()
-                && stmt.limit_count.is_none()
-                && stmt.limit_offset.is_none()
-            {
-                let rows = compile_values_lists(&stmt.values_lists)?;
-                return Ok(Statement::Values { rows });
-            }
-            compile_top_level_select(stmt)
-        }
+        NodeEnum::SelectStmt(stmt) => compile_select_statement(stmt),
         NodeEnum::UpdateStmt(stmt) => compile_update(stmt).map(Statement::Update),
         NodeEnum::DeleteStmt(stmt) => compile_delete(stmt).map(Statement::Delete),
         NodeEnum::DropStmt(stmt) => compile_drop(stmt),
@@ -213,8 +233,8 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         }
         NodeEnum::RuleStmt(stmt) => compile_create_rule(stmt).map(Statement::CreateRule),
         NodeEnum::AlterTableStmt(stmt) => compile_alter_table(stmt),
-        NodeEnum::RenameStmt(stmt) => compile_rename(stmt),
-        NodeEnum::AlterObjectSchemaStmt(stmt) => compile_alter_object_schema(stmt),
+        NodeEnum::RenameStmt(stmt) => compile_rename_statement(stmt),
+        NodeEnum::AlterObjectSchemaStmt(stmt) => compile_alter_object_schema_statement(stmt),
         NodeEnum::ViewStmt(stmt) => compile_create_view(stmt),
         NodeEnum::CreateSchemaStmt(stmt) => compile_create_schema(stmt),
         NodeEnum::NotifyStmt(stmt) => Ok(Statement::Notify {
@@ -252,6 +272,12 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::CreateDomainStmt(stmt) => {
             super::domains::compile_create_domain(stmt).map(Statement::CreateDomain)
         }
+        NodeEnum::CreateEnumStmt(stmt) => {
+            super::enums::compile_create_enum(stmt).map(Statement::CreateEnum)
+        }
+        NodeEnum::AlterEnumStmt(stmt) => {
+            super::enums::compile_alter_enum(stmt).map(Statement::AlterEnum)
+        }
         NodeEnum::CreateFunctionStmt(stmt) => {
             compile_create_function(stmt).map(|f| Statement::CreateFunction(Box::new(f)))
         }
@@ -260,8 +286,8 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::AlterFunctionStmt(stmt) => {
             compile_alter_routine(stmt).map(Statement::AlterRoutine)
         }
-        NodeEnum::AlterOwnerStmt(stmt) => compile_alter_routine_owner(stmt),
-        NodeEnum::GrantStmt(stmt) => compile_grant(stmt),
+        NodeEnum::AlterOwnerStmt(stmt) => compile_alter_owner_statement(stmt),
+        NodeEnum::GrantStmt(stmt) => compile_grant_statement(stmt),
         NodeEnum::GrantRoleStmt(stmt) => compile_grant_role(stmt),
         NodeEnum::CreateRoleStmt(stmt) => compile_create_role(stmt),
         NodeEnum::AlterRoleStmt(stmt) => compile_alter_role(stmt),
@@ -284,8 +310,22 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
     }
 }
 
-/// Map `pg_query`'s `DiscardMode` enum (1=ALL, 2=PLANS, 3=SEQUENCES,
-/// 4=TEMP) to the AST's [`DiscardTarget`].
+/// Standalone `VALUES (...) (...)` parses as a `SelectStmt` with an empty target list and populated values lists; it is a relation-producing statement of its own.
+fn compile_select_statement(stmt: &SelectStmt) -> Result<Statement> {
+    if stmt.target_list.is_empty()
+        && !stmt.values_lists.is_empty()
+        && stmt.locking_clause.is_empty()
+        && stmt.sort_clause.is_empty()
+        && stmt.limit_count.is_none()
+        && stmt.limit_offset.is_none()
+    {
+        let rows = compile_values_lists(&stmt.values_lists)?;
+        return Ok(Statement::Values { rows });
+    }
+    compile_top_level_select(stmt)
+}
+
+/// Statement label reported for a parser node that compilation does not support.
 pub(super) fn other_node_label(node: &NodeEnum) -> &'static str {
     match node {
         NodeEnum::ExplainStmt(_) => "EXPLAIN",

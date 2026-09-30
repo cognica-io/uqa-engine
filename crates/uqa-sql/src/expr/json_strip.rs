@@ -273,7 +273,9 @@ impl JsonStripParser<'_, '_> {
                     let source = &self.input[start..self.position];
                     let decoded = decode_json_string_with_control(source.as_bytes(), &self.control)
                         .map_err(|error| match error {
-                            JsonReadError::InvalidJson => invalid_json_input(self.input),
+                            JsonReadError::InvalidJson | JsonReadError::Malformed { .. } => {
+                                invalid_json_input(self.input)
+                            }
                             JsonReadError::Memory(error) => error.into(),
                             JsonReadError::Cancelled(error) => error.into(),
                         })?;

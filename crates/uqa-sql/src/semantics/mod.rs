@@ -56,6 +56,8 @@ pub mod effects;
 
 pub mod partition;
 
+pub mod row_description;
+
 pub mod scalar_projection;
 pub mod source_filters;
 

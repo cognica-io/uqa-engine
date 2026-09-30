@@ -28,7 +28,7 @@ use uqa_sql::{
         dependencies::RoutineCompilationMode,
         lifecycle::{binding::resolve_sql_routine_alter_target, ensure_routine_owner_as},
         registration::{self as analysis, RoutineSupportAuthority},
-        routine_signature_types, SQLUserFunction,
+        routine_signature_types, CompiledFunctionBody, SQLUserFunction,
     },
     SQLError,
 };
@@ -39,6 +39,7 @@ pub struct RoutineRegistrationContext<'a> {
     pub definition: RoutineDefinitionContext<'a>,
     pub support: &'a dyn RoutineSupportAuthority,
     pub configuration: &'a dyn RoutineConfigurationSession,
+    pub bodies: &'a dyn super::invocation::bodies::RoutineBodySession,
 }
 
 fn allocate_routine_object_id(
@@ -61,6 +62,57 @@ fn allocate_routine_object_id(
     }
 }
 
+/// The OID reserved for a routine that the registry did not hold when its creation began.
+fn created_routine_oid(name: &str, reserved: Option<u32>) -> Result<u32, SQLError> {
+    reserved.ok_or_else(|| {
+        SQLError::Internal(format!(
+            "routine `{name}` replaced during creation disappeared"
+        ))
+    })
+}
+
+/// `ProcedureCreate` keeps a replaced routine's OID and gives a new routine the next one: `None` for a replacement. The OID is reserved before the registry is held for writing, since the reservation reads the catalog.
+fn new_routine_oid(
+    context: &RoutineRegistrationContext<'_>,
+    name: &str,
+    signature: &[String],
+) -> Result<Option<u32>, SQLError> {
+    let routines = context.catalog.registry.routine_snapshot();
+    let replaces = routines.get(name).is_some_and(|overloads| {
+        overloads
+            .iter()
+            .any(|function| routine_signature_types(&function.def) == signature)
+    });
+    if replaces {
+        return Ok(None);
+    }
+    let oid = crate::catalog::identity::reserve_new_catalog_oid(
+        context.namespace.locks,
+        uqa_sql::schema::constraint_metadata::CatalogOidClass::Procedure.class_id(),
+        "function",
+        |oid| crate::catalog::projection::routine_oid_in_use(&routines, oid),
+    )?;
+    u32::try_from(oid)
+        .map(Some)
+        .map_err(|_| SQLError::Internal(format!("invalid routine OID {oid}")))
+}
+
+/// `CreateFunction` checks CREATE on the schema, the SUPPORT function and the superuser-only attributes before `interpret_function_parameter_list` resolves the argument types. The locked registration checks them again.
+fn validate_routine_creation_privileges(
+    context: &RoutineRegistrationContext<'_>,
+    def: &CreateFunction,
+    current_user: &uqa_sql::catalog::roles::RoleReference,
+) -> Result<(), SQLError> {
+    context.namespace.ensure_create(&def.name)?;
+    if let Some(support) = def.support.as_deref() {
+        analysis::validate_routine_support(context.support, support)?;
+    }
+    let current_user_is_superuser = current_user
+        .role_definition(&context.catalog.roles.role_definitions())
+        .is_some_and(|role| role.has(RoleAttribute::Superuser));
+    analysis::validate_routine_security_attributes(def, current_user_is_superuser)
+}
+
 pub fn register_sql_function(
     context: &RoutineRegistrationContext<'_>,
     mut def: CreateFunction,
@@ -81,22 +133,21 @@ pub fn register_sql_function(
     def.owner = Some(owner.identity());
     let requested_name = def.name.clone();
     def.name = context.namespace.persistent_name(&requested_name)?;
+    validate_routine_creation_privileges(context, &def, &current_user)?;
     resolve_routine_type_references(context.definition.compilation.analysis.types, &mut def)?;
-    if let Some(support) = def.support.as_deref() {
-        analysis::validate_routine_support(context.support, support)?;
-    }
     configuration::apply_routine_config_actions(context.configuration, &mut def)?;
-    let (compiled, _) = compile_catalog_bound_routine(
+    let bound = compile_catalog_bound_routine(
         &context.definition,
         &mut def,
         RoutineCompilationMode::Definition,
     )?;
     let name = def.name.clone();
     let signature = routine_signature_types(&def);
+    let new_oid = new_routine_oid(context, &name, &signature)?;
     let RoleDependencyCandidate {
         roles,
         memberships,
-        value: (mut registry, next),
+        value: (mut registry, next, published),
         ..
     } = prepare_role_dependencies(
         &locks,
@@ -116,7 +167,7 @@ pub fn register_sql_function(
             let mut def = def.clone();
             let overloads = next.entry(name.clone()).or_default();
             let mut dependencies = BTreeSet::new();
-            if let Some(pos) = overloads
+            let published = if let Some(pos) = overloads
                 .iter()
                 .position(|function| routine_signature_types(&function.def) == signature)
             {
@@ -129,26 +180,25 @@ pub fn register_sql_function(
                     &roles,
                     &memberships,
                 )?;
-                overloads[pos] = Arc::new(SQLUserFunction {
-                    def,
-                    compiled: compiled.clone(),
-                });
+                let published = Arc::new(SQLUserFunction::new(def, bound.body.clone()));
+                overloads[pos] = Arc::clone(&published);
+                published
             } else {
                 dependencies =
                     uqa_sql::routines::security::binding::routine_role_dependencies(&def, &roles)?;
                 def.object_id = Some(allocate_routine_object_id(&registry, &name)?);
-                overloads.push(Arc::new(SQLUserFunction {
-                    def,
-                    compiled: compiled.clone(),
-                }));
-            }
+                def.catalog_oid = Some(created_routine_oid(&name, new_oid)?);
+                let published = Arc::new(SQLUserFunction::new(def, bound.body.clone()));
+                overloads.push(Arc::clone(&published));
+                published
+            };
             overloads.sort_by(|left, right| {
                 routine_signature_types(&left.def)
                     .cmp(&routine_signature_types(&right.def))
                     .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
             });
             Ok(RoleDependencyCandidate {
-                value: (registry, next),
+                value: (registry, next, published),
                 memberships,
                 roles,
                 dependencies,
@@ -163,8 +213,23 @@ pub fn register_sql_function(
     drop(registry);
     drop(memberships);
     drop(roles);
+    retain_validated_body(context, &published, bound.validated)?;
     context.catalog.changes.catalog_registry_changed();
     Ok(())
+}
+
+/// The PL/pgSQL validator leaves its compilation in the defining session's function cache; the SQL validator does not, so a SQL body compiles when a session first runs it.
+fn retain_validated_body(
+    context: &RoutineRegistrationContext<'_>,
+    published: &SQLUserFunction,
+    validated: Option<CompiledFunctionBody>,
+) -> Result<(), SQLError> {
+    match validated {
+        Some(validated) if published.def.language == "plpgsql" => {
+            context.bodies.retain_routine_body(published, validated)
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Change mutable routine attributes without replacing its identity or compiled body.
@@ -181,21 +246,25 @@ pub fn alter_sql_routine(
         .role_definition(&roles)
         .is_some_and(|role| role.has(RoleAttribute::Superuser));
     let memberships = context.catalog.roles.role_memberships();
-    let mut registry = context.catalog.registry.routines_write();
+    // Lookup diagnostics read the type catalog, so the target resolves before the registry is held for writing.
+    let snapshot = context.catalog.registry.routine_snapshot();
     let (name, position) = resolve_sql_routine_alter_target(
         context.catalog.names,
-        &registry,
+        &snapshot,
         &stmt.name,
         requested_types.as_deref(),
         stmt.kind,
     )?;
+    let resolved_identity = snapshot[&name][position].def.object_id;
+    let mut registry = context.catalog.registry.routines_write();
     let existing = registry
         .get(&name)
         .and_then(|overloads| overloads.get(position))
+        .filter(|function| function.def.object_id == resolved_identity)
         .cloned()
         .ok_or_else(|| {
             SQLError::Internal(format!(
-                "resolved ALTER routine target `{name}` disappeared before mutation"
+                "resolved ALTER routine target `{name}` changed before mutation"
             ))
         })?;
     ensure_routine_owner_as(
@@ -220,10 +289,7 @@ pub fn alter_sql_routine(
             "resolved ALTER routine registry entry `{name}` disappeared before mutation"
         ))
     })?;
-    overloads[position] = Arc::new(SQLUserFunction {
-        def,
-        compiled: existing.compiled.clone(),
-    });
+    overloads[position] = Arc::new(SQLUserFunction::new(def, existing.body.clone()));
     context
         .catalog
         .publication

@@ -7,6 +7,7 @@
 //! Immutable catalog inputs and runtime catalog projections.
 
 pub mod domain;
+pub mod enum_type;
 pub mod foreign;
 pub mod identity;
 pub mod security;
@@ -49,6 +50,8 @@ pub struct CatalogReadSnapshot {
 #[derive(Clone)]
 pub struct CatalogTableSnapshot {
     pub object_id: [u8; 16],
+    /// The table's public OIDs, recorded or derived from its identity.
+    pub catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids,
     pub security: Arc<crate::catalog::security::BoundTableSecurity>,
     pub columns: Arc<Vec<uqa_sql::ast::ColumnDef>>,
     pub columns_declared: bool,
@@ -90,6 +93,7 @@ pub struct CatalogDefinitionSnapshot {
     >,
 
     pub domains: Arc<BTreeMap<String, uqa_sql::catalog::domain::StoredDomain>>,
+    pub enums: Arc<enum_type::EnumRegistry>,
     pub graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub views: Arc<BTreeMap<RelationIdentity, StoredView>>,
     pub catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,

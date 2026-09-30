@@ -83,6 +83,17 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
     let triggers = referential.triggers;
     super::analysis::ensure_merge_privileges(mutation, stmt, inherited_ctes)?;
     let _transition_capture_scope = crate::mutation::triggers::TransitionCaptureScope::enter();
+    let table_columns = assignment
+        .columns
+        .try_describe_table(&stmt.target)
+        .map_err(|error| dml_storage_error("MERGE", error))?
+        .unwrap_or_default()
+        .into_iter()
+        .map(|column| column.name)
+        .collect::<Vec<_>>();
+    let _supplied_columns = crate::mutation::supplied_columns::SuppliedColumnsScope::enter(
+        crate::mutation::supplied_columns::merge_supplied_columns(stmt, &table_columns),
+    );
     let target_table = stmt.target.clone();
     referential.locking.session.lock_relation(
         &target_table,

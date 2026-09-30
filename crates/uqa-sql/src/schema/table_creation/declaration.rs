@@ -24,6 +24,7 @@ pub struct CreateTableAnalysisContext<'a> {
     pub foreign_keys: ForeignKeyDefinitionContext<'a>,
 }
 
+/// Describe the new table's columns before its name is claimed: the declared types resolve, the parents' columns merge ahead of the local ones as `MergeAttributes` merges them, `BuildDescForRelation` requires `USAGE` on every column's type, and `CheckAttributeNamesTypes` rejects system column names and pseudo-types.
 pub fn prepare_create_table_declaration(
     context: &CreateTableAnalysisContext<'_>,
     c: &mut CreateTable,
@@ -32,14 +33,25 @@ pub fn prepare_create_table_declaration(
         column.ty =
             crate::type_resolution::resolve_declared_column_type(context.types, &column.ty)?;
     }
-    super::super::inheritance::prepare_create_table_hierarchy(&context.inheritance, c)?;
+    super::super::inheritance::merge_create_table_hierarchy(&context.inheritance, c)?;
+    for column in &c.columns {
+        context.types.require_type_usage(&column.ty)?;
+    }
+    super::validate_create_table_columns(c)
+}
+
+/// Bind what depends on the created relation, in `DefineRelation` order: the partition bound and key, the indexes of key constraints, and the relations that foreign keys reference.
+pub fn bind_create_table_relation(
+    context: &CreateTableAnalysisContext<'_>,
+    c: &mut CreateTable,
+) -> Result<(), SQLError> {
+    super::super::inheritance::bind_create_table_partitioning(&context.inheritance, c)?;
     super::super::indexes::names::name_constraint_indexes(
         context.index_names,
         &c.name,
         &mut c.key_constraints,
     )?;
-    bind_create_table_relation_references(context.foreign_keys.catalog, c)?;
-    Ok(())
+    bind_create_table_relation_references(context.foreign_keys.catalog, c)
 }
 
 pub fn validate_create_table_expressions(
@@ -108,8 +120,12 @@ pub fn validate_create_table_expressions(
             foreign_key.ref_table = canonical;
         }
     }
+    let binding = context.bindings.binding_scope()?;
     super::super::generated::prepare_generated_columns(
-        context.schema,
+        &SchemaBindingContext {
+            catalog: context.schema,
+            binding: &binding.context(),
+        },
         &c.qualifier,
         &mut c.columns,
         &c.key_constraints,

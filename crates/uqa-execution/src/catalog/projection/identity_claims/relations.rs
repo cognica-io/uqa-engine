@@ -55,7 +55,7 @@ fn collect_relation_claims(
         append(
             relation,
             table.object_id,
-            stable_object_oid("relation", &table.object_id),
+            i64::from(table.catalog_oids.relation),
         );
     }
     for (relation, view) in definitions.views.iter() {

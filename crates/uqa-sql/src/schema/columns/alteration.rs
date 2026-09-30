@@ -106,8 +106,12 @@ pub fn analyze_generated_expression(
         .keys
         .try_foreign_keys(table)
         .map_err(|error| ddl_storage_error("ALTER COLUMN SET EXPRESSION", error))?;
+    let binding = context.bindings.bindings.binding_scope()?;
     crate::schema::generated::prepare_generated_columns(
-        context.bindings.schema,
+        &crate::schema::SchemaBindingContext {
+            catalog: context.bindings.schema,
+            binding: &binding.context(),
+        },
         qualifier,
         &mut columns,
         &key_constraints,
@@ -162,10 +166,10 @@ pub fn analyze_column_type(
         .has_column(table, name)
         .map_err(|error| ddl_storage_error("ALTER COLUMN", error))?
     {
-        return Err(SQLError::Unsupported(format!(
-            "ALTER TABLE ALTER COLUMN: column `{name}` does not exist"
-        )));
+        return Err(super::undefined_relation_column(table, name));
     }
+    // ATPrepAlterColumnType requires USAGE on the new type before CheckAttributeType rejects a pseudo-type.
+    context.bindings.schema.require_type_usage(ty)?;
     super::validate_postgres_relation_column_type(name, ty)?;
     let mut candidate_columns = context
         .columns
@@ -203,8 +207,12 @@ pub fn analyze_column_type(
         &key_constraints,
         &foreign_keys,
     )?;
+    let binding = context.bindings.bindings.binding_scope()?;
     crate::schema::generated::prepare_generated_columns(
-        context.bindings.schema,
+        &crate::schema::SchemaBindingContext {
+            catalog: context.bindings.schema,
+            binding: &binding.context(),
+        },
         qualifier,
         &mut candidate_columns,
         &key_constraints,

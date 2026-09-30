@@ -174,16 +174,22 @@ fn attach_partition(
     requested_partition: &str,
     bound: PartitionBound,
 ) -> Result<(), SQLError> {
-    let partition = resolve_table(context, requested_partition)?;
-    lock_secondary_relation(context, parent, &partition, TableLockMode::AccessExclusive)?;
-    validate_matching_persistence(context, &partition, parent, "attach to")?;
     let parent_hierarchy = read_hierarchy(context, parent)?;
-    let Some(parent_spec) = parent_hierarchy.partition_spec.as_ref() else {
+    if parent_hierarchy.partition_spec.is_none() {
         return Err(wrong_object(format!(
             "ALTER action ATTACH PARTITION cannot be performed on relation \"{}\"",
             local_relation_name(parent)
         )));
-    };
+    }
+    // Parse analysis transforms the bound before the partition relation is opened.
+    let bound = uqa_sql::semantics::partition::transform_partition_bound(
+        &context.partitions,
+        parent,
+        &bound,
+    )?;
+    let partition = resolve_table(context, requested_partition)?;
+    lock_secondary_relation(context, parent, &partition, TableLockMode::AccessExclusive)?;
+    validate_matching_persistence(context, &partition, parent, "attach to")?;
     let partition_hierarchy = read_hierarchy(context, &partition)?;
     if partition_hierarchy.is_partition() {
         return Err(wrong_object(format!(
@@ -217,6 +223,7 @@ fn attach_partition(
     uqa_sql::semantics::partition::validate_new_partition_bound(
         &context.partitions,
         parent,
+        &partition,
         &bound,
     )?;
     validate_attached_rows(context, parent, &partition, &bound)?;
@@ -226,7 +233,6 @@ fn attach_partition(
     for target in subtree {
         validate_existing_constraints(context, &target)?;
     }
-    let _ = parent_spec;
     Ok(())
 }
 
@@ -440,7 +446,8 @@ fn validate_attached_rows(
     Ok(())
 }
 
-fn validate_default_partition_exclusion(
+/// A new non-default partition moves the rows it accepts out of the default partition's constraint, so no stored row of the default partition may be accepted by `new_bound`.
+pub fn validate_default_partition_exclusion(
     context: &HierarchyContext<'_>,
     parent: &str,
     new_bound: &PartitionBound,

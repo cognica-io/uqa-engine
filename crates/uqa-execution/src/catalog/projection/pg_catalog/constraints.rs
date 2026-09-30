@@ -84,26 +84,7 @@ pub fn build_pg_constraint(
             let (inheritance_count, is_local) =
                 constraint_inheritance_state(catalog, resolution, &constraint)?;
             Ok(row([
-                (
-                    "oid",
-                    int_value(constraint.catalog_oid.unwrap_or_else(|| {
-                        constraint
-                            .object_id
-                            .filter(|_| constraint.kind == ConstraintCatalogKind::Check)
-                            .map_or_else(
-                                || {
-                                    stable_oid(
-                                        "constraint",
-                                        &format!(
-                                            "{}.{}.{}",
-                                            constraint.schema, constraint.table, constraint.name
-                                        ),
-                                    )
-                                },
-                                |object_id| stable_object_oid("constraint", &object_id),
-                            )
-                    })),
-                ),
+                ("oid", int_value(constraint_row_oid(&constraint))),
                 ("conname", str_value(constraint.name)),
                 (
                     "connamespace",
@@ -154,10 +135,34 @@ pub fn build_pg_constraint(
             ]))
         })
         .collect::<Result<Vec<_>, SQLError>>()?;
+    rows.extend(super::constraint_definitions::domain_constraint_rows(
+        catalog,
+    )?);
     rows.extend(super::super::events::build_trigger_constraints(
         catalog, resolution,
     )?);
     Ok(rows)
+}
+
+/// The `pg_constraint` OID of a relation constraint.
+pub(super) fn constraint_row_oid(constraint: &ConstraintCatalogRow) -> i64 {
+    constraint.catalog_oid.unwrap_or_else(|| {
+        constraint
+            .object_id
+            .filter(|_| constraint.kind == ConstraintCatalogKind::Check)
+            .map_or_else(
+                || {
+                    stable_oid(
+                        "constraint",
+                        &format!(
+                            "{}.{}.{}",
+                            constraint.schema, constraint.table, constraint.name
+                        ),
+                    )
+                },
+                |object_id| stable_object_oid("constraint", &object_id),
+            )
+    })
 }
 
 fn constraint_inheritance_state(
@@ -279,7 +284,7 @@ const fn foreign_key_match_code(match_type: uqa_sql::ast::ForeignKeyMatch) -> &'
     }
 }
 
-fn constraint_index_oid(
+pub(super) fn constraint_index_oid(
     constraint: &super::super::helpers::constraints::ConstraintCatalogRow,
     indexes: &[super::CatalogIndexRelation],
 ) -> i64 {

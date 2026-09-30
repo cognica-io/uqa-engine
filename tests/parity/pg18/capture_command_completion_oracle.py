@@ -20,7 +20,7 @@ import os
 import sys
 
 
-def capture(queries, connection_string, include_rows=False, include_fields=False):
+def capture(queries, connection_string, include_rows=False, include_fields=False, include_details=False):
     library = ctypes.util.find_library("pq")
     if library is None:
         raise RuntimeError("PostgreSQL libpq shared library was not found")
@@ -103,6 +103,10 @@ def capture(queries, connection_string, include_rows=False, include_fields=False
                             "sqlstate": field(result, ord("C")).decode(),
                             "message": field(result, ord("M")).decode(),
                         }
+                        if include_details:
+                            for key, code_letter in (("detail", "D"), ("hint", "H")):
+                                text = field(result, ord(code_letter))
+                                error[key] = None if text is None else text.decode()
                     else:
                         raise RuntimeError(f"unexpected libpq result status {code}")
                 finally:
@@ -122,6 +126,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rows", action="store_true", help="also capture field names, PostgreSQL type OIDs, and every result row")
     parser.add_argument("--fields", action="store_true", help="also capture full result field descriptors and rows")
+    parser.add_argument("--details", action="store_true", help="also capture the DETAIL and HINT fields of every error")
     args = parser.parse_args()
     connection_string = os.environ.get("PG_COMPLETION_CONNECTION")
     if not connection_string:
@@ -130,7 +135,7 @@ def main():
     queries = [case["sql"] for case in fixture["cases"]]
     if not queries or queries[0] != "SELECT version()":
         raise RuntimeError("the first fixture query must identify the reference with SELECT version()")
-    result = capture(queries, connection_string, include_rows=args.rows, include_fields=args.fields)
+    result = capture(queries, connection_string, include_rows=args.rows, include_fields=args.fields, include_details=args.details)
     json.dump(result, sys.stdout, indent=2)
     sys.stdout.write("\n")
 

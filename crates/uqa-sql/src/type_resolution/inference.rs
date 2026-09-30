@@ -152,10 +152,17 @@ pub(super) fn scalar_type_inner_with_control(
             }
             copy_type(Some(&ColumnType::Boolean), control)
         }
+        // `unknown` operands take the type selected by each comparison operator.
         ScalarExpr::Between { expr, low, high } => {
-            let value = scalar_type_inner_with_control(expr, schema, params, resolver, control)?;
-            let low = scalar_type_inner_with_control(low, schema, params, resolver, control)?;
-            let high = scalar_type_inner_with_control(high, schema, params, resolver, control)?;
+            let value = common::common_context_expression_type_with_control(
+                expr, schema, params, resolver, control,
+            )?;
+            let low = common::common_context_expression_type_with_control(
+                low, schema, params, resolver, control,
+            )?;
+            let high = common::common_context_expression_type_with_control(
+                high, schema, params, resolver, control,
+            )?;
             operators::binary_result_type_with_control(
                 crate::ast::BinaryOp::GreaterEqual,
                 value.as_deref(),
@@ -171,16 +178,38 @@ pub(super) fn scalar_type_inner_with_control(
             copy_type(Some(&ColumnType::Boolean), control)
         }
         ScalarExpr::InList { expr, list, .. } => {
-            let needle = scalar_type_inner_with_control(expr, schema, params, resolver, control)?;
+            let needle = common::common_context_expression_type_with_control(
+                expr, schema, params, resolver, control,
+            )?;
+            let mut candidates = Vec::with_capacity(list.len());
             for item in list {
-                let candidate =
-                    scalar_type_inner_with_control(item, schema, params, resolver, control)?;
-                operators::binary_result_type_with_control(
-                    crate::ast::BinaryOp::Equal,
-                    needle.as_deref(),
-                    candidate.as_deref(),
-                    control,
-                )?;
+                candidates.push(common::common_context_expression_type_with_control(
+                    item, schema, params, resolver, control,
+                )?);
+            }
+            // `transformAExprIn` compares the needle with the list coerced to the inputs' common type; without one, each item is compared separately.
+            let inputs = std::iter::once(needle.as_deref())
+                .chain(candidates.iter().map(Option::as_deref))
+                .collect::<Vec<_>>();
+            match common::select_common_input_type_with_control(&inputs, control)? {
+                Some(common) => {
+                    operators::binary_result_type_with_control(
+                        crate::ast::BinaryOp::Equal,
+                        needle.as_deref(),
+                        Some(&common),
+                        control,
+                    )?;
+                }
+                None => {
+                    for candidate in &candidates {
+                        operators::binary_result_type_with_control(
+                            crate::ast::BinaryOp::Equal,
+                            needle.as_deref(),
+                            candidate.as_deref(),
+                            control,
+                        )?;
+                    }
+                }
             }
             copy_type(Some(&ColumnType::Boolean), control)
         }

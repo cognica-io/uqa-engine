@@ -44,6 +44,7 @@ pub fn jsonb_equality_key_with_control(
         control.finish(output, memory).map_err(|error| match error {
             ValueRetentionError::Memory(error) => JsonbKeyError::Memory(error),
             ValueRetentionError::Cancelled(error) => JsonbKeyError::Cancelled(error),
+            ValueRetentionError::Malformed { .. } => JsonbKeyError::InvalidJson,
         })
     })();
     match result {

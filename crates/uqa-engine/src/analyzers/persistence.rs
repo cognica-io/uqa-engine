@@ -161,8 +161,10 @@ impl Engine {
                     binding
                 };
                 // Default document fields index only stored strings, even when a declared column has another type.
-                // Named assignments retain the stricter SQL column contract; GIN definitions are checked separately.
-                if binding.index.name.is_some() || binding.search.name.is_some() {
+                // Named field assignments retain the stricter SQL column contract; GIN-owned bindings, including document fields of undeclared tables, are checked with their GIN definitions.
+                if binding.owner == AnalyzerBindingOwner::Field
+                    && (binding.index.name.is_some() || binding.search.name.is_some())
+                {
                     Self::validate_table_analyzer_field(table_name, table, &field)
                         .map_err(corrupt)?;
                 }

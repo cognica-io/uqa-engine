@@ -1,0 +1,623 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE fr_checked (id integer NOT NULL, label text CHECK (label <> 'bad'), note text, amount numeric(6,2))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO fr_checked VALUES (NULL, 'ok', 'n', 1.5)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23502",
+        "message": "null value in column \"id\" of relation \"fr_checked\" violates not-null constraint",
+        "detail": "Failing row contains (null, ok, n, 1.50).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO fr_checked VALUES (1, 'bad', NULL, 2)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"fr_checked\" violates check constraint \"fr_checked_label_check\"",
+        "detail": "Failing row contains (1, bad, null, 2.00).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO fr_checked (id, label) VALUES (2, 'bad')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"fr_checked\" violates check constraint \"fr_checked_label_check\"",
+        "detail": "Failing row contains (2, bad, null, null).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO fr_checked VALUES (3, 'fine', repeat('x', 70), 3)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "UPDATE fr_checked SET label = 'bad' WHERE id = 3",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"fr_checked\" violates check constraint \"fr_checked_label_check\"",
+        "detail": "Failing row contains (3, bad, xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx..., 3.00).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "UPDATE fr_checked SET id = NULL WHERE id = 3",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23502",
+        "message": "null value in column \"id\" of relation \"fr_checked\" violates not-null constraint",
+        "detail": "Failing row contains (null, fine, xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx..., 3.00).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE fr_generated (id integer, doubled integer GENERATED ALWAYS AS (id * 2) VIRTUAL, stored integer GENERATED ALWAYS AS (id * 3) STORED, CHECK (id > 0))",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO fr_generated (id) VALUES (-1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"fr_generated\" violates check constraint \"fr_generated_id_check\"",
+        "detail": "Failing row contains (-1, virtual, -3).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE fr_base (id integer, v integer)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE VIEW fr_view AS SELECT id, v FROM fr_base WHERE v > 0 WITH CHECK OPTION",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO fr_view VALUES (1, -1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "44000",
+        "message": "new row violates check option for view \"fr_view\"",
+        "detail": "Failing row contains (1, -1).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO fr_view VALUES (2, 5)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "UPDATE fr_view SET v = 0 WHERE id = 2",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "44000",
+        "message": "new row violates check option for view \"fr_view\"",
+        "detail": "Failing row contains (2, 0).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE VIEW fr_cascaded AS SELECT id, v FROM fr_view WHERE id < 100 WITH CASCADED CHECK OPTION",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO fr_cascaded VALUES (200, 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "44000",
+        "message": "new row violates check option for view \"fr_cascaded\"",
+        "detail": "Failing row contains (200, 1).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO fr_cascaded VALUES (3, -3)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "44000",
+        "message": "new row violates check option for view \"fr_view\"",
+        "detail": "Failing row contains (3, -3).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "CREATE TABLE fr_parts (k integer, v text) PARTITION BY RANGE (k)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE fr_parts_low PARTITION OF fr_parts FOR VALUES FROM (0) TO (10)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO fr_parts_low VALUES (50, 'x')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"fr_parts_low\" violates partition constraint",
+        "detail": "Failing row contains (50, x).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "UPDATE fr_parts_low SET k = 20",
+      "command_tags": [
+        "UPDATE 0"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE fr_limited",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE TABLE fr_private (id integer, secret text, note text CHECK (note <> 'bad'), code integer NOT NULL)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT INSERT (id, note, code) ON fr_private TO fr_limited",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT SELECT (id) ON fr_private TO fr_limited",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT UPDATE (note) ON fr_private TO fr_limited",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE fr_limited",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO fr_private (id, note, code) VALUES (1, 'bad', 1)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"fr_private\" violates check constraint \"fr_private_note_check\"",
+        "detail": "Failing row contains (id, note, code) = (1, bad, 1).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO fr_private (note, code) VALUES ('bad', 2)",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"fr_private\" violates check constraint \"fr_private_note_check\"",
+        "detail": "Failing row contains (id, note, code) = (null, bad, 2).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "INSERT INTO fr_private (id, note) VALUES (3, 'fine')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23502",
+        "message": "null value in column \"code\" of relation \"fr_private\" violates not-null constraint",
+        "detail": "Failing row contains (id, note) = (3, fine).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO fr_private VALUES (4, 's', 'fine', 4)",
+      "command_tags": [
+        "INSERT 0 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT SELECT (id, note) ON fr_private TO fr_limited",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE fr_limited",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "UPDATE fr_private SET note = 'bad' WHERE id = 4",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23514",
+        "message": "new row for relation \"fr_private\" violates check constraint \"fr_private_note_check\"",
+        "detail": "Failing row contains (id, note) = (4, bad).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "CREATE ROLE fr_blind",
+      "command_tags": [
+        "CREATE ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "GRANT INSERT (secret, code) ON fr_private TO fr_blind",
+      "command_tags": [
+        "GRANT"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "SET ROLE fr_blind",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "INSERT INTO fr_private (secret) VALUES ('s')",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "23502",
+        "message": "null value in column \"code\" of relation \"fr_private\" violates not-null constraint",
+        "detail": "Failing row contains (secret) = (s).",
+        "hint": null
+      },
+      "results": []
+    },
+    {
+      "sql": "RESET ROLE",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE fr_checked, fr_generated, fr_parts, fr_private CASCADE",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP VIEW fr_cascaded, fr_view",
+      "command_tags": [
+        "DROP VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP TABLE fr_base",
+      "command_tags": [
+        "DROP TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE fr_limited",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    },
+    {
+      "sql": "DROP ROLE fr_blind",
+      "command_tags": [
+        "DROP ROLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ]
+    }
+  ]
+}

@@ -35,14 +35,7 @@ pub struct RoutineSecurityAttributes {
 }
 
 /// One explicit `EXECUTE` ACL entry. `None` on `CreateFunction::execute_acl` retains `PostgreSQL`'s default public execution privilege.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RoutineAclEntry {
-    /// An explicit null means PUBLIC; a missing grantee is invalid.
-    #[serde(deserialize_with = "Deserialize::deserialize")]
-    pub role: Option<uqa_core::catalog_role::RoleIdentity>,
-    pub grantor: uqa_core::catalog_role::RoleIdentity,
-    pub grant_option: bool,
-}
+pub type RoutineAclEntry = super::ObjectAclEntry;
 
 /// Old parsed declarations used an empty owner string. This accepts only that unbound marker; stored authority is separately required to carry a valid identity.
 pub(super) fn deserialize_routine_owner<'de, D: serde::Deserializer<'de>>(

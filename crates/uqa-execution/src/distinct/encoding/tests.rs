@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use uqa_core::ArrayValue;
+use uqa_core::{ArrayValue, EnumLabelKey, EnumValue};
 
 #[test]
 fn controlled_keys_keep_all_canonical_domains_and_only_retain_the_output_buffer() {
@@ -193,5 +193,32 @@ fn legacy_vector_hash_validation_does_not_reject_opaque_reservation_addresses() 
         };
         assert_eq!(error.sqlstate(), Some("42804"));
         assert_eq!(error.to_string(), "array is not a valid oidvector");
+    }
+}
+
+#[test]
+fn enum_keys_are_injective_and_congruent_with_value_equality() {
+    let label = |type_oid, key: &[u8]| {
+        Value::Enum(EnumValue::new(
+            type_oid,
+            EnumLabelKey::from_bytes(key.to_vec()).unwrap(),
+        ))
+    };
+    let values = [
+        label(7, &[64]),
+        label(7, &[64, 1]),
+        label(7, &[128]),
+        label(8, &[64]),
+        label(0x0100_0000, &[64]),
+        Value::Bytes(vec![64]),
+        Value::Array(ArrayValue::try_new(vec![label(7, &[64])]).unwrap()),
+        Value::Record(vec![("field".into(), label(7, &[64]))]),
+    ];
+    for left in &values {
+        for right in &values {
+            let left_key = canonical_row_key(std::slice::from_ref(left)).unwrap();
+            let right_key = canonical_row_key(std::slice::from_ref(right)).unwrap();
+            assert_eq!(left_key == right_key, left == right, "{left:?} / {right:?}");
+        }
     }
 }

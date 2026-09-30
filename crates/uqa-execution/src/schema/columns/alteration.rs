@@ -81,9 +81,9 @@ pub fn set_default<S: Clone + 'static>(
     )
     .map_err(|error| ddl_storage_error("ALTER COLUMN SET DEFAULT", error))?
     {
-        return Err(SQLError::Unsupported(format!(
-            "ALTER TABLE ALTER COLUMN: column `{name}` does not exist"
-        )));
+        return Err(uqa_sql::schema::columns::undefined_relation_column(
+            table, name,
+        ));
     }
     context
         .fields
@@ -109,9 +109,9 @@ pub fn drop_default<S: Clone + 'static>(
     )
     .map_err(|error| ddl_storage_error("ALTER COLUMN DROP DEFAULT", error))?
     {
-        return Err(SQLError::Unsupported(format!(
-            "ALTER TABLE ALTER COLUMN: column `{name}` does not exist"
-        )));
+        return Err(uqa_sql::schema::columns::undefined_relation_column(
+            table, name,
+        ));
     }
     context
         .fields

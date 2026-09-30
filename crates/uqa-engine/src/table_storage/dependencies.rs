@@ -8,6 +8,7 @@
 
 mod regclass;
 mod routines;
+mod types;
 
 use super::{
     rename_schema_expr_column, rename_schema_expr_qualified_column, rename_schema_expr_relation,
@@ -191,6 +192,7 @@ impl Engine {
             foreign_keys: foreign_keys.to_vec(),
             key_constraints: key_constraints.to_vec(),
             hierarchy: hierarchy.clone(),
+            catalog_oids: table.recorded_catalog_oids(),
         };
         self.try_save_table_schema_with_components(name, table, columns, &constraints)
     }
