@@ -20,6 +20,8 @@ mod catalog_oid_order;
 mod drop_dependencies;
 #[path = "catalog/function_sqlbody.rs"]
 mod function_sqlbody;
+#[path = "catalog/legacy_type_names.rs"]
+mod legacy_type_names;
 #[path = "catalog/pg18_constraint_lifecycle.rs"]
 mod pg18_constraint_lifecycle;
 #[path = "sql_analyze_persistence.rs"]

@@ -84,6 +84,49 @@ pub(super) fn rewrite_query_scalars(
     }
 }
 
+/// Visit every `FROM` item a query owns, nested ones included: those of its `WITH` queries, set-operation members, joins, subqueries in `FROM` and scalar subqueries.
+pub(super) fn visit_query_sources(query: &mut QueryPlan, visit: &mut dyn FnMut(&mut SourcePlan)) {
+    for cte in &mut query.ctes {
+        if let super::CtePlanBody::Query(query) = &mut cte.body {
+            visit_query_sources(query, visit);
+        }
+    }
+    let subqueries = match &mut query.root {
+        RelationalPlan::QueryBlock(block) => {
+            if let Some(source) = &mut block.from {
+                visit_source(source, visit);
+            }
+            &mut block.subqueries
+        }
+        RelationalPlan::SetOp {
+            left,
+            right,
+            subqueries,
+            ..
+        } => {
+            visit_query_sources(left, visit);
+            visit_query_sources(right, visit);
+            subqueries
+        }
+        RelationalPlan::Values { subqueries, .. } => subqueries,
+    };
+    for subquery in subqueries {
+        visit_query_sources(subquery, visit);
+    }
+}
+
+fn visit_source(source: &mut SourcePlan, visit: &mut dyn FnMut(&mut SourcePlan)) {
+    visit(source);
+    match source {
+        SourcePlan::Join { left, right, .. } => {
+            visit_source(left, visit);
+            visit_source(right, visit);
+        }
+        SourcePlan::Subquery { body, .. } => visit_query_sources(body, visit),
+        _ => {}
+    }
+}
+
 pub(super) fn rewrite_source_scalars(
     source: &mut SourcePlan,
     rewrite: &mut dyn FnMut(&mut ScalarExpr),

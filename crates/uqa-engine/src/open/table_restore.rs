@@ -93,6 +93,7 @@ impl Engine {
             catalog,
             crate::new_sequence_object_id,
         )?;
+        uqa_execution::catalog::type_identity_restoration::upgrade_stored_type_names(catalog)?;
         Ok(())
     }
 
