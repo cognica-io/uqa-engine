@@ -871,6 +871,14 @@ fn pg18_read_only_errors_name_commands_by_their_command_tags() {
         ("DROP INDEX tagged_index", "DROP INDEX"),
         ("DROP SCHEMA tagged_schema", "DROP SCHEMA"),
         ("TRUNCATE tagged_rows", "TRUNCATE TABLE"),
+        (
+            "CREATE TABLE tagged_copy AS SELECT id FROM tagged_rows",
+            "CREATE TABLE AS",
+        ),
+        (
+            "SELECT id INTO tagged_selected FROM tagged_rows",
+            "SELECT INTO",
+        ),
         ("GRANT SELECT ON tagged_rows TO tagged_role", "GRANT"),
         ("REVOKE SELECT ON tagged_rows FROM tagged_role", "REVOKE"),
         (

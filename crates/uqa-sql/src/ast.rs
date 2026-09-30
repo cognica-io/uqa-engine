@@ -698,6 +698,9 @@ pub enum Statement {
         column_names: Vec<String>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         with_no_data: bool,
+        /// Written as `SELECT ... INTO`, which `PostgreSQL` tags `SELECT INTO`.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        select_into: bool,
         #[serde(default)]
         persistence: RelationPersistence,
         #[serde(default)]

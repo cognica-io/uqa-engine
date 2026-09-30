@@ -209,21 +209,25 @@ pub fn alter_sql_routine(
         .role_definition(&roles)
         .is_some_and(|role| role.has(RoleAttribute::Superuser));
     let memberships = context.catalog.roles.role_memberships();
-    let mut registry = context.catalog.registry.routines_write();
+    // Lookup diagnostics read the type catalog, so the target resolves before the registry is held for writing.
+    let snapshot = context.catalog.registry.routine_snapshot();
     let (name, position) = resolve_sql_routine_alter_target(
         context.catalog.names,
-        &registry,
+        &snapshot,
         &stmt.name,
         requested_types.as_deref(),
         stmt.kind,
     )?;
+    let resolved_identity = snapshot[&name][position].def.object_id;
+    let mut registry = context.catalog.registry.routines_write();
     let existing = registry
         .get(&name)
         .and_then(|overloads| overloads.get(position))
+        .filter(|function| function.def.object_id == resolved_identity)
         .cloned()
         .ok_or_else(|| {
             SQLError::Internal(format!(
-                "resolved ALTER routine target `{name}` disappeared before mutation"
+                "resolved ALTER routine target `{name}` changed before mutation"
             ))
         })?;
     ensure_routine_owner_as(

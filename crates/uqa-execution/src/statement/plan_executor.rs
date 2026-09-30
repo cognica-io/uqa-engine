@@ -867,6 +867,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 persistence,
                 on_commit,
                 query,
+                ..
             } => crate::schema::ctas::entry::run_create_table_as(
                 self.context.schemas.tables_as,
                 CreateTableAsExecution {

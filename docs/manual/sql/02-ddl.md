@@ -140,6 +140,38 @@ ORDER BY enumsortorder;
 
 `DROP TYPE` removes enum types and domains after resolving every target, checking type ownership or containing-schema ownership, and applying the dependency rules of [domain deletion](#domain-declarations-and-deletion): RESTRICT reports `2BP01` while columns, domains, arrays or routines depend on the type, and CASCADE removes those dependents. Built-in types report `2BP01` as required by the database system, a generated array type cannot be dropped by itself (`2BP01`, naming its element type), and the row type of a table, view, materialized view or foreign table always reports `2BP01` naming its relation.
 
+## Type lifecycle and privileges
+
+```sql
+ALTER TYPE schema_name.type_name RENAME TO new_name;
+ALTER TYPE schema_name.type_name SET SCHEMA new_schema;
+ALTER TYPE schema_name.type_name OWNER TO role_name;
+ALTER DOMAIN schema_name.domain_name RENAME TO new_name;
+GRANT USAGE ON TYPE schema_name.type_name TO role_name WITH GRANT OPTION;
+REVOKE GRANT OPTION FOR USAGE ON DOMAIN schema_name.domain_name FROM role_name CASCADE;
+```
+
+`ALTER TYPE` changes enum types and domains; `ALTER DOMAIN` accepts only domains (`42809`). The commands apply PostgreSQL's check order: a missing type reports `42704`, a missing schema `3F000`, a generated array type `42809` with a hint naming its element type, a non-owner `42501`, a taken name `42710`, and `OWNER TO` requires membership in the new owner and `CREATE` on the schema. A type's generated array type is renamed and moved with it, and an array type already holding the new name is moved out of the way first.
+
+Columns, domains, views, defaults, CHECK constraints, generated columns, index expressions and predicates, routine signatures and SQL-standard routine bodies refer to user-defined types by identity, so they follow a rename or schema move without changing. Stored enum constants refer to their labels by identity and follow `RENAME VALUE`. Output such as `pg_get_viewdef`, `pg_get_expr`, `pg_get_constraintdef`, `pg_get_function_arguments`, `format_type` and diagnostics spells a type by its current name, qualified by its schema when the search path does not reach it.
+
+`GRANT` and `REVOKE` of `USAGE` (or `ALL`) on a type or domain record an access control list in `pg_type.typacl`, with grant options, `CASCADE` for dependent grants (`2BP01` without it) and PostgreSQL's warnings when nothing is granted or revoked. The default privileges grant `USAGE` to `PUBLIC`; after the first `GRANT` or `REVOKE` they are recorded explicitly. Array types have no privileges of their own (`0LP01`). `has_type_privilege` answers in all six forms, and `aclexplode` expands an access control list.
+
+Declaring a type requires `USAGE` on it for a table, temporary or foreign table column (inherited and partition columns included), `ADD COLUMN`, `ALTER COLUMN TYPE`, a domain's base type, a routine's argument and result types, and the columns of a view, materialized view, `CREATE TABLE AS` or `SELECT INTO`; a denial reports `42501` `permission denied for type`. An array type defers to its element type, a domain is governed by its own privileges rather than its base type's, and casts need no privilege. Each check takes PostgreSQL's place among the command's other checks: for example, `CREATE TABLE` reports a taken relation name only after its columns' types, privileges, names and pseudo-types have been checked.
+
+Routine bodies written as strings are compiled by each session that runs them, as PostgreSQL's per-session function cache does. The session that creates a PL/pgSQL routine keeps the compilation that validated it, a SQL-language body compiles when a session first runs it, and a compiled body keeps the enum types it resolved; another session, or a reopened database, resolves the names again, so a body naming a type that was renamed afterwards reports `42704` there. Loading the catalog never compiles such bodies. A SQL-standard body (`RETURN` or `BEGIN ATOMIC`) is bound when the routine is created.
+
+```sql execute
+CREATE TYPE ticket_state AS ENUM ('open', 'closed');
+CREATE TABLE tickets (id integer, state ticket_state);
+CREATE VIEW open_tickets AS SELECT id FROM tickets WHERE state = 'open';
+ALTER TYPE ticket_state RENAME TO ticket_status;
+SELECT format_type(atttypid, atttypmod) AS column_type
+FROM pg_attribute
+WHERE attrelid = 'tickets'::regclass AND attname = 'state';
+SELECT pg_get_viewdef('open_tickets'::regclass) AS definition;
+```
+
 ## Tables
 
 ```sql

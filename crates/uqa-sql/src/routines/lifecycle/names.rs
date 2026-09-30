@@ -16,6 +16,8 @@ pub trait RoutineNameCatalog {
     fn search_path(&self) -> Vec<String>;
     fn require_schema_usage(&self, schema: &str, role: &RoleReference) -> Result<(), SQLError>;
     fn schema_has_usage(&self, schema: &str, role: &RoleReference) -> bool;
+    /// `format_type_be` of a routine argument type: a user-defined type, recorded by identity, is spelled by its current name.
+    fn routine_type_display(&self, type_name: &str) -> String;
 }
 
 pub fn routine_lookup_keys(

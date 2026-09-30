@@ -78,6 +78,9 @@ pub fn command_tag_name(command: &CommandPlan) -> &'static str {
                 "FETCH"
             }
         }
+        CommandPlan::CreateTableAs {
+            select_into: true, ..
+        } => "SELECT INTO",
         CommandPlan::CreateTableAs { .. } => "CREATE TABLE AS",
         CommandPlan::CreateMaterializedView { .. } => "CREATE MATERIALIZED VIEW",
         CommandPlan::Execute { .. } => "EXECUTE",

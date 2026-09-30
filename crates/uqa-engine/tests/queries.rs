@@ -74,18 +74,22 @@ mod sql_offset_like;
 mod sql_partition_bounds;
 #[path = "sql_prepared.rs"]
 mod sql_prepared;
+#[path = "queries/sql_routine_late_binding.rs"]
+mod sql_routine_late_binding;
+#[path = "queries/sql_routine_lookup.rs"]
+mod sql_routine_lookup;
 #[path = "sql_row_locks.rs"]
 mod sql_row_locks;
 #[path = "queries/sql_row_locks_recheck.rs"]
 mod sql_row_locks_recheck;
-#[path = "queries/sql_routine_late_binding.rs"]
-mod sql_routine_late_binding;
 #[path = "queries/sql_simple_query.rs"]
 mod sql_simple_query;
 #[path = "sql_subqueries.rs"]
 mod sql_subqueries;
 #[path = "sql_subquery.rs"]
 mod sql_subquery;
+#[path = "queries/sql_type_lifecycle_reopen.rs"]
+mod sql_type_lifecycle_reopen;
 #[path = "queries/sql_type_usage.rs"]
 mod sql_type_usage;
 #[path = "sql_window.rs"]

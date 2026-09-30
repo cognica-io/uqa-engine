@@ -238,10 +238,11 @@ pub fn match_routine_signature(
     Ok(Some(MatchedRoutineSignature {
         declared_identity,
         argument_targets,
+        // Invocation re-resolves the source types, so user-defined types are recorded by OID identity rather than by a name the search path may not reach.
         argument_sources: call
             .argument_types
             .iter()
-            .map(|ty| ty.as_ref().map(ColumnType::sql_name))
+            .map(|ty| ty.as_ref().map(ColumnType::catalog_name))
             .collect(),
         argument_positions: mapping.argument_positions,
         coercion_targets,

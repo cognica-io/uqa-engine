@@ -102,7 +102,14 @@ pub fn preflight_sql_function_drop(
     }
     let dependents = routine_object_dependents(context, &resolution.targets, stmt.cascade)?;
     if stmt.cascade {
-        append_routine_cascade_notice(&mut resolution.notices, &cascaded_routines, &dependents);
+        // `getObjectDescription` names every routine kind a function.
+        let cascaded = cascaded_routines
+            .iter()
+            .map(|target| {
+                routine_drop_display_label(context, target).map(|label| format!("function {label}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        append_routine_cascade_notice(&mut resolution.notices, cascaded, &dependents);
     }
     Ok(SQLFunctionDropPlan {
         domains,

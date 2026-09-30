@@ -45,7 +45,7 @@ A unit is complete only when its exit evidence is recorded against the actual so
 | --- | --- | --- | --- |
 | Enum value carrier | None | Core, Joins, SQL, Execution, Storage, providers, bindings | Complete: key allocation, codecs, retention and consumer tests below |
 | Enum catalog and SQL surface | Enum value carrier | SQL, Execution, Engine adapters, pg-server | Complete: 293-statement PostgreSQL 18.4 oracle on every provider and over TCP, the 132-statement partition bound oracle, reopen and binding tests below |
-| Type object lifecycle | Enum catalog and SQL surface | SQL, Execution | Not started |
+| Type object lifecycle | Enum catalog and SQL surface | SQL, Execution | In progress: rename, schema moves, ownership, `USAGE` grants and enforcement, identity-bound stored references, catalog-aware deparse and per-session routine compilation are implemented; dependency DETAIL listings await creation-ordered catalog OIDs, and the PostgreSQL 18.4 oracle awaits recapture |
 | Composite types | Type object lifecycle | Core, SQL, Execution | Not started |
 | User-defined ranges and multiranges | Composite types | SQL, Execution | Not started |
 | Package registry and pre-open options | None | Core, SQL, Execution, Engine adapters | Not started |

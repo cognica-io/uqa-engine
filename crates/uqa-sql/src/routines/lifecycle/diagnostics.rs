@@ -9,15 +9,13 @@
 use super::{RoutineDropTarget, RoutineObjectDependents};
 use crate::SQLError;
 
+/// `drop cascades to ...` notices; `cascaded_routines` are the routines as `getObjectDescription` names them.
 pub fn append_routine_cascade_notice(
     notices: &mut Vec<(&'static str, String)>,
-    cascaded_routines: &[RoutineDropTarget],
+    cascaded_routines: Vec<String>,
     dependents: &RoutineObjectDependents,
 ) {
-    let mut cascaded = cascaded_routines
-        .iter()
-        .map(|target| format!("{} {}", target.kind(), target.label()))
-        .collect::<Vec<_>>();
+    let mut cascaded = cascaded_routines;
     cascaded.extend(dependents.columns.iter().map(|(table, column, foreign)| {
         format!(
             "column {column} of {} {table}",

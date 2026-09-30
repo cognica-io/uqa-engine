@@ -105,23 +105,36 @@ pub fn routine_signature_label(name: &str, types: &[String]) -> String {
     format!("{name}({})", display_types.join(", "))
 }
 
-pub fn wrong_routine_kind_error(
+/// `func_signature_string`: the routine name as the command wrote it and each argument type as `format_type_be` spells it.
+pub fn routine_signature_display(
+    catalog: &dyn names::RoutineNameCatalog,
     name: &str,
     types: &[String],
-    actual_is_procedure: bool,
-    expected_kind: &str,
-) -> SQLError {
-    let actual_kind = if actual_is_procedure {
-        "procedure"
-    } else {
-        "function"
-    };
+) -> String {
+    let types = types
+        .iter()
+        .map(|type_name| catalog.routine_type_display(type_name))
+        .collect::<Vec<_>>();
+    format!("{name}({})", types.join(", "))
+}
+
+/// `LookupFuncWithArgs`: the routine an argument list selects is not of the kind the command names.
+pub fn wrong_routine_kind_error(signature: &str, expected_kind: &str) -> SQLError {
     SQLError::Routine {
         sqlstate: "42809".into(),
-        message: format!(
-            "{} is a {actual_kind}, not a {expected_kind}",
-            routine_signature_label(name, types)
-        ),
+        message: format!("{signature} is not a {expected_kind}"),
+    }
+}
+
+/// `LookupFuncWithArgs`: a name without an argument list selects more than one routine of the command's kind.
+pub fn ambiguous_routine_error(kind: &str, name: &str) -> SQLError {
+    SQLError::Diagnostic {
+        sqlstate: "42725".into(),
+        message: format!("{kind} name \"{name}\" is not unique"),
+        detail: None,
+        hint: Some(format!(
+            "Specify the argument list to select the {kind} unambiguously."
+        )),
     }
 }
 
