@@ -22,7 +22,9 @@ pub use casting::{
     cast_value_with_type_resolution, cast_value_with_type_resolution_with_control,
     coercion_type_name,
 };
-pub use regtype::{format_regtype_value, format_regtype_value_with_control};
+pub use regtype::{
+    format_regtype_elements_with_control, format_regtype_value, format_regtype_value_with_control,
+};
 
 /// Engine-side hook that scalar function evaluation calls for stateful
 /// sequence and user-defined functions. Query-valued expressions are not

@@ -182,6 +182,36 @@ fn pg18_regnamespace_casts_preserve_oid_identity_and_hard_errors() {
     }
 }
 
+#[test]
+fn pg18_oid_aliases_cast_to_every_string_type_through_their_output() {
+    let eng = engine();
+    // `find_coercion_pathway` converts through the alias's output function, and the string type applies its modifier afterwards.
+    for (sql, expected) in [
+        ("SELECT 11::regnamespace::name::text", "pg_catalog"),
+        ("SELECT 11::regnamespace::varchar::text", "pg_catalog"),
+        ("SELECT 'pg_class'::regclass::varchar(4)::text", "pg_c"),
+        ("SELECT 'int4'::regtype::char(10) || '|'", "integer|"),
+        ("SELECT 'pg_class'::regclass::name::text", "pg_class"),
+        (
+            "SELECT 'pg_backend_pid'::regproc::varchar::text",
+            "pg_backend_pid",
+        ),
+        (
+            "SELECT 'abs(integer)'::regprocedure::name::text",
+            "abs(integer)",
+        ),
+        ("SELECT 0::regclass::name::text", "-"),
+        ("SELECT (NULL::regtype::name IS NULL)::text", "true"),
+        ("SELECT ARRAY['int4'::regtype]::name[]::text", "{integer}"),
+        (
+            "SELECT ARRAY['pg_class'::regclass]::varchar(4)[]::text",
+            "{pg_c}",
+        ),
+    ] {
+        assert_eq!(text(&eng, sql), expected, "{sql}");
+    }
+}
+
 fn assert_lookup_result_types(eng: &Engine) {
     for (sql, expected) in [
         ("SELECT pg_typeof(to_regproc('one'))", "regproc"),

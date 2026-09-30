@@ -12,7 +12,7 @@ use uqa_core::{
 };
 
 use super::super::casting::{cast_value_from_with_control, parse_pg_array_literal_with_control};
-use super::{format_regtype_value_with_control, EngineHook};
+use super::{format_regtype_elements_with_control, format_regtype_value_with_control, EngineHook};
 use crate::{
     ast::ColumnType,
     error::{Result, SQLError},
@@ -42,6 +42,14 @@ fn coercion_type_name_with_control(
         }
         _ => Ok(ty.sql_name_with_control(control)?),
     }
+}
+
+/// The types of `PostgreSQL`'s string category, which any type casts to through its output function.
+fn is_string_type(ty: &ColumnType) -> bool {
+    matches!(
+        ty,
+        ColumnType::Text | ColumnType::Name | ColumnType::Varchar(_) | ColumnType::Character(_)
+    )
 }
 
 fn regrole_array_type(ty: &ColumnType) -> bool {
@@ -203,7 +211,30 @@ fn cast_resolved_value(
             control,
         );
     }
-    if target_ty.eq_ignore_ascii_case("text") {
+    // `find_coercion_pathway` casts an OID alias to a string type through its output function, as `CoerceViaIO`, and the string type then applies its own modifier; an array does so element by element.
+    if let Some(ColumnType::Array(element)) = target_column_type {
+        if is_string_type(element) {
+            if let Some(source_ty) = source_ty
+                .map(|source| optional_type_name(source, control))
+                .transpose()?
+                .flatten()
+            {
+                if let Some(elements) =
+                    format_regtype_elements_with_control(value, &source_ty, engine, control)?
+                {
+                    let (elements, _memory) = elements.into_parts();
+                    return cast_value_from_with_control(
+                        &Value::Array(elements),
+                        target_ty,
+                        Some("text[]"),
+                        control,
+                    );
+                }
+            }
+        }
+    }
+    let text_target = target_ty.eq_ignore_ascii_case("text");
+    if text_target || target_column_type.is_some_and(is_string_type) {
         if let Some(source_ty) = source_ty
             .map(|source| optional_type_name(source, control))
             .transpose()?
@@ -213,7 +244,15 @@ fn cast_resolved_value(
                 format_regtype_value_with_control(value, &source_ty, engine, control)?
             {
                 let (text, memory) = text.into_parts();
-                return Ok(control.finish(Value::Str(text), memory)?);
+                if text_target {
+                    return Ok(control.finish(Value::Str(text), memory)?);
+                }
+                return cast_value_from_with_control(
+                    &Value::Str(text),
+                    target_ty,
+                    Some("text"),
+                    control,
+                );
             }
         }
     }
