@@ -134,7 +134,7 @@ fn insert_format(connection: &Connection, namespace: DatabaseId) -> PhysicalResu
 }
 
 fn check_mapping_version(connection: &Connection, version: u32) -> PhysicalResult<()> {
-    let valid: bool = connection.query_row("SELECT (SELECT count(*) = 1 FROM _uqa_mvcc_native_format WHERE singleton = 1 AND format = ?1 AND catalog_version = 49) AND (SELECT value = '49' FROM _metadata WHERE key = 'schema_version') AND NOT EXISTS(SELECT 1 FROM _uqa_mvcc_native_expected) AND NOT EXISTS(SELECT 1 FROM _uqa_mvcc_native_changes)", [version], |row| row.get(0))?;
+    let valid: bool = connection.prepare_cached("SELECT (SELECT count(*) = 1 FROM _uqa_mvcc_native_format WHERE singleton = 1 AND format = ?1 AND catalog_version = 49) AND (SELECT value = '49' FROM _metadata WHERE key = 'schema_version') AND NOT EXISTS(SELECT 1 FROM _uqa_mvcc_native_expected) AND NOT EXISTS(SELECT 1 FROM _uqa_mvcc_native_changes)")?.query_row([version], |row| row.get(0))?;
     if !valid {
         return Err(
             invalid("incomplete native record format or unfinished materialization").into(),

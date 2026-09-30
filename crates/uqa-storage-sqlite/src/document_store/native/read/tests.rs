@@ -10,6 +10,90 @@ use crate::{Catalog, ManagedConnection, SQLiteDocumentStore};
 use uqa_storage::{mvcc::VersionedSessionOptions, read_control::StorageReadControl, DocumentStore};
 
 #[test]
+fn maximum_native_id_uses_bounded_work_independent_of_live_document_count() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    Catalog::open(connection.clone()).unwrap();
+    connection
+        .bind_native_records(VersionedSessionOptions::default())
+        .unwrap();
+    let mut documents = SQLiteDocumentStore::new(connection.clone(), "docs");
+    let work = Arc::new(AtomicUsize::new(0));
+    for count in [32, 4096] {
+        connection.begin_transaction().unwrap();
+        for id in 1..=count {
+            documents.put(id, BTreeMap::new()).unwrap();
+        }
+        connection.commit_transaction().unwrap();
+        let counter = Arc::clone(&work);
+        connection
+            .with_physical(|sqlite| {
+                sqlite.progress_handler(
+                    1,
+                    Some(move || {
+                        counter.fetch_add(1, Ordering::Relaxed);
+                        false
+                    }),
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        work.store(0, Ordering::Relaxed);
+        assert_eq!(documents.max_doc_id().unwrap(), count);
+        let instructions = work.load(Ordering::Relaxed);
+        assert!(
+            instructions < 2000,
+            "maximum ID query used {instructions} SQLite VM instructions for {count} documents"
+        );
+        connection
+            .with_physical(|sqlite| {
+                sqlite.progress_handler(0, None::<fn() -> bool>)?;
+                Ok(())
+            })
+            .unwrap();
+    }
+}
+
+#[test]
+fn maximum_native_id_follows_private_deletes_undo_and_retained_snapshots() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    Catalog::open(connection.clone()).unwrap();
+    connection
+        .bind_native_records(VersionedSessionOptions::default())
+        .unwrap();
+    let mut documents = SQLiteDocumentStore::new(connection.clone(), "docs");
+    assert_eq!(documents.max_doc_id().unwrap(), 0);
+    for id in [1, 50, 100] {
+        documents.put(id, BTreeMap::new()).unwrap();
+    }
+    let retained = documents.snapshot().unwrap();
+    connection.begin_transaction().unwrap();
+    documents.put(200, BTreeMap::new()).unwrap();
+    connection.savepoint("larger").unwrap();
+    documents.delete(200).unwrap();
+    documents.delete(100).unwrap();
+    assert_eq!(documents.max_doc_id().unwrap(), 50);
+    assert_eq!(retained.max_doc_id().unwrap(), 100);
+    let other = connection.new_session();
+    SQLiteDocumentStore::new(other.clone(), "docs")
+        .put(300, BTreeMap::new())
+        .unwrap();
+    assert_eq!(documents.max_doc_id().unwrap(), 50);
+    connection.rollback_to_savepoint("larger").unwrap();
+    assert_eq!(documents.max_doc_id().unwrap(), 200);
+    connection.rollback_transaction().unwrap();
+    assert_eq!(documents.max_doc_id().unwrap(), 300);
+    assert_eq!(retained.max_doc_id().unwrap(), 100);
+    for id in [300, 100, 50, 1] {
+        documents.delete(id).unwrap();
+    }
+    assert_eq!(documents.max_doc_id().unwrap(), 0);
+}
+
+#[test]
 fn borrowed_native_identity_pages_keep_their_lease_during_reentrant_writes() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     Catalog::open(connection.clone()).unwrap();

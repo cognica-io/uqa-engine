@@ -547,6 +547,17 @@ impl ManagedConnection {
         Ok(Some(version))
     }
 
+    /// Complete logical record visibility, including the private root restored by savepoint undo. Legacy physical sessions retain their existing data-version refresh protocol.
+    pub fn read_view_revision(
+        &self,
+    ) -> Result<Option<uqa_storage::key_value::KeyValueReadRevision>> {
+        self.surface_cleanup_failure()?;
+        let _gate = self.session.gate.read();
+        self.session.logical.get().map_or(Ok(None), |logical| {
+            logical.read_view_revision().map_err(Into::into)
+        })
+    }
+
     /// Establish the database snapshot for the active transaction without
     /// depending on the caller's first user query. `BEGIN DEFERRED` alone does
     /// not start a read transaction, so a writer could otherwise commit after

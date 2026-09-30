@@ -32,6 +32,40 @@ pub struct BudgetedSharedMap<K, V> {
     memory: MemoryBudget,
 }
 
+/// An immutable ordered root and its cardinality. Its nodes retain their original allocation leases; an empty root owns no allocations. Cloning does not copy entries or allocate, and restoring into a mutable map requires its original allowance for a nonempty root.
+pub struct BudgetedSharedMapSnapshot<K, V> {
+    root: Link<K, V>,
+    len: usize,
+}
+
+impl<K, V> Clone for BudgetedSharedMapSnapshot<K, V> {
+    fn clone(&self) -> Self {
+        Self {
+            root: self.root.clone(),
+            len: self.len,
+        }
+    }
+}
+
+impl<K, V> BudgetedSharedMapSnapshot<K, V> {
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
+impl<K: Ord, V> BudgetedSharedMapSnapshot<K, V> {
+    pub fn get<Q: Ord + ?Sized>(&self, key: &Q) -> Option<&V>
+    where
+        K: Borrow<Q>,
+    {
+        lookup(&self.root, key)
+    }
+}
+
 impl<K, V> Clone for BudgetedSharedMap<K, V> {
     fn clone(&self) -> Self {
         Self {
@@ -63,6 +97,26 @@ impl<K, V> BudgetedSharedMap<K, V> {
         &self.memory
     }
 
+    /// Retain this immutable root without another mutable allowance handle or any allocation.
+    pub fn snapshot(&self) -> BudgetedSharedMapSnapshot<K, V> {
+        BudgetedSharedMapSnapshot {
+            root: self.root.clone(),
+            len: self.len,
+        }
+    }
+
+    /// Restore a retained root without allocating. Panics before mutation if a nonempty root belongs to another allowance; empty roots own no allocations and can be restored into any allowance.
+    pub fn restore(&mut self, snapshot: &BudgetedSharedMapSnapshot<K, V>) {
+        if let Some(root) = &snapshot.root {
+            assert!(
+                self.memory.shares_allowance(root.budget()),
+                "different memory allowances"
+            );
+        }
+        self.root.clone_from(&snapshot.root);
+        self.len = snapshot.len;
+    }
+
     pub fn iter(&self) -> BudgetedSharedMapIter<'_, K, V> {
         let mut iter = BudgetedSharedMapIter::empty();
         iter.push_left(self.root.as_ref().map(|node| &***node));
@@ -71,19 +125,34 @@ impl<K, V> BudgetedSharedMap<K, V> {
 }
 
 impl<K: Ord, V> BudgetedSharedMap<K, V> {
-    pub fn get<Q: Ord + ?Sized>(&self, key: &Q) -> Option<&V>
+    /// Select the greatest entry at an upper bound in logarithmic time, without allocating or traversing preceding entries.
+    pub fn last_before<Q: Ord + ?Sized>(&self, end: Bound<&Q>) -> Option<(&K, &V)>
     where
         K: Borrow<Q>,
     {
         let mut link = &self.root;
+        let mut found = None;
         while let Some(node) = link {
-            match key.cmp(node.entry.0.borrow()) {
-                Ordering::Less => link = &node.left,
-                Ordering::Greater => link = &node.right,
-                Ordering::Equal => return Some(&node.entry.1),
+            let included = match end {
+                Bound::Unbounded => true,
+                Bound::Included(key) => node.entry.0.borrow() <= key,
+                Bound::Excluded(key) => node.entry.0.borrow() < key,
+            };
+            if included {
+                found = Some((&node.entry.0, &node.entry.1));
+                link = &node.right;
+            } else {
+                link = &node.left;
             }
         }
-        None
+        found
+    }
+
+    pub fn get<Q: Ord + ?Sized>(&self, key: &Q) -> Option<&V>
+    where
+        K: Borrow<Q>,
+    {
+        lookup(&self.root, key)
     }
 
     /// Return a new root containing the supplied key and value, leaving this root unchanged even if reservation fails. Matching keys are replaced together with their values; neither type needs to implement `Clone`.
@@ -123,6 +192,20 @@ impl<K: Ord, V> BudgetedSharedMap<K, V> {
         }
         iter
     }
+}
+
+fn lookup<'a, K: Borrow<Q>, V, Q: Ord + ?Sized>(
+    mut link: &'a Link<K, V>,
+    key: &Q,
+) -> Option<&'a V> {
+    while let Some(node) = link {
+        match key.cmp(node.entry.0.borrow()) {
+            Ordering::Less => link = &node.left,
+            Ordering::Greater => link = &node.right,
+            Ordering::Equal => return Some(&node.entry.1),
+        }
+    }
+    None
 }
 
 pub struct BudgetedSharedMapIter<'a, K, V> {

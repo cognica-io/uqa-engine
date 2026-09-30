@@ -6,6 +6,10 @@
 
 //! A coalesced background maintenance session per database, never per query.
 
+mod cache;
+#[cfg(test)]
+mod tests;
+
 use std::sync::atomic::Ordering;
 use std::sync::{mpsc, Arc, Weak};
 use std::time::{Duration, Instant};
@@ -34,6 +38,7 @@ pub(super) fn run(
     };
     let mut session = None;
     let mut diskann = None;
+    let mut maintenance = cache::MaintenanceCache::default();
     let mut poll_at = Instant::now();
     loop {
         let pass_started = Instant::now();
@@ -77,7 +82,7 @@ pub(super) fn run(
             // whole-catalog statistics pass before its next poll.
             if refresh_due {
                 statistics.automatic_statistics.status.lock().running = true;
-                let result = refresh_due_tables(engine);
+                let result = refresh_due_tables(engine, &mut maintenance);
                 let mut status = statistics.automatic_statistics.status.lock();
                 status.running = false;
                 match result {
@@ -160,31 +165,67 @@ fn wait_until(
     }
 }
 
-fn refresh_due_tables(engine: &Engine) -> StorageBackendResult<()> {
+fn refresh_due_tables(
+    engine: &Engine,
+    maintenance: &mut cache::MaintenanceCache,
+) -> StorageBackendResult<()> {
     engine.synchronize_table_catalog()?;
     engine.synchronize_table_data()?;
-    let names = engine
+    let tables = engine
         .storage
         .tables
         .read()
-        .keys()
-        .map(uqa_storage::RelationIdentity::qualified_name)
+        .iter()
+        .map(|(relation, table)| (relation.qualified_name(), Arc::clone(table)))
         .collect::<Vec<_>>();
+    maintenance.retain(tables.iter().map(|(name, _)| name.as_str()));
+    let revisions = engine.epochs.storage_cache_revisions.lock().clone();
+    let version = engine
+        .storage
+        .backend
+        .as_ref()
+        .map(|backend| backend.change_version())
+        .transpose()?
+        .flatten()
+        .filter(|version| {
+            *version
+                == engine
+                    .epochs
+                    .seen_storage_change_version
+                    .load(Ordering::Acquire)
+        });
     let mut failure = None;
-    for name in names {
+    for (name, table) in tables {
         engine
             .runtime
             .cancellation
             .check()
             .map_err(|error| uqa_storage::StorageBackendError::Other(error.to_string()))?;
         let result = (|| {
-            let Some(table) = engine.try_table(&name)? else {
-                return Ok(false);
-            };
             let Some(catalog) = engine.storage.catalog.as_deref() else {
                 return Ok(false);
             };
-            let state = MaintenanceState::load_for(catalog, &name, table.object_id())?;
+            let revision = version.and(revisions.as_ref()).map(|revisions| {
+                revisions
+                    .statistics_maintenance
+                    .get(&name)
+                    .copied()
+                    .unwrap_or_default()
+            });
+            let state = maintenance.load(&name, table.object_id(), revision, || {
+                let state = MaintenanceState::load_for(catalog, &name, table.object_id())?;
+                // A commit racing the metadata read leaves this entry uncached until the next synchronized pass.
+                let stable = version.is_some()
+                    && engine
+                        .storage
+                        .backend
+                        .as_ref()
+                        .map(|backend| backend.change_version())
+                        .transpose()?
+                        .flatten()
+                        == version;
+                Ok((state, stable))
+            })?;
             let missing = state.missing(table.column_stats.read().is_empty());
             if !state.due(
                 missing,
@@ -197,6 +238,7 @@ fn refresh_due_tables(engine: &Engine) -> StorageBackendResult<()> {
         })();
         match result {
             Ok(true) => {
+                maintenance.remove(&name);
                 let mut status = engine.statistics.automatic_statistics.status.lock();
                 status.completed = status.completed.saturating_add(1);
             }

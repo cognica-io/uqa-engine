@@ -6,6 +6,9 @@
 
 //! Historical reads probe encoded lengths and reserve before materializing keys or values.
 
+mod last;
+mod ordered;
+
 use rusqlite::{params, types::ValueRef, Connection, OptionalExtension};
 use uqa_core::memory::BudgetedVec;
 use uqa_storage::mvcc::{
@@ -48,6 +51,16 @@ impl CommittedRecordSnapshot for Snapshot {
     }
     fn sequence(&self) -> CommitSequence {
         self.sequence
+    }
+
+    fn visit_last_key(
+        &self,
+        prefix: &[u8],
+        before: Option<&[u8]>,
+        control: &StorageReadControl,
+        visit: &mut RecordKeyVisitor<'_>,
+    ) -> VersionResult<()> {
+        last::visit(self, prefix, before, control, visit)
     }
 
     fn get(
@@ -142,16 +155,30 @@ impl CommittedRecordSnapshot for Snapshot {
             return Ok(());
         }
         self.read(|connection| {
-            keys(connection, prefix, after, limit, control, &mut |key| {
-                let mut more = None;
-                value(connection, key, self.sequence, control, &mut |record| {
-                    if let Some(record) = record {
-                        more = Some(visit(key, record)?);
-                    }
-                    Ok(())
-                })?;
-                Ok(more)
-            })
+            ordered::visit(
+                connection,
+                prefix,
+                after,
+                limit,
+                self.sequence,
+                control,
+                &mut |key, info| {
+                    let mut more = true;
+                    value_from_info(
+                        connection,
+                        key,
+                        info,
+                        self.sequence,
+                        usize::MAX,
+                        control,
+                        &mut |record| {
+                            more = visit(key, record.expect("selected visible record"))?;
+                            Ok(())
+                        },
+                    )?;
+                    Ok(more)
+                },
+            )
         })
     }
 
@@ -168,20 +195,23 @@ impl CommittedRecordSnapshot for Snapshot {
             return Ok(());
         }
         self.read(|connection| {
-            keys(connection, prefix, after, limit, control, &mut |key| {
-                let _bindings = reserve_bindings(control, &[key])?;
-                info(connection, key, self.sequence)?
-                    .map(|info| {
-                        Ok(visit(
-                            key,
-                            RecordMetadata {
-                                revision: Some(CommitSequence::from_u64(info.revision)),
-                                live: info.length.is_some(),
-                            },
-                        )?)
-                    })
-                    .transpose()
-            })
+            ordered::visit(
+                connection,
+                prefix,
+                after,
+                limit,
+                self.sequence,
+                control,
+                &mut |key, info| {
+                    Ok(visit(
+                        key,
+                        RecordMetadata {
+                            revision: Some(CommitSequence::from_u64(info.revision)),
+                            live: info.length.is_some(),
+                        },
+                    )?)
+                },
+            )
         })
     }
 }
@@ -195,10 +225,9 @@ pub(super) fn keys(
     visit: &mut impl FnMut(&[u8]) -> PhysicalResult<Option<bool>>,
 ) -> PhysicalResult<()> {
     let upper = prefix_upper_bound(prefix, control)?;
-    let has_runs: bool =
-        connection.query_row("SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_runs)", [], |row| {
-            row.get(0)
-        })?;
+    let has_runs: bool = connection
+        .prepare_cached("SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_runs)")?
+        .query_row([], |row| row.get(0))?;
     walk_keys(
         after,
         limit,
@@ -273,6 +302,7 @@ fn walk_keys(
     Ok(())
 }
 
+#[derive(Clone, Copy)]
 pub(super) struct Info {
     pub(super) revision: u64,
     pub(super) length: Option<usize>,
@@ -284,7 +314,7 @@ pub(super) fn info(
     key: &[u8],
     boundary: CommitSequence,
 ) -> PhysicalResult<Option<Info>> {
-    let mut statement = connection.prepare("SELECT h.sequence, h.compacted, v.sequence, CASE WHEN v.value IS NULL THEN NULL WHEN typeof(v.value) = 'blob' THEN length(v.value) ELSE -1 END FROM _uqa_mvcc_heads h LEFT JOIN _uqa_mvcc_versions v ON v.key = h.key AND v.sequence = (SELECT sequence FROM _uqa_mvcc_versions WHERE key = ?1 AND sequence <= ?2 ORDER BY sequence DESC LIMIT 1) WHERE h.key = ?1")?;
+    let mut statement = connection.prepare_cached("SELECT h.sequence, h.compacted, v.sequence, CASE WHEN v.value IS NULL THEN NULL WHEN typeof(v.value) = 'blob' THEN length(v.value) ELSE -1 END FROM _uqa_mvcc_heads h LEFT JOIN _uqa_mvcc_versions v ON v.key = h.key AND v.sequence = (SELECT sequence FROM _uqa_mvcc_versions WHERE key = ?1 AND sequence <= ?2 ORDER BY sequence DESC LIMIT 1) WHERE h.key = ?1")?;
     let mut rows = statement.query(params![key, boundary.as_u64().to_be_bytes().as_slice()])?;
     let Some(row) = rows.next()? else {
         return Ok(runs::info(connection, key)?
@@ -295,6 +325,10 @@ pub(super) fn info(
                 run: true,
             }));
     };
+    point_info(row, boundary)
+}
+
+fn point_info(row: &rusqlite::Row<'_>, boundary: CommitSequence) -> PhysicalResult<Option<Info>> {
     let (head, compacted) = codec::decode_head(row)?;
     let head_visible = head <= boundary;
     if head_visible && compacted {
@@ -345,14 +379,28 @@ fn value_bounded(
     control: &StorageReadControl,
     visit: &mut RecordValueVisitor<'_>,
 ) -> PhysicalResult<()> {
-    let _bindings = reserve_bindings(control, &[key])?;
+    let bindings = reserve_bindings(control, &[key])?;
     let info = info(connection, key, boundary)?;
+    drop(bindings);
     let Some(info) = info else {
         control.cancellation().check().map_err(VersionError::from)?;
         visit(None)?;
         control.cancellation().check().map_err(VersionError::from)?;
         return Ok(());
     };
+    value_from_info(connection, key, info, boundary, max_bytes, control, visit)
+}
+
+fn value_from_info(
+    connection: &Connection,
+    key: &[u8],
+    info: Info,
+    boundary: CommitSequence,
+    max_bytes: usize,
+    control: &StorageReadControl,
+    visit: &mut RecordValueVisitor<'_>,
+) -> PhysicalResult<()> {
+    let _bindings = reserve_bindings(control, &[key])?;
     control
         .check_value_size(info.length.unwrap_or(0), max_bytes)
         .map_err(VersionError::from)?;
@@ -376,7 +424,7 @@ fn value_bounded(
         .reserve(length.unwrap_or(0))
         .map_err(VersionError::from)?;
     let mut statement = connection
-        .prepare("SELECT value FROM _uqa_mvcc_versions WHERE key = ?1 AND sequence = ?2")?;
+        .prepare_cached("SELECT value FROM _uqa_mvcc_versions WHERE key = ?1 AND sequence = ?2")?;
     let revision_bytes = revision.to_be_bytes();
     let mut rows = statement.query(params![key, revision_bytes.as_slice()])?;
     let row = rows.next()?.ok_or(VersionError::InvalidEncoding(
@@ -418,7 +466,8 @@ fn next_key(
         (false, false) => ("SELECT length(key) FROM _uqa_mvcc_heads WHERE key >= ?1 AND (?2 IS NULL) ORDER BY key LIMIT 1", "SELECT key FROM _uqa_mvcc_heads WHERE key >= ?1 AND (?2 IS NULL) ORDER BY key LIMIT 1"),
     };
     let length: Option<i64> = connection
-        .query_row(sizes, params![lower, upper], |row| row.get(0))
+        .prepare_cached(sizes)?
+        .query_row(params![lower, upper], |row| row.get(0))
         .optional()?;
     let Some(length) = length else {
         return Ok(None);
@@ -429,7 +478,7 @@ fn next_key(
         .memory()
         .reserve(length)
         .map_err(VersionError::from)?;
-    let mut statement = connection.prepare(data)?;
+    let mut statement = connection.prepare_cached(data)?;
     let mut rows = statement.query(params![lower, upper])?;
     let row = rows.next()?.ok_or(VersionError::InvalidEncoding(
         "head disappeared within a read",

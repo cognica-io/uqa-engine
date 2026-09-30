@@ -63,6 +63,39 @@ use uqa_storage::read_control::StorageReadControl;
 use uqa_storage::{KeyValueStore, StorageBackendError};
 
 #[test]
+fn complete_read_view_identity_distinguishes_private_branches_and_pinned_commits() {
+    let persistence = Persistence::new();
+    let a = persistence.session(1 << 20);
+    let b = persistence.session(1 << 20);
+    let baseline = a.read_view_revision().unwrap().unwrap();
+    assert!(Some(baseline.clone()) == b.read_view_revision().unwrap());
+    a.begin_transaction().unwrap();
+    a.savepoint("empty").unwrap();
+    assert!(Some(baseline.clone()) == a.read_view_revision().unwrap());
+    a.put(b"a", b"first").unwrap();
+    let first = a.read_view_revision().unwrap().unwrap();
+    assert!(first != baseline);
+    assert!(Some(baseline.clone()) == b.read_view_revision().unwrap());
+    a.savepoint("first").unwrap();
+    a.put(b"a", b"second").unwrap();
+    let discarded = a.read_view_revision().unwrap().unwrap();
+    assert!(discarded != first);
+    a.rollback_to_savepoint("first").unwrap();
+    assert!(Some(first.clone()) == a.read_view_revision().unwrap());
+    a.put(b"a", b"second").unwrap();
+    assert!(Some(discarded) != a.read_view_revision().unwrap());
+    a.rollback_to_savepoint("empty").unwrap();
+    assert!(Some(baseline.clone()) == a.read_view_revision().unwrap());
+    b.put(b"b", b"committed").unwrap();
+    assert!(Some(baseline.clone()) == a.read_view_revision().unwrap());
+    a.refresh_transaction_snapshot(&uqa_core::CancellationToken::new())
+        .unwrap();
+    assert!(Some(baseline) != a.read_view_revision().unwrap());
+    assert!(a.read_view_revision().unwrap() == b.read_view_revision().unwrap());
+    a.rollback_transaction().unwrap();
+}
+
+#[test]
 fn paired_handles_require_the_same_reported_transaction_context() {
     use uqa_storage::{
         KeyValueCatalog, KeyValueStorageBackend, MemoryKeyValueStore, PersistentStorageSession,

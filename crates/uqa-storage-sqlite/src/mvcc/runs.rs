@@ -7,10 +7,12 @@
 //! Bounded, lossless runs of current records with consecutive big-endian key suffixes.
 
 mod collect;
+mod previous;
 mod scan;
 
 pub(super) use collect::compact;
-pub(super) use scan::next_key;
+pub(super) use previous::previous_key;
+pub(super) use scan::{next_candidate, next_key, KeyCandidate};
 
 use rusqlite::{params, types::ValueRef, Connection, Row};
 use uqa_storage::mvcc::{BorrowedRecord, CommitSequence, RecordValueVisitor, VersionError};
@@ -90,7 +92,7 @@ fn bounds(connection: &Connection, key: &[u8]) -> PhysicalResult<Option<Bounds>>
     if !(8..=MAX_KEY).contains(&key.len()) {
         return Ok(None);
     }
-    let mut statement = connection.prepare(LOOKUP)?;
+    let mut statement = connection.prepare_cached(LOOKUP)?;
     let mut rows = statement.query(params![
         i64::try_from(key.len()).expect("bounded key length"),
         key
@@ -116,8 +118,9 @@ struct Run {
 impl Run {
     fn load(connection: &Connection, bounds: Bounds) -> PhysicalResult<Self> {
         let mut template = [0; MAX_VALUE];
-        let mut statement = connection
-            .prepare("SELECT value FROM _uqa_mvcc_runs WHERE key_length = ?1 AND first_key = ?2")?;
+        let mut statement = connection.prepare_cached(
+            "SELECT value FROM _uqa_mvcc_runs WHERE key_length = ?1 AND first_key = ?2",
+        )?;
         let mut rows = statement.query(params![
             i64::try_from(bounds.key_length).expect("bounded key length"),
             bounds.first()

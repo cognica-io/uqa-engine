@@ -48,6 +48,102 @@ fn value(view: &MergedRecordSnapshot, key: &[u8]) -> Option<Vec<u8>> {
 }
 
 #[test]
+fn greatest_key_selection_preserves_private_tombstones_bounds_and_retained_commands() {
+    let storage = StorageReadControl::with_limit(8 << 20);
+    let read = StorageReadControl::with_limit(4096);
+    let store = MemoryVersionStore::new(storage.memory());
+    let large = vec![7; 1 << 20];
+    let committed = store
+        .commit(
+            &[
+                write(b"p/a", None, Some(&large)),
+                write(b"p/c", None, Some(&large)),
+                write(b"p/z", None, None),
+                write(b"q/a", None, Some(b"other")),
+                write(b"\xff\xff", None, Some(b"maximum")),
+            ],
+            &storage,
+        )
+        .unwrap();
+    let private = PrivateRecordChanges::new(storage.memory());
+    private
+        .apply(
+            &[
+                write(b"p/b", None, Some(b"inserted")),
+                write(b"p/c", Some(committed), None),
+                write(b"p/y", None, Some(b"inserted")),
+                write(b"\xff\xff", Some(committed), None),
+            ],
+            &storage,
+        )
+        .unwrap();
+    let retained = view(&store, &private);
+    let expected = BTreeMap::from([
+        (b"p/a".as_slice(), true),
+        (b"p/b".as_slice(), true),
+        (b"p/c".as_slice(), false),
+        (b"p/y".as_slice(), true),
+        (b"p/z".as_slice(), false),
+        (b"q/a".as_slice(), true),
+        (b"\xff\xff".as_slice(), false),
+    ]);
+    private.rollback().unwrap();
+    store
+        .commit(&[write(b"p/zz", None, Some(b"later"))], &storage)
+        .unwrap();
+    for prefix in [
+        b"".as_slice(),
+        b"p/",
+        b"p/a",
+        b"absent",
+        b"\xff",
+        b"\xff\xff",
+    ] {
+        for before in [
+            None,
+            Some(b"".as_slice()),
+            Some(b"p/"),
+            Some(b"p/c"),
+            Some(b"p/d"),
+            Some(b"z"),
+            Some(b"\xff\xff"),
+        ] {
+            let wanted = expected
+                .iter()
+                .filter(|(key, _)| {
+                    key.starts_with(prefix) && before.is_none_or(|before| **key < before)
+                })
+                .next_back()
+                .map(|(key, live)| (key.to_vec(), *live));
+            let mut actual = None;
+            retained
+                .visit_last_key(prefix, before, &read, &mut |key, record| {
+                    assert!(actual.is_none());
+                    actual = Some((key.to_vec(), record.live));
+                    Ok(true)
+                })
+                .unwrap();
+            assert_eq!(actual, wanted);
+            assert_eq!(read.memory().used(), 0);
+        }
+    }
+    assert!(read.memory().peak() < large.len());
+    let full = read.memory().reserve(read.memory().limit()).unwrap();
+    assert!(retained
+        .visit_last_key(b"p/", None, &read, &mut |_, _| panic!(
+            "rejected seek must not visit"
+        ))
+        .is_err());
+    drop(full);
+    read.cancellation().cancel();
+    assert!(retained
+        .visit_last_key(b"", None, &read, &mut |_, _| panic!(
+            "cancelled seek must not visit"
+        ))
+        .is_err());
+}
+
+#[test]
 fn refreshing_a_committed_boundary_preserves_own_writes_and_older_commands() {
     let control = control();
     let store = MemoryVersionStore::new(control.memory());

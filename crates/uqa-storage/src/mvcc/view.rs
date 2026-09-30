@@ -7,6 +7,7 @@
 //! Provider-independent reads combine one pinned committed boundary with a fixed private command view.
 
 mod fingerprint;
+mod last;
 
 use std::cmp::Ordering;
 use std::sync::Arc;
@@ -105,6 +106,17 @@ pub trait CommittedRecordSnapshot: Send + Sync {
         self.visit_prefix(prefix, after, limit, control, &mut |key, record| {
             visit(key, record.into())
         })
+    }
+
+    /// Visit the greatest visible identity with this prefix strictly before `before`, including a tombstone. Invoke the visitor at most once; providers may seek directly without reading preceding keys or values. The default preserves semantics for providers that only implement forward scans.
+    fn visit_last_key(
+        &self,
+        prefix: &[u8],
+        before: Option<&[u8]>,
+        control: &StorageReadControl,
+        visit: &mut RecordKeyVisitor<'_>,
+    ) -> VersionResult<()> {
+        last::by_scan(self, prefix, before, control, visit)
     }
 
     /// Return the newest revision at or before this snapshot, including tombstones. Missing identities return `None`.
@@ -223,6 +235,15 @@ impl<T: CommittedRecordSnapshot> CommittedRecordSnapshot for RetainedSnapshot<T>
     }
     fn reclamation_epoch(&self) -> Option<u64> {
         self.snapshot.reclamation_epoch()
+    }
+    fn visit_last_key(
+        &self,
+        prefix: &[u8],
+        before: Option<&[u8]>,
+        control: &StorageReadControl,
+        visit: &mut RecordKeyVisitor<'_>,
+    ) -> VersionResult<()> {
+        self.snapshot.visit_last_key(prefix, before, control, visit)
     }
     fn metadata(
         &self,
@@ -408,6 +429,11 @@ impl MergedRecordSnapshot {
 
     pub fn sequence(&self) -> CommitSequence {
         self.committed.sequence()
+    }
+
+    /// Whole private command-root identity, restored together with its records on undo.
+    pub fn private_revision(&self) -> Option<super::PrivateRecordRevision> {
+        self.private.revision()
     }
 
     /// The pinned committed boundary underlying this command view, without private replacements.

@@ -375,6 +375,12 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         self.store.change_version()
     }
 
+    fn read_view_revision(
+        &self,
+    ) -> StorageBackendResult<Option<crate::key_value::KeyValueReadRevision>> {
+        self.store.read_view_revision()
+    }
+
     fn change_version_monitor_is_nonblocking(&self) -> StorageBackendResult<bool> {
         self.store.change_version_monitor_is_nonblocking()
     }

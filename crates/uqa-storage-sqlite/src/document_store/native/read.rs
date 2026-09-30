@@ -224,12 +224,50 @@ impl NativeDocumentRead<'_> {
     }
 
     pub(crate) fn max_doc_id(&self) -> SQLiteResult<DocId> {
-        let mut last = 0;
-        self.visit_ids(None, usize::MAX, &self.snapshot.control, |id| {
-            last = id;
-            Ok(())
-        })?;
-        Ok(last)
+        let control = &self.snapshot.control;
+        control.check()?;
+        let Some(owner) = self.owner else {
+            return Ok(0);
+        };
+        let identity = NativeRecordIdentity::new(Family::Documents, owner)?;
+        let prefix = identity.encode_prefix(&[], control)?;
+        let mut before = BudgetedVec::new(control.memory());
+        loop {
+            let mut found = None;
+            let mut preceding = BudgetedVec::new(control.memory());
+            self.snapshot.view.visit_last_key(
+                &prefix,
+                (!before.is_empty()).then_some(&*before),
+                control,
+                &mut |key, record| {
+                    if record.live {
+                        NativeRecordIdentity::visit_key_components(key, control, |_, value| {
+                            let ValueRef::Integer(id) = value else {
+                                return Err(VersionError::InvalidEncoding(
+                                    "native document key must be integer",
+                                ));
+                            };
+                            found = Some(
+                                document_id_from_sqlite(id)
+                                    .map_err(|error| VersionError::Storage(error.into()))?,
+                            );
+                            Ok(())
+                        })?;
+                    } else {
+                        preceding.extend_from_slice(key)?;
+                    }
+                    Ok(false)
+                },
+            )?;
+            control.check()?;
+            if let Some(id) = found {
+                return Ok(id);
+            }
+            if preceding.is_empty() {
+                return Ok(0);
+            }
+            before = preceding;
+        }
     }
 
     pub(crate) fn find(&self, field: &str, value: &Value) -> SQLiteResult<Option<DocId>> {

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-import { test } from "node:test";
+import { testWithCleanup as test } from "./cleanup.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -29,7 +29,7 @@ function webCore(packagePath) {
 }
 
 export function registerNotificationPortabilityTests(packagePath) {
-  test("notification abort discards queued values and joins owned cleanup", async (t) => {
+  test("notification abort discards queued values and joins owned cleanup", async (defer) => {
     const load = webCore(packagePath);
     const { subscribe } = load("./notification-subscription.js");
     const { NotificationEvent, cancelled } = load("./notification-error.js");
@@ -37,7 +37,7 @@ export function registerNotificationPortabilityTests(packagePath) {
     let release, started, subscription;
     const cleanup = new Promise((resolve) => { release = resolve; });
     const cleaning = new Promise((resolve) => { started = resolve; });
-    t.after(async () => { release(); await subscription?.close(); });
+    defer(async () => { release(); await subscription?.close(); });
     const runtime = { now: () => performance.now(), randomInt: (lower) => lower,
       async runAttempt(connection, signal, deadline, onReady, onEvent) {
         const identity = { epoch: fixture.stream_id, requestId: fixture.request_id };
@@ -86,7 +86,7 @@ export function registerNotificationPortabilityTests(packagePath) {
     assert.equal(String(error).includes("비공개"), false);
   });
 
-  test("notification lifecycle without Node globals preserves gaps and joins cancelled runtime work", { timeout: 15000 }, async (t) => {
+  test("notification lifecycle without Node globals preserves gaps and joins cancelled runtime work", { timeout: 15000 }, async (defer) => {
     const load = webCore(packagePath);
     const { subscribe } = load("./notification-subscription.js");
     const { NotificationError, NotificationEvent, cancelled } = load("./notification-error.js");
@@ -97,7 +97,7 @@ export function registerNotificationPortabilityTests(packagePath) {
     let releaseCleanup, startedCleanup, sub;
     const cleanup = new Promise((resolve) => { releaseCleanup = resolve; });
     const cancelling = new Promise((resolve) => { startedCleanup = resolve; });
-    t.after(async () => { releaseCleanup(); await sub?.close(); });
+    defer(async () => { releaseCleanup(); await sub?.close(); });
     let attempts = 0;
     const runtime = { now: () => performance.now(), randomInt: (lower) => lower,
       async runAttempt(connection, signal, deadline, onReady, onEvent) {

@@ -38,6 +38,7 @@ impl Engine {
         }
         let epochs = self.epochs.published_epochs();
         let cache_revisions = self.epochs.storage_cache_revisions.lock().clone();
+        let read_view = self.epochs.seen_storage_read_view.lock().clone();
         let session = Self::empty_persistent_session(
             PersistentStorageSession::new(
                 Arc::clone(&storage.catalog),
@@ -73,6 +74,13 @@ impl Engine {
                 .store(version, Ordering::Release);
         }
         *session.epochs.storage_cache_revisions.lock() = cache_revisions;
+        if let Some(current) = storage.backend.read_view_revision()? {
+            if read_view.as_ref() == Some(&current)
+                && source_backend.read_view_revision()?.as_ref() == Some(&current)
+            {
+                *session.epochs.seen_storage_read_view.lock() = Some(current);
+            }
+        }
         Ok(Some(session))
     }
 

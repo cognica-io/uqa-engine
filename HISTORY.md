@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Avoid full native document scans for maximum-ID lookups, repeated catalog restoration for unchanged committed/private command views, per-key SQLite metadata statements and unchanged maintenance metadata reads. Preserve pinned visibility, savepoint undo, serializable observations, resource limits and existing maintenance deadlines.
+- Restore named analyzer bindings on document tables without requiring declared SQL columns. Declared SQL tables retain TEXT-column and physical FTS validation, and missing field bindings remain rejected.
+- Release notification test resources on the supported Node.js 16 runtime, including assertion failures and cancellation, so the HTTP compatibility suite completes without requiring newer test-context hooks.
+
 ## [0.4.7] - 2026-09-29
 
 ### Fixed

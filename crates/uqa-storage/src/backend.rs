@@ -613,6 +613,13 @@ pub trait PersistentStorageBackend: Send + Sync {
         Ok(None)
     }
 
+    /// Exact identity of the current committed and private record view for cache reuse. Equal identities guarantee equal record visibility, including after savepoint undo; providers without this capability return `None`. This process-local token must never be persisted or substituted for SQL isolation or serializable observations.
+    fn read_view_revision(
+        &self,
+    ) -> StorageBackendResult<Option<crate::key_value::KeyValueReadRevision>> {
+        Ok(None)
+    }
+
     /// Whether reading [`Self::change_version`] can proceed while this session owns its pinned transaction. An independent monitor can also be unsafe for a reader when a pending writer is waiting for that reader's lock.
     fn change_version_monitor_is_nonblocking(&self) -> StorageBackendResult<bool> {
         Ok(true)
