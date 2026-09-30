@@ -292,6 +292,9 @@ pub struct InsertStmt {
     pub target_relation_bound: bool,
     /// SQL-visible target relation name: explicit alias, otherwise the local relation name.
     pub target_qualifier: String,
+    /// The alias written for the target relation, which deparsing prints even when it equals the relation's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_alias: Option<String>,
     #[serde(default = "default_include_descendants")]
     pub include_descendants: bool,
     pub columns: Vec<AssignmentTarget>,
@@ -459,6 +462,9 @@ pub struct UpdateStmt {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub target_relation_bound: bool,
     pub target_qualifier: String,
+    /// The alias written for the target relation, which deparsing prints even when it equals the relation's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_alias: Option<String>,
     #[serde(default = "default_include_descendants")]
     pub include_descendants: bool,
     pub assignments: Vec<(AssignmentTarget, Expr)>,
@@ -480,6 +486,9 @@ pub struct DeleteStmt {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub target_relation_bound: bool,
     pub target_qualifier: String,
+    /// The alias written for the target relation, which deparsing prints even when it equals the relation's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_alias: Option<String>,
     #[serde(default = "default_include_descendants")]
     pub include_descendants: bool,
     pub r#where: Option<Expr>,

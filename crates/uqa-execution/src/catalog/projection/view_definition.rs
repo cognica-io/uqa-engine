@@ -26,10 +26,13 @@ mod expressions;
 mod query;
 mod references;
 mod rename;
+mod routine_body;
+mod statements;
 mod subscripts;
 mod types;
 pub use references::query_references;
 pub use rename::{rename_view_column_query, view_query_references_column};
+pub use routine_body::RoutineNamespace;
 mod sources;
 
 pub fn pg_get_viewdef_value(
@@ -146,10 +149,15 @@ pub fn view_definition(
         pretty,
         wrap,
         standalone: false,
+        indent: true,
+        routine: None,
     };
     let mut rendered = deparser.query(
         &view.query,
-        &Scope::default(),
+        &Scope {
+            column_names_visible: true,
+            ..Scope::default()
+        },
         view.output_columns.as_deref(),
     )?;
     rendered.push(';');
@@ -164,6 +172,10 @@ struct Deparser<'a> {
     wrap: i64,
     /// A standalone expression, as `pg_get_expr` and `pg_get_indexdef` print, rather than a clause of a query.
     standalone: bool,
+    /// `PRETTYFLAG_INDENT`: clauses start new lines and nested queries indent. Only `RETURN` bodies print without it.
+    indent: bool,
+    /// The routine whose SQL-standard body is printed, whose parameters print by name.
+    routine: Option<RoutineNamespace>,
 }
 
 #[derive(Clone)]
@@ -176,9 +188,15 @@ struct Column {
     merged_expression: Option<ScalarExpr>,
     /// The relation column this column reads, by relation name and column name, whatever alias names it.
     base: Option<(String, String)>,
+    /// A join input's own copy of a `USING` column, which qualified references reach but `*` does not.
+    hidden: bool,
 }
 
 #[derive(Clone, Default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is a separate field of ruleutils.c's deparse context"
+)]
 struct Scope {
     columns: Vec<Column>,
     outer: Vec<Column>,
@@ -186,17 +204,38 @@ struct Scope {
     indent: usize,
     nested: bool,
     qualify: bool,
+    /// This query level or one enclosing it has a range table, so a routine parameter prints qualified by the routine's name.
+    range_table: bool,
+    /// `colNamesVisible`: the output column names of this query level matter, so every column that is not a plain column reference prints its name.
+    column_names_visible: bool,
 }
 
 impl Scope {
+    /// The scope of a subquery nested in this one, whose output column names do not matter.
     fn child(&self) -> Self {
         Self {
             outer: self.columns.iter().chain(&self.outer).cloned().collect(),
             ctes: self.ctes.clone(),
             indent: self.indent + 8,
             nested: true,
+            range_table: self.range_table,
             ..Self::default()
         }
+    }
+
+    /// The scope of a subquery whose output column names matter: a `WITH` query or a subquery in `FROM`.
+    fn named_child(&self) -> Self {
+        Self {
+            column_names_visible: true,
+            ..self.child()
+        }
+    }
+
+    /// Whether a column reference names a column of this query level or an enclosing one.
+    fn resolves(&self, qualifier: Option<&str>, name: &str) -> bool {
+        self.columns.iter().chain(&self.outer).any(|column| {
+            column.name == name && qualifier.is_none_or(|qualifier| column.qualifier == qualifier)
+        })
     }
 
     fn column(&self, qualifier: Option<&str>, name: &str) -> String {
@@ -292,6 +331,8 @@ pub fn stored_expression_definition(
         pretty,
         wrap: 0,
         standalone: true,
+        indent: true,
+        routine: None,
     };
     let expression = uqa_sql::plan::ExpressionPlan::lower(expression.clone());
     deparser.expression(
@@ -319,6 +360,8 @@ pub fn stored_domain_expression_definition(
         pretty,
         wrap: 0,
         standalone: true,
+        indent: true,
+        routine: None,
     };
     let scope = Scope {
         columns: vec![Column {
@@ -329,6 +372,7 @@ pub fn stored_domain_expression_definition(
             relation: None,
             merged_expression: None,
             base: None,
+            hidden: false,
         }],
         ..Scope::default()
     };
@@ -336,16 +380,19 @@ pub fn stored_domain_expression_definition(
     deparser.expression(&expression.scalar, &scope, &expression.subqueries)
 }
 
-/// One statement of a `BEGIN ATOMIC` body, as `get_query_def` prints a query with indentation and full parenthesization.
-pub fn stored_statement_definition(
+/// A routine's SQL-standard body as `print_function_sqlbody` prints it: a `RETURN` body's expression without indentation, or each statement of a `BEGIN ATOMIC` body at indentation level one, with the routine's parameters named.
+pub fn routine_body_definition(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
-    statement: &uqa_sql::ast::Statement,
+    def: &uqa_sql::ast::CreateFunction,
+    form: uqa_sql::ast::SQLBodyForm,
+    statements: &[uqa_sql::ast::Statement],
 ) -> Result<String, SQLError> {
     let mut dynamic = resolution.clone();
     dynamic.set_lookup_mode(RelationLookupMode::Dynamic);
     let mut bound = resolution.clone();
     bound.set_lookup_mode(RelationLookupMode::Bound);
+    let atomic = form == uqa_sql::ast::SQLBodyForm::Atomic;
     let deparser = Deparser {
         catalog,
         dynamic,
@@ -353,24 +400,42 @@ pub fn stored_statement_definition(
         pretty: false,
         wrap: 0,
         standalone: false,
+        indent: atomic,
+        routine: Some(RoutineNamespace::new(def)?),
     };
-    match statement {
-        uqa_sql::ast::Statement::Select(select) => {
-            let query = uqa_sql::plan::QueryPlan::lower((**select).clone());
-            deparser.query(&query, &Scope::default(), None)
-        }
-        uqa_sql::ast::Statement::Insert(_) => Err(unsupported_body_statement("INSERT")),
-        uqa_sql::ast::Statement::Update(_) => Err(unsupported_body_statement("UPDATE")),
-        uqa_sql::ast::Statement::Delete(_) => Err(unsupported_body_statement("DELETE")),
-        uqa_sql::ast::Statement::Merge(_) => Err(unsupported_body_statement("MERGE")),
-        _ => Err(unsupported_body_statement("utility")),
+    // The body's queries sit below the routine's namespace, so their column references always carry a relation name.
+    let scope = Scope {
+        indent: usize::from(atomic),
+        nested: true,
+        ..Scope::default()
+    };
+    if !atomic {
+        let [uqa_sql::ast::Statement::Select(select)] = statements else {
+            return Err(SQLError::Internal(format!(
+                "RETURN body of `{}` is not one SELECT",
+                def.name
+            )));
+        };
+        let [projection] = select.projections.as_slice() else {
+            return Err(SQLError::Internal(format!(
+                "RETURN body of `{}` selects more than one value",
+                def.name
+            )));
+        };
+        let expression = uqa_sql::plan::ExpressionPlan::lower(projection.expr.clone());
+        return Ok(format!(
+            "RETURN {}",
+            deparser.expression(&expression.scalar, &scope, &expression.subqueries)?
+        ));
     }
-}
-
-fn unsupported_body_statement(kind: &str) -> SQLError {
-    SQLError::Unsupported(format!(
-        "pg_get_function_sqlbody cannot print a {kind} statement"
-    ))
+    let mut body = String::from("BEGIN ATOMIC\n");
+    for statement in statements {
+        let plan = uqa_sql::plan::UnifiedPlan::lower(statement.clone());
+        body.push_str(&deparser.statement(&plan, &scope)?);
+        body.push_str(";\n");
+    }
+    body.push_str("END");
+    Ok(body)
 }
 
 /// A stored catalog expression as `pg_get_expr` prints it without pretty-printing.

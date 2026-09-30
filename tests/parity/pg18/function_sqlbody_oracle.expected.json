@@ -1,0 +1,1846 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "cases": [
+    {
+      "sql": "SELECT version()",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "version"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE SCHEMA sb",
+      "command_tags": [
+        "CREATE SCHEMA"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE sb.items (id integer PRIMARY KEY, label text, qty integer DEFAULT 0)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE audit (id integer, note text, at integer DEFAULT 1)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE TABLE \"Mixed Case\" (\"Key\" integer, \"Value\" text)",
+      "command_tags": [
+        "CREATE TABLE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION r_add(a integer, b integer) RETURNS integer LANGUAGE sql RETURN a + b",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION r_positional(integer) RETURNS integer LANGUAGE sql RETURN $1 * 2",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION r_named_positional(a integer) RETURNS integer LANGUAGE sql RETURN $1 + a",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION s_plus(x integer) RETURNS integer LANGUAGE sql BEGIN ATOMIC SELECT x + 1; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION s_where(x integer) RETURNS integer LANGUAGE sql BEGIN ATOMIC SELECT id FROM sb.items WHERE id = x AND label = $1::text; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION s_shape(x integer) RETURNS SETOF text LANGUAGE sql BEGIN ATOMIC SELECT i.label FROM sb.items AS i JOIN audit a ON a.id = i.id WHERE i.qty > x GROUP BY i.label HAVING count(*) > 1 ORDER BY i.label DESC LIMIT 3; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION s_named(x integer) RETURNS integer LANGUAGE sql BEGIN ATOMIC SELECT x AS result, 2 AS two; END",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42P13",
+        "message": "return type mismatch in function declared to return integer",
+        "detail": "Final statement must return exactly one column.",
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION s_two(x integer) RETURNS integer LANGUAGE sql BEGIN ATOMIC SELECT 1; SELECT x; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION i_values(x integer) RETURNS void LANGUAGE sql BEGIN ATOMIC INSERT INTO sb.items VALUES (x, 'a'); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION i_rows(x integer) RETURNS void LANGUAGE sql BEGIN ATOMIC INSERT INTO sb.items (id, label) VALUES (x, 'a'), (x + 1, 'b'); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION i_subset(x integer) RETURNS void LANGUAGE sql BEGIN ATOMIC INSERT INTO sb.items (label, id) VALUES ('z', x); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION i_default() RETURNS void LANGUAGE sql BEGIN ATOMIC INSERT INTO audit DEFAULT VALUES; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION i_select(x integer) RETURNS void LANGUAGE sql BEGIN ATOMIC INSERT INTO audit (id, note) SELECT id, label FROM sb.items WHERE id > x; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION i_nothing(x integer) RETURNS void LANGUAGE sql BEGIN ATOMIC INSERT INTO sb.items (id, label) VALUES (x, 'a') ON CONFLICT (id) DO NOTHING; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION i_upsert(x integer) RETURNS void LANGUAGE sql BEGIN ATOMIC INSERT INTO sb.items AS t (id, label) VALUES (x, 'a') ON CONFLICT (id) DO UPDATE SET label = EXCLUDED.label, qty = t.qty + 1 WHERE t.qty < 10; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION i_returning(x integer) RETURNS integer LANGUAGE sql BEGIN ATOMIC INSERT INTO sb.items (id, label) VALUES (x, 'a') RETURNING id; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION i_returning_all(x integer) RETURNS TABLE (rid integer, rlabel text, rqty integer) LANGUAGE sql BEGIN ATOMIC INSERT INTO sb.items (id) VALUES (x) RETURNING *; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION u_set(x integer) RETURNS void LANGUAGE sql BEGIN ATOMIC UPDATE sb.items SET label = 'b', qty = qty + x WHERE id = x; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION u_from(x integer) RETURNS void LANGUAGE sql BEGIN ATOMIC UPDATE sb.items SET label = a.note FROM audit a WHERE a.id = sb.items.id AND a.at > x; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION u_alias(x integer) RETURNS void LANGUAGE sql BEGIN ATOMIC UPDATE sb.items AS i SET qty = (SELECT max(at) FROM audit WHERE audit.id = i.id) WHERE i.id = x; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION u_returning(x integer) RETURNS SETOF integer LANGUAGE sql BEGIN ATOMIC UPDATE sb.items SET qty = 0 WHERE id > x RETURNING id; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION d_where(x integer) RETURNS void LANGUAGE sql BEGIN ATOMIC DELETE FROM sb.items WHERE id > x; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION d_using(x integer) RETURNS void LANGUAGE sql BEGIN ATOMIC DELETE FROM sb.items USING audit WHERE audit.id = sb.items.id AND audit.at = x; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION d_returning(x integer) RETURNS TABLE (rid integer, rlabel text, rqty integer) LANGUAGE sql BEGIN ATOMIC DELETE FROM sb.items WHERE id = x RETURNING *; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION m_merge(x integer) RETURNS void LANGUAGE sql BEGIN ATOMIC MERGE INTO sb.items AS t USING audit AS s ON t.id = s.id WHEN MATCHED AND s.at > x THEN UPDATE SET label = s.note WHEN MATCHED THEN DELETE WHEN NOT MATCHED THEN INSERT (id, label) VALUES (s.id, s.note); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION m_nothing(x integer) RETURNS void LANGUAGE sql BEGIN ATOMIC MERGE INTO sb.items t USING (SELECT x AS id) s ON t.id = s.id WHEN NOT MATCHED THEN DO NOTHING; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION w_insert(x integer) RETURNS void LANGUAGE sql BEGIN ATOMIC WITH src AS (SELECT id, label FROM sb.items WHERE id < x) INSERT INTO audit (id, note) SELECT id, label FROM src; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION q_quoted(x integer) RETURNS void LANGUAGE sql BEGIN ATOMIC UPDATE \"Mixed Case\" SET \"Value\" = 'v' WHERE \"Key\" = x; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE PROCEDURE p_proc(x integer) LANGUAGE sql BEGIN ATOMIC INSERT INTO audit (id) VALUES (x); DELETE FROM audit WHERE id < x; END",
+      "command_tags": [
+        "CREATE PROCEDURE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION s_union(x integer) RETURNS SETOF integer LANGUAGE sql BEGIN ATOMIC SELECT x UNION SELECT 2; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION s_values(x integer) RETURNS SETOF integer LANGUAGE sql BEGIN ATOMIC VALUES (x), (2); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION r_sub(x integer) RETURNS integer LANGUAGE sql RETURN (SELECT x + id FROM sb.items ORDER BY id LIMIT 1)",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION s_out(a integer, OUT b integer, c integer) LANGUAGE sql BEGIN ATOMIC SELECT a + c; END",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42703",
+        "message": "column \"c\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION s_shadow(id integer) RETURNS SETOF integer LANGUAGE sql BEGIN ATOMIC SELECT id FROM sb.items WHERE id > s_shadow.id; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION s_cte(x integer) RETURNS SETOF integer LANGUAGE sql BEGIN ATOMIC WITH c AS (SELECT x AS v) SELECT v + 1 FROM c; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION i_default_values(x integer) RETURNS void LANGUAGE sql BEGIN ATOMIC INSERT INTO sb.items VALUES (x, DEFAULT, DEFAULT); INSERT INTO sb.items (id, qty) VALUES (x, DEFAULT), (x + 1, 2); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION u_multi(x integer) RETURNS void LANGUAGE sql BEGIN ATOMIC UPDATE sb.items SET (label, qty) = ('m', x) WHERE id = x; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION i_conflict_where(x integer) RETURNS void LANGUAGE sql BEGIN ATOMIC INSERT INTO sb.items (id, label) VALUES (x, 'a') ON CONFLICT (id) WHERE qty > 0 DO NOTHING; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION i_on_constraint(x integer) RETURNS void LANGUAGE sql BEGIN ATOMIC INSERT INTO sb.items (id, label) VALUES (x, 'a') ON CONFLICT ON CONSTRAINT items_pkey DO NOTHING; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION m_by_source(x integer) RETURNS void LANGUAGE sql BEGIN ATOMIC MERGE INTO sb.items t USING audit s ON t.id = s.id WHEN NOT MATCHED BY SOURCE AND t.qty > x THEN DELETE WHEN NOT MATCHED THEN INSERT DEFAULT VALUES; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION s_star(x integer) RETURNS TABLE (rid integer, rlabel text, rqty integer) LANGUAGE sql BEGIN ATOMIC SELECT * FROM sb.items WHERE id > x; END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION s_star_join() RETURNS TABLE (c1 integer, c2 text, c3 integer, c4 text, c5 integer) LANGUAGE sql BEGIN ATOMIC SELECT * FROM sb.items JOIN audit USING (id); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION s_qstar() RETURNS TABLE (c1 integer, c2 text, c3 integer) LANGUAGE sql BEGIN ATOMIC SELECT a.* FROM sb.items i JOIN audit a USING (id); END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE FUNCTION r_case(x integer) RETURNS text LANGUAGE sql RETURN CASE WHEN x > 0 THEN 'pos' WHEN x < 0 THEN 'neg' ELSE 'zero' END",
+      "command_tags": [
+        "CREATE FUNCTION"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "CREATE VIEW v_sub AS SELECT (SELECT 1 + 1) AS a, (SELECT max(x) FROM (VALUES (1)) t(x)) AS b, EXISTS (SELECT 1) AS c",
+      "command_tags": [
+        "CREATE VIEW"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('r_add(integer, integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "RETURN (a + b)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('r_positional(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "RETURN ($1 * 2)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('r_named_positional(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "RETURN (a + a)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('s_plus(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n SELECT (x + 1);\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('s_where(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n SELECT items.id\n    FROM sb.items\n   WHERE ((items.id = s_where.x) AND (items.label = (s_where.x)::text));\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('s_shape(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n SELECT i.label\n    FROM (sb.items i\n      JOIN audit a ON ((a.id = i.id)))\n   WHERE (i.qty > s_shape.x)\n   GROUP BY i.label\n  HAVING (count(*) > 1)\n   ORDER BY i.label DESC\n  LIMIT 3;\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('s_named(integer)'::regprocedure) AS body",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function \"s_named(integer)\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('s_two(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n SELECT 1;\n SELECT x AS x;\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('i_values(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n INSERT INTO sb.items (id, label)\n   VALUES (i_values.x, 'a'::text);\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('i_rows(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n INSERT INTO sb.items (id, label) VALUES (i_rows.x,'a'::text), ((i_rows.x + 1),'b'::text);\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('i_subset(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n INSERT INTO sb.items (label, id)\n   VALUES ('z'::text, i_subset.x);\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('i_default()'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n INSERT INTO audit DEFAULT VALUES;\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('i_select(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n INSERT INTO audit (id, note)  SELECT items.id,\n             items.label\n            FROM sb.items\n           WHERE (items.id > i_select.x);\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('i_nothing(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n INSERT INTO sb.items (id, label)\n   VALUES (i_nothing.x, 'a'::text) ON CONFLICT(id) DO NOTHING;\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('i_upsert(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n INSERT INTO sb.items AS t (id, label)\n   VALUES (i_upsert.x, 'a'::text) ON CONFLICT(id) DO UPDATE SET label = excluded.label, qty = (t.qty + 1)\n   WHERE (t.qty < 10);\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('i_returning(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n INSERT INTO sb.items (id, label)\n   VALUES (i_returning.x, 'a'::text)\n   RETURNING items.id;\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('i_returning_all(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n INSERT INTO sb.items (id)\n   VALUES (i_returning_all.x)\n   RETURNING items.id,\n     items.label,\n     items.qty;\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('u_set(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n UPDATE sb.items SET label = 'b'::text, qty = (items.qty + u_set.x)\n   WHERE (items.id = u_set.x);\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('u_from(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n UPDATE sb.items SET label = a.note\n    FROM audit a\n   WHERE ((a.id = items.id) AND (a.at > u_from.x));\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('u_alias(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n UPDATE sb.items i SET qty = ( SELECT max(audit.at) AS max\n            FROM audit\n           WHERE (audit.id = i.id))\n   WHERE (i.id = u_alias.x);\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('u_returning(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n UPDATE sb.items SET qty = 0\n   WHERE (items.id > u_returning.x)\n   RETURNING items.id;\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('d_where(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n DELETE FROM sb.items\n   WHERE (items.id > d_where.x);\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('d_using(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n DELETE FROM sb.items\n    USING audit\n   WHERE ((audit.id = items.id) AND (audit.at = d_using.x));\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('d_returning(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n DELETE FROM sb.items\n   WHERE (items.id = d_returning.x)\n   RETURNING items.id,\n     items.label,\n     items.qty;\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('m_merge(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n MERGE INTO sb.items t\n    USING audit s\n    ON (t.id = s.id)\n    WHEN MATCHED\n     AND (s.at > m_merge.x)\n     THEN UPDATE SET label = s.note\n    WHEN MATCHED\n     THEN DELETE\n    WHEN NOT MATCHED\n     THEN INSERT (id, label)\n      VALUES (s.id, s.note);\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('m_nothing(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n MERGE INTO sb.items t\n    USING ( SELECT m_nothing.x AS id) s\n    ON (t.id = s.id)\n    WHEN NOT MATCHED\n     THEN DO NOTHING;\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('w_insert(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n WITH src AS (\n          SELECT items.id,\n             items.label\n            FROM sb.items\n           WHERE (items.id < w_insert.x)\n         )\n  INSERT INTO audit (id, note)  SELECT src.id,\n             src.label\n            FROM src;\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('q_quoted(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n UPDATE \"Mixed Case\" SET \"Value\" = 'v'::text\n   WHERE (\"Mixed Case\".\"Key\" = q_quoted.x);\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('p_proc(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n INSERT INTO audit (id)\n   VALUES (p_proc.x);\n DELETE FROM audit\n   WHERE (audit.id < p_proc.x);\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('s_union(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n SELECT s_union.x AS x\n UNION\n  SELECT 2;\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('s_values(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n VALUES (s_values.x), (2);\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('r_sub(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "RETURN (SELECT (r_sub.x + items.id) FROM sb.items ORDER BY items.id LIMIT 1)"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('s_out(integer, integer)'::regprocedure) AS body",
+      "command_tags": [],
+      "error": {
+        "sqlstate": "42883",
+        "message": "function \"s_out(integer, integer)\" does not exist",
+        "detail": null,
+        "hint": null
+      },
+      "results": [],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('s_shadow(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n SELECT items.id\n    FROM sb.items\n   WHERE (items.id > s_shadow.id);\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('s_cte(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n WITH c AS (\n          SELECT s_cte.x AS v\n         )\n  SELECT (c.v + 1)\n    FROM c;\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('i_default_values(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n INSERT INTO sb.items (id, label, qty)\n   VALUES (i_default_values.x, DEFAULT, DEFAULT);\n INSERT INTO sb.items (id, qty) VALUES (i_default_values.x,DEFAULT), ((i_default_values.x + 1),2);\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('u_multi(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n UPDATE sb.items SET label = 'm'::text, qty = u_multi.x\n   WHERE (items.id = u_multi.x);\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('i_conflict_where(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n INSERT INTO sb.items (id, label)\n   VALUES (i_conflict_where.x, 'a'::text) ON CONFLICT(id)\n   WHERE (qty > 0) DO NOTHING;\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('i_on_constraint(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n INSERT INTO sb.items (id, label)\n   VALUES (i_on_constraint.x, 'a'::text) ON CONFLICT ON CONSTRAINT items_pkey DO NOTHING;\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('m_by_source(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n MERGE INTO sb.items t\n    USING audit s\n    ON (t.id = s.id)\n    WHEN NOT MATCHED BY SOURCE\n     AND (t.qty > m_by_source.x)\n     THEN DELETE\n    WHEN NOT MATCHED BY TARGET\n     THEN INSERT DEFAULT VALUES;\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('s_star(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n SELECT items.id,\n     items.label,\n     items.qty\n    FROM sb.items\n   WHERE (items.id > s_star.x);\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('s_star_join()'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n SELECT items.id,\n     items.label,\n     items.qty,\n     audit.note,\n     audit.at\n    FROM (sb.items\n      JOIN audit USING (id));\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('s_qstar()'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n SELECT a.id,\n     a.note,\n     a.at\n    FROM (sb.items i\n      JOIN audit a USING (id));\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('r_case(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "RETURN CASE WHEN (x > 0) THEN 'pos'::text WHEN (x < 0) THEN 'neg'::text ELSE 'zero'::text END"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SET search_path = sb, public",
+      "command_tags": [
+        "SET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('public.s_where(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n SELECT items.id\n    FROM items\n   WHERE ((items.id = s_where.x) AND (items.label = (s_where.x)::text));\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_function_sqlbody('public.u_from(integer)'::regprocedure) AS body",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "body"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              "BEGIN ATOMIC\n UPDATE items SET label = a.note\n    FROM audit a\n   WHERE ((a.id = items.id) AND (a.at > u_from.x));\nEND"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "RESET search_path",
+      "command_tags": [
+        "RESET"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": []
+    },
+    {
+      "sql": "SELECT pg_get_viewdef('v_sub'::regclass) AS def",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "def"
+          ],
+          "type_oids": [
+            25
+          ],
+          "rows": [
+            [
+              " SELECT ( SELECT (1 + 1)) AS a,\n    ( SELECT max(t.x) AS max\n           FROM ( VALUES (1)) t(x)) AS b,\n    (EXISTS ( SELECT 1)) AS c;"
+            ]
+          ]
+        }
+      ],
+      "notices": []
+    }
+  ]
+}

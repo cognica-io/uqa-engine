@@ -24,9 +24,9 @@ impl Deparser<'_> {
         subqueries: &[QueryPlan],
     ) -> Result<String, SQLError> {
         match expression {
-            ScalarExpr::Column(name) => Ok(scope.column(None, name)),
+            ScalarExpr::Column(name) => Ok(self.column_reference(None, name, scope)),
             ScalarExpr::QualifiedColumn { qualifier, column } => {
-                Ok(scope.column(Some(qualifier), column))
+                Ok(self.column_reference(Some(qualifier), column, scope))
             }
             ScalarExpr::Position(index) => scope
                 .columns
@@ -43,7 +43,7 @@ impl Deparser<'_> {
             )),
             ScalarExpr::Literal(value) => literal(value),
             ScalarExpr::TypedLiteral { value, ty, .. } => self.typed_literal(value, ty),
-            ScalarExpr::Param(index) => Ok(format!("${index}")),
+            ScalarExpr::Param(index) => Ok(self.parameter(*index, scope)),
             ScalarExpr::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs, scope, subqueries),
             ScalarExpr::And(items) | ScalarExpr::Or(items) => {
                 let operator = if matches!(expression, ScalarExpr::And(_)) {
@@ -474,6 +474,9 @@ impl Deparser<'_> {
         scope: &Scope,
         subqueries: &[QueryPlan],
     ) -> Result<String, SQLError> {
+        if !self.indent {
+            return self.inline_case(base, when, otherwise, scope, subqueries);
+        }
         // A standalone expression starts at indentation level zero; query clauses indent their expressions one level.
         let indent = " ".repeat(if self.standalone {
             scope.indent
@@ -503,6 +506,41 @@ impl Deparser<'_> {
             .expect("writing to a String cannot fail");
         }
         write!(rendered, "\n{indent}END").expect("writing to a String cannot fail");
+        Ok(rendered)
+    }
+
+    /// `CASE` as `get_rule_expr` prints it without `PRETTYFLAG_INDENT`, on one line.
+    fn inline_case(
+        &self,
+        base: Option<&ScalarExpr>,
+        when: &[(ScalarExpr, ScalarExpr)],
+        otherwise: Option<&ScalarExpr>,
+        scope: &Scope,
+        subqueries: &[QueryPlan],
+    ) -> Result<String, SQLError> {
+        let mut rendered = String::from("CASE");
+        if let Some(base) = base {
+            rendered.push(' ');
+            rendered.push_str(&self.expression(base, scope, subqueries)?);
+        }
+        for (condition, value) in when {
+            write!(
+                rendered,
+                " WHEN {} THEN {}",
+                self.expression(condition, scope, subqueries)?,
+                self.expression(value, scope, subqueries)?
+            )
+            .expect("writing to a String cannot fail");
+        }
+        if let Some(otherwise) = otherwise {
+            write!(
+                rendered,
+                " ELSE {}",
+                self.expression(otherwise, scope, subqueries)?
+            )
+            .expect("writing to a String cannot fail");
+        }
+        rendered.push_str(" END");
         Ok(rendered)
     }
 

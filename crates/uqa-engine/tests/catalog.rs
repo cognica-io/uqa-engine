@@ -18,6 +18,8 @@ mod catalog_dependencies;
 mod catalog_oid_order;
 #[path = "catalog/drop_dependencies.rs"]
 mod drop_dependencies;
+#[path = "catalog/function_sqlbody.rs"]
+mod function_sqlbody;
 #[path = "catalog/pg18_constraint_lifecycle.rs"]
 mod pg18_constraint_lifecycle;
 #[path = "sql_analyze_persistence.rs"]

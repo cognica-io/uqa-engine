@@ -42,6 +42,8 @@ pub fn query_references(
         pretty: false,
         wrap: 0,
         standalone: false,
+        indent: true,
+        routine: None,
     };
     let mut references = QueryReferences::default();
     deparser.reference_query(query, &Scope::default(), &mut references)?;

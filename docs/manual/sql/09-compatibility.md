@@ -63,6 +63,7 @@ Unsupported forms fail before catalog mutation. That failure is fail-safe behavi
 
 - Collations, domains, user-defined equality operators, and the complete common-type matrix for `JOIN ... USING` columns with different declared types
 - Array element and slice assignment targets lose their subscripts during compilation ([#148](https://github.com/cognica-io/uqa-engine/issues/148)). A valid scalar element assignment is rejected, while an invalid array RHS can replace the whole column; catalog-vector assignment diagnostics also differ. Target preservation, PostgreSQL type resolution and failure atomicity are required corrections.
+- A multiple-column assignment from a sub-SELECT, `SET (a, b) = (SELECT ...)`, in `UPDATE`, `ON CONFLICT DO UPDATE`, and `MERGE` reports `0A000`; PostgreSQL evaluates the sub-SELECT once for each target row and assigns its columns. Row-constructor sources are implemented.
 
 Each missing clause above must be implemented with PostgreSQL 18 semantics; source-query rewriting is not an accepted compatibility solution.
 

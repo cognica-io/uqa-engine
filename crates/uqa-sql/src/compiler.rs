@@ -67,8 +67,8 @@ pub(crate) fn compile_pg_select(
 pub(in crate::compiler) use hierarchy::compile_table_hierarchy;
 pub(crate) use names::render_relation_component;
 pub(super) use names::{
-    compile_on_commit, compile_qualified_name, range_var_name, relation_persistence,
-    validate_create_table_envelope,
+    compile_on_commit, compile_qualified_name, range_var_alias, range_var_name,
+    relation_persistence, validate_create_table_envelope,
 };
 pub(in crate::compiler) use returning::compile_returning_clause;
 

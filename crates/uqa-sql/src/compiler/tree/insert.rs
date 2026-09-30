@@ -7,10 +7,10 @@
 //! INSERT and ON CONFLICT lowering.
 
 use super::{
-    compile_expr, compile_returning_clause, compile_select, compile_with_clause, range_var_name,
-    Expr, InsertStmt, NodeEnum, Result, SQLError,
+    compile_expr, compile_returning_clause, compile_select, compile_with_clause, range_var_alias,
+    range_var_name, Expr, InsertStmt, NodeEnum, Result, SQLError,
 };
-use crate::compiler::dml::compile_assignment_target;
+use crate::compiler::dml::{compile_assignment_target, compile_set_clause};
 
 pub(in crate::compiler) fn compile_insert(
     stmt: &pg_query::protobuf::InsertStmt,
@@ -100,6 +100,7 @@ pub(in crate::compiler) fn compile_insert(
         table,
         target_relation_bound: false,
         target_qualifier,
+        target_alias: range_var_alias(relation),
         include_descendants: relation.inh,
         columns,
         with,
@@ -138,22 +139,7 @@ pub(in crate::compiler) fn compile_on_conflict(
     let action = match clause.action() {
         PgAction::OnconflictNothing => OnConflictAction::Nothing,
         PgAction::OnconflictUpdate => {
-            let mut assignments = Vec::new();
-            for tgt in &clause.target_list {
-                let inner = tgt.node.as_ref().ok_or_else(|| {
-                    SQLError::Internal("ON CONFLICT UPDATE contains an empty assignment".into())
-                })?;
-                let NodeEnum::ResTarget(rt) = inner else {
-                    return Err(SQLError::Internal(format!(
-                        "ON CONFLICT UPDATE expected ResTarget, got {inner:?}"
-                    )));
-                };
-                let val = rt.val.as_ref().ok_or_else(|| {
-                    SQLError::Internal("ON CONFLICT UPDATE assignment has no value".into())
-                })?;
-                let expr = compile_expr(val)?;
-                assignments.push((compile_assignment_target(rt)?, expr));
-            }
+            let assignments = compile_set_clause(&clause.target_list, "ON CONFLICT UPDATE")?;
             let where_clause = clause
                 .where_clause
                 .as_ref()

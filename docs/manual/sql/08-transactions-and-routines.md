@@ -253,7 +253,7 @@ IMMUTABLE;
 SELECT add_tax(100.00, 0.10);
 ```
 
-SQL functions can return scalar, `SETOF`, or `TABLE` results according to their declaration. Positional parameters and named parameters are resolved by the routine compiler. SQL-standard `RETURN expression` and `BEGIN ATOMIC ... END` bodies are also implemented for supported statement shapes.
+SQL functions can return scalar, `SETOF`, or `TABLE` results according to their declaration. Positional parameters and named parameters are resolved by the routine compiler. SQL-standard `RETURN expression` and `BEGIN ATOMIC ... END` bodies are also implemented for supported statement shapes. Such a body is analyzed when the routine is created: its final statement must be a `SELECT` or an `INSERT`, `UPDATE`, `DELETE`, or `MERGE` with `RETURNING` whose columns can be assigned to the declared result, and otherwise the definition reports `42P13` with PostgreSQL's detail. As in PostgreSQL, the input parameters of a SQL-standard body go by the names declared at their positions among all parameters, so an output parameter declared before an input lends the input its name. `pg_get_function_sqlbody` prints a body as PostgreSQL does: a `RETURN` expression on one line, and each `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`, or `WITH` statement of a `BEGIN ATOMIC` body in PostgreSQL's layout, with column references qualified by their relation and parameters by name, qualified by the routine's name whenever the statement has a range table.
 
 ## PL/pgSQL scalar function
 

@@ -155,22 +155,13 @@ impl Deparser<'_> {
             }
             SourcePlan::Join { .. } => return self.join_columns(source, scope),
         };
-        let base_relation = table_source_relation(source, scope);
-        Ok(names
-            .into_iter()
-            .enumerate()
-            .map(|(index, name)| Column {
-                base: base_relation
-                    .as_ref()
-                    .map(|relation| (relation.clone(), name.clone())),
-                name: aliases.get(index).cloned().unwrap_or(name),
-                qualifier: qualifier.clone(),
-                rendered_qualifier: rendered.clone(),
-                merged: None,
-                relation: column_relation(source, scope, index, aliases.len()),
-                merged_expression: None,
-            })
-            .collect())
+        Ok(source_scope_columns(
+            source,
+            scope,
+            names,
+            (qualifier, rendered),
+            aliases,
+        ))
     }
 
     fn join_columns(&self, source: &SourcePlan, scope: &Scope) -> Result<Vec<Column>, SQLError> {
@@ -245,7 +236,7 @@ impl Deparser<'_> {
                 alias,
                 column_aliases,
             } => {
-                let mut rendered = format!("({})", self.query(body, &scope.child(), None)?);
+                let mut rendered = format!("({})", self.query(body, &scope.named_child(), None)?);
                 relation_alias(&mut rendered, alias.as_deref(), column_aliases);
                 Ok(rendered)
             }
@@ -255,7 +246,11 @@ impl Deparser<'_> {
                 column_aliases,
                 ..
             } => {
-                let mut rendered = format!("( VALUES {})", self.values(rows, scope, subqueries)?);
+                let mut rendered = format!(
+                    "({}VALUES {})",
+                    if self.indent { " " } else { "" },
+                    self.values(rows, scope, subqueries)?
+                );
                 relation_alias(&mut rendered, alias.as_deref(), column_aliases);
                 Ok(rendered)
             }
@@ -354,10 +349,14 @@ impl Deparser<'_> {
             JoinKind::Cross => "CROSS JOIN",
         };
         let lateral = if *lateral { "LATERAL " } else { "" };
-        let mut rendered = format!(
-            "{left_sql}\n{}     {keyword} {lateral}{right_sql}",
-            " ".repeat(scope.indent)
-        );
+        let mut rendered = if self.indent {
+            format!(
+                "{left_sql}\n{}     {keyword} {lateral}{right_sql}",
+                " ".repeat(scope.indent)
+            )
+        } else {
+            format!("{left_sql} {keyword} {lateral}{right_sql}")
+        };
         if let Some(on) = on {
             let condition = self.expression(on, scope, subqueries)?;
             if self.pretty {
@@ -436,14 +435,41 @@ fn merged_columns(
             .filter(|column| !using.contains(&column.name))
             .cloned(),
     );
-    // Qualified references to the two inputs remain visible even for a merged USING column.
-    columns.extend(
-        left.iter()
-            .chain(right)
-            .filter(|column| using.contains(&column.name))
-            .cloned(),
-    );
+    // Each input keeps its own columns in order for qualified references and `input.*`, including its copy of a merged USING column.
+    if !using.is_empty() {
+        columns.extend(left.iter().chain(right).map(|column| Column {
+            hidden: true,
+            ..column.clone()
+        }));
+    }
     columns
+}
+
+/// The columns of one `FROM` item under its qualifier, renamed by its column aliases.
+fn source_scope_columns(
+    source: &SourcePlan,
+    scope: &Scope,
+    names: Vec<String>,
+    (qualifier, rendered): (String, String),
+    aliases: &[String],
+) -> Vec<Column> {
+    let base_relation = table_source_relation(source, scope);
+    names
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| Column {
+            base: base_relation
+                .as_ref()
+                .map(|relation| (relation.clone(), name.clone())),
+            name: aliases.get(index).cloned().unwrap_or(name),
+            qualifier: qualifier.clone(),
+            rendered_qualifier: rendered.clone(),
+            merged: None,
+            relation: column_relation(source, scope, index, aliases.len()),
+            merged_expression: None,
+            hidden: false,
+        })
+        .collect()
 }
 
 pub fn source_count(source: &SourcePlan) -> usize {

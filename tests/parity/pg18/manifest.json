@@ -136,7 +136,8 @@
       "query.window-frames",
       "aggregates.null-and-enum-inputs",
       "expressions.boolean-conditions",
-      "expressions.interval-arithmetic"
+      "expressions.interval-arithmetic",
+      "routines.sql-standard-body-deparse"
     ],
     "M2": [
       "protocol.frontend-backend-3.2"
@@ -1115,6 +1116,14 @@
       "postgresql_reference": "PostgreSQL 18.4 live rows, SQLSTATEs, messages and hints in tests/parity/pg18/interval_arithmetic_oracle.expected.json; interval_um_internal, finite_interval_pl, finite_interval_mi, interval_mul, interval_div, interval_justify_hours, interval_justify_days, interval_justify_interval, timestamp_pl_interval, interval_avg_accum, interval_avg_combine, interval_sum and interval_avg in src/backend/utils/adt/timestamp.c; time_pl_interval, time_mi_interval and date_pli in src/backend/utils/adt/date.c",
       "uqa_test": "cargo test -p uqa-engine --test integration functions::pg18_semantics::interval_arithmetic; cargo test -p uqa-sql --lib expr::time::interval",
       "supported_version": "Unreleased: 58 PostgreSQL 18.4 cases on memory and SQLite engines cover interval multiplication and division by float8, numeric and integer factors with the fractional month and day cascades and TSROUND, division by zero (22012), NaN, overflow and the field values reserved for infinity (22008), interval addition, subtraction and negation, time and timetz arithmetic that ignores months and days and wraps the 64-bit sum, date and timestamp overflow (22008), justify_hours, justify_days and justify_interval with their argument resolution (42883), and sum and avg over interval with grouping, NULLs, empty input, DISTINCT, FILTER, window frames and overflow",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "routines.sql-standard-body-deparse",
+      "postgresql_reference": "PostgreSQL 18.4 live rows, SQLSTATEs, messages and details in tests/parity/pg18/function_sqlbody_oracle.expected.json; print_function_sqlbody, get_query_def, get_insert_query_def, get_update_query_def, get_delete_query_def, get_merge_query_def, get_with_clause, get_target_list, get_returning_clause and get_parameter in src/backend/utils/adt/ruleutils.c; interpret_AS_clause and interpret_function_parameter_list in src/backend/commands/functioncmds.c; check_sql_stmt_retval in src/backend/executor/functions.c; transformMultiAssignRef in src/backend/parser/parse_expr.c; regprocedurein in src/backend/utils/adt/regproc.c",
+      "uqa_test": "cargo test -p uqa-engine --test integration catalog::function_sqlbody",
+      "supported_version": "Unreleased: 99 PostgreSQL 18.4 cases on memory and SQLite engines cover pg_get_function_sqlbody for RETURN bodies on one line and BEGIN ATOMIC bodies of SELECT, set operations, VALUES, WITH, INSERT with single-row, multi-row, SELECT and DEFAULT VALUES sources, ON CONFLICT arbiters, predicates, constraints, DO NOTHING and DO UPDATE with EXCLUDED, UPDATE with FROM, aliases and multiple-column row assignments, DELETE with USING, MERGE with every action kind and BY TARGET, RETURNING with expanded stars, parameters printed by name and qualified by the routine's name when a range table is present, column references qualified by relation, star expansion over USING joins, CASE on one line in RETURN bodies, sublink target lists without the ?column? name in view definitions, PostgreSQL's positional naming of SQL-standard body parameters after an output parameter, the 42P13 final-statement check with its details, and regprocedure input errors",
       "status": "verified",
       "open_issue": null
     }

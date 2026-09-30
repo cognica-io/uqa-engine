@@ -113,6 +113,11 @@ pub trait EngineHook {
         Ok(None)
     }
 
+    /// Resolve `regprocedure` input while preserving the typed errors `regprocedurein` reports. Embedders that implement only the historical lookup hook keep its behavior.
+    fn resolve_regprocedure_input(&self, name: &str) -> Result<Option<i64>> {
+        self.resolve_regprocedure(name).map_err(SQLError::Internal)
+    }
+
     /// Resolve a `regrole` input while preserving hard input errors for direct casts.
     fn resolve_regrole(&self, _name: &str) -> Result<Option<i64>> {
         Ok(None)

@@ -6,7 +6,7 @@
 
 //! MERGE source, predicate, and WHEN-clause lowering.
 
-use super::dml::compile_assignment_target;
+use super::dml::{compile_assignment_target, compile_set_clause};
 use super::{
     compile_expr, compile_from_node, compile_returning_clause, range_var_name, Expr, NodeEnum,
     Result, SQLError,
@@ -87,19 +87,7 @@ pub(super) fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crat
                         "MERGE UPDATE is not valid for WHEN NOT MATCHED BY TARGET".into(),
                     ));
                 }
-                let mut assignments = Vec::new();
-                for tgt in &w.target_list {
-                    let Some(NodeEnum::ResTarget(rt)) = tgt.node.as_ref() else {
-                        return Err(SQLError::Internal(
-                            "MERGE UPDATE contains a malformed assignment".into(),
-                        ));
-                    };
-                    let val = rt
-                        .val
-                        .as_ref()
-                        .ok_or_else(|| SQLError::Internal("MERGE UPDATE without value".into()))?;
-                    assignments.push((compile_assignment_target(rt)?, compile_expr(val)?));
-                }
+                let assignments = compile_set_clause(&w.target_list, "MERGE UPDATE")?;
                 when_clauses.push(match match_kind {
                     MergeMatchKind::MergeWhenMatched => MergeWhen::UpdateMatched {
                         condition,

@@ -154,6 +154,14 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         )
     }
 
+    fn resolve_regprocedure_input(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
+        uqa_execution::catalog::projection::resolve_regprocedure_input_oid(
+            &self.engine.catalog_execution(),
+            name,
+        )
+        .map(Some)
+    }
+
     fn resolve_regrole(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
         uqa_execution::catalog::projection::resolve_regrole_oid(
             &self.engine.catalog_execution(),

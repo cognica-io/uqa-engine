@@ -9,6 +9,14 @@
 use super::{extract_string, Node, RangeVar, Result, SQLError};
 use crate::ast::{OnCommitAction, RelationPersistence};
 
+/// The alias written for a relation, if any.
+pub(crate) fn range_var_alias(r: &RangeVar) -> Option<String> {
+    r.alias
+        .as_ref()
+        .map(|alias| alias.aliasname.clone())
+        .filter(|alias| !alias.is_empty())
+}
+
 pub(crate) fn range_var_name(r: &RangeVar) -> String {
     if r.schemaname.is_empty() {
         render_relation_component(&r.relname)

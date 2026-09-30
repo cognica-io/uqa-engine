@@ -67,6 +67,14 @@ impl uqa_sql::expr::EngineHook for Engine {
         )
     }
 
+    fn resolve_regprocedure_input(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
+        uqa_execution::catalog::projection::resolve_regprocedure_input_oid(
+            &self.catalog_execution(),
+            name,
+        )
+        .map(Some)
+    }
+
     fn resolve_regrole(&self, name: &str) -> std::result::Result<Option<i64>, SQLError> {
         uqa_execution::catalog::projection::resolve_regrole_oid(&self.catalog_execution(), name)
     }

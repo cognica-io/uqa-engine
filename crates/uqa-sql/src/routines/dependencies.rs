@@ -109,7 +109,9 @@ pub fn bind_sql_standard_body_routines(
         preserve_target_expressions: true,
     };
     let mut changed = false;
-    for statement in statements.iter_mut() {
+    let statement_count = statements.len();
+    let mut final_output = None;
+    for (index, statement) in statements.iter_mut().enumerate() {
         let mut lowered =
             super::compilation::lower_sql_routine_statement(context, statement.clone(), lowering)?;
         parameters.bind_references(&mut lowered);
@@ -123,9 +125,26 @@ pub fn bind_sql_standard_body_routines(
             &parameters.positional,
         )?;
         changed |= stored_ast::bind_stored_statement_sites(statement, &routines.sites)?;
+        // A definition's final statement must return what the routine declares.
+        if matches!(mode, RoutineCompilationMode::Definition) && index + 1 == statement_count {
+            final_output = Some(match &lowered {
+                crate::plan::UnifiedPlan::Query(_) => routines.query_output,
+                crate::plan::UnifiedPlan::Command(command) => {
+                    crate::binding::analyze_prepared_command_schema(
+                        context.routines,
+                        command,
+                        &parameters.positional,
+                        &binding.context(),
+                    )?
+                }
+            });
+        }
     }
     if let Some(statement) = statements.last_mut() {
         changed |= fold_sql_function_result(context, result_types, statement)?;
+    }
+    if let Some(output) = final_output {
+        super::result_shape::check_final_statement_result(context.types, def, output.as_ref())?;
     }
     Ok(changed)
 }

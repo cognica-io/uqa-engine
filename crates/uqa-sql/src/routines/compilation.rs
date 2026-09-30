@@ -15,7 +15,7 @@ use super::{
     routine_local_name, CompiledFunctionBody, RoutineResolution,
 };
 use crate::{
-    ast::{ColumnType, CreateFunction, FunctionBody, Statement},
+    ast::{ColumnType, CreateFunction, FunctionBody, FunctionParam, Statement},
     binding::{
         snapshot::BindingSnapshot,
         stored_relations::{
@@ -121,6 +121,8 @@ fn compile_function_body_inner(
 pub struct SQLRoutineParameters {
     local_name: String,
     names: Vec<String>,
+    /// The 1-based call argument each parameter reads.
+    call_positions: Vec<usize>,
     pub positional: Vec<crate::SQLParam>,
     pub scope: crate::RowSchema,
 }
@@ -130,14 +132,27 @@ pub fn sql_routine_parameters(
     def: &CreateFunction,
 ) -> Result<SQLRoutineParameters, SQLError> {
     let local_name = routine_local_name(&def.name)?;
-    let signature_params = def.signature_params();
-    let names: Vec<String> = signature_params
+    // A SQL-standard body was parsed with PostgreSQL's positional parameter names; a source body names each call parameter by its own name.
+    let parameters: Vec<(&str, &FunctionParam, usize)> =
+        if matches!(def.body, FunctionBody::Statements(_)) {
+            def.sql_body_parameters()
+                .into_iter()
+                .map(|parameter| (parameter.name, parameter.parameter, parameter.call_position))
+                .collect()
+        } else {
+            def.signature_params()
+                .into_iter()
+                .enumerate()
+                .map(|(index, parameter)| (parameter.name.as_str(), parameter, index + 1))
+                .collect()
+        };
+    let names: Vec<String> = parameters
         .iter()
-        .map(|parameter| parameter.name.clone())
+        .map(|(name, ..)| (*name).to_string())
         .collect();
-    let types = signature_params
+    let types = parameters
         .iter()
-        .map(|parameter| {
+        .map(|(_, parameter, _)| {
             context
                 .types
                 .resolve_catalog_column_type(&parameter.type_name)
@@ -157,30 +172,33 @@ pub fn sql_routine_parameters(
     Ok(SQLRoutineParameters {
         local_name,
         names,
+        call_positions: parameters.iter().map(|(.., position)| *position).collect(),
         positional,
         scope,
     })
 }
 
 impl SQLRoutineParameters {
-    /// Replace references to the routine's parameters by positional parameters, as the body is invoked.
+    /// Replace references to the routine's parameters by positional parameters, as the body is invoked. A body's `$n` numbers its own parameters, whose call arguments a procedure's output parameters can move.
     pub fn bind_references(&self, plan: &mut UnifiedPlan) {
+        let named = |name: &str| {
+            self.names
+                .iter()
+                .position(|parameter| !parameter.is_empty() && parameter == name)
+        };
         plan.rewrite_scalar_expressions(&mut |expression| {
             let parameter = match expression {
-                ScalarExpr::Column(name) => self
-                    .names
-                    .iter()
-                    .position(|parameter| !parameter.is_empty() && parameter == name),
+                ScalarExpr::Column(name) => named(name),
                 ScalarExpr::QualifiedColumn {
                     qualifier, column, ..
-                } if qualifier == &self.local_name => self
-                    .names
-                    .iter()
-                    .position(|parameter| !parameter.is_empty() && parameter == column),
+                } if qualifier == &self.local_name => named(column),
+                ScalarExpr::Param(number) => number
+                    .checked_sub(1)
+                    .filter(|index| *index < self.call_positions.len()),
                 _ => None,
             };
-            if let Some(position) = parameter {
-                *expression = ScalarExpr::Param(position + 1);
+            if let Some(index) = parameter {
+                *expression = ScalarExpr::Param(self.call_positions[index]);
             }
         });
     }

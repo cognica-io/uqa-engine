@@ -256,39 +256,14 @@ pub fn pg_get_function_sqlbody_value(
         .def
         .sql_body_form
         .unwrap_or_else(|| legacy_body_form(statements));
-    if form == SQLBodyForm::Return {
-        let [Statement::Select(select)] = statements.as_slice() else {
-            return Err(SQLError::Internal(format!(
-                "RETURN body of `{}` is not one SELECT",
-                function.def.name
-            )));
-        };
-        let [projection] = select.projections.as_slice() else {
-            return Err(SQLError::Internal(format!(
-                "RETURN body of `{}` selects more than one value",
-                function.def.name
-            )));
-        };
-        return Ok(Value::Str(format!(
-            "RETURN {}",
-            super::view_definition::stored_expression_text(
-                &catalog,
-                &resolution,
-                &projection.expr
-            )?
-        )));
-    }
-    let mut body = String::from("BEGIN ATOMIC\n");
-    for statement in statements {
-        body.push_str(&super::view_definition::stored_statement_definition(
-            &catalog,
-            &resolution,
-            statement,
-        )?);
-        body.push_str(";\n");
-    }
-    body.push_str("END");
-    Ok(Value::Str(body))
+    super::view_definition::routine_body_definition(
+        &catalog,
+        &resolution,
+        &function.def,
+        form,
+        statements,
+    )
+    .map(Value::Str)
 }
 
 /// Definitions stored before the body form was recorded: a body of one `SELECT` of one unnamed value without clauses is the stored form of `RETURN`.

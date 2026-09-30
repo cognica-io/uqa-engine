@@ -16,6 +16,7 @@ pub mod privilege_inquiry;
 pub mod regclass;
 pub mod registration;
 pub mod resolution;
+mod result_shape;
 pub mod security;
 
 use crate::ast::{

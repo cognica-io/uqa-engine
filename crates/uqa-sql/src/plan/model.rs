@@ -385,6 +385,8 @@ pub struct InsertPlan {
     /// Effective role used only for privilege checks on an internally rewritten target relation.
     pub target_privilege_subject: Option<RoleReference>,
     pub target_qualifier: String,
+    #[serde(default)]
+    pub target_alias: Option<String>,
     pub include_descendants: bool,
     pub columns: Vec<crate::ast::AssignmentTarget<ScalarExpr>>,
     pub ctes: Vec<CtePlan>,
@@ -429,6 +431,8 @@ pub struct UpdatePlan {
     /// Effective role used only for privilege checks on an internally rewritten target relation.
     pub target_privilege_subject: Option<RoleReference>,
     pub target_qualifier: String,
+    #[serde(default)]
+    pub target_alias: Option<String>,
     pub include_descendants: bool,
     pub assignments: Vec<AssignmentPlan>,
     pub predicate: Option<ScalarExpr>,
@@ -454,6 +458,8 @@ pub struct DeletePlan {
     /// Effective role used only for privilege checks on an internally rewritten target relation.
     pub target_privilege_subject: Option<RoleReference>,
     pub target_qualifier: String,
+    #[serde(default)]
+    pub target_alias: Option<String>,
     pub include_descendants: bool,
     pub predicate: Option<ScalarExpr>,
     pub ctes: Vec<CtePlan>,

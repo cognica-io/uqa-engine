@@ -28,6 +28,8 @@ pub struct BoundStatementRoutines {
     pub query: Option<QueryPlan>,
     /// What binding recorded for the statement's syntax, in syntax order.
     pub sites: super::syntax_sites::SyntaxSites,
+    /// The columns a query statement returns; a command's binding query is not its result.
+    pub query_output: Option<RowSchema>,
 }
 
 #[derive(Debug, Clone)]
@@ -62,10 +64,11 @@ pub fn bind_catalog_statement_routines(
         return Ok(BoundStatementRoutines {
             query: None,
             sites: super::syntax_sites::SyntaxSites::default(),
+            query_output: None,
         });
     };
     let mut query = lowered.clone();
-    crate::binding::bind_syntax_query_plan_routines(
+    let output = crate::binding::bind_syntax_query_plan_routines(
         context.routines,
         &mut query,
         params,
@@ -76,6 +79,7 @@ pub fn bind_catalog_statement_routines(
     Ok(BoundStatementRoutines {
         query: Some(query),
         sites,
+        query_output: matches!(plan, UnifiedPlan::Query(_)).then_some(output),
     })
 }
 
@@ -315,17 +319,31 @@ fn insert_statement_routine_inputs(
         alias: Some("__uqa_catalog_statement_source".into()),
         column_aliases: Vec::new(),
     });
+    let mut outer = statement_target_outer_schema(
+        context,
+        &plan.table,
+        &plan.target_qualifier,
+        &plan.returning_aliases,
+    )?;
+    // `ON CONFLICT DO UPDATE` also sees the proposed row as `excluded`.
+    if matches!(
+        plan.on_conflict.as_ref().map(|conflict| &conflict.action),
+        Some(ConflictActionPlan::Update { .. })
+    ) {
+        let target = statement_target_schema(context, &plan.table, &plan.target_qualifier)?;
+        let excluded = RowSchema::with_qualified_types(
+            "excluded",
+            target.columns().to_vec(),
+            target.column_types().to_vec(),
+        );
+        outer = RowSchema::join(&outer, &excluded, std::iter::empty::<String>());
+    }
     Ok(CommandRoutineInputs {
         ctes: plan.ctes.clone(),
         source,
         expressions,
         subqueries: plan.subqueries.clone(),
-        outer: statement_target_outer_schema(
-            context,
-            &plan.table,
-            &plan.target_qualifier,
-            &plan.returning_aliases,
-        )?,
+        outer,
     })
 }
 
@@ -389,6 +407,20 @@ fn statement_target_outer_schema(
     target_qualifier: &str,
     aliases: &crate::ast::ReturningAliases,
 ) -> Result<RowSchema, SQLError> {
+    let target = statement_target_schema(context, table, target_qualifier)?;
+    Ok(crate::semantics::returning_expression_schema(
+        &target,
+        target_qualifier,
+        aliases,
+        None,
+    ))
+}
+
+fn statement_target_schema(
+    context: &CatalogRoutineContext<'_, '_>,
+    table: &str,
+    target_qualifier: &str,
+) -> Result<RowSchema, SQLError> {
     let target = crate::binding::analyze_source_plan_schema(
         context.routines,
         &SourcePlan::Table {
@@ -403,12 +435,9 @@ fn statement_target_outer_schema(
         context.binding,
         None,
     )?;
-    let target = RowSchema::with_types(target.columns().to_vec(), target.column_types().to_vec());
-    Ok(crate::semantics::returning_expression_schema(
-        &target,
-        target_qualifier,
-        aliases,
-        None,
+    Ok(RowSchema::with_types(
+        target.columns().to_vec(),
+        target.column_types().to_vec(),
     ))
 }
 

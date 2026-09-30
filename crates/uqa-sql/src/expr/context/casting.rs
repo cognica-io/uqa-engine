@@ -262,9 +262,7 @@ fn resolve_regobject_input(
         ObjectKind::Relation => engine.resolve_regclass_input(name)?,
         // `regprocin` reports its own missing and ambiguous names.
         ObjectKind::RoutineName => return engine.resolve_regproc(name),
-        ObjectKind::Routine => engine
-            .resolve_regprocedure(name)
-            .map_err(SQLError::Internal)?,
+        ObjectKind::Routine => engine.resolve_regprocedure_input(name)?,
         ObjectKind::Role => engine.resolve_regrole(name)?,
         ObjectKind::Namespace => engine.resolve_regnamespace(name)?,
         ObjectKind::Type => engine.resolve_regtype_input(name)?,
@@ -275,7 +273,7 @@ fn resolve_regobject_input(
     }
     let (sqlstate, message) = match kind {
         ObjectKind::Relation => ("42P01", format!("relation \"{name}\" does not exist")),
-        ObjectKind::Routine => ("42883", format!("function {name} does not exist")),
+        ObjectKind::Routine => ("42883", format!("function \"{name}\" does not exist")),
         ObjectKind::Role => ("42704", format!("role \"{name}\" does not exist")),
         ObjectKind::Namespace => ("3F000", format!("schema \"{name}\" does not exist")),
         ObjectKind::Type | ObjectKind::RoutineName => {

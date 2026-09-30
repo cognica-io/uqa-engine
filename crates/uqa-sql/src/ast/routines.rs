@@ -27,6 +27,16 @@ pub enum FunctionParamMode {
     Table,
 }
 
+/// An input parameter as a SQL-standard body refers to it: the name the body uses, which follows `PostgreSQL`'s positional naming, and where the parameter's value arrives in a call.
+#[derive(Debug, Clone, Copy)]
+pub struct SQLBodyParameter<'a> {
+    /// The name the body uses, empty when the declared parameter at this position is unnamed.
+    pub name: &'a str,
+    pub parameter: &'a FunctionParam,
+    /// The parameter's 1-based position among the call's arguments, which include a procedure's output parameters.
+    pub call_position: usize,
+}
+
 /// One declared parameter of a user-defined function or procedure.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionParam {
@@ -257,6 +267,26 @@ impl CreateFunction {
             FunctionParamMode::Out => self.is_procedure,
             FunctionParamMode::Table => false,
         }
+    }
+
+    /// The parameters a SQL-standard body refers to, as `interpret_AS_clause` gives them to its parser: the input parameters in order, the one at position `n` going by the name of the parameter declared at position `n` among all parameters. When an output parameter precedes an input, the body therefore names that input by the output parameter's name, as `PostgreSQL` does.
+    pub fn sql_body_parameters(&self) -> Vec<SQLBodyParameter<'_>> {
+        let call_params = self.call_params();
+        self.identity_params()
+            .into_iter()
+            .enumerate()
+            .map(|(index, parameter)| SQLBodyParameter {
+                name: self
+                    .params
+                    .get(index)
+                    .map_or("", |declared| declared.name.as_str()),
+                parameter,
+                call_position: call_params
+                    .iter()
+                    .position(|call| std::ptr::eq(*call, parameter))
+                    .map_or(index + 1, |position| position + 1),
+            })
+            .collect()
     }
 
     /// Backward-compatible alias for [`Self::call_arity`].

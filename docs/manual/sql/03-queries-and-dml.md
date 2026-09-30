@@ -365,6 +365,8 @@ WHERE task_id = 1
 RETURNING task_id, state;
 ```
 
+A multiple-column item assigns each listed column the element of a row constructor at its position, as in `SET (state, priority) = ('closed', 1)` or `SET (state, priority) = ROW('closed', 1)`, in `UPDATE`, `ON CONFLICT DO UPDATE`, and `MERGE` alike. A row with a different number of elements reports `42601`, and a source that is neither a row constructor nor a sub-SELECT reports `0A000`.
+
 `UPDATE ... FROM` is implemented:
 
 ```sql

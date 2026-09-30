@@ -22,7 +22,8 @@ use super::types::{
     validate_foreign_key_set_columns,
 };
 use super::{
-    compile_qualified_name, compile_returning_clause, range_var_name, render_relation_component,
+    compile_qualified_name, compile_returning_clause, range_var_alias, range_var_name,
+    render_relation_component,
 };
 
 pub(super) fn extract_string(node: &Node) -> Result<String> {
