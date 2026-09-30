@@ -14,6 +14,7 @@ impl CatalogRemovalInputs for Engine {
         CatalogRemovalContext {
             catalog: self.catalog_execution(),
             locks: self,
+            identities: self,
             tables: self.table_removal_context(),
             foreign_tables: self.foreign_removal_context(),
             indexes: self.index_removal_context(),

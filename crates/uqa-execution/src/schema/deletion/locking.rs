@@ -4,10 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `AcquireDeletionLock` for relations: every relation a deletion removes or changes is held in access exclusive mode before anything is removed.
+//! `AcquireDeletionLock` for relations: every relation a deletion removes or changes is held in access exclusive mode, by its object identity, before anything is removed.
 
 use super::plan::DeletionPlan;
 use super::CatalogRemovalContext;
+use crate::row_locks::{binding::lock_any_relation_identity, RelationLockMode};
 use std::collections::BTreeSet;
 use uqa_sql::SQLError;
 
@@ -15,21 +16,32 @@ use uqa_sql::SQLError;
 pub(super) fn lock_relations(
     context: &CatalogRemovalContext<'_>,
     plan: &DeletionPlan,
-    locked: &mut BTreeSet<String>,
+    locked: &mut BTreeSet<[u8; 16]>,
 ) -> Result<bool, SQLError> {
-    let names = plan
-        .relations()
-        .into_iter()
-        .map(|relation| relation.qualified_name())
-        .filter(|name| !locked.contains(name))
-        .collect::<BTreeSet<_>>();
-    if names.is_empty() {
-        return Ok(false);
+    // The identities are those the search saw: a wait for one lock can give another relation's name to a new relation.
+    let mut identities = Vec::new();
+    for relation in plan.relations() {
+        let name = relation.qualified_name();
+        // A relation that has already disappeared leaves the next search without it.
+        if let Some(object_id) = context.identities.relation_object_id(&name)? {
+            identities.push((name, object_id));
+        }
     }
-    crate::row_locks::binding::prepare_dependent_relation_writes(
-        context.locks,
-        names.iter().map(String::as_str),
-    )?;
-    locked.extend(names);
-    Ok(true)
+    let mut acquired = false;
+    for (name, object_id) in identities {
+        if locked.insert(object_id) {
+            lock_any_relation_identity(
+                context.identities,
+                context.locks,
+                name,
+                object_id,
+                RelationLockMode::AccessExclusive,
+            )?;
+            acquired = true;
+        }
+    }
+    if acquired {
+        context.locks.prepare_definition_write()?;
+    }
+    Ok(acquired)
 }

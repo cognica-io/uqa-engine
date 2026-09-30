@@ -229,4 +229,28 @@ impl RelationLockCatalog for Engine {
             (table.object_id() == object_id).then(|| name.qualified_name())
         })
     }
+    fn relation_name(&self, object_id: [u8; 16]) -> Option<String> {
+        self.table_name(object_id)
+            .or_else(|| {
+                self.durable.views.read().iter().find_map(|(name, view)| {
+                    (view.object_id == object_id).then(|| name.qualified_name())
+                })
+            })
+            .or_else(|| {
+                self.durable
+                    .sequence_object_ids
+                    .read()
+                    .iter()
+                    .find_map(|(name, id)| (*id == object_id).then(|| name.qualified_name()))
+            })
+            .or_else(|| {
+                self.durable
+                    .foreign_tables
+                    .read()
+                    .iter()
+                    .find_map(|(name, table)| {
+                        (table.object_id == object_id).then(|| name.qualified_name())
+                    })
+            })
+    }
 }

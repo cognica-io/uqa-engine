@@ -141,7 +141,16 @@ fn direct_table_drops_recheck_waited_view_edges_and_reject_retained_dependencies
                     );
                 } else {
                     let error = result.unwrap_err();
-                    assert!(error.to_string().contains("view public.d"), "{error}");
+                    let relation = match kind {
+                        Kind::Table => "table",
+                        Kind::Foreign => "foreign table",
+                    };
+                    assert!(
+                        error.to_string().contains(&format!(
+                            "cannot drop {relation} v because other objects depend on it"
+                        )),
+                        "{error}"
+                    );
                     if matches!(kind, Kind::Table) {
                         assert_eq!(error.sqlstate(), Some("2BP01"));
                     }

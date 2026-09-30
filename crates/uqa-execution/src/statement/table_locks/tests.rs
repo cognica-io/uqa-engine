@@ -303,6 +303,9 @@ impl RelationLockCatalog for Fixture {
             .iter()
             .find_map(|(name, id)| (*id == object_id).then(|| name.clone()))
     }
+    fn relation_name(&self, object_id: [u8; 16]) -> Option<String> {
+        self.table_name(object_id)
+    }
 }
 
 #[test]
