@@ -171,7 +171,12 @@
       "ddl.dependency-aware-deletion",
       "types.enum-declarations-and-values",
       "types.unknown-literal-coercion",
-      "ddl.partition-bound-transformation"
+      "ddl.partition-bound-transformation",
+      "types.type-object-lifecycle",
+      "catalog.object-dependencies",
+      "catalog.creation-ordered-oids",
+      "ddl.relation-creation-namespaces",
+      "ddl.rule-and-trigger-definitions"
     ],
     "M4": [
       "dml.returning-row-images-extended",
@@ -1058,10 +1063,10 @@
     {
       "id": "types.enum-declarations-and-values",
       "postgresql_reference": "PostgreSQL 18.4 live command tags, result rows, type OIDs, SQLSTATEs and messages in tests/parity/pg18/enum_types_oracle.expected.json; https://www.postgresql.org/docs/18/datatype-enum.html; https://www.postgresql.org/docs/18/sql-createtype.html; https://www.postgresql.org/docs/18/sql-altertype.html; https://www.postgresql.org/docs/18/functions-enum.html",
-      "uqa_test": "cargo test -p uqa-core --lib enum_value; cargo test -p uqa-sql --lib catalog::enum_type; cargo test -p uqa-engine --test integration queries::sql_enums; cargo test -p uqa-pg-server --test integration enums",
-      "supported_version": "293 PostgreSQL 18.4 statements on memory, native SQLite, SQLite Key/Value and redb engines and over TCP: CREATE TYPE AS ENUM, ALTER TYPE ADD VALUE [IF NOT EXISTS] [BEFORE | AFTER] and RENAME VALUE with PostgreSQL check order and float4 sort positions, immutable order-preserving label keys, uncommitted-label safety (55P04) with transaction and savepoint scope, comparisons, arrays, casts and unknown-literal input, the anyenum support functions, min and max, JSON output, anyenum routines, pg_type, pg_enum and pg_proc rows, DROP TYPE dependencies, LIST, RANGE and HASH partitioning by enum keys, enum expressions in stored generated columns and partition keys, and virtual generated column restrictions; reopen tests on the three persistent providers; Python, Node.js, browser WASM and Arrow results carry current labels",
-      "status": "partial",
-      "open_issue": "Stored expressions such as views, defaults, CHECK constraints, generated columns, index expressions, partition keys, rules and trigger conditions must hold enum constants by label identity so that RENAME VALUE cannot reinterpret them, their deparsed text must spell such constants as 'label'::type, and dependency errors must carry PostgreSQL's DETAIL listing; the type object lifecycle unit of docs/plans/0016-extension-packages-and-types.md owns this work."
+      "uqa_test": "cargo test -p uqa-core --lib enum_value; cargo test -p uqa-sql --lib catalog::enum_type; cargo test -p uqa-engine --test integration queries::sql_enums; cargo test -p uqa-pg-server --test integration enums; cargo test -p uqa-engine --test integration queries::sql_type_lifecycle; cargo test -p uqa-engine --test integration catalog::event_definitions",
+      "supported_version": "293 PostgreSQL 18.4 statements on memory, native SQLite, SQLite Key/Value and redb engines and over TCP: CREATE TYPE AS ENUM, ALTER TYPE ADD VALUE [IF NOT EXISTS] [BEFORE | AFTER] and RENAME VALUE with PostgreSQL check order and float4 sort positions, immutable order-preserving label keys, uncommitted-label safety (55P04) with transaction and savepoint scope, comparisons, arrays, casts and unknown-literal input, the anyenum support functions, min and max, JSON output, anyenum routines, pg_type, pg_enum and pg_proc rows, DROP TYPE dependencies, LIST, RANGE and HASH partitioning by enum keys, enum expressions in stored generated columns and partition keys, and virtual generated column restrictions; reopen tests on the three persistent providers; Python, Node.js, browser WASM and Arrow results carry current labels; stored expressions (views, defaults, CHECK constraints, generated columns, index expressions and predicates, partition keys, domain constraints, routine defaults and SQL-standard bodies, rule conditions and actions, and trigger conditions) hold enum constants by label identity, so RENAME VALUE renames them and deparse spells them as 'label'::type, and dependency errors carry PostgreSQL's DETAIL listing",
+      "status": "verified",
+      "open_issue": null
     },
     {
       "id": "types.unknown-literal-coercion",
@@ -1126,6 +1131,46 @@
       "supported_version": "Unreleased: 99 PostgreSQL 18.4 cases on memory and SQLite engines cover pg_get_function_sqlbody for RETURN bodies on one line and BEGIN ATOMIC bodies of SELECT, set operations, VALUES, WITH, INSERT with single-row, multi-row, SELECT and DEFAULT VALUES sources, ON CONFLICT arbiters, predicates, constraints, DO NOTHING and DO UPDATE with EXCLUDED, UPDATE with FROM, aliases and multiple-column row assignments, DELETE with USING, MERGE with every action kind and BY TARGET, RETURNING with expanded stars, parameters printed by name and qualified by the routine's name when a range table is present, column references qualified by relation, star expansion over USING joins, CASE on one line in RETURN bodies, sublink target lists without the ?column? name in view definitions, PostgreSQL's positional naming of SQL-standard body parameters after an output parameter, the 42P13 final-statement check with its details, and regprocedure input errors",
       "status": "verified",
       "open_issue": null
+    },
+    {
+      "id": "types.type-object-lifecycle",
+      "postgresql_reference": "PostgreSQL 18.4 live command tags, result rows, SQLSTATEs, messages, details and notices in tests/parity/pg18/type_lifecycle_oracle.expected.json; RenameType, AlterTypeNamespace, AlterTypeOwner and AlterDomain* in src/backend/commands/typecmds.c; ExecGrant_Type_check, pg_type_aclmask and has_type_privilege in src/backend/catalog/aclchk.c and src/backend/utils/adt/acl.c; https://www.postgresql.org/docs/18/sql-altertype.html; https://www.postgresql.org/docs/18/sql-alterdomain.html; https://www.postgresql.org/docs/18/sql-grant.html",
+      "uqa_test": "cargo test -p uqa-engine --test integration queries::sql_type_lifecycle; cargo test -p uqa-pg-server --test integration type_lifecycle_oracle_matches_postgresql_over_tcp; cargo test -p uqa-engine --test integration catalog::legacy_type_names",
+      "supported_version": "Unreleased: 256 PostgreSQL 18.4 statements on memory and SQLite engines and over TCP cover ALTER TYPE and ALTER DOMAIN RENAME TO, SET SCHEMA and OWNER TO with PostgreSQL's check order and generated array types, GRANT and REVOKE USAGE ON TYPE and DOMAIN with typacl, grant options and CASCADE, has_type_privilege in all six forms, aclexplode, USAGE enforcement in every creation path, stored type references held by OID identity and enum constants by label identity, catalog-aware deparse, per-session routine compilation, and DROP TYPE and DROP DOMAIN details; databases written by earlier releases upgrade their stored domain names to identities on first open",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "catalog.object-dependencies",
+      "postgresql_reference": "PostgreSQL 18.4 live rows in tests/parity/pg18/catalog_dependencies_oracle.expected.json; recordDependencyOn*, recordDependencyOnExpr, find_expr_references_walker and getObjectDescription in src/backend/catalog/dependency.c, pg_depend.c, pg_shdepend.c and objectaddress.c; https://www.postgresql.org/docs/18/catalog-pg-depend.html; https://www.postgresql.org/docs/18/catalog-pg-shdepend.html",
+      "uqa_test": "cargo test -p uqa-engine --test integration catalog::catalog_dependencies; cargo test -p uqa-sql --lib catalog::dependencies",
+      "supported_version": "Unreleased: 74 PostgreSQL 18.4 cases on memory and SQLite engines cover pg_depend rows for schemas, column, argument and result types, row and array types, inheritance and partition parents, owned sequences, and what constraints, defaults, generation expressions, index keys and predicates, triggers, rules, views and SQL-standard routine bodies use; pg_shdepend rows for owners and every role that privileges name; and pg_describe_object as getObjectDescription spells objects",
+      "status": "partial",
+      "open_issue": "Dependencies of implicit coercions inside stored expressions (domain-to-base relabeling for operators and routine arguments), of the objects initdb leaves unpinned, TOAST relations, foreign servers, wrappers, user mappings and collations, and foreign keys' internal RI_ConstraintTrigger rows remain; PR 259 tracks them."
+    },
+    {
+      "id": "catalog.creation-ordered-oids",
+      "postgresql_reference": "GetNewObjectId and GetNewOidWithIndex in src/backend/access/transam/varsup.c and src/backend/catalog/catalog.c; heap_create_with_catalog, AssignTypeArrayOid, DefineRelation, DefineViewRules, AddEnumLabel and index_create allocation order; InitTempTableNamespace in src/backend/catalog/namespace.c; Apache AGE 1.8.0 create_graph, create_vlabel and create_elabel; PostgreSQL 18.4 and AGE 1.8.0 OID offsets recorded in the tests",
+      "uqa_test": "cargo test -p uqa-engine --test integration catalog::catalog_oid_order; cargo test -p uqa-engine --test integration sql_age_catalog::catalog_oids; cargo test -p uqa-engine --test integration catalog::temporary_namespace_oids; cargo test -p uqa-execution --lib catalog::identity",
+      "supported_version": "Unreleased: one database-wide OID counter from 16384 that never goes back, wraps as GetNewObjectId does and skips OIDs a catalog holds, allocating in PostgreSQL's order for relations, views, sequences, foreign tables, routines, enums and their labels, domains and their constraints, key indexes and constraints, column defaults and generation expressions, triggers and rules; Apache AGE graphs and labels in AGE 1.8's order; and a session's temporary namespace and its TOAST namespace before its first temporary relation, forgotten by rollback; the offsets match PostgreSQL 18.4 and AGE 1.8.0 across reopen",
+      "status": "partial",
+      "open_issue": "TOAST relations and their indexes take no OIDs, and temporary namespaces end with their session and stay invisible to other sessions; PR 259 tracks them."
+    },
+    {
+      "id": "ddl.relation-creation-namespaces",
+      "postgresql_reference": "PostgreSQL 18.4 live command tags, rows, SQLSTATEs, messages, details and notices in tests/parity/pg18/relation_creation_namespace_oracle.expected.json; RangeVarGetCreationNamespace, RangeVarAdjustRelationPersistence and recomputeNamespacePath in src/backend/catalog/namespace.c; CreateTableAsRelExists in src/backend/commands/createas.c; DefineView in src/backend/commands/view.c; heap_create in src/backend/catalog/heap.c",
+      "uqa_test": "cargo test -p uqa-engine --test integration catalog::relation_creation_namespaces",
+      "supported_version": "Unreleased: 53 PostgreSQL 18.4 cases on memory and SQLite engines cover temporary relations in ordinary schemas and unlogged relations in pg_temp (42P16), relations qualified with pg_temp or created while pg_temp leads, follows a missing schema in, or trails search_path, views made temporary by their queries with the notice, CTAS existence checks, and relations refused in pg_catalog (42501) after taking their OID",
+      "status": "partial",
+      "open_issue": "Temporary materialized views and foreign tables, functions, types and domains in pg_temp, ALTER TABLE SET SCHEMA for tables, and user relations in information_schema and ag_catalog on durable storage remain; PR 259 tracks them."
+    },
+    {
+      "id": "ddl.rule-and-trigger-definitions",
+      "postgresql_reference": "PostgreSQL 18.4 live rows in tests/parity/pg18/event_definition_oracle.expected.json; make_ruledef, pg_get_triggerdef_worker, get_rule_expr, get_query_def and get_utility_query_def in src/backend/utils/adt/ruleutils.c",
+      "uqa_test": "cargo test -p uqa-engine --test integration catalog::event_definitions",
+      "supported_version": "Unreleased: 43 PostgreSQL 18.4 cases on memory and SQLite engines cover pg_get_ruledef in both forms and pg_rules for every rule event, INSTEAD and ALSO, NOTHING, several actions, INSERT ... SELECT, UPDATE, DELETE and NOTIFY actions and conditions with subqueries, CASE and enum constants, and pg_get_triggerdef WHEN conditions with IS DISTINCT FROM, ANY and ALL, casts, CASE and enum constants, after RENAME VALUE and RENAME COLUMN, with the rules and triggers firing",
+      "status": "partial",
+      "open_issue": "Implicit domain-to-base coercions of operator and routine arguments are not printed, as get_rule_expr prints ((a)::positive)::integer, and after column renames rule and view definitions keep the alias lists stored with them instead of naming columns as set_relation_column_names, set_join_column_names and set_using_names do, which print an alias list only where a name changed and push USING names into the join inputs; PR 259 tracks both."
     }
   ]
 }

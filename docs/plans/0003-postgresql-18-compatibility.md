@@ -237,7 +237,7 @@ The following compact ledger is the readable projection of the machine-readable 
 | `aggregates.mode-equality-and-ties` | `M4` | `verified` |
 | `types.legacy-vector-coherence` | `M4` | `verified` |
 | `dml.assignment-subscripts` | `M4` | `verified` |
-| `types.enum-declarations-and-values` | `M3` | `partial` |
+| `types.enum-declarations-and-values` | `M3` | `verified` |
 | `types.unknown-literal-coercion` | `M3` | `partial` |
 | `ddl.partition-bound-transformation` | `M3` | `partial` |
 | `dml.failing-row-details` | `M4` | `partial` |
@@ -246,6 +246,11 @@ The following compact ledger is the readable projection of the machine-readable 
 | `expressions.boolean-conditions` | `M1` | `verified` |
 | `expressions.interval-arithmetic` | `M1` | `verified` |
 | `routines.sql-standard-body-deparse` | `M1` | `verified` |
+| `types.type-object-lifecycle` | `M3` | `verified` |
+| `catalog.object-dependencies` | `M3` | `partial` |
+| `catalog.creation-ordered-oids` | `M3` | `partial` |
+| `ddl.relation-creation-namespaces` | `M3` | `partial` |
+| `ddl.rule-and-trigger-definitions` | `M3` | `partial` |
 
 <!-- pg18-manifest-status:end -->
 
