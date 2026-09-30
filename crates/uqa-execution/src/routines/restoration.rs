@@ -16,7 +16,7 @@ use uqa_sql::{
     routines::{
         dependencies::RoutineCompilationMode,
         lifecycle::{restoration as analysis, RoutineRegistry},
-        routine_signature_types, CompiledFunctionBody, SQLUserFunction,
+        routine_signature_types, CompiledFunctionBody, RoutineBody, SQLUserFunction,
     },
 };
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
@@ -118,10 +118,10 @@ pub fn install_sql_function_restore_placeholders(
                 .iter()
                 .cloned()
                 .map(|def| {
-                    Arc::new(SQLUserFunction {
+                    Arc::new(SQLUserFunction::new(
                         def,
-                        compiled: CompiledFunctionBody::SQL(Vec::new()),
-                    })
+                        RoutineBody::Bound(Arc::new(CompiledFunctionBody::SQL(Vec::new()))),
+                    ))
                 })
                 .collect::<Vec<_>>();
             overloads.sort_by(|left, right| {
@@ -155,14 +155,15 @@ pub fn finalize_sql_function_restore(
         for (name, definitions) in definitions {
             let mut overloads = Vec::with_capacity(definitions.len());
             for mut def in definitions {
-                let (compiled, definition_migrated) = compile_catalog_bound_routine(
+                // A stored source body is not compiled here: the sessions that run it compile it, so a body that no longer compiles cannot keep the catalog from loading.
+                let bound = compile_catalog_bound_routine(
                     &context.definition,
                     &mut def,
                     RoutineCompilationMode::Persisted,
                 )
                 .map_err(|err| StorageBackendError::Other(err.to_string()))?;
-                migrated |= definition_migrated;
-                overloads.push(Arc::new(SQLUserFunction { def, compiled }));
+                migrated |= bound.changed;
+                overloads.push(Arc::new(SQLUserFunction::new(def, bound.body)));
             }
             overloads.sort_by(|left, right| {
                 routine_signature_types(&left.def)

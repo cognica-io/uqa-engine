@@ -44,22 +44,25 @@ pub(super) fn execute_routine(
         && definition.config.is_empty();
     let _transaction_context = RoutineTransactionGuard::enter(context.runtime.session, nonatomic);
     uqa_sql::routines::security::ensure_routine_execute_privilege(context.authority, definition)?;
-    super::scopes::with_routine_context(context.session, definition, || match &function.compiled {
-        CompiledFunctionBody::PLpgSQL(parsed) => {
-            if specialized.is_some() {
-                let mut parsed = parsed.clone();
-                for (index, parameter) in definition.params.iter().enumerate() {
-                    if let Some(PLpgSQLDatum::Var(variable)) = parsed.datums.get_mut(index) {
-                        variable.type_name.clone_from(&parameter.type_name);
+    super::scopes::with_routine_context(context.session, definition, || {
+        let body = context.lookup.routine_body(function)?;
+        match &*body {
+            CompiledFunctionBody::PLpgSQL(parsed) => {
+                if specialized.is_some() {
+                    let mut parsed = parsed.clone();
+                    for (index, parameter) in definition.params.iter().enumerate() {
+                        if let Some(PLpgSQLDatum::Var(variable)) = parsed.datums.get_mut(index) {
+                            variable.type_name.clone_from(&parameter.type_name);
+                        }
                     }
+                    execute_plpgsql_language(context, definition, &parsed, bound)
+                } else {
+                    execute_plpgsql_language(context, definition, parsed, bound)
                 }
-                execute_plpgsql_language(context, definition, &parsed, bound)
-            } else {
-                execute_plpgsql_language(context, definition, parsed, bound)
             }
-        }
-        CompiledFunctionBody::SQL(statements) => {
-            execute_sql_language(context, definition, statements, &bound)
+            CompiledFunctionBody::SQL(statements) => {
+                execute_sql_language(context, definition, statements, &bound)
+            }
         }
     })
 }
@@ -72,7 +75,8 @@ pub fn execute_trigger_routine(
     let _guard = DepthGuard::enter(context.session)?;
     let _transaction_context = RoutineTransactionGuard::enter(context.runtime.session, false);
     super::scopes::with_routine_context(context.session, &function.def, || {
-        let CompiledFunctionBody::PLpgSQL(parsed) = &function.compiled else {
+        let body = context.lookup.routine_body(function)?;
+        let CompiledFunctionBody::PLpgSQL(parsed) = &*body else {
             return Err(SQLError::Unsupported(
                 "only LANGUAGE plpgsql trigger functions are executable".into(),
             ));

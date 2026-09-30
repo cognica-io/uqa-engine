@@ -307,7 +307,8 @@ fn compatible_family_preserves_equal_domains_and_flattens_mixed_domains() {
     )
     .unwrap()
     .unwrap();
-    assert_eq!(same.argument_targets, ["public.positive_int"; 2]);
+    // Argument targets name a user-defined type by identity, which resolves to the same type after a rename.
+    assert_eq!(same.argument_targets, ["domain#43"; 2]);
 
     let mixed = match_types(
         &[parameter("anycompatible"), parameter("anycompatible")],

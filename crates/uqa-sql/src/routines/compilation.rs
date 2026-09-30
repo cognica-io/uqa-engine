@@ -242,6 +242,22 @@ pub fn lower_sql_routine_statement(
     Ok(plan)
 }
 
+/// A session's compilation of a source body keeps the types it resolved, as its analyzed plan holds type OIDs that renaming an enum does not invalidate. A domain coercion records the domain as a plan dependency, so a changed domain is resolved again, and relations and routines are resolved when the plan runs.
+fn bind_session_plan_types(
+    context: &RoutineCompilationContext<'_>,
+    plan: &mut UnifiedPlan,
+) -> Result<(), SQLError> {
+    crate::binding::stored_types::bind_unified_plan_type_identities(plan, &mut |name| {
+        let resolved = context.types.resolve_catalog_column_type(name);
+        let mut element = resolved.as_ref();
+        while let Some(ColumnType::Array(inner)) = element {
+            element = Some(inner.as_ref());
+        }
+        let domain = matches!(element, Some(ColumnType::Domain { .. }));
+        Ok(resolved.filter(|_| !domain))
+    })
+}
+
 fn compile_sql_routine_plans(
     context: &RoutineCompilationContext<'_>,
     def: &CreateFunction,
@@ -268,6 +284,8 @@ fn compile_sql_routine_plans(
                     &binding.context(),
                     Some(&parameters.scope),
                 )?;
+            } else if !bind_catalog_dependencies {
+                bind_session_plan_types(context, &mut plan)?;
             }
             parameters.bind_references(&mut plan);
             // Stored definitions retain their analyzed logical expressions;

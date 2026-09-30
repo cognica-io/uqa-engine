@@ -49,8 +49,23 @@ pub fn bind_query_plan_type_identities(
     plan: &mut QueryPlan,
     resolve: &mut TypeNameResolver<'_>,
 ) -> Result<(), SQLError> {
+    bind_plan_type_identities(|rewrite| plan.rewrite_scalar_expressions(rewrite), resolve)
+}
+
+/// Replace the names of user-defined types in the casts and typed constants of a compiled statement with their identities.
+pub fn bind_unified_plan_type_identities(
+    plan: &mut crate::plan::UnifiedPlan,
+    resolve: &mut TypeNameResolver<'_>,
+) -> Result<(), SQLError> {
+    bind_plan_type_identities(|rewrite| plan.rewrite_scalar_expressions(rewrite), resolve)
+}
+
+fn bind_plan_type_identities(
+    visit: impl FnOnce(&mut dyn FnMut(&mut ScalarExpr)),
+    resolve: &mut TypeNameResolver<'_>,
+) -> Result<(), SQLError> {
     let mut failure = None;
-    plan.rewrite_scalar_expressions(&mut |expression| {
+    visit(&mut |expression| {
         if failure.is_some() {
             return;
         }

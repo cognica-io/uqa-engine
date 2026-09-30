@@ -52,7 +52,7 @@ fn function_results_retain_nested_type_payloads_and_release_inference_scratch() 
     let field = ScalarExpr::Column("value".into());
     let array_type = ColumnType::Array(Box::new(domain()));
     for (name, argument_count, ty, expected) in [
-        ("min", 1, domain(), domain()),
+        ("min", 1, domain(), ColumnType::Text),
         ("array_agg", 1, domain(), array_type.clone()),
         ("array_cat", 2, array_type.clone(), array_type.clone()),
         ("unnest", 1, array_type, domain()),

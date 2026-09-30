@@ -8,7 +8,7 @@ use super::*;
 use crate::routines::{
     declaration::RoutineTypeCatalog,
     resolution::{RoutineOverloadCatalog, RoutineTypeSnapshot},
-    CompiledFunctionBody,
+    CompiledFunctionBody, RoutineBody,
 };
 
 struct Catalog {
@@ -25,10 +25,10 @@ impl Catalog {
                 else {
                     unreachable!()
                 };
-                Arc::new(SQLUserFunction {
-                    def: *def,
-                    compiled: CompiledFunctionBody::SQL(Vec::new()),
-                })
+                Arc::new(SQLUserFunction::new(
+                    *def,
+                    RoutineBody::Bound(Arc::new(CompiledFunctionBody::SQL(Vec::new()))),
+                ))
             })
             .collect();
         Self {

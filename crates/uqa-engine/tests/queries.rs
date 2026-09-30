@@ -78,6 +78,8 @@ mod sql_prepared;
 mod sql_row_locks;
 #[path = "queries/sql_row_locks_recheck.rs"]
 mod sql_row_locks_recheck;
+#[path = "queries/sql_routine_late_binding.rs"]
+mod sql_routine_late_binding;
 #[path = "queries/sql_simple_query.rs"]
 mod sql_simple_query;
 #[path = "sql_subqueries.rs"]

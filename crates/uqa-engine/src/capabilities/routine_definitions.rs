@@ -64,6 +64,15 @@ impl RoutineTypeCatalog for Engine {
         )
     }
 }
+impl uqa_execution::routines::invocation::bodies::RoutineBodySession for Engine {
+    fn retain_routine_body(
+        &self,
+        function: &uqa_sql::routines::SQLUserFunction,
+        body: uqa_sql::routines::CompiledFunctionBody,
+    ) -> Result<(), SQLError> {
+        self.session.routine_bodies.retain(function, body)
+    }
+}
 impl StoredMergeColumnCatalog for Engine {
     fn stored_merge_target_definitions(&self, table: &str) -> Option<Vec<ColumnDef>> {
         self.table_entries()
@@ -228,6 +237,7 @@ impl Engine {
             definition: self.routine_definition_context(),
             support: self,
             configuration: self,
+            bodies: self,
         }
     }
     #[cfg(test)]

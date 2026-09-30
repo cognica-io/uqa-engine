@@ -94,10 +94,10 @@ fn routine() -> Arc<SQLUserFunction> {
     let compiled = crate::routines::CompiledFunctionBody::PLpgSQL(
         crate::plpgsql::parse_function(&def).unwrap(),
     );
-    Arc::new(SQLUserFunction {
-        def: *def,
-        compiled,
-    })
+    Arc::new(SQLUserFunction::new(
+        *def,
+        crate::routines::RoutineBody::Bound(Arc::new(compiled)),
+    ))
 }
 impl EventRelationCatalog for Catalog {
     fn event_relation_owner(

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Type names in diagnostics, as `format_type_be` spells them: a user-defined type is qualified by its schema when the running statement's search path does not include that schema. The statement executor records the search path for the statement it runs on this thread; without a recorded path, types are spelled without qualification.
+//! Type names in diagnostics, as `format_type_be` spells them: a user-defined type is qualified by its schema when the running statement's search path does not include that schema. The statement executor records the search path for the statement it runs on this thread; without a recorded path, `PostgreSQL`'s default search path applies.
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -46,28 +46,30 @@ impl Drop for TypeDisplayScope {
 fn schema_visible(schema: &str) -> bool {
     schema == "pg_catalog"
         || SEARCH_PATH.with(|current| {
-            current
-                .borrow()
-                .as_ref()
-                .is_none_or(|path| path.iter().any(|entry| entry == schema))
+            current.borrow().as_ref().map_or_else(
+                || schema == "public",
+                |path| path.iter().any(|entry| entry == schema),
+            )
         })
+}
+
+/// A user-defined type's name, qualified by its schema when the schema is not visible.
+pub(super) fn visible_type_name(schema: &str, name: &str) -> String {
+    let local = crate::expr::quote_ident(name);
+    if schema_visible(schema) {
+        local
+    } else {
+        format!("{}.{local}", crate::expr::quote_ident(schema))
+    }
 }
 
 impl ColumnType {
     /// `format_type_be` of this type for a diagnostic.
     #[must_use]
     pub fn display_name(&self) -> String {
-        let qualified = |schema: &str, name: &str| {
-            let local = crate::expr::quote_ident(name);
-            if schema_visible(schema) {
-                local
-            } else {
-                format!("{}.{local}", crate::expr::quote_ident(schema))
-            }
-        };
         match self {
-            ColumnType::Enum(reference) => qualified(&reference.schema, &reference.name),
-            ColumnType::Domain { schema, name, .. } => qualified(schema, name),
+            ColumnType::Enum(reference) => visible_type_name(&reference.schema, &reference.name),
+            ColumnType::Domain { schema, name, .. } => visible_type_name(schema, name),
             // An array type of any dimensionality is the element's one array type.
             ColumnType::Array(element) => {
                 let mut leaf = element.as_ref();
@@ -98,7 +100,8 @@ mod tests {
             oid: 1,
             array_oid: 2,
         });
-        assert_eq!(mood.display_name(), "hmood");
+        // Without a statement, the default search path applies.
+        assert_eq!(mood.display_name(), "hidden.hmood");
         let scope = TypeDisplayScope::enter(&["public".into()]);
         assert_eq!(mood.display_name(), "hidden.hmood");
         assert_eq!(
@@ -108,7 +111,7 @@ mod tests {
         scope.refresh(&["hidden".into(), "public".into()]);
         assert_eq!(mood.display_name(), "hmood");
         drop(scope);
-        assert_eq!(mood.display_name(), "hmood");
+        assert_eq!(mood.display_name(), "hidden.hmood");
         assert_eq!(ColumnType::Integer.display_name(), "integer");
     }
 }

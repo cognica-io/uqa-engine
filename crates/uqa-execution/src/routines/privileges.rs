@@ -175,10 +175,7 @@ fn prepare_privileges<'a>(
         analysis::binding::added_routine_acl_roles(&existing.def, &def, &roles, &mut dependencies)?;
         if def.execute_acl != existing.def.execute_acl {
             next.get_mut(&name).expect("resolved routine key")[position] =
-                Arc::new(SQLUserFunction {
-                    def,
-                    compiled: existing.compiled.clone(),
-                });
+                Arc::new(SQLUserFunction::new(def, existing.body.clone()));
         }
     }
     Ok(RoleDependencyCandidate {

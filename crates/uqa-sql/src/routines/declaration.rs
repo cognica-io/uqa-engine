@@ -278,8 +278,8 @@ pub fn resolve_plpgsql_datum_types(
                 .type_oid
                 .and_then(|oid| catalog.resolve_catalog_user_type_by_oid(oid))
             {
-                // The compiled body spells the variable's type in generated SQL; its OID keeps the binding exact.
-                variable.type_name = ty.sql_name();
+                // The compiled function names the variable's type by identity, as a compiled PL/pgSQL function holds type OIDs: a later rename does not change which type it means.
+                variable.type_name = ty.catalog_name();
                 continue;
             }
         }

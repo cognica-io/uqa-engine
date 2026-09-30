@@ -18,7 +18,7 @@ use crate::{
         security::table::TableAclPrivilege,
     },
     plpgsql::bind_expr,
-    routines::{routine_signature_types, CompiledFunctionBody, SQLUserFunction},
+    routines::{routine_signature_types, SQLUserFunction},
     type_resolution::canonical_routine_type_name,
     SQLError,
 };
@@ -163,7 +163,7 @@ impl EventAnalysisContext<'_> {
                 message: format!("function {} must return type trigger", function.def.name),
             });
         }
-        if !matches!(function.compiled, CompiledFunctionBody::PLpgSQL(_)) {
+        if function.def.language != "plpgsql" {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),
                 message: "only LANGUAGE plpgsql trigger functions are executable".into(),

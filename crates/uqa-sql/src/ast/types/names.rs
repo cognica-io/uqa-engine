@@ -109,7 +109,10 @@ impl fmt::Display for TypeName<'_> {
         }
         match self.ty {
             ColumnType::Named(name) => f.write_str(name),
-            // Binding diagnostics name a visible user type without its schema, quoted as `quote_identifier` does; catalog-aware output applies search-path visibility.
+            // Regtype output qualifies a user-defined type whose schema is not visible, as `format_type_be` does; other spellings name an enum without its schema.
+            ColumnType::Enum(reference) if self.regtype => f.write_str(
+                &super::display::visible_type_name(&reference.schema, &reference.name),
+            ),
             ColumnType::Enum(reference) => f.write_str(&crate::expr::quote_ident(&reference.name)),
             ColumnType::SmallInteger => f.write_str("smallint"),
             ColumnType::Integer => f.write_str("integer"),
@@ -178,9 +181,8 @@ impl fmt::Display for TypeName<'_> {
             ColumnType::Multirange(subtype) => f.write_str(subtype.multirange_name()),
             ColumnType::Vector(dimension) => write!(f, "vector({dimension})"),
             ColumnType::Tensor(dimension) => write!(f, "tensor({dimension})"),
-            // Diagnostics name a visible domain without its schema, as enums are named; resolvable names use `catalog_name`.
-            ColumnType::Domain { name, .. } if self.regtype => {
-                f.write_str(&crate::expr::quote_ident(name))
+            ColumnType::Domain { schema, name, .. } if self.regtype => {
+                f.write_str(&super::display::visible_type_name(schema, name))
             }
             ColumnType::Domain { schema, name, .. } => write!(
                 f,

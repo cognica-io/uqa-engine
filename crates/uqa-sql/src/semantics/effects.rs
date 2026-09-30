@@ -453,7 +453,11 @@ fn sql_routine_may_mutate_engine(
             )? {
                 return Ok(true);
             }
-            match &function.compiled {
+            let Some(body) = crate::routines::analyzable_routine_body(context.catalog, &function)?
+            else {
+                return Ok(false);
+            };
+            match &*body {
                 crate::routines::CompiledFunctionBody::SQL(plans) => (|| {
                     let mut mutates = false;
                     for plan in plans {

@@ -665,7 +665,16 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
                     "does not exist",
                 ))
             }
-            argument => copy(argument.map(base_type), control),
+            argument => match min_max_result_type(argument.map(base_type)) {
+                Some(result) => inline(result, control),
+                None => Err(super::super::function_resolution_error(
+                    "42883",
+                    name,
+                    &[None],
+                    std::slice::from_ref(&argument.cloned()),
+                    "does not exist",
+                )),
+            },
         },
         "lag" | "lead" | "first_value" | "last_value" | "nth_value" | "nullif" | "trim_array"
         | "array_sample" | "generate_series" => copy(first(), control),
@@ -790,3 +799,39 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
 
 #[cfg(test)]
 mod tests;
+
+/// The result type of the `min` or `max` overload that `PostgreSQL` 18 selects for an argument type, or `None` when no overload accepts it. An aggregate's result carries no type modifier; `varchar`, `name` and `"char"` reach `min(text)` by implicit coercion to the preferred string type, and so does an unknown argument.
+fn min_max_result_type(argument: Option<&ColumnType>) -> Option<ColumnType> {
+    Some(match argument {
+        None
+        | Some(
+            ColumnType::Text | ColumnType::Varchar(_) | ColumnType::Name | ColumnType::InternalChar,
+        ) => ColumnType::Text,
+        Some(ColumnType::Bpchar | ColumnType::Character(_)) => ColumnType::Bpchar,
+        Some(ColumnType::Numeric { .. }) => ColumnType::Numeric {
+            precision: None,
+            scale: None,
+        },
+        Some(ColumnType::Time | ColumnType::TimePrecision(_)) => ColumnType::Time,
+        Some(ColumnType::TimeTz | ColumnType::TimeTzPrecision(_)) => ColumnType::TimeTz,
+        Some(ColumnType::Timestamp | ColumnType::TimestampPrecision(_)) => ColumnType::Timestamp,
+        Some(ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_)) => {
+            ColumnType::TimestampTz
+        }
+        Some(ColumnType::Interval | ColumnType::IntervalWithFields { .. }) => ColumnType::Interval,
+        Some(
+            ty @ (ColumnType::SmallInteger
+            | ColumnType::Integer
+            | ColumnType::BigInteger
+            | ColumnType::Oid
+            | ColumnType::Real
+            | ColumnType::DoublePrecision
+            | ColumnType::Date
+            | ColumnType::Bytea
+            | ColumnType::Record
+            | ColumnType::Enum(_)),
+        ) => ty.clone(),
+        Some(ty @ ColumnType::Array(_)) => ty.without_type_modifiers(),
+        Some(_) => return None,
+    })
+}

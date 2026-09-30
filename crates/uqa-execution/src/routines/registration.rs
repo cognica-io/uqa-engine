@@ -28,7 +28,7 @@ use uqa_sql::{
         dependencies::RoutineCompilationMode,
         lifecycle::{binding::resolve_sql_routine_alter_target, ensure_routine_owner_as},
         registration::{self as analysis, RoutineSupportAuthority},
-        routine_signature_types, SQLUserFunction,
+        routine_signature_types, CompiledFunctionBody, SQLUserFunction,
     },
     SQLError,
 };
@@ -39,6 +39,7 @@ pub struct RoutineRegistrationContext<'a> {
     pub definition: RoutineDefinitionContext<'a>,
     pub support: &'a dyn RoutineSupportAuthority,
     pub configuration: &'a dyn RoutineConfigurationSession,
+    pub bodies: &'a dyn super::invocation::bodies::RoutineBodySession,
 }
 
 fn allocate_routine_object_id(
@@ -100,7 +101,7 @@ pub fn register_sql_function(
     validate_routine_creation_privileges(context, &def, &current_user)?;
     resolve_routine_type_references(context.definition.compilation.analysis.types, &mut def)?;
     configuration::apply_routine_config_actions(context.configuration, &mut def)?;
-    let (compiled, _) = compile_catalog_bound_routine(
+    let bound = compile_catalog_bound_routine(
         &context.definition,
         &mut def,
         RoutineCompilationMode::Definition,
@@ -110,7 +111,7 @@ pub fn register_sql_function(
     let RoleDependencyCandidate {
         roles,
         memberships,
-        value: (mut registry, next),
+        value: (mut registry, next, published),
         ..
     } = prepare_role_dependencies(
         &locks,
@@ -130,7 +131,7 @@ pub fn register_sql_function(
             let mut def = def.clone();
             let overloads = next.entry(name.clone()).or_default();
             let mut dependencies = BTreeSet::new();
-            if let Some(pos) = overloads
+            let published = if let Some(pos) = overloads
                 .iter()
                 .position(|function| routine_signature_types(&function.def) == signature)
             {
@@ -143,26 +144,24 @@ pub fn register_sql_function(
                     &roles,
                     &memberships,
                 )?;
-                overloads[pos] = Arc::new(SQLUserFunction {
-                    def,
-                    compiled: compiled.clone(),
-                });
+                let published = Arc::new(SQLUserFunction::new(def, bound.body.clone()));
+                overloads[pos] = Arc::clone(&published);
+                published
             } else {
                 dependencies =
                     uqa_sql::routines::security::binding::routine_role_dependencies(&def, &roles)?;
                 def.object_id = Some(allocate_routine_object_id(&registry, &name)?);
-                overloads.push(Arc::new(SQLUserFunction {
-                    def,
-                    compiled: compiled.clone(),
-                }));
-            }
+                let published = Arc::new(SQLUserFunction::new(def, bound.body.clone()));
+                overloads.push(Arc::clone(&published));
+                published
+            };
             overloads.sort_by(|left, right| {
                 routine_signature_types(&left.def)
                     .cmp(&routine_signature_types(&right.def))
                     .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
             });
             Ok(RoleDependencyCandidate {
-                value: (registry, next),
+                value: (registry, next, published),
                 memberships,
                 roles,
                 dependencies,
@@ -177,8 +176,23 @@ pub fn register_sql_function(
     drop(registry);
     drop(memberships);
     drop(roles);
+    retain_validated_body(context, &published, bound.validated)?;
     context.catalog.changes.catalog_registry_changed();
     Ok(())
+}
+
+/// The PL/pgSQL validator leaves its compilation in the defining session's function cache; the SQL validator does not, so a SQL body compiles when a session first runs it.
+fn retain_validated_body(
+    context: &RoutineRegistrationContext<'_>,
+    published: &SQLUserFunction,
+    validated: Option<CompiledFunctionBody>,
+) -> Result<(), SQLError> {
+    match validated {
+        Some(validated) if published.def.language == "plpgsql" => {
+            context.bodies.retain_routine_body(published, validated)
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Change mutable routine attributes without replacing its identity or compiled body.
@@ -234,10 +248,7 @@ pub fn alter_sql_routine(
             "resolved ALTER routine registry entry `{name}` disappeared before mutation"
         ))
     })?;
-    overloads[position] = Arc::new(SQLUserFunction {
-        def,
-        compiled: existing.compiled.clone(),
-    });
+    overloads[position] = Arc::new(SQLUserFunction::new(def, existing.body.clone()));
     context
         .catalog
         .publication

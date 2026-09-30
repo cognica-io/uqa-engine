@@ -286,6 +286,8 @@ pub(super) struct SessionContext {
     pub(crate) statistics_client: AtomicBool,
     /// Enum labels that the outermost transaction added to types it did not create; they become usable at commit. Label checks run while catalog restoration holds the transaction stack, so this state has its own lock.
     pub(crate) uncommitted_enum_labels: Mutex<uqa_execution::schema::enums::UncommittedEnumLabels>,
+    /// Routine source bodies this session compiled, as `PostgreSQL`'s backend-local function cache keeps them. The cache is not transactional, and portal workers share it with their session.
+    pub(crate) routine_bodies: uqa_execution::routines::invocation::bodies::SessionRoutineBodies,
 }
 
 #[derive(Clone)]
@@ -341,6 +343,8 @@ impl SessionContext {
             uncommitted_enum_labels: Mutex::new(
                 uqa_execution::schema::enums::UncommittedEnumLabels::default(),
             ),
+            routine_bodies:
+                uqa_execution::routines::invocation::bodies::SessionRoutineBodies::default(),
         }
     }
 

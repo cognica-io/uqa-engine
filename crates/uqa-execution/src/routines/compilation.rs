@@ -6,11 +6,12 @@
 
 //! Compile stored routine bodies inside their recorded creation namespace.
 
+use std::sync::Arc;
 use uqa_sql::{
     ast::{CreateFunction, FunctionBody},
     routines::{
         compilation::{self as analysis, RoutineCompilationContext},
-        CompiledFunctionBody,
+        CompiledFunctionBody, RoutineBody,
     },
     SQLError,
 };
@@ -39,4 +40,16 @@ pub fn compile_persisted_sql_function(
     let compiled = analysis::compile_persisted_function_body(&context.analysis, def);
     context.session.restore_routine_search_path(previous);
     compiled
+}
+
+/// The body the catalog keeps for a stored definition: a SQL-standard body bound again, and a source body left to the sessions that run it.
+pub fn persisted_routine_body(
+    context: &StoredRoutineCompilationContext<'_>,
+    def: &CreateFunction,
+) -> Result<RoutineBody, SQLError> {
+    match def.body {
+        FunctionBody::Statements(_) => compile_persisted_sql_function(context, def)
+            .map(|body| RoutineBody::Bound(Arc::new(body))),
+        FunctionBody::Source(_) => Ok(RoutineBody::Source),
+    }
 }

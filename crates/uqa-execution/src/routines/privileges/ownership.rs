@@ -94,10 +94,7 @@ pub fn alter_sql_routine_owner(
             def.owner = Some(owner.identity());
             let mut next = registry.clone();
             next.get_mut(name).expect("resolved routine key")[position] =
-                Arc::new(SQLUserFunction {
-                    def,
-                    compiled: existing.compiled.clone(),
-                });
+                Arc::new(SQLUserFunction::new(def, existing.body.clone()));
             Ok(Some((registry, next)))
         },
     )?;

@@ -110,10 +110,10 @@ pub fn move_routine_registry_entry(
     let mut renamed_definition = renamed.def.clone();
     renamed_definition.name.clone_from(&target.new_name);
     let new_overloads = registry.entry(target.new_name.clone()).or_default();
-    new_overloads.push(Arc::new(SQLUserFunction {
-        def: renamed_definition,
-        compiled: renamed.compiled.clone(),
-    }));
+    new_overloads.push(Arc::new(SQLUserFunction::new(
+        renamed_definition,
+        renamed.body.clone(),
+    )));
     new_overloads.sort_by(|left, right| {
         routine_signature_types(&left.def)
             .cmp(&routine_signature_types(&right.def))

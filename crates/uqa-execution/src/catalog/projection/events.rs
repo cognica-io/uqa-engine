@@ -21,7 +21,7 @@ use crate::catalog::{CatalogReadView, RelationNameResolution};
 use uqa_core::RelationIdentity;
 use uqa_sql::canonical_routine_type_name;
 use uqa_sql::catalog::events::{StoredRule, StoredTrigger};
-use uqa_sql::routines::{routine_signature_types, CompiledFunctionBody, SQLUserFunction};
+use uqa_sql::routines::{routine_signature_types, SQLUserFunction};
 
 use super::expression_text::schema_expr_text;
 use super::helpers::oids::{namespace_oid, split_schema_name, stable_oid};
@@ -421,7 +421,7 @@ fn resolve_trigger_function(
             message: format!("function {} must return type trigger", function.def.name),
         });
     }
-    if !matches!(function.compiled, CompiledFunctionBody::PLpgSQL(_)) {
+    if function.def.language != "plpgsql" {
         return Err(SQLError::Routine {
             sqlstate: "0A000".into(),
             message: "only LANGUAGE plpgsql trigger functions are executable".into(),

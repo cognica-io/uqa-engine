@@ -132,6 +132,15 @@ impl From<pg_query::Error> for SQLError {
                     message,
                 }
             }
+            // The PL/pgSQL parser looks up declared types as parse_datatype does, which reports a missing type as an undefined object.
+            pg_query::Error::Parse(message)
+                if message.starts_with("type \"") && message.ends_with("\" does not exist") =>
+            {
+                SQLError::Routine {
+                    sqlstate: "42704".into(),
+                    message,
+                }
+            }
             pg_query::Error::Parse(message) => SQLError::Parse(message),
             other => SQLError::Parse(other.to_string()),
         }

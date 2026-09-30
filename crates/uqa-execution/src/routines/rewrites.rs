@@ -8,7 +8,7 @@
 
 use super::{
     catalog::{RoutineRegistryPublication, RoutineRegistryState},
-    compilation::{compile_persisted_sql_function, StoredRoutineCompilationContext},
+    compilation::{persisted_routine_body, StoredRoutineCompilationContext},
 };
 use crate::schema::namespaces::NamespaceCatalogChanges;
 use std::sync::Arc;
@@ -77,11 +77,8 @@ pub fn publish_stored_routine_body_rewrites(
     let mut rewritten = context.registry.routine_snapshot();
     for definition in definitions {
         let function = analysis::routine_body_rewrite_target(&mut rewritten, &definition)?;
-        let compiled = compile_persisted_sql_function(&context.compilation, &definition)?;
-        *function = Arc::new(SQLUserFunction {
-            def: definition,
-            compiled,
-        });
+        let body = persisted_routine_body(&context.compilation, &definition)?;
+        *function = Arc::new(SQLUserFunction::new(definition, body));
     }
     context
         .publication
