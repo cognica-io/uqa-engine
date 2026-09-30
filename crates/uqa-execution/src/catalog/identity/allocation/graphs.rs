@@ -17,8 +17,6 @@ use uqa_sql::SQLError;
 
 use super::ReservedCatalogIdentityAllocator;
 
-/// `pg_namespace`'s catalog class.
-const NAMESPACE_CLASS_ID: u32 = 2615;
 /// AGE's label ids of the default vertex and edge labels.
 const DEFAULT_VERTEX_LABEL_ID: u32 = 1;
 const DEFAULT_EDGE_LABEL_ID: u32 = 2;
@@ -36,12 +34,7 @@ impl ReservedCatalogIdentityAllocator<'_> {
         &mut self,
         namespace_in_use: impl FnMut(i64) -> Result<bool, SQLError>,
     ) -> Result<GraphCatalogOids, SQLError> {
-        let namespace = crate::catalog::identity::reserve_new_catalog_oid(
-            self.context.locks,
-            NAMESPACE_CLASS_ID,
-            "schema",
-            namespace_in_use,
-        )?;
+        let namespace = self.allocate_namespace_oid(namespace_in_use)?;
         let label_sequence = self
             .allocate_relation_oids(RelationOidKind::Sequence)?
             .relation;
@@ -59,7 +52,7 @@ impl ReservedCatalogIdentityAllocator<'_> {
             );
         }
         Ok(GraphCatalogOids {
-            namespace: oid(namespace)?,
+            namespace,
             label_sequence,
             labels,
         })

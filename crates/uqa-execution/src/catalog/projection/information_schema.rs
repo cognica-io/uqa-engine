@@ -43,20 +43,18 @@ pub fn build_info_schemata(
 ) -> Result<Vec<ResultRow>, SQLError> {
     let current_user = resolution.current_user();
     catalog
-        .all_schema_names(resolution)
+        .all_schema_names()
         .into_iter()
         .filter(|schema| {
-            catalog.schema_security(schema).is_none()
-                || catalog.schema_has_privilege_to(
-                    schema,
-                    current_user,
-                    crate::catalog::security::schema::SchemaAclPrivilege::Usage,
-                )
-                || catalog.schema_has_privilege_to(
-                    schema,
-                    current_user,
-                    crate::catalog::security::schema::SchemaAclPrivilege::Create,
-                )
+            catalog.schema_has_privilege_to(
+                schema,
+                current_user,
+                crate::catalog::security::schema::SchemaAclPrivilege::Usage,
+            ) || catalog.schema_has_privilege_to(
+                schema,
+                current_user,
+                crate::catalog::security::schema::SchemaAclPrivilege::Create,
+            )
         })
         .map(|schema| {
             let owner = catalog.schema_security_names(&schema)?.map_or_else(

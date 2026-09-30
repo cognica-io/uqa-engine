@@ -35,7 +35,14 @@ impl Engine {
     }
 
     pub(crate) fn temporary_namespace_allocated(&self) -> bool {
-        self.session.state.read().temporary_namespace_allocated
+        self.session.state.read().temporary_namespace.is_some()
+    }
+
+    /// The OIDs of the session's temporary namespace and its TOAST namespace once its first temporary object created them.
+    pub(crate) fn temporary_namespace_oids(
+        &self,
+    ) -> Option<uqa_sql::catalog::temporary_namespace::TemporaryNamespaceOids> {
+        self.session.state.read().temporary_namespace
     }
 
     pub(crate) fn temporary_schema_name(&self) -> String {

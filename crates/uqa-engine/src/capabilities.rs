@@ -90,7 +90,7 @@ impl SessionExecutionView<'_> {
         RelationNameResolution {
             search_path: state.search_path.clone(),
             temporary_schema: self.temporary_schema_name(),
-            temporary_namespace_allocated: state.temporary_namespace_allocated,
+            temporary_namespace_allocated: state.temporary_namespace.is_some(),
             current_user: RoleReference::Bound(state.authorization.current().clone()),
             lookup_mode: RelationLookupMode::Dynamic,
         }
@@ -259,14 +259,15 @@ impl Engine {
             || self.storage.tables.read().clone(),
             |tables| (**tables).clone(),
         );
-        Self::catalog_read_view_from(&durable, table_sources)
+        self.catalog_read_view_from(&durable, table_sources)
     }
 
     pub(crate) fn restored_catalog_read_view(&self) -> CatalogReadView {
-        Self::catalog_read_view_from(&self.durable.snapshot(), self.storage.tables.read().clone())
+        self.catalog_read_view_from(&self.durable.snapshot(), self.storage.tables.read().clone())
     }
 
     fn catalog_read_view_from(
+        &self,
         durable: &DurableCatalogSnapshot,
         table_sources: BTreeMap<super::RelationIdentity, Arc<super::TableState>>,
     ) -> CatalogReadView {
@@ -314,6 +315,12 @@ impl Engine {
                 triggers: durable.triggers.clone(),
                 rules: durable.rules.clone(),
             },
+            temporary_namespace: self.temporary_namespace_oids().map(|oids| {
+                uqa_sql::catalog::temporary_namespace::TemporaryNamespace {
+                    schema: self.temporary_schema_name(),
+                    oids,
+                }
+            }),
         })
     }
 

@@ -36,6 +36,7 @@ pub(crate) fn empty_catalog() -> CatalogReadView {
             triggers: Arc::default(),
             rules: Arc::default(),
         },
+        temporary_namespace: None,
     })
 }
 

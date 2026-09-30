@@ -207,7 +207,7 @@ impl RoleDependencyCatalog for Engine {
 
 impl uqa_sql::catalog::roles::dependencies::context::TemporaryRoleDependencyCatalog for Engine {
     fn temporary_namespace_allocated(&self) -> bool {
-        self.session.state.read().temporary_namespace_allocated
+        self.session.state.read().temporary_namespace.is_some()
     }
     fn sequence_persistence(
         &self,

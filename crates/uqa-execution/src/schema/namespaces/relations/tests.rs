@@ -23,6 +23,7 @@ use uqa_sql::catalog::{
         schema_inquiry::{GraphNamespaceRead, SchemaRegistryRead},
         BoundSchemaSecurity,
     },
+    temporary_namespace::TemporaryNamespaceOids,
 };
 use uqa_storage::StorageBackendError;
 
@@ -174,8 +175,11 @@ impl SchemaPrivilegeCatalog for Fixture {
     fn graphs(&self) -> Box<dyn GraphNamespaceRead + '_> {
         Box::new(EmptyNames)
     }
-    fn temporary_namespace_allocated(&self) -> bool {
-        self.allocated.get()
+    fn temporary_namespace_oids(&self) -> Option<TemporaryNamespaceOids> {
+        self.allocated.get().then_some(TemporaryNamespaceOids {
+            namespace: 16_390,
+            toast_namespace: 16_391,
+        })
     }
     fn temporary_schema_name(&self) -> String {
         RelationCandidateState::temporary_schema_name(self)
@@ -236,9 +240,10 @@ impl RelationCreationRuntime for Fixture {
         }
         Ok(())
     }
-    fn allocate_temporary_namespace(&self) {
+    fn create_temporary_namespace(&self) -> Result<(), SQLError> {
         self.events.borrow_mut().push("allocate");
         self.allocated.set(true);
+        Ok(())
     }
 }
 

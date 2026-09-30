@@ -42,6 +42,9 @@ fn usable_namespace(
     role: &(impl RoleSubject + ?Sized),
     name: &str,
 ) -> bool {
+    if name == resolution.temporary_schema && !resolution.temporary_namespace_allocated {
+        return false;
+    }
     let Some(security) = schema_security(catalog, &resolution.temporary_schema, name) else {
         return false;
     };
@@ -57,35 +60,57 @@ fn usable_namespace(
     })
 }
 
+/// The search path's schemas that exist and that the role may use, once each, with `pg_temp` standing for the session's temporary namespace once it exists, as `recomputeNamespacePath` lists them.
+fn explicit_schema_names(
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    role: &(impl RoleSubject + ?Sized),
+) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for name in resolution.search_path() {
+        let name = if name == "pg_temp" {
+            &resolution.temporary_schema
+        } else {
+            name
+        };
+        if !names.contains(name) && usable_namespace(catalog, resolution, role, name) {
+            names.push(name.clone());
+        }
+    }
+    names
+}
+
+/// `current_schema()`: the first schema of the explicit search path.
 pub fn current_schema_name(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     role: &(impl RoleSubject + ?Sized),
 ) -> Option<String> {
-    for name in resolution.search_path() {
-        if usable_namespace(catalog, resolution, role, name) {
-            return Some(name.clone());
-        }
-    }
-    None
+    explicit_schema_names(catalog, resolution, role)
+        .into_iter()
+        .next()
 }
 
+/// `current_schemas(include_implicit)`: the explicit search path, which the implicitly searched schemas precede when asked for: the session's temporary namespace once it exists and then `pg_catalog`, each unless the path names it.
 pub fn current_schema_names(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     role: &(impl RoleSubject + ?Sized),
     include_implicit: bool,
 ) -> Vec<String> {
-    let path = resolution.search_path();
+    let explicit = explicit_schema_names(catalog, resolution, role);
     let mut out = Vec::new();
-    if include_implicit && !path.iter().any(|name| name == "pg_catalog") {
-        out.push("pg_catalog".to_owned());
-    }
-    for name in path {
-        if !out.contains(name) && usable_namespace(catalog, resolution, role, name) {
-            out.push(name.clone());
+    if include_implicit {
+        if resolution.temporary_namespace_allocated
+            && !explicit.contains(&resolution.temporary_schema)
+        {
+            out.push(resolution.temporary_schema.clone());
+        }
+        if !explicit.iter().any(|name| name == "pg_catalog") {
+            out.push("pg_catalog".to_owned());
         }
     }
+    out.extend(explicit);
     out
 }
 

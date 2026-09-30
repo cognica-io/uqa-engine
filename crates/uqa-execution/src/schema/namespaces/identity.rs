@@ -76,7 +76,7 @@ pub(super) fn reserve_creation(
     new_tuple(oid).map_err(|error| SQLError::Internal(error.to_string()))
 }
 
-/// Whether a namespace already holds `oid`: a built-in, created or graph schema.
+/// Whether a namespace already holds `oid`: a built-in, created or graph schema, or the session's temporary namespace or its TOAST namespace.
 pub fn namespace_oid_in_use(
     catalog: &dyn uqa_sql::catalog::security::schema_inquiry::SchemaPrivilegeCatalog,
     oid: i64,
@@ -85,6 +85,11 @@ pub fn namespace_oid_in_use(
         .iter()
         .any(|name| schema_oid(name) == oid)
     {
+        return true;
+    }
+    if catalog.temporary_namespace_oids().is_some_and(|oids| {
+        oid == i64::from(oids.namespace) || oid == i64::from(oids.toast_namespace)
+    }) {
         return true;
     }
     if catalog

@@ -123,7 +123,7 @@ impl CatalogObjects {
         resolution: &RelationNameResolution,
     ) -> Result<Self, SQLError> {
         let mut objects = Self::default();
-        objects.collect_namespaces(catalog, resolution);
+        objects.collect_namespaces(catalog);
         objects.collect_relations(context, catalog, resolution)?;
         objects.collect_types(catalog);
         for function in catalog.all_sql_functions() {
@@ -148,12 +148,8 @@ impl CatalogObjects {
         Ok(objects)
     }
 
-    fn collect_namespaces(
-        &mut self,
-        catalog: &CatalogReadView,
-        resolution: &RelationNameResolution,
-    ) {
-        for schema in catalog.all_schema_names(resolution) {
+    fn collect_namespaces(&mut self, catalog: &CatalogReadView) {
+        for schema in catalog.all_schema_names() {
             let Ok(oid) =
                 u32::try_from(super::super::helpers::oids::namespace_oid(catalog, &schema))
             else {

@@ -146,6 +146,7 @@ const FALSE_NODE: &str = "({CONST :consttype 16 :consttypmod -1 :constcollid 0 :
 mod arrays;
 mod definitions;
 mod enums;
+mod namespaces;
 mod notifications;
 mod privileges;
 mod ranges;
@@ -175,6 +176,7 @@ pub const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] = &[
     arrays::ROUTINES,
     enums::ROUTINES,
     definitions::ROUTINES,
+    namespaces::ROUTINES,
     notifications::ROUTINES,
     privileges::ROUTINES,
     ranges::ROUTINES,

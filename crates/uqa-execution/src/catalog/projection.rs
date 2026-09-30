@@ -63,7 +63,7 @@ pub fn build_info_schema_rows(
         VirtualRelation::InformationKeyColumnUsage => {
             build_info_key_column_usage(catalog, resolution)?
         }
-        VirtualRelation::PgNamespace => build_pg_namespace(catalog, resolution)?,
+        VirtualRelation::PgNamespace => build_pg_namespace(catalog)?,
         VirtualRelation::PgClass => build_pg_class(context, catalog, resolution)?,
         VirtualRelation::PgInherits => build_pg_inherits(catalog, resolution)?,
         VirtualRelation::PgPartitionedTable => {
@@ -327,6 +327,7 @@ use pg_catalog::{
     build_pg_type, build_pg_user, build_pg_views,
 };
 use pg_namespace::build_pg_namespace;
+pub use pg_namespace::{pg_is_other_temp_schema_value, pg_my_temp_schema_value};
 use pg_proc::build_pg_proc;
 use pg_settings::build_pg_settings;
 pub use regtypes::{

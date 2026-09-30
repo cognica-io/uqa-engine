@@ -322,7 +322,7 @@ impl SessionContext {
         let state = super::SessionStateSnapshot {
             graph_overlay: None,
             search_path: vec!["public".to_string()],
-            temporary_namespace_allocated: false,
+            temporary_namespace: None,
             session_vars: BTreeMap::new(),
             parameter_scopes: uqa_sql::semantics::parameters::ParameterScopes::default(),
             sequence_currvals: BTreeMap::new(),

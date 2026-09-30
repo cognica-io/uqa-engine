@@ -259,7 +259,7 @@ impl Engine {
                 .transactions
                 .try_lock()
                 .is_some_and(|stack| stack.is_empty())
-            && !self.session.state.read().temporary_namespace_allocated;
+            && self.session.state.read().temporary_namespace.is_none();
         if share_catalog {
             self.synchronize_table_catalog()?;
             self.synchronize_table_data()?;

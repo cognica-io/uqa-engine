@@ -527,7 +527,7 @@ impl RegtypeOutputCatalog {
         // Output functions read catalog rows, which name relations canonically; they need no privilege on their schemas, as `regclassout` and `regtypeout` do not.
         let mut resolution = context.session_execution_view().relation_name_resolution();
         resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
-        let namespaces = build_pg_namespace(&catalog, &resolution)?
+        let namespaces = build_pg_namespace(&catalog)?
             .into_iter()
             .filter_map(|row| {
                 Some((

@@ -172,7 +172,7 @@ impl CatalogReadView {
         Ok(None)
     }
 
-    pub fn all_schema_names(&self, resolution: &RelationNameResolution) -> Vec<String> {
+    pub fn all_schema_names(&self) -> Vec<String> {
         let mut schemas = vec![
             "pg_catalog".to_string(),
             "information_schema".to_string(),
@@ -180,26 +180,9 @@ impl CatalogReadView {
         ];
         schemas.extend(self.snapshot.definitions.schemas.keys().cloned());
         schemas.extend(self.snapshot.definitions.graphs.keys().cloned());
-        let temporary_schema = resolution.temporary_schema.clone();
-        let has_temporary_relation = self
-            .snapshot
-            .tables
-            .iter()
-            .any(|(relation, _)| relation.schema == temporary_schema)
-            || self
-                .snapshot
-                .definitions
-                .views
-                .keys()
-                .any(|relation| relation.schema == temporary_schema)
-            || self.snapshot.definitions.sequence_persistence.iter().any(
-                |(relation, persistence)| {
-                    relation.schema == temporary_schema
-                        && *persistence == uqa_sql::ast::RelationPersistence::Temporary
-                },
-            );
-        if has_temporary_relation {
-            schemas.push(temporary_schema);
+        if let Some(temporary) = &self.snapshot.temporary_namespace {
+            schemas.push(temporary.schema.clone());
+            schemas.push(temporary.toast_schema());
         }
         schemas.sort();
         schemas.dedup();
@@ -448,8 +431,21 @@ impl CatalogReadView {
         role: &(impl RoleSubject + ?Sized),
         privilege: crate::catalog::security::schema::SchemaAclPrivilege,
     ) -> bool {
-        let Some(security) = self.snapshot.definitions.schemas.get(schema) else {
-            return true;
+        let toast_security;
+        let security = match self.snapshot.definitions.schemas.get(schema) {
+            Some(security) => security,
+            None => match self.snapshot.temporary_namespace.as_ref() {
+                // `InitTempTableNamespace` creates the TOAST namespace for the bootstrap superuser with no ACL, so only its privileges reach it.
+                Some(temporary) if schema == temporary.toast_schema() => {
+                    toast_security =
+                        crate::catalog::security::BoundSchemaSecurity::bootstrap_with_oid(
+                            schema,
+                            temporary.oids.toast_namespace,
+                        );
+                    &toast_security
+                }
+                _ => return true,
+            },
         };
         security
             .resolve(&self.snapshot.definitions.roles)

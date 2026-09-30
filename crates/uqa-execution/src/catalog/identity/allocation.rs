@@ -109,7 +109,25 @@ impl ReservedCatalogIdentityAllocator<'_> {
         self.assigned.insert((class, oid));
         Ok(oid)
     }
+
+    /// The next OID of the counter that no namespace holds, for a schema `NamespaceCreate` inserts; `namespace_in_use` tells whether a namespace already holds an OID.
+    pub fn allocate_namespace_oid(
+        &mut self,
+        namespace_in_use: impl FnMut(i64) -> Result<bool, uqa_sql::SQLError>,
+    ) -> Result<u32, uqa_sql::SQLError> {
+        let oid = super::reserve_new_catalog_oid(
+            self.context.locks,
+            NAMESPACE_CLASS_ID,
+            "schema",
+            namespace_in_use,
+        )?;
+        u32::try_from(oid)
+            .map_err(|_| uqa_sql::SQLError::Internal(format!("invalid schema OID {oid}")))
+    }
 }
+
+/// `pg_namespace`'s catalog class.
+const NAMESPACE_CLASS_ID: u32 = 2615;
 
 impl CatalogObjectAllocator for ReservedCatalogIdentityAllocator<'_> {
     fn include_catalog_identity(
@@ -185,6 +203,7 @@ impl CatalogObjectAllocator for ReservedCatalogIdentityAllocator<'_> {
 
 mod graphs;
 pub use graphs::LabelShape;
+mod temporary_namespaces;
 
 #[cfg(test)]
 mod tests;

@@ -70,7 +70,9 @@ impl SchemaPrivilegeCatalog for Catalog {
     fn graphs(&self) -> Box<dyn GraphNamespaceRead + '_> {
         panic!("raw API creation uses loaded schema names")
     }
-    fn temporary_namespace_allocated(&self) -> bool {
+    fn temporary_namespace_oids(
+        &self,
+    ) -> Option<crate::catalog::temporary_namespace::TemporaryNamespaceOids> {
         panic!("creation selection does not inspect allocation")
     }
     fn temporary_schema_name(&self) -> String {

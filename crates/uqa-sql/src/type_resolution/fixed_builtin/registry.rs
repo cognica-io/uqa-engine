@@ -180,6 +180,8 @@ declarations! { fn lookup_local(local);
         "pg_get_partkeydef" => &[Signature::new(&[ColumnType::Oid], ColumnType::Text)],
         "pg_get_userbyid" => &[Signature::new(&[ColumnType::Oid], ColumnType::Name)],
         "pg_backend_pid" => &[Signature::new(&[], ColumnType::Integer)],
+        "pg_my_temp_schema" => &[Signature::new(&[], ColumnType::Oid)],
+        "pg_is_other_temp_schema" => &[Signature::new(&[ColumnType::Oid], ColumnType::Boolean)],
         "current_setting" => &[
             Signature::new(&[ColumnType::Text], ColumnType::Text),
             Signature::new(&[ColumnType::Text, ColumnType::Boolean],

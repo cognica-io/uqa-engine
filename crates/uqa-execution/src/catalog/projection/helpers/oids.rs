@@ -9,8 +9,16 @@
 use uqa_core::RelationIdentity;
 use uqa_sql::SQLError;
 
-/// Resolve namespace references from the same catalog snapshot as their owning rows. A graph's schema has the OID its creation recorded.
+/// Resolve namespace references from the same catalog snapshot as their owning rows. A graph's schema and the session's temporary namespaces have the OIDs their creation allocated.
 pub fn namespace_oid(catalog: &crate::catalog::CatalogReadView, name: &str) -> i64 {
+    if let Some(oid) = catalog
+        .snapshot()
+        .temporary_namespace
+        .as_ref()
+        .and_then(|temporary| temporary.namespace_oid(name))
+    {
+        return i64::from(oid);
+    }
     if let Some(oids) = catalog.graph_catalog_oids(name) {
         return i64::from(oids.namespace);
     }

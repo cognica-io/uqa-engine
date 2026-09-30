@@ -105,6 +105,8 @@ pub fn function_volatility_with_binding(
                 | "current_schemas"
                 | "current_setting"
                 | "pg_backend_pid"
+                | "pg_my_temp_schema"
+                | "pg_is_other_temp_schema"
                 | "version"
                 | "pg_listening_channels"
                 | "to_regclass"

@@ -154,6 +154,8 @@ fn is_catalog_scalar(name: &str) -> bool {
         "pg_get_expr"
             | "pg_get_partkeydef"
             | "pg_backend_pid"
+            | "pg_my_temp_schema"
+            | "pg_is_other_temp_schema"
             | "pg_notify"
             | "pg_notification_queue_usage"
             | "pg_get_serial_sequence"
@@ -198,6 +200,15 @@ pub fn catalog_scalar_value(
     Some(match lower.as_str() {
         "pg_backend_pid" => no_scalar_arguments(&lower, arguments)
             .map(|()| Value::Int(i64::from(context.session.backend_process_id()))),
+        "pg_my_temp_schema" => no_scalar_arguments(&lower, arguments).map(|()| {
+            crate::catalog::projection::pg_my_temp_schema_value(
+                &context.catalog.catalog_read_view(),
+            )
+        }),
+        "pg_is_other_temp_schema" => crate::catalog::projection::pg_is_other_temp_schema_value(
+            &context.catalog.catalog_read_view(),
+            arguments,
+        ),
         "pg_notify" => (|| {
             let (channel, payload) = notification_arguments(arguments)?;
             context.session.notify(channel, payload)?;

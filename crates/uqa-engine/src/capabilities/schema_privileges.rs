@@ -57,8 +57,10 @@ impl SchemaPrivilegeCatalog for Engine {
             oids: self.durable.graph_catalog_oids.read(),
         })
     }
-    fn temporary_namespace_allocated(&self) -> bool {
-        self.temporary_namespace_allocated()
+    fn temporary_namespace_oids(
+        &self,
+    ) -> Option<uqa_sql::catalog::temporary_namespace::TemporaryNamespaceOids> {
+        self.temporary_namespace_oids()
     }
     fn temporary_schema_name(&self) -> String {
         self.temporary_schema_name()
@@ -155,8 +157,15 @@ impl RelationCreationRuntime for Engine {
     fn fence_catalog_writer_and_refresh_snapshot(&self) -> Result<(), SQLError> {
         Engine::fence_catalog_writer_and_refresh_snapshot(self)
     }
-    fn allocate_temporary_namespace(&self) {
-        self.session.state.write().temporary_namespace_allocated = true;
+    fn create_temporary_namespace(&self) -> Result<(), SQLError> {
+        let oids = self
+            .catalog_identity_reservation_context()
+            .allocator(uqa_execution::catalog::identity::allocate_catalog_object_id)
+            .allocate_temporary_namespace_oids(|oid| {
+                Ok(uqa_execution::schema::namespaces::identity::namespace_oid_in_use(self, oid))
+            })?;
+        self.session.state.write().temporary_namespace = Some(oids);
+        Ok(())
     }
 }
 impl Engine {

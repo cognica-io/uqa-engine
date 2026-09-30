@@ -46,6 +46,8 @@ pub struct CatalogReadView {
 pub struct CatalogReadSnapshot {
     pub tables: BTreeMap<uqa_core::RelationIdentity, CatalogTableSnapshot>,
     pub definitions: CatalogDefinitionSnapshot,
+    /// The session's temporary namespace once its first temporary object created it.
+    pub temporary_namespace: Option<uqa_sql::catalog::temporary_namespace::TemporaryNamespace>,
 }
 
 /// Immutable table-definition fields used by binding and catalog projection.

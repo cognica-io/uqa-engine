@@ -66,6 +66,8 @@ pub(crate) fn fixed_builtin_is_non_immutable(name: &str) -> bool {
             | "pg_get_expr"
             | "pg_get_partkeydef"
             | "pg_backend_pid"
+            | "pg_my_temp_schema"
+            | "pg_is_other_temp_schema"
             | "current_setting"
             | "version"
             | "pg_listening_channels"

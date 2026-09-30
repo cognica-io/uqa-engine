@@ -36,7 +36,8 @@ pub trait RelationCreationRuntime {
     fn synchronize_table_data(&self) -> StorageBackendResult<()>;
     fn backend_transaction_is_deferred(&self) -> bool;
     fn fence_catalog_writer_and_refresh_snapshot(&self) -> Result<(), SQLError>;
-    fn allocate_temporary_namespace(&self);
+    /// Create the session's temporary namespace and its TOAST namespace with the counter's next OIDs, which a rollback past this point forgets.
+    fn create_temporary_namespace(&self) -> Result<(), SQLError>;
 }
 
 #[derive(Clone, Copy)]
@@ -83,8 +84,15 @@ impl RelationCreationContext<'_> {
     pub fn temporary_name(&self, name: &str) -> Result<String, SQLError> {
         self.ensure_temporary_privilege()?;
         let (temporary_schema, relation) = creation::temporary_creation_parts(self.state, name)?;
-        self.runtime.allocate_temporary_namespace();
+        self.access_temporary_namespace()?;
         Ok(RelationIdentity::new(temporary_schema, relation).qualified_name())
+    }
+    /// `AccessTempTableNamespace`: the session's first temporary object creates the session's temporary namespace, and later ones find it.
+    fn access_temporary_namespace(&self) -> Result<(), SQLError> {
+        if self.schemas.temporary_namespace_allocated() {
+            return Ok(());
+        }
+        self.runtime.create_temporary_namespace()
     }
     pub fn api_name(&self, name: &str) -> StorageBackendResult<String> {
         self.lock_relation_namespace(|| {
@@ -117,7 +125,7 @@ impl RelationCreationContext<'_> {
         if target.schema == "pg_temp" {
             if !self.schemas.temporary_namespace_allocated() {
                 self.ensure_temporary_privilege()?;
-                self.runtime.allocate_temporary_namespace();
+                self.access_temporary_namespace()?;
             }
             target.schema.clone_from(&temporary);
         } else if target.schema == temporary && !self.schemas.temporary_namespace_allocated() {

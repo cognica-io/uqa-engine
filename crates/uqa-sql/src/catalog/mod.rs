@@ -876,6 +876,7 @@ pub mod regrole_dependencies;
 
 pub mod graph_oids;
 pub mod relation_oids;
+pub mod temporary_namespace;
 
 pub mod security;
 
