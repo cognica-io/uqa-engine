@@ -498,6 +498,30 @@ pub(crate) struct NotificationHub {
     max_queue_pages: u64,
     cross: Option<CrossProcessState>,
     cross_error: Mutex<Option<String>>,
+    cross_failures: Mutex<CrossFailureLog>,
+}
+
+/// The delivery failures of cross-process synchronizations, counted so that a committing statement reports a failure another thread met while delivering its notifications.
+#[derive(Default)]
+struct CrossFailureLog {
+    count: u64,
+    last: Option<String>,
+}
+
+impl CrossFailureLog {
+    #[cfg_attr(
+        not(any(windows, all(unix, not(target_os = "emscripten")))),
+        allow(dead_code)
+    )]
+    fn record(&mut self, error: String) {
+        self.count += 1;
+        self.last = Some(error);
+    }
+
+    /// The last failure, when one was counted after `count` failures.
+    fn since(&self, count: u64) -> Option<String> {
+        (self.count > count).then(|| self.last.clone()).flatten()
+    }
 }
 
 impl Default for NotificationHub {
@@ -509,6 +533,7 @@ impl Default for NotificationHub {
             max_queue_pages: MAX_NOTIFICATION_QUEUE_PAGES,
             cross: None,
             cross_error: Mutex::new(None),
+            cross_failures: Mutex::new(CrossFailureLog::default()),
         }
     }
 }
@@ -854,6 +879,7 @@ mod tests {
             max_queue_pages: 1,
             cross: None,
             cross_error: Mutex::new(None),
+            cross_failures: Mutex::new(CrossFailureLog::default()),
         };
         let warning = hub.queue_warning(&mut state).unwrap();
         assert_eq!(warning.message, "NOTIFY queue is 100% full");

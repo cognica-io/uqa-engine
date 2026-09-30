@@ -53,6 +53,7 @@ impl NotificationHub {
                 coordinator: Mutex::new(None),
             }),
             cross_error: Mutex::new(None),
+            cross_failures: Mutex::new(super::CrossFailureLog::default()),
         })
     }
 
@@ -253,6 +254,7 @@ impl NotificationHub {
         };
         *recorded = Some(error.to_string());
         drop(recorded);
+        self.cross_failures.lock().record(error.to_string());
         let failure = super::subscription::NotificationSubscriptionError::with_source(
             uqa_core::notifications::NotificationFailureKind::SourceUnavailable,
             error,
@@ -704,6 +706,8 @@ impl NotificationHub {
             notices,
             pending: _,
         } = session;
+        // The commit gate keeps other synchronizations out until the publication commits, so a failure counted after this belongs to a delivery that followed it.
+        let failures_before = self.cross_failures.lock().count;
         let publication_result = prepared
             .registry
             .take()
@@ -752,7 +756,12 @@ impl NotificationHub {
                 "transaction committed; notification publication awaits recovery: {error}"
             ))
         })?;
-        self.try_synchronize_cross_process_session(None)
+        let delivered = self.try_synchronize_cross_process_session(None);
+        // The wake thread's periodic synchronization may deliver the publication first; its failure is this statement's too.
+        let concurrent = self.cross_failures.lock().since(failures_before);
+        delivered
+            .map_err(|error| error.to_string())
+            .and_then(|()| concurrent.map_or(Ok(()), Err))
             .map_err(|error| {
                 SQLError::Internal(format!(
                     "transaction committed; notification delivery awaits recovery: {error}"
