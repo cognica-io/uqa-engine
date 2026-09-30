@@ -151,17 +151,29 @@ pub(super) fn eval_scalar_inner(
                 )?;
                 return plain(value, control);
             }
-            eval_binary_values_with_integer_width_with_control(
-                *op,
-                &left,
-                &right,
+            // Integer operand widths constrain only integer arithmetic.
+            // Other carriers keep their existing
+            // numeric promotion without re-inferring the operand trees.
+            let integer_width = if matches!((&*left, &*right), (Value::Int(_), Value::Int(_)))
+                && matches!(
+                    op,
+                    BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
+                ) {
                 uqa_sql::scalar_integer_operation_width_with_control(
                     lhs,
                     rhs,
                     context.row_schema().unwrap_or(&crate::RowSchema::default()),
                     context.params(),
                     control,
-                )?,
+                )?
+            } else {
+                None
+            };
+            eval_binary_values_with_integer_width_with_control(
+                *op,
+                &left,
+                &right,
+                integer_width,
                 control,
             )
         }

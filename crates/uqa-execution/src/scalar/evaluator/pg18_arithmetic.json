@@ -1,0 +1,15 @@
+{
+  "postgresql": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "image": "sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636",
+  "charge": "111.600000",
+  "profit": "89.2500",
+  "int2_overflow": "22003",
+  "int4_overflow": "22003",
+  "int8_overflow": "22003",
+  "nested_int2_overflow": "22003",
+  "nested_int4_overflow": "22003",
+  "nested_int8_overflow": "22003",
+  "int2_null": true,
+  "int4_null": true,
+  "int8_null": true
+}
