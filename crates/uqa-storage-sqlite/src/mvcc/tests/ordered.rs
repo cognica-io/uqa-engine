@@ -134,3 +134,63 @@ fn ordered_cursor_stops_before_oversize_keys_and_never_hydrates_metadata_values(
     ));
     assert_eq!(read.memory().used(), 0);
 }
+
+#[test]
+fn stopping_at_a_point_does_not_admit_a_later_compacted_run_key() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    let storage = control();
+    let mut keys = vec![b"ordered/a".to_vec()];
+    let run_prefix = [b"ordered/z".as_slice(), &[b'x'; 512]].concat();
+    keys.extend((0_u64..130).map(|id| [run_prefix.as_slice(), &id.to_be_bytes()].concat()));
+    let writes = keys
+        .iter()
+        .map(|key| RecordWrite {
+            key,
+            expected: None,
+            value: Some(b"value"),
+        })
+        .collect::<Vec<_>>();
+    let commit = PreparedRecordCommit::new(&writes, &storage).unwrap();
+    let id = store.allocate_transaction(&storage).unwrap();
+    store.commit(id, &commit, &storage).unwrap();
+    store.reclaim_versions(&storage).unwrap();
+    store
+        .with(|sqlite| {
+            assert!(
+                sqlite.query_row("SELECT count(*) FROM _uqa_mvcc_runs", [], |row| {
+                    row.get::<_, i64>(0)
+                })? > 0
+            );
+            assert!(sqlite.query_row(
+                "SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_heads WHERE key = ?1)",
+                [b"ordered/a".as_slice()],
+                |row| row.get::<_, bool>(0),
+            )?);
+            Ok(())
+        })
+        .unwrap();
+    let snapshot = store.snapshot(&storage).unwrap();
+    for (limit, more) in [(1, true), (usize::MAX, false)] {
+        let read = StorageReadControl::with_limit(256);
+        let mut visited = 0;
+        snapshot
+            .visit_keys(b"ordered/", None, limit, &read, &mut |key, record| {
+                assert_eq!(key, b"ordered/a");
+                assert!(record.live);
+                visited += 1;
+                Ok(more)
+            })
+            .unwrap();
+        assert_eq!(visited, 1);
+        assert_eq!(read.memory().used(), 0);
+        let error = snapshot
+            .visit_keys(b"ordered/", Some(b"ordered/a"), 1, &read, &mut |_, _| {
+                panic!("an oversized selected run key must be rejected before its visitor")
+            })
+            .unwrap_err()
+            .into_storage_error();
+        assert!(matches!(error, uqa_storage::StorageBackendError::Memory(_)));
+        assert_eq!(read.memory().used(), 0);
+    }
+}

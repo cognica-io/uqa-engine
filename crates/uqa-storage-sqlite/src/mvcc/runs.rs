@@ -12,7 +12,7 @@ mod scan;
 
 pub(super) use collect::compact;
 pub(super) use previous::previous_key;
-pub(super) use scan::next_key;
+pub(super) use scan::{next_candidate, next_key, KeyCandidate};
 
 use rusqlite::{params, types::ValueRef, Connection, Row};
 use uqa_storage::mvcc::{BorrowedRecord, CommitSequence, RecordValueVisitor, VersionError};

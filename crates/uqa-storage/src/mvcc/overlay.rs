@@ -6,6 +6,7 @@
 
 //! Transaction-private evaluated replacements, retained command views and undo.
 
+use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use parking_lot::Mutex;
@@ -19,7 +20,7 @@ use super::key::RecordKey;
 use super::{PreparedRecordCommit, PreparedRecordWrite, RecordWrite, VersionError, VersionResult};
 
 mod retained;
-use retained::Sources;
+use retained::{RetainedSources, Sources};
 
 struct Change {
     write: PreparedRecordWrite,
@@ -30,18 +31,18 @@ type Records = BudgetedSharedMap<RecordKey, Change>;
 
 /// Process-local identity of an evaluated private batch. Identities are never reused across transactions or undo branches; they are not durable commit sequences.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct PrivateRecordRevision(u64);
+pub struct PrivateRecordRevision(NonZeroU64);
 
 impl PrivateRecordRevision {
     fn allocate() -> VersionResult<Self> {
         static NEXT: AtomicU64 = AtomicU64::new(1);
         NEXT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-            .map(Self)
+            .map(|id| Self(NonZeroU64::new(id).expect("private revisions start at one")))
             .map_err(|_| VersionError::PrivateRevisionExhausted)
     }
 
     pub fn as_u64(self) -> u64 {
-        self.0
+        self.0.get()
     }
 }
 
@@ -64,7 +65,7 @@ impl PrivateRecordKey {
 struct Savepoint {
     id: StorageSavepointId,
     records: Records,
-    sources: Sources,
+    sources: RetainedSources,
     revision: Option<PrivateRecordRevision>,
 }
 
@@ -94,7 +95,6 @@ impl State {
 
 struct Owner {
     state: Mutex<State>,
-    memory: MemoryBudget,
 }
 
 /// One transaction's record changes. No provider lock or native transaction is retained between operations.
@@ -135,7 +135,6 @@ impl PrivateRecordChanges {
                     revision: None,
                     savepoints: BudgetedVec::new(memory),
                 }),
-                memory: memory.clone(),
             }),
         }
     }
@@ -146,7 +145,8 @@ impl PrivateRecordChanges {
         writes: &[RecordWrite<'_>],
         control: &StorageReadControl,
     ) -> VersionResult<()> {
-        let owned_control = StorageReadControl::new(&self.owner.memory, control.cancellation());
+        let memory = self.owner.state.lock().records.budget().clone();
+        let owned_control = StorageReadControl::new(&memory, control.cancellation());
         let prepared = PreparedRecordCommit::new(writes, &owned_control)?;
         self.apply_owned(prepared.records(), control)
     }
@@ -217,14 +217,14 @@ impl PrivateRecordChanges {
     }
 
     pub fn snapshot(&self) -> VersionResult<PrivateRecordSnapshot> {
-        let memory = self
-            .owner
-            .memory
-            .reserve(std::mem::size_of::<PrivateRecordSnapshot>())?;
         let state = self.owner.state.lock();
+        let memory = state
+            .records
+            .budget()
+            .reserve(std::mem::size_of::<PrivateRecordSnapshot>())?;
         Ok(PrivateRecordSnapshot {
             records: state.records.clone(),
-            sources: state.sources.clone(),
+            sources: state.sources.snapshot(),
             revision: state.revision,
             _memory: memory,
         })
@@ -233,7 +233,7 @@ impl PrivateRecordChanges {
     pub fn savepoint(&self, id: StorageSavepointId) -> VersionResult<()> {
         let mut state = self.owner.state.lock();
         let records = state.records.clone();
-        let sources = state.sources.clone();
+        let sources = state.sources.snapshot();
         let revision = state.revision;
         state.savepoints.push(Savepoint {
             id,
@@ -257,7 +257,8 @@ impl PrivateRecordChanges {
         let mut state = self.owner.state.lock();
         let position = state.savepoint_position(id)?;
         state.records = state.savepoints[position].records.clone();
-        state.sources = state.savepoints[position].sources.clone();
+        let sources = state.savepoints[position].sources.clone();
+        state.sources.restore(&sources);
         state.revision = state.savepoints[position].revision;
         state.truncate_savepoints(position + 1);
         Ok(())
@@ -265,8 +266,9 @@ impl PrivateRecordChanges {
 
     pub fn rollback(&self) -> VersionResult<()> {
         let mut state = self.owner.state.lock();
-        state.records = Records::new(&self.owner.memory);
-        state.sources = Sources::new(&self.owner.memory);
+        let memory = state.records.budget().clone();
+        state.records = Records::new(&memory);
+        state.sources = Sources::new(&memory);
         state.revision = None;
         state.truncate_savepoints(0);
         Ok(())
@@ -288,7 +290,7 @@ impl PrivateRecordChanges {
 /// Fixed private visibility for a command or retained source cursor; tombstones remain distinguishable from an unchanged key.
 pub struct PrivateRecordSnapshot {
     records: Records,
-    sources: Sources,
+    sources: RetainedSources,
     revision: Option<PrivateRecordRevision>,
     _memory: MemoryReservation,
 }

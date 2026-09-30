@@ -7,7 +7,7 @@
 //! Paired ordered cursors admit each encoded key before fetching it, then merge compacted runs.
 
 use rusqlite::{params, Connection};
-use uqa_core::memory::{BudgetedVec, MemoryReservation};
+use uqa_core::memory::MemoryReservation;
 use uqa_storage::read_control::StorageReadControl;
 
 use super::{codec, info, point_info, runs, CommitSequence, Info, PhysicalResult, VersionError};
@@ -52,32 +52,53 @@ pub(super) fn visit(
         boundary,
         control,
         &mut |key, record| {
-            while let Some(run) = pending.as_ref().filter(|run| &***run < key) {
-                if let Some(record) = run_info(connection, run, boundary, control)? {
-                    running = emit(run, record)?;
+            while let Some(run) = pending.as_ref().filter(|run| run.bytes() < key) {
+                let _payload = control
+                    .memory()
+                    .reserve(run.bytes().len())
+                    .map_err(VersionError::from)?;
+                if let Some(record) = run_info(connection, run.bytes(), boundary, control)? {
+                    running = emit(run.bytes(), record)?;
                     if !running {
                         return Ok(false);
                     }
                 }
-                pending = next_run(connection, prefix, Some(run), upper.as_deref(), control)?;
+                pending = next_run(
+                    connection,
+                    prefix,
+                    Some(run.bytes()),
+                    upper.as_deref(),
+                    control,
+                )?;
             }
-            if pending.as_deref() == Some(key) {
-                // Point heads keep the same precedence as individual record reads.
-                pending = next_run(connection, prefix, Some(key), upper.as_deref(), control)?;
-            }
+            let same_key = pending.as_ref().is_some_and(|run| run.bytes() == key);
             if let Some(record) = record {
                 running = emit(key, record)?;
+            }
+            if running && same_key {
+                // Point heads keep precedence; advance a tied run only if the consumer continues.
+                pending = next_run(connection, prefix, Some(key), upper.as_deref(), control)?;
             }
             Ok(running)
         },
     )?;
     while running {
         let Some(run) = pending else { break };
-        if let Some(record) = run_info(connection, &run, boundary, control)? {
-            running = emit(&run, record)?;
+        let _payload = control
+            .memory()
+            .reserve(run.bytes().len())
+            .map_err(VersionError::from)?;
+        if let Some(record) = run_info(connection, run.bytes(), boundary, control)? {
+            running = emit(run.bytes(), record)?;
         }
         if running {
-            pending = next_run(connection, prefix, Some(&run), upper.as_deref(), control)?;
+            pending = next_run(
+                connection,
+                prefix,
+                Some(run.bytes()),
+                upper.as_deref(),
+                control,
+            )?;
         } else {
             pending = None;
         }
@@ -102,9 +123,9 @@ fn next_run(
     after: Option<&[u8]>,
     upper: Option<&[u8]>,
     control: &StorageReadControl,
-) -> PhysicalResult<Option<BudgetedVec<u8>>> {
+) -> PhysicalResult<Option<runs::KeyCandidate>> {
     let after = after.filter(|after| *after >= prefix);
-    runs::next_key(
+    runs::next_candidate(
         connection,
         after.unwrap_or(prefix),
         after.is_some(),

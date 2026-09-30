@@ -272,7 +272,7 @@ fn nonclone_entries_keep_addresses_and_drop_with_the_last_referencing_root() {
         .with_insert(2, Value(drops.clone()))
         .unwrap();
     let first = std::ptr::from_ref(original.get(&1).unwrap());
-    let retained = original.clone();
+    let retained = original.snapshot();
     let changed = original.with_insert(2, Value(drops.clone())).unwrap();
     assert_eq!(std::ptr::from_ref(changed.get(&1).unwrap()), first);
     drop(original);
@@ -282,6 +282,60 @@ fn nonclone_entries_keep_addresses_and_drop_with_the_last_referencing_root() {
     drop(changed);
     assert_eq!(drops.load(AtomicOrdering::Relaxed), 3);
     assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn immutable_roots_restore_values_and_cardinality_without_headroom_or_allocation() {
+    let budget = MemoryBudget::new(1 << 16);
+    let mut map = BudgetedSharedMap::new(&budget);
+    let empty = map.snapshot();
+    assert!(empty.is_empty());
+    map.try_insert("a".to_owned(), 10).unwrap();
+    map.try_insert("b".to_owned(), 20).unwrap();
+    let retained = map.snapshot();
+    map.try_insert("a".to_owned(), 30).unwrap();
+    map.try_insert("c".to_owned(), 40).unwrap();
+    assert_eq!(retained.get("a"), Some(&10));
+    assert!(retained.get("c").is_none());
+    let blocker = budget.reserve(budget.limit() - budget.used()).unwrap();
+    let allocations = allocation_counter::measure(|| map.restore(&retained));
+    assert_eq!(allocations.count_total, 0);
+    assert_eq!(map.len(), retained.len());
+    assert_eq!(map.get("a"), Some(&10));
+    assert_eq!(map.get("b"), Some(&20));
+    assert!(map.get("c").is_none());
+    drop(blocker);
+    drop(retained);
+    map.restore(&empty);
+    assert!(map.is_empty());
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn immutable_root_restoration_rejects_another_allowance_before_changing_values() {
+    let original = MemoryBudget::new(4096);
+    let other = MemoryBudget::new(4096);
+    let mut source = BudgetedSharedMap::new(&original);
+    source.try_insert(1, 10).unwrap();
+    let retained = source.snapshot();
+    let mut destination = BudgetedSharedMap::new(&other);
+    destination.try_insert(2, 20).unwrap();
+    let used = other.used();
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        destination.restore(&retained);
+    }))
+    .is_err());
+    assert_eq!(destination.len(), 1);
+    assert_eq!(destination.get(&2), Some(&20));
+    assert!(destination.get(&1).is_none());
+    assert_eq!(other.used(), used);
+    drop(destination);
+    drop(source);
+    assert!(original.used() > 0);
+    assert_eq!(retained.get(&1), Some(&10));
+    drop(retained);
+    assert_eq!(original.used(), 0);
+    assert_eq!(other.used(), 0);
 }
 
 #[test]

@@ -25,8 +25,9 @@ pub use deque::BudgetedDeque;
 pub use hash_set::BudgetedHashSet;
 pub use heap::BudgetedBinaryHeap;
 pub use map::{
-    BudgetedMap, BudgetedMapIter, BudgetedSharedMap, BudgetedSharedMapIter, OwnedMap,
-    OwnedMapIntoIter, OwnedSet, OwnedSetIntoIter, OwnedSetIter, PreparedMapEntry,
+    BudgetedMap, BudgetedMapIter, BudgetedSharedMap, BudgetedSharedMapIter,
+    BudgetedSharedMapSnapshot, OwnedMap, OwnedMapIntoIter, OwnedSet, OwnedSetIntoIter,
+    OwnedSetIter, PreparedMapEntry,
 };
 pub use production::{Produced, ProductionControl, ProductionString, ProductionVec};
 pub use string::BudgetedString;

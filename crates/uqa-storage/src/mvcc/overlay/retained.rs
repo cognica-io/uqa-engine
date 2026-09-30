@@ -13,9 +13,11 @@ use crate::key_value::KeyValueRead;
 use crate::mvcc::{PreparedRecordWrite, VersionError, VersionResult};
 use crate::read_control::StorageReadControl;
 use std::sync::Arc;
-use uqa_core::memory::BudgetedSharedMap;
+use uqa_core::memory::{BudgetedSharedMap, BudgetedSharedMapSnapshot};
 
-pub(super) type Sources = BudgetedSharedMap<RecordKey, Option<Arc<dyn KeyValueRead + Send + Sync>>>;
+type Source = Option<Arc<dyn KeyValueRead + Send + Sync>>;
+pub(super) type Sources = BudgetedSharedMap<RecordKey, Source>;
+pub(super) type RetainedSources = BudgetedSharedMapSnapshot<RecordKey, Source>;
 
 impl PrivateRecordChanges {
     pub(in crate::mvcc) fn apply_with_retained_source(
