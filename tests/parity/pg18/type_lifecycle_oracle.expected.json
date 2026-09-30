@@ -21,7 +21,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE ROLE tl_owner",
@@ -35,7 +36,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE ROLE tl_user",
@@ -49,7 +51,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE ROLE tl_other",
@@ -63,7 +66,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy')",
@@ -77,7 +81,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE DOMAIN posint AS integer CHECK (VALUE > 0)",
@@ -91,7 +96,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE DOMAIN good_mood AS mood CHECK (VALUE <> 'sad')",
@@ -105,7 +111,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE TABLE lt (id integer PRIMARY KEY, m mood DEFAULT 'ok', ms mood[], p posint, g good_mood, gs good_mood[], c mood CONSTRAINT lt_c_check CHECK (c <> 'happy'), gen integer GENERATED ALWAYS AS (CASE WHEN m = 'ok' THEN 1 ELSE 0 END) STORED)",
@@ -119,7 +126,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE INDEX lt_partial_idx ON lt (id) WHERE m <> 'sad'",
@@ -133,7 +141,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE INDEX lt_cast_idx ON lt ((p::integer))",
@@ -147,7 +156,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE VIEW lv AS SELECT id, m, m = 'ok' AS is_ok, 'happy'::mood AS top, p::integer AS p_int, NULL::posint AS np FROM lt WHERE m <> 'sad'",
@@ -161,7 +171,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE FUNCTION lt_next(x mood) RETURNS mood LANGUAGE sql AS $$ SELECT enum_larger(x, 'ok') $$",
@@ -175,7 +186,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE FUNCTION lt_double(x posint) RETURNS posint LANGUAGE sql IMMUTABLE AS $$ SELECT (x * 2)::posint $$",
@@ -189,7 +201,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE FUNCTION lt_atomic(x mood) RETURNS boolean LANGUAGE sql RETURN x = 'ok'::mood",
@@ -203,7 +216,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE FUNCTION lt_plpgsql(x mood) RETURNS text LANGUAGE plpgsql AS $$ DECLARE v mood := 'happy'; BEGIN RETURN (x < v)::text; END $$",
@@ -217,7 +231,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE FUNCTION lt_fresh(x mood) RETURNS text LANGUAGE plpgsql AS $$ DECLARE v mood := 'ok'; BEGIN RETURN (x = v)::text; END $$",
@@ -231,7 +246,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "INSERT INTO lt (id, m, ms, p, g, gs, c) VALUES (1, 'ok', '{sad,ok}', 5, 'ok', '{ok}', 'sad')",
@@ -245,7 +261,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT lt_plpgsql('sad') AS before_rename",
@@ -267,7 +284,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT pg_get_viewdef('lv'::regclass) AS view_before",
@@ -289,7 +307,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE mood RENAME TO feeling",
@@ -303,7 +322,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE mood RENAME TO x",
@@ -314,7 +334,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE feeling RENAME TO posint",
@@ -325,7 +346,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE feeling RENAME TO feeling",
@@ -336,7 +358,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE feeling RENAME TO lt",
@@ -347,7 +370,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE _feeling RENAME TO f2",
@@ -358,7 +382,8 @@
         "detail": null,
         "hint": "You can alter type feeling, which will alter the array type as well."
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE lt RENAME TO lt2",
@@ -369,7 +394,8 @@
         "detail": null,
         "hint": "Use ALTER TABLE instead."
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE lt OWNER TO tl_owner",
@@ -380,7 +406,8 @@
         "detail": null,
         "hint": "Use ALTER TABLE instead."
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE lt SET SCHEMA pg_catalog",
@@ -391,7 +418,8 @@
         "detail": null,
         "hint": "Use ALTER TABLE instead."
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "ALTER DOMAIN posint RENAME TO positive",
@@ -405,7 +433,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE positive RENAME TO posint2",
@@ -419,7 +448,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER DOMAIN feeling RENAME TO x",
@@ -430,7 +460,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "ALTER DOMAIN nosuch RENAME TO x",
@@ -441,7 +472,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE nosuch RENAME TO x",
@@ -452,7 +484,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "SELECT typname FROM pg_type WHERE typnamespace = 'public'::regnamespace AND typname IN ('feeling', '_feeling', 'posint2', '_posint2', 'mood', '_mood', 'good_mood', '_good_mood', 'posint', '_posint') ORDER BY 1",
@@ -489,7 +522,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT t.typname, a.typname AS array_name FROM pg_type t JOIN pg_type a ON a.oid = t.typarray WHERE t.typname IN ('feeling', 'posint2', 'good_mood') ORDER BY 1",
@@ -522,7 +556,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT attname, format_type(atttypid, atttypmod) AS type FROM pg_attribute WHERE attrelid = 'lt'::regclass AND attnum > 0 ORDER BY attnum",
@@ -575,7 +610,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT column_name, data_type, udt_schema, udt_name, domain_schema, domain_name FROM information_schema.columns WHERE table_name = 'lt' ORDER BY ordinal_position",
@@ -668,7 +704,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT pg_get_viewdef('lv'::regclass) AS view_after",
@@ -690,7 +727,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT attname, format_type(atttypid, atttypmod) AS type FROM pg_attribute WHERE attrelid = 'lv'::regclass AND attnum > 0 ORDER BY attnum",
@@ -735,7 +773,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT a.attname, pg_get_expr(d.adbin, d.adrelid) AS expression FROM pg_attrdef d JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum WHERE d.adrelid = 'lt'::regclass ORDER BY d.adnum",
@@ -764,7 +803,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT conname, pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid = 'lt'::regclass ORDER BY conname",
@@ -797,7 +837,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT conname, pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE contypid IN ('posint2'::regtype, 'good_mood'::regtype) ORDER BY conname",
@@ -826,7 +867,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT indexrelid::regclass AS index, pg_get_indexdef(indexrelid) AS definition FROM pg_index WHERE indrelid = 'lt'::regclass ORDER BY 1",
@@ -859,7 +901,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT p.oid::regprocedure AS signature, pg_get_function_arguments(p.oid) AS arguments, pg_get_function_result(p.oid) AS result FROM pg_proc p WHERE proname LIKE 'lt\\_%' ORDER BY proname",
@@ -907,7 +950,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT pg_get_function_sqlbody('lt_atomic'::regproc) AS body",
@@ -929,7 +973,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT lt_next('sad') AS next",
@@ -951,7 +996,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT lt_double(3) AS doubled",
@@ -962,7 +1008,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "SELECT lt_atomic('ok') AS atomic",
@@ -984,7 +1031,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT lt_plpgsql('sad') AS cached_plpgsql",
@@ -1006,7 +1054,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT lt_fresh('ok') AS fresh_plpgsql",
@@ -1028,7 +1077,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT id, m, is_ok, top, p_int, np FROM lv",
@@ -1065,7 +1115,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "INSERT INTO lt (id, p) VALUES (2, 1)",
@@ -1079,7 +1130,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "INSERT INTO lt (id, c) VALUES (3, 'happy')",
@@ -1090,7 +1142,8 @@
         "detail": "Failing row contains (3, ok, null, null, null, null, happy, 1).",
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "INSERT INTO lt (id, m) VALUES (4, 1)",
@@ -1101,7 +1154,8 @@
         "detail": null,
         "hint": "You will need to rewrite or cast the expression."
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "SELECT id, m, gen FROM lt ORDER BY id",
@@ -1134,7 +1188,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT 'ok'::feeling AS known, pg_typeof('ok'::feeling)::text AS type_name, pg_typeof(ARRAY['ok'::feeling])::text AS array_type_name",
@@ -1162,7 +1217,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT 'x'::feeling",
@@ -1173,7 +1229,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "SELECT 'ok'::mood",
@@ -1184,7 +1241,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "SELECT enum_range(NULL::feeling) AS labels",
@@ -1206,7 +1264,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE TABLE _renamed (a integer)",
@@ -1220,7 +1279,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE feeling RENAME TO renamed",
@@ -1234,7 +1294,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT t.typname, a.typname AS array_name FROM pg_type t JOIN pg_type a ON a.oid = t.typarray WHERE t.typname = 'renamed'",
@@ -1259,7 +1320,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT format_type('renamed'::regtype, NULL) AS element, format_type('renamed[]'::regtype, NULL) AS array_type",
@@ -1284,7 +1346,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE renamed RENAME TO \"Feeling\"",
@@ -1298,7 +1361,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT format_type('\"Feeling\"'::regtype, NULL) AS quoted, format_type('\"Feeling\"[]'::regtype, NULL) AS quoted_array",
@@ -1323,7 +1387,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT t.typname, a.typname AS array_name FROM pg_type t JOIN pg_type a ON a.oid = t.typarray WHERE t.typname = 'Feeling'",
@@ -1348,7 +1413,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE \"Feeling\" RENAME TO aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -1362,7 +1428,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT t.typname, a.typname AS array_name FROM pg_type t JOIN pg_type a ON a.oid = t.typarray WHERE t.oid = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'::regtype",
@@ -1387,7 +1454,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa RENAME TO feeling",
@@ -1401,7 +1469,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "DROP TABLE _renamed",
@@ -1415,7 +1484,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "BEGIN",
@@ -1429,7 +1499,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE feeling RENAME TO rolled",
@@ -1443,7 +1514,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT 'ok'::rolled AS inside",
@@ -1465,7 +1537,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ROLLBACK",
@@ -1479,7 +1552,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT 'ok'::feeling AS after_rollback",
@@ -1501,7 +1575,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT 'ok'::rolled",
@@ -1512,7 +1587,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "CREATE SCHEMA other",
@@ -1526,7 +1602,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE feeling SET SCHEMA other",
@@ -1540,7 +1617,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE other.feeling SET SCHEMA other",
@@ -1554,7 +1632,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE other.feeling SET SCHEMA nosuch",
@@ -1565,7 +1644,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE other._feeling SET SCHEMA public",
@@ -1576,7 +1656,8 @@
         "detail": null,
         "hint": "You can alter type other.feeling, which will alter the array type as well."
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "CREATE TYPE clash AS ENUM ('a')",
@@ -1590,7 +1671,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE TYPE other.clash AS ENUM ('b')",
@@ -1604,7 +1686,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE clash SET SCHEMA other",
@@ -1615,7 +1698,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "DROP TYPE other.clash",
@@ -1629,7 +1713,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE TABLE other._clash (a integer)",
@@ -1643,7 +1728,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE clash SET SCHEMA other",
@@ -1654,7 +1740,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "DROP TABLE other._clash",
@@ -1668,7 +1755,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "DROP TYPE clash",
@@ -1682,7 +1770,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT format_type('other.feeling'::regtype, NULL) AS qualified, format_type('other._feeling'::regtype, NULL) AS array_type",
@@ -1707,7 +1796,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT attname, format_type(atttypid, atttypmod) AS type FROM pg_attribute WHERE attrelid = 'lt'::regclass AND attnum IN (2, 3, 5) ORDER BY attnum",
@@ -1740,7 +1830,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT column_name, data_type, udt_schema, udt_name, domain_schema, domain_name FROM information_schema.columns WHERE table_name = 'lt' AND column_name IN ('m', 'ms', 'g') ORDER BY ordinal_position",
@@ -1793,7 +1884,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT pg_get_viewdef('lv'::regclass) AS view_other",
@@ -1815,7 +1907,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT a.attname, pg_get_expr(d.adbin, d.adrelid) AS expression FROM pg_attrdef d JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum WHERE d.adrelid = 'lt'::regclass ORDER BY d.adnum",
@@ -1844,7 +1937,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT conname, pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid = 'lt'::regclass AND contype = 'c' ORDER BY conname",
@@ -1869,7 +1963,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT indexrelid::regclass AS index, pg_get_indexdef(indexrelid) AS definition FROM pg_index WHERE indrelid = 'lt'::regclass ORDER BY 1",
@@ -1902,7 +1997,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT p.oid::regprocedure AS signature, pg_get_function_arguments(p.oid) AS arguments, pg_get_function_result(p.oid) AS result FROM pg_proc p WHERE proname IN ('lt_next', 'lt_atomic') ORDER BY proname",
@@ -1935,7 +2031,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT pg_get_function_sqlbody('lt_atomic'::regproc) AS body",
@@ -1957,7 +2054,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT id, m, is_ok, top FROM lv ORDER BY id",
@@ -1994,7 +2092,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT lt_next('sad') AS next, lt_atomic('ok') AS atomic",
@@ -2019,7 +2118,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SET search_path = other, public",
@@ -2033,7 +2133,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT format_type('feeling'::regtype, NULL) AS visible",
@@ -2055,7 +2156,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT pg_get_viewdef('lv'::regclass) AS view_visible",
@@ -2077,7 +2179,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT p.oid::regprocedure AS signature FROM pg_proc p WHERE proname = 'lt_next'",
@@ -2099,7 +2202,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "RESET search_path",
@@ -2113,7 +2217,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER DOMAIN posint2 SET SCHEMA other",
@@ -2127,7 +2232,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT nspname, typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE typname IN ('feeling', '_feeling', 'posint2', '_posint2') ORDER BY typname",
@@ -2164,7 +2270,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT id, m, p FROM lt ORDER BY id",
@@ -2197,7 +2304,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT pg_get_userbyid(typowner) = current_user AS owned_by_creator FROM pg_type WHERE oid = 'other.feeling'::regtype",
@@ -2219,7 +2327,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE other.feeling OWNER TO tl_owner",
@@ -2233,7 +2342,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT pg_get_userbyid(typowner) AS owner FROM pg_type WHERE oid = 'other.feeling'::regtype",
@@ -2255,7 +2365,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT pg_get_userbyid(typowner) AS array_owner FROM pg_type WHERE oid = 'other._feeling'::regtype",
@@ -2277,7 +2388,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE other.feeling OWNER TO nosuchrole",
@@ -2288,7 +2400,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE other._feeling OWNER TO tl_owner",
@@ -2299,7 +2412,8 @@
         "detail": null,
         "hint": "You can alter type other.feeling, which will alter the array type as well."
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "ALTER DOMAIN other.posint2 OWNER TO tl_owner",
@@ -2313,7 +2427,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER DOMAIN other.feeling OWNER TO tl_owner",
@@ -2324,7 +2439,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "SELECT pg_get_userbyid(typowner) AS domain_owner FROM pg_type WHERE oid = 'other.posint2'::regtype",
@@ -2346,7 +2462,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "GRANT USAGE ON SCHEMA other TO tl_user, tl_other",
@@ -2360,7 +2477,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SET ROLE tl_user",
@@ -2374,7 +2492,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE other.feeling OWNER TO tl_user",
@@ -2385,7 +2504,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE other.feeling RENAME TO x",
@@ -2396,7 +2516,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE other.feeling SET SCHEMA public",
@@ -2407,7 +2528,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE other.feeling ADD VALUE 'meh'",
@@ -2418,7 +2540,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "DROP TYPE other.feeling",
@@ -2429,7 +2552,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "GRANT USAGE ON TYPE other.feeling TO tl_other",
@@ -2443,6 +2567,15 @@
           "type_oids": [],
           "rows": []
         }
+      ],
+      "notices": [
+        {
+          "severity": "WARNING",
+          "sqlstate": "01007",
+          "message": "no privileges were granted for \"feeling\"",
+          "detail": null,
+          "hint": null
+        }
       ]
     },
     {
@@ -2457,7 +2590,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "GRANT tl_owner TO tl_user",
@@ -2471,7 +2605,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SET ROLE tl_user",
@@ -2485,7 +2620,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE other.feeling OWNER TO tl_other",
@@ -2496,7 +2632,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE other.feeling RENAME TO f3",
@@ -2510,7 +2647,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "RESET ROLE",
@@ -2524,7 +2662,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE other.f3 RENAME TO feeling",
@@ -2538,7 +2677,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "REVOKE tl_owner FROM tl_user",
@@ -2552,7 +2692,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT typacl FROM pg_type WHERE oid = 'other.feeling'::regtype",
@@ -2574,7 +2715,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "GRANT USAGE ON TYPE other.feeling TO tl_user WITH GRANT OPTION",
@@ -2588,7 +2730,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT typacl FROM pg_type WHERE oid = 'other.feeling'::regtype",
@@ -2610,7 +2753,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "REVOKE USAGE ON TYPE other.feeling FROM PUBLIC",
@@ -2624,7 +2768,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT typacl FROM pg_type WHERE oid = 'other.feeling'::regtype",
@@ -2646,7 +2791,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT a.privilege_type, pg_get_userbyid(a.grantor) AS grantor, CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END AS grantee, a.is_grantable FROM pg_type t, aclexplode(t.typacl) a WHERE t.oid = 'other.feeling'::regtype ORDER BY 3",
@@ -2683,7 +2829,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT typacl FROM pg_type WHERE oid = 'other._feeling'::regtype",
@@ -2705,7 +2852,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "GRANT USAGE ON TYPE other._feeling TO tl_user",
@@ -2716,7 +2864,8 @@
         "detail": null,
         "hint": "Set the privileges of the element type instead."
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "GRANT SELECT ON TYPE other.feeling TO tl_user",
@@ -2727,7 +2876,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "GRANT USAGE ON DOMAIN other.feeling TO tl_user",
@@ -2738,7 +2888,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "GRANT USAGE ON TYPE nosuch TO tl_user",
@@ -2749,7 +2900,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "GRANT USAGE ON TYPE other.feeling TO nosuchrole",
@@ -2760,7 +2912,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "GRANT USAGE ON DOMAIN other.posint2 TO tl_user",
@@ -2774,7 +2927,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT typacl FROM pg_type WHERE oid = 'other.posint2'::regtype",
@@ -2796,7 +2950,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "GRANT ALL PRIVILEGES ON TYPE other.feeling TO tl_other",
@@ -2810,7 +2965,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT typacl FROM pg_type WHERE oid = 'other.feeling'::regtype",
@@ -2832,7 +2988,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT has_type_privilege('tl_user', 'other.feeling', 'USAGE') AS user_usage, has_type_privilege('tl_user', 'other.feeling', 'USAGE WITH GRANT OPTION') AS user_grant, has_type_privilege('tl_other', 'other.feeling', 'USAGE WITH GRANT OPTION') AS other_grant, has_type_privilege('tl_owner', 'other.feeling', 'usage') AS owner_usage",
@@ -2863,7 +3020,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT has_type_privilege('other.feeling', 'USAGE') AS current_usage, has_type_privilege('tl_user', 'other.feeling'::regtype, 'USAGE') AS by_oid, has_type_privilege('tl_user', 'other._feeling', 'USAGE') AS array_usage, has_type_privilege('tl_user', 'integer', 'USAGE') AS builtin",
@@ -2894,7 +3052,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT has_type_privilege('tl_user', 'other.feeling', 'SELECT')",
@@ -2905,7 +3064,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "SELECT has_type_privilege('tl_user', 'nosuch', 'USAGE')",
@@ -2916,7 +3076,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "SELECT has_type_privilege('nosuchrole', 'other.feeling', 'USAGE')",
@@ -2927,7 +3088,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "SELECT has_type_privilege('tl_user', 999999::oid, 'USAGE') AS missing_oid",
@@ -2949,7 +3111,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SET ROLE tl_other",
@@ -2963,7 +3126,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "GRANT USAGE ON TYPE other.feeling TO PUBLIC",
@@ -2976,6 +3140,15 @@
           "columns": [],
           "type_oids": [],
           "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "WARNING",
+          "sqlstate": "01007",
+          "message": "no privileges were granted for \"feeling\"",
+          "detail": null,
+          "hint": null
         }
       ]
     },
@@ -2991,7 +3164,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT typacl FROM pg_type WHERE oid = 'other.feeling'::regtype",
@@ -3013,7 +3187,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "REVOKE USAGE ON TYPE other.feeling FROM PUBLIC",
@@ -3027,7 +3202,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SET ROLE tl_user",
@@ -3041,7 +3217,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "GRANT USAGE ON TYPE other.feeling TO tl_other",
@@ -3055,7 +3232,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "RESET ROLE",
@@ -3069,7 +3247,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT typacl FROM pg_type WHERE oid = 'other.feeling'::regtype",
@@ -3091,7 +3270,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "REVOKE GRANT OPTION FOR USAGE ON TYPE other.feeling FROM tl_user",
@@ -3102,7 +3282,8 @@
         "detail": null,
         "hint": "Use CASCADE to revoke them too."
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "REVOKE GRANT OPTION FOR USAGE ON TYPE other.feeling FROM tl_user CASCADE",
@@ -3116,7 +3297,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT typacl FROM pg_type WHERE oid = 'other.feeling'::regtype",
@@ -3138,7 +3320,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "REVOKE ALL ON TYPE other.feeling FROM tl_other",
@@ -3152,7 +3335,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT typacl FROM pg_type WHERE oid = 'other.feeling'::regtype",
@@ -3174,7 +3358,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "GRANT CREATE ON SCHEMA public TO tl_user",
@@ -3188,7 +3373,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE TABLE usage_target (a integer)",
@@ -3202,7 +3388,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TABLE usage_target OWNER TO tl_user",
@@ -3216,7 +3403,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SET ROLE tl_other",
@@ -3230,7 +3418,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT 'ok'::other.feeling AS cast_without_usage",
@@ -3252,7 +3441,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT has_type_privilege('other.feeling', 'USAGE') AS other_usage",
@@ -3274,7 +3464,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "RESET ROLE",
@@ -3288,7 +3479,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SET ROLE tl_user",
@@ -3302,7 +3494,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT has_type_privilege('other.feeling', 'USAGE') AS user_usage",
@@ -3324,7 +3517,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "RESET ROLE",
@@ -3338,7 +3532,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "REVOKE USAGE ON TYPE other.feeling FROM tl_user",
@@ -3352,7 +3547,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SET ROLE tl_user",
@@ -3366,7 +3562,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE TABLE denied_table (m other.feeling)",
@@ -3377,7 +3574,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "CREATE TABLE denied_array (m other.feeling[])",
@@ -3388,7 +3586,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "CREATE TABLE allowed_domain (p other.posint2, g good_mood)",
@@ -3402,7 +3601,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TABLE usage_target ADD COLUMN m other.feeling",
@@ -3413,7 +3613,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "ALTER TABLE usage_target ALTER COLUMN a TYPE other.feeling USING NULL",
@@ -3424,7 +3625,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "CREATE FUNCTION denied_argument(x other.feeling) RETURNS integer LANGUAGE sql AS $$ SELECT 1 $$",
@@ -3435,7 +3637,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "CREATE FUNCTION denied_result() RETURNS other.feeling LANGUAGE sql AS $$ SELECT 'ok'::other.feeling $$",
@@ -3446,7 +3649,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "CREATE FUNCTION denied_array_argument(x other.feeling[]) RETURNS integer LANGUAGE sql AS $$ SELECT 1 $$",
@@ -3457,7 +3661,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "CREATE DOMAIN denied_domain AS other.feeling",
@@ -3468,7 +3673,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "CREATE VIEW denied_view AS SELECT 'ok'::other.feeling AS m",
@@ -3479,7 +3685,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "CREATE TABLE denied_ctas AS SELECT 'ok'::other.feeling AS m",
@@ -3490,7 +3697,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "CREATE TEMP TABLE denied_temp (m other.feeling)",
@@ -3501,7 +3709,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "SELECT 'ok'::other.feeling AS cast_value",
@@ -3523,7 +3732,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT m FROM lt LIMIT 0",
@@ -3534,7 +3744,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "RESET ROLE",
@@ -3548,7 +3759,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "GRANT USAGE ON TYPE other.feeling TO tl_user",
@@ -3562,7 +3774,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SET ROLE tl_user",
@@ -3576,7 +3789,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE TABLE denied_table (m other.feeling)",
@@ -3590,7 +3804,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TABLE usage_target ADD COLUMN m other.feeling",
@@ -3604,7 +3819,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "RESET ROLE",
@@ -3618,7 +3834,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "DROP TABLE denied_table, allowed_domain, usage_target",
@@ -3632,7 +3849,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "DROP TYPE lt",
@@ -3643,7 +3861,8 @@
         "detail": null,
         "hint": "You can drop table lt instead."
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "DROP TYPE other._feeling",
@@ -3654,7 +3873,8 @@
         "detail": null,
         "hint": "You can drop type other.feeling instead."
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "DROP TYPE other.feeling",
@@ -3665,7 +3885,8 @@
         "detail": "column ms of table lt depends on type other.feeling[]\ntype good_mood depends on type other.feeling\ncolumn gs of table lt depends on type good_mood[]\ncolumn g of table lt depends on type good_mood\ncolumn c of table lt depends on type other.feeling\ncolumn m of table lt depends on type other.feeling\ncolumn gen of table lt depends on type other.feeling\nview lv depends on type other.feeling\nfunction lt_next(other.feeling) depends on type other.feeling\nfunction lt_atomic(other.feeling) depends on type other.feeling\nfunction lt_plpgsql(other.feeling) depends on type other.feeling\nfunction lt_fresh(other.feeling) depends on type other.feeling",
         "hint": "Use DROP ... CASCADE to drop the dependent objects too."
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "DROP DOMAIN other.posint2",
@@ -3676,7 +3897,8 @@
         "detail": "column p of table lt depends on type other.posint2\nview lv depends on type other.posint2\nfunction lt_double(other.posint2) depends on type other.posint2",
         "hint": "Use DROP ... CASCADE to drop the dependent objects too."
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "DROP DOMAIN good_mood",
@@ -3687,7 +3909,8 @@
         "detail": "column gs of table lt depends on type good_mood[]\ncolumn g of table lt depends on type good_mood",
         "hint": "Use DROP ... CASCADE to drop the dependent objects too."
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "DROP ROLE tl_owner",
@@ -3698,7 +3921,8 @@
         "detail": "owner of type other.feeling\nowner of type other.posint2",
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "DROP ROLE tl_user",
@@ -3709,7 +3933,8 @@
         "detail": "privileges for schema public\nprivileges for type other.feeling\nprivileges for type other.posint2\nprivileges for schema other",
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "CREATE TYPE lbl AS ENUM ('a', 'b', 'c')",
@@ -3723,7 +3948,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE TABLE lbl_t (id integer, x lbl DEFAULT 'b' CONSTRAINT lbl_t_x_check CHECK (x <> 'c'), y integer GENERATED ALWAYS AS (CASE WHEN x = 'a' THEN 1 ELSE 2 END) STORED)",
@@ -3737,7 +3963,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE INDEX lbl_idx ON lbl_t ((x = 'a'))",
@@ -3751,7 +3978,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE VIEW lbl_v AS SELECT x, x = 'b' AS is_b, 'c'::lbl AS c, ARRAY['a', 'b']::lbl[] AS labels FROM lbl_t WHERE x <> 'a'",
@@ -3765,7 +3993,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE FUNCTION lbl_f(v lbl) RETURNS boolean LANGUAGE sql RETURN v = 'b'",
@@ -3779,7 +4008,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "ALTER TYPE lbl RENAME VALUE 'b' TO 'bee'",
@@ -3793,7 +4023,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT pg_get_viewdef('lbl_v'::regclass) AS view_definition",
@@ -3815,7 +4046,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT a.attname, pg_get_expr(d.adbin, d.adrelid) AS expression FROM pg_attrdef d JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum WHERE d.adrelid = 'lbl_t'::regclass ORDER BY d.adnum",
@@ -3844,7 +4076,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid = 'lbl_t'::regclass",
@@ -3866,7 +4099,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT pg_get_indexdef('lbl_idx'::regclass) AS definition",
@@ -3888,7 +4122,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT pg_get_function_sqlbody('lbl_f'::regproc) AS body",
@@ -3910,7 +4145,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "INSERT INTO lbl_t (id) VALUES (1)",
@@ -3924,7 +4160,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "INSERT INTO lbl_t (id, x) VALUES (2, 'a'), (3, 'bee')",
@@ -3938,7 +4175,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "INSERT INTO lbl_t (id, x) VALUES (4, 'c')",
@@ -3949,7 +4187,8 @@
         "detail": "Failing row contains (4, c, 2).",
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "SELECT id, x, y FROM lbl_t ORDER BY id",
@@ -3987,7 +4226,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT x, is_b, c, labels FROM lbl_v ORDER BY x",
@@ -4024,7 +4264,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SELECT lbl_f('bee') AS matches, lbl_f('a') AS other",
@@ -4049,7 +4290,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "DROP VIEW lbl_v",
@@ -4063,7 +4305,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "DROP FUNCTION lbl_f(lbl)",
@@ -4077,7 +4320,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "DROP TABLE lbl_t",
@@ -4091,7 +4335,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "DROP TYPE lbl",
@@ -4105,7 +4350,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE SCHEMA hidden",
@@ -4119,7 +4365,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE TYPE hidden.hmood AS ENUM ('x', 'y')",
@@ -4133,7 +4380,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE DOMAIN hidden.hdom AS integer CHECK (VALUE > 0)",
@@ -4147,7 +4395,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "CREATE TABLE ht (h hidden.hmood, d hidden.hdom)",
@@ -4161,7 +4410,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "INSERT INTO ht (h) VALUES (1)",
@@ -4172,7 +4422,8 @@
         "detail": null,
         "hint": "You will need to rewrite or cast the expression."
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "SELECT 'z'::hidden.hmood",
@@ -4183,7 +4434,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "SELECT h = 1 FROM ht",
@@ -4194,7 +4446,8 @@
         "detail": null,
         "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "SELECT 1::hidden.hmood",
@@ -4205,7 +4458,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "INSERT INTO ht (d) VALUES (0)",
@@ -4216,7 +4470,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "SELECT pg_typeof(h)::text AS type_name, pg_typeof(d)::text AS domain_name FROM (SELECT 'x'::hidden.hmood AS h, 1::hidden.hdom AS d) s",
@@ -4241,7 +4496,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "SET search_path = hidden, public",
@@ -4255,7 +4511,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "INSERT INTO ht (h) VALUES (1)",
@@ -4266,7 +4523,8 @@
         "detail": null,
         "hint": "You will need to rewrite or cast the expression."
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "SELECT 'z'::hmood",
@@ -4277,7 +4535,8 @@
         "detail": null,
         "hint": null
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "SELECT h = 1 FROM ht",
@@ -4288,7 +4547,8 @@
         "detail": null,
         "hint": "No operator matches the given name and argument types. You might need to add explicit type casts."
       },
-      "results": []
+      "results": [],
+      "notices": []
     },
     {
       "sql": "SELECT pg_typeof(h)::text AS type_name FROM (SELECT 'x'::hmood AS h) s",
@@ -4310,7 +4570,8 @@
             ]
           ]
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "RESET search_path",
@@ -4324,7 +4585,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "DROP TABLE ht",
@@ -4338,7 +4600,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "DROP SCHEMA hidden CASCADE",
@@ -4351,6 +4614,15 @@
           "columns": [],
           "type_oids": [],
           "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "drop cascades to 2 other objects",
+          "detail": "drop cascades to type hidden.hmood\ndrop cascades to type hidden.hdom",
+          "hint": null
         }
       ]
     },
@@ -4366,7 +4638,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "DROP TABLE lt",
@@ -4380,7 +4653,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "DROP FUNCTION lt_next(other.feeling), lt_double(other.posint2), lt_atomic(other.feeling), lt_plpgsql(other.feeling), lt_fresh(other.feeling)",
@@ -4394,7 +4668,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "DROP SCHEMA other CASCADE",
@@ -4407,6 +4682,15 @@
           "columns": [],
           "type_oids": [],
           "rows": []
+        }
+      ],
+      "notices": [
+        {
+          "severity": "NOTICE",
+          "sqlstate": "00000",
+          "message": "drop cascades to 3 other objects",
+          "detail": "drop cascades to type other.feeling\ndrop cascades to type good_mood\ndrop cascades to type other.posint2",
+          "hint": null
         }
       ]
     },
@@ -4422,7 +4706,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "DROP ROLE tl_other",
@@ -4436,7 +4721,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "DROP ROLE tl_owner",
@@ -4450,7 +4736,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     },
     {
       "sql": "DROP ROLE tl_user",
@@ -4464,7 +4751,8 @@
           "type_oids": [],
           "rows": []
         }
-      ]
+      ],
+      "notices": []
     }
   ]
 }

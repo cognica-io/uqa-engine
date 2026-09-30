@@ -149,18 +149,14 @@ fn prepare_privileges<'a>(
                     analysis::grant_routine_acl(&mut def, *grantee, grantor, stmt.grant_option)?;
                 }
             } else {
-                let mut revoked = false;
                 for grantee in &grantees {
-                    revoked |= analysis::revoke_routine_acl(
+                    analysis::revoke_routine_acl(
                         &mut def,
                         *grantee,
                         grantor,
                         stmt.grant_option_only,
                         stmt.revoke_behavior == RoutineRevokeBehavior::Cascade,
                     )?;
-                }
-                if !revoked {
-                    notices.push(analysis::routine_acl_warning(false, &existing.def.name));
                 }
             }
         } else {

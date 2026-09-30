@@ -139,7 +139,7 @@ pub fn grant(
     }
 }
 
-/// Remove the privilege or only its grant option. Returns whether anything was revoked. Privileges granted through a lost grant option require CASCADE.
+/// Remove the privilege or only its grant option; revoking what the grantor did not grant changes nothing, and `ExecGrant_*` warns only when the grantor holds no grant option. Privileges granted through a lost grant option require CASCADE.
 pub fn revoke(
     owner: RoleIdentity,
     acl: &mut Option<Vec<ObjectAclEntry>>,
@@ -147,25 +147,24 @@ pub fn revoke(
     grantor: RoleIdentity,
     grant_option_only: bool,
     cascade: bool,
-) -> Result<bool, SQLError> {
+) -> Result<(), SQLError> {
     let before = grant_option_roles(owner, acl.as_deref());
     let entries = materialize(owner, acl);
     let Some(position) = entries
         .iter()
         .position(|entry| entry.role == grantee && entry.grantor == grantor)
     else {
-        return Ok(false);
+        return Ok(());
     };
     if grant_option_only {
         if !entries[position].grant_option {
-            return Ok(false);
+            return Ok(());
         }
         entries[position].grant_option = false;
     } else {
         entries.remove(position);
     }
-    revoke_dependents(owner, acl, &before, cascade)?;
-    Ok(true)
+    revoke_dependents(owner, acl, &before, cascade)
 }
 
 fn revoke_dependents(
@@ -401,7 +400,7 @@ mod tests {
         let error = revoke(owner, &mut acl.clone(), Some(role(2)), owner, true, false).unwrap_err();
         assert_eq!(error.sqlstate(), Some("2BP01"));
         assert_eq!(error.hint(), Some("Use CASCADE to revoke them too."));
-        assert!(revoke(owner, &mut acl, Some(role(2)), owner, true, true).unwrap());
+        revoke(owner, &mut acl, Some(role(2)), owner, true, true).unwrap();
         assert_eq!(
             acl.unwrap(),
             [

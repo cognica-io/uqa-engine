@@ -192,7 +192,7 @@ pub fn revoke_routine_acl(
     grantor: RoleIdentity,
     grant_option_only: bool,
     cascade: bool,
-) -> Result<bool, SQLError> {
+) -> Result<(), SQLError> {
     let owner = bound_routine_owner(definition)?;
     object_acl::revoke(
         owner,

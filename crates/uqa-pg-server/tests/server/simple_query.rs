@@ -9,71 +9,35 @@ use std::net::TcpStream;
 use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
-use serde_json::{json, Value};
+use serde_json::json;
 use uqa_engine::{SQLFunctionOptions, SQLFunctionVolatility};
 
-use super::client::{error_matches, evidence, evidence_with_fields, fields, Client, Fixture};
-
-fn compare_reference(input: &str) {
-    let fixture = Fixture::new();
-    let mut client = fixture.connect();
-    let reference: Value = serde_json::from_str(input).unwrap();
-    let include_fields = reference["cases"][0]["results"][0].get("fields").is_some();
-    let mut differences = Vec::new();
-    for case in reference["cases"].as_array().unwrap() {
-        let sql = case["sql"].as_str().unwrap();
-        let response = client.query(sql);
-        let actual = if include_fields {
-            evidence_with_fields(&response)
-        } else {
-            evidence(&response)
-        };
-        for key in ["command_tags", "error", "results"] {
-            if let Some(expected) = case.get(key) {
-                if key == "results" && sql == "SELECT version()" {
-                    continue;
-                }
-                let matches = if key == "error" {
-                    error_matches(&actual[key], expected)
-                } else {
-                    &actual[key] == expected
-                };
-                if !matches {
-                    differences.push(format!(
-                        "{sql}\n{key}: expected {expected}\nactual: {}",
-                        actual[key]
-                    ));
-                }
-            }
-        }
-    }
-    assert!(differences.is_empty(), "{}", differences.join("\n"));
-}
+use super::client::{compare_oracle, evidence, fields, Client, Fixture};
 
 #[test]
 fn simple_query_messages_match_postgresql_over_tcp() {
-    compare_reference(include_str!(
+    compare_oracle(include_str!(
         "../../../../tests/parity/pg18/command_completion_oracle.expected.json"
     ));
 }
 
 #[test]
 fn data_modifying_ctes_match_postgresql_over_tcp() {
-    compare_reference(include_str!(
+    compare_oracle(include_str!(
         "../../../../tests/parity/pg18/cte_commands_oracle.expected.json"
     ));
 }
 
 #[test]
 fn command_cte_composition_matches_postgresql_over_tcp() {
-    compare_reference(include_str!(
+    compare_oracle(include_str!(
         "../../../../tests/parity/pg18/cte_command_composition_oracle.expected.json"
     ));
 }
 
 #[test]
 fn result_fields_and_text_match_postgresql_over_tcp() {
-    compare_reference(include_str!(
+    compare_oracle(include_str!(
         "../../../../tests/parity/pg18/wire_result_oracle.expected.json"
     ));
 }
@@ -87,34 +51,34 @@ fn constant_and_rule_planning_match_postgresql_over_tcp() {
         ),
         include_str!("../../../../tests/parity/pg18/rule_input_planning_oracle.expected.json"),
     ] {
-        compare_reference(fixture);
+        compare_oracle(fixture);
     }
 }
 
 #[test]
 fn prepared_plan_selection_matches_postgresql_over_tcp() {
-    compare_reference(include_str!(
+    compare_oracle(include_str!(
         "../../../../tests/parity/pg18/prepared_plan_selection_oracle.expected.json"
     ));
 }
 
 #[test]
 fn prepared_plan_cost_matches_postgresql_over_tcp() {
-    compare_reference(include_str!(
+    compare_oracle(include_str!(
         "../../../../tests/parity/pg18/prepared_plan_cost_oracle.expected.json"
     ));
 }
 
 #[test]
 fn prepared_plan_settings_match_postgresql_over_tcp() {
-    compare_reference(include_str!(
+    compare_oracle(include_str!(
         "../../../../tests/parity/pg18/prepared_plan_settings_oracle.expected.json"
     ));
 }
 
 #[test]
 fn prepared_plan_types_match_postgresql_over_tcp() {
-    compare_reference(include_str!(
+    compare_oracle(include_str!(
         "../../../../tests/parity/pg18/prepared_plan_types_oracle.expected.json"
     ));
 }

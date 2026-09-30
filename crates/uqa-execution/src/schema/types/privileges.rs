@@ -137,9 +137,7 @@ fn prepare<'a>(
         );
         let mut acl = before.clone();
         if let Some(grantor) = grantor.filter(|_| usage) {
-            if !apply_privileges(statement, owner, &mut acl, &grantees, grantor)? {
-                notices.push(object_acl::acl_warning(false, &local_name));
-            }
+            apply_privileges(statement, owner, &mut acl, &grantees, grantor)?;
         } else {
             let has_role =
                 |role: &RoleIdentity| role_inherits(&roles, &memberships, &current_user, role);
@@ -222,25 +220,22 @@ fn apply_privileges(
     acl: &mut Option<Vec<ObjectAclEntry>>,
     grantees: &[Option<RoleIdentity>],
     grantor: RoleIdentity,
-) -> Result<bool, SQLError> {
-    if statement.is_grant {
-        for grantee in grantees {
-            object_acl::grant(owner, acl, *grantee, grantor, statement.grant_option);
-        }
-        return Ok(true);
-    }
-    let mut revoked = false;
+) -> Result<(), SQLError> {
     for grantee in grantees {
-        revoked |= object_acl::revoke(
-            owner,
-            acl,
-            *grantee,
-            grantor,
-            statement.grant_option_only,
-            statement.revoke_behavior == TypeRevokeBehavior::Cascade,
-        )?;
+        if statement.is_grant {
+            object_acl::grant(owner, acl, *grantee, grantor, statement.grant_option);
+        } else {
+            object_acl::revoke(
+                owner,
+                acl,
+                *grantee,
+                grantor,
+                statement.grant_option_only,
+                statement.revoke_behavior == TypeRevokeBehavior::Cascade,
+            )?;
+        }
     }
-    Ok(revoked)
+    Ok(())
 }
 
 fn with_acl(object: TypeObject, acl: Option<Vec<ObjectAclEntry>>) -> TypeObject {

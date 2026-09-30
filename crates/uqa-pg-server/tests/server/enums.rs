@@ -6,60 +6,15 @@
 
 //! Enum values, diagnostics and result metadata over the `PostgreSQL` wire protocol.
 
-use serde_json::{json, Value};
+use serde_json::json;
 
-use super::client::{error_matches, evidence, evidence_with_fields, Fixture};
-
-/// User-defined type OIDs are database-local, so the oracle and the server compare them by class.
-const FIRST_USER_OID: i64 = 16_384;
-
-fn normalized(mut evidence: Value) -> Value {
-    for result in evidence["results"].as_array_mut().into_iter().flatten() {
-        for oid in result["type_oids"].as_array_mut().into_iter().flatten() {
-            // The wire field is an unsigned OID; the test client reads it as a signed 32-bit integer.
-            if oid
-                .as_i64()
-                .map(|value| if value < 0 { value + (1 << 32) } else { value })
-                .is_some_and(|value| value >= FIRST_USER_OID)
-            {
-                *oid = json!("user-defined");
-            }
-        }
-    }
-    evidence
-}
+use super::client::{compare_oracle, evidence, evidence_with_fields, Fixture};
 
 #[test]
 fn enum_oracle_matches_postgresql_over_tcp() {
-    let fixture = Fixture::new();
-    let mut client = fixture.connect();
-    let oracle: Value = serde_json::from_str(include_str!(
+    compare_oracle(include_str!(
         "../../../../tests/parity/pg18/enum_types_oracle.expected.json"
-    ))
-    .unwrap();
-    let mut differences = Vec::new();
-    for case in oracle["cases"].as_array().unwrap() {
-        let sql = case["sql"].as_str().unwrap();
-        let actual = normalized(evidence(&client.query(sql)));
-        let expected = normalized(case.clone());
-        for key in ["command_tags", "error", "results"] {
-            if key == "results" && sql == "SELECT version()" {
-                continue;
-            }
-            let matches = if key == "error" {
-                error_matches(&actual[key], &expected[key])
-            } else {
-                actual[key] == expected[key]
-            };
-            if !matches {
-                differences.push(format!(
-                    "{sql}\n{key}: expected {}\nactual: {}",
-                    expected[key], actual[key]
-                ));
-            }
-        }
-    }
-    assert!(differences.is_empty(), "{}", differences.join("\n"));
+    ));
 }
 
 #[test]
