@@ -40,12 +40,18 @@ pub struct ReservedCatalogIdentityAllocator<'a> {
 }
 
 impl ReservedCatalogIdentityAllocator<'_> {
-    /// Allocate a new relation's OIDs in `heap_create_with_catalog`'s order: the relation, then the array type `AssignTypeArrayOid` reserves, then the row type, and for a view the `_RETURN` rule `DefineViewRules` inserts next. Sequences have no row type.
+    /// Allocate a new relation's OIDs in `heap_create_with_catalog`'s order: the relation, then, once `heap_create` accepts the relation's namespace, the array type `AssignTypeArrayOid` reserves, then the row type, and for a view the `_RETURN` rule `DefineViewRules` inserts next. Sequences have no row type. A refused relation has used its own OID.
     pub fn allocate_relation_oids(
         &mut self,
         kind: uqa_sql::catalog::relation_oids::RelationOidKind,
+        relation: &uqa_core::RelationIdentity,
     ) -> Result<uqa_sql::catalog::relation_oids::RelationCatalogOids, uqa_sql::SQLError> {
         use uqa_sql::catalog::relation_oids::{RelationCatalogOids, RelationOidKind};
+        let temporary_schema = self
+            .context
+            .session
+            .relation_name_resolution()
+            .temporary_schema;
         let mut allocate = |class| {
             self.allocate_catalog_oid(class, &[0; 16])
                 .map_err(|error| uqa_sql::catalog::errors::storage_error("relation OID", &error))
@@ -55,7 +61,11 @@ impl ReservedCatalogIdentityAllocator<'_> {
                     })
                 })
         };
-        let relation = allocate(CatalogOidClass::Relation)?;
+        let relation_oid = allocate(CatalogOidClass::Relation)?;
+        uqa_sql::catalog::resolution::creation::ensure_relation_namespace_writable(
+            relation,
+            &temporary_schema,
+        )?;
         let (array_type, row_type) = if kind == RelationOidKind::Sequence {
             (None, None)
         } else {
@@ -68,7 +78,7 @@ impl ReservedCatalogIdentityAllocator<'_> {
             None
         };
         Ok(RelationCatalogOids {
-            relation,
+            relation: relation_oid,
             row_type,
             array_type,
             rule,

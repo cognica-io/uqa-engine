@@ -67,19 +67,20 @@ fn temporary_namespace_allocation_follows_validation_and_stays_session_local() {
     let directory = tempfile::tempdir().unwrap();
     let engine = Engine::open(&directory.path().join("temporary.db")).unwrap();
     assert!(!engine.temporary_namespace_allocated());
-    assert!(engine
-        .relation_creation_context()
-        .temporary_name("public.docs")
-        .is_err());
+    // An ordinary schema is resolved before the temporary relation is rejected, as `RangeVarAdjustRelationPersistence` rejects it.
+    let error = engine
+        .sql("CREATE TEMP TABLE public.docs (a integer)", &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42P16"));
     assert!(!engine.temporary_namespace_allocated());
-    assert_eq!(
-        engine
-            .relation_creation_context()
-            .temporary_name("pg_temp.docs")
-            .unwrap(),
-        format!("{}.docs", engine.temporary_schema_name())
-    );
+    engine
+        .sql("CREATE TEMP TABLE pg_temp.docs (a integer)", &[])
+        .unwrap();
     assert!(engine.temporary_namespace_allocated());
+    assert!(engine
+        .table(&format!("{}.docs", engine.temporary_schema_name()))
+        .unwrap()
+        .is_some());
     let sibling = engine.new_session().unwrap();
     assert!(!sibling.temporary_namespace_allocated());
     assert_ne!(

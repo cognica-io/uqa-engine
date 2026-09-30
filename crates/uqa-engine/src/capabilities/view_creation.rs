@@ -45,6 +45,7 @@ impl Engine {
             query_owners: self,
             publication: self,
             changes: self,
+            notices: &self.runtime.notices,
         }
     }
 }

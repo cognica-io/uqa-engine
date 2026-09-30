@@ -241,6 +241,7 @@ impl ForeignCreationContext<'_> {
             .allocator(crate::catalog::identity::allocate_catalog_object_id)
             .allocate_relation_oids(
                 uqa_sql::catalog::relation_oids::RelationOidKind::ForeignTable,
+                &RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?,
             )?;
         self.schema.prepare_foreign_table_schema(
             name,

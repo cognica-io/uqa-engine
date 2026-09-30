@@ -80,6 +80,7 @@ impl SchemaPrivilegeInquiry<'_> {
             let oid = u32::try_from(graphs.namespace_oid(schema)).ok()?;
             return Some(BoundSchemaSecurity::bootstrap_with_oid(schema, oid));
         }
+        // The session's temporary namespaces exist once its first temporary object created them.
         if let Some(temporary) = self.temporary_namespace() {
             if schema == temporary.toast_schema() {
                 return Some(BoundSchemaSecurity::bootstrap_with_oid(
@@ -87,23 +88,22 @@ impl SchemaPrivilegeInquiry<'_> {
                     temporary.oids.toast_namespace,
                 ));
             }
+            if schema == temporary.schema {
+                let mut security = BoundSchemaSecurity::with_public_privileges(true);
+                security.tuple = Some(uqa_core::catalog_schema::SchemaTupleIdentity::initial(
+                    temporary.oids.namespace,
+                ));
+                return Some(security);
+            }
         }
         let mut security = match schema {
             "pg_catalog" | "information_schema" => {
                 Some(BoundSchemaSecurity::with_public_privileges(false))
             }
             "ag_catalog" => Some(BoundSchemaSecurity::bootstrap("ag_catalog")),
-            name if name == self.catalog.temporary_schema_name() => {
-                Some(BoundSchemaSecurity::with_public_privileges(true))
-            }
             _ => None,
         }?;
-        security.tuple = match self.temporary_namespace() {
-            Some(temporary) if schema == temporary.schema => Some(
-                uqa_core::catalog_schema::SchemaTupleIdentity::initial(temporary.oids.namespace),
-            ),
-            _ => BoundSchemaSecurity::bootstrap(schema).tuple,
-        };
+        security.tuple = BoundSchemaSecurity::bootstrap(schema).tuple;
         Some(security)
     }
 

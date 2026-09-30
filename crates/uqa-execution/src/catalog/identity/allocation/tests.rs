@@ -541,13 +541,40 @@ fn supplied_identity_reservation_releases_failures_and_preserves_sqlstate() {
 }
 
 #[test]
+fn heap_create_refuses_a_system_namespace_after_the_relation_takes_its_oid() {
+    use uqa_sql::catalog::relation_oids::RelationOidKind;
+    let session = Session::new();
+    let mut allocator = session.allocator();
+    let error = allocator
+        .allocate_relation_oids(
+            RelationOidKind::Table,
+            &uqa_core::RelationIdentity::new("pg_catalog", "t"),
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42501"));
+    assert_eq!(
+        allocator
+            .allocate_relation_oids(
+                RelationOidKind::Sequence,
+                &uqa_core::RelationIdentity::new("public", "s")
+            )
+            .unwrap()
+            .relation,
+        16_385
+    );
+}
+
+#[test]
 fn relation_oids_follow_heap_create_with_catalog_order() {
     use uqa_sql::catalog::relation_oids::{RelationCatalogOids, RelationOidKind};
     let session = Session::new();
     let mut allocator = session.allocator();
     assert_eq!(
         allocator
-            .allocate_relation_oids(RelationOidKind::Table)
+            .allocate_relation_oids(
+                RelationOidKind::Table,
+                &uqa_core::RelationIdentity::new("public", "t")
+            )
             .unwrap(),
         RelationCatalogOids {
             relation: 16_384,
@@ -558,7 +585,10 @@ fn relation_oids_follow_heap_create_with_catalog_order() {
     );
     assert_eq!(
         allocator
-            .allocate_relation_oids(RelationOidKind::View)
+            .allocate_relation_oids(
+                RelationOidKind::View,
+                &uqa_core::RelationIdentity::new("public", "v")
+            )
             .unwrap(),
         RelationCatalogOids {
             relation: 16_387,
@@ -569,7 +599,10 @@ fn relation_oids_follow_heap_create_with_catalog_order() {
     );
     assert_eq!(
         allocator
-            .allocate_relation_oids(RelationOidKind::Sequence)
+            .allocate_relation_oids(
+                RelationOidKind::Sequence,
+                &uqa_core::RelationIdentity::new("public", "s")
+            )
             .unwrap(),
         RelationCatalogOids {
             relation: 16_391,

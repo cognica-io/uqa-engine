@@ -22,7 +22,8 @@ use uqa_sql::{
     },
     plan::{QueryPlan, UnifiedPlan},
     schema::view_creation::{
-        replacement_is_view, validate_replacement_schema, view_creation_target,
+        replacement_is_view, temporary_view_notice, validate_replacement_schema,
+        view_becomes_temporary, view_creation_target,
     },
     SQLError,
 };
@@ -139,6 +140,9 @@ fn register_view_plan_inner(
     let owner = context.namespace.bind_owner()?;
     context.bindings.lock_relations(&plan)?;
     let uses_temporary_relation = context.bindings.bind_relations(&mut plan)?;
+    if view_becomes_temporary(persistence, uses_temporary_relation) {
+        context.notices.lock().push(temporary_view_notice(name)?);
+    }
     let (name, persistence) = view_creation_target(
         &context.namespace,
         name,
@@ -171,7 +175,7 @@ fn register_view_plan_inner(
         let object_id = context.catalog.allocate_identity().map_err(|error| {
             SQLError::Internal(format!("allocate view `{name}` identity: {error}"))
         })?;
-        (object_id, Some(allocate_view_oids(context)?))
+        (object_id, Some(allocate_view_oids(context, &relation)?))
     };
     let view = StoredView {
         security: existing_view.as_ref().map_or_else(
@@ -206,9 +210,13 @@ fn register_view_plan_inner(
 /// The OIDs of a new view or materialized view: its relation, array type and row type, then its `_RETURN` rule.
 pub(super) fn allocate_view_oids(
     context: &ViewCreationContext<'_>,
+    relation: &RelationIdentity,
 ) -> Result<uqa_sql::catalog::relation_oids::RelationCatalogOids, SQLError> {
     context
         .identities
         .allocator(crate::catalog::identity::allocate_catalog_object_id)
-        .allocate_relation_oids(uqa_sql::catalog::relation_oids::RelationOidKind::View)
+        .allocate_relation_oids(
+            uqa_sql::catalog::relation_oids::RelationOidKind::View,
+            relation,
+        )
 }

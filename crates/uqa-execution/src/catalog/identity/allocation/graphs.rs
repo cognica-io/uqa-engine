@@ -8,6 +8,7 @@
 
 use std::collections::BTreeMap;
 
+use uqa_core::RelationIdentity;
 use uqa_sql::catalog::graph_oids::{
     EndpointIndexOids, GraphCatalogOids, IndexConstraintOids, LabelCatalogOids,
 };
@@ -17,9 +18,13 @@ use uqa_sql::SQLError;
 
 use super::ReservedCatalogIdentityAllocator;
 
-/// AGE's label ids of the default vertex and edge labels.
+/// AGE's label ids and names of the default vertex and edge labels.
 const DEFAULT_VERTEX_LABEL_ID: u32 = 1;
 const DEFAULT_EDGE_LABEL_ID: u32 = 2;
+const DEFAULT_VERTEX_LABEL: &str = "_ag_label_vertex";
+const DEFAULT_EDGE_LABEL: &str = "_ag_label_edge";
+/// The sequence that numbers a graph's labels.
+const LABEL_ID_SEQUENCE: &str = "_label_id_seq";
 
 /// Whether a label holds vertices or edges, and whether it is one of the two labels every graph starts with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,23 +37,31 @@ impl ReservedCatalogIdentityAllocator<'_> {
     /// `create_graph`: the schema, whose OID becomes the graph's id, the label id sequence, and the default vertex and edge labels. `namespace_in_use` tells whether a schema already holds an OID.
     pub fn allocate_graph_oids(
         &mut self,
+        graph: &str,
         namespace_in_use: impl FnMut(i64) -> Result<bool, SQLError>,
     ) -> Result<GraphCatalogOids, SQLError> {
         let namespace = self.allocate_namespace_oid(namespace_in_use)?;
         let label_sequence = self
-            .allocate_relation_oids(RelationOidKind::Sequence)?
+            .allocate_relation_oids(
+                RelationOidKind::Sequence,
+                &RelationIdentity::new(graph, LABEL_ID_SEQUENCE),
+            )?
             .relation;
         let mut labels = BTreeMap::new();
-        for (id, edge) in [
-            (DEFAULT_VERTEX_LABEL_ID, false),
-            (DEFAULT_EDGE_LABEL_ID, true),
+        for (id, label, edge) in [
+            (DEFAULT_VERTEX_LABEL_ID, DEFAULT_VERTEX_LABEL, false),
+            (DEFAULT_EDGE_LABEL_ID, DEFAULT_EDGE_LABEL, true),
         ] {
             labels.insert(
                 id,
-                self.allocate_label_oids(LabelShape {
-                    edge,
-                    default: true,
-                })?,
+                self.allocate_label_oids(
+                    graph,
+                    label,
+                    LabelShape {
+                        edge,
+                        default: true,
+                    },
+                )?,
             );
         }
         Ok(GraphCatalogOids {
@@ -59,16 +72,25 @@ impl ReservedCatalogIdentityAllocator<'_> {
     }
 
     /// One label's objects. A default label's table is created with its columns, defaults and constraints; any other label's table inherits its kind's default label, whose `id` default it copies first and then replaces with one on its own sequence, so its inherited NOT NULL constraints arrive in name order and its `id` default is allocated last.
-    pub fn allocate_label_oids(&mut self, shape: LabelShape) -> Result<LabelCatalogOids, SQLError> {
+    pub fn allocate_label_oids(
+        &mut self,
+        graph: &str,
+        label: &str,
+        shape: LabelShape,
+    ) -> Result<LabelCatalogOids, SQLError> {
         let columns: &[&str] = if shape.edge {
             &["id", "start_id", "end_id", "properties"]
         } else {
             &["id", "properties"]
         };
         let sequence = self
-            .allocate_relation_oids(RelationOidKind::Sequence)?
+            .allocate_relation_oids(
+                RelationOidKind::Sequence,
+                &RelationIdentity::new(graph, format!("{label}_id_seq")),
+            )?
             .relation;
-        let relation = self.allocate_relation_oids(RelationOidKind::Table)?;
+        let relation = self
+            .allocate_relation_oids(RelationOidKind::Table, &RelationIdentity::new(graph, label))?;
         let (id_default, properties_default, not_null) = if shape.default {
             let id_default = self.allocate(CatalogOidClass::AttributeDefault)?;
             let properties_default = self.allocate(CatalogOidClass::AttributeDefault)?;

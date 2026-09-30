@@ -59,6 +59,7 @@ pub struct CreateTableAsContext<'a, S: Clone> {
     pub namespace: &'a dyn TableAsNamespace,
     pub publication: &'a dyn TableAsPublication,
     pub vectors: &'a dyn ConstraintCatalog,
+    pub notices: &'a parking_lot::Mutex<Vec<uqa_sql::SQLNotice>>,
 }
 pub struct CreateTableAsExecution<'a> {
     pub name: &'a str,
@@ -77,12 +78,14 @@ pub fn run_create_table_as<S: Clone>(
 ) -> Result<SQLResult, SQLError> {
     let owner = context.creation.bind_owner()?;
     // PostgreSQL analyzes the CTAS source before target namespace resolution, collisions, or schema CREATE. Source execution still follows target validation, so an existing target wins over runtime expression errors and row locks.
-    let temporary_privilege_error =
-        if execution.persistence == uqa_sql::ast::RelationPersistence::Temporary {
-            context.creation.ensure_temporary_privilege().err()
-        } else {
-            None
-        };
+    let temporary = context
+        .creation
+        .targets_temporary_namespace(execution.name, execution.persistence)?;
+    let temporary_privilege_error = if temporary {
+        context.creation.ensure_temporary_privilege().err()
+    } else {
+        None
+    };
     let query_schema = crate::query::binding::analyze_query_plan_schema(
         context.routines,
         execution.query,
@@ -93,18 +96,19 @@ pub fn run_create_table_as<S: Clone>(
     if let Some(error) = temporary_privilege_error {
         return Err(error);
     }
-    let preliminary_name = create_table_as_target_name(&context.creation, execution)?;
-    if should_skip_existing_create_table_as(
-        context.namespace,
-        &preliminary_name,
-        execution.if_not_exists,
-    )? {
+    let preliminary_name =
+        create_table_as_target_name(&context.creation, execution.name, temporary)?;
+    if should_skip_existing_create_table_as(context, &preliminary_name, execution)? {
         return Ok(SQLResult::empty().with_command_tag("CREATE TABLE AS"));
     }
     let columns = create_table_as_columns(&query_schema, execution.column_names)?;
-    if execution.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+    if !temporary {
         context.creation.ensure_create(&preliminary_name)?;
     }
+    // `DefineRelation` adjusts the persistence after the namespace's CREATE check and before it describes the columns.
+    let persistence = context
+        .creation
+        .adjusted_persistence(&preliminary_name, execution.persistence)?;
     // create_ctas_internal describes the relation before a source tuple is read.
     validate_create_table_as_columns(context.routines, &columns)?;
     context.creation.retain_owner(&owner)?;
@@ -121,14 +125,14 @@ pub fn run_create_table_as<S: Clone>(
         } else {
             None
         };
-    if execution.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+    if !temporary {
         context.namespace.prepare_writer()?;
     }
-    let name = create_table_as_target_name(&context.creation, execution)?;
-    if should_skip_existing_create_table_as(context.namespace, &name, execution.if_not_exists)? {
+    let name = create_table_as_target_name(&context.creation, execution.name, temporary)?;
+    if should_skip_existing_create_table_as(context, &name, execution)? {
         return Ok(SQLResult::empty().with_command_tag("CREATE TABLE AS"));
     }
-    let name = if execution.persistence == uqa_sql::ast::RelationPersistence::Temporary {
+    let name = if temporary {
         name
     } else {
         context.creation.persistent_relation_name(execution.name)?
@@ -153,7 +157,7 @@ pub fn run_create_table_as<S: Clone>(
         context.publication,
         &name,
         &columns,
-        execution.persistence,
+        persistence,
         execution.on_commit,
         &owner,
     )?;
@@ -176,29 +180,37 @@ pub fn run_create_table_as<S: Clone>(
 
 fn create_table_as_target_name(
     namespace: &crate::schema::namespaces::relations::RelationCreationContext<'_>,
-    execution: &CreateTableAsExecution<'_>,
+    name: &str,
+    temporary: bool,
 ) -> Result<String, SQLError> {
-    if execution.persistence == uqa_sql::ast::RelationPersistence::Temporary {
-        namespace.temporary_name(execution.name)
+    if temporary {
+        namespace.temporary_name(name)
     } else {
-        namespace.resolve_persistent_name(execution.name)
+        namespace.resolve_persistent_name(name)
     }
 }
 
-fn should_skip_existing_create_table_as(
-    namespace: &dyn TableAsNamespace,
+/// `CreateTableAsRelExists`: whether an existing relation of the target's name skips the statement under `IF NOT EXISTS`, which reports it with a notice; otherwise the name is taken. Both name the relation as written.
+fn should_skip_existing_create_table_as<S: Clone>(
+    context: &CreateTableAsContext<'_, S>,
     name: &str,
-    if_not_exists: bool,
+    execution: &CreateTableAsExecution<'_>,
 ) -> Result<bool, SQLError> {
-    if !namespace.relation_exists(name)? {
+    if !context.namespace.relation_exists(name)? {
         return Ok(false);
     }
-    if if_not_exists {
+    let (_, relation) = uqa_core::RelationIdentity::parse_reference(execution.name)
+        .map_err(SQLError::Unsupported)?;
+    if execution.if_not_exists {
+        context.notices.lock().push(
+            uqa_sql::SQLNotice::notice(format!("relation \"{relation}\" already exists, skipping"))
+                .with_sqlstate("42P07"),
+        );
         return Ok(true);
     }
     Err(SQLError::Routine {
         sqlstate: "42P07".into(),
-        message: format!("relation \"{name}\" already exists"),
+        message: format!("relation \"{relation}\" already exists"),
     })
 }
 

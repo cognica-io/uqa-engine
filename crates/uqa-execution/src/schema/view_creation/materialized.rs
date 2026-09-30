@@ -137,7 +137,7 @@ pub fn register_materialized_view_plan(
         })?;
         context.locks.prepare_definition_write()?;
         context.namespace.ensure_create(&name)?;
-        let catalog_oids = super::registration::allocate_view_oids(context)?;
+        let catalog_oids = super::registration::allocate_view_oids(context, &relation)?;
         let view = StoredView {
             security: uqa_sql::catalog::security::BoundTableSecurity::owner(owner.identity()),
             definition: uqa_sql::catalog::stored_view::StoredViewDefinition {

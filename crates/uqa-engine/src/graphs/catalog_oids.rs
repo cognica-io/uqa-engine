@@ -29,7 +29,7 @@ impl Engine {
                 let oids = self
                     .catalog_identity_reservation_context()
                     .allocator(uqa_execution::catalog::identity::allocate_catalog_object_id)
-                    .allocate_graph_oids(|oid| {
+                    .allocate_graph_oids(&graph, |oid| {
                         Ok(
                             uqa_execution::schema::namespaces::identity::namespace_oid_in_use(
                                 self, oid,
@@ -55,10 +55,14 @@ impl Engine {
                 let label_oids = self
                     .catalog_identity_reservation_context()
                     .allocator(uqa_execution::catalog::identity::allocate_catalog_object_id)
-                    .allocate_label_oids(LabelShape {
-                        edge: label.kind == LabelKind::Edge,
-                        default: false,
-                    })
+                    .allocate_label_oids(
+                        &graph,
+                        &label.name,
+                        LabelShape {
+                            edge: label.kind == LabelKind::Edge,
+                            default: false,
+                        },
+                    )
                     .map_err(|error| {
                         uqa_storage::StorageBackendError::backend("label OIDs", error)
                     })?;

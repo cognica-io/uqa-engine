@@ -67,11 +67,10 @@ pub fn create_sequence(
 ) -> Result<bool, SQLError> {
     validate_sequence_definition(&state.definition(), None)?;
     let role_owner = context.creation.bind_owner()?;
-    let name = if persistence == RelationPersistence::Temporary {
-        context.creation.temporary_name(name)?
-    } else {
-        context.creation.persistent_relation_name(name)?
-    };
+    let temporary = context
+        .creation
+        .targets_temporary_namespace(name, persistence)?;
+    let (name, persistence) = context.creation.relation_target(name, persistence)?;
     let relation = RelationIdentity::from_legacy_name(&name)
         .map_err(|error| SQLError::Internal(format!("resolve sequence `{name}`: {error}")))?;
     context.namespace.refresh_sequences().map_err(|error| {
@@ -86,7 +85,7 @@ pub fn create_sequence(
     }
     state.owner = bind_sequence_owner(context.owners, &name, ownership)?;
     context.creation.retain_owner(&role_owner)?;
-    if persistence == RelationPersistence::Temporary {
+    if temporary {
         context.creation.ensure_temporary_privilege()?;
     } else {
         context.creation.ensure_create(&name)?;
@@ -102,7 +101,10 @@ pub fn create_sequence(
     let catalog_oid = context
         .identities
         .allocator(crate::catalog::identity::allocate_catalog_object_id)
-        .allocate_relation_oids(uqa_sql::catalog::relation_oids::RelationOidKind::Sequence)?
+        .allocate_relation_oids(
+            uqa_sql::catalog::relation_oids::RelationOidKind::Sequence,
+            &relation,
+        )?
         .relation;
     if !context.publication.insert_sequence(
         &name,

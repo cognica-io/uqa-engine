@@ -12,6 +12,7 @@ use crate::catalog::security::roles::{
 };
 use crate::row_locks::{shared_objects::SharedObjectLockSession, RelationLockMode};
 use uqa_core::RelationIdentity;
+use uqa_sql::ast::RelationPersistence;
 use uqa_sql::{
     catalog::{
         resolution::{
@@ -86,6 +87,64 @@ impl RelationCreationContext<'_> {
         let (temporary_schema, relation) = creation::temporary_creation_parts(self.state, name)?;
         self.access_temporary_namespace()?;
         Ok(RelationIdentity::new(temporary_schema, relation).qualified_name())
+    }
+    /// `RangeVarGetAndCheckCreationNamespace` for a new relation: its canonical name and the persistence `RangeVarAdjustRelationPersistence` gives it there. A relation that [goes to the session's temporary namespace](Self::targets_temporary_namespace) creates the namespace when it does not exist yet; any other goes to its schema, which must exist and allow CREATE. A relation in the temporary namespace or its TOAST namespace is then temporary, and a temporary relation elsewhere or an unlogged one there is `42P16`.
+    pub fn relation_target(
+        &self,
+        name: &str,
+        persistence: RelationPersistence,
+    ) -> Result<(String, RelationPersistence), SQLError> {
+        let name = if self.targets_temporary_namespace(name, persistence)? {
+            self.temporary_name(name)?
+        } else {
+            self.persistent_relation_name(name)?
+        };
+        let persistence = self.adjusted_persistence(&name, persistence)?;
+        Ok((name, persistence))
+    }
+    /// `RangeVarAdjustRelationPersistence` for a relation of canonical `name`.
+    pub fn adjusted_persistence(
+        &self,
+        name: &str,
+        persistence: RelationPersistence,
+    ) -> Result<RelationPersistence, SQLError> {
+        let schema = RelationIdentity::from_legacy_name(name)
+            .map_err(SQLError::Internal)?
+            .schema;
+        creation::adjusted_relation_persistence(
+            &schema,
+            persistence,
+            &self.state.temporary_schema_name(),
+        )
+    }
+    /// Whether `RangeVarGetCreationNamespace` puts a new relation in the session's temporary namespace: a temporary relation without a schema, one qualified with `pg_temp` or with the namespace's own name once it exists, and one without a schema whose search path leads with `pg_temp`.
+    pub fn targets_temporary_namespace(
+        &self,
+        name: &str,
+        persistence: RelationPersistence,
+    ) -> Result<bool, SQLError> {
+        let (schema, _) = RelationIdentity::parse_reference(name).map_err(SQLError::Unsupported)?;
+        let temporary_schema = self.state.temporary_schema_name();
+        match schema.as_deref() {
+            Some("pg_temp") => Ok(true),
+            Some(schema) => {
+                Ok(schema == temporary_schema && self.schemas.temporary_namespace_allocated())
+            }
+            None if persistence == RelationPersistence::Temporary => Ok(true),
+            None => {
+                self.runtime
+                    .synchronize_catalog_registries()
+                    .map_err(|error| {
+                        SQLError::Internal(format!("refresh schema catalog: {error}"))
+                    })?;
+                Ok(creation::relation_creation_schema(
+                    self.state,
+                    &self.schema_privileges(),
+                    &self.names.current_role(),
+                )
+                .is_some_and(|schema| schema == temporary_schema))
+            }
+        }
     }
     /// `AccessTempTableNamespace`: the session's first temporary object creates the session's temporary namespace, and later ones find it.
     fn access_temporary_namespace(&self) -> Result<(), SQLError> {
@@ -259,14 +318,12 @@ impl RelationCreationContext<'_> {
 }
 
 impl uqa_sql::schema::view_creation::ViewCreationNamespace for RelationCreationContext<'_> {
-    fn temporary_schema_name(&self) -> String {
-        self.state.temporary_schema_name()
-    }
-    fn temporary_target(&self, name: &str) -> Result<String, SQLError> {
-        self.temporary_name(name)
-    }
-    fn persistent_target(&self, name: &str) -> Result<String, SQLError> {
-        self.persistent_relation_name(name)
+    fn relation_target(
+        &self,
+        name: &str,
+        persistence: RelationPersistence,
+    ) -> Result<(String, RelationPersistence), SQLError> {
+        RelationCreationContext::relation_target(self, name, persistence)
     }
 }
 

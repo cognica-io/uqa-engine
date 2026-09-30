@@ -9,36 +9,43 @@ use crate::{ast::RelationPersistence, RowSchema, SQLError};
 use uqa_core::RelationIdentity;
 
 pub trait ViewCreationNamespace {
-    fn temporary_schema_name(&self) -> String;
-    fn temporary_target(&self, name: &str) -> Result<String, SQLError>;
-    fn persistent_target(&self, name: &str) -> Result<String, SQLError>;
+    /// `RangeVarGetAndCheckCreationNamespace` for the view: its canonical name and the persistence it takes there.
+    fn relation_target(
+        &self,
+        name: &str,
+        persistence: RelationPersistence,
+    ) -> Result<(String, RelationPersistence), SQLError>;
 }
 
+/// Whether `DefineView` makes a view temporary because its query uses a temporary relation, which it reports with a notice before it resolves the view's namespace.
+pub fn view_becomes_temporary(
+    persistence: RelationPersistence,
+    uses_temporary_relation: bool,
+) -> bool {
+    uses_temporary_relation && persistence == RelationPersistence::Permanent
+}
+
+/// The notice `DefineView` reports for a view that its query makes temporary, naming the view as written without its schema.
+pub fn temporary_view_notice(name: &str) -> Result<crate::SQLNotice, SQLError> {
+    let (_, relation) = RelationIdentity::parse_reference(name).map_err(SQLError::Unsupported)?;
+    Ok(crate::SQLNotice::notice(format!(
+        "view \"{relation}\" will be a temporary view"
+    )))
+}
+
+/// The view's canonical name and persistence: a view whose query uses a temporary relation is temporary, and then goes where a temporary relation of its name goes.
 pub fn view_creation_target(
     namespace: &dyn ViewCreationNamespace,
     name: &str,
     persistence: RelationPersistence,
     uses_temporary_relation: bool,
 ) -> Result<(String, RelationPersistence), SQLError> {
-    let persistence = if uses_temporary_relation {
+    let persistence = if view_becomes_temporary(persistence, uses_temporary_relation) {
         RelationPersistence::Temporary
     } else {
         persistence
     };
-    let name = if persistence == RelationPersistence::Temporary {
-        let (schema, _) = RelationIdentity::parse_reference(name).map_err(SQLError::Unsupported)?;
-        if uses_temporary_relation
-            && schema.as_deref().is_some_and(|schema| {
-                schema != "pg_temp" && schema != namespace.temporary_schema_name()
-            })
-        {
-            namespace.persistent_target(name)?;
-        }
-        namespace.temporary_target(name)?
-    } else {
-        namespace.persistent_target(name)?
-    };
-    Ok((name, persistence))
+    namespace.relation_target(name, persistence)
 }
 
 pub fn replacement_is_view(

@@ -70,7 +70,7 @@ pub fn run_create_table(
     mut table: CreateTable,
 ) -> Result<SQLResult, SQLError> {
     let owner = context.creation.bind_owner()?;
-    let Some(name) = preflight(
+    let Some((name, persistence)) = preflight(
         context,
         &table.name,
         table.persistence,
@@ -81,6 +81,7 @@ pub fn run_create_table(
         return Ok(SQLResult::empty());
     };
     table.name = name;
+    table.persistence = persistence;
     create_after_preflight(context, table, &owner)
 }
 pub fn run_create_table_if_not_exists(
@@ -88,7 +89,7 @@ pub fn run_create_table_if_not_exists(
     deferred: DeferredCreateTable,
 ) -> Result<SQLResult, SQLError> {
     let owner = context.creation.bind_owner()?;
-    let Some(name) = preflight(
+    let Some((name, persistence)) = preflight(
         context,
         &deferred.name,
         deferred.persistence,
@@ -100,6 +101,7 @@ pub fn run_create_table_if_not_exists(
     };
     let mut table = uqa_sql::resolve_deferred_create_table(&deferred)?;
     table.name = name;
+    table.persistence = persistence;
     create_after_preflight(context, table, &owner)
 }
 
@@ -109,21 +111,21 @@ enum ExistingRelation {
     Deferred,
     Reported,
 }
+/// Resolve the new table's name and persistence as `RangeVarGetAndCheckCreationNamespace` does, before `transformCreateStmt` looks for a relation that already has the name.
 fn preflight(
     context: &CreateTableContext<'_>,
     name: &str,
     persistence: RelationPersistence,
     if_not_exists: bool,
     existing: ExistingRelation,
-) -> Result<Option<String>, SQLError> {
-    if persistence != RelationPersistence::Temporary {
+) -> Result<Option<(String, RelationPersistence)>, SQLError> {
+    if !context
+        .creation
+        .targets_temporary_namespace(name, persistence)?
+    {
         context.namespace.prepare_writer()?;
     }
-    let name = if persistence == RelationPersistence::Temporary {
-        context.creation.temporary_name(name)?
-    } else {
-        context.creation.persistent_relation_name(name)?
-    };
+    let (name, persistence) = context.creation.relation_target(name, persistence)?;
     if context.namespace.relation_exists(&name)? {
         let local = uqa_core::RelationIdentity::from_legacy_name(&name)
             .map_err(SQLError::Internal)?
@@ -144,7 +146,7 @@ fn preflight(
             });
         }
     }
-    Ok(Some(name))
+    Ok(Some((name, persistence)))
 }
 fn create_after_preflight(
     context: &CreateTableContext<'_>,

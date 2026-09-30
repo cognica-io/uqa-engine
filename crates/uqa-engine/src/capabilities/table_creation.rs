@@ -34,6 +34,7 @@ impl Engine {
             namespace: self,
             publication: self,
             vectors: self,
+            notices: &self.runtime.notices,
         }
     }
 }

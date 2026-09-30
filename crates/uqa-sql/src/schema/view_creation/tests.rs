@@ -9,64 +9,61 @@ use crate::ast::ColumnType;
 use std::cell::RefCell;
 
 struct Namespace {
-    calls: RefCell<Vec<&'static str>>,
-    deny_persistent: bool,
+    calls: RefCell<Vec<(String, RelationPersistence)>>,
 }
 impl ViewCreationNamespace for Namespace {
-    fn temporary_schema_name(&self) -> String {
-        self.calls.borrow_mut().push("temporary_schema");
-        "pg_temp_7".into()
-    }
-    fn temporary_target(&self, _: &str) -> Result<String, SQLError> {
-        self.calls.borrow_mut().push("temporary");
-        Ok("pg_temp_7.v".into())
-    }
-    fn persistent_target(&self, _: &str) -> Result<String, SQLError> {
-        self.calls.borrow_mut().push("persistent");
-        if self.deny_persistent {
-            Err(SQLError::Routine {
-                sqlstate: "42501".into(),
-                message: "schema creation denied".into(),
-            })
-        } else {
-            Ok("public.v".into())
-        }
+    fn relation_target(
+        &self,
+        name: &str,
+        persistence: RelationPersistence,
+    ) -> Result<(String, RelationPersistence), SQLError> {
+        self.calls.borrow_mut().push((name.into(), persistence));
+        Ok((format!("resolved.{name}"), persistence))
     }
 }
 
 #[test]
-fn temporary_view_dependencies_preserve_namespace_privilege_order() {
+fn a_view_over_temporary_relations_is_placed_as_a_temporary_relation() {
     let namespace = Namespace {
         calls: RefCell::new(Vec::new()),
-        deny_persistent: true,
     };
-    let error = view_creation_target(
-        &namespace,
-        "private.v",
-        RelationPersistence::Permanent,
-        true,
-    )
-    .unwrap_err();
-    assert_eq!(error.sqlstate(), Some("42501"));
-    assert_eq!(
-        *namespace.calls.borrow(),
-        ["temporary_schema", "persistent"]
-    );
-    namespace.calls.borrow_mut().clear();
-    assert_eq!(
-        view_creation_target(
-            &namespace,
-            "pg_temp.v",
+    for (name, persistence, uses_temporary_relation, placed) in [
+        (
+            "private.v",
             RelationPersistence::Permanent,
-            true
-        )
-        .unwrap(),
-        ("pg_temp_7.v".into(), RelationPersistence::Temporary)
+            true,
+            RelationPersistence::Temporary,
+        ),
+        (
+            "v",
+            RelationPersistence::Temporary,
+            false,
+            RelationPersistence::Temporary,
+        ),
+        (
+            "v",
+            RelationPersistence::Permanent,
+            false,
+            RelationPersistence::Permanent,
+        ),
+    ] {
+        namespace.calls.borrow_mut().clear();
+        view_creation_target(&namespace, name, persistence, uses_temporary_relation).unwrap();
+        assert_eq!(*namespace.calls.borrow(), [(name.to_string(), placed)]);
+    }
+    assert!(view_becomes_temporary(RelationPersistence::Permanent, true));
+    assert!(!view_becomes_temporary(
+        RelationPersistence::Temporary,
+        true
+    ));
+    assert!(!view_becomes_temporary(
+        RelationPersistence::Permanent,
+        false
+    ));
+    assert_eq!(
+        temporary_view_notice("sales.\"Recent\"").unwrap().message,
+        "view \"Recent\" will be a temporary view"
     );
-    assert_eq!(*namespace.calls.borrow(), ["temporary"]);
-    namespace.calls.borrow_mut().clear();
-    view_creation_target(&namespace, "v", RelationPersistence::Temporary, false).unwrap();
-    assert_eq!(*namespace.calls.borrow(), ["temporary"]);
 }
 
 #[test]

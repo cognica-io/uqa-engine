@@ -24,6 +24,8 @@ mod function_sqlbody;
 mod legacy_type_names;
 #[path = "catalog/pg18_constraint_lifecycle.rs"]
 mod pg18_constraint_lifecycle;
+#[path = "catalog/relation_creation_namespaces.rs"]
+mod relation_creation_namespaces;
 #[path = "sql_analyze_persistence.rs"]
 mod sql_analyze_persistence;
 #[path = "sql_analyzer_ddl.rs"]
