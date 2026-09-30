@@ -12,6 +12,7 @@ use super::*;
 mod admission;
 mod diskann;
 mod identifiers;
+mod ordered;
 mod receipts;
 mod reclamation;
 mod runs;

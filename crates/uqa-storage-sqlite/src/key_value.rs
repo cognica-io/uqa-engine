@@ -322,6 +322,12 @@ impl KeyValueStore for SQLiteKeyValueStore {
         self.conn.data_version().map_err(Into::into)
     }
 
+    fn read_view_revision(
+        &self,
+    ) -> StorageBackendResult<Option<uqa_storage::key_value::KeyValueReadRevision>> {
+        self.conn.read_view_revision().map_err(Into::into)
+    }
+
     fn change_version_monitor_is_nonblocking(&self) -> StorageBackendResult<bool> {
         Ok(true)
     }

@@ -1,0 +1,13 @@
+rr_private:3
+rr_external:3
+rr_keep:2
+rr_empty:1
+rr_branch:2
+rr_final:{1,4}
+ddl_first:first
+ddl_undone:0
+ddl_branch:replacement
+ddl_final:0
+batch_first:first
+batch_kept:1
+batch_final:absent

@@ -624,6 +624,11 @@ pub trait KeyValueStore: Send + Sync {
         Ok(None)
     }
 
+    /// Complete committed/private visibility identity, including savepoint undo. `None` requires consumers to use their existing refresh path. Tokens are process-local and do not replace transaction isolation or logical read observations.
+    fn read_view_revision(&self) -> StorageBackendResult<Option<KeyValueReadRevision>> {
+        Ok(None)
+    }
+
     fn change_version_monitor_is_nonblocking(&self) -> StorageBackendResult<bool> {
         Ok(true)
     }

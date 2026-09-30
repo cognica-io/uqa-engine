@@ -48,7 +48,7 @@ pub(super) fn restoration_header(
 ) -> PhysicalResult<(DatabaseId, Header, Option<DatabaseId>)> {
     // Decode the marker before touching fields absent from predecessor schemas, preserving their typed format rejection.
     let mut statement =
-        connection.prepare("SELECT * FROM _uqa_mvcc_metadata WHERE singleton = 1")?;
+        connection.prepare_cached("SELECT * FROM _uqa_mvcc_metadata WHERE singleton = 1")?;
     let mut rows = statement.query([])?;
     let row = rows
         .next()?

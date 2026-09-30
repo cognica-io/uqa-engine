@@ -71,6 +71,29 @@ impl<K, V> BudgetedSharedMap<K, V> {
 }
 
 impl<K: Ord, V> BudgetedSharedMap<K, V> {
+    /// Select the greatest entry at an upper bound in logarithmic time, without allocating or traversing preceding entries.
+    pub fn last_before<Q: Ord + ?Sized>(&self, end: Bound<&Q>) -> Option<(&K, &V)>
+    where
+        K: Borrow<Q>,
+    {
+        let mut link = &self.root;
+        let mut found = None;
+        while let Some(node) = link {
+            let included = match end {
+                Bound::Unbounded => true,
+                Bound::Included(key) => node.entry.0.borrow() <= key,
+                Bound::Excluded(key) => node.entry.0.borrow() < key,
+            };
+            if included {
+                found = Some((&node.entry.0, &node.entry.1));
+                link = &node.right;
+            } else {
+                link = &node.left;
+            }
+        }
+        found
+    }
+
     pub fn get<Q: Ord + ?Sized>(&self, key: &Q) -> Option<&V>
     where
         K: Borrow<Q>,

@@ -269,6 +269,8 @@ impl Engine {
     /// between a physical commit and publication of the matching in-process
     /// epochs, while allowing unchanged statements to retain their caches.
     pub(crate) fn refresh_pinned_transaction_snapshot(&self) -> StorageBackendResult<()> {
+        use std::sync::atomic::Ordering;
+
         let (storage_snapshot_unchanged, stable_storage_version) =
             if let Some(backend) = self.storage.backend.as_ref() {
                 if backend.change_version_monitor_is_nonblocking()? {
@@ -281,7 +283,7 @@ impl Engine {
                             && after.is_some_and(|version| {
                                 self.epochs
                                     .seen_storage_change_version
-                                    .load(std::sync::atomic::Ordering::Acquire)
+                                    .load(Ordering::Acquire)
                                     == version
                             }),
                         stable.then_some(after).flatten(),
@@ -294,57 +296,47 @@ impl Engine {
             } else {
                 (true, None)
             };
-        let table_catalog_epoch = self
-            .epochs
-            .table_catalog
-            .published
-            .load(std::sync::atomic::Ordering::Acquire);
-        let table_data_epoch = self
-            .epochs
-            .table_data
-            .published
-            .load(std::sync::atomic::Ordering::Acquire);
+        let table_catalog_epoch = self.epochs.table_catalog.published.load(Ordering::Acquire);
+        let table_data_epoch = self.epochs.table_data.published.load(Ordering::Acquire);
         let catalog_registry_epoch = self
             .epochs
             .catalog_registry
             .published
-            .load(std::sync::atomic::Ordering::Acquire);
-        // A committed sequence alone does not identify a private command view: writes and savepoint undo may change it without a durable commit.
+            .load(Ordering::Acquire);
+        let read_view = self
+            .storage
+            .backend
+            .as_ref()
+            .map(|backend| backend.read_view_revision())
+            .transpose()?
+            .flatten();
+        // A complete command-root identity distinguishes writes and undo without scanning catalog records. Providers lacking it retain the conservative private-view refresh.
+        let same_read_view = read_view.as_ref().is_some_and(|current| {
+            self.epochs.seen_storage_read_view.lock().as_ref() == Some(current)
+                && self.epochs.storage_cache_revisions.lock().is_some()
+        });
         let private_view = self.storage.backend.as_ref().is_some_and(|backend| {
             backend.transaction_model().is_versioned() && backend.in_transaction()
         });
-        if !private_view
-            && storage_snapshot_unchanged
-            && self
-                .epochs
-                .table_catalog
-                .seen
-                .load(std::sync::atomic::Ordering::Acquire)
-                == table_catalog_epoch
-            && self
-                .epochs
-                .table_data
-                .seen
-                .load(std::sync::atomic::Ordering::Acquire)
-                == table_data_epoch
-            && self
-                .epochs
-                .catalog_registry
-                .seen
-                .load(std::sync::atomic::Ordering::Acquire)
-                == catalog_registry_epoch
+        if (same_read_view || (read_view.is_none() && !private_view && storage_snapshot_unchanged))
+            && self.epochs.table_catalog.seen.load(Ordering::Acquire) == table_catalog_epoch
+            && self.epochs.table_data.seen.load(Ordering::Acquire) == table_data_epoch
+            && self.epochs.catalog_registry.seen.load(Ordering::Acquire) == catalog_registry_epoch
         {
             return Ok(());
         }
+        // A failed partial restoration must not leave an older successful token eligible for reuse after undo.
+        *self.epochs.seen_storage_read_view.lock() = None;
         if self.refresh_tracked_pinned_snapshot(
             table_catalog_epoch,
             table_data_epoch,
             catalog_registry_epoch,
         )? {
+            *self.epochs.seen_storage_read_view.lock() = read_view;
             if let Some(version) = stable_storage_version {
                 self.epochs
                     .seen_storage_change_version
-                    .store(version, std::sync::atomic::Ordering::Release);
+                    .store(version, Ordering::Release);
             }
             return Ok(());
         }
@@ -356,13 +348,14 @@ impl Engine {
         self.epochs
             .table_data
             .seen
-            .store(table_data_epoch, std::sync::atomic::Ordering::Release);
+            .store(table_data_epoch, Ordering::Release);
         self.synchronize_partition_identity_watermarks()?;
         self.reload_catalog_registries(catalog_registry_epoch)?;
+        *self.epochs.seen_storage_read_view.lock() = read_view;
         if let Some(version) = stable_storage_version {
             self.epochs
                 .seen_storage_change_version
-                .store(version, std::sync::atomic::Ordering::Release);
+                .store(version, Ordering::Release);
         }
         Ok(())
     }

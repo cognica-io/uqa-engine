@@ -515,6 +515,7 @@ impl EpochChannel {
 
 pub(super) struct EpochCoordinator {
     pub(super) storage_cache_revisions: Mutex<Option<uqa_storage::CatalogCacheRevisions>>,
+    pub(super) seen_storage_read_view: Mutex<Option<uqa_storage::key_value::KeyValueReadRevision>>,
     pub(super) seen_storage_change_version: AtomicU64,
     pub(super) external_commit_refresh: Mutex<()>,
     pub(super) table_catalog: EpochChannel,
@@ -533,6 +534,7 @@ impl EpochCoordinator {
     pub(super) fn new() -> Self {
         Self {
             storage_cache_revisions: Mutex::new(None),
+            seen_storage_read_view: Mutex::new(None),
             seen_storage_change_version: AtomicU64::new(0),
             external_commit_refresh: Mutex::new(()),
             table_catalog: EpochChannel::new(1),

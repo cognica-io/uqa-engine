@@ -52,6 +52,7 @@ impl PrivateRecordChanges {
         control.check()?;
         state.records = records;
         state.sources = sources;
+        state.revision = Some(identity);
         Ok(())
     }
 

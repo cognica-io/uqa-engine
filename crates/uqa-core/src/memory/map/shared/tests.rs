@@ -183,6 +183,14 @@ fn borrowed_ranges_seek_inclusively_and_exclusively_without_allocating() {
     for key in ["", "a", "b", "c", "m", "z"] {
         assert_eq!(map.get(key), expected.get(key));
         for bound in [Bound::Included(key), Bound::Excluded(key)] {
+            assert_eq!(
+                map.last_before(bound)
+                    .map(|(key, value)| (key.as_str(), value)),
+                expected
+                    .range::<str, _>((Bound::Unbounded, bound))
+                    .next_back()
+                    .map(|(key, value)| (*key, value))
+            );
             assert!(map
                 .range_from(bound)
                 .map(|(key, value)| (key.as_str(), value))
@@ -198,6 +206,54 @@ fn borrowed_ranges_seek_inclusively_and_exclusively_without_allocating() {
     assert_eq!(budget.used(), used);
     let empty = BudgetedSharedMap::<String, usize>::new(&budget);
     assert!(empty.range_from(Bound::Included("a")).next().is_none());
+    assert!(empty.last_before(Bound::Included("a")).is_none());
+    assert_eq!(
+        map.last_before::<str>(Bound::Unbounded)
+            .map(|(key, value)| (key.as_str(), *value)),
+        Some(("m", 13))
+    );
+}
+
+#[test]
+fn greatest_entry_seeks_without_linear_work_or_allocation() {
+    #[derive(Eq, PartialEq)]
+    struct Key(usize);
+    static COMPARISONS: AtomicUsize = AtomicUsize::new(0);
+    impl Ord for Key {
+        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+            COMPARISONS.fetch_add(1, AtomicOrdering::Relaxed);
+            self.0.cmp(&other.0)
+        }
+    }
+    impl PartialOrd for Key {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+    let budget = MemoryBudget::new(2 << 20);
+    let mut map = BudgetedSharedMap::new(&budget);
+    for key in 0..8192 {
+        map.try_insert(Key(key), key).unwrap();
+    }
+    for (bound, expected) in [
+        (Bound::Included(Key(8191)), 8191),
+        (Bound::Excluded(Key(4096)), 4095),
+    ] {
+        COMPARISONS.store(0, AtomicOrdering::Relaxed);
+        let allocated = allocation_counter::measure(|| {
+            let bound = match &bound {
+                Bound::Included(key) => Bound::Included(key),
+                Bound::Excluded(key) => Bound::Excluded(key),
+                Bound::Unbounded => unreachable!(),
+            };
+            assert_eq!(
+                map.last_before(bound).map(|(_, value)| *value),
+                Some(expected)
+            );
+        });
+        assert_eq!(allocated.count_total, 0);
+        assert!(COMPARISONS.load(AtomicOrdering::Relaxed) < 32);
+    }
 }
 
 #[test]

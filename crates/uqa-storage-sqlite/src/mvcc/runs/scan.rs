@@ -20,11 +20,11 @@ pub(in crate::mvcc) fn next_key(
     control: &StorageReadControl,
 ) -> PhysicalResult<Option<BudgetedVec<u8>>> {
     let _bindings = crate::read_control::reserve_bindings(control, &[lower])?;
-    let mut lengths = connection.prepare(
+    let mut lengths = connection.prepare_cached(
         "SELECT key_length FROM _uqa_mvcc_runs WHERE key_length > ?1 ORDER BY key_length LIMIT 1",
     )?;
-    let mut predecessor = connection.prepare(super::LOOKUP)?;
-    let mut successor = connection.prepare("SELECT first_key, last_key, sequence, kind, CASE WHEN value IS NULL THEN NULL WHEN typeof(value) = 'blob' THEN length(value) ELSE -1 END, key_length FROM _uqa_mvcc_runs WHERE key_length = ?1 AND first_key > ?2 ORDER BY first_key LIMIT 1")?;
+    let mut predecessor = connection.prepare_cached(super::LOOKUP)?;
+    let mut successor = connection.prepare_cached("SELECT first_key, last_key, sequence, kind, CASE WHEN value IS NULL THEN NULL WHEN typeof(value) = 'blob' THEN length(value) ELSE -1 END, key_length FROM _uqa_mvcc_runs WHERE key_length = ?1 AND first_key > ?2 ORDER BY first_key LIMIT 1")?;
     let mut previous = 0;
     let mut selected: Option<BudgetedVec<u8>> = None;
     while let Some(length) = lengths

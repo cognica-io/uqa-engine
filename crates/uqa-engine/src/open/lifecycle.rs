@@ -445,6 +445,7 @@ impl Engine {
         storage_session.validate_transaction_affinity()?;
         let restore_catalog = Arc::clone(&storage_session.catalog);
         let restore_backend = Arc::clone(&storage_session.backend);
+        let read_view_before = restore_backend.read_view_revision()?;
         let cache_revisions_before;
         let mut engine = Self::empty_persistent_session(storage_session, provider);
         if initialize_catalog {
@@ -515,6 +516,10 @@ impl Engine {
         let stable_restore = cache_revisions_before == cache_revisions_after;
         if stable_restore {
             *engine.epochs.storage_cache_revisions.lock() = cache_revisions_after;
+            let read_view_after = restore_backend.read_view_revision()?;
+            if read_view_before == read_view_after {
+                *engine.epochs.seen_storage_read_view.lock() = read_view_after;
+            }
         }
         if let Some(version) = restore_backend.change_version()?.filter(|_| stable_restore) {
             engine

@@ -709,6 +709,17 @@ impl KeyValueStore for VersionedKeyValueStore {
         ))
     }
 
+    fn read_view_revision(
+        &self,
+    ) -> StorageBackendResult<Option<crate::key_value::KeyValueReadRevision>> {
+        let view = self.view().map_err(VersionError::into_storage_error)?;
+        Ok(Some(crate::key_value::KeyValueReadRevision::records(
+            self.persistence.database_id(),
+            view.sequence(),
+            view.private_revision(),
+        )))
+    }
+
     fn commit_transaction(&self) -> StorageBackendResult<()> {
         let mut active = self.active.lock();
         active

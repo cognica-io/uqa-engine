@@ -65,11 +65,13 @@ struct Savepoint {
     id: StorageSavepointId,
     records: Records,
     sources: Sources,
+    revision: Option<PrivateRecordRevision>,
 }
 
 struct State {
     records: Records,
     sources: Sources,
+    revision: Option<PrivateRecordRevision>,
     savepoints: BudgetedVec<Savepoint>,
 }
 
@@ -130,6 +132,7 @@ impl PrivateRecordChanges {
                 state: Mutex::new(State {
                     records: Records::new(memory),
                     sources: Sources::new(memory),
+                    revision: None,
                     savepoints: BudgetedVec::new(memory),
                 }),
                 memory: memory.clone(),
@@ -183,6 +186,7 @@ impl PrivateRecordChanges {
                     identity,
                 },
             )?;
+            state.revision = Some(identity);
             return Ok(());
         }
         let mut records = state.records.clone();
@@ -204,6 +208,7 @@ impl PrivateRecordChanges {
         // Candidate roots own every reservation before this single atomic publication.
         state.records = records;
         state.sources = sources;
+        state.revision = Some(identity);
         Ok(())
     }
 
@@ -220,6 +225,7 @@ impl PrivateRecordChanges {
         Ok(PrivateRecordSnapshot {
             records: state.records.clone(),
             sources: state.sources.clone(),
+            revision: state.revision,
             _memory: memory,
         })
     }
@@ -228,10 +234,12 @@ impl PrivateRecordChanges {
         let mut state = self.owner.state.lock();
         let records = state.records.clone();
         let sources = state.sources.clone();
+        let revision = state.revision;
         state.savepoints.push(Savepoint {
             id,
             records,
             sources,
+            revision,
         })?;
         Ok(())
     }
@@ -250,6 +258,7 @@ impl PrivateRecordChanges {
         let position = state.savepoint_position(id)?;
         state.records = state.savepoints[position].records.clone();
         state.sources = state.savepoints[position].sources.clone();
+        state.revision = state.savepoints[position].revision;
         state.truncate_savepoints(position + 1);
         Ok(())
     }
@@ -258,6 +267,7 @@ impl PrivateRecordChanges {
         let mut state = self.owner.state.lock();
         state.records = Records::new(&self.owner.memory);
         state.sources = Sources::new(&self.owner.memory);
+        state.revision = None;
         state.truncate_savepoints(0);
         Ok(())
     }
@@ -279,16 +289,52 @@ impl PrivateRecordChanges {
 pub struct PrivateRecordSnapshot {
     records: Records,
     sources: Sources,
+    revision: Option<PrivateRecordRevision>,
     _memory: MemoryReservation,
 }
 
 impl PrivateRecordSnapshot {
+    /// Identity of this complete private root. Undo restores the saved identity; successful replacement batches receive identities never used by another root or transaction.
+    pub fn revision(&self) -> Option<PrivateRecordRevision> {
+        self.revision
+    }
+
+    pub(super) fn last_before(
+        &self,
+        prefix: &[u8],
+        before: Option<&[u8]>,
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<PreparedRecordWrite>> {
+        control.check()?;
+        let mut upper = BudgetedVec::new(control.memory());
+        upper.extend_from_slice(prefix)?;
+        let upper = match upper.iter().rposition(|byte| *byte != u8::MAX) {
+            Some(last) => {
+                upper[last] += 1;
+                upper.truncate(last + 1);
+                Some(upper)
+            }
+            None => None,
+        };
+        let end = match (before, upper.as_deref()) {
+            (Some(before), Some(upper)) => Some(before.min(upper)),
+            (before, upper) => before.or(upper),
+        };
+        let bound = end.map_or(std::ops::Bound::Unbounded, std::ops::Bound::Excluded);
+        Ok(self
+            .records
+            .last_before::<[u8]>(bound)
+            .filter(|(key, _)| key.bytes().starts_with(prefix))
+            .map(|(_, change)| change.write.clone()))
+    }
+
     /// Retain this exact private revision without following later writes or copying its values.
     pub(super) fn try_clone(&self) -> VersionResult<Self> {
         let memory = self.records.budget().reserve(std::mem::size_of::<Self>())?;
         Ok(Self {
             records: self.records.clone(),
             sources: self.sources.clone(),
+            revision: self.revision,
             _memory: memory,
         })
     }

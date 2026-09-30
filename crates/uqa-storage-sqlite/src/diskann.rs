@@ -334,6 +334,11 @@ impl KeyValueStore for Records {
     fn change_version(&self) -> StorageBackendResult<Option<u64>> {
         self.inner.change_version()
     }
+    fn read_view_revision(
+        &self,
+    ) -> StorageBackendResult<Option<uqa_storage::key_value::KeyValueReadRevision>> {
+        self.inner.read_view_revision()
+    }
     fn change_version_monitor_is_nonblocking(&self) -> StorageBackendResult<bool> {
         self.inner.change_version_monitor_is_nonblocking()
     }

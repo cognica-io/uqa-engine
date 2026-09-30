@@ -525,6 +525,12 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         Ok(self.conn.data_version()?)
     }
 
+    fn read_view_revision(
+        &self,
+    ) -> StorageBackendResult<Option<uqa_storage::key_value::KeyValueReadRevision>> {
+        Ok(self.conn.read_view_revision()?)
+    }
+
     fn change_version_monitor_is_nonblocking(&self) -> StorageBackendResult<bool> {
         Ok(self.conn.data_version_monitor_is_nonblocking()?)
     }
