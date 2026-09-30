@@ -87,6 +87,8 @@ fn set_column_property(
     )
     .map_err(|error| StorageBackendError::backend("column default identity", error))?;
     let default_catalog_oid = definition.default_catalog_oid;
+    // The reservation refreshes the catalog, so the columns are published into the table state it holds now.
+    let state = super::current_table_state(context.catalog, &table_name, state.as_ref())?;
     let mut guard = state.write_columns();
     let mut next = guard.columns().to_vec();
     publication::apply_property(&mut next, &table_name, column, property)
