@@ -18,13 +18,20 @@ pub(super) fn rewrite_window_expr(
     slots: &mut Vec<WindowSlot>,
 ) -> (ScalarExpr, bool) {
     match expr {
-        ScalarExpr::WindowCall { name, args, spec } => {
+        ScalarExpr::WindowCall {
+            name,
+            args,
+            spec,
+            filter,
+            ..
+        } => {
             let column = InternalRelationId::allocate().column(0);
             slots.push(WindowSlot {
                 column,
                 name: name.clone(),
                 args: args.clone(),
                 spec: spec.clone(),
+                filter: filter.as_deref().cloned(),
             });
             (ScalarExpr::InternalColumn(column), true)
         }

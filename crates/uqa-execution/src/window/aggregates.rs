@@ -19,6 +19,8 @@ use uqa_sql::{SQLError, ScalarExpr};
 pub(super) struct WindowAggregate {
     name: String,
     args: Vec<ScalarExpr>,
+    /// Rows for which this condition is not true do not enter the aggregate.
+    filter: Option<ScalarExpr>,
     template: AggregateAccumulatorTemplate,
     budget_bytes: usize,
     accumulator: AggregateAccumulator,
@@ -30,9 +32,9 @@ pub(super) struct WindowAggregate {
 }
 
 impl WindowAggregate {
+    /// An aggregate call: its name, arguments and `FILTER` condition.
     pub(super) fn new(
-        name: &str,
-        args: &[ScalarExpr],
+        (name, args, filter): (&str, &[ScalarExpr], Option<&ScalarExpr>),
         template: AggregateAccumulatorTemplate,
         budget_bytes: usize,
     ) -> Self {
@@ -40,6 +42,7 @@ impl WindowAggregate {
         Self {
             name: name.to_string(),
             args: args.to_vec(),
+            filter: filter.cloned(),
             template,
             budget_bytes,
             accumulator,
@@ -95,8 +98,15 @@ impl WindowAggregate {
                 Membership::After => break,
                 Membership::Outside => {}
                 Membership::Inside => {
-                    let (name, args, accumulator) = (&self.name, &self.args, &mut self.accumulator);
+                    let (name, args, filter, accumulator) =
+                        (&self.name, &self.args, &self.filter, &mut self.accumulator);
                     rows.with_context(self.aggregated_upto, |context| {
+                        // `advance_windowaggregate`: a row whose filter is not true is skipped.
+                        if let Some(filter) = filter {
+                            if !uqa_sql::expr::truthy(&crate::eval_scalar(filter, context)?) {
+                                return Ok(());
+                            }
+                        }
                         observe_aggregate(accumulator, name, args, false, &[], context)
                     })?;
                 }

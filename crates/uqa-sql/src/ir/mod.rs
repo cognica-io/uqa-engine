@@ -14,7 +14,8 @@ pub use call_arguments::{
 };
 
 use crate::ast::{
-    BinaryOp, ColumnType, FrameExclusion, FrameMode, FunctionBinding, InternalColumnRef, NullsOrder,
+    BinaryOp, ColumnType, FrameExclusion, FrameMode, FunctionBinding, InternalColumnRef,
+    NullsOrder, WindowCallModifiers,
 };
 use uqa_core::Value;
 
@@ -82,10 +83,15 @@ pub enum ScalarExpr {
         list: Vec<Self>,
         negated: bool,
     },
+    /// A window function call; `filter` is an aggregate's `FILTER (WHERE ...)` condition.
     WindowCall {
         name: String,
         args: Vec<Self>,
         spec: ScalarWindowSpec,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        filter: Option<Box<Self>>,
+        #[serde(default, skip_serializing_if = "WindowCallModifiers::is_empty")]
+        modifiers: WindowCallModifiers,
     },
     Case {
         base: Option<Box<Self>>,

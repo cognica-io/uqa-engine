@@ -558,23 +558,25 @@ fn collect_constraint_columns(expression: &crate::ast::Expr, output: &mut Vec<St
                 collect_constraint_columns(item, output);
             }
         }
-        Expr::WindowCall { args, spec, .. } => {
-            for argument in args {
-                collect_constraint_columns(argument, output);
-            }
-            for expression in &spec.partition_by {
+        Expr::WindowCall {
+            args, spec, filter, ..
+        } => {
+            for expression in args
+                .iter()
+                .chain(filter.as_deref())
+                .chain(&spec.partition_by)
+                .chain(spec.order_by.iter().map(|order| &order.expr))
+            {
                 collect_constraint_columns(expression, output);
             }
-            for order in &spec.order_by {
-                collect_constraint_columns(&order.expr, output);
-            }
-            if let Some(frame) = &spec.frame {
-                for bound in [&frame.start, &frame.end] {
-                    if let FrameBound::Preceding(expression) | FrameBound::Following(expression) =
-                        bound
-                    {
-                        collect_constraint_columns(expression, output);
-                    }
+            for bound in spec
+                .frame
+                .iter()
+                .flat_map(|frame| [&frame.start, &frame.end])
+            {
+                if let FrameBound::Preceding(expression) | FrameBound::Following(expression) = bound
+                {
+                    collect_constraint_columns(expression, output);
                 }
             }
         }

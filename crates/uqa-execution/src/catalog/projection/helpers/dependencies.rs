@@ -95,9 +95,14 @@ fn collect_expression_columns(expression: &Expr, output: &mut Vec<String>) {
                 collect_expression_columns(item, output);
             }
         }
-        Expr::WindowCall { args, spec, .. } => {
+        Expr::WindowCall {
+            args, spec, filter, ..
+        } => {
             for argument in args {
                 collect_expression_columns(argument, output);
+            }
+            if let Some(filter) = filter {
+                collect_expression_columns(filter, output);
             }
             collect_window_columns(spec, output);
         }

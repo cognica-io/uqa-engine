@@ -57,6 +57,7 @@ fn pass(order_by: Vec<ScalarOrder>, slots: usize) -> WindowPass {
                     order_by: order_by.clone(),
                     frame: None,
                 },
+                filter: None,
             })
             .collect(),
     }
@@ -132,8 +133,7 @@ fn results(
 
 fn sum() -> WindowFunction {
     WindowFunction::Aggregate(Box::new(aggregates::WindowAggregate::new(
-        "sum",
-        &[ScalarExpr::Column("v".into())],
+        ("sum", &[ScalarExpr::Column("v".into())], None),
         AggregateAccumulatorTemplate::Builtin(AggregateStatePlan::Sum),
         1 << 20,
     )))

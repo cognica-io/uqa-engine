@@ -664,8 +664,14 @@ fn validate_rule_expr_scopes(catalog: &dyn RuleSourceCatalog, expr: &Expr) -> Re
                 validate_rule_expr_scopes(catalog, item)?;
             }
         }
-        Expr::WindowCall { args, spec, .. } => {
-            for expr in args.iter().chain(spec.partition_by.iter()) {
+        Expr::WindowCall {
+            args, spec, filter, ..
+        } => {
+            for expr in args
+                .iter()
+                .chain(filter.iter().map(AsRef::as_ref))
+                .chain(spec.partition_by.iter())
+            {
                 validate_rule_expr_scopes(catalog, expr)?;
             }
             for order in &spec.order_by {

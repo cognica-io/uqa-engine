@@ -38,6 +38,8 @@ struct WindowSlot {
     name: String,
     args: Vec<ScalarExpr>,
     spec: ScalarWindowSpec,
+    /// An aggregate's `FILTER (WHERE ...)` condition.
+    filter: Option<ScalarExpr>,
 }
 
 impl WindowSlot {
@@ -46,6 +48,8 @@ impl WindowSlot {
             name: self.name.clone(),
             args: self.args.clone(),
             spec: self.spec.clone(),
+            filter: self.filter.clone().map(Box::new),
+            modifiers: uqa_sql::ast::WindowCallModifiers::default(),
         }
     }
 }
@@ -462,8 +466,7 @@ fn window_function(
             .pop()
             .ok_or_else(|| SQLError::Internal("window aggregate lost its accumulator".into()))?;
             WindowFunction::Aggregate(Box::new(aggregates::WindowAggregate::new(
-                &slot.name,
-                &slot.args,
+                (&slot.name, &slot.args, slot.filter.as_ref()),
                 template,
                 budget_bytes,
             )))

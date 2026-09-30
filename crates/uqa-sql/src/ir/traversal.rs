@@ -18,6 +18,35 @@ impl ScalarExpr {
         .unwrap_or_else(|never| match never {});
     }
 
+    /// Visit a window call's arguments, `FILTER` condition, partition and ordering keys, and frame offsets.
+    fn try_visit_window<E>(
+        args: &[Self],
+        filter: Option<&Self>,
+        spec: &super::ScalarWindowSpec,
+        visitor: &mut impl FnMut(&Self) -> Result<bool, E>,
+    ) -> Result<(), E> {
+        for expression in args
+            .iter()
+            .chain(filter)
+            .chain(&spec.partition_by)
+            .chain(spec.order_by.iter().map(|order| &order.expr))
+        {
+            expression.try_visit(visitor)?;
+        }
+        for bound in spec
+            .frame
+            .iter()
+            .flat_map(|frame| [&frame.start, &frame.end])
+        {
+            if let ScalarFrameBound::Preceding(expression)
+            | ScalarFrameBound::Following(expression) = bound
+            {
+                expression.try_visit(visitor)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Visit in pre-order, skipping a subtree when the visitor returns false and stopping immediately on its first error.
     pub fn try_visit<E>(
         &self,
@@ -68,30 +97,9 @@ impl ScalarExpr {
                     filter.try_visit(visitor)?;
                 }
             }
-            Self::WindowCall { args, spec, .. } => {
-                for argument in args {
-                    argument.try_visit(visitor)?;
-                }
-                for partition in &spec.partition_by {
-                    partition.try_visit(visitor)?;
-                }
-                for order in &spec.order_by {
-                    order.expr.try_visit(visitor)?;
-                }
-                if let Some(frame) = &spec.frame {
-                    for bound in [&frame.start, &frame.end] {
-                        match bound {
-                            ScalarFrameBound::Preceding(expression)
-                            | ScalarFrameBound::Following(expression) => {
-                                expression.try_visit(visitor)?;
-                            }
-                            ScalarFrameBound::UnboundedPreceding
-                            | ScalarFrameBound::UnboundedFollowing
-                            | ScalarFrameBound::CurrentRow => {}
-                        }
-                    }
-                }
-            }
+            Self::WindowCall {
+                args, spec, filter, ..
+            } => Self::try_visit_window(args, filter.as_deref(), spec, visitor)?,
             Self::Case {
                 base,
                 when,
@@ -306,8 +314,11 @@ impl ScalarExpr {
             Self::InList { expr, list, .. } => {
                 expr.contains_subquery() || list.iter().any(Self::contains_subquery)
             }
-            Self::WindowCall { args, spec, .. } => {
+            Self::WindowCall {
+                args, spec, filter, ..
+            } => {
                 args.iter().any(Self::contains_subquery)
+                    || filter.as_deref().is_some_and(Self::contains_subquery)
                     || spec.partition_by.iter().any(Self::contains_subquery)
                     || spec
                         .order_by
@@ -371,8 +382,11 @@ impl ScalarExpr {
             Self::InList { expr, list, .. } => {
                 expr.contains_parameter() || list.iter().any(Self::contains_parameter)
             }
-            Self::WindowCall { args, spec, .. } => {
+            Self::WindowCall {
+                args, spec, filter, ..
+            } => {
                 args.iter().any(Self::contains_parameter)
+                    || filter.as_deref().is_some_and(Self::contains_parameter)
                     || spec.partition_by.iter().any(Self::contains_parameter)
                     || spec
                         .order_by
@@ -553,6 +567,8 @@ mod tests {
                     exclusion: FrameExclusion::NoOthers,
                 }),
             },
+            filter: None,
+            modifiers: crate::ast::WindowCallModifiers::default(),
         };
         let mut visited_parameter = false;
         expression.visit(&mut |part| {

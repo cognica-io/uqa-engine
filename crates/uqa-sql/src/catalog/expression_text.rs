@@ -185,13 +185,21 @@ pub fn schema_expr_text(expr: &Expr) -> Result<String, SQLError> {
                 .collect::<Result<Vec<_>, SQLError>>()?
                 .join(", ")
         ),
-        Expr::WindowCall { name, args, .. } => format!(
-            "{}({}) OVER (...)",
+        Expr::WindowCall {
+            name, args, filter, ..
+        } => format!(
+            "{}({}){} OVER (...)",
             name,
             args.iter()
                 .map(schema_expr_text)
                 .collect::<Result<Vec<_>, SQLError>>()?
-                .join(", ")
+                .join(", "),
+            filter
+                .as_deref()
+                .map(schema_expr_text)
+                .transpose()?
+                .map(|filter| format!(" FILTER (WHERE {filter})"))
+                .unwrap_or_default()
         ),
         Expr::Case {
             base,

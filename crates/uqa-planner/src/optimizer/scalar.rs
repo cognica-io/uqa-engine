@@ -144,6 +144,8 @@ fn optimize_scalar(
             name,
             args,
             mut spec,
+            filter,
+            modifiers,
         } => {
             spec.partition_by = optimize_list(spec.partition_by, config)?;
             for order in &mut spec.order_by {
@@ -157,6 +159,8 @@ fn optimize_scalar(
                 name,
                 args: optimize_list(args, config)?,
                 spec,
+                filter: optimize_optional(filter, config)?,
+                modifiers,
             }
         }
         ScalarExpr::Case {

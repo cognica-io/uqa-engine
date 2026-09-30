@@ -258,8 +258,17 @@ pub fn expression_may_return_set(
         )? || expressions_may_return_set(
             engine, resolver, list, schema, params,
         )?),
-        ScalarExpr::WindowCall { args, spec, .. } => {
+        ScalarExpr::WindowCall {
+            args, spec, filter, ..
+        } => {
             if expressions_may_return_set(engine, resolver, args, schema, params)?
+                || expressions_may_return_set(
+                    engine,
+                    resolver,
+                    filter.iter().map(AsRef::as_ref),
+                    schema,
+                    params,
+                )?
                 || expressions_may_return_set(engine, resolver, &spec.partition_by, schema, params)?
                 || expressions_may_return_set(
                     engine,
@@ -436,11 +445,14 @@ fn validate_set_context(
                 validate_set_context(engine, resolver, filter, schema, params)?;
             }
         }
-        ScalarExpr::WindowCall { args, spec, .. } => {
+        ScalarExpr::WindowCall {
+            args, spec, filter, ..
+        } => {
             reject_set_descendant(
                 engine,
                 resolver,
                 args.iter()
+                    .chain(filter.iter().map(AsRef::as_ref))
                     .chain(spec.partition_by.iter())
                     .chain(spec.order_by.iter().map(|order| &order.expr))
                     .chain(

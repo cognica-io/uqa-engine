@@ -550,6 +550,8 @@ mod tests {
                     exclusion: FrameExclusion::NoOthers,
                 }),
             },
+            filter: None,
+            modifiers: crate::ast::WindowCallModifiers::default(),
         };
         assert!(expr_contains_volatile_function(&EmptyCatalog, &expression));
     }

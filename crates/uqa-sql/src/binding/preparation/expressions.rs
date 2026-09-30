@@ -206,8 +206,17 @@ impl Preparation<'_> {
                 }
                 self.known_type(expression, input, subqueries)?
             }
-            ScalarExpr::WindowCall { name, args, spec } => {
+            ScalarExpr::WindowCall {
+                name,
+                args,
+                spec,
+                filter,
+                ..
+            } => {
                 self.call(name, None, args, input, subqueries)?;
+                if let Some(filter) = filter {
+                    self.require_boolean(filter, input, subqueries, "FILTER")?;
+                }
                 self.window_specification(spec, input, subqueries)?;
                 self.known_type(expression, input, subqueries)?
             }

@@ -86,11 +86,13 @@ impl Deparser<'_> {
             )),
             ScalarExpr::Cast { expr, ty } => self.cast(expr, ty, scope, subqueries),
             ScalarExpr::Func { .. } => self.aggregate(expression, scope, subqueries),
-            ScalarExpr::WindowCall { name, args, spec } => Ok(format!(
-                "{} OVER ({})",
-                self.function(name, None, args, scope, subqueries)?,
-                self.window(spec, scope, subqueries)?
-            )),
+            ScalarExpr::WindowCall {
+                name,
+                args,
+                spec,
+                filter,
+                ..
+            } => self.window_call(name, args, (filter.as_deref(), spec), scope, subqueries),
             ScalarExpr::Case {
                 base,
                 when,
@@ -502,6 +504,27 @@ impl Deparser<'_> {
         }
         write!(rendered, "\n{indent}END").expect("writing to a String cannot fail");
         Ok(rendered)
+    }
+
+    /// A window call as `get_windowfunc_expr` prints it: the call, its `FILTER`, and `OVER` with the window.
+    fn window_call(
+        &self,
+        name: &str,
+        args: &[ScalarExpr],
+        (filter, spec): (Option<&ScalarExpr>, &ScalarWindowSpec),
+        scope: &Scope,
+        subqueries: &[QueryPlan],
+    ) -> Result<String, SQLError> {
+        let filter = filter
+            .map(|filter| self.expression(filter, scope, subqueries))
+            .transpose()?
+            .map(|filter| format!(" FILTER (WHERE {filter})"))
+            .unwrap_or_default();
+        Ok(format!(
+            "{}{filter} OVER ({})",
+            self.function(name, None, args, scope, subqueries)?,
+            self.window(spec, scope, subqueries)?
+        ))
     }
 
     fn window(

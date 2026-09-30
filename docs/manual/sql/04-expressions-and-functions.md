@@ -15,6 +15,8 @@ SELECT CASE
 FROM predictions;
 ```
 
+The conditions of `WHERE`, `HAVING`, `JOIN ... ON`, a searched `CASE`, `AND`, `OR`, `NOT`, and an aggregate's `FILTER` must be `boolean` or a domain over it, as in PostgreSQL: any other type is `42804` (`argument of WHERE must be type boolean, not type integer`), and a quoted literal whose type is not yet known is read as boolean input, so `'false'`, `'no'`, `'off'`, `'0'`, and their prefixes are false and text that is not a boolean is `22P02`. The operand of a simple `CASE` is compared with each value instead. The retrieval predicates in [Retrieval](06-retrieval.md) are conditions as well.
+
 `LIKE`, `ILIKE`, and `SIMILAR TO` accept `ESCAPE` with a runtime text expression. Omitting the clause uses PostgreSQL's default backslash escape, `ESCAPE ''` disables escaping, `ESCAPE NULL` produces NULL, and every nonempty escape must contain exactly one character. Escaped wildcard and regular-expression metacharacters are treated literally, while escaped alphanumeric characters in `SIMILAR TO` retain the implemented PostgreSQL regular-expression escape behavior.
 
 ```sql execute
@@ -364,7 +366,7 @@ SELECT lastval() AS last_allocated;
 | Ordered set | `percentile_cont`, `percentile_disc`, `mode` |
 | JSON | `json_agg`, `jsonb_agg`, `json_object_agg`, `jsonb_object_agg` |
 
-Aggregates support `DISTINCT`, aggregate-local `ORDER BY`, and `FILTER` where the function shape permits it. `min` and `max` compare arrays and record-like map values lexicographically in addition to their scalar inputs.
+Aggregates support `DISTINCT`, aggregate-local `ORDER BY`, and `FILTER` where the function shape permits it; on an ordinary function each is `42809` (`FILTER specified, but abs is not an aggregate function`). `min` and `max` compare arrays and record-like map values lexicographically in addition to their scalar inputs.
 
 `mode() WITHIN GROUP (ORDER BY value [ASC | DESC])` returns the most frequent non-NULL value with the input's type, or NULL for empty or all-NULL input. SQL-equal values count together, including signed floating zero, equal intervals and equivalent JSONB representations. When frequencies tie, the first value in the requested ordering wins. Memory and spilled aggregate execution use the same equality and tie rules.
 
@@ -387,7 +389,7 @@ FROM samples;
 
 ## Window functions
 
-The window functions are `row_number`, `rank`, `dense_rank`, `percent_rank`, `cume_dist`, `ntile`, `lag`, `lead`, `first_value`, `last_value`, and `nth_value`, and every built-in or registered aggregate can be computed over a window. [Window functions](03-queries-and-dml.md#window-functions) describes peers, frames, and exclusions. Calling an ordinary function with `OVER` is `42809`, as is calling `count()` without `*` or an ordered-set aggregate without `WITHIN GROUP`.
+The window functions are `row_number`, `rank`, `dense_rank`, `percent_rank`, `cume_dist`, `ntile`, `lag`, `lead`, `first_value`, `last_value`, and `nth_value`, and every built-in or registered aggregate can be computed over a window, with `FILTER (WHERE condition)` leaving out the frame rows for which the condition is not true. [Window functions](03-queries-and-dml.md#window-functions) describes peers, frames, and exclusions. As in PostgreSQL, the function is resolved first, with a `WITHIN GROUP` call's ordering expressions after its arguments, and a function that does not exist is `42883`. Calling an ordinary function with `OVER` is `42809`, as is calling `count()` without `*`, an ordered-set aggregate without `WITHIN GROUP`, or any other function with it; an ordered-set aggregate cannot take `OVER` (`0A000`), and neither `DISTINCT`, an aggregate `ORDER BY`, nor `FILTER` on a function that is not an aggregate is implemented for window calls (`0A000`).
 
 ## General table functions
 

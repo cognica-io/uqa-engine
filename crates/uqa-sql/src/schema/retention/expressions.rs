@@ -60,9 +60,16 @@ impl<'a> Walker<'a> {
                 self.boxed(expr.as_ref(), Node::Expr)?;
                 self.children(list, Node::Expr)?;
             }
-            Expr::WindowCall { name, args, spec } => {
+            Expr::WindowCall {
+                name,
+                args,
+                spec,
+                filter,
+                modifiers: _,
+            } => {
                 self.text(name)?;
                 self.children(args, Node::Expr)?;
+                self.optional_boxed_expr(filter.as_deref())?;
                 self.window(spec)?;
             }
             Expr::Case {

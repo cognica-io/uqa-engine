@@ -125,10 +125,6 @@ fn unsupported_expression_shapes_fail_instead_of_losing_semantics() {
             "SELECT 2 > ANY (SELECT value FROM values_table)",
             "ANY subquery operator",
         ),
-        (
-            "SELECT count(*) FILTER (WHERE true) OVER ()",
-            "aggregate modifiers",
-        ),
         ("SELECT 1 ORDER BY 1 USING >", "USING operators"),
     ] {
         let error = crate::compile(sql).expect_err(sql);

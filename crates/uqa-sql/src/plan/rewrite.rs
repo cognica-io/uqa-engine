@@ -438,9 +438,14 @@ pub(super) fn rewrite_scalar(
                 rewrite_scalar(item, rewrite);
             }
         }
-        ScalarExpr::WindowCall { args, spec, .. } => {
+        ScalarExpr::WindowCall {
+            args, spec, filter, ..
+        } => {
             for argument in args {
                 rewrite_scalar(argument, rewrite);
+            }
+            if let Some(filter) = filter {
+                rewrite_scalar(filter, rewrite);
             }
             for expression in &mut spec.partition_by {
                 rewrite_scalar(expression, rewrite);

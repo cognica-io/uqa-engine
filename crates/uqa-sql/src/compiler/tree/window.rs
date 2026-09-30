@@ -93,8 +93,13 @@ pub(in crate::compiler) fn resolve_named_windows_in_expr(
             resolve_named_windows_in_expr(expr, windows)?;
             resolve_named_windows_in_exprs(list, windows)?;
         }
-        Expr::WindowCall { args, spec, .. } => {
+        Expr::WindowCall {
+            args, spec, filter, ..
+        } => {
             resolve_named_windows_in_exprs(args, windows)?;
+            if let Some(filter) = filter {
+                resolve_named_windows_in_expr(filter, windows)?;
+            }
             resolve_window_spec(spec, windows, WindowSpecSite::OverClause)?;
             resolve_window_spec_expressions(spec, windows)?;
         }

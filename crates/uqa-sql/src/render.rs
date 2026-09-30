@@ -448,9 +448,21 @@ fn render_expr(expression: &Expr) -> Result<String, SQLError> {
             if *negated { "NOT " } else { "" },
             expr_list(list)
         ),
-        Expr::WindowCall { name, args, spec } => {
-            format!("{name}({}) OVER {}", expr_list(args), window_sql(spec))
-        }
+        Expr::WindowCall {
+            name,
+            args,
+            spec,
+            filter,
+            ..
+        } => format!(
+            "{name}({}){} OVER {}",
+            expr_list(args),
+            filter.as_ref().map_or_else(String::new, |filter| format!(
+                " FILTER (WHERE {})",
+                expr_sql(filter)
+            )),
+            window_sql(spec)
+        ),
         Expr::Case {
             base,
             when,

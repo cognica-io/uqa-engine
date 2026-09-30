@@ -56,23 +56,25 @@ pub fn walk_schema_expr_mut(
                 walk_schema_expr_mut(item, visit)?;
             }
         }
-        Expr::WindowCall { args, spec, .. } => {
-            for argument in args.iter_mut().chain(&mut spec.partition_by) {
-                walk_schema_expr_mut(argument, visit)?;
+        Expr::WindowCall {
+            args, spec, filter, ..
+        } => {
+            for expression in args
+                .iter_mut()
+                .chain(filter.as_deref_mut())
+                .chain(&mut spec.partition_by)
+                .chain(spec.order_by.iter_mut().map(|order| &mut order.expr))
+            {
+                walk_schema_expr_mut(expression, visit)?;
             }
-            for order in &mut spec.order_by {
-                walk_schema_expr_mut(&mut order.expr, visit)?;
-            }
-            if let Some(frame) = &mut spec.frame {
-                for bound in [&mut frame.start, &mut frame.end] {
-                    match bound {
-                        FrameBound::Preceding(expression) | FrameBound::Following(expression) => {
-                            walk_schema_expr_mut(expression, visit)?;
-                        }
-                        FrameBound::UnboundedPreceding
-                        | FrameBound::UnboundedFollowing
-                        | FrameBound::CurrentRow => {}
-                    }
+            for bound in spec
+                .frame
+                .iter_mut()
+                .flat_map(|frame| [&mut frame.start, &mut frame.end])
+            {
+                if let FrameBound::Preceding(expression) | FrameBound::Following(expression) = bound
+                {
+                    walk_schema_expr_mut(expression, visit)?;
                 }
             }
         }

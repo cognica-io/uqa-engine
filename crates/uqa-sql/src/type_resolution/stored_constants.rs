@@ -154,14 +154,23 @@ fn transfer(
             },
         ) => transfer(expr, bound_expr, catalog)? | transfer_all(list, bound_list, catalog)?,
         (
-            ScalarExpr::WindowCall { name, args, spec },
+            ScalarExpr::WindowCall {
+                name,
+                args,
+                spec,
+                filter,
+                ..
+            },
             ScalarExpr::WindowCall {
                 name: bound_name,
                 args: bound_args,
                 spec: bound_spec,
+                filter: bound_filter,
+                ..
             },
         ) => {
             if name != bound_name
+                || filter.is_some() != bound_filter.is_some()
                 || args.len() != bound_args.len()
                 || spec.partition_by.len() != bound_spec.partition_by.len()
                 || spec.order_by.len() != bound_spec.order_by.len()
@@ -169,6 +178,9 @@ fn transfer(
                 return Ok(false);
             }
             let mut changed = transfer_all(args, bound_args, catalog)?;
+            if let (Some(filter), Some(bound)) = (filter, bound_filter) {
+                changed |= transfer(filter, bound, catalog)?;
+            }
             changed |= transfer_all(&mut spec.partition_by, &bound_spec.partition_by, catalog)?;
             for (order, bound) in spec.order_by.iter_mut().zip(&bound_spec.order_by) {
                 changed |= transfer(&mut order.expr, &bound.expr, catalog)?;

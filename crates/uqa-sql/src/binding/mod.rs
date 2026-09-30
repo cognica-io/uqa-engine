@@ -424,6 +424,7 @@ impl SchemaScope {
             let input = overlay_outer_schema(&input, outer);
             if self.validate_references {
                 self.bind_expression_type(routines, on, &input, subqueries, params, outer)?;
+                self.validate_condition(routines, on, "JOIN/ON", &input, subqueries, params)?;
             } else {
                 crate::scalar_type_with_resolver(on, &input, params, routines)?;
             }

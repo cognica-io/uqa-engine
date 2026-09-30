@@ -340,12 +340,24 @@ fn bind_rule_window_expression(
     scope: &RuleBindingScope,
     context: &RuleBindingContext<'_>,
 ) -> Result<Expr, SQLError> {
-    let Expr::WindowCall { name, args, spec } = expr else {
+    let Expr::WindowCall {
+        name,
+        args,
+        spec,
+        filter,
+        modifiers,
+    } = expr
+    else {
         unreachable!("window binder received a non-window expression")
     };
     Ok(Expr::WindowCall {
+        modifiers: *modifiers,
         name: name.clone(),
         args: bind_exprs(args, resolver, scope, context)?,
+        filter: filter
+            .as_deref()
+            .map(|filter| bind_rule_expr_with_scope(filter, resolver, scope, context).map(Box::new))
+            .transpose()?,
         spec: crate::ast::WindowSpec {
             reference: spec.reference.clone(),
             partition_by: bind_exprs(&spec.partition_by, resolver, scope, context)?,

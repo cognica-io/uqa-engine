@@ -861,9 +861,14 @@ fn collect_scalar_qualifiers(expression: &ScalarExpr, output: &mut BTreeSet<Stri
                 collect_scalar_qualifiers(item, output);
             }
         }
-        ScalarExpr::WindowCall { args, spec, .. } => {
+        ScalarExpr::WindowCall {
+            args, spec, filter, ..
+        } => {
             for argument in args {
                 collect_scalar_qualifiers(argument, output);
+            }
+            if let Some(filter) = filter {
+                collect_scalar_qualifiers(filter, output);
             }
             for partition in &spec.partition_by {
                 collect_scalar_qualifiers(partition, output);

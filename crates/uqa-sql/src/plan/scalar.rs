@@ -147,12 +147,22 @@ impl Lowering<'_> {
                 })?,
                 negated,
             },
-            Node::WindowCall { name, args, spec } => ScalarExpr::WindowCall {
+            Node::WindowCall {
+                name,
+                args,
+                spec,
+                filter,
+                modifiers,
+            } => ScalarExpr::WindowCall {
+                modifiers,
                 name: self.text(name)?,
                 args: self.map(args, |this, argument| {
                     this.expression(argument, aggregates, subqueries)
                 })?,
                 spec: self.window(spec, aggregates, subqueries)?,
+                filter: filter
+                    .map(|filter| self.child(filter, aggregates, subqueries))
+                    .transpose()?,
             },
             Node::Case {
                 base,

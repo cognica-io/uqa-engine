@@ -117,6 +117,8 @@ pub(super) enum Node<'a> {
         name: Source<'a, String>,
         args: Items<'a, Expr>,
         spec: Source<'a, WindowSpec>,
+        filter: Option<Source<'a, Box<Expr>>>,
+        modifiers: crate::ast::WindowCallModifiers,
     },
     Case {
         base: Option<Source<'a, Box<Expr>>>,
@@ -209,11 +211,7 @@ fn owned(expression: Expr) -> Node<'static> {
             list: Items::Owned(list.into_iter()),
             negated,
         },
-        Expr::WindowCall { name, args, spec } => Node::WindowCall {
-            name: Source::Owned(name),
-            args: Items::Owned(args.into_iter()),
-            spec: Source::Owned(spec),
-        },
+        window @ Expr::WindowCall { .. } => owned_window_call(window),
         Expr::Case {
             base,
             when,
@@ -305,11 +303,7 @@ fn borrowed(expression: &Expr) -> Node<'_> {
             list: Items::Borrowed(list.iter()),
             negated: *negated,
         },
-        Expr::WindowCall { name, args, spec } => Node::WindowCall {
-            name: Source::Borrowed(name),
-            args: Items::Borrowed(args.iter()),
-            spec: Source::Borrowed(spec),
-        },
+        window @ Expr::WindowCall { .. } => borrowed_window_call(window),
         Expr::Case {
             base,
             when,
@@ -337,5 +331,45 @@ fn borrowed(expression: &Expr) -> Node<'_> {
             body: Source::Borrowed(body),
             negated: *negated,
         },
+    }
+}
+
+fn owned_window_call<'a>(window: Expr) -> Node<'a> {
+    let Expr::WindowCall {
+        name,
+        args,
+        spec,
+        filter,
+        modifiers,
+    } = window
+    else {
+        unreachable!("only window calls reach the window conversion")
+    };
+    Node::WindowCall {
+        name: Source::Owned(name),
+        args: Items::Owned(args.into_iter()),
+        spec: Source::Owned(spec),
+        filter: filter.map(Source::Owned),
+        modifiers,
+    }
+}
+
+fn borrowed_window_call(window: &Expr) -> Node<'_> {
+    let Expr::WindowCall {
+        name,
+        args,
+        spec,
+        filter,
+        modifiers,
+    } = window
+    else {
+        unreachable!("only window calls reach the window conversion")
+    };
+    Node::WindowCall {
+        name: Source::Borrowed(name),
+        args: Items::Borrowed(args.iter()),
+        spec: Source::Borrowed(spec),
+        filter: filter.as_ref().map(Source::Borrowed),
+        modifiers: *modifiers,
     }
 }

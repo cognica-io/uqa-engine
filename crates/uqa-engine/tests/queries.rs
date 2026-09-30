@@ -26,6 +26,8 @@ mod sql_aggregate_nulls;
 mod sql_aggregates;
 #[path = "sql_blocking_spill.rs"]
 mod sql_blocking_spill;
+#[path = "queries/sql_boolean_conditions.rs"]
+mod sql_boolean_conditions;
 #[path = "sql_correlated_subqueries.rs"]
 mod sql_correlated_subqueries;
 #[path = "sql_cte.rs"]

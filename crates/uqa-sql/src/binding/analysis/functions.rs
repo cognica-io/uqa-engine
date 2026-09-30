@@ -290,61 +290,156 @@ fn uuid_compatible_type(ty: &ColumnType) -> bool {
     }
 }
 
+/// What `func_get_detail` found for a window call's name and arguments.
+enum WindowCallKind {
+    WindowFunction,
+    /// An ordered-set or hypothetical-set aggregate.
+    OrderedSetAggregate,
+    Aggregate,
+    Ordinary,
+}
+
+/// Validate a window call as `ParseFuncOrColumn` does: resolve the function by its arguments, which include a `WITHIN GROUP` call's ordering expressions, then reject what that kind of function cannot take. `call` holds the arguments, whether the call has `FILTER`, and its other aggregate modifiers.
 pub(super) fn validate_window_function(
+    routines: &dyn RoutineResolution,
+    name: &str,
+    (args, filtered, modifiers): (&[ScalarExpr], bool, crate::ast::WindowCallModifiers),
+    schema: &RowSchema,
+    params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
+) -> Result<(), SQLError> {
+    let kind = window_call_kind(routines, name, args, schema, params, resolver)?
+        .ok_or_else(|| undefined_function(name, args, schema, params, resolver))?;
+    let wrong_object = |message: String| SQLError::Routine {
+        sqlstate: "42809".into(),
+        message,
+    };
+    let unsupported = |message: &str| SQLError::Routine {
+        sqlstate: "0A000".into(),
+        message: message.into(),
+    };
+    match kind {
+        WindowCallKind::Ordinary => {
+            let modifier = if modifiers.distinct {
+                "DISTINCT"
+            } else if modifiers.within_group {
+                "WITHIN GROUP"
+            } else if modifiers.ordered {
+                "ORDER BY"
+            } else if filtered {
+                "FILTER"
+            } else {
+                return Err(wrong_object(format!(
+                    "OVER specified, but {name} is not a window function nor an aggregate function"
+                )));
+            };
+            Err(wrong_object(format!(
+                "{modifier} specified, but {name} is not an aggregate function"
+            )))
+        }
+        WindowCallKind::OrderedSetAggregate => Err(if modifiers.within_group {
+            unsupported(&format!(
+                "OVER is not supported for ordered-set aggregate {name}"
+            ))
+        } else {
+            wrong_object(format!(
+                "WITHIN GROUP is required for ordered-set aggregate {name}"
+            ))
+        }),
+        WindowCallKind::Aggregate | WindowCallKind::WindowFunction => {
+            let aggregate = matches!(kind, WindowCallKind::Aggregate);
+            if modifiers.within_group {
+                return Err(wrong_object(if aggregate {
+                    format!(
+                        "{name} is not an ordered-set aggregate, so it cannot have WITHIN GROUP"
+                    )
+                } else {
+                    format!("window function {name} cannot have WITHIN GROUP")
+                }));
+            }
+            if modifiers.distinct {
+                return Err(unsupported(
+                    "DISTINCT is not implemented for window functions",
+                ));
+            }
+            if aggregate && args.is_empty() {
+                return Err(wrong_object(format!(
+                    "{name}(*) must be used to call a parameterless aggregate function"
+                )));
+            }
+            if modifiers.ordered {
+                return Err(unsupported(
+                    "aggregate ORDER BY is not implemented for window functions",
+                ));
+            }
+            if !aggregate && filtered {
+                return Err(unsupported(
+                    "FILTER is not implemented for non-aggregate window functions",
+                ));
+            }
+            Ok(())
+        }
+    }
+}
+
+/// `func_get_detail` for a window call: the built-in window functions, the ordered-set aggregates with their direct and ordered arguments, the built-in and registered aggregates, and then any other function the arguments resolve; `None` when nothing matches.
+fn window_call_kind(
     routines: &dyn RoutineResolution,
     name: &str,
     args: &[ScalarExpr],
     schema: &RowSchema,
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
-) -> Result<(), SQLError> {
+) -> Result<Option<WindowCallKind>, SQLError> {
     let lower = crate::semantics::builtin_function_dispatch_name(name);
-    if lower == "count" && args.is_empty() {
-        return Err(SQLError::Routine {
-            sqlstate: "42809".into(),
-            message: format!("{name}(*) must be used to call a parameterless aggregate function"),
-        });
+    let kind = match (lower.as_str(), args.len()) {
+        ("row_number" | "rank" | "dense_rank" | "percent_rank" | "cume_dist", 0)
+        | ("lag" | "lead", 1..=3)
+        | ("first_value" | "last_value" | "ntile", 1)
+        | ("nth_value", 2) => Some(WindowCallKind::WindowFunction),
+        ("percentile_cont" | "percentile_disc", 2)
+        | ("mode", 1)
+        | ("rank" | "dense_rank" | "percent_rank" | "cume_dist", 1..) => {
+            Some(WindowCallKind::OrderedSetAggregate)
+        }
+        (
+            "count" | "sum" | "avg" | "min" | "max" | "array_agg" | "json_agg" | "jsonb_agg"
+            | "bool_and" | "bool_or" | "stddev" | "stddev_samp" | "stddev_pop" | "variance"
+            | "var_samp" | "var_pop",
+            1,
+        )
+        | ("count", 0)
+        | ("string_agg" | "json_object_agg" | "jsonb_object_agg", 2) => {
+            Some(WindowCallKind::Aggregate)
+        }
+        _ if routines.has_registered_aggregate_function(name) => Some(WindowCallKind::Aggregate),
+        _ => None,
+    };
+    if kind.is_some() {
+        return Ok(kind);
     }
+    // The built-in window and ordered-set functions have no other signatures; only a user routine can take these arguments.
     if matches!(
         lower.as_str(),
-        "percentile_cont" | "percentile_disc" | "mode"
+        "row_number"
+            | "rank"
+            | "dense_rank"
+            | "percent_rank"
+            | "cume_dist"
+            | "ntile"
+            | "lag"
+            | "lead"
+            | "first_value"
+            | "last_value"
+            | "nth_value"
+            | "percentile_cont"
+            | "percentile_disc"
+            | "mode"
     ) {
-        return Err(SQLError::Routine {
-            sqlstate: "42809".into(),
-            message: format!("WITHIN GROUP is required for ordered-set aggregate {name}"),
-        });
-    }
-    if matches!(
-        (lower.as_str(), args.len()),
-        (
-            "row_number" | "rank" | "dense_rank" | "percent_rank" | "cume_dist",
-            0
-        ) | ("lag" | "lead", 1..=3)
-            | ("first_value" | "last_value" | "ntile", 1)
-            | ("nth_value", 2)
-            | (
-                "sum"
-                    | "count"
-                    | "avg"
-                    | "min"
-                    | "max"
-                    | "array_agg"
-                    | "json_agg"
-                    | "jsonb_agg"
-                    | "bool_and"
-                    | "bool_or"
-                    | "stddev"
-                    | "stddev_samp"
-                    | "stddev_pop"
-                    | "variance"
-                    | "var_samp"
-                    | "var_pop",
-                1
-            )
-            | ("string_agg" | "json_object_agg" | "jsonb_object_agg", 2)
-    ) || routines.has_registered_aggregate_function(name)
-    {
-        return Ok(());
+        return Ok(
+            resolve_sql_function(routines, name, None, args, schema, params, resolver)?
+                .map(|_| WindowCallKind::Ordinary),
+        );
     }
     let call = ScalarExpr::Func {
         name: name.to_string(),
@@ -354,8 +449,8 @@ pub(super) fn validate_window_function(
         order_by: Vec::new(),
         filter: None,
     };
-    // A built-in aggregate reaching here has no overload for these arguments; any other function that resolves is an ordinary one.
-    if !crate::semantics::is_builtin_aggregate(&call)
+    // A built-in aggregate reaching here has no overload for these arguments.
+    Ok((!crate::semantics::is_builtin_aggregate(&call)
         && validate_scalar_function(
             routines,
             ScalarFunctionValidation {
@@ -369,16 +464,8 @@ pub(super) fn validate_window_function(
                 resolver,
             },
         )
-        .is_ok()
-    {
-        return Err(SQLError::Routine {
-            sqlstate: "42809".into(),
-            message: format!(
-                "OVER specified, but {name} is not a window function nor an aggregate function"
-            ),
-        });
-    }
-    Err(undefined_function(name, args, schema, params, resolver))
+        .is_ok())
+    .then_some(WindowCallKind::Ordinary))
 }
 
 pub(super) fn validate_table_function(

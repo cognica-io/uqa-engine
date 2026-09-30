@@ -303,8 +303,11 @@ pub fn contains_retrieval(expression: &ScalarExpr) -> bool {
         ScalarExpr::InList { expr, list, .. } => {
             contains_retrieval(expr) || list.iter().any(contains_retrieval)
         }
-        ScalarExpr::WindowCall { args, spec, .. } => {
+        ScalarExpr::WindowCall {
+            args, spec, filter, ..
+        } => {
             args.iter().any(contains_retrieval)
+                || filter.as_deref().is_some_and(contains_retrieval)
                 || spec.partition_by.iter().any(contains_retrieval)
                 || spec
                     .order_by

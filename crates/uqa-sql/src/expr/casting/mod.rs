@@ -658,6 +658,38 @@ pub(super) fn cast_integer(
     Ok(Value::Int(n))
 }
 
+/// `boolin`: `PostgreSQL`'s `parse_bool` over trimmed text, accepting case-insensitive prefixes of `true`, `false`, `yes` and `no`, `on`, at least two letters of `off`, and `1` and `0`.
+#[must_use]
+pub fn parse_boolean_input(text: &str) -> Option<bool> {
+    let text = text.trim();
+    let matches_prefix = |word: &str| {
+        !text.is_empty()
+            && word
+                .get(..text.len())
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(text))
+    };
+    if matches_prefix("true") || matches_prefix("yes") || text == "1" {
+        Some(true)
+    } else if matches_prefix("false") || matches_prefix("no") || text == "0" {
+        Some(false)
+    } else if text.eq_ignore_ascii_case("on") {
+        Some(true)
+    } else if matches_prefix("off") && text.len() >= 2 {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// The error `boolin` reports for text that is not a boolean.
+#[must_use]
+pub fn invalid_boolean_input(text: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "22P02".into(),
+        message: format!("invalid input syntax for type boolean: \"{text}\""),
+    }
+}
+
 /// CAST to boolean: strings follow `PostgreSQL`'s `parse_bool`
 /// (prefixes of true/false/yes/no, on/off, 1/0); numbers are non-zero
 /// tests.
@@ -667,30 +699,9 @@ pub(super) fn cast_boolean(v: &Value) -> Result<Value> {
         Value::Int(n) => Ok(Value::Bool(*n != 0)),
         Value::Float(f) => Ok(Value::Bool(*f != 0.0)),
         Value::Decimal(d) => Ok(Value::Bool(!d.is_zero())),
-        Value::Str(s) | Value::FixedChar(s) => {
-            let text = s.trim();
-            let matches_prefix = |word: &str| {
-                !text.is_empty()
-                    && word
-                        .get(..text.len())
-                        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(text))
-            };
-            let value = if matches_prefix("true") || matches_prefix("yes") || text == "1" {
-                Some(true)
-            } else if matches_prefix("false") || matches_prefix("no") || text == "0" {
-                Some(false)
-            } else if text.eq_ignore_ascii_case("on") {
-                Some(true)
-            } else if matches_prefix("off") && text.len() >= 2 {
-                Some(false)
-            } else {
-                None
-            };
-            value.map(Value::Bool).ok_or_else(|| SQLError::Routine {
-                sqlstate: "22P02".into(),
-                message: format!("invalid input syntax for type boolean: \"{s}\""),
-            })
-        }
+        Value::Str(s) | Value::FixedChar(s) => parse_boolean_input(s)
+            .map(Value::Bool)
+            .ok_or_else(|| invalid_boolean_input(s)),
         other => Err(SQLError::TypeMismatch(format!(
             "cannot cast {other:?} to boolean"
         ))),

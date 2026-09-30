@@ -436,14 +436,23 @@ impl Walk {
                 self.scalars(list, bound_list, subqueries)
             }
             (
-                ScalarExpr::WindowCall { args, spec, .. },
+                ScalarExpr::WindowCall {
+                    args, spec, filter, ..
+                },
                 ScalarExpr::WindowCall {
                     name,
                     args: bound_args,
                     spec: bound_spec,
+                    filter: bound_filter,
+                    ..
                 },
             ) => {
                 self.scalars(args, bound_args, subqueries)?;
+                if let Some((lowered, bound)) =
+                    optional_pair(filter.as_deref(), bound_filter.as_deref(), "window FILTER")?
+                {
+                    self.scalar(lowered, bound, subqueries)?;
+                }
                 self.scalars(&spec.partition_by, &bound_spec.partition_by, subqueries)?;
                 for (lowered, bound) in
                     pairs(&spec.order_by, &bound_spec.order_by, "window ORDER BY")?

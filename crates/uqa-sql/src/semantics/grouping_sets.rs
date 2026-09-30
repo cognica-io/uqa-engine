@@ -231,6 +231,8 @@ fn normalize_expression(
             name,
             args,
             mut spec,
+            filter,
+            modifiers,
         } => {
             spec.partition_by = normalize_items(engine, spec.partition_by, schema, params)?;
             for order in &mut spec.order_by {
@@ -241,9 +243,15 @@ fn normalize_expression(
                 normalize_frame_bound(engine, &mut frame.end, schema, params)?;
             }
             ScalarExpr::WindowCall {
+                modifiers,
                 name: canonical_function_name(name),
                 args: normalize_items(engine, args, schema, params)?,
                 spec,
+                filter: filter
+                    .map(|expression| {
+                        normalize_expression(engine, *expression, schema, params).map(Box::new)
+                    })
+                    .transpose()?,
             }
         }
         ScalarExpr::Case {

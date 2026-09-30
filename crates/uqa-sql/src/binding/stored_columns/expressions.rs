@@ -104,8 +104,14 @@ impl StoredColumnBinder<'_> {
                 }
                 Ok(())
             }
-            Expr::WindowCall { args, spec, .. } => {
-                self.bind_window_parts(args, spec, scopes, context)
+            Expr::WindowCall {
+                args, spec, filter, ..
+            } => {
+                self.bind_window_parts(args, spec, scopes, context)?;
+                if let Some(filter) = filter {
+                    self.bind_expr(filter, scopes, context)?;
+                }
+                Ok(())
             }
             Expr::Case {
                 base,

@@ -75,8 +75,9 @@ pub use binary::{
 };
 pub(crate) use binary::{division_by_zero, out_of_range};
 pub use casting::{
-    array_dimensions, cast_value, cast_value_from, cast_value_from_with_control, negate_value,
-    negate_value_with_control, parse_pg_array_literal, parse_pg_array_literal_with_control,
+    array_dimensions, cast_value, cast_value_from, cast_value_from_with_control,
+    invalid_boolean_input, negate_value, negate_value_with_control, parse_boolean_input,
+    parse_pg_array_literal, parse_pg_array_literal_with_control,
 };
 use conversion::{
     allocation_error, float_to_i64_rounded, float_to_i64_trunc, nonnegative_usize, to_decimal,

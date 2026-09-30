@@ -345,7 +345,16 @@ pub(super) fn scalar_type_inner_with_control(
                 control,
             )
         }
-        ScalarExpr::WindowCall { name, args, spec } => {
+        ScalarExpr::WindowCall {
+            name,
+            args,
+            spec,
+            filter,
+            ..
+        } => {
+            if let Some(filter) = filter {
+                scalar_type_inner_with_control(filter, schema, params, resolver, control)?;
+            }
             for expression in &spec.partition_by {
                 if let Some(ty) =
                     scalar_type_inner_with_control(expression, schema, params, resolver, control)?

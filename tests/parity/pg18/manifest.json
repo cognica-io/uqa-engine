@@ -134,7 +134,8 @@
       "functions.string-binary-lengths",
       "functions.uuid-extraction",
       "query.window-frames",
-      "aggregates.null-and-enum-inputs"
+      "aggregates.null-and-enum-inputs",
+      "expressions.boolean-conditions"
     ],
     "M2": [
       "protocol.frontend-backend-3.2"
@@ -1086,9 +1087,9 @@
     },
     {
       "id": "query.window-frames",
-      "postgresql_reference": "PostgreSQL 18.4 live rows, SQLSTATEs, messages and hints in tests/parity/pg18/window_frames_oracle.expected.json; update_frameheadpos, update_frametailpos, row_is_in_frame and WinGetFuncArgInFrame in src/backend/executor/nodeWindowAgg.c; src/backend/utils/adt/windowfuncs.c; transformFrameOffset in src/backend/parser/parse_clause.c; https://www.postgresql.org/docs/18/sql-expressions.html#SYNTAX-WINDOW-FUNCTIONS",
+      "postgresql_reference": "PostgreSQL 18.4 live rows, SQLSTATEs, messages and hints in tests/parity/pg18/window_frames_oracle.expected.json; update_frameheadpos, update_frametailpos, row_is_in_frame and WinGetFuncArgInFrame in src/backend/executor/nodeWindowAgg.c; src/backend/utils/adt/windowfuncs.c; transformFrameOffset in src/backend/parser/parse_clause.c; https://www.postgresql.org/docs/18/sql-expressions.html#SYNTAX-WINDOW-FUNCTIONS; ParseFuncOrColumn in src/backend/parser/parse_func.c",
       "uqa_test": "cargo test -p uqa-engine --test integration queries::sql_window_frames; cargo test -p uqa-execution --lib window; cargo test -p uqa-sql --lib expr::in_range; cargo test -p uqa-sql --lib type_resolution::range_offsets",
-      "supported_version": "Unreleased: 51 PostgreSQL 18.4 cases on memory and SQLite engines cover the default RANGE frame ending at the current row's last peer, ROWS, RANGE and GROUPS frames with CURRENT ROW, offset and unbounded bounds, RANGE offsets selected and coerced through the in_range support of integer, numeric, floating-point, date, time, timestamp and interval keys with NULL ordering values, EXCLUDE CURRENT ROW, GROUP, TIES and NO OTHERS, first_value, last_value and nth_value, rank, dense_rank, percent_rank, cume_dist, row_number, ntile, lag and lead, every built-in and registered aggregate over a frame, named window references, query ORDER BY on columns the target list omits, and the frame, offset, argument and window-reference errors (42P20, 42P10, 22004, 22013, 22014, 22016, 0A000, 42883 and 42725 with PostgreSQL's hints)",
+      "supported_version": "Unreleased: 69 PostgreSQL 18.4 cases on memory and SQLite engines cover the default RANGE frame ending at the current row's last peer, ROWS, RANGE and GROUPS frames with CURRENT ROW, offset and unbounded bounds, RANGE offsets selected and coerced through the in_range support of integer, numeric, floating-point, date, time, timestamp and interval keys with NULL ordering values, EXCLUDE CURRENT ROW, GROUP, TIES and NO OTHERS, first_value, last_value and nth_value, rank, dense_rank, percent_rank, cume_dist, row_number, ntile, lag and lead, every built-in and registered aggregate over a frame with or without FILTER, named window references, query ORDER BY on columns the target list omits, and the frame, offset, argument and window-reference errors, and ParseFuncOrColumn's errors for OVER, FILTER, DISTINCT, aggregate ORDER BY and WITHIN GROUP after function resolution (42P20, 42P10, 42809, 22004, 22013, 22014, 22016, 0A000, 42883 and 42725 with PostgreSQL's hints)",
       "status": "verified",
       "open_issue": null
     },
@@ -1097,6 +1098,14 @@
       "postgresql_reference": "PostgreSQL 18.4 live rows, SQLSTATEs, messages and hints in tests/parity/pg18/aggregate_nulls_oracle.expected.json; array_agg_array_transfn in src/backend/utils/adt/array_userfuncs.c; https://www.postgresql.org/docs/18/functions-aggregate.html",
       "uqa_test": "cargo test -p uqa-engine --test integration queries::sql_aggregate_nulls",
       "supported_version": "Unreleased: 55 PostgreSQL 18.4 cases on memory and SQLite engines cover array_agg, json_agg, jsonb_agg and string_agg over NULL inputs with ORDER BY, DISTINCT, FILTER, empty inputs and window frames, array accumulation with its dimensionality and NULL-array errors, domain element types, and min, max, count, mode, percentile_disc, enum_range, grouping, ordering and window aggregates over enum values with inserted labels, with function resolution errors and hints for aggregates that take no such argument type",
+      "status": "verified",
+      "open_issue": null
+    },
+    {
+      "id": "expressions.boolean-conditions",
+      "postgresql_reference": "PostgreSQL 18.4 live rows, SQLSTATEs and messages in tests/parity/pg18/boolean_conditions_oracle.expected.json; coerce_to_boolean in src/backend/parser/parse_coerce.c; boolin in src/backend/utils/adt/bool.c",
+      "uqa_test": "cargo test -p uqa-engine --test integration queries::sql_boolean_conditions",
+      "supported_version": "Unreleased: 45 PostgreSQL 18.4 cases on memory and SQLite engines cover the conditions of WHERE, HAVING, JOIN ON, searched CASE, AND, OR, NOT and aggregate FILTER in queries, updates and deletes: a condition of another type than boolean or a domain over it is 42804 naming its construct, and an unknown literal is read as boolean input with prefixes and surrounding spaces, invalid text being 22P02",
       "status": "verified",
       "open_issue": null
     }

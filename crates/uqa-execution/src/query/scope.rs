@@ -187,6 +187,8 @@ mod tests {
                     exclusion: FrameExclusion::NoOthers,
                 }),
             },
+            filter: None,
+            modifiers: uqa_sql::ast::WindowCallModifiers::default(),
         };
         assert!(expr_contains_subquery(&expression));
     }

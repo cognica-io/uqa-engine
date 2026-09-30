@@ -63,6 +63,14 @@ impl SchemaScope {
                 &block.subqueries,
                 params,
             )?;
+            self.validate_condition(
+                engine,
+                predicate,
+                "WHERE",
+                source,
+                &block.subqueries,
+                params,
+            )?;
         }
         for expression in block
             .group_by
@@ -94,6 +102,7 @@ impl SchemaScope {
                 &block.subqueries,
                 params,
             )?;
+            self.validate_condition(engine, having, "HAVING", source, &block.subqueries, params)?;
         }
         for expression in &block.distinct_on {
             self.validate_alias_reference(
@@ -223,6 +232,28 @@ impl SchemaScope {
         Self::validate_expression_references_with_resolver(
             engine, expression, schema, fallback, params, &resolver,
         )
+    }
+
+    /// A clause condition must be boolean, as `transformWhereClause` requires.
+    pub(super) fn validate_condition(
+        &mut self,
+        engine: &dyn RoutineResolution,
+        condition: &ScalarExpr,
+        construct: &str,
+        schema: &RowSchema,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+    ) -> Result<(), SQLError> {
+        let schema = self.with_stored_outer_internal_aliases(schema);
+        let resolver = self.query_function_type_resolver(
+            engine,
+            condition,
+            &schema,
+            subqueries,
+            params,
+            Some(&schema),
+        )?;
+        references::require_boolean_condition(condition, construct, &schema, params, &resolver)
     }
 
     pub(super) fn validate_expression_references_with_resolver(

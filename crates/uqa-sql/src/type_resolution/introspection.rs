@@ -286,8 +286,13 @@ impl Binder<'_, '_> {
                 name,
                 mut args,
                 mut spec,
+                mut filter,
+                modifiers,
             } => {
                 self.items(&mut args)?;
+                if let Some(filter) = filter.as_deref_mut() {
+                    self.in_place(filter)?;
+                }
                 self.items(&mut spec.partition_by)?;
                 for order in &mut spec.order_by {
                     self.in_place(&mut order.expr)?;
@@ -296,7 +301,13 @@ impl Binder<'_, '_> {
                     self.frame_bound(&mut frame.start)?;
                     self.frame_bound(&mut frame.end)?;
                 }
-                ScalarExpr::WindowCall { name, args, spec }
+                ScalarExpr::WindowCall {
+                    name,
+                    args,
+                    spec,
+                    filter,
+                    modifiers,
+                }
             }
             ScalarExpr::Case {
                 mut base,

@@ -150,13 +150,23 @@ pub fn qualify_unqualified_columns(expr: &ScalarExpr, qualifier: &str) -> Scalar
                 .as_ref()
                 .map(|filter| Box::new(qualify_unqualified_columns(filter, qualifier))),
         },
-        ScalarExpr::WindowCall { name, args, spec } => ScalarExpr::WindowCall {
+        ScalarExpr::WindowCall {
+            name,
+            args,
+            spec,
+            filter,
+            modifiers,
+        } => ScalarExpr::WindowCall {
+            modifiers: *modifiers,
             name: name.clone(),
             args: args
                 .iter()
                 .map(|arg| qualify_unqualified_columns(arg, qualifier))
                 .collect(),
             spec: spec.clone(),
+            filter: filter
+                .as_ref()
+                .map(|filter| Box::new(qualify_unqualified_columns(filter, qualifier))),
         },
         ScalarExpr::Case {
             base,
@@ -239,6 +249,8 @@ mod tests {
                     exclusion: FrameExclusion::NoOthers,
                 }),
             },
+            filter: None,
+            modifiers: crate::ast::WindowCallModifiers::default(),
         };
         assert!(expr_contains_function(&expression));
         assert!(expr_has_unqualified_column(&expression));
