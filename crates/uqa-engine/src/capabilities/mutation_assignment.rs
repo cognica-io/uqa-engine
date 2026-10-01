@@ -11,7 +11,7 @@ use uqa_execution::mutation::{
     identity::{IdentitySequences, InsertIdentityCatalog, InsertIdentityContext},
 };
 use uqa_sql::{
-    assignment::columns::AssignmentColumnCatalog,
+    assignment::columns::{AssignmentColumnCatalog, ColumnShape},
     ast::{AutoIncrement, ColumnDef, Expr},
     SQLError,
 };
@@ -38,6 +38,29 @@ impl AssignmentColumnCatalog for Engine {
     ) -> Result<Option<Expr>, uqa_sql::assignment::columns::ColumnCatalogError> {
         Engine::try_column_insert_default_expr(self, table, column)
             .map_err(|error| Box::new(error) as uqa_sql::assignment::columns::ColumnCatalogError)
+    }
+    fn try_column_shape(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> Result<Option<Option<ColumnShape>>, uqa_sql::assignment::columns::ColumnCatalogError> {
+        let table = self
+            .try_table(table)
+            .map_err(|error| Box::new(error) as uqa_sql::assignment::columns::ColumnCatalogError)?;
+        Ok(table.map(|table| {
+            table
+                .columns
+                .read()
+                .iter()
+                .find(|definition| definition.name == column)
+                .map(|definition| ColumnShape {
+                    ty: definition.ty.clone(),
+                    generated: definition
+                        .generated
+                        .as_ref()
+                        .map(|generated| generated.kind),
+                })
+        }))
     }
 }
 impl InsertIdentityCatalog for Engine {
