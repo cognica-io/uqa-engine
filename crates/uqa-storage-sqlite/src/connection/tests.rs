@@ -6,6 +6,7 @@
 
 #[cfg(unix)]
 mod source_identity;
+mod statements;
 
 use std::sync::{mpsc, Arc};
 use std::thread;

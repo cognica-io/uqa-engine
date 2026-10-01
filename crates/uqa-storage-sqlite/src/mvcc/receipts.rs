@@ -40,10 +40,11 @@ impl SQLiteRecordStore {
             let transaction = admission::begin(connection, control)?;
             native::check_mapping(&transaction, self.native)?;
             codec::header(&transaction, self.identity)?;
-            transaction.execute(
-                "UPDATE _uqa_mvcc_metadata SET receipt_limit = ?1 WHERE singleton = 1",
-                [limit],
-            )?;
+            transaction
+                .prepare_cached(
+                    "UPDATE _uqa_mvcc_metadata SET receipt_limit = ?1 WHERE singleton = 1",
+                )?
+                .execute([limit])?;
             admission::commit(transaction, control)
         })
     }
@@ -111,7 +112,7 @@ pub(super) fn acknowledge(
         return Err(VersionError::UnknownTransaction.into());
     }
     acknowledgement.validate(codec::status(&transaction, id)?)?;
-    transaction.execute("UPDATE _uqa_mvcc_transactions SET status = CASE status WHEN 1 THEN 3 WHEN 2 THEN 4 ELSE status END WHERE allocation = ?1", [id.allocation().to_be_bytes().as_slice()])?;
+    transaction.prepare_cached("UPDATE _uqa_mvcc_transactions SET status = CASE status WHEN 1 THEN 3 WHEN 2 THEN 4 ELSE status END WHERE allocation = ?1")?.execute([id.allocation().to_be_bytes().as_slice()])?;
     admission::commit(transaction, control)
 }
 
@@ -130,7 +131,7 @@ fn reclaim(
     let header = codec::header(&transaction, identity)?;
     let mut selected = BudgetedVec::new(control.memory());
     {
-        let mut statement = transaction.prepare("SELECT allocation, status, managed FROM _uqa_mvcc_transactions WHERE status IN (3, 4) OR managed = 1 ORDER BY allocation")?;
+        let mut statement = transaction.prepare_cached("SELECT allocation, status, managed FROM _uqa_mvcc_transactions WHERE status IN (3, 4) OR managed = 1 ORDER BY allocation")?;
         let mut rows = statement.query([])?;
         while let Some(row) = rows.next()? {
             control.check().map_err(VersionError::from)?;
@@ -170,16 +171,19 @@ fn reclaim(
     for (allocation, delete, committed) in selected.iter() {
         control.check().map_err(VersionError::from)?;
         if *delete {
-            transaction.execute(
-                "DELETE FROM _uqa_mvcc_transactions WHERE allocation = ?1",
-                [allocation.as_slice()],
-            )?;
+            transaction
+                .prepare_cached("DELETE FROM _uqa_mvcc_transactions WHERE allocation = ?1")?
+                .execute([allocation.as_slice()])?;
             removed += 1;
         } else {
-            transaction.execute(
-                "UPDATE _uqa_mvcc_transactions SET status = ?2 WHERE allocation = ?1",
-                rusqlite::params![allocation.as_slice(), if *committed { 4 } else { 3 }],
-            )?;
+            transaction
+                .prepare_cached(
+                    "UPDATE _uqa_mvcc_transactions SET status = ?2 WHERE allocation = ?1",
+                )?
+                .execute(rusqlite::params![
+                    allocation.as_slice(),
+                    if *committed { 4 } else { 3 }
+                ])?;
         }
     }
     admission::commit(transaction, control)?;

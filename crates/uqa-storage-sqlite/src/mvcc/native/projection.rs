@@ -188,9 +188,12 @@ fn apply(
             verify_expected(connection, family, key, row.as_deref(), control)
         },
     )?;
-    connection.execute_batch(
-        "DELETE FROM _uqa_mvcc_native_expected; DELETE FROM _uqa_mvcc_native_changes;",
-    )?;
+    connection
+        .prepare_cached("DELETE FROM _uqa_mvcc_native_expected")?
+        .execute([])?;
+    connection
+        .prepare_cached("DELETE FROM _uqa_mvcc_native_changes")?
+        .execute([])?;
     control.cancellation().check().map_err(VersionError::from)?;
     Ok(())
 }

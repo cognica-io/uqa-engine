@@ -71,7 +71,9 @@ fn dense_document_presence_uses_bounded_selects_and_releases_reservations() {
         .conn
         .with_physical(|sqlite| {
             sqlite.authorizer(None::<fn(rusqlite::hooks::AuthContext<'_>) -> Authorization>)?;
-            sqlite.set_prepared_statement_cache_capacity(16);
+            sqlite.set_prepared_statement_cache_capacity(
+                crate::connection::PREPARED_STATEMENT_CACHE_CAPACITY,
+            );
             Ok(())
         })
         .unwrap();

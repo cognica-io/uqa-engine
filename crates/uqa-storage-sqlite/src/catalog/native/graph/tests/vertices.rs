@@ -247,7 +247,9 @@ fn read_vertices(
     connection
         .with_physical(|sqlite| {
             sqlite.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)?;
-            sqlite.set_prepared_statement_cache_capacity(16);
+            sqlite.set_prepared_statement_cache_capacity(
+                crate::connection::PREPARED_STATEMENT_CACHE_CAPACITY,
+            );
             Ok(())
         })
         .unwrap();

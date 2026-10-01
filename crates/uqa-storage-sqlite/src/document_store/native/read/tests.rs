@@ -299,7 +299,9 @@ fn the_latest_document_count_reads_stored_rows_and_other_snapshots_count_records
     connection
         .with_physical(|sqlite| {
             sqlite.authorizer(None::<fn(rusqlite::hooks::AuthContext<'_>) -> Authorization>)?;
-            sqlite.set_prepared_statement_cache_capacity(16);
+            sqlite.set_prepared_statement_cache_capacity(
+                crate::connection::PREPARED_STATEMENT_CACHE_CAPACITY,
+            );
             Ok(())
         })
         .unwrap();

@@ -59,10 +59,9 @@ pub(super) fn allocate_with_owner(
     let transaction = admission::begin(connection, control)?;
     native::check_mapping(&transaction, native)?;
     let current = codec::header(&transaction, identity)?;
-    let retained: i64 =
-        transaction.query_row("SELECT count(*) FROM _uqa_mvcc_transactions", [], |row| {
-            row.get(0)
-        })?;
+    let retained: i64 = transaction
+        .prepare_cached("SELECT count(*) FROM _uqa_mvcc_transactions")?
+        .query_row([], |row| row.get(0))?;
     let retained = u64::try_from(retained)
         .map_err(|_| VersionError::InvalidEncoding("negative transaction receipt count"))?;
     if retained >= current.receipt_limit {
@@ -80,14 +79,10 @@ pub(super) fn allocate_with_owner(
     )?;
     let bytes = id.allocation().to_be_bytes();
     retain(id)?;
-    transaction.execute(
-        "UPDATE _uqa_mvcc_metadata SET allocated = ?1 WHERE singleton = 1",
-        params![bytes.as_slice()],
-    )?;
-    transaction.execute(
-        "INSERT INTO _uqa_mvcc_transactions (allocation, status, sequence, fingerprint, managed) VALUES (?1, 0, NULL, NULL, ?2)",
-        params![bytes.as_slice(), i64::from(managed)],
-    )?;
+    transaction
+        .prepare_cached("UPDATE _uqa_mvcc_metadata SET allocated = ?1 WHERE singleton = 1")?
+        .execute(params![bytes.as_slice()])?;
+    transaction.prepare_cached("INSERT INTO _uqa_mvcc_transactions (allocation, status, sequence, fingerprint, managed) VALUES (?1, 0, NULL, NULL, ?2)")?.execute(params![bytes.as_slice(), i64::from(managed)])?;
     control.cancellation().check().map_err(VersionError::from)?;
     admission::commit(transaction, control)?;
     Ok(id)
@@ -146,15 +141,15 @@ fn stage(
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
     let sequence = receipt.sequence.as_u64().to_be_bytes();
-    let has_runs: bool =
-        connection.query_row("SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_runs)", [], |row| {
-            row.get(0)
-        })?;
+    let has_runs: bool = connection
+        .prepare_cached("SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_runs)")?
+        .query_row([], |row| row.get(0))?;
     {
-        let mut versions = connection
-            .prepare("INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES (?1, ?2, ?3)")?;
-        let mut previous = connection.prepare("INSERT INTO _uqa_mvcc_versions (key, sequence, value) SELECT key, sequence, NULL FROM _uqa_mvcc_heads WHERE key = ?1 AND compacted = 1")?;
-        let mut heads = connection.prepare("INSERT INTO _uqa_mvcc_heads (key, sequence, compacted) VALUES (?1, ?2, 0) ON CONFLICT(key) DO UPDATE SET sequence = excluded.sequence, compacted = 0")?;
+        let mut versions = connection.prepare_cached(
+            "INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES (?1, ?2, ?3)",
+        )?;
+        let mut previous = connection.prepare_cached("INSERT INTO _uqa_mvcc_versions (key, sequence, value) SELECT key, sequence, NULL FROM _uqa_mvcc_heads WHERE key = ?1 AND compacted = 1")?;
+        let mut heads = connection.prepare_cached("INSERT INTO _uqa_mvcc_heads (key, sequence, compacted) VALUES (?1, ?2, 0) ON CONFLICT(key) DO UPDATE SET sequence = excluded.sequence, compacted = 0")?;
         for write in prepared.records() {
             control.cancellation().check().map_err(VersionError::from)?;
             if has_runs {
@@ -168,11 +163,10 @@ fn stage(
             heads.clear_bindings();
         }
     }
-    connection.execute(
-        "UPDATE _uqa_mvcc_metadata SET sequence = ?1 WHERE singleton = 1",
-        params![sequence.as_slice()],
-    )?;
-    connection.execute("UPDATE _uqa_mvcc_transactions SET status = 2, sequence = ?1, fingerprint = ?2 WHERE allocation = ?3", params![sequence.as_slice(), receipt.fingerprint.as_slice(), receipt.transaction.allocation().to_be_bytes().as_slice()])?;
+    connection
+        .prepare_cached("UPDATE _uqa_mvcc_metadata SET sequence = ?1 WHERE singleton = 1")?
+        .execute(params![sequence.as_slice()])?;
+    connection.prepare_cached("UPDATE _uqa_mvcc_transactions SET status = 2, sequence = ?1, fingerprint = ?2 WHERE allocation = ?3")?.execute(params![sequence.as_slice(), receipt.fingerprint.as_slice(), receipt.transaction.allocation().to_be_bytes().as_slice()])?;
     control.cancellation().check().map_err(VersionError::from)?;
     Ok(())
 }
@@ -189,12 +183,11 @@ pub(super) fn stage_record(
         crate::read_control::reserve_bindings(control, &[key, value.unwrap_or_default()])?;
     let sequence = sequence.as_u64().to_be_bytes();
     super::runs::extract(connection, key, control)?;
-    connection.execute("INSERT INTO _uqa_mvcc_versions (key, sequence, value) SELECT key, sequence, NULL FROM _uqa_mvcc_heads WHERE key = ?1 AND compacted = 1", [key])?;
-    connection.execute(
-        "INSERT INTO _uqa_mvcc_versions(key, sequence, value) VALUES (?1, ?2, ?3)",
-        params![key, sequence.as_slice(), value],
-    )?;
-    connection.execute("INSERT INTO _uqa_mvcc_heads(key, sequence, compacted) VALUES (?1, ?2, 0) ON CONFLICT(key) DO UPDATE SET sequence = excluded.sequence, compacted = 0", params![key, sequence.as_slice()])?;
+    connection.prepare_cached("INSERT INTO _uqa_mvcc_versions (key, sequence, value) SELECT key, sequence, NULL FROM _uqa_mvcc_heads WHERE key = ?1 AND compacted = 1")?.execute([key])?;
+    connection
+        .prepare_cached("INSERT INTO _uqa_mvcc_versions(key, sequence, value) VALUES (?1, ?2, ?3)")?
+        .execute(params![key, sequence.as_slice(), value])?;
+    connection.prepare_cached("INSERT INTO _uqa_mvcc_heads(key, sequence, compacted) VALUES (?1, ?2, 0) ON CONFLICT(key) DO UPDATE SET sequence = excluded.sequence, compacted = 0")?.execute(params![key, sequence.as_slice()])?;
     Ok(())
 }
 
@@ -213,10 +206,9 @@ pub(super) fn abort(
     if status != CommitStatus::Pending {
         return Ok(status);
     }
-    transaction.execute(
-        "UPDATE _uqa_mvcc_transactions SET status = 1 WHERE allocation = ?1",
-        params![id.allocation().to_be_bytes().as_slice()],
-    )?;
+    transaction
+        .prepare_cached("UPDATE _uqa_mvcc_transactions SET status = 1 WHERE allocation = ?1")?
+        .execute(params![id.allocation().to_be_bytes().as_slice()])?;
     control.cancellation().check().map_err(VersionError::from)?;
     admission::commit(transaction, control)?;
     Ok(CommitStatus::Aborted)

@@ -112,6 +112,9 @@ pub type Result<T> = std::result::Result<T, SQLiteError>;
 const MIN_POOL_CONNECTIONS: usize = 4;
 const MAX_POOL_CONNECTIONS: usize = 32;
 
+/// Prepared statements each connection retains. Statements are built from record layouts and work-queue conditions, so one commit runs more distinct statements than a small cache holds, and preparing a projection upsert compiles every trigger of its table; a cache that evicts them prepares them again in each transaction.
+pub(crate) const PREPARED_STATEMENT_CACHE_CAPACITY: usize = 256;
+
 #[derive(Clone)]
 enum ConnectionSpec {
     File {
@@ -132,6 +135,12 @@ enum ConnectionSpec {
 
 impl ConnectionSpec {
     fn open(&self, initialize_database: bool) -> Result<Connection> {
+        let conn = self.open_configured(initialize_database)?;
+        conn.set_prepared_statement_cache_capacity(PREPARED_STATEMENT_CACHE_CAPACITY);
+        Ok(conn)
+    }
+
+    fn open_configured(&self, initialize_database: bool) -> Result<Connection> {
         let mut flags = OpenFlags::default();
         if !initialize_database && matches!(self, Self::File { .. } | Self::Auxiliary { .. }) {
             flags.remove(OpenFlags::SQLITE_OPEN_CREATE);

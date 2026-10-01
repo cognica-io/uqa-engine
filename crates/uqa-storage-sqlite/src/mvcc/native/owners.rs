@@ -106,8 +106,9 @@ pub(super) fn lookup(
     control: &StorageReadControl,
 ) -> PhysicalResult<Option<NativeRecordOwner>> {
     let _bindings = physical::reserve_values(&[name], control)?;
-    let mut statement = connection
-        .prepare("SELECT object_id, generation FROM _uqa_mvcc_native_owners WHERE name = ?1")?;
+    let mut statement = connection.prepare_cached(
+        "SELECT object_id, generation FROM _uqa_mvcc_native_owners WHERE name = ?1",
+    )?;
     let mut rows = statement.query(params![ToSqlOutput::Borrowed(name)])?;
     rows.next()?
         .map(|row| {

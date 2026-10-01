@@ -92,7 +92,9 @@ fn borrowed_points_share_read_admission_and_preserve_request_order() {
         .conn
         .with_physical(|sqlite| {
             sqlite.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)?;
-            sqlite.set_prepared_statement_cache_capacity(16);
+            sqlite.set_prepared_statement_cache_capacity(
+                crate::connection::PREPARED_STATEMENT_CACHE_CAPACITY,
+            );
             Ok(())
         })
         .unwrap();

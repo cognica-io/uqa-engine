@@ -68,11 +68,10 @@ pub(super) fn consolidate_diskann_generations(connection: &Connection) -> Physic
 
 pub(super) fn watermark(connection: &Connection, namespace: &[u8]) -> PhysicalResult<Option<u64>> {
     connection
-        .query_row(
-            "SELECT watermark FROM _uqa_mvcc_identifiers WHERE namespace = ?1",
-            [namespace],
-            |row| Ok(codec::bytes(row, 0).and_then(codec::integer)),
-        )
+        .prepare_cached("SELECT watermark FROM _uqa_mvcc_identifiers WHERE namespace = ?1")?
+        .query_row([namespace], |row| {
+            Ok(codec::bytes(row, 0).and_then(codec::integer))
+        })
         .optional()?
         .transpose()
 }
@@ -117,10 +116,9 @@ pub(super) fn allocate(
     let previous = watermark(&transaction, namespace)?;
     let allocation = request.prepare(previous)?;
     if previous != Some(allocation.watermark()) {
-        transaction.execute(
-            "INSERT INTO _uqa_mvcc_identifiers VALUES (?1, ?2) ON CONFLICT(namespace) DO UPDATE SET watermark = excluded.watermark",
-            params![namespace, allocation.watermark().to_be_bytes().as_slice()],
-        )?;
+        transaction
+            .prepare_cached("INSERT INTO _uqa_mvcc_identifiers VALUES (?1, ?2) ON CONFLICT(namespace) DO UPDATE SET watermark = excluded.watermark")?
+            .execute(params![namespace, allocation.watermark().to_be_bytes().as_slice()])?;
     }
     control
         .cancellation()

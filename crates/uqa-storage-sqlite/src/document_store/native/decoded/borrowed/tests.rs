@@ -84,7 +84,9 @@ fn borrowed_native_rows_use_bounded_queries_and_keep_the_decoding_allowance() {
         .conn
         .with_physical(|sqlite| {
             sqlite.authorizer(None::<fn(rusqlite::hooks::AuthContext<'_>) -> Authorization>)?;
-            sqlite.set_prepared_statement_cache_capacity(16);
+            sqlite.set_prepared_statement_cache_capacity(
+                crate::connection::PREPARED_STATEMENT_CACHE_CAPACITY,
+            );
             Ok(())
         })
         .unwrap();
@@ -290,7 +292,9 @@ fn scan_reading(
         .conn
         .with_physical(|sqlite| {
             sqlite.authorizer(None::<fn(rusqlite::hooks::AuthContext<'_>) -> Authorization>)?;
-            sqlite.set_prepared_statement_cache_capacity(16);
+            sqlite.set_prepared_statement_cache_capacity(
+                crate::connection::PREPARED_STATEMENT_CACHE_CAPACITY,
+            );
             Ok(())
         })
         .unwrap();
