@@ -7,7 +7,7 @@
 //! Inline rows stream on one cursor, over the latest committed physical rows when they stand in for the snapshot's records and over the records otherwise; selected BLOBs hydrate after releasing it.
 
 use rusqlite::types::ValueRef;
-use uqa_core::{memory::BudgetedVec, DocId, Value};
+use uqa_core::{memory::BudgetedSmallVec, DocId, Value};
 use uqa_storage::mvcc::VersionError;
 
 use super::{controlled, sqlite_doc_id, Decoded, Family, NativeDocumentRead, SQLiteResult};
@@ -174,7 +174,8 @@ impl NativeDocumentRead<'_> {
     ) -> SQLiteResult<bool> {
         self.snapshot.control.check()?;
         self.control.check()?;
-        let mut projected = BudgetedVec::new(self.control.memory());
+        // Ordinary projections keep their value references inline.
+        let mut projected = BudgetedSmallVec::<[&Value; 8]>::new(self.control.memory());
         projected.reserve(fields.len())?;
         for field in fields {
             projected.push(row.get(*field).unwrap_or(&Value::Null))?;

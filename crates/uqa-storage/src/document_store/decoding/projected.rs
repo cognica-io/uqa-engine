@@ -11,7 +11,7 @@ use super::{
 };
 use uqa_core::{
     json::{decode_json_string, JsonReader, JsonToken},
-    memory::{Budgeted, BudgetedVec},
+    memory::{Budgeted, BudgetedSmallVec},
     Value,
 };
 
@@ -58,7 +58,8 @@ pub(super) fn fields(
     Ok(Some(Budgeted::new(result, memory)))
 }
 
-type PrimitiveMembers<'a> = BudgetedVec<(&'a str, &'a [u8])>;
+/// Ordinary documents keep their members inline; wider ones charge a heap buffer.
+type PrimitiveMembers<'a> = BudgetedSmallVec<[(&'a str, &'a [u8]); 16]>;
 
 fn ordered_primitives<'a>(
     input: &'a str,
@@ -75,7 +76,7 @@ fn ordered_primitives<'a>(
     ) {
         return Ok(None);
     }
-    let mut members = BudgetedVec::new(control.memory());
+    let mut members = PrimitiveMembers::new(control.memory());
     let mut previous = None;
     loop {
         let event = reader

@@ -53,7 +53,7 @@ impl<'a> JsonReader<'a, '_> {
             match byte {
                 b'"' => {
                     let encoded = &self.input[start..self.position];
-                    if !self.ignored_string_escapes {
+                    if !self.ignored_string_escapes && !self.validated_utf8 {
                         std::str::from_utf8(encoded).map_err(|_| JsonReadError::InvalidJson)?;
                     }
                     return Ok(encoded);

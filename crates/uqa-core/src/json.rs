@@ -7,7 +7,7 @@
 //! Borrowed JSON events share one grammar without choosing a numeric or object representation.
 
 use crate::{
-    memory::{Budgeted, BudgetedVec, MemoryBudget, MemoryError, ProductionControl},
+    memory::{Budgeted, BudgetedSmallVec, MemoryBudget, MemoryError, ProductionControl},
     CancellationToken, QueryCancelled,
 };
 
@@ -58,9 +58,10 @@ enum Frame {
     ObjectAfter,
 }
 
+/// Open containers. A bounded stack keeps ordinary nesting inline and charges only deeper nesting.
 enum Stack {
     Unbounded(Vec<Frame>),
-    Bounded(BudgetedVec<Frame>),
+    Bounded(BudgetedSmallVec<[Frame; 16]>),
 }
 
 impl Stack {
@@ -101,11 +102,16 @@ pub struct JsonReader<'a, 'c> {
     root_started: bool,
     depth_limit: Option<usize>,
     ignored_string_escapes: bool,
+    /// The input came from a `str`, so every token between ASCII delimiters is already valid UTF-8.
+    validated_utf8: bool,
 }
 
 impl<'a, 'c> JsonReader<'a, 'c> {
     pub fn new(input: &'a str, memory: &MemoryBudget, cancellation: &'c CancellationToken) -> Self {
-        Self::from_slice(input.as_bytes(), memory, cancellation)
+        Self {
+            validated_utf8: true,
+            ..Self::from_slice(input.as_bytes(), memory, cancellation)
+        }
     }
 
     pub fn from_slice(
@@ -116,12 +122,13 @@ impl<'a, 'c> JsonReader<'a, 'c> {
         Self {
             input,
             position: 0,
-            stack: Stack::Bounded(BudgetedVec::new(memory)),
+            stack: Stack::Bounded(BudgetedSmallVec::new(memory)),
             cancellation: Some(cancellation),
             production: None,
             root_started: false,
             depth_limit: None,
             ignored_string_escapes: false,
+            validated_utf8: false,
         }
     }
 
@@ -135,6 +142,7 @@ impl<'a, 'c> JsonReader<'a, 'c> {
             root_started: false,
             depth_limit: None,
             ignored_string_escapes: false,
+            validated_utf8: true,
         }
     }
 
@@ -145,13 +153,14 @@ impl<'a, 'c> JsonReader<'a, 'c> {
             position: 0,
             stack: control.budget().map_or_else(
                 || Stack::Unbounded(Vec::new()),
-                |budget| Stack::Bounded(BudgetedVec::new(budget)),
+                |budget| Stack::Bounded(BudgetedSmallVec::new(budget)),
             ),
             cancellation: None,
             production: Some(*control),
             root_started: false,
             depth_limit: None,
             ignored_string_escapes: false,
+            validated_utf8: true,
         }
     }
 
