@@ -103,7 +103,7 @@ Avoid holding a registry lock across provider I/O, callback execution, or anothe
 
 One logical operation that needs several registries should use the domain snapshot or publication method rather than acquiring individual locks in an ad hoc order.
 
-The lock manager separates stable identities, in-process grants, relation locks, wait-graph and deadlock traversal, committed row-change publication, shared manager registration, and the durable cross-process adapter. Scoped snapshot, publication, wait-advertisement, row-observation, statement, and transaction owners release their claims on every ordinary return and on drop; timeout and cancellation paths remove the same wait edges before they return an error.
+The lock manager separates stable identities, in-process grants, relation locks, wait-graph and deadlock traversal, committed row-change publication, shared manager registration, and the durable cross-process adapter. Scoped snapshot, publication, wait-advertisement, row-observation, statement, and transaction owners release their claims on every ordinary return and on drop; timeout and cancellation paths remove the same wait edges before they return an error. The cross-process adapter publishes the holder attributions that other processes' deadlock traversal reads only when a local session advertises a wait, because a wait-for cycle closes only when its last member starts waiting; claims therefore write no attribution, and a release clears the published attributions under one slot lock before it unlocks its bytes in ascending order.
 
 ## Cancellation and notices
 
