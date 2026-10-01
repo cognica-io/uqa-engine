@@ -11,6 +11,7 @@ use std::sync::Arc;
 use uqa_core::Value;
 use uqa_sql::{plan::source_projection::RelationMetadataProjection, ResultRow, SQLError};
 
+mod borrowed;
 mod command_scan;
 mod row_source;
 

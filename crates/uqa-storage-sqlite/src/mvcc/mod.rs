@@ -8,6 +8,7 @@
 
 mod admission;
 mod codec;
+mod connection_functions;
 mod identifiers;
 mod key_value;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
@@ -25,6 +26,7 @@ mod serializable;
 #[cfg(test)]
 mod tests;
 mod tombstones;
+mod version_metadata;
 mod write;
 
 pub(crate) use schema::WritePermit;

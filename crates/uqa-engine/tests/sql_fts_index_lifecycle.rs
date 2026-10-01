@@ -18,10 +18,14 @@ use uqa_engine::Engine;
 use uqa_storage::{document_store::Document, RelationIdentity};
 use uqa_storage_sqlite::ManagedConnection;
 
+#[path = "sql_fts_index_lifecycle/deletion_publication.rs"]
+mod deletion_publication;
 #[path = "sql_fts_index_lifecycle/initial_restore.rs"]
 mod initial_restore;
 #[path = "sql_fts_index_lifecycle/occurrences.rs"]
 mod occurrences;
+#[path = "sql_fts_index_lifecycle/rewrite_publication.rs"]
+mod rewrite_publication;
 
 fn ids(result: &uqa_sql::SQLResult) -> Vec<i64> {
     result

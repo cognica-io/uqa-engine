@@ -22,6 +22,9 @@ use super::format::{
 #[cfg(test)]
 mod tests;
 
+mod buffered;
+pub(crate) use buffered::BufferedIndexedSpill;
+
 /// Disk-only physical-row store with constant-memory positional lookup.
 ///
 /// Each row retains the exact physical layout described by `schema` and is
@@ -79,6 +82,11 @@ impl IndexedSpill {
     /// original lengths, so callers never observe a partial index entry.
     pub fn push(&mut self, row: &PhysicalRow) -> ExecResult<()> {
         let payload = encode_physical_row_record(row, self.schema.physical_width())?;
+        self.push_encoded(&payload)
+    }
+
+    /// Append a record already encoded and validated against this store's physical schema.
+    fn push_encoded(&mut self, payload: &[u8]) -> ExecResult<()> {
         let length = u64::try_from(payload.len())
             .map_err(|_| spill_error("indexed spill row is too large"))?;
         // Validate every piece of metadata before touching either file.  A
@@ -112,7 +120,7 @@ impl IndexedSpill {
         let write_result = (|| -> std::io::Result<()> {
             self.data.as_file_mut().write_all_vectored(&mut [
                 IoSlice::new(&length.to_le_bytes()),
-                IoSlice::new(&payload),
+                IoSlice::new(payload),
             ])?;
             self.data.as_file_mut().flush()?;
             self.offsets

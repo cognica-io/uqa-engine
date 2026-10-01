@@ -87,6 +87,44 @@ impl NativeRecordIdentity {
         self.owner
     }
 
+    /// Compare the canonical encoding directly, without allocating a second copy of a retained record key.
+    pub(super) fn matches_row_key(
+        self,
+        key: &[u8],
+        values: &[ValueRef<'_>],
+        control: &StorageReadControl,
+    ) -> VersionResult<bool> {
+        let owner_bytes = match self.owner {
+            NativeRecordOwner::Database(_) => 16,
+            NativeRecordOwner::Object { .. } => 32,
+        };
+        // decode_record already validated this exact family/owner header.
+        let mut input = &key[PREFIX.len() + 2 + 1 + owner_bytes..];
+        for &column in self.family.layout().identity_columns {
+            control.cancellation().check()?;
+            let matches = match values[column] {
+                ValueRef::Integer(value) => {
+                    let ordered = u64::from_be_bytes(value.to_be_bytes()) ^ (1 << 63);
+                    consume(&mut input, &[1]) && consume(&mut input, &ordered.to_be_bytes())
+                }
+                ValueRef::Text(bytes) => {
+                    consume(&mut input, &[2]) && matches_escaped(&mut input, bytes, control)?
+                }
+                ValueRef::Blob(bytes) => {
+                    consume(&mut input, &[3]) && matches_escaped(&mut input, bytes, control)?
+                }
+                ValueRef::Null | ValueRef::Real(_) => {
+                    return Err(invalid("native primary key must be INTEGER, TEXT or BLOB"));
+                }
+            };
+            if !matches {
+                return Ok(false);
+            }
+        }
+        control.cancellation().check()?;
+        Ok(input.is_empty())
+    }
+
     pub(super) fn validate_row(self, values: &[ValueRef<'_>]) -> VersionResult<()> {
         let layout = self.family.layout();
         layout.validate_values(values)?;
@@ -347,6 +385,31 @@ impl NativeRecordIdentity {
         }
         Ok(identity)
     }
+}
+
+fn consume(input: &mut &[u8], expected: &[u8]) -> bool {
+    if let Some(rest) = input.strip_prefix(expected) {
+        *input = rest;
+        true
+    } else {
+        false
+    }
+}
+
+fn matches_escaped(
+    input: &mut &[u8],
+    bytes: &[u8],
+    control: &StorageReadControl,
+) -> VersionResult<bool> {
+    for (index, &byte) in bytes.iter().enumerate() {
+        if index % 1024 == 0 {
+            control.cancellation().check()?;
+        }
+        if !consume(input, &[byte]) || (byte == 0 && !consume(input, &[255])) {
+            return Ok(false);
+        }
+    }
+    Ok(consume(input, &[0, 0]))
 }
 
 fn escaped_bytes(

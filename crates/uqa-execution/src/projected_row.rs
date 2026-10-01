@@ -74,6 +74,12 @@ impl<'schema, 'row> ProjectedRow<'schema, 'row> {
 
     #[inline]
     #[must_use]
+    pub(crate) fn row_schema(&self) -> &RowSchema {
+        self.schema
+    }
+
+    #[inline]
+    #[must_use]
     pub fn positional_column(&self, index: usize) -> Option<&Value> {
         match self.slots.get(index)? {
             ProjectedValueSlot::Field(index) => self.fields.get(*index).copied(),

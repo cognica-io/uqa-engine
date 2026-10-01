@@ -8,6 +8,12 @@ Databases already opened with 0.4.5 or 0.4.6 use the same persistent formats in 
 
 Application-owned raw SQLite tables remain outside the native UQA record model. Initial open still rejects unmapped physical tables; application-specific migration must preserve their data before native conversion. This release does not infer ownership or silently discard those tables.
 
+## SQLite version metadata pages
+
+SQLite record format 55 stores predecessor lengths in a guarded metadata table separate from version payload pages. Opening a supported record format from 1 through 54 converts it atomically while preserving its database identity, committed histories, pending transactions, receipts and identifier watermarks. Pending backup restoration performs the same conversion inside its existing restoration transaction. Native catalog mapping 13 and catalog format 49 do not change. Older binaries reject the new record format; retain a backup before opening a file that must remain usable by an older binary.
+
+The table and its maintenance triggers add disk space and publication work proportional to retained versions. Point and ordered metadata reads avoid opening payload pages; canonical values and their read allowance are unchanged. Missing or altered current-format tables or maintenance triggers are rejected. See the [representation and preservation proof](../../design/ordered-native-reads.md#payload-free-version-metadata).
+
 ## 0.4.5 vector indexes and storage formats
 
 DiskANN generations, canonical mutation provenance, exact population metadata and scoped physical reclamation use the following final format boundaries. Conversion preserves data, record histories, receipts and identifier watermarks; it does not delete history. Older incompatible binaries are rejected, including retained adapters on their next physical access.

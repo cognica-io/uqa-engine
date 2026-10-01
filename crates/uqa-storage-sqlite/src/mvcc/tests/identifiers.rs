@@ -11,6 +11,94 @@ use uqa_storage::mvcc::{DatabaseId, IdentifierRequest};
 
 mod diskann;
 
+fn synchronous(connection: &rusqlite::Connection) -> i64 {
+    connection
+        .pragma_query_value(None, "synchronous", |row| row.get(0))
+        .unwrap()
+}
+
+#[test]
+fn wal_observations_commit_without_their_own_sync_and_restore_full_synchronization() {
+    use crate::mvcc::{identifiers::ObservationSynchronization, schema::WritePermit};
+    let directory = tempfile::tempdir().unwrap();
+    let connection = ManagedConnection::open(&directory.path().join("observations.db")).unwrap();
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    let control = control();
+    store
+        .with(|connection| {
+            let permit = WritePermit::acquire(connection)?;
+            assert_eq!(synchronous(connection), 2);
+            let relaxed = ObservationSynchronization::relax(connection, &permit)?;
+            assert!(relaxed.is_some(), "WAL observations relax synchronization");
+            assert_eq!(synchronous(connection), 1);
+            drop(relaxed);
+            assert_eq!(synchronous(connection), 2);
+            // A restoration attempted inside a transaction fails and stays recorded until the next write admission restores it.
+            let relaxed = ObservationSynchronization::relax(connection, &permit)?;
+            connection.execute_batch("BEGIN")?;
+            drop(relaxed);
+            connection.execute_batch("COMMIT")?;
+            assert_eq!(synchronous(connection), 1);
+            drop(permit);
+            drop(WritePermit::acquire(connection)?);
+            assert_eq!(synchronous(connection), 2);
+            Ok(())
+        })
+        .unwrap();
+    for (request, watermark) in [(IdentifierRequest::Observe(40), 40), (reserve(2), 42)] {
+        assert_eq!(
+            store
+                .allocate_identifiers(b"entities", request, &control)
+                .unwrap()
+                .watermark(),
+            watermark
+        );
+        store
+            .with(|connection| {
+                assert_eq!(synchronous(connection), 2);
+                Ok(())
+            })
+            .unwrap();
+    }
+    drop(store);
+    drop(connection);
+    let reopened = ManagedConnection::open(&directory.path().join("observations.db")).unwrap();
+    assert_eq!(
+        SQLiteRecordStore::new(&reopened)
+            .unwrap()
+            .identifier_watermark(b"entities", &control)
+            .unwrap(),
+        Some(42)
+    );
+}
+
+#[test]
+fn rollback_journal_observations_keep_full_synchronization() {
+    use crate::mvcc::{identifiers::ObservationSynchronization, schema::WritePermit};
+    let directory = tempfile::tempdir().unwrap();
+    let connection = ManagedConnection::open_compressed(
+        &directory.path().join("observations.db"),
+        crate::SQLiteCompressionOptions::default(),
+    )
+    .unwrap();
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    store
+        .with(|connection| {
+            let permit = WritePermit::acquire(connection)?;
+            assert!(ObservationSynchronization::relax(connection, &permit)?.is_none());
+            assert_eq!(synchronous(connection), 2);
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        store
+            .allocate_identifiers(b"entities", IdentifierRequest::Observe(7), &control())
+            .unwrap()
+            .watermark(),
+        7
+    );
+}
+
 fn reserve(count: u64) -> IdentifierRequest {
     IdentifierRequest::Reserve {
         minimum: 1,

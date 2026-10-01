@@ -567,6 +567,27 @@ pub trait DocumentStore: Send + Sync {
         Ok(None)
     }
 
+    /// Visit a bounded ascending projection while permitting the provider to retain a physical read borrow. The caller must not reenter storage, invoke host callbacks, or execute nested SQL from `visitor`. Missing fields are SQL NULL; stopping the visitor must not decode later rows. `None` must leave the visitor uncalled. Providers without a physical borrow reuse their ordinary projected cursor.
+    fn for_each_next_fields_borrowed(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        self.for_each_next_fields(after, limit, fields, visitor)
+    }
+
+    /// Visit requested point projections, including missing rows and duplicate IDs, in caller order while allowing a physical read borrow. Neither the visitor nor its callees may reenter storage, invoke host callbacks, or execute nested SQL. A stopped visitor must not read later IDs. `Some(count)` counts callbacks; `None` must leave the visitor uncalled and selects the ordinary projection path.
+    fn for_each_fields_multi_borrowed(
+        &self,
+        _ids: &[DocId],
+        _fields: &[&str],
+        _visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        Ok(None)
+    }
+
     fn max_doc_id(&self) -> StorageBackendResult<DocId> {
         Ok(self.doc_ids()?.into_iter().max().unwrap_or(0))
     }

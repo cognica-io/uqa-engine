@@ -119,7 +119,7 @@ fn rejected_commit_preserves_typed_diagnostics_and_cleans_up_without_replay() {
 }
 
 #[test]
-fn direct_document_observation_preserves_storage_diagnostics_and_rolls_back_the_write() {
+fn direct_document_commit_failure_preserves_storage_diagnostics_and_rolls_back_the_write() {
     let (_directory, fixtures) = fixtures();
     for persistence in fixtures {
         let root = engine(persistence.clone());
@@ -134,7 +134,9 @@ fn direct_document_observation_preserves_storage_diagnostics_and_rolls_back_the_
             (REJECT_CANCELLED, "57014"),
             (REJECT_DEPENDENCY, "40001"),
         ] {
-            persistence.identifier_fault.store(fault, Ordering::Release);
+            // The supplied identity is observed durably in the commit that publishes the document.
+            *persistence.attempt.lock().unwrap() = None;
+            persistence.fault.store(fault, Ordering::Release);
             let error = root
                 .add_document(
                     "items",
@@ -146,10 +148,7 @@ fn direct_document_observation_preserves_storage_diagnostics_and_rolls_back_the_
             if fault == REJECT_CANCELLED {
                 assert!(matches!(error, SQLError::Cancelled(_)));
             }
-            assert_eq!(
-                persistence.identifier_fault.load(Ordering::Acquire),
-                HEALTHY
-            );
+            persistence.fault.store(HEALTHY, Ordering::Release);
             assert_eq!(root.transaction_depth(), 0);
             assert!(root.pending_commit().is_none());
             assert_eq!(count(&observer, "items"), Value::Int(0));

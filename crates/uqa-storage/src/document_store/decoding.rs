@@ -11,6 +11,7 @@ use crate::{read_control::StorageReadControl, StorageBackendError, StorageBacken
 use uqa_core::{json::JsonReadError, memory::Budgeted, JsonValueDecoder, Value};
 
 mod legacy;
+mod projected;
 pub(crate) mod spans;
 
 /// Decode historical JSON document fields without migrating tuple metadata. Root keys remain ordinary field names; nested values preserve historical tagged values, byte-array preference and JSON normalization. The returned lease covers decoded payloads and live field entries under the supplied allowance.
@@ -22,6 +23,25 @@ pub fn decode_legacy_document_fields_budgeted(
     let fields = legacy::fields(text(bytes)?, control)?;
     control.check()?;
     Ok(fields)
+}
+
+/// Decode selected fields while preserving complete historical document validation. Canonical flat objects borrow unselected primitive tokens; other shapes retain the ordinary decoder before projection. Missing fields remain absent and duplicate requested names select one stored field.
+pub fn decode_legacy_document_projection_budgeted(
+    bytes: &[u8],
+    fields: &[&str],
+    control: &StorageReadControl,
+) -> StorageBackendResult<Budgeted<Document>> {
+    control.check()?;
+    let input = text(bytes)?;
+    let result = if let Some(selected) = projected::fields(input, fields, control)? {
+        selected
+    } else {
+        let (mut decoded, memory) = legacy::normalized_fields(input, control)?.into_parts();
+        decoded.retain(|name, _| fields.contains(&name.as_str()));
+        Budgeted::new(decoded, memory)
+    };
+    control.check()?;
+    Ok(result)
 }
 
 /// Decode one historical field value with the same normalization and tagged-value rules as a complete legacy document.

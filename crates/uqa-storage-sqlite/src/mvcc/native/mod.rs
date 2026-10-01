@@ -36,6 +36,7 @@ mod vector_guards;
 
 pub(crate) use session::NativeSnapshot;
 
+pub(super) use capture::{capture_key, CapturedKey};
 pub(super) use format::{check_mapping, initialize, initialize_in, present, reject_mapped};
 pub(super) use format::{initialize_restoration, validate_restoration};
 pub(super) use projection::materialize;
@@ -117,11 +118,7 @@ pub fn decode_record<'a>(
     let layout = identity.family().layout();
     let values = decode_row(row, layout.columns.len(), control)?;
     identity.validate_row(&values)?;
-    let mut components = BudgetedVec::new(control.memory());
-    for &column in layout.identity_columns {
-        components.push(values[column])?;
-    }
-    if identity.encode_key(&components, control)?.as_ref() != key {
+    if !identity.matches_row_key(key, &values, control)? {
         return Err(invalid("native row does not match its record key"));
     }
     Ok((identity, values))

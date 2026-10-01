@@ -178,7 +178,7 @@ pub trait VersionedPersistence: Send + Sync {
         control: &StorageReadControl,
     ) -> VersionResult<Option<u64>>;
 
-    /// Atomically observe or reserve identifiers under the database's physical admission. Persist the high watermark before returning; an error may consume identifiers but must never permit their reuse. This operation advances neither record visibility nor transaction allocation, publishes no private records, and survives transaction/savepoint rollback. Implementations and wrappers must preserve the caller's resource/cancellation control and reject a different database incarnation.
+    /// Atomically observe or reserve identifiers under the database's physical admission. Commit the high watermark before returning. A reservation must be durable before it returns, because its identifiers can be used before any record commit; an observation must be durable no later than the next durable commit. An error may consume identifiers but must never permit their reuse. This operation advances neither record visibility nor transaction allocation, publishes no private records, and survives transaction/savepoint rollback. Implementations and wrappers must preserve the caller's resource/cancellation control and reject a different database incarnation.
     fn allocate_identifiers(
         &self,
         namespace: &[u8],

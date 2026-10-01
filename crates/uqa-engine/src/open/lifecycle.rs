@@ -445,9 +445,21 @@ impl Engine {
         storage_session.validate_transaction_affinity()?;
         let restore_catalog = Arc::clone(&storage_session.catalog);
         let restore_backend = Arc::clone(&storage_session.backend);
+        let mut engine = Self::empty_persistent_session(storage_session, provider);
+        let own_read = !initialize_catalog && !restore_backend.in_transaction();
+        let version_before_read = if own_read {
+            let version = restore_backend.change_version()?;
+            restore_backend.begin_read_transaction()?;
+            restore_backend.pin_transaction_snapshot()?;
+            Some(version)
+        } else {
+            None
+        };
+        // A load-only restore owns one read boundary. Registry validators may
+        // resolve tables without recursively restoring a newer catalog. The
+        // unpublished Engine releases this transaction on errors and unwinds.
         let read_view_before = restore_backend.read_view_revision()?;
         let cache_revisions_before;
-        let mut engine = Self::empty_persistent_session(storage_session, provider);
         if initialize_catalog {
             restore_backend.migrate_document_storage()?;
             // A clean restore remains read-only on backends that can promote a transaction, while backends without promotion reserve their writer before the atomic migration scan.
@@ -526,6 +538,18 @@ impl Engine {
                 .epochs
                 .seen_storage_change_version
                 .store(version, std::sync::atomic::Ordering::Release);
+        }
+        if let Some(before) = version_before_read {
+            restore_backend.rollback_transaction()?;
+            if restore_backend.change_version()? != before {
+                // The restored definitions belong to the pinned snapshot,
+                // even when the independent monitor saw a later commit.
+                engine.epochs.seen_storage_change_version.store(
+                    before.unwrap_or_default(),
+                    std::sync::atomic::Ordering::Release,
+                );
+                *engine.epochs.seen_storage_read_view.lock() = None;
+            }
         }
         Ok(engine)
     }

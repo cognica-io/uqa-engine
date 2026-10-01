@@ -18,7 +18,7 @@ impl FileLockCoordinator {
         HOLDER_SLOT_BASE + index * HOLDER_SLOT_SIZE
     }
 
-    fn read_holder_slot(&self, index: u64) -> Option<HolderSlot> {
+    pub(super) fn read_holder_slot(&self, index: u64) -> Option<HolderSlot> {
         let mut bytes = [0_u8; HOLDER_SLOT_SIZE as usize];
         read_exact_at(&self.file, &mut bytes, Self::holder_slot_offset(index)).ok()?;
         HolderSlot::decode(&bytes)
@@ -38,25 +38,48 @@ impl FileLockCoordinator {
         }
     }
 
+    /// Publish the holder slots of every pending acquisition. The caller holds the slot metadata lock.
+    fn publish_pending_holders(&self, state: &mut CoordinatorState) {
+        state.pending_holders.clear();
+        for (session, claim) in std::mem::take(&mut state.pending_order).into_values() {
+            self.register_holder_slot(state, session, claim);
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn publish_holders(&self) {
+        let mut state = self.state.lock();
+        self.acquire_slot_metadata_lock();
+        self.publish_pending_holders(&mut state);
+        let _ = self.apply_byte_mode(SLOT_METADATA_LOCK_BYTE, Some(true), None);
+    }
+
+    /// Write one acquisition's holder slot. The caller holds the slot metadata lock.
     pub(super) fn register_holder_slot(
         &self,
         state: &mut CoordinatorState,
         session: u64,
         claim: ByteClaim,
     ) {
-        self.acquire_slot_metadata_lock();
         let pid = std::process::id();
+        let mut reused = None;
+        while let Some(index) = state.released_holder_slots.pop() {
+            if !self.holder_slot_occupied(state, pid, index) {
+                reused = Some(index);
+                break;
+            }
+        }
         let preferred = state.next_holder_slot;
-        let slot = (0..HOLDER_SLOT_COUNT).find_map(|probe| {
-            let index = (preferred + probe) % HOLDER_SLOT_COUNT;
-            let occupied = state.occupied_holder_slots[index as usize]
-                || self
-                    .read_holder_slot(index)
-                    .is_some_and(|existing| existing.pid != pid && process_alive(existing.pid));
-            (!occupied).then_some(index)
+        let slot = reused.or_else(|| {
+            (0..HOLDER_SLOT_COUNT).find_map(|probe| {
+                let index = (preferred + probe) % HOLDER_SLOT_COUNT;
+                (!self.holder_slot_occupied(state, pid, index)).then_some(index)
+            })
         });
         if let Some(index) = slot {
-            state.next_holder_slot = (index + 1) % HOLDER_SLOT_COUNT;
+            if reused.is_none() {
+                state.next_holder_slot = (index + 1) % HOLDER_SLOT_COUNT;
+            }
             self.write_holder_slot(
                 index,
                 Some(&HolderSlot {
@@ -73,29 +96,57 @@ impl FileLockCoordinator {
                 .push(index);
             state.occupied_holder_slots[index as usize] = true;
         }
-        let _ = self.apply_byte_mode(SLOT_METADATA_LOCK_BYTE, Some(true), None);
     }
 
-    pub(super) fn clear_holder_slot(
+    fn holder_slot_occupied(&self, state: &CoordinatorState, pid: u32, index: u64) -> bool {
+        state.occupied_holder_slots[index as usize]
+            || self
+                .read_holder_slot(index)
+                .is_some_and(|existing| existing.pid != pid && process_alive(existing.pid))
+    }
+
+    /// Clear the holder slots of `claims` under one slot metadata lock. Each lock operation walks every record lock of the sidecar file, so a bulk release takes the metadata lock once rather than once per claim.
+    pub(super) fn clear_holder_slots(
         &self,
         state: &mut CoordinatorState,
         session: u64,
-        claim: ByteClaim,
+        claims: &[ByteClaim],
     ) {
-        let key = (session, claim.offset, claim.write);
-        let Some(slots) = state.holder_slots.get_mut(&key) else {
-            return;
-        };
-        let Some(index) = slots.pop() else {
-            return;
-        };
-        if slots.is_empty() {
-            state.holder_slots.remove(&key);
+        let mut locked = false;
+        for claim in claims {
+            let key = (session, claim.offset, claim.write);
+            // An unpublished acquisition has no slot to clear.
+            if let Some(pending) = state.pending_holders.get_mut(&key) {
+                let sequence = pending.pop();
+                if pending.is_empty() {
+                    state.pending_holders.remove(&key);
+                }
+                if let Some(sequence) = sequence {
+                    state.pending_order.remove(&sequence);
+                    continue;
+                }
+            }
+            let Some(slots) = state.holder_slots.get_mut(&key) else {
+                continue;
+            };
+            let Some(index) = slots.pop() else {
+                continue;
+            };
+            if slots.is_empty() {
+                state.holder_slots.remove(&key);
+            }
+            state.occupied_holder_slots[index as usize] = false;
+            if !locked {
+                self.acquire_slot_metadata_lock();
+                locked = true;
+            }
+            self.write_holder_slot(index, None);
+            // Allocation rechecks foreign process liveness before reusing this slot. The ordinary probe cursor keeps its position beyond live local holders.
+            state.released_holder_slots.push(index);
         }
-        state.occupied_holder_slots[index as usize] = false;
-        self.acquire_slot_metadata_lock();
-        self.write_holder_slot(index, None);
-        let _ = self.apply_byte_mode(SLOT_METADATA_LOCK_BYTE, Some(true), None);
+        if locked {
+            let _ = self.apply_byte_mode(SLOT_METADATA_LOCK_BYTE, Some(true), None);
+        }
     }
 
     fn slot_offset(index: u64) -> u64 {
@@ -127,6 +178,7 @@ impl FileLockCoordinator {
         };
         let mut state = self.state.lock();
         self.acquire_slot_metadata_lock();
+        self.publish_pending_holders(&mut state);
         if let Some(index) = state.wait_slots.get(&session).copied() {
             self.write_slot(index, Some(&slot));
             let _ = self.apply_byte_mode(SLOT_METADATA_LOCK_BYTE, Some(true), None);
@@ -258,10 +310,10 @@ struct WaitSlot {
     write: bool,
 }
 
-struct HolderSlot {
+pub(super) struct HolderSlot {
     pid: u32,
-    session: u64,
-    offset: u64,
+    pub(super) session: u64,
+    pub(super) offset: u64,
     write: bool,
 }
 

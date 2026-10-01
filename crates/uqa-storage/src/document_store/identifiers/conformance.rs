@@ -65,8 +65,11 @@ pub fn verify_document_id_sessions(
     let mut stale = 1;
     assert!(full.allocate(&mut stale).is_err());
     assert_eq!(stale, 1);
-    full.observe(&mut stale, 1)?;
-    assert_eq!(stale, u128::from(u64::MAX) + 1);
+    // A supplied identity advances only the local floor; the exhausted durable watermark still refuses every reservation above it.
+    DocumentIdAllocator::observe(&mut stale, 1)?;
+    assert_eq!(stale, 2);
+    assert!(full.allocate(&mut stale).is_err());
+    assert_eq!(stale, 2);
     for (object, generation) in [([0; 16], [1; 16]), ([1; 16], [0; 16])] {
         assert!(
             DocumentIdAllocator::new(a.backend.identifier_allocator(), object, generation).is_err()

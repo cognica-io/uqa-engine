@@ -53,6 +53,8 @@ impl NotificationHub {
                 coordinator: Mutex::new(None),
             }),
             cross_error: Mutex::new(None),
+            #[cfg(test)]
+            after_publication: Mutex::new(None),
         })
     }
 
@@ -191,6 +193,15 @@ impl NotificationHub {
         &self,
         transaction_state: Option<(u64, bool)>,
     ) -> Result<(), SQLError> {
+        self.synchronize_cross_process(transaction_state, None)
+    }
+
+    /// `published` is the delivery failure count when the calling session's publication committed, if it has one to deliver.
+    fn synchronize_cross_process(
+        &self,
+        transaction_state: Option<(u64, bool)>,
+        published: Option<u64>,
+    ) -> Result<(), SQLError> {
         let Some(cross_state) = self.cross.as_ref() else {
             return Ok(());
         };
@@ -203,8 +214,11 @@ impl NotificationHub {
         let control = cross.recovery_control()?;
         let cancellation = Some(control.cancellation());
         if transaction_state.is_none() {
-            let owners =
-                Self::local_owner_ids(&*super::registration::lock(&self.state, cancellation)?);
+            let owners = {
+                let state = super::registration::lock(&self.state, cancellation)?;
+                Self::concurrent_delivery_failure(&state, published)?;
+                Self::local_owner_ids(&state)
+            };
             if !cross.poll_needed(&owners)? {
                 *super::registration::lock(&self.cross_error, cancellation)? = None;
                 return Ok(());
@@ -213,6 +227,7 @@ impl NotificationHub {
         let transaction = cross.begin_registry_transaction()?;
         let _gate = super::registration::lock(&self.commit_gate, cancellation)?;
         let mut state = super::registration::lock(&self.state, cancellation)?;
+        Self::concurrent_delivery_failure(&state, published)?;
         let deliveries =
             Self::prepare_cross_sync(&cross, &transaction, &mut state, transaction_state)?;
         Self::complete_deliveries(
@@ -229,6 +244,19 @@ impl NotificationHub {
             *error = None;
         }
         Ok(())
+    }
+
+    /// A synchronization that failed after a session's publication committed failed every local subscription before the session could deliver to them, so its failure is the session's delivery failure. The background poll can run that synchronization at any time between the publication and the session's own synchronization.
+    fn concurrent_delivery_failure(
+        state: &NotificationHubState,
+        published: Option<u64>,
+    ) -> Result<(), SQLError> {
+        match (published, &state.last_delivery_failure) {
+            (Some(failures), Some(error)) if failures != state.delivery_failures => {
+                Err(error.clone())
+            }
+            _ => Ok(()),
+        }
     }
 
     #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
@@ -719,6 +747,8 @@ impl NotificationHub {
         }
         let wake_ports = std::mem::take(&mut prepared.wake_ports);
         let mut state = self.state.lock();
+        // The commit gate still excludes every other synchronization, so later failures follow this publication.
+        let published = state.delivery_failures;
         if channels.is_empty() {
             state.listeners.remove(&session_id);
         } else if let Some(listener) = state.listeners.get_mut(&session_id) {
@@ -750,12 +780,16 @@ impl NotificationHub {
         drop(state);
         drop(gate);
         CrossProcessCoordinator::wake(wake_ports.iter());
+        #[cfg(test)]
+        if let Some(after_publication) = self.after_publication.lock().take() {
+            after_publication(self);
+        }
         publication_result.map_err(|error| {
             SQLError::Internal(format!(
                 "transaction committed; notification publication awaits recovery: {error}"
             ))
         })?;
-        self.try_synchronize_cross_process_session(None)
+        self.synchronize_cross_process(None, Some(published))
             .map_err(|error| {
                 SQLError::Internal(format!(
                     "transaction committed; notification delivery awaits recovery: {error}"

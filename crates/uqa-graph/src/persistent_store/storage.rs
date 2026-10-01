@@ -144,6 +144,15 @@ pub trait GraphStorage: Send + Sync {
     fn counter(&self, kind: GraphEntityKind) -> GraphStoreResult<Option<u64>>;
     fn save_counter(&self, kind: GraphEntityKind, next: u64) -> GraphStoreResult<()>;
     fn vertex(&self, id: u64) -> GraphStoreResult<Option<Vertex>>;
+    /// Optional caller-ordered borrowed reads with the same no-reentry,
+    /// early-stop and invocation-count contract as `GraphStore`.
+    fn for_each_vertex_borrowed(
+        &self,
+        _ids: &[u64],
+        _visit: &mut dyn FnMut(u64, Option<&Vertex>) -> bool,
+    ) -> GraphStoreResult<Option<usize>> {
+        Ok(None)
+    }
     fn edge(&self, id: u64) -> GraphStoreResult<Option<Edge>>;
     fn save_vertex(&self, vertex: &Vertex) -> GraphStoreResult<()>;
     fn save_edge(&self, edge: &Edge) -> GraphStoreResult<()>;

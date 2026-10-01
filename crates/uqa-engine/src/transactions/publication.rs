@@ -19,6 +19,7 @@ impl Engine {
         committed: TransactionFrame,
         change_publication: Option<RowChangePublication<'_>>,
         notification_commit: Option<NotificationCommitGuard<'_>>,
+        wrote_records: bool,
     ) -> Result<(), SQLError> {
         if committed.storage_savepoint.is_none() {
             self.session.state.write().graph_overlay = None;
@@ -29,7 +30,14 @@ impl Engine {
             );
             drop(change_publication);
             self.row_locks.release_session(self.session_id);
+            let data_only = wrote_records
+                && self.epochs.table_data.dirty.load(Ordering::Acquire)
+                && !self.epochs.table_catalog.dirty.load(Ordering::Acquire)
+                && !self.epochs.catalog_registry.dirty.load(Ordering::Acquire);
             self.publish_committed_transaction_epochs();
+            if data_only {
+                self.adopt_own_commit_revisions();
+            }
             if !committed.statistics_changes.is_empty() {
                 self.wake_automatic_statistics();
             }

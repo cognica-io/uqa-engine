@@ -77,6 +77,127 @@ fn ordered_point_metadata_uses_constant_statements_without_a_statement_cache() {
 }
 
 #[test]
+fn ordered_point_values_use_constant_statements_without_a_statement_cache() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    let control = control();
+    let keys = (0_u64..1024)
+        .map(|id| [b"ordered/".as_slice(), &id.to_be_bytes()].concat())
+        .collect::<Vec<_>>();
+    let writes = keys
+        .iter()
+        .map(|key| RecordWrite {
+            key,
+            expected: None,
+            value: Some(b"value"),
+        })
+        .collect::<Vec<_>>();
+    let commit = PreparedRecordCommit::new(&writes, &control).unwrap();
+    let id = store.allocate_transaction(&control).unwrap();
+    store.commit(id, &commit, &control).unwrap();
+    let snapshot = store.snapshot(&control).unwrap();
+    let retained = control.memory().used();
+    let statements = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&statements);
+    store
+        .with(|sqlite| {
+            sqlite.set_prepared_statement_cache_capacity(0);
+            sqlite.authorizer(Some(move |context: AuthContext<'_>| {
+                if matches!(context.action, AuthAction::Select) {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                }
+                Authorization::Allow
+            }))?;
+            Ok(())
+        })
+        .unwrap();
+    let mut visited = 0;
+    snapshot
+        .visit_prefix(
+            b"ordered/",
+            None,
+            usize::MAX,
+            &control,
+            &mut |key, record| {
+                assert_eq!(key, keys[visited]);
+                assert_eq!(record.value, Some(b"value".as_slice()));
+                visited += 1;
+                Ok(true)
+            },
+        )
+        .unwrap();
+    store
+        .with(|sqlite| {
+            sqlite.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)?;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(visited, keys.len());
+    assert!(
+        statements.load(Ordering::Relaxed) <= 20,
+        "ordered values must not prepare statements per key"
+    );
+    assert_eq!(control.memory().used(), retained);
+}
+
+#[test]
+fn ordered_values_stop_before_later_oversize_payloads_and_release_the_last_row() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    let storage = control();
+    let large = vec![7; 1 << 20];
+    let writes = [
+        RecordWrite {
+            key: b"ordered/a",
+            expected: None,
+            value: Some(b"small"),
+        },
+        RecordWrite {
+            key: b"ordered/z",
+            expected: None,
+            value: Some(&large),
+        },
+    ];
+    let commit = PreparedRecordCommit::new(&writes, &storage).unwrap();
+    let id = store.allocate_transaction(&storage).unwrap();
+    store.commit(id, &commit, &storage).unwrap();
+    let snapshot = store.snapshot(&storage).unwrap();
+    let read = StorageReadControl::with_limit(1024);
+    let mut visited = 0;
+    snapshot
+        .visit_prefix(b"ordered/", None, usize::MAX, &read, &mut |key, record| {
+            assert_eq!(key, b"ordered/a");
+            assert_eq!(record.value, Some(b"small".as_slice()));
+            visited += 1;
+            Ok(false)
+        })
+        .unwrap();
+    assert_eq!(visited, 1);
+    assert_eq!(read.memory().used(), 0);
+    assert!(read.memory().peak() < large.len());
+    let error = snapshot
+        .visit_prefix(b"ordered/", Some(b"ordered/a"), 1, &read, &mut |_, _| {
+            panic!("rejected payload must not visit")
+        })
+        .unwrap_err()
+        .into_storage_error();
+    assert!(matches!(error, uqa_storage::StorageBackendError::Memory(_)));
+    assert_eq!(read.memory().used(), 0);
+    let error = snapshot
+        .visit_prefix(b"ordered/", None, usize::MAX, &read, &mut |_, _| {
+            read.cancellation().cancel();
+            Ok(false)
+        })
+        .unwrap_err()
+        .into_storage_error();
+    assert!(matches!(
+        error,
+        uqa_storage::StorageBackendError::Cancelled(_)
+    ));
+    assert_eq!(read.memory().used(), 0);
+}
+
+#[test]
 fn ordered_cursor_stops_before_oversize_keys_and_never_hydrates_metadata_values() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     let store = SQLiteRecordStore::new(&connection).unwrap();

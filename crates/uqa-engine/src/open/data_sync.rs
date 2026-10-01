@@ -223,11 +223,10 @@ impl Engine {
         for (name, table) in tables {
             let name = name.qualified_name();
             let temporary = table.persistence == uqa_sql::ast::RelationPersistence::Temporary;
+            // Only this session writes a memory-only or temporary table, and every write maintains or explicitly clears its value indexes, so they stay valid across its own data generations.
             if self.storage.backend.is_some() && !temporary {
                 self.rebind_persistent_table_stores(&name, &table)?;
                 self.refresh_table_next_id(&name, &table)?;
-            } else {
-                Self::value_indexes_clear_column_accelerators(&table);
             }
             table
                 .doc_count_dirty
@@ -325,12 +324,21 @@ impl Engine {
         {
             return Ok(());
         }
+        // With the committed state unchanged since the last refresh, every private generation comes from this session's own transaction, whose writes its caches already include.
+        let committed_unchanged = read_view.as_ref().is_some_and(|current| {
+            self.epochs
+                .seen_storage_read_view
+                .lock()
+                .as_ref()
+                .is_some_and(|seen| current.same_committed_state(seen))
+        });
         // A failed partial restoration must not leave an older successful token eligible for reuse after undo.
         *self.epochs.seen_storage_read_view.lock() = None;
         if self.refresh_tracked_pinned_snapshot(
             table_catalog_epoch,
             table_data_epoch,
             catalog_registry_epoch,
+            committed_unchanged,
         )? {
             *self.epochs.seen_storage_read_view.lock() = read_view;
             if let Some(version) = stable_storage_version {

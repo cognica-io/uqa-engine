@@ -243,3 +243,96 @@ fn path_projection_functions_reject_malformed_tagged_envelopes() {
         Err(CypherError::Storage(_))
     ));
 }
+
+#[test]
+fn independent_node_matches_preserve_age_multiplicity_and_optional_padding() {
+    // Independently captured from PostgreSQL 18.6 with Apache AGE 1.8.0.
+    let cases: &[(&str, &[&[Option<&str>]])] = &[
+        (
+            "UNWIND [{n:'bob', c:'sf'}, {n:'alice', c:'ny'}, {n:'bob', c:'sf'}] AS pair \
+             MATCH (p:Person {name:pair.n}), (c:City {name:pair.c}) \
+             RETURN p.name AS name, c.name AS city ORDER BY name, city",
+            &[
+                &[Some("alice"), Some("ny")],
+                &[Some("bob"), Some("sf")],
+                &[Some("bob"), Some("sf")],
+            ],
+        ),
+        (
+            "UNWIND ['bob', 'missing', 'alice', 'bob'] AS name \
+             OPTIONAL MATCH (p:Person {name:name}), (c:City) \
+             RETURN name, p.name AS person, c.name AS city ORDER BY name, person, city",
+            &[
+                &[Some("alice"), Some("alice"), Some("ny")],
+                &[Some("alice"), Some("alice"), Some("sf")],
+                &[Some("bob"), Some("bob"), Some("ny")],
+                &[Some("bob"), Some("bob"), Some("ny")],
+                &[Some("bob"), Some("bob"), Some("sf")],
+                &[Some("bob"), Some("bob"), Some("sf")],
+                &[Some("missing"), None, None],
+            ],
+        ),
+        (
+            "UNWIND ['bob', 'alice'] AS name \
+             MATCH (p:Person {name:name}), (q:Person {age:p.age}) \
+             RETURN p.name AS person, q.name AS other ORDER BY person, other",
+            &[&[Some("alice"), Some("alice")], &[Some("bob"), Some("bob")]],
+        ),
+        (
+            "UNWIND ['bob', 'alice'] AS name \
+             MATCH (:Person {name:name}), (c:City) \
+             RETURN name, c.name AS city ORDER BY name, city",
+            &[
+                &[Some("alice"), Some("ny")],
+                &[Some("alice"), Some("sf")],
+                &[Some("bob"), Some("ny")],
+                &[Some("bob"), Some("sf")],
+            ],
+        ),
+    ];
+    for &(query, expected) in cases {
+        let (columns, rows) = run(query);
+        let actual: Vec<Vec<Value>> = rows
+            .iter()
+            .map(|row| columns.iter().map(|column| row[column].clone()).collect())
+            .collect();
+        let expected: Vec<Vec<Value>> = expected
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|cell| cell.map_or(Value::Null, |value| Value::Str(value.into())))
+                    .collect()
+            })
+            .collect();
+        assert_eq!(actual, expected, "{query}");
+    }
+}
+
+#[test]
+fn batched_node_matches_keep_seed_order_before_skip_and_limit() {
+    let (_, rows) = run("UNWIND ['bob', 'alice', 'bob'] AS name \
+         MATCH (p:Person {name:name}), (c:City) \
+         RETURN p.name AS person, c.name AS city SKIP 1 LIMIT 3");
+    let actual: Vec<_> = rows
+        .iter()
+        .map(|row| (row["person"].clone(), row["city"].clone()))
+        .collect();
+    assert_eq!(
+        actual,
+        [("bob", "ny"), ("alice", "sf"), ("alice", "ny")]
+            .map(|(person, city)| (Value::Str(person.into()), Value::Str(city.into())))
+    );
+}
+
+#[test]
+fn node_match_batch_keeps_agtype_graph_id_validation() {
+    let mut graph = corpus();
+    graph
+        .add_vertex(Vertex::new(u64::MAX - 1, "Invalid"), "g")
+        .unwrap();
+    let query = parse_cypher("UNWIND [1, 2] AS x MATCH (:Invalid) RETURN x").unwrap();
+    assert!(matches!(
+        CypherExecutor::new(&graph, "g").execute(&query),
+        Err(CypherError::Storage(_))
+    ));
+}

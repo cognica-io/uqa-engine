@@ -92,13 +92,24 @@ impl StatisticsMaintenance {
         statistics_format: u32,
     ) -> StorageBackendResult<()> {
         let mut state = Self::load_for(catalog, table, object_id)?;
-        state.object_id = Some(object_id);
-        state.advance_generation()?;
-        state.changes = 0;
-        state.dirty_since_ms = 0;
-        state.analyzed_rows = Some(rows);
-        state.statistics_format = statistics_format;
+        state.analyzed(object_id, rows, statistics_format)?;
         state.save(catalog, table)
+    }
+
+    /// Record a completed analysis of `rows` rows, which covers every change counted before it.
+    pub fn analyzed(
+        &mut self,
+        object_id: [u8; 16],
+        rows: u64,
+        statistics_format: u32,
+    ) -> StorageBackendResult<()> {
+        self.object_id = Some(object_id);
+        self.advance_generation()?;
+        self.changes = 0;
+        self.dirty_since_ms = 0;
+        self.analyzed_rows = Some(rows);
+        self.statistics_format = statistics_format;
+        Ok(())
     }
 
     fn advance_generation(&mut self) -> StorageBackendResult<()> {

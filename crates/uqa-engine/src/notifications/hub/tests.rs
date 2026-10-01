@@ -118,3 +118,68 @@ fn foreign_channels_do_not_enter_registration_delivery_usage_or_cleanup() {
     assert!(registry.entries_from(0).unwrap().is_empty());
     registry.commit().unwrap();
 }
+
+#[test]
+fn delivery_failures_after_a_publication_are_its_delivery_failures() {
+    let mut state = NotificationHubState::default();
+    let published = state.delivery_failures;
+    assert!(NotificationHub::concurrent_delivery_failure(&state, Some(published)).is_ok());
+    let failure = NotificationHub::complete_deliveries(
+        Err(SQLError::Internal("listener cursor commit failed".into())),
+        &mut state,
+        Vec::new(),
+    )
+    .unwrap_err();
+    let reported = NotificationHub::concurrent_delivery_failure(&state, Some(published))
+        .unwrap_err()
+        .to_string();
+    assert_eq!(reported, failure.to_string());
+    assert!(
+        NotificationHub::concurrent_delivery_failure(&state, Some(state.delivery_failures)).is_ok(),
+        "a failure that precedes the publication is not its delivery failure"
+    );
+    assert!(NotificationHub::concurrent_delivery_failure(&state, None).is_ok());
+}
+
+#[test]
+fn a_poll_that_fails_delivery_after_publication_fails_the_committing_notify() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("raced-delivery.db");
+    let engine = Engine::open(&path).unwrap();
+    let options = NotificationSubscriptionOptions {
+        max_active_subscriptions: 1,
+        max_channels: 1,
+        max_queued_notifications: 2,
+        max_queued_bytes: 4_096,
+        max_registry_entries_per_poll: 1,
+    };
+    let subscription = engine
+        .subscribe_notifications(&["events"], options)
+        .unwrap();
+    let mut registry_path = path.as_os_str().to_owned();
+    registry_path.push(".uqa-notification-state");
+    let registry = rusqlite::Connection::open(std::path::PathBuf::from(registry_path)).unwrap();
+    registry.execute_batch("CREATE TABLE required_cursor(id INTEGER PRIMARY KEY); CREATE TABLE rejected_cursor(id INTEGER REFERENCES required_cursor(id) DEFERRABLE INITIALLY DEFERRED); CREATE TRIGGER reject_cursor_commit AFTER UPDATE OF next_sequence ON listeners WHEN NEW.next_sequence > OLD.next_sequence BEGIN INSERT INTO rejected_cursor VALUES(1); END;").unwrap();
+    let (polled, poll) = std::sync::mpsc::channel();
+    *engine.notification_hub.after_publication.lock() = Some(Box::new(move |hub| {
+        // Whichever of this synchronization and the background poll the publication woke runs first fails the delivery before the committing session synchronizes.
+        let interleaved = hub.try_synchronize_cross_process_session(None);
+        polled
+            .send((interleaved.is_err(), hub.state.lock().delivery_failures))
+            .unwrap();
+    }));
+    let error = engine.sql("NOTIFY events, 'raced'", &[]).unwrap_err();
+    let (interleaved_failed, failures) = poll.try_recv().unwrap();
+    assert_ne!(failures, 0, "interleaved failure: {interleaved_failed}");
+    assert!(
+        error
+            .to_string()
+            .contains("transaction committed; notification delivery awaits recovery"),
+        "{error}"
+    );
+    assert!(!error.to_string().contains("raced"), "{error}");
+    assert_eq!(
+        subscription.poll().unwrap_err().kind(),
+        uqa_core::notifications::NotificationFailureKind::SourceUnavailable
+    );
+}

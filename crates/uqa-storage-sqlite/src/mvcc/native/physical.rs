@@ -116,8 +116,8 @@ fn read(
         primary_columns(layout)
     );
     let size: Option<i64> = connection
+        .prepare_cached(&format!("SELECT {sizes} {suffix}"))?
         .query_row(
-            &format!("SELECT {sizes} {suffix}"),
             params_from_iter(parameters.iter().copied().map(ToSqlOutput::Borrowed)),
             |row| row.get(0),
         )
@@ -129,7 +129,8 @@ fn read(
         .ok_or(VersionError::from(MemoryError::SizeOverflow))?;
     let _payload = control.memory().reserve(size).map_err(VersionError::from)?;
     control.cancellation().check().map_err(VersionError::from)?;
-    let mut statement = connection.prepare(&format!("SELECT {} {suffix}", columns(layout)))?;
+    let mut statement =
+        connection.prepare_cached(&format!("SELECT {} {suffix}", columns(layout)))?;
     let mut rows = statement.query(params_from_iter(
         parameters.iter().copied().map(ToSqlOutput::Borrowed),
     ))?;
@@ -213,14 +214,15 @@ pub(super) fn remove(
 ) -> PhysicalResult<()> {
     let values = decode_row(key, layout.primary_key.len(), control)?;
     let _bindings = reserve_values(&values, control)?;
-    connection.execute(
-        &format!(
+    connection
+        .prepare_cached(&format!(
             "DELETE FROM {} WHERE {}",
             layout.table,
             predicate(layout, "=")
-        ),
-        params_from_iter(values.iter().copied().map(ToSqlOutput::Borrowed)),
-    )?;
+        ))?
+        .execute(params_from_iter(
+            values.iter().copied().map(ToSqlOutput::Borrowed),
+        ))?;
     Ok(())
 }
 
@@ -244,15 +246,19 @@ pub(super) fn upsert(
     } else {
         format!("UPDATE SET {}", assignments.join(", "))
     };
-    connection.execute(
-        &format!(
+    connection
+        .prepare_cached(&format!(
             "INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) DO {action}",
             layout.table,
             columns(layout),
             parameters(values.len()),
             primary_columns(layout)
-        ),
-        params_from_iter(values.iter().copied().map(ToSqlOutput::Borrowed)),
-    )?;
+        ))?
+        .execute(params_from_iter(
+            values.iter().copied().map(ToSqlOutput::Borrowed),
+        ))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

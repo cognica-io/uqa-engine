@@ -239,6 +239,7 @@ impl Engine {
             column_stats: crate::state::CatalogCell::new(BTreeMap::new()),
             column_stats_loaded: AtomicBool::new(true),
             column_stats_dirty: AtomicBool::new(true),
+            statistics_maintenance: parking_lot::Mutex::default(),
             table_checks: crate::state::CatalogCell::new(Vec::new()),
             foreign_keys: crate::state::CatalogCell::new(Vec::new()),
             key_constraints: crate::state::CatalogCell::new(Vec::new()),
@@ -793,15 +794,27 @@ impl Engine {
             doc_id,
             uqa_sql::ast::LockStrength::ForUpdate,
             |engine| {
-                engine.validate_vector_values(table, &vectors)?;
-                engine
-                    .add_prepared_document_without_fts_impl(table, doc_id, document, known_new)?;
-                for (field, vectors) in vectors {
-                    engine.add_vector_values_inner(table, doc_id, &field, vectors)?;
-                }
-                Ok(())
+                engine.add_prepared_document_with_vector_values_deferred_fts_inner(
+                    table, doc_id, document, vectors, known_new,
+                )
             },
         )
+    }
+
+    pub(crate) fn add_prepared_document_with_vector_values_deferred_fts_inner(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: Document,
+        vectors: BTreeMap<FieldName, Vec<Vec<f32>>>,
+        known_new: bool,
+    ) -> Result<(), SQLError> {
+        self.validate_vector_values(table, &vectors)?;
+        self.add_prepared_document_without_fts_impl(table, doc_id, document, known_new)?;
+        for (field, vectors) in vectors {
+            self.add_vector_values_inner(table, doc_id, &field, vectors)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn add_prepared_document_with_vector_values_inner(

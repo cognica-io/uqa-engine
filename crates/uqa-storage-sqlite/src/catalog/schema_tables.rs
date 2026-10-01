@@ -22,17 +22,13 @@ impl Catalog {
     pub fn metadata_with_prefix(&self, prefix: &str) -> Result<Vec<(String, String)>> {
         if let Some(entries) = self.read_native(|snapshot| {
             let mut entries = Vec::new();
-            snapshot.visit_rows(
+            snapshot.visit_text_prefix_rows(
                 Family::Metadata,
-                Some(crate::mvcc::native::NativeRecordOwner::Database(
-                    snapshot.database,
-                )),
-                &[],
+                crate::mvcc::native::NativeRecordOwner::Database(snapshot.database),
+                prefix,
                 |row| {
                     let key = super::native::string(row[0])?;
-                    if key.starts_with(prefix) {
-                        entries.push((key, super::native::string(row[1])?));
-                    }
+                    entries.push((key, super::native::string(row[1])?));
                     Ok(())
                 },
             )?;

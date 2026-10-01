@@ -60,20 +60,16 @@ impl<'a> DocumentIdAllocator<'a> {
         Ok(id)
     }
 
-    /// Observe a supplied document identity before its row is published. The restored floor is included so deleting older rows cannot make their identities available again.
-    pub fn observe(&self, next: &mut u128, id: u64) -> StorageBackendResult<()> {
-        let mut updated = (*next).max(u128::from(id) + 1);
-        self.synchronize(&mut updated)?;
-        *next = updated;
+    /// Advance the local floor past a supplied document identity. The row's own write observes the identity durably in the batch that publishes it ([`observe_document_id`]), so a supplied identity costs no separate durable transaction; a reservation reads the durable watermark itself, so the local floor need not include other sessions' reservations. The restored floor is retained so deleting older rows cannot make their identities available again.
+    pub fn observe(next: &mut u128, id: u64) -> StorageBackendResult<()> {
+        watermark_identity(*next)?;
+        *next = (*next).max(u128::from(id) + 1);
         Ok(())
     }
 
     /// Seed existing data and legacy reservations before exposing a migrated table to new sessions. The one-past-last representation preserves the exhausted full-width domain.
     pub fn synchronize(&self, next: &mut u128) -> StorageBackendResult<()> {
-        let observed = next
-            .checked_sub(1)
-            .and_then(|value| u64::try_from(value).ok())
-            .ok_or_else(|| StorageBackendError::Other("invalid document id watermark".into()))?;
+        let observed = watermark_identity(*next)?;
         if let Some(allocator) = self.durable {
             let allocated = allocator
                 .allocate_identifiers(&self.namespace, IdentifierRequest::Observe(observed))?;
@@ -103,6 +99,13 @@ impl<'a> DocumentIdAllocator<'a> {
             catalog.set_metadata(&key, &next.to_string())
         }
     }
+}
+
+/// The last identity a one-past-last local floor covers; a floor outside `1..=u64::MAX + 1` is invalid.
+fn watermark_identity(next: u128) -> StorageBackendResult<u64> {
+    next.checked_sub(1)
+        .and_then(|value| u64::try_from(value).ok())
+        .ok_or_else(|| StorageBackendError::Other("invalid document id watermark".into()))
 }
 
 /// Include a supplied identity in the batch evaluated by its document owner. The batch makes the observation durable before its rows can be published, without reentering the selected storage session.

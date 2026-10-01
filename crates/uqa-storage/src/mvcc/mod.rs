@@ -103,8 +103,8 @@ pub use tombstones::{
 pub use types::{CommitSequence, RecordWrite, VersionError, VersionResult};
 pub use view::{
     retain_record_snapshot, BorrowedRecord, CommittedRecordSnapshot, MergedRecordSnapshot,
-    RecordKeyVisitor, RecordMetadata, RecordScanVisitor, RecordValueVisitor, ScannedVisibleRecord,
-    VisibleRecord, VisibleRecordRevision,
+    RecordKeyIterator, RecordKeyVisitor, RecordMetadata, RecordPointVisitor, RecordScanVisitor,
+    RecordValueVisitor, ScannedVisibleRecord, VisibleRecord, VisibleRecordRevision,
 };
 
 mod maintenance;

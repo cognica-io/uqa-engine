@@ -120,6 +120,32 @@ fn opaque_bindings_follow_registry_replacement_and_rollback_without_name_lookup(
 }
 
 #[test]
+fn publication_barriers_follow_expression_predicate_and_catalog_replacement() {
+    let source = rows(2, true);
+    let cache = PhysicalIndexCache::default();
+    let expressions = cache.bind(source.clone()).unwrap();
+    assert!(expressions.row_publication_uses_expressions("public.t"));
+    assert!(!expressions.row_publication_uses_expressions("public.other"));
+    let mut columns = source.as_ref().clone();
+    for row in columns.values_mut() {
+        row.columns_json = serde_json::to_string(&[IndexKey::Column("id".into())]).unwrap();
+    }
+    let predicates = cache.bind(Arc::new(columns.clone())).unwrap();
+    assert!(predicates.row_publication_uses_expressions("public.t"));
+    for row in columns.values_mut() {
+        let mut definition = super::super::index_definition(row).unwrap();
+        definition.predicate = None;
+        row.definition_json = Some(serde_json::to_string(&definition).unwrap());
+    }
+    let plain = cache.bind(Arc::new(columns)).unwrap();
+    assert!(!plain.row_publication_uses_expressions("public.t"));
+    assert!(cache
+        .bind(source)
+        .unwrap()
+        .row_publication_uses_expressions("public.t"));
+}
+
+#[test]
 fn legacy_partition_namespaces_are_scoped_to_their_physical_tables() {
     let mut source = rows(2, true).as_ref().clone();
     let mut second = source.values().next().unwrap().clone();

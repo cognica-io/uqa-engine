@@ -23,6 +23,7 @@ pub(super) struct OccurrenceRead<'a> {
     pub(super) store: &'a dyn KeyValueRead,
     pub(super) table: &'a str,
     pub(super) bindings: &'a AnalyzerBindings,
+    pub(super) format_requires_rebuild: std::cell::Cell<Option<bool>>,
 }
 
 impl OccurrenceRead<'_> {
@@ -60,6 +61,7 @@ impl KeyValueInvertedIndex {
                 store,
                 table: &self.table,
                 bindings: &self.bindings,
+                format_requires_rebuild: std::cell::Cell::new(None),
             })
         };
         match &self.source {
@@ -98,6 +100,7 @@ impl KeyValueInvertedIndex {
                         store: read,
                         table: &self.table,
                         bindings: &self.bindings,
+                        format_requires_rebuild: std::cell::Cell::new(None),
                     },
                     batch,
                 )

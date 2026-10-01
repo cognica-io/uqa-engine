@@ -13,6 +13,9 @@ use uqa_storage::mvcc::VersionedSessionOptions;
 use super::*;
 use crate::{Catalog, ManagedConnection};
 
+mod dense;
+mod vertices;
+
 fn connection(vertices: i64) -> ManagedConnection {
     let connection = ManagedConnection::open_in_memory().unwrap();
     Catalog::open(connection.clone()).unwrap();
@@ -38,7 +41,7 @@ fn connection(vertices: i64) -> ManagedConnection {
 
 #[test]
 fn selection_releases_physical_io_and_keeps_predicates_and_payloads_on_one_snapshot() {
-    let connection = connection(2);
+    let connection = connection(16);
     let catalog = Catalog::open(connection.clone()).unwrap();
     let snapshot = connection.native_snapshot().unwrap().unwrap();
     let other = connection.new_session();
@@ -116,12 +119,14 @@ fn selection_releases_physical_io_and_keeps_predicates_and_payloads_on_one_snaps
     writer.join().unwrap();
     assert_eq!(
         seen,
-        [
-            (1, "node".into(), "{}".into()),
-            (2, "node".into(), "{}".into())
-        ]
+        (1..=16)
+            .map(|id| (id, "node".into(), "{}".into()))
+            .collect::<Vec<_>>()
     );
-    assert_eq!(catalog.graph_entity_ids(filter, None, 8).unwrap(), [1]);
+    assert_eq!(
+        catalog.graph_entity_ids(filter, None, 32).unwrap(),
+        (1..=16).filter(|id| *id != 2).collect::<Vec<_>>()
+    );
     let current = catalog.graph_vertex(2).unwrap().unwrap();
     assert_eq!(
         (current.label.as_str(), current.properties_json.as_str()),

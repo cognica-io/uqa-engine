@@ -22,6 +22,9 @@ use uqa_sql::semantics::{
     sets::{validation::expression_may_return_set, SetFunctionCatalog},
 };
 
+#[cfg(test)]
+mod tests;
+
 type PreparedOrderSetProjections = (Option<QueryBlockPlan>, Vec<(usize, InternalColumnRef)>);
 
 pub fn prepare_order_set_projections(
@@ -58,7 +61,10 @@ pub fn prepare_order_set_projections(
         }) {
             prepared.get_or_insert_with(|| statement.clone()).order_by[index].expr =
                 projection_target_expression(target);
-        } else if expression_may_return_set(engine, type_resolver, &expression, schema, params)? {
+        } else if matches!(statement.compute, uqa_sql::plan::ComputePlan::Window)
+            || expression_may_return_set(engine, type_resolver, &expression, schema, params)?
+        {
+            // Window output projection replaces the source schema, so an unselected sort expression must survive as an internal attribute until ordering consumes it.
             let column = relation.column(resjunk.len());
             projections.push((ProjectionTarget::Internal(column), expression));
             resjunk.push((index, column));

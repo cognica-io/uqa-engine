@@ -13,12 +13,18 @@ use super::{
     VertexId,
 };
 
+mod batch;
+mod borrowed;
+
 impl<G: GraphStore> CypherExecutor<'_, G> {
     pub(crate) fn exec_match(
         &self,
         clause: &MatchClause,
         bindings: &[BindingRow],
     ) -> Result<Vec<BindingRow>, CypherError> {
+        if let Some(rows) = self.try_node_match_batch(clause, bindings)? {
+            return Ok(rows);
+        }
         // Multiple comma-separated patterns combine as a cross-product:
         // each pattern further constrains the binding rows from the
         // previous pattern, sharing variable names where they appear.
@@ -106,14 +112,7 @@ impl<G: GraphStore> CypherExecutor<'_, G> {
         states: &[MatchState],
     ) -> Result<Vec<MatchState>, CypherError> {
         // Candidate vertex set: by label if specified, else everything in the graph.
-        let candidate_ids: Vec<VertexId> = if let Some(label) = np.labels.first() {
-            self.store.vertex_ids_by_label(label, self.graph)?
-        } else {
-            self.store
-                .vertex_ids_in_graph(self.graph)?
-                .into_iter()
-                .collect()
-        };
+        let candidate_ids = self.node_candidate_ids(np)?;
 
         let mut out = Vec::new();
         for state in states {
@@ -136,25 +135,34 @@ impl<G: GraphStore> CypherExecutor<'_, G> {
                     continue;
                 }
             }
-            for vid in &candidate_ids {
-                let Some(vertex) = self.store.get_vertex(*vid)? else {
-                    continue;
-                };
-                if !self.node_matches(np, &vertex, &state.row)? {
-                    continue;
+            self.for_each_node_vertex(np, &candidate_ids, |vertex| {
+                if !self.node_matches(np, vertex, &state.row)? {
+                    return Ok(());
                 }
                 let mut new_state = state.clone();
-                new_state.trail.push(agtype::vertex_to_value(&vertex)?);
+                new_state.trail.push(agtype::vertex_to_value(vertex)?);
                 if let Some(var) = &np.variable {
                     new_state
                         .row
                         .insert(var.clone(), Binding::Vertex(vertex.clone()));
                 }
-                new_state.position = Some(vertex);
+                new_state.position = Some(vertex.clone());
                 out.push(new_state);
-            }
+                Ok(())
+            })?;
         }
         Ok(out)
+    }
+
+    fn node_candidate_ids(&self, pattern: &NodePattern) -> Result<Vec<VertexId>, CypherError> {
+        Ok(if let Some(label) = pattern.labels.first() {
+            self.store.vertex_ids_by_label(label, self.graph)?
+        } else {
+            self.store
+                .vertex_ids_in_graph(self.graph)?
+                .into_iter()
+                .collect()
+        })
     }
 
     /// Whether `vertex_id` is consistent with an already-bound pattern variable. An unbound (or

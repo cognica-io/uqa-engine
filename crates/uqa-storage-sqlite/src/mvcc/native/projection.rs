@@ -240,7 +240,7 @@ fn seed_originals(
                     }
                     let _bindings =
                         crate::read_control::reserve_bindings(control, &[&key, record.key()])?;
-                    connection.execute("INSERT INTO _uqa_mvcc_native_expected(family, physical_key, old_key) VALUES (?1, ?2, ?3)", params![family.id(), &key[..], record.key()])?;
+                    connection.prepare_cached("INSERT INTO _uqa_mvcc_native_expected(family, physical_key, old_key) VALUES (?1, ?2, ?3)")?.execute(params![family.id(), &key[..], record.key()])?;
                     if family == Family::Metadata
                         && values[0] == ValueRef::Text(b"schema_version")
                         && record.value() != Some(row)
@@ -281,7 +281,7 @@ fn seed_targets(
         }
         let key = physical::physical_key(family.layout(), &values, control)?;
         let _bindings = crate::read_control::reserve_bindings(control, &[&key, record.key(), row])?;
-        let changed = connection.execute("INSERT INTO _uqa_mvcc_native_expected(family, physical_key, new_key, new_value) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(family, physical_key) DO UPDATE SET new_key = excluded.new_key, new_value = excluded.new_value WHERE _uqa_mvcc_native_expected.new_key IS NULL", params![family.id(), &key[..], record.key(), row])?;
+        let changed = connection.prepare_cached("INSERT INTO _uqa_mvcc_native_expected(family, physical_key, new_key, new_value) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(family, physical_key) DO UPDATE SET new_key = excluded.new_key, new_value = excluded.new_value WHERE _uqa_mvcc_native_expected.new_key IS NULL")?.execute(params![family.id(), &key[..], record.key(), row])?;
         if changed != 1 {
             return Err(invalid("two native records claim the same physical primary key").into());
         }
@@ -339,7 +339,7 @@ fn verify_expected(
 ) -> PhysicalResult<()> {
     let _bindings =
         crate::read_control::reserve_bindings(control, &[key, row.unwrap_or_default()])?;
-    let valid: Option<bool> = connection.query_row("SELECT new_value IS ?3 FROM _uqa_mvcc_native_expected WHERE family = ?1 AND physical_key = ?2", params![family.id(), key, row], |row| row.get(0)).optional()?;
+    let valid: Option<bool> = connection.prepare_cached("SELECT new_value IS ?3 FROM _uqa_mvcc_native_expected WHERE family = ?1 AND physical_key = ?2")?.query_row(params![family.id(), key, row], |row| row.get(0)).optional()?;
     if valid != Some(true) {
         return Err(invalid("native trigger or cascade changed an unprepared record").into());
     }

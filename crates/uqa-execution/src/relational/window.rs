@@ -164,7 +164,7 @@ fn builtin_window_order_key(
 
 fn builtin_window_partition_value(
     kind: &WindowKind,
-    partition: &mut crate::spill::IndexedSpill,
+    partition: &mut crate::spill::BufferedIndexedSpill,
     params: &[SQLParam],
 ) -> ExecResult<Option<Value>> {
     let mut count = 0_i64;
@@ -291,7 +291,7 @@ fn builtin_ntile(index: u64, rows: u64, buckets: i64) -> ExecResult<Value> {
     reason = "window execution preserves frame and peer ordering in one pass"
 )]
 fn emit_builtin_window_partition(
-    partition: &mut crate::spill::IndexedSpill,
+    partition: &mut crate::spill::BufferedIndexedSpill,
     spec: &WindowSpec,
     functions: &[(String, WindowKind)],
     params: &[SQLParam],
@@ -425,7 +425,7 @@ impl PhysicalOperator for Window<'_> {
             input.push(batch)?;
         }
         let scan: Box<dyn PhysicalOperator> = Box::new(crate::spill_scan::SpillScan::new(
-            self.child.schema().to_vec(),
+            self.child.row_schema().clone(),
             input,
         ));
         let mut keys = self
@@ -447,7 +447,8 @@ impl PhysicalOperator for Window<'_> {
 
         let partition_schema = sorted.row_schema().clone();
         let mut current_partition_key: Option<Vec<Value>> = None;
-        let mut partition = crate::spill::IndexedSpill::new(partition_schema.clone())?;
+        let mut partition =
+            crate::spill::BufferedIndexedSpill::new(partition_schema.clone(), phase_budget);
         let mut output = crate::spill::SpillBuffer::new(phase_budget);
         let execution = (|| -> ExecResult<()> {
             while let Some(batch) = sorted.next()? {
@@ -472,7 +473,10 @@ impl PhysicalOperator for Window<'_> {
                             &self.schema,
                             &mut output,
                         )?;
-                        partition = crate::spill::IndexedSpill::new(partition_schema.clone())?;
+                        partition = crate::spill::BufferedIndexedSpill::new(
+                            partition_schema.clone(),
+                            phase_budget,
+                        );
                     }
                     current_partition_key = Some(key);
                     partition.push(&row)?;

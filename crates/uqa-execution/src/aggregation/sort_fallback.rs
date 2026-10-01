@@ -81,6 +81,7 @@ pub(super) fn aggregate_sorted_input(
             for row in batch.rows {
                 let view = batch.schema.view(&row);
                 let scalar_context = ScalarEvalContext::from_row_lookup(&view, params)
+                    .with_row_schema(&batch.schema)
                     .with_function_hook(hook)
                     .with_subquery_runner(&subquery_arena)
                     .with_physical_outer_row(&batch.schema, &row);

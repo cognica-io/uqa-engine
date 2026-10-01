@@ -10,7 +10,12 @@ use super::{lock_would_block, ByteClaim, CoordinatorState, FileLockCoordinator};
 
 impl FileLockCoordinator {
     pub(super) fn release_one(&self, state: &mut CoordinatorState, session: u64, claim: ByteClaim) {
-        self.clear_holder_slot(state, session, claim);
+        self.clear_holder_slots(state, session, std::slice::from_ref(&claim));
+        self.unlock_claim(state, session, claim);
+    }
+
+    /// Drop one claim's holder attribution and count, unlocking its byte when its mode changes. Its holder slot must already be clear.
+    fn unlock_claim(&self, state: &mut CoordinatorState, session: u64, claim: ByteClaim) {
         if let Some(holders) = state.holders.get_mut(&claim.offset) {
             if let Some(position) = holders.iter().position(|holder| *holder == session) {
                 holders.swap_remove(position);
@@ -86,17 +91,27 @@ impl FileLockCoordinator {
                 }
             }
             state.holders.entry(claim.offset).or_default().push(session);
-            self.register_holder_slot(state, session, *claim);
+            let sequence = state.next_pending;
+            state.next_pending += 1;
+            state.pending_order.insert(sequence, (session, *claim));
+            state
+                .pending_holders
+                .entry((session, claim.offset, claim.write))
+                .or_default()
+                .push(sequence);
             applied.push(*claim);
         }
         Ok(Ok(()))
     }
 
-    /// Release claims that were successfully applied earlier by `session`.
+    /// Release claims that were successfully applied earlier by `session`. Every holder slot is cleared before any byte is unlocked, so no waiter can acquire a byte while a slot still attributes it to `session`. The kernel keeps each process's record locks sorted by offset, so unlocking in ascending order finds each lock at the front of this process's locks.
     pub(in crate::row_locks) fn release(&self, session: u64, claims: &[ByteClaim]) {
+        let mut ordered = claims.to_vec();
+        ordered.sort_unstable_by_key(|claim| (claim.offset, claim.write));
         let mut state = self.state.lock();
-        for claim in claims {
-            self.release_one(&mut state, session, *claim);
+        self.clear_holder_slots(&mut state, session, &ordered);
+        for claim in ordered {
+            self.unlock_claim(&mut state, session, claim);
         }
     }
 }

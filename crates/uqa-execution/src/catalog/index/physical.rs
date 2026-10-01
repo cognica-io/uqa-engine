@@ -76,6 +76,15 @@ impl PhysicalIndexCache {
 }
 
 impl PhysicalIndexDefinitions {
+    /// Expression keys and predicates may invoke runtime callbacks during row publication. Their retained registry must be checked before deferring another index's visible changes.
+    pub fn row_publication_uses_expressions(&self, table: &str) -> bool {
+        self.indexes.values().any(|index| {
+            index.table == table
+                && (index.keys.iter().any(|key| key.column().is_none())
+                    || index.definition.predicate.is_some())
+        })
+    }
+
     fn prepare(rows: &IndexRows) -> StorageBackendResult<Self> {
         let mut indexes = BTreeMap::new();
         for row in rows.values() {

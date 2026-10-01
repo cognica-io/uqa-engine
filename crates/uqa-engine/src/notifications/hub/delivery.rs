@@ -25,6 +25,8 @@ impl NotificationHub {
         deliveries: Vec<PreparedDelivery>,
     ) -> Result<(), SQLError> {
         if let Err(error) = result {
+            state.delivery_failures = state.delivery_failures.wrapping_add(1);
+            state.last_delivery_failure = Some(error.clone());
             let failure = NotificationSubscriptionError::with_source(
                 NotificationFailureKind::SourceUnavailable,
                 error.clone(),

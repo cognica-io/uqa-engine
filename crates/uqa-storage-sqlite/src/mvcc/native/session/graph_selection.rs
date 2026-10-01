@@ -14,6 +14,8 @@ use crate::{graph::encode_graph_id, mvcc::native::NativeRecordIdentity};
 use rusqlite::types::ValueRef;
 use uqa_storage::{GraphEntityFilter, GraphEntityKind};
 
+mod dense;
+
 fn text(value: &str) -> ValueRef<'_> {
     ValueRef::Text(value.as_bytes())
 }
@@ -97,6 +99,7 @@ impl<'a> Selection<'a> {
         &self,
         snapshot: &NativeSnapshot,
         after: Option<i64>,
+        limit: usize,
     ) -> Result<(BudgetedVec<i64>, Option<i64>)> {
         let identity = NativeRecordIdentity::new(self.family, owner(snapshot))?;
         let prefix = identity.encode_prefix(&self.parts[..self.width], &snapshot.control)?;
@@ -113,7 +116,7 @@ impl<'a> Selection<'a> {
         snapshot.view.visit_keys(
             &prefix,
             cursor.as_deref(),
-            256,
+            limit,
             &snapshot.control,
             &mut |key, record| {
                 NativeRecordIdentity::visit_key_components(
@@ -146,6 +149,7 @@ pub(super) fn visit(
     scope: Option<&str>,
     filter: GraphEntityFilter<'_>,
     after: Option<u64>,
+    page_size: usize,
     mut visit: impl FnMut(i64) -> Result<bool>,
 ) -> Result<()> {
     let selection = Selection::new(scope, filter)?;
@@ -153,13 +157,25 @@ pub(super) fn visit(
         .map(|id| encode_graph_id("graph scan cursor", id))
         .transpose()?;
     loop {
-        let (ids, last) = selection.page(snapshot, after)?;
+        let (ids, last) = selection.page(snapshot, after, page_size)?;
         let Some(last) = last else {
             break;
         };
         after = Some(last);
-        for id in ids.iter().copied() {
-            if !matches(snapshot, filter, &selection, id)? {
+        let dense = dense::presence(snapshot, filter, &selection, &ids)?;
+        for (position, id) in ids.iter().copied().enumerate() {
+            let keep = if let Some(presence) = dense.as_ref() {
+                if presence[position] & 1 == 0 {
+                    return Err(crate::SQLiteError::StorageBackend(format!(
+                        "graph lookup references missing {} {id}",
+                        filter.kind.as_str()
+                    )));
+                }
+                presence[position] & 2 != 0
+            } else {
+                matches(snapshot, filter, &selection, id)?
+            };
+            if !keep {
                 continue;
             }
             if !visit(id)? {

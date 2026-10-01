@@ -553,6 +553,21 @@ impl GraphStore for MemoryGraphStore {
         Ok(MemoryGraphStore::get_vertex(self, vertex_id).cloned())
     }
 
+    fn for_each_vertex_borrowed(
+        &self,
+        ids: &[VertexId],
+        visit: &mut dyn FnMut(VertexId, Option<&Vertex>) -> bool,
+    ) -> GraphStoreResult<Option<usize>> {
+        let mut count = 0;
+        for id in ids {
+            count += 1;
+            if !visit(*id, MemoryGraphStore::get_vertex(self, *id)) {
+                break;
+            }
+        }
+        Ok(Some(count))
+    }
+
     fn get_edge(&self, edge_id: EdgeId) -> GraphStoreResult<Option<Edge>> {
         Ok(MemoryGraphStore::get_edge(self, edge_id).cloned())
     }

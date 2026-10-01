@@ -22,6 +22,7 @@ use integer::{ProjectedIntegerExpression, ProjectedIntegerValue};
 pub(super) struct ProjectedAggregatePlans {
     plans: Vec<ProjectedAggregatePlan>,
     all_direct: bool,
+    input_schema: RowSchema,
 }
 
 enum ProjectedAggregatePlan {
@@ -51,7 +52,11 @@ impl ProjectedAggregatePlans {
         let all_direct = plans
             .iter()
             .all(|plan| matches!(plan, ProjectedAggregatePlan::Direct(_)));
-        Self { plans, all_direct }
+        Self {
+            plans,
+            all_direct,
+            input_schema: input_schema.clone(),
+        }
     }
 
     pub(super) fn all_direct(&self) -> bool {
@@ -91,7 +96,8 @@ impl ProjectedAggregatePlans {
                     }
                     ProjectedIntegerValue::Null => {}
                     ProjectedIntegerValue::General => {
-                        let context = ScalarEvalContext::from_row_lookup(row, params);
+                        let context = ScalarEvalContext::from_row_lookup(row, params)
+                            .with_row_schema(&self.input_schema);
                         let value = crate::eval_scalar(fallback, &context)?;
                         accumulator.observe_projected(&value)?;
                     }

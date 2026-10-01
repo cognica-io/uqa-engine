@@ -26,6 +26,8 @@ use crate::physical::{
 use crate::relational::{compare_sort_key_values_by, SharedExpressionEvaluator, SortKey};
 use crate::spill::{EncodedBatchSizer, SpillBuffer, SpillDrain};
 
+mod top_k;
+
 /// Maximum number of input runs opened by one merge operation.
 pub const EXTERNAL_SORT_MERGE_FAN_IN: usize = 16;
 
@@ -117,6 +119,7 @@ impl<'a> ExternalSort<'a> {
         let mut sequence = 0_u64;
         let mut pending = Vec::new();
         let mut pending_size = EncodedBatchSizer::new(&self.run_schema)?;
+        let mut top_k_heap = false;
         let mut runs = Vec::new();
 
         while let Some(batch) = self.child.next()? {
@@ -140,6 +143,22 @@ impl<'a> ExternalSort<'a> {
                 sequence = sequence.checked_add(1).ok_or_else(|| {
                     ExecError::Other("external sort input sequence overflow".into())
                 })?;
+                if !top_k_heap
+                    && self
+                        .keep
+                        .is_some_and(|keep| keep > 0 && pending.len() == keep)
+                {
+                    top_k::heapify(
+                        &mut pending,
+                        &self.keys,
+                        &self.run_schema,
+                        self.input_slots.len(),
+                    )?;
+                    top_k_heap = true;
+                }
+                if self.retain_top_candidate(&mut pending, &mut pending_size, &record)? {
+                    continue;
+                }
                 let mut candidate_size = pending_size;
                 candidate_size.append(&record.row)?;
                 let would_exceed = candidate_size.bytes() > self.work_mem_bytes;
@@ -149,6 +168,7 @@ impl<'a> ExternalSort<'a> {
                         runs.push(run);
                     }
                     pending_size = EncodedBatchSizer::new(&self.run_schema)?;
+                    top_k_heap = false;
                     candidate_size = pending_size;
                     candidate_size.append(&record.row)?;
                 }
@@ -163,6 +183,7 @@ impl<'a> ExternalSort<'a> {
                         runs.push(run);
                     }
                     pending_size = EncodedBatchSizer::new(&self.run_schema)?;
+                    top_k_heap = false;
                 }
             }
         }
@@ -597,6 +618,7 @@ fn heap_pop(
 #[cfg(test)]
 mod tests {
     mod legacy_vectors;
+    mod top_k;
     use crate::RowSchemaExecution;
     use std::collections::BTreeMap;
     use std::io::Write as _;

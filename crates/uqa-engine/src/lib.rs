@@ -565,6 +565,7 @@ struct TableDataSnapshot {
     column_stats: BTreeMap<String, uqa_planner::ColumnStats>,
     column_stats_loaded: bool,
     column_stats_dirty: bool,
+    statistics_maintenance: statistics::MaintenanceState,
     table_checks: Vec<uqa_sql::ast::TableCheck>,
     foreign_keys: Vec<uqa_sql::ast::ForeignKey>,
     key_constraints: Vec<uqa_sql::ast::TableKeyConstraint>,
@@ -598,6 +599,8 @@ pub(crate) struct TableState {
     column_stats: state::CatalogCell<BTreeMap<String, uqa_planner::ColumnStats>>,
     column_stats_loaded: AtomicBool,
     column_stats_dirty: AtomicBool,
+    /// Changes since the last analysis of a table that no catalog tracks: tables of a memory-only engine and temporary tables. Their lazy analysis follows the maintenance policy of durable tables instead of re-analyzing after every write.
+    statistics_maintenance: parking_lot::Mutex<statistics::MaintenanceState>,
     /// Table-level `CHECK` constraints, evaluated against every row
     /// at INSERT / UPDATE time.
     table_checks: state::CatalogCell<Vec<uqa_sql::ast::TableCheck>>,

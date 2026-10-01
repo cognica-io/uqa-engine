@@ -41,6 +41,11 @@ impl PrivateRecordRevision {
             .map_err(|_| VersionError::PrivateRevisionExhausted)
     }
 
+    #[cfg(test)]
+    pub(crate) fn for_tests() -> Self {
+        Self::allocate().expect("test private revision")
+    }
+
     pub fn as_u64(self) -> u64 {
         self.0.get()
     }

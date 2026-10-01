@@ -122,6 +122,14 @@ impl Catalog {
         })
     }
 
+    pub fn for_each_graph_vertex_borrowed(
+        &self,
+        ids: &[u64],
+        visit: &mut dyn FnMut(u64, Option<&GraphVertexRow>) -> bool,
+    ) -> Result<Option<usize>> {
+        self.read_native(|snapshot| graph::for_each_vertex_borrowed(snapshot, ids, visit))
+    }
+
     pub fn graph_edge(&self, id: u64) -> Result<Option<EdgeRow>> {
         let encoded = encode_catalog_id("edge", id)?;
         if let Some(row) = self.read_native(|snapshot| graph::edge(snapshot, id))? {
