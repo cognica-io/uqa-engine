@@ -475,6 +475,7 @@ pub(super) struct QueryRuntime {
     pub(super) bayesian_params_cache: RwLock<BTreeMap<String, BayesianBM25Params>>,
     pub(super) regtype_output_cache: uqa_execution::catalog::cache::RegtypeOutputCache,
     pub(super) physical_index_cache: uqa_execution::catalog::index::physical::PhysicalIndexCache,
+    pub(super) enforced_key_cache: uqa_execution::catalog::index::EnforcedKeyCache,
 }
 
 impl QueryRuntime {
@@ -499,6 +500,7 @@ impl QueryRuntime {
             regtype_output_cache: uqa_execution::catalog::cache::RegtypeOutputCache::default(),
             physical_index_cache:
                 uqa_execution::catalog::index::physical::PhysicalIndexCache::default(),
+            enforced_key_cache: uqa_execution::catalog::index::EnforcedKeyCache::default(),
         }
     }
 }
