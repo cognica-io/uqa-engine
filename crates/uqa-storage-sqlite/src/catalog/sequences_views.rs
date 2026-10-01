@@ -11,7 +11,7 @@ use super::{
     SQLiteError, SequenceOptions, SequenceReservationResult, SequenceRow, SequenceSetValueResult,
     ViewRow,
 };
-use uqa_storage::catalog::{sequence_value_reservation, SequenceValuePosition};
+use uqa_storage::catalog::{sequence_value_reservation, SequenceLogResult, SequenceValuePosition};
 
 pub(in crate::catalog) mod codec;
 use codec::{
@@ -203,9 +203,12 @@ impl Catalog {
             let (role_owner, acl_json) = crate::catalog::role_security::encode_sequence(&sequence.security)?;
             Ok(connection.execute(
                 "UPDATE _sequences
-                    SET object_id = ?3, definition_generation = ?4, start = ?5, increment = ?6, current = ?7, called = ?8, persistence = ?9,
-                        data_type = ?10, min_value = ?11, max_value = ?12, cycle = ?13, cache_size = ?14,
-                        owner_table_object_id = ?15, owner_column_object_id = ?16, owner_dependency = ?17, role_owner = ?18, acl_json = ?19, log_count = ?20
+                    SET object_id = ?3, definition_generation = ?4, start = ?5, increment = ?6,
+                        current = CASE WHEN object_id = ?3 AND definition_generation = ?4 THEN current ELSE ?7 END,
+                        called = CASE WHEN object_id = ?3 AND definition_generation = ?4 THEN called ELSE ?8 END,
+                        persistence = ?9, data_type = ?10, min_value = ?11, max_value = ?12, cycle = ?13, cache_size = ?14,
+                        owner_table_object_id = ?15, owner_column_object_id = ?16, owner_dependency = ?17, role_owner = ?18, acl_json = ?19,
+                        log_count = CASE WHEN object_id = ?3 AND definition_generation = ?4 THEN log_count ELSE ?20 END
                   WHERE schema_name = ?1 AND relation_name = ?2",
                 params![
                     sequence.relation.schema,
@@ -404,6 +407,78 @@ impl Catalog {
                 )));
             }
             Ok(SequenceSetValueResult::Set(value))
+        })
+    }
+
+    pub fn log_sequence_values(
+        &self,
+        name: &str,
+        object_id: [u8; 16],
+        definition_generation: [u8; 16],
+        expected: (i64, bool),
+        logged: SequenceValuePosition,
+    ) -> Result<SequenceLogResult> {
+        let relation = migration_relation(name)?;
+        if let Some(result) = self.log_native_sequence_values(
+            &relation,
+            object_id,
+            definition_generation,
+            expected,
+            logged,
+        )? {
+            return Ok(result);
+        }
+        with_sequence_value_write(&self.conn, |connection| {
+            let stored = connection
+                .query_row(
+                    "SELECT object_id, definition_generation, current, called, log_count FROM _sequences
+                  WHERE schema_name = ?1 AND relation_name = ?2",
+                    params![relation.schema, relation.name],
+                    |row| {
+                        Ok((
+                            row.get::<_, Vec<u8>>(0)?,
+                            row.get::<_, Vec<u8>>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, bool>(3)?,
+                            row.get::<_, i64>(4)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((identity, generation, current, called, log_count)) = stored else {
+                return Ok(SequenceLogResult::Missing);
+            };
+            if decode_sequence_identity(&relation, "object identity", identity)? != object_id {
+                return Ok(SequenceLogResult::Missing);
+            }
+            if decode_sequence_identity(&relation, "definition generation", generation)?
+                != definition_generation
+            {
+                return Ok(SequenceLogResult::DefinitionChanged);
+            }
+            if logged.log_count < 0 {
+                return Err(SQLiteError::StorageBackend(
+                    "sequence log count cannot be negative".into(),
+                ));
+            }
+            if (current, called) != expected {
+                return Ok(SequenceLogResult::Changed(SequenceValuePosition {
+                    current,
+                    called,
+                    log_count,
+                }));
+            }
+            let updated = connection.execute(
+                "UPDATE _sequences SET current = ?5, called = ?6, log_count = ?7
+                  WHERE schema_name = ?1 AND relation_name = ?2 AND object_id = ?3 AND definition_generation = ?4",
+                params![relation.schema, relation.name, object_id.as_slice(), definition_generation.as_slice(), logged.current, logged.called, logged.log_count],
+            )?;
+            if updated != 1 {
+                return Err(SQLiteError::StorageBackend(format!(
+                    "sequence `{name}` changed while logging its value"
+                )));
+            }
+            Ok(SequenceLogResult::Logged)
         })
     }
 

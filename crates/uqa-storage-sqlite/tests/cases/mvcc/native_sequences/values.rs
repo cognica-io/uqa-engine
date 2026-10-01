@@ -8,6 +8,12 @@
 
 use super::*;
 
+/// Replace the row under a new allocation generation, with which a replacement stores its value state.
+fn redefine(catalog: &Catalog, row: &mut SequenceRow) {
+    row.definition_generation[0] += 1;
+    assert!(catalog.replace_sequence_row(row).unwrap());
+}
+
 #[test]
 fn sequence_reservations_keep_cached_bounds_cycles_and_full_width_values() {
     for native in [false, true] {
@@ -44,7 +50,7 @@ fn sequence_reservations_keep_cached_bounds_cycles_and_full_width_values() {
             row.options.max_value = Some(i64::MAX);
             row.options.cache_size = i64::MAX;
             row.options.cycle = false;
-            catalog.replace_sequence_row(&row).unwrap();
+            redefine(&catalog, &mut row);
             let reserved = reserve(&catalog, &row);
             assert_eq!(
                 (reserved.first_value, reserved.last_value, reserved.count),
@@ -64,7 +70,7 @@ fn sequence_reservations_keep_cached_bounds_cycles_and_full_width_values() {
         row.current = 7;
         row.called = false;
         row.log_count = 0;
-        catalog.replace_sequence_row(&row).unwrap();
+        redefine(&catalog, &mut row);
         assert_eq!(
             catalog
                 .set_sequence_value("s", row.object_id, row.definition_generation, 20, false, 0)
@@ -101,13 +107,121 @@ fn sequence_reservations_keep_cached_bounds_cycles_and_full_width_values() {
         );
         connection.begin_transaction().unwrap();
         row.increment = 0;
-        catalog.replace_sequence_row(&row).unwrap();
+        redefine(&catalog, &mut row);
         super::lifecycle::reject(&connection, native, || {
             catalog.reserve_sequence_values("s", row.object_id, row.definition_generation)
         });
         assert_eq!(catalog.load_sequence_rows().unwrap()[0].current, 7);
         connection.rollback_transaction().unwrap();
         assert_eq!(catalog.load_sequence_rows().unwrap()[0].current, 31);
+    }
+}
+
+#[test]
+fn a_record_moves_only_from_the_position_its_caller_read() {
+    for native in [false, true] {
+        let (_connection, catalog) = memory(native);
+        let row = sequence("s", 1);
+        catalog.create_sequence_row(&row).unwrap();
+        let logged = |value| SequenceValuePosition {
+            current: value,
+            called: true,
+            log_count: 0,
+        };
+        let log = |expected, value| {
+            catalog
+                .log_sequence_values(
+                    "s",
+                    row.object_id,
+                    row.definition_generation,
+                    expected,
+                    logged(value),
+                )
+                .unwrap()
+        };
+        assert_eq!(log((1, false), 33), SequenceLogResult::Logged);
+        let record = catalog.load_sequence_rows().unwrap();
+        // Nothing is written from a position the record has left, and the record it holds is reported.
+        assert_eq!(log((1, false), 99), SequenceLogResult::Changed(logged(33)));
+        assert_eq!(log((33, false), 99), SequenceLogResult::Changed(logged(33)));
+        assert_eq!(
+            catalog
+                .log_sequence_values("s", row.object_id, [90; 16], (33, true), logged(99))
+                .unwrap(),
+            SequenceLogResult::DefinitionChanged
+        );
+        for (name, object_id) in [("s", [2; 16]), ("absent", row.object_id)] {
+            assert_eq!(
+                catalog
+                    .log_sequence_values(
+                        name,
+                        object_id,
+                        row.definition_generation,
+                        (33, true),
+                        logged(99)
+                    )
+                    .unwrap(),
+                SequenceLogResult::Missing
+            );
+        }
+        assert!(catalog
+            .log_sequence_values(
+                "s",
+                row.object_id,
+                row.definition_generation,
+                (33, true),
+                SequenceValuePosition {
+                    log_count: -1,
+                    ..logged(99)
+                },
+            )
+            .is_err());
+        assert_eq!(catalog.load_sequence_rows().unwrap(), record);
+        assert_eq!(log((33, true), 66), SequenceLogResult::Logged);
+        // A reservation continues after the record, as a sequence without a kept position does.
+        assert_eq!(reserve(&catalog, &row).first_value, 67);
+    }
+}
+
+#[test]
+fn a_replacement_of_the_same_allocation_generation_keeps_the_value_state() {
+    for native in [false, true] {
+        let (_connection, catalog) = memory(native);
+        let row = sequence("s", 1);
+        catalog.create_sequence_row(&row).unwrap();
+        assert_eq!(reserve(&catalog, &row).last_value, 3);
+        let value_state = |catalog: &Catalog| {
+            let stored = catalog.load_sequence_rows().unwrap().remove(0);
+            (
+                stored.start,
+                stored.current,
+                stored.called,
+                stored.log_count,
+            )
+        };
+        assert_eq!(value_state(&catalog), (1, 3, true, 32));
+        // The row a session writes for an owner or privilege change carries whatever value state its registry holds.
+        let mut replaced = row.clone();
+        replaced.start = 7;
+        replaced.current = 100;
+        replaced.called = false;
+        replaced.log_count = 5;
+        assert!(catalog.replace_sequence_row(&replaced).unwrap());
+        assert_eq!(value_state(&catalog), (7, 3, true, 32));
+        assert_eq!(reserve(&catalog, &row).first_value, 4);
+        // Unset identities name the stored object and generation, which is the same generation.
+        replaced.object_id = [0; 16];
+        replaced.definition_generation = [0; 16];
+        if native {
+            assert!(catalog.replace_sequence_row(&replaced).unwrap());
+            assert_eq!(value_state(&catalog), (7, 6, true, 29));
+        }
+        // A new allocation generation is stored with the value state it comes with.
+        replaced.object_id = row.object_id;
+        replaced.definition_generation = [91; 16];
+        assert!(catalog.replace_sequence_row(&replaced).unwrap());
+        assert_eq!(value_state(&catalog), (7, 100, false, 5));
+        assert_eq!(reserve(&catalog, &replaced).first_value, 100);
     }
 }
 

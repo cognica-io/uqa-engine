@@ -404,6 +404,24 @@ impl CatalogFacade for Catalog {
         ))
     }
 
+    fn log_sequence_values(
+        &self,
+        name: &str,
+        object_id: [u8; 16],
+        definition_generation: [u8; 16],
+        expected: (i64, bool),
+        logged: uqa_storage::catalog::SequenceValuePosition,
+    ) -> StorageBackendResult<uqa_storage::catalog::SequenceLogResult> {
+        into_storage_result(Catalog::log_sequence_values(
+            self,
+            name,
+            object_id,
+            definition_generation,
+            expected,
+            logged,
+        ))
+    }
+
     fn save_view(&self, view: &ViewRow) -> StorageBackendResult<()> {
         into_storage_result(Catalog::save_view(self, view))
     }

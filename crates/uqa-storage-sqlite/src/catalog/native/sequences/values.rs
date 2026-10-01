@@ -11,11 +11,11 @@ use super::{
 };
 use rusqlite::types::ValueRef;
 use uqa_storage::catalog::{
-    sequence_value_reservation, SequenceReservationResult, SequenceSetValueResult,
-    SequenceValuePosition,
+    sequence_value_reservation, SequenceLogResult, SequenceReservationResult,
+    SequenceSetValueResult, SequenceValuePosition,
 };
 
-fn integer(value: ValueRef<'_>) -> i64 {
+pub(super) fn integer(value: ValueRef<'_>) -> i64 {
     value.as_i64().expect("validated sequence integer column")
 }
 
@@ -98,6 +98,46 @@ impl Catalog {
                 Ok(SequenceSetValueResult::Set(value))
             })?;
             Ok(updated.expect("resolved sequence on retained snapshot"))
+        })
+    }
+
+    pub(in crate::catalog) fn log_native_sequence_values(
+        &self,
+        relation: &RelationIdentity,
+        object_id: [u8; 16],
+        definition_generation: [u8; 16],
+        expected: (i64, bool),
+        logged: SequenceValuePosition,
+    ) -> Result<Option<SequenceLogResult>> {
+        self.conn.with_native_write(|snapshot, batch| {
+            let Some(owner) = snapshot.sequence_incarnation(relation, object_id)? else {
+                return Ok(SequenceLogResult::Missing);
+            };
+            if owner_id(owner).1 != definition_generation {
+                return Ok(SequenceLogResult::DefinitionChanged);
+            }
+            if logged.log_count < 0 {
+                return Err(SQLiteError::StorageBackend(
+                    "sequence log count cannot be negative".into(),
+                ));
+            }
+            let result = snapshot.read_row(Family::Sequences, owner, &[], |row| {
+                let stored = SequenceValuePosition {
+                    current: integer(row[5]),
+                    called: integer(row[6]) != 0,
+                    log_count: integer(row[20]),
+                };
+                if (stored.current, stored.called) != expected {
+                    return Ok(SequenceLogResult::Changed(stored));
+                }
+                let mut updated = row_values(row);
+                updated[5] = ValueRef::Integer(logged.current);
+                updated[6] = ValueRef::Integer(i64::from(logged.called));
+                updated[20] = ValueRef::Integer(logged.log_count);
+                snapshot.put_row(batch, Family::Sequences, owner, &updated)?;
+                Ok(SequenceLogResult::Logged)
+            })?;
+            Ok(result.expect("resolved sequence on retained snapshot"))
         })
     }
 }

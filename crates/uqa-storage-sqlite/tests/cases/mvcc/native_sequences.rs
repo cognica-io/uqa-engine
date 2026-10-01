@@ -14,9 +14,10 @@ use uqa_core::{
     Value,
 };
 use uqa_storage::{
-    mvcc::VersionedSessionOptions, DocumentStore, RelationIdentity, SequenceOptions, SequenceOwner,
-    SequenceOwnerDependency, SequencePrivileges, SequenceReservationResult, SequenceRow,
-    SequenceSecurityRow, SequenceValueReservation,
+    mvcc::VersionedSessionOptions, DocumentStore, RelationIdentity, SequenceLogResult,
+    SequenceOptions, SequenceOwner, SequenceOwnerDependency, SequencePrivileges,
+    SequenceReservationResult, SequenceRow, SequenceSecurityRow, SequenceValuePosition,
+    SequenceValueReservation,
 };
 use uqa_storage_sqlite::{Catalog, ManagedConnection, SQLiteDocumentStore};
 
