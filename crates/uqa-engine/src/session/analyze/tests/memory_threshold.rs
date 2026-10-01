@@ -4,11 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::Engine;
+use super::{Engine, StatisticsRefresh};
 
 fn analyzed_rows(engine: &Engine) -> Option<u64> {
     engine
-        .column_stats_in_execution("growing")
+        .column_stats_in_execution("growing", StatisticsRefresh::Maintained)
         .unwrap()
         .get("v")
         .map(|stats| stats.row_count)
@@ -51,4 +51,9 @@ fn memory_statistics_wait_for_the_change_threshold_before_reanalyzing() {
         .unwrap();
     engine.sql("ROLLBACK", &[]).unwrap();
     assert_eq!(analyzed_rows(&engine), Some(1100));
+    // An explicit request still reports the current rows after any write.
+    engine.sql("DELETE FROM growing WHERE id = 1", &[]).unwrap();
+    assert_eq!(analyzed_rows(&engine), Some(1100));
+    assert_eq!(engine.column_stats("growing").unwrap()["v"].row_count, 1099);
+    assert_eq!(analyzed_rows(&engine), Some(1099));
 }

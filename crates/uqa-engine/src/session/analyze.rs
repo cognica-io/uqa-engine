@@ -77,6 +77,15 @@ fn build_analyze_stats(
     Ok(stats)
 }
 
+/// When the lazy statistics of a memory-only table are collected again after writes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StatisticsRefresh {
+    /// An explicit statistics request reports the current rows.
+    Current,
+    /// Planning keeps its estimates until enough rows changed, as autovacuum decides for PostgreSQL, so a write is not followed by a full ANALYZE of its table.
+    Maintained,
+}
+
 impl Engine {
     /// Refresh per-column statistics for one table, or every table when
     /// `table` is `None`. The analysis scans each document and collects per-
@@ -409,7 +418,7 @@ impl Engine {
     ) -> StorageBackendResult<BTreeMap<String, uqa_planner::ColumnStats>> {
         self.with_direct_query_snapshot(
             false,
-            |engine| engine.column_stats_in_execution(table),
+            |engine| engine.column_stats_in_execution(table, StatisticsRefresh::Current),
             |error| StorageBackendError::backend("column statistics query", error),
         )
     }
@@ -417,6 +426,7 @@ impl Engine {
     pub(crate) fn column_stats_in_execution(
         &self,
         table: &str,
+        refresh: StatisticsRefresh,
     ) -> StorageBackendResult<BTreeMap<String, uqa_planner::ColumnStats>> {
         self.synchronize_table_data()?;
         let canonical_name = self
@@ -429,16 +439,16 @@ impl Engine {
             if self.storage.catalog.is_none() {
                 // Memory-only lazy collection has no durable publication and
                 // must not invalidate the statement currently being planned.
-                // Estimates stay in use until enough rows changed, as autovacuum
-                // decides for PostgreSQL, so a write is not followed by a full
-                // ANALYZE of its table.
-                let due = {
-                    let maintenance = t.statistics_maintenance.lock();
-                    maintenance.due(
-                        maintenance.missing(t.column_stats.read().is_empty()),
-                        crate::statistics::now_ms(),
-                        crate::statistics::value_size::FORMAT_VERSION,
-                    )
+                let due = match refresh {
+                    StatisticsRefresh::Current => true,
+                    StatisticsRefresh::Maintained => {
+                        let maintenance = t.statistics_maintenance.lock();
+                        maintenance.due(
+                            maintenance.missing(t.column_stats.read().is_empty()),
+                            crate::statistics::now_ms(),
+                            crate::statistics::value_size::FORMAT_VERSION,
+                        )
+                    }
                 };
                 if due {
                     self.analyze_table(&canonical_name, &t, false, None, true)?;
@@ -463,7 +473,7 @@ impl Engine {
         // Memory-only engines have no durable independent sessions or blob
         // I/O. Retain their automatic lazy refresh at this boundary.
         if self.storage.provider.is_none() && self.query_table_snapshots.is_none() {
-            return self.column_stats_in_execution(table);
+            return self.column_stats_in_execution(table, StatisticsRefresh::Maintained);
         }
         let table = self
             .try_query_table(table)?
