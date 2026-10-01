@@ -29,6 +29,8 @@ static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
 pub(in crate::mvcc) struct ConnectionFunctions {
     write_permit: AtomicBool,
     capture: Mutex<Option<CaptureScope>>,
+    /// Set while an identifier observation may have left the connection below full synchronization.
+    relaxed_synchronization: AtomicBool,
 }
 
 /// One materialization's capture: its read control and the first encoding error, which the materialization reports instead of `SQLite`'s generic function failure.
@@ -81,6 +83,7 @@ impl ConnectionFunctions {
         let functions = Arc::new(Self {
             write_permit: AtomicBool::new(false),
             capture: Mutex::new(None),
+            relaxed_synchronization: AtomicBool::new(false),
         });
         let permit = Arc::clone(&functions);
         connection.create_scalar_function(
@@ -122,6 +125,28 @@ impl ConnectionFunctions {
 
     pub(in crate::mvcc) fn close_write_permit(&self) {
         self.write_permit.store(false, Ordering::Release);
+    }
+
+    /// Commit the connection's next transactions without their own sync. The pragma takes effect only outside a transaction, and the flag is set first, so a failed relaxation is restored like a failed restoration.
+    pub(in crate::mvcc) fn relax_synchronization(
+        &self,
+        connection: &Connection,
+    ) -> PhysicalResult<()> {
+        self.relaxed_synchronization.store(true, Ordering::Release);
+        connection.pragma_update(None, "synchronous", "NORMAL")?;
+        Ok(())
+    }
+
+    /// Restore full synchronization after [`Self::relax_synchronization`]. Write admission calls this before every physical write, so a restoration that failed when its observation ended is retried, or fails the write, before a record commit could run without its own sync.
+    pub(in crate::mvcc) fn require_full_synchronization(
+        &self,
+        connection: &Connection,
+    ) -> PhysicalResult<()> {
+        if self.relaxed_synchronization.load(Ordering::Acquire) {
+            connection.pragma_update(None, "synchronous", "FULL")?;
+            self.relaxed_synchronization.store(false, Ordering::Release);
+        }
+        Ok(())
     }
 
     /// Capture native keys under `control` until [`Self::end_capture`]. Materializations do not nest on one connection.

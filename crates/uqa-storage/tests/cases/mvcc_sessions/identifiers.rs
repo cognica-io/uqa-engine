@@ -112,6 +112,43 @@ fn batch_observations_finish_before_record_publication_and_are_not_replayed_on_r
 }
 
 #[test]
+fn batch_observations_allocate_once_for_each_run_of_one_namespace() {
+    let persistence = Persistence::new();
+    let store = persistence.session(1 << 20);
+    let mut batch = store.batch();
+    for value in [5, 9, 7] {
+        batch.observe_identifier(b"rows", value).unwrap();
+    }
+    batch.observe_identifier(b"other", 3).unwrap();
+    batch.observe_identifier(b"rows", 4).unwrap();
+    batch.inherit_identifiers(b"rows", b"successor").unwrap();
+    batch.observe_identifier(b"successor", 2).unwrap();
+    batch.observe_identifier(b"successor", 20).unwrap();
+    batch.put(b"row", b"value").unwrap();
+    batch.commit().unwrap();
+    let state = persistence.state.lock();
+    let requests = state
+        .identifier_requests
+        .iter()
+        .map(|(namespace, value)| (namespace.as_slice(), *value))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        requests,
+        [
+            (&b"rows"[..], Some(9)),
+            (&b"other"[..], Some(3)),
+            (&b"rows"[..], Some(4)),
+            (&b"rows"[..], Some(0)),
+            (&b"successor"[..], Some(9)),
+            (&b"successor"[..], Some(20)),
+        ]
+    );
+    assert_eq!(state.identifiers[b"rows".as_slice()], 9);
+    assert_eq!(state.identifiers[b"other".as_slice()], 3);
+    assert_eq!(state.identifiers[b"successor".as_slice()], 20);
+}
+
+#[test]
 fn rejected_record_staging_does_not_consume_queued_identifiers() {
     let persistence = Persistence::new();
     let mut failures = 0;

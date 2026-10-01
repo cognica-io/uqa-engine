@@ -47,8 +47,13 @@ impl WritePermit {
             .into());
         }
         let functions = ConnectionFunctions::of(connection)?;
+        functions.require_full_synchronization(connection)?;
         functions.open_write_permit();
         Ok(Self(functions))
+    }
+
+    pub(super) fn functions(&self) -> &Arc<ConnectionFunctions> {
+        &self.0
     }
 }
 

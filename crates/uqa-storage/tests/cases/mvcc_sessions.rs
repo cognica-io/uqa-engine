@@ -151,6 +151,8 @@ enum AbortFault {
 struct State {
     next: u64,
     identifiers: BTreeMap<Vec<u8>, u64>,
+    /// Each physical allocation's namespace and observed value; reservations record no value.
+    identifier_requests: Vec<(Vec<u8>, Option<u64>)>,
     identifier_fault: bool,
     receipts: BTreeMap<u64, CommitStatus>,
     commit_fault: CommitFault,
@@ -176,6 +178,7 @@ impl Persistence {
             state: Mutex::new(State {
                 next: 0,
                 identifiers: BTreeMap::new(),
+                identifier_requests: Vec::new(),
                 identifier_fault: false,
                 receipts: BTreeMap::new(),
                 commit_fault: CommitFault::None,
@@ -275,6 +278,13 @@ impl VersionedPersistence for Persistence {
             return Err(StorageBackendError::Other("injected identifier failure".into()).into());
         }
         let allocation = request.prepare(state.identifiers.get(namespace).copied())?;
+        let observed = match request {
+            IdentifierRequest::Observe(value) => Some(value),
+            IdentifierRequest::Reserve { .. } => None,
+        };
+        state
+            .identifier_requests
+            .push((namespace.to_vec(), observed));
         state
             .identifiers
             .insert(namespace.to_vec(), allocation.watermark());
