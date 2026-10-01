@@ -437,3 +437,98 @@ fn concurrent_sessions_never_draw_a_value_twice() {
         assert_eq!(blocks.len(), 600, "{provider}");
     }
 }
+
+/// How many times `engine` read the sequence catalog from storage while `work` ran.
+fn catalog_reads(engine: &Engine, work: impl FnOnce()) -> u64 {
+    let reads = || {
+        engine
+            .session
+            .sequence_snapshot_reads
+            .load(std::sync::atomic::Ordering::Relaxed)
+    };
+    let before = reads();
+    work();
+    reads() - before
+}
+
+#[test]
+fn the_sequence_catalog_is_read_again_only_after_a_commit_or_a_change_of_this_session() {
+    let (_directory, engine, peer) = sessions(0);
+    sql(
+        &engine,
+        "CREATE ROLE drawer; CREATE SEQUENCE ids; GRANT USAGE ON SEQUENCE ids TO drawer",
+    );
+    assert_eq!(next(&engine, "ids"), 1);
+    // The record covers the next 32 values, so nothing is committed while they are drawn and the catalog is read once.
+    let reads = catalog_reads(&engine, || {
+        for expected in 2..=30 {
+            assert_eq!(next(&engine, "ids"), expected);
+        }
+    });
+    assert_eq!(reads, 1);
+    assert_eq!(
+        catalog_reads(&engine, || assert_eq!(next(&engine, "ids"), 31)),
+        0
+    );
+
+    // A commit of another session is read before the next value: here it moves the sequence to another name.
+    sql(&peer, "ALTER SEQUENCE ids RENAME TO renamed");
+    let reads = catalog_reads(&engine, || {
+        let error = engine.sql("SELECT nextval('ids')", &[]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42P01"), "{error}");
+        assert_eq!(next(&engine, "renamed"), 32);
+    });
+    assert!(reads >= 1);
+    sql(&peer, "ALTER SEQUENCE renamed RENAME TO ids");
+
+    // A revoked privilege applies to the next call.
+    sql(&engine, "SET ROLE drawer");
+    assert_eq!(next(&engine, "ids"), 33);
+    sql(&peer, "REVOKE USAGE ON SEQUENCE ids FROM drawer");
+    let error = engine.sql("SELECT nextval('ids')", &[]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42501"), "{error}");
+    sql(&engine, "RESET ROLE");
+
+    // A sequence this transaction creates is seen without a commit, and is gone when the transaction rolls back.
+    sql(&engine, "BEGIN; CREATE SEQUENCE uncommitted");
+    assert_eq!(next(&engine, "uncommitted"), 1);
+    assert_eq!(next(&engine, "ids"), 34);
+    sql(&engine, "ROLLBACK");
+    let error = engine
+        .sql("SELECT nextval('uncommitted')", &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42P01"), "{error}");
+
+    // A temporary sequence lives in the session's registries alone.
+    sql(&engine, "CREATE TEMP SEQUENCE scratch");
+    assert_eq!(next(&engine, "scratch"), 1);
+    assert_eq!(next(&engine, "scratch"), 2);
+    sql(&engine, "DROP SEQUENCE scratch");
+    let error = engine.sql("SELECT nextval('scratch')", &[]).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42P01"), "{error}");
+    assert_eq!(next(&engine, "ids"), 35);
+}
+
+#[test]
+fn a_bulk_insert_of_serial_identities_reads_the_sequence_catalog_a_few_times() {
+    let (_directory, engine, _peer) = sessions(0);
+    sql(
+        &engine,
+        "CREATE TABLE numbered (id serial PRIMARY KEY, value integer NOT NULL)",
+    );
+    let reads = catalog_reads(&engine, || {
+        sql(
+            &engine,
+            "INSERT INTO numbered (value) SELECT g FROM generate_series(1, 200) AS g",
+        );
+    });
+    // The record is written once for each 33 values, and the catalog is read again after each of those commits.
+    assert!(reads <= 2 * (200 / 33 + 2), "{reads} reads for 200 rows");
+    assert_eq!(
+        integer(
+            &engine,
+            "SELECT count(*) FROM numbered WHERE id BETWEEN 1 AND 200"
+        ),
+        200
+    );
+}

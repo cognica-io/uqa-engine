@@ -531,6 +531,10 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         Ok(self.conn.read_view_revision()?)
     }
 
+    fn commit_monitor_version(&self) -> StorageBackendResult<Option<u64>> {
+        Ok(self.conn.commit_monitor_version()?)
+    }
+
     fn change_version_monitor_is_nonblocking(&self) -> StorageBackendResult<bool> {
         Ok(self.conn.data_version_monitor_is_nonblocking()?)
     }

@@ -5,6 +5,7 @@
 //
 
 #[cfg(unix)]
+mod commit_monitor;
 mod source_identity;
 mod statements;
 

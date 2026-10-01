@@ -262,6 +262,11 @@ pub(super) struct SessionContext {
     /// `PostgreSQL` sequence reservations are session-local and nontransactional. They are intentionally kept outside `SessionStateSnapshot` so rollback never rewinds consumption or restores blocks discarded by `ALTER SEQUENCE`.
     pub(super) sequence_caches:
         Mutex<BTreeMap<super::RelationIdentity, super::SessionSequenceCache>>,
+    /// The sequence catalog as this session last read it from the latest commit, kept while nothing it was read from has changed.
+    pub(super) sequence_snapshot: Mutex<Option<crate::sequence_snapshot::SequenceSnapshotMemo>>,
+    /// How many times this session read the sequence catalog instead of reusing its last read.
+    #[cfg(test)]
+    pub(super) sequence_snapshot_reads: std::sync::atomic::AtomicU64,
     /// `PostgreSQL`'s session PRNG is not transactional: failed statements and
     /// transaction or savepoint rollback leave every consumed draw in place.
     pub(super) random_state: Mutex<super::SessionRandomState>,
@@ -316,6 +321,9 @@ impl SessionContext {
             state: RwLock::new(state),
             prepared: RwLock::new(BTreeMap::new()),
             sequence_caches: Mutex::new(BTreeMap::new()),
+            sequence_snapshot: Mutex::new(None),
+            #[cfg(test)]
+            sequence_snapshot_reads: std::sync::atomic::AtomicU64::new(0),
             random_state: Mutex::new(random_state),
             transactions: Mutex::new(Vec::new()),
             query_retention: uqa_core::memory::MemoryBudget::new(

@@ -563,6 +563,36 @@ impl ManagedConnection {
         Ok(Some(version))
     }
 
+    /// `SQLite`'s change counter on the pool's monitor connection, which differs from an earlier read exactly when another connection of any session or process committed in between. `None` when the monitor may not read at any time: an in-memory database has no independent connection, and a rollback-journal reader waits for a pending writer, which may itself be waiting for a read this session has open.
+    pub fn commit_monitor_version(&self) -> Result<Option<u64>> {
+        if matches!(
+            &self.pool.spec,
+            ConnectionSpec::Memory
+                | ConnectionSpec::Compressed { .. }
+                | ConnectionSpec::Auxiliary { .. }
+        ) {
+            return Ok(None);
+        }
+        self.pool.check_source()?;
+        let mut monitor = self.pool.data_version_monitor.lock();
+        if monitor.is_none() {
+            *monitor = Some(self.pool.open_connection()?);
+        }
+        let monitor = monitor.as_ref().ok_or_else(|| {
+            SQLiteError::StorageBackend(
+                "data-version monitor was not initialized after opening it".into(),
+            )
+        })?;
+        let version: i64 = monitor
+            .prepare_cached("PRAGMA data_version")?
+            .query_row([], |row| row.get(0))?;
+        u64::try_from(version).map(Some).map_err(|_| {
+            SQLiteError::StorageBackend(format!(
+                "SQLite returned a negative PRAGMA data_version: {version}"
+            ))
+        })
+    }
+
     /// Complete logical record visibility, including the private root restored by savepoint undo. Legacy physical sessions retain their existing data-version refresh protocol.
     pub fn read_view_revision(
         &self,

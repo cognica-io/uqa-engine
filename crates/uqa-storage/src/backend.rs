@@ -620,6 +620,11 @@ pub trait PersistentStorageBackend: Send + Sync {
         Ok(None)
     }
 
+    /// A value that changes whenever any session or process commits to this database, read without a transaction of this session. Two equal values prove that no commit lies between the two reads, so whatever was read from the committed state in between still is that state. `None` when the backend has no such monitor; a caller then reads the committed state again.
+    fn commit_monitor_version(&self) -> StorageBackendResult<Option<u64>> {
+        Ok(None)
+    }
+
     /// Whether reading [`Self::change_version`] can proceed while this session owns its pinned transaction. An independent monitor can also be unsafe for a reader when a pending writer is waiting for that reader's lock.
     fn change_version_monitor_is_nonblocking(&self) -> StorageBackendResult<bool> {
         Ok(true)

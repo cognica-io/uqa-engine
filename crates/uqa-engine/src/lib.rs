@@ -111,6 +111,7 @@ mod schema_security;
 mod search;
 mod sequence_catalog;
 mod sequence_session;
+mod sequence_snapshot;
 mod sequences;
 mod session;
 mod sql_registry;

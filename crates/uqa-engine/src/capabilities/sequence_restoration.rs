@@ -73,8 +73,7 @@ impl uqa_execution::catalog::sequence::snapshot::SequenceSnapshotSource for Engi
     ) -> uqa_storage::StorageBackendResult<
         uqa_execution::catalog::sequence::snapshot::SequenceReadSnapshot,
     > {
-        let session = self.open_independent_catalog_session(None)?;
-        self.sequence_snapshot_from_catalog(session.as_ref())
+        self.latest_sequence_snapshot()
     }
 
     fn sequence_position(
@@ -147,21 +146,8 @@ impl Engine {
     ) -> uqa_storage::StorageBackendResult<
         uqa_execution::catalog::sequence::snapshot::SequenceReadSnapshot,
     > {
-        use uqa_execution::catalog::{
-            security::roles::persistence::RoleCatalogSnapshot,
-            sequence::snapshot::{read_sequence_snapshot, SequenceReadSnapshot},
-        };
-        read_sequence_snapshot(
-            SequenceReadSnapshot {
-                sequences: self.durable.sequences.snapshot(),
-                object_ids: self.durable.sequence_object_ids.snapshot(),
-                persistence: self.durable.sequence_persistence.snapshot(),
-                security: self.durable.sequence_security.snapshot(),
-                roles: RoleCatalogSnapshot {
-                    roles: self.durable.roles.snapshot(),
-                    memberships: self.durable.role_memberships.snapshot(),
-                },
-            },
+        uqa_execution::catalog::sequence::snapshot::read_sequence_snapshot(
+            self.sequence_registries(),
             self.storage.catalog.as_deref(),
             independent,
             self.versioned_backend_transactions(),
