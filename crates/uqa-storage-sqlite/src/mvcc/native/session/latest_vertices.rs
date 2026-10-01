@@ -7,13 +7,13 @@
 //! Committed catalog graph vertices read from `_graph_vertices`, the projection of their records, in one B-tree pass for a batch of identities.
 
 use rusqlite::{params, types::ValueRef, Connection, Row};
-use uqa_core::memory::{MemoryError, MemoryReservation};
+use uqa_core::memory::{BudgetedVec, MemoryError, MemoryReservation};
 use uqa_storage::mvcc::VersionError;
 use uqa_storage::read_control::StorageReadControl;
 
 use super::NativeSnapshot;
 use crate::connection::Result;
-use crate::read_control::payload_length;
+use crate::read_control::{payload_length, reserve_bindings};
 
 /// Properties of at most this many bytes are read with their row. The selected byte length bounds `SQLite`'s copy before the properties are evaluated; larger properties are admitted and then read by themselves.
 const INLINE_PROPERTIES_BYTES: u16 = 16 * 1024;
@@ -24,8 +24,34 @@ type VertexVisitor<'a> = dyn FnMut(i64, Option<&[ValueRef<'_>]>) -> Result<bool>
 const RANGE: &str = "SELECT vertex_id, label, octet_length(label) + octet_length(properties_json), CASE WHEN octet_length(properties_json) <= ?3 THEN properties_json END FROM _graph_vertices WHERE vertex_id BETWEEN ?1 AND ?2 ORDER BY vertex_id";
 const POINT: &str = "SELECT vertex_id, label, octet_length(label) + octet_length(properties_json), CASE WHEN octet_length(properties_json) <= ?2 THEN properties_json END FROM _graph_vertices WHERE vertex_id = ?1";
 const PROPERTIES: &str = "SELECT properties_json FROM _graph_vertices WHERE vertex_id = ?1";
+/// A graph's vertices with one label, through the label index in identity order.
+const LABELED: &str = "SELECT v.vertex_id FROM _graph_vertices v WHERE v.label = ?1 AND v.vertex_id > ?2 AND EXISTS (SELECT 1 FROM _graph_membership m WHERE m.entity_type = 'vertex' AND m.entity_id = v.vertex_id AND m.graph_name = ?3) ORDER BY v.vertex_id LIMIT ?4";
 
 impl NativeSnapshot {
+    /// The latest committed identities of catalog graph `graph`'s vertices labeled `label` after `after`, ascending, at most `limit`. Commit validation keeps label lookups equal to the vertex rows, so the label index stands in for the label selection. Returns `None` when the physical rows cannot stand in for this snapshot's records.
+    pub(crate) fn latest_labeled_vertex_ids(
+        &self,
+        graph: &str,
+        label: &str,
+        after: Option<i64>,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> Result<Option<BudgetedVec<i64>>> {
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        self.read_latest_projection(control, &mut |connection| {
+            let _bindings = reserve_bindings(control, &[graph.as_bytes(), label.as_bytes()])?;
+            let mut ids = BudgetedVec::new(control.memory());
+            let mut statement = connection.prepare_cached(LABELED)?;
+            let mut rows =
+                statement.query(params![label, after.unwrap_or(i64::MIN), graph, limit])?;
+            while let Some(row) = rows.next()? {
+                control.check().map_err(VersionError::from)?;
+                ids.push(row.get(0)?).map_err(VersionError::from)?;
+            }
+            Ok(Some(ids))
+        })
+    }
+
     /// Visit the latest committed catalog graph vertices `ids`, which must ascend without duplicates, in `ids` order as `[vertex_id, label, properties_json]` rows, or `None` for a missing vertex, while `visit` returns true. Returns how many identities were visited, or `None` without visiting when the physical rows cannot stand in for this snapshot's records.
     pub(crate) fn visit_latest_vertices(
         &self,

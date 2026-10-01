@@ -156,3 +156,65 @@ fn standalone_dense_labels_keep_scope_and_private_membership_boundaries() {
         (1..=16).collect::<Vec<_>>()
     );
 }
+
+/// Select `filter` after `after`, recording which physical tables the selection read.
+fn select_reading(
+    connection: &ManagedConnection,
+    snapshot: &NativeSnapshot,
+    filter: GraphEntityFilter<'_>,
+    after: Option<u64>,
+    limit: usize,
+) -> (Vec<u64>, std::collections::BTreeSet<String>) {
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+    use std::sync::{Arc, Mutex};
+    let tables = Arc::new(Mutex::new(std::collections::BTreeSet::new()));
+    let seen = Arc::clone(&tables);
+    connection
+        .with_physical(|sqlite| {
+            sqlite.set_prepared_statement_cache_capacity(0);
+            sqlite.authorizer(Some(move |context: AuthContext<'_>| {
+                if let AuthAction::Read { table_name, .. } = context.action {
+                    seen.lock().unwrap().insert(table_name.to_owned());
+                }
+                Authorization::Allow
+            }))?;
+            Ok(())
+        })
+        .unwrap();
+    let selected = ids(snapshot, filter, after, limit).unwrap();
+    connection
+        .with_physical(|sqlite| {
+            sqlite.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)?;
+            sqlite.set_prepared_statement_cache_capacity(16);
+            Ok(())
+        })
+        .unwrap();
+    let tables = tables.lock().unwrap().clone();
+    (selected, tables)
+}
+
+#[test]
+fn latest_label_selection_reads_the_label_index_and_matches_the_records() {
+    let connection = connection(300);
+    let catalog = Catalog::open(connection.clone()).unwrap();
+    catalog.save_vertex(7, "other", "{}").unwrap();
+    catalog.save_vertex(500, "node", "{}").unwrap();
+    let snapshot = connection.native_snapshot().unwrap().unwrap();
+    let mut filter = GraphEntityFilter::new(GraphEntityKind::Vertex, Some("g"));
+    filter.label = Some("node");
+    let pages = [(None, 256), (Some(100), 50), (Some(299), 256), (None, 1)];
+    let mut latest = Vec::new();
+    for (after, limit) in pages {
+        let (selected, tables) = select_reading(&connection, &snapshot, filter, after, limit);
+        assert!(tables.contains("_graph_vertices"), "{tables:?}");
+        latest.push(selected);
+    }
+    assert!(!latest[0].contains(&7));
+    // A later commit leaves the snapshot behind, so the same selections resolve its records.
+    catalog.save_vertex(301, "node", "{}").unwrap();
+    for ((after, limit), expected) in pages.into_iter().zip(latest) {
+        let (selected, tables) = select_reading(&connection, &snapshot, filter, after, limit);
+        assert!(!tables.contains("_graph_vertices"), "{tables:?}");
+        assert_eq!(selected, expected, "after {after:?}, limit {limit}");
+    }
+}
