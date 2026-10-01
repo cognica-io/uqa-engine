@@ -20,11 +20,16 @@ const CHANGE_JOURNAL_LOCK_BYTE: u64 = 10;
 const SLOT_METADATA_LOCK_BYTE: u64 = 11;
 #[cfg(windows)]
 const MODE_TRANSITION_LOCK_BYTE: u64 = 12;
+const TRANSACTION_XID_ATTACHMENT_BYTE: u64 = 8;
 const TRANSACTION_XID_LOCK_BYTE: u64 = 13;
 const TRANSACTION_XID_STATE_OFFSET: u64 = 16;
 const TRANSACTION_XID_STATE_SIZE: usize = 16;
 const TRANSACTION_XID_STATE_MAGIC: u32 = 0x5551_5849;
 const TRANSACTION_XID_STATE_VERSION: u32 = 1;
+const TRANSACTION_XID_CURSOR_OFFSET: u64 = 32;
+const TRANSACTION_XID_CURSOR_SIZE: usize = 24;
+const TRANSACTION_XID_CURSOR_MAGIC: u32 = 0x5551_5843;
+const TRANSACTION_XID_CURSOR_VERSION: u32 = 1;
 const WAIT_SLOT_BASE: u64 = 64;
 const WAIT_SLOT_SIZE: u64 = 32;
 const WAIT_SLOT_COUNT: u64 = 256;
@@ -79,7 +84,7 @@ pub(in crate::row_locks) struct FileLockCoordinator {
     file: std::fs::File,
     change_file: std::fs::File,
     change_journal: Mutex<()>,
-    transaction_xids: Mutex<()>,
+    transaction_xids: Mutex<xids::TransactionXids>,
     temporary_role_slots: Mutex<temporary_roles::Slots>,
     state: Mutex<CoordinatorState>,
 }
@@ -129,7 +134,7 @@ impl FileLockCoordinator {
             file,
             change_file,
             change_journal: Mutex::new(()),
-            transaction_xids: Mutex::new(()),
+            transaction_xids: Mutex::new(xids::TransactionXids::new()),
             temporary_role_slots: Mutex::new(temporary_roles::Slots::default()),
             state: Mutex::new(CoordinatorState {
                 claims: HashMap::new(),
@@ -145,6 +150,12 @@ impl FileLockCoordinator {
             }),
         };
         Ok(coordinator)
+    }
+}
+
+impl Drop for FileLockCoordinator {
+    fn drop(&mut self) {
+        self.detach_transaction_xids();
     }
 }
 
