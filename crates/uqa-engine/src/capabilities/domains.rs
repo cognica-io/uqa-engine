@@ -24,6 +24,7 @@ impl Engine {
             },
             publication: self,
             enums: self,
+            composites: self,
             changes: self,
         }
     }
@@ -58,6 +59,7 @@ impl Engine {
             catalog: self,
             publication: self,
             enums: self,
+            composites: self,
             changes: self,
         }
     }
@@ -112,6 +114,17 @@ impl TypeObjectCatalog for Engine {
     fn enum_by_type_oid(&self, oid: u32) -> Option<uqa_sql::catalog::enum_type::StoredEnum> {
         self.durable
             .enums
+            .read()
+            .values()
+            .find(|definition| definition.oid == oid || definition.array_oid == oid)
+            .cloned()
+    }
+    fn composite_by_type_oid(
+        &self,
+        oid: u32,
+    ) -> Option<uqa_sql::catalog::composite_type::StoredComposite> {
+        self.durable
+            .composites
             .read()
             .values()
             .find(|definition| definition.oid == oid || definition.array_oid == oid)

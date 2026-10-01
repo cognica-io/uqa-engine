@@ -116,6 +116,7 @@ pub fn forbidden_command(
         | CommandPlan::AlterSequence(_)
         | CommandPlan::CreateDomain(_)
         | CommandPlan::CreateEnum(_)
+        | CommandPlan::CreateCompositeType(_)
         | CommandPlan::AlterEnum(_)
         | CommandPlan::AlterTypeObject(_)
         | CommandPlan::GrantType(_)

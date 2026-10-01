@@ -119,6 +119,12 @@ pub enum ColumnType {
         name: String,
         oid: u32,
     },
+    /// A composite type. Handlers exchange records whose fields carry the type's attribute names in attribute order.
+    Composite {
+        schema: String,
+        name: String,
+        oid: u32,
+    },
     /// An array whose element metadata is preserved across the SQL/FDW boundary.
     Array(Box<ColumnType>),
 }

@@ -114,6 +114,12 @@ impl fmt::Display for TypeName<'_> {
                 &super::display::visible_type_name(&reference.schema, &reference.name),
             ),
             ColumnType::Enum(reference) => f.write_str(&crate::expr::quote_ident(&reference.name)),
+            ColumnType::Composite(reference) if self.regtype => f.write_str(
+                &super::display::visible_type_name(&reference.schema, &reference.name),
+            ),
+            ColumnType::Composite(reference) => {
+                f.write_str(&crate::expr::quote_ident(&reference.name))
+            }
             ColumnType::SmallInteger => f.write_str("smallint"),
             ColumnType::Integer => f.write_str("integer"),
             ColumnType::BigInteger => f.write_str("bigint"),

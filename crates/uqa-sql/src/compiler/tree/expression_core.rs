@@ -250,9 +250,9 @@ pub(in crate::compiler) fn compile_indirection(
                         "indirection contains an empty field name".into(),
                     ));
                 }
-                // `(composite).field` access on map values.
+                // `(composite).field`: a composite value's field, or a document map's key.
                 current = dispatched_call(
-                    FunctionDispatch::Subscript,
+                    FunctionDispatch::FieldSelect,
                     vec![current, Expr::Literal(Value::Str(field.sval.clone()))],
                 );
             }

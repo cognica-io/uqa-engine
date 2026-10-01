@@ -715,6 +715,7 @@ impl Statement {
         match self {
             Self::Select(select) => select.upgrade_legacy_serialized_dispatches(),
             Self::CreateEnum(_)
+            | Self::CreateCompositeType(_)
             | Self::AlterEnum(_)
             | Self::AlterTypeObject(_)
             | Self::GrantType(_) => false,

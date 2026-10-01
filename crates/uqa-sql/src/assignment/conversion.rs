@@ -138,9 +138,13 @@ pub fn convert_declared_value_to_column_type(
     }
 }
 
-fn type_requires_catalog_resolution(ty: &ColumnType) -> bool {
+/// Whether converting a value to `ty` needs the statement's catalog: enum labels, domain constraints, composite attributes or role names.
+pub(crate) fn type_requires_catalog_resolution(ty: &ColumnType) -> bool {
     match ty {
-        ColumnType::Regrole | ColumnType::Domain { .. } | ColumnType::Enum(_) => true,
+        ColumnType::Regrole
+        | ColumnType::Domain { .. }
+        | ColumnType::Enum(_)
+        | ColumnType::Composite(_) => true,
         ColumnType::Array(element) => type_requires_catalog_resolution(element),
         _ => false,
     }

@@ -304,7 +304,7 @@ fn age_pg_attribute_row(relid: i64, attnum: i64, column: &str, type_name: &str) 
             "atttypid",
             int_value(i64::from(ag_catalog_type_oid(type_name))),
         ),
-        ("attstattarget", int_value(-1)),
+        ("attstattarget", Value::Null),
         ("attlen", int_value(attlen)),
         ("attnum", int_value(attnum)),
         ("attndims", int_value(0)),

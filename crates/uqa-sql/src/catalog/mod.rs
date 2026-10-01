@@ -847,6 +847,7 @@ pub mod analysis;
 
 pub mod array_type_names;
 
+pub mod composite_type;
 pub mod domain;
 pub mod enum_type;
 pub mod events;

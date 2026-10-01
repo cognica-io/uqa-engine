@@ -46,6 +46,7 @@ pub(in crate::schema) enum GenerationType {
     Tensor,
     Record,
     Enum(crate::ast::EnumTypeReference),
+    Composite(crate::ast::CompositeTypeReference),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -304,6 +305,7 @@ pub(in crate::schema) fn column_generation_type(ty: &ColumnType) -> GenerationTy
             unreachable!("unresolved declaration type {name} reached catalog projection")
         }
         ColumnType::Enum(reference) => GenerationType::Enum(reference.clone()),
+        ColumnType::Composite(reference) => GenerationType::Composite(reference.clone()),
         ColumnType::SmallInteger => GenerationType::SmallInteger,
         ColumnType::Integer => GenerationType::Integer,
         ColumnType::BigInteger => GenerationType::BigInteger,
@@ -395,6 +397,7 @@ pub(in crate::schema) fn generation_type_name(ty: &GenerationType) -> String {
         GenerationType::Tensor => "tensor".into(),
         GenerationType::Record => "record".into(),
         GenerationType::Enum(reference) => ColumnType::Enum(reference.clone()).sql_name(),
+        GenerationType::Composite(reference) => ColumnType::Composite(reference.clone()).sql_name(),
     }
 }
 
@@ -586,6 +589,68 @@ fn infer_expression(
     }
 }
 
+/// `(expression).field` in a generation expression: a row constructor's `fN` field or a composite value's attribute.
+fn field_generation_type(
+    engine: &dyn SchemaExpressionCatalog,
+    columns: &[ColumnDef],
+    args: &[Expr],
+    argument_types: &[GenerationType],
+    dependencies: &mut Vec<GeneratedFunctionDependency>,
+) -> Result<GenerationType, SQLError> {
+    use crate::type_resolution::field_selection;
+    let ([base, Expr::Literal(Value::Str(field))], [base_type, _]) = (args, argument_types) else {
+        return Err(SQLError::Internal(
+            "field selection takes an expression and a field name".into(),
+        ));
+    };
+    let declared = |ty: &GenerationType| {
+        if type_rules::is_unknown(ty) {
+            None
+        } else {
+            match ty {
+                GenerationType::Composite(reference) => {
+                    Some(ColumnType::Composite(reference.clone()))
+                }
+                GenerationType::Record => Some(ColumnType::Record),
+                other => ColumnType::from_sql_name(&generation_type_name(other)).ok(),
+            }
+        }
+    };
+    let field_type = if let Expr::Row(items) = base {
+        let items = items
+            .iter()
+            .map(|item| {
+                infer_expression(engine, columns, item, dependencies).map(|ty| declared(&ty))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        field_selection::row_field_type(&items, field)?
+    } else {
+        let catalog = CompositeFieldResolver(engine);
+        field_selection::value_field_type(declared(base_type).as_ref(), field, Some(&catalog))?
+    };
+    Ok(field_type.map_or(GenerationType::Null, |ty| column_generation_type(&ty)))
+}
+
+/// Composite attribute lookup for generation expressions, which bind through the schema catalog rather than a routine resolver.
+struct CompositeFieldResolver<'a>(&'a dyn SchemaExpressionCatalog);
+
+impl crate::type_resolution::FunctionTypeResolver for CompositeFieldResolver<'_> {
+    fn composite_types(&self) -> Option<&dyn crate::expr::composites::CompositeTypeCatalog> {
+        crate::expr::EngineHook::composite_types(self.0)
+    }
+
+    fn resolve_function_type(
+        &self,
+        _name: &str,
+        _binding: Option<&crate::ast::FunctionBinding>,
+        _argument_names: &[Option<String>],
+        _argument_types: &[Option<ColumnType>],
+        _explicit_variadic: bool,
+    ) -> Result<Option<ColumnType>, SQLError> {
+        Ok(None)
+    }
+}
+
 fn infer_function(
     engine: &dyn SchemaExpressionCatalog,
     columns: &[ColumnDef],
@@ -609,6 +674,9 @@ fn infer_function(
 
     if let Some(binding) = binding {
         if binding.builtin {
+            if binding.dispatch == Some(crate::ast::FunctionDispatch::FieldSelect) {
+                return field_generation_type(engine, columns, args, &argument_types, dependencies);
+            }
             if let Some(dispatch) = binding.dispatch {
                 if let Some(return_type) = infer_dispatched_function(dispatch, &argument_types)? {
                     return Ok(return_type);

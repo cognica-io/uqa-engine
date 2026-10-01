@@ -427,6 +427,7 @@ pub fn build_pg_type(
         array.insert("typowner".into(), int_value(owner));
         types.push(array);
     }
+    types.extend(super::composites::composite_type_rows(catalog)?);
     for definition in catalog.enums() {
         let ty = definition.column_type();
         let owner = int_value(definition.owner.oid);
@@ -459,7 +460,7 @@ pub fn build_pg_type(
 }
 
 /// `typacl`: NULL for the default ACL; array types have none of their own.
-fn type_acl_value(
+pub(super) fn type_acl_value(
     catalog: &CatalogReadView,
     acl: Option<&[uqa_sql::ast::ObjectAclEntry]>,
 ) -> Result<Value, uqa_sql::SQLError> {
@@ -548,7 +549,7 @@ struct PgTypeCatalogMetadata<'a> {
     collation_oid: i64,
 }
 
-fn pg_type_catalog_row(
+pub(super) fn pg_type_catalog_row(
     ty: &ColumnType,
     namespace_oid: i64,
     kind: &str,

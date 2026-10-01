@@ -142,7 +142,7 @@ pub fn command_tag_name(command: &CommandPlan) -> &'static str {
         }
         CommandPlan::CreateSequence(_) => "CREATE SEQUENCE",
         CommandPlan::CreateDomain(_) => "CREATE DOMAIN",
-        CommandPlan::CreateEnum(_) => "CREATE TYPE",
+        CommandPlan::CreateEnum(_) | CommandPlan::CreateCompositeType(_) => "CREATE TYPE",
         CommandPlan::AlterEnum(_) => "ALTER TYPE",
         CommandPlan::AlterTypeObject(statement) => match statement.kind {
             crate::ast::TypeObjectKind::Type => "ALTER TYPE",

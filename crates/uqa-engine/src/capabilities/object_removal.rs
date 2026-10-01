@@ -19,6 +19,7 @@ impl CatalogRemovalInputs for Engine {
             foreign_tables: self.foreign_removal_context(),
             indexes: self.index_removal_context(),
             domains: self.domain_dependency_context(),
+            composites: self.composite_attribute_context(),
             schemas: self.empty_schema_removal_context(),
             events: self,
             notices: self.query_runtime_view().notices,

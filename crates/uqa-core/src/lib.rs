@@ -30,7 +30,7 @@ pub use cancel::{CancellationToken, QueryCancelled, SQLSTATE_QUERY_CANCELED};
 pub use doc_set::DocSet;
 pub use float_text::{format_float_pg, format_float_pg_with_control};
 pub use posting_list::{GeneralizedPostingList, PostingList};
-pub use predicate::Predicate;
+pub use predicate::{sql_null_test, Predicate};
 pub use ranked_view::RankedView;
 pub use relation::{LogSemiring, Relation, RelationEntry, Semiring};
 pub use relation_identity::RelationIdentity;

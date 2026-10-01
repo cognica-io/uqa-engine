@@ -34,7 +34,7 @@ pub fn restore(
     catalog: &dyn CatalogFacade,
     roles: &BTreeMap<String, RoleDefinition>,
 ) -> StorageBackendResult<EnumRegistry> {
-    let registry = records::read(catalog)?;
+    let registry = records::FORMAT.read(catalog)?;
     validate_enum_registry(&registry, roles).map_err(StorageBackendError::Other)?;
     Ok(registry)
 }
@@ -53,7 +53,7 @@ pub fn merge_private(
         .collect::<std::collections::BTreeSet<_>>();
     for name in names {
         let private = catalog.map_or(Ok(false), |catalog| {
-            catalog.metadata_has_private_changes(&records::key(&name))
+            catalog.metadata_has_private_changes(&records::FORMAT.key(&name))
         })?;
         if private {
             if let Some(definition) = current.get(&name) {
@@ -75,15 +75,19 @@ pub fn publish(
 ) -> Result<(), uqa_sql::SQLError> {
     let registry = {
         let current = publication.enum_registry();
-        let registry = records::merge_changes(before, &registry, &current).map_err(|error| {
-            uqa_sql::catalog::errors::storage_error("prepare enum catalog", &error)
-        })?;
+        let registry = records::FORMAT
+            .merge_changes(before, &registry, &current)
+            .map_err(|error| {
+                uqa_sql::catalog::errors::storage_error("prepare enum catalog", &error)
+            })?;
         validate_enum_registry(&registry, &publication.enum_role_definitions())
             .map_err(uqa_sql::SQLError::Internal)?;
         if let Some(catalog) = publication.enum_catalog() {
-            records::persist(catalog, &current, &registry).map_err(|error| {
-                uqa_sql::catalog::errors::storage_error("persist enum catalog", &error)
-            })?;
+            records::FORMAT
+                .persist(catalog, &current, &registry)
+                .map_err(|error| {
+                    uqa_sql::catalog::errors::storage_error("persist enum catalog", &error)
+                })?;
         }
         registry
     };

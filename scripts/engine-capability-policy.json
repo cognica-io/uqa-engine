@@ -21,6 +21,7 @@
         "crates/uqa-engine/src/capabilities/catalog_execution.rs",
         "crates/uqa-engine/src/capabilities/column_removal.rs",
         "crates/uqa-engine/src/capabilities/column_rewrites.rs",
+        "crates/uqa-engine/src/capabilities/composites.rs",
         "crates/uqa-engine/src/capabilities/constraint_changes.rs",
         "crates/uqa-engine/src/capabilities/constraints.rs",
         "crates/uqa-engine/src/capabilities/copy.rs",

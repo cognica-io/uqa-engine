@@ -89,6 +89,7 @@ pub fn bind_stored_query_relations(
                     .is_ok_and(|relation| relation.schema == catalog.temporary_schema);
                 Ok(canonical)
             }
+            Some((canonical, "composite type")) => Err(composite_relation_error(&canonical)),
             Some((canonical, kind)) => Err(SQLError::Routine {
                 sqlstate: "42809".into(),
                 message: format!(
@@ -111,4 +112,14 @@ pub fn bind_stored_query_relations(
         })
     })?;
     Ok(uses_temporary_relation)
+}
+
+/// A composite type's relation holds no rows, so `table_open` refuses it.
+pub(super) fn composite_relation_error(canonical: &str) -> SQLError {
+    crate::catalog::analysis::UnopenableRelation {
+        name: RelationIdentity::from_legacy_name(canonical)
+            .map_or_else(|_| canonical.to_string(), |relation| relation.name),
+        kinds: "composite types",
+    }
+    .error()
 }

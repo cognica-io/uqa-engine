@@ -154,6 +154,7 @@ pub fn pg_type_oid(ty: &ColumnType) -> i64 {
             ColumnType::Tensor(_) => 380_003,
             ColumnType::Domain { oid, array_oid, .. } => pg_domain_array_oid(*oid, *array_oid),
             ColumnType::Enum(reference) => i64::from(reference.array_oid),
+            ColumnType::Composite(reference) => i64::from(reference.array_oid),
             ColumnType::Range(subtype) => match subtype {
                 RangeSubtype::Integer => 3905,
                 RangeSubtype::Numeric => 3907,
@@ -182,6 +183,7 @@ pub fn pg_type_oid(ty: &ColumnType) -> i64 {
         ColumnType::Tensor(_) => 380_001,
         ColumnType::Domain { oid, .. } => i64::from(*oid),
         ColumnType::Enum(reference) => i64::from(reference.oid),
+        ColumnType::Composite(reference) => i64::from(reference.oid),
     }
 }
 
@@ -377,6 +379,8 @@ pub fn pg_type_align(ty: &ColumnType) -> &'static str {
         | ColumnType::TimestampTzPrecision(_)
         | ColumnType::Interval
         | ColumnType::IntervalWithFields { .. }
+        | ColumnType::Record
+        | ColumnType::Composite(_)
         | ColumnType::Range(
             RangeSubtype::BigInteger | RangeSubtype::Timestamp | RangeSubtype::TimestampTz,
         )
@@ -409,7 +413,9 @@ pub fn pg_type_storage(ty: &ColumnType) -> &'static str {
         | ColumnType::Range(_)
         | ColumnType::Multirange(_)
         | ColumnType::Vector(_)
-        | ColumnType::Tensor(_) => "x",
+        | ColumnType::Tensor(_)
+        | ColumnType::Record
+        | ColumnType::Composite(_) => "x",
         ColumnType::Domain { base, .. } => pg_type_storage(base),
         _ => "p",
     }
@@ -557,6 +563,7 @@ pub fn pg_type_routine_oids(ty: &ColumnType) -> PgTypeRoutineOids {
         }
         ColumnType::Boolean => PgTypeRoutineOids::new(1242, 1243, 2436, 2437),
         ColumnType::Enum(_) => PgTypeRoutineOids::new(3506, 3507, 3532, 3533),
+        ColumnType::Composite(_) => PgTypeRoutineOids::new(2290, 2291, 2402, 2403),
         ColumnType::Void => PgTypeRoutineOids::new(2298, 2299, 3120, 3121),
         ColumnType::Bytea => PgTypeRoutineOids::new(1244, 31, 2412, 2413),
         ColumnType::InternalChar => PgTypeRoutineOids::new(1245, 33, 2434, 2435),
@@ -631,6 +638,7 @@ pub fn column_type_name(ty: &ColumnType) -> &str {
     match ty {
         ColumnType::Named(name) => name,
         ColumnType::Enum(reference) => &reference.name,
+        ColumnType::Composite(reference) => &reference.name,
         ColumnType::SmallInteger => "smallint",
         ColumnType::Integer => "integer",
         ColumnType::BigInteger => "bigint",

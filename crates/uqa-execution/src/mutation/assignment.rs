@@ -96,7 +96,12 @@ pub fn eval_mutation_assignment<S: Clone + 'static>(
     let empty_schema = RowSchema::default();
     let schema = row.map_or(&empty_schema, |row| &row.schema);
     let hook = services.expressions.expressions.bind_scope(ctes.clone());
-    let source = crate::scalar_type_with_resolver(expression, schema, params, hook.as_ref())?;
+    let source = uqa_sql::type_resolution::assignment_source_type(
+        expression,
+        schema,
+        params,
+        hook.as_ref(),
+    )?;
     subscripts::assign_value(
         services,
         ctes,
@@ -145,7 +150,7 @@ pub fn eval_typed_assignment<S: Clone + 'static>(
     uqa_sql::assignment::targets::validate_assignment_type(target.target, target.ty)?;
     let schema = RowSchema::default();
     let hook = services.expressions.expressions.bind_scope(ctes.clone());
-    let source = crate::scalar_type_with_resolver(
+    let source = uqa_sql::type_resolution::assignment_source_type(
         expression,
         row.map_or(&schema, |row| &row.schema),
         params,

@@ -144,6 +144,13 @@ impl CatalogReadView {
                 || self.has_constraint_index(&relation)
             {
                 Some("index")
+            } else if self
+                .snapshot
+                .definitions
+                .composites
+                .contains_key(&relation.qualified_name())
+            {
+                Some("composite type")
             } else {
                 None
             };
@@ -544,6 +551,21 @@ impl CatalogReadView {
 
     pub fn enums(&self) -> impl Iterator<Item = &uqa_sql::catalog::enum_type::StoredEnum> {
         self.snapshot.definitions.enums.values()
+    }
+
+    pub fn composites(
+        &self,
+    ) -> impl Iterator<Item = &uqa_sql::catalog::composite_type::StoredComposite> {
+        self.snapshot.definitions.composites.values()
+    }
+
+    /// Resolve a standalone composite type by its type OID or by the OID of its generated array type.
+    pub fn composite_by_type_oid(
+        &self,
+        oid: u32,
+    ) -> Option<&uqa_sql::catalog::composite_type::StoredComposite> {
+        self.composites()
+            .find(|definition| definition.oid == oid || definition.array_oid == oid)
     }
 
     /// Resolve an enum by its type OID or by the OID of its generated array type.

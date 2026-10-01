@@ -28,6 +28,10 @@ mod sql_aggregates;
 mod sql_blocking_spill;
 #[path = "queries/sql_boolean_conditions.rs"]
 mod sql_boolean_conditions;
+#[path = "queries/sql_composites.rs"]
+mod sql_composites;
+#[path = "queries/sql_composites_reopen.rs"]
+mod sql_composites_reopen;
 #[path = "sql_correlated_subqueries.rs"]
 mod sql_correlated_subqueries;
 #[path = "sql_cte.rs"]

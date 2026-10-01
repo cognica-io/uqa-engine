@@ -78,6 +78,7 @@ pub(crate) use uqa_execution::catalog::view::{StoredView, StoredViewKind};
 pub(super) struct DurableCatalogState {
     pub(super) domains: CatalogCell<BTreeMap<String, super::domains::StoredDomain>>,
     pub(super) enums: CatalogCell<uqa_execution::catalog::enum_type::EnumRegistry>,
+    pub(super) composites: CatalogCell<uqa_execution::catalog::composite_type::CompositeRegistry>,
     pub(super) graphs: CatalogCell<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub(super) models: CatalogCell<BTreeMap<String, DeepModel>>,
     pub(super) scoring_params: CatalogCell<BTreeMap<String, String>>,
@@ -120,6 +121,7 @@ pub(super) struct DurableCatalogState {
 pub(super) struct DurableCatalogSnapshot {
     pub(super) domains: Arc<BTreeMap<String, super::domains::StoredDomain>>,
     pub(super) enums: Arc<uqa_execution::catalog::enum_type::EnumRegistry>,
+    pub(super) composites: Arc<uqa_execution::catalog::composite_type::CompositeRegistry>,
     pub(super) graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub(super) models: Arc<BTreeMap<String, DeepModel>>,
     pub(super) scoring_params: Arc<BTreeMap<String, String>>,
@@ -158,6 +160,7 @@ impl DurableCatalogState {
         Self {
             domains: CatalogCell::new(BTreeMap::new()),
             enums: CatalogCell::new(BTreeMap::new()),
+            composites: CatalogCell::new(BTreeMap::new()),
             graphs: CatalogCell::new(BTreeMap::new()),
             models: CatalogCell::new(BTreeMap::new()),
             scoring_params: CatalogCell::new(BTreeMap::new()),
@@ -197,6 +200,7 @@ impl DurableCatalogState {
         DurableCatalogSnapshot {
             domains: self.domains.snapshot(),
             enums: self.enums.snapshot(),
+            composites: self.composites.snapshot(),
             graphs: self.graphs.snapshot(),
             models: self.models.snapshot(),
             scoring_params: self.scoring_params.snapshot(),
@@ -257,6 +261,7 @@ impl DurableCatalogState {
         self.sql_user_functions
             .restore(&snapshot.sql_user_functions);
         self.enums.restore(&snapshot.enums);
+        self.composites.restore(&snapshot.composites);
         self.domains.restore(&snapshot.domains);
         self.roles.restore(&snapshot.roles);
         self.role_memberships.restore(&snapshot.role_memberships);
@@ -497,6 +502,8 @@ pub(super) struct QueryRuntime {
     pub(super) bayesian_params_cache: RwLock<BTreeMap<String, BayesianBM25Params>>,
     pub(super) regtype_output_cache: uqa_execution::catalog::cache::RegtypeOutputCache,
     pub(super) enum_label_cache: uqa_execution::catalog::enum_type::EnumLabelCache,
+    pub(super) composite_descriptor_cache:
+        uqa_execution::catalog::composite_type::CompositeDescriptorCache,
     pub(super) physical_index_cache: uqa_execution::catalog::index::physical::PhysicalIndexCache,
 }
 
@@ -521,6 +528,8 @@ impl QueryRuntime {
             bayesian_params_cache: RwLock::new(BTreeMap::new()),
             regtype_output_cache: uqa_execution::catalog::cache::RegtypeOutputCache::default(),
             enum_label_cache: uqa_execution::catalog::enum_type::EnumLabelCache::default(),
+            composite_descriptor_cache:
+                uqa_execution::catalog::composite_type::CompositeDescriptorCache::default(),
             physical_index_cache:
                 uqa_execution::catalog::index::physical::PhysicalIndexCache::default(),
         }

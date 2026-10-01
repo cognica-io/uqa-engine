@@ -24,6 +24,12 @@ pub struct ColumnValueIndex {
     /// because string-vs-temporal comparisons need parsing.
     has_temporal: bool,
     has_fallible_comparison: bool,
+    /// Set when any indexed key is a row value, whose null test inspects its fields; the null set cannot answer it, as `PostgreSQL` never indexes a row-type null test.
+    has_row_values: bool,
+}
+
+fn value_is_row(value: &Value) -> bool {
+    matches!(value, Value::Row(_) | Value::Record(_))
 }
 
 fn value_is_temporal(value: &Value) -> bool {
@@ -61,12 +67,14 @@ impl ColumnValueIndex {
         let mut nulls = Vec::new();
         let mut has_temporal = false;
         let mut has_fallible_comparison = false;
+        let mut has_row_values = false;
         for (doc_id, value) in values {
             stored.insert(doc_id, value.clone());
             match value {
                 Value::Null => nulls.push(doc_id),
                 value => {
                     has_temporal |= value_is_temporal(&value);
+                    has_row_values |= value_is_row(&value);
                     has_fallible_comparison |= uqa_sql::expr::value_comparison_can_fail(&value);
                     index.insert(doc_id, value);
                 }
@@ -80,6 +88,7 @@ impl ColumnValueIndex {
             nulls,
             has_temporal,
             has_fallible_comparison,
+            has_row_values,
         }
     }
 
@@ -93,6 +102,7 @@ impl ColumnValueIndex {
             }
             value => {
                 self.has_temporal |= value_is_temporal(value);
+                self.has_row_values |= value_is_row(value);
                 self.has_fallible_comparison |= uqa_sql::expr::value_comparison_can_fail(value);
                 self.index.insert(doc_id, value.clone());
             }
@@ -118,6 +128,7 @@ impl ColumnValueIndex {
         self.nulls.clear();
         self.has_temporal = false;
         self.has_fallible_comparison = false;
+        self.has_row_values = false;
     }
 
     /// Resolve `predicate` to a posting list, or `None` when this
@@ -175,7 +186,11 @@ impl ColumnValueIndex {
         predicate_targets_are_index_safe(predicate)
             && !comparison::needs_sql_comparison(predicate, self.has_fallible_comparison)
             && !matches!(predicate, Predicate::NotEquals(_))
-            && (matches!(predicate, Predicate::IsNull | Predicate::IsNotNull) || !self.has_temporal)
+            && if matches!(predicate, Predicate::IsNull | Predicate::IsNotNull) {
+                !self.has_row_values
+            } else {
+                !self.has_temporal
+            }
     }
 }
 

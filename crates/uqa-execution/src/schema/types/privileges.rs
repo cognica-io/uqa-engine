@@ -248,6 +248,10 @@ fn with_acl(object: TypeObject, acl: Option<Vec<ObjectAclEntry>>) -> TypeObject 
             definition.usage_acl = acl;
             TypeObject::Domain(definition)
         }
+        TypeObject::Composite(mut definition) => {
+            definition.usage_acl = acl;
+            TypeObject::Composite(definition)
+        }
     }
 }
 
@@ -264,6 +268,16 @@ fn publish(context: &TypeLifecycleContext<'_>, object: TypeObject) -> Result<(),
             let mut registry = before.clone();
             registry.insert(definition.identity.qualified_name(), *definition);
             domain::publish(context.registries.domains, &before, registry)
+        }
+        TypeObject::Composite(definition) => {
+            let before = context.registries.composites.composite_registry().clone();
+            let mut registry = before.clone();
+            registry.insert(definition.identity.qualified_name(), *definition);
+            crate::catalog::composite_type::publish(
+                context.registries.composites,
+                &before,
+                registry,
+            )
         }
     }
 }

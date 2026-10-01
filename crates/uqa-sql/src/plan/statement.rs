@@ -362,6 +362,9 @@ impl UnifiedPlan {
                 Self::Command(Box::new(CommandPlan::CreateSequence(value)))
             }
             Statement::CreateEnum(value) => Self::Command(Box::new(CommandPlan::CreateEnum(value))),
+            Statement::CreateCompositeType(value) => {
+                Self::Command(Box::new(CommandPlan::CreateCompositeType(value)))
+            }
             Statement::AlterEnum(value) => Self::Command(Box::new(CommandPlan::AlterEnum(value))),
             Statement::AlterTypeObject(value) => {
                 Self::Command(Box::new(CommandPlan::AlterTypeObject(value)))
@@ -574,6 +577,7 @@ impl CommandPlan {
             Self::CreateSequence(_) => "CreateSequence",
             Self::CreateDomain(_) => "CreateDomain",
             Self::CreateEnum(_) => "CreateEnum",
+            Self::CreateCompositeType(_) => "CreateCompositeType",
             Self::AlterEnum(_) => "AlterEnum",
             Self::AlterTypeObject(_) => "AlterTypeObject",
             Self::GrantType(_) => "GrantType",

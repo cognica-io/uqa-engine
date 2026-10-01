@@ -11,7 +11,6 @@ use crate::{SQLError, SQLParam};
 
 use crate::schema::ScalarTypeSchema;
 use crate::{RowSchema, ScalarExpr};
-#[cfg(test)]
 use uqa_core::Value;
 
 mod array_transform;
@@ -25,6 +24,7 @@ pub(crate) use common::value_type_with_control;
 mod containment;
 pub(crate) mod enums;
 mod equality;
+pub(crate) mod field_selection;
 mod fixed_builtin;
 mod functions;
 mod gamma;
@@ -139,6 +139,11 @@ pub trait FunctionTypeResolver: Send + Sync {
 
     /// Enum labels of the binding catalog. Binding converts `unknown` literals coerced to an enum type with them, as `PostgreSQL` parse analysis calls the type's input function.
     fn enum_labels(&self) -> Option<&dyn crate::expr::enums::EnumLabelCatalog> {
+        None
+    }
+
+    /// Composite type attributes of the binding catalog, which type field selections and row coercions.
+    fn composite_types(&self) -> Option<&dyn crate::expr::composites::CompositeTypeCatalog> {
         None
     }
 
@@ -267,6 +272,24 @@ pub fn scalar_type_with_resolver(
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<ColumnType>, SQLError> {
     scalar_type_inner(expression, schema, params, Some(resolver))
+}
+
+/// A bare string or NULL literal, which `PostgreSQL` types as `unknown` until its context resolves it.
+pub fn is_unknown_literal(expression: &ScalarExpr) -> bool {
+    matches!(expression, ScalarExpr::Literal(Value::Str(_) | Value::Null))
+}
+
+/// The type of an assignment's source before coercion to its destination. A bare string or NULL literal has none: `transformAssignedExpr` and `transformAssignmentIndirection` convert it with the destination type's input function instead of checking a source type, so `'7'` assigns to an integer array element and `'abc'` fails as integer input.
+pub fn assignment_source_type(
+    expression: &ScalarExpr,
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    resolver: &dyn FunctionTypeResolver,
+) -> Result<Option<ColumnType>, SQLError> {
+    if is_unknown_literal(expression) {
+        return Ok(None);
+    }
+    scalar_type_with_resolver(expression, schema, params, resolver)
 }
 
 pub(super) fn scalar_type_inner(

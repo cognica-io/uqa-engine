@@ -211,6 +211,8 @@ pub(super) fn assignment_compatible(source: &GenerationType, target: &Generation
         | (T::Time, T::TimeTz | T::Interval)
         | (T::TimeTz | T::Interval, T::Time) => true,
         (T::Array(source), T::Array(target)) => assignment_compatible(source, target),
+        // A row constructor is coerced to the target composite type attribute by attribute.
+        (T::Record, T::Composite(_)) => true,
         (T::Array(element), T::Vector) => is_numeric(element),
         (T::Array(element), T::Tensor) => {
             matches!(element.as_ref(), T::Array(inner) if is_numeric(inner))

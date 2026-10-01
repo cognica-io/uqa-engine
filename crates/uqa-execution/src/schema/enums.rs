@@ -68,8 +68,9 @@ pub struct EnumTypeContext<'a> {
     pub binding: TypeObjectBinding<'a>,
     pub allocate_identity: fn() -> Result<[u8; 16], SQLError>,
     pub publication: &'a dyn EnumRegistryPublication,
-    /// Domain arrays share the type namespace with enum arrays.
+    /// Domain and composite arrays share the type namespace with enum arrays.
     pub domains: &'a dyn crate::catalog::domain::DomainRegistryPublication,
+    pub composites: &'a dyn crate::catalog::composite_type::CompositeRegistryPublication,
     pub changes: &'a dyn NamespaceCatalogChanges,
     pub visibility: &'a dyn EnumLabelVisibility,
     pub notices: &'a dyn CatalogNotices,
@@ -108,6 +109,7 @@ pub fn create_enum(context: &EnumTypeContext<'_>, definition: CreateEnum) -> Res
         super::types::arrays::UserTypeRegistries {
             enums: context.publication,
             domains: context.domains,
+            composites: context.composites,
         },
         &requested,
     )?;

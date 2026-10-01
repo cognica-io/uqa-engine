@@ -68,14 +68,16 @@ fn a_view_over_temporary_relations_is_placed_as_a_temporary_relation() {
 
 #[test]
 fn view_collision_diagnostics_precede_replacement_kind_checks() {
-    for kind in ["view", "table", "materialized view"] {
+    for kind in ["view", "table", "materialized view", "composite type"] {
         let error = replacement_is_view("public.v", Some(kind), false).unwrap_err();
         assert_eq!(error.sqlstate(), Some("42P07"));
-        assert!(error.to_string().contains("already exists"));
+        assert_eq!(error.to_string(), "relation \"v\" already exists");
     }
-    let error = replacement_is_view("public.v", Some("table"), true).unwrap_err();
-    assert_eq!(error.sqlstate(), Some("42809"));
-    assert!(error.to_string().contains("it is a table"));
+    for kind in ["table", "composite type"] {
+        let error = replacement_is_view("public.v", Some(kind), true).unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42809"));
+        assert_eq!(error.to_string(), "\"v\" is not a view");
+    }
     assert!(replacement_is_view("public.v", Some("view"), true).unwrap());
     assert!(!replacement_is_view("public.v", None, false).unwrap());
 }

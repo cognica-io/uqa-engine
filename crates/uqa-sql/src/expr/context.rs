@@ -75,6 +75,11 @@ pub trait EngineHook {
         None
     }
 
+    /// Composite type attributes of the statement's catalog. Embedders without catalog composite types keep the default, so composite input and coercion fail as an unavailable type.
+    fn composite_types(&self) -> Option<&dyn super::composites::CompositeTypeCatalog> {
+        None
+    }
+
     /// Resolve a catalog-owned SQL type name for casts evaluated with an engine context.
     fn resolve_type_name(&self, _name: &str) -> std::result::Result<Option<ColumnType>, String> {
         Ok(None)

@@ -83,4 +83,27 @@ impl AnalysisCatalog for CatalogReadView {
     ) -> Result<Option<Vec<Arc<uqa_sql::routines::SQLUserFunction>>>, SQLError> {
         CatalogReadView::sql_functions(self, resolution, name)
     }
+
+    fn unopenable_relation(
+        &self,
+        resolution: &RelationNameResolution,
+        name: &str,
+    ) -> Result<Option<uqa_sql::catalog::analysis::UnopenableRelation>, SQLError> {
+        Ok(
+            match self
+                .relation_kind_resolution(resolution, name)?
+                .into_found()
+            {
+                Some((canonical, "composite type")) => {
+                    let relation = uqa_core::RelationIdentity::from_legacy_name(&canonical)
+                        .map_err(SQLError::Internal)?;
+                    Some(uqa_sql::catalog::analysis::UnopenableRelation {
+                        name: relation.name,
+                        kinds: "composite types",
+                    })
+                }
+                _ => None,
+            },
+        )
+    }
 }

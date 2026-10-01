@@ -204,6 +204,10 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         Some(self.engine)
     }
 
+    fn composite_types(&self) -> Option<&dyn uqa_sql::expr::composites::CompositeTypeCatalog> {
+        Some(self.engine)
+    }
+
     fn nextval(&self, name: &str) -> std::result::Result<i64, SQLError> {
         self.engine.nextval_sql(name)
     }

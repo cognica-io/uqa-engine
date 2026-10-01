@@ -138,7 +138,32 @@ WHERE enumtypid = 'review_state'::regtype
 ORDER BY enumsortorder;
 ```
 
-`DROP TYPE` removes enum types and domains after resolving every target, checking type ownership or containing-schema ownership, and applying the dependency rules of [domain deletion](#domain-declarations-and-deletion): RESTRICT reports `2BP01` while columns, domains, arrays, views or routines depend on the type, and CASCADE removes those dependents. The error and the cascade notice come from the [catalog dependencies](#catalog-dependencies) as PostgreSQL's `findDependentObjects` finds them: the RESTRICT detail names each dependent and the object it depends on, newest dependents last, and a column default or generation expression and a view's rule are reported as the column or view they belong to. Built-in types report `2BP01` as required by the database system, a generated array type cannot be dropped by itself (`2BP01`, naming its element type), and the row type of a table, view, materialized view or foreign table always reports `2BP01` naming its relation.
+`DROP TYPE` removes enum types, composite types and domains after resolving every target, checking type ownership or containing-schema ownership, and applying the dependency rules of [domain deletion](#domain-declarations-and-deletion): RESTRICT reports `2BP01` while columns, domains, arrays, views or routines depend on the type, and CASCADE removes those dependents. The error and the cascade notice come from the [catalog dependencies](#catalog-dependencies) as PostgreSQL's `findDependentObjects` finds them: the RESTRICT detail names each dependent and the object it depends on, newest dependents last, and a column default or generation expression and a view's rule are reported as the column or view they belong to. Built-in types report `2BP01` as required by the database system, a generated array type cannot be dropped by itself (`2BP01`, naming its element type), and the row type of a table, view, materialized view or foreign table always reports `2BP01` naming its relation.
+
+## Composite types
+
+```sql
+CREATE TYPE schema_name.type_name AS (first_attribute integer, second_attribute text COLLATE "C");
+DROP TYPE IF EXISTS schema_name.type_name CASCADE;
+```
+
+`CREATE TYPE ... AS (...)` declares a standalone composite type with its attributes in order; an empty attribute list is allowed. The checks follow PostgreSQL's `DefineCompositeType`: the creation schema and its `CREATE` privilege, then the type name, where a name held by another type reports `42710` and a name held only by a generated array type moves that array aside, then the attributes, where more than 1600 report `54011`, a repeated name `42701`, an unknown type `42704` (`serial` names no type here), a type without `USAGE` `42501`, an unknown collation `42704`, a collation on a type that has none `42804`, `SETOF` `42P16` and a pseudo-type such as `record` or `void` `42P16`, and then the name of the composite relation, which no table, view, sequence, index or other composite relation may hold (`42P07`). `COLLATE` accepts PostgreSQL's built-in collations: `default`, `C`, `POSIX`, `ucs_basic`, `unicode`, `pg_c_utf8` and `pg_unicode_fast`. A type in `pg_catalog` is refused with `42501` after its relation OID is assigned, as `heap_create` refuses it.
+
+The type receives a composite relation in `pg_class` (`relkind = 'c'`), one `pg_attribute` row per attribute and a `pg_type` row with `typtype = 'c'`, category `C` and PostgreSQL's `record_in` and `record_out` routines, together with a generated array type. The relation OID is assigned first, then the array type's and then the type's, as `heap_create_with_catalog` assigns them. `pg_depend` records that the relation belongs to the type, that the array type belongs to the type and that each attribute depends on its type, and `pg_describe_object` names the relation `composite type name` and an attribute `column attribute of composite type name`. Values of the type are named records: `'(1,"a b")'::type_name` reads text as `record_in` does, including its `22P02` diagnostics for a malformed literal, text output quotes fields as `record_out` does, `ROW(...)::type_name` and assignment coerce an anonymous row attribute by attribute (`42846` when the column counts differ), and `(value).attribute` selects a field (`42703` for a missing attribute, `42809` on a value that is not composite). Composite values nest in other composite types and in arrays, compare field by field with NULL fields sorting last, and are null for `IS NULL` only when every field is null and not null for `IS NOT NULL` only when no field is. `UPDATE ... SET column.attribute = value` and `INSERT INTO table (column.attribute)` assign a field, through arrays and nested composites as well; assigning a field of a NULL value creates a row of NULL fields.
+
+Relation commands refuse a composite relation as PostgreSQL does: reading or changing its rows, creating an index, inheriting from it or defining a rule or trigger on it reports `42809` `cannot open relation`, `DROP TABLE` and the other relation drops report `42809` with a hint to use `DROP TYPE`, `ALTER TABLE` reports `42809` with a hint to use `ALTER TYPE`, and `TRUNCATE` and `GRANT` on it report `42809`. `DROP TYPE` removes the type with its relation and array type; with `CASCADE`, an attribute of another composite type whose type is removed is dropped from that type and from its stored values, and keeps its number in `pg_attribute` as a dropped attribute. Definitions and stored values participate in transaction and savepoint rollback and survive reopen on native SQLite, SQLite Key/Value and redb.
+
+```sql execute
+CREATE TYPE shipping_address AS (street text, city text, zip varchar(10));
+CREATE TABLE shipments (id integer, destination shipping_address);
+INSERT INTO shipments VALUES (1, ROW('1 Main St', 'Springfield', '12345')), (2, '("2 Oak Ave",Shelbyville,)');
+UPDATE shipments SET destination.zip = '54321' WHERE id = 2;
+SELECT id, destination, (destination).city FROM shipments ORDER BY id;
+SELECT attname, format_type(atttypid, atttypmod) AS attribute_type
+FROM pg_attribute
+WHERE attrelid = 'shipping_address'::regclass
+ORDER BY attnum;
+```
 
 ## Type lifecycle and privileges
 
@@ -151,7 +176,7 @@ GRANT USAGE ON TYPE schema_name.type_name TO role_name WITH GRANT OPTION;
 REVOKE GRANT OPTION FOR USAGE ON DOMAIN schema_name.domain_name FROM role_name CASCADE;
 ```
 
-`ALTER TYPE` changes enum types and domains; `ALTER DOMAIN` accepts only domains (`42809`). The commands apply PostgreSQL's check order: a missing type reports `42704`, a missing schema `3F000`, a generated array type `42809` with a hint naming its element type, a non-owner `42501`, a taken name `42710`, and `OWNER TO` requires membership in the new owner and `CREATE` on the schema. A type's generated array type is renamed and moved with it, and an array type already holding the new name is moved out of the way first.
+`ALTER TYPE` changes enum types, composite types and domains; `ALTER DOMAIN` accepts only domains (`42809`). The commands apply PostgreSQL's check order: a missing type reports `42704`, a missing schema `3F000`, a generated array type `42809` with a hint naming its element type, a non-owner `42501`, a taken name `42710`, and `OWNER TO` requires membership in the new owner and `CREATE` on the schema. A type's generated array type is renamed and moved with it, and an array type already holding the new name is moved out of the way first. A composite type's relation is renamed, moved and given the new owner with it, so a rename or move also reports `42P07` when a relation holds the name.
 
 Columns, domains, views, defaults, CHECK constraints, generated columns, index expressions and predicates, routine signatures and SQL-standard routine bodies refer to user-defined types by identity, so they follow a rename or schema move without changing. Stored enum constants refer to their labels by identity and follow `RENAME VALUE`. Output such as `pg_get_viewdef`, `pg_get_expr`, `pg_get_constraintdef`, `pg_get_function_arguments`, `format_type` and diagnostics spells a type by its current name, qualified by its schema when the search path does not reach it.
 

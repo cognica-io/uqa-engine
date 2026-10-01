@@ -95,13 +95,6 @@ pub(super) fn assign_typed_value<S: Clone + 'static>(
             source,
         );
     }
-    let required = targets::assignment_value_type(target, declared)?;
-    targets::validate_assignment_source(target, &required, source)?;
-    targets::validate_assignment_result(target, declared)?;
-    let slice = target
-        .indirection
-        .iter()
-        .any(|step| matches!(step, AssignmentStep::Slice { .. }));
     let bound = |expr: &ScalarExpr| -> Result<i32, SQLError> {
         let value = eval_mutation_expr(services.expressions, ctes, expr, row, params)?;
         if value == Value::Null {
@@ -126,6 +119,27 @@ pub(super) fn assign_typed_value<S: Clone + 'static>(
             )),
         }
     };
+    if targets::has_field_step(target) {
+        return assign_field_value(
+            services.assignment,
+            FieldAssignment {
+                target,
+                declared,
+                current: current.unwrap_or(&Value::Null),
+                final_column_write,
+            },
+            value,
+            source,
+            &bound,
+        );
+    }
+    let required = targets::assignment_value_type(target, declared)?;
+    targets::validate_assignment_source(target, &required, source)?;
+    targets::validate_assignment_result(target, declared)?;
+    let slice = target
+        .indirection
+        .iter()
+        .any(|step| matches!(step, AssignmentStep::Slice { .. }));
     let mut bounds = Vec::with_capacity(target.indirection.len());
     for step in &target.indirection {
         bounds.push(match step {
@@ -159,6 +173,144 @@ pub(super) fn assign_typed_value<S: Clone + 'static>(
         )
     } else {
         Ok(result)
+    }
+}
+
+struct FieldAssignment<'a> {
+    target: &'a uqa_sql::ast::AssignmentTarget<ScalarExpr>,
+    declared: &'a ColumnType,
+    current: &'a Value,
+    final_column_write: bool,
+}
+
+/// A write through composite fields and subscript groups, as `transformAssignmentIndirection` nests `FieldStore` and subscripting: each level rebuilds its container around the level below, and a NULL composite becomes a row of NULL fields. Subscript bounds are evaluated in the target's order before the value.
+fn assign_field_value(
+    assignment: &dyn uqa_sql::assignment::AssignmentContext,
+    destination: FieldAssignment<'_>,
+    value: impl FnOnce() -> Result<Value, SQLError>,
+    source: Option<&ColumnType>,
+    bound: &dyn Fn(&ScalarExpr) -> Result<i32, SQLError>,
+) -> Result<Value, SQLError> {
+    let FieldAssignment {
+        target,
+        declared,
+        current,
+        final_column_write,
+    } = destination;
+    let composites = uqa_sql::expr::EngineHook::composite_types(assignment);
+    let types = targets::field_assignment_types(target, declared, composites)?;
+    let required = types
+        .last()
+        .ok_or_else(|| SQLError::Internal("field assignment has no value type".into()))?;
+    targets::validate_assignment_source(target, required, source)?;
+    let levels = targets::assignment_levels(&target.indirection);
+    let mut level_bounds = Vec::with_capacity(levels.len());
+    for level in &levels {
+        let targets::AssignmentLevel::Subscripts(steps) = level else {
+            level_bounds.push(Vec::new());
+            continue;
+        };
+        let slice = level.is_slice();
+        let mut bounds = Vec::with_capacity(steps.len());
+        for step in *steps {
+            bounds.push(match step {
+                AssignmentStep::Index(index) => (slice.then_some(1), Some(bound(index)?)),
+                AssignmentStep::Slice { lower, upper } => (
+                    lower.as_deref().map(bound).transpose()?,
+                    upper.as_deref().map(bound).transpose()?,
+                ),
+                AssignmentStep::Field(_) => {
+                    unreachable!("subscript groups contain no fields")
+                }
+            });
+        }
+        level_bounds.push(bounds);
+    }
+    let value = conversion::coerce_assignment_value(assignment, value()?, required, source)?;
+    let result = assign_levels(current, &types, &levels, &level_bounds, value, composites)?;
+    if !final_column_write {
+        return Ok(result);
+    }
+    // A domain over the composite checks the rebuilt value.
+    let mut base = declared;
+    while let ColumnType::Domain { base: inner, .. } = base {
+        base = inner;
+    }
+    conversion::coerce_assignment_value(assignment, result, declared, Some(base))
+}
+
+fn assign_levels(
+    current: &Value,
+    types: &[ColumnType],
+    levels: &[targets::AssignmentLevel<'_, ScalarExpr>],
+    bounds: &[Vec<(Option<i32>, Option<i32>)>],
+    value: Value,
+    composites: Option<&dyn uqa_sql::expr::composites::CompositeTypeCatalog>,
+) -> Result<Value, SQLError> {
+    let Some((level, rest)) = levels.split_first() else {
+        return Ok(value);
+    };
+    match level {
+        targets::AssignmentLevel::Field(field) => {
+            let mut composite = &types[0];
+            while let ColumnType::Domain { base, .. } = composite {
+                composite = base;
+            }
+            let ColumnType::Composite(reference) = composite else {
+                return Err(SQLError::Internal(
+                    "field assignment level lost its composite type".into(),
+                ));
+            };
+            let descriptor = uqa_sql::expr::composites::descriptor(composites, reference.oid)?;
+            let mut fields = match current {
+                Value::Record(fields) => fields.clone(),
+                Value::Null => descriptor
+                    .attributes
+                    .iter()
+                    .map(|attribute| (attribute.name.clone(), Value::Null))
+                    .collect(),
+                other => {
+                    return Err(SQLError::Internal(format!(
+                        "composite column holds a non-composite carrier {other:?}"
+                    )))
+                }
+            };
+            let slot = fields
+                .iter_mut()
+                .find(|(name, _)| name == field)
+                .ok_or_else(|| {
+                    SQLError::Internal(format!("composite value has no field `{field}`"))
+                })?;
+            slot.1 = assign_levels(&slot.1, &types[1..], rest, &bounds[1..], value, composites)?;
+            Ok(Value::Record(fields))
+        }
+        targets::AssignmentLevel::Subscripts(_) => {
+            let slice = level.is_slice();
+            let level_bounds = &bounds[0];
+            let value = if rest.is_empty() {
+                value
+            } else {
+                let element = match current {
+                    Value::Array(array) => level_bounds
+                        .iter()
+                        .map(|(_, upper)| *upper)
+                        .collect::<Option<Vec<_>>>()
+                        .and_then(|subscripts| array.element_at(&subscripts).cloned())
+                        .unwrap_or(Value::Null),
+                    _ => Value::Null,
+                };
+                assign_levels(&element, &types[1..], rest, &bounds[1..], value, composites)?
+            };
+            Ok(assign_array_with_control(
+                current,
+                &value,
+                level_bounds,
+                slice,
+                &ProductionControl::uncontrolled(),
+            )?
+            .into_uncontrolled()
+            .expect("ordinary array assignment result"))
+        }
     }
 }
 

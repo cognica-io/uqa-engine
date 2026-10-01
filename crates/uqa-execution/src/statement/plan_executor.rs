@@ -831,6 +831,13 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 )?;
                 Ok(SQLResult::empty())
             }
+            CommandPlan::CreateCompositeType(statement) => {
+                crate::schema::composites::create_composite_type(
+                    &self.context.schemas.inputs.composite_type_context(),
+                    statement.clone(),
+                )?;
+                Ok(SQLResult::empty())
+            }
             CommandPlan::AlterEnum(statement) => {
                 crate::schema::enums::alter_enum(
                     &self.context.schemas.inputs.enum_type_context(),

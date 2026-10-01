@@ -133,7 +133,8 @@ pub fn compare_nullable_with_control(
         | (Value::Array(_), Value::Array(_))
         | (Value::LegacyVector(_), Value::LegacyVector(_))
         | (Value::List(_), Value::List(_))
-        | (Value::Record(_), Value::Record(_))
+        | (Value::Record(_), Value::Record(_) | Value::Row(_))
+        | (Value::Row(_), Value::Record(_))
         | (Value::Enum(_), Value::Enum(_)) => Ok(Some(compare_sql_values(a, b, control)?)),
         (Value::FixedChar(x), Value::Str(y)) | (Value::Str(x), Value::FixedChar(y)) => {
             Ok(Some(compare_fixed_text(x, y, control)?))
@@ -203,6 +204,13 @@ pub fn compare_typed_values_with_control(
                 right.iter().map(|(_, v)| v),
                 control,
             );
+        }
+        // A composite value compared with an anonymous row uses the record operators, which order NULL fields after all others.
+        (Value::Record(left), Value::Row(right)) => {
+            return compare_sequence(left.iter().map(|(_, v)| v), right.iter(), control);
+        }
+        (Value::Row(left), Value::Record(right)) => {
+            return compare_sequence(left.iter(), right.iter().map(|(_, v)| v), control);
         }
         (Value::Row(left), Value::Row(right)) | (Value::List(left), Value::List(right)) => {
             return compare_sequence(left.iter(), right.iter(), control);
@@ -284,6 +292,12 @@ fn equal_sql_values(left: &Value, right: &Value, control: &ProductionControl<'_>
             right.iter().map(|(_, v)| v),
             control,
         ),
+        (Value::Record(left), Value::Row(right)) => {
+            equal_sequence(left.iter().map(|(_, v)| v), right.iter(), control)
+        }
+        (Value::Row(left), Value::Record(right)) => {
+            equal_sequence(left.iter(), right.iter().map(|(_, v)| v), control)
+        }
         (Value::Row(left), Value::Row(right)) | (Value::List(left), Value::List(right)) => {
             equal_sequence(left.iter(), right.iter(), control)
         }

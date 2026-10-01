@@ -66,6 +66,8 @@ pub enum FunctionDispatch {
     ArraySlices,
     Subscript,
     Slice,
+    /// `(expression).field`: the field of a composite value, or the key of a document map.
+    FieldSelect,
     AnyOperator,
     AllOperator,
     IsDistinct,
@@ -124,6 +126,7 @@ impl FunctionDispatch {
             Self::VariadicArgument => "VARIADIC argument",
             Self::ArraySubscripts | Self::Subscript => "subscript",
             Self::ArraySlices | Self::Slice => "slice",
+            Self::FieldSelect => "field selection",
             Self::AnyOperator => "ANY operator",
             Self::AllOperator => "ALL operator",
             Self::IsDistinct => "IS DISTINCT FROM",

@@ -115,6 +115,124 @@ pub fn array_assignment_type<E>(
     Ok(array)
 }
 
+/// One level of an assignment target: a composite field, or the consecutive subscripts that `transformAssignmentSubscripts` applies together.
+pub enum AssignmentLevel<'a, E> {
+    Field(&'a str),
+    Subscripts(&'a [AssignmentStep<E>]),
+}
+
+impl<E> AssignmentLevel<'_, E> {
+    /// Whether a subscript group writes a slice.
+    pub fn is_slice(&self) -> bool {
+        match self {
+            Self::Field(_) => false,
+            Self::Subscripts(steps) => steps
+                .iter()
+                .any(|step| matches!(step, AssignmentStep::Slice { .. })),
+        }
+    }
+}
+
+/// Group an assignment's indirection into fields and subscript groups, in order.
+pub fn assignment_levels<E>(steps: &[AssignmentStep<E>]) -> Vec<AssignmentLevel<'_, E>> {
+    let mut levels = Vec::new();
+    let mut position = 0;
+    while position < steps.len() {
+        if let AssignmentStep::Field(field) = &steps[position] {
+            levels.push(AssignmentLevel::Field(field));
+            position += 1;
+            continue;
+        }
+        let start = position;
+        while position < steps.len() && !matches!(steps[position], AssignmentStep::Field(_)) {
+            position += 1;
+        }
+        levels.push(AssignmentLevel::Subscripts(&steps[start..position]));
+    }
+    levels
+}
+
+/// Whether an assignment writes a composite field somewhere along its indirection.
+pub fn has_field_step<E>(target: &AssignmentTarget<E>) -> bool {
+    target
+        .indirection
+        .iter()
+        .any(|step| matches!(step, AssignmentStep::Field(_)))
+}
+
+/// The type each level of a field assignment applies to, followed by the type the assigned value must have, as `transformAssignmentIndirection` resolves them: a field names an attribute of a composite type or of a domain over one, and a subscript group selects an array element, or keeps the array for a slice.
+pub fn field_assignment_types<E>(
+    target: &AssignmentTarget<E>,
+    declared: &ColumnType,
+    composites: Option<&dyn crate::expr::composites::CompositeTypeCatalog>,
+) -> Result<Vec<ColumnType>, SQLError> {
+    let mut types = vec![declared.clone()];
+    for level in assignment_levels(&target.indirection) {
+        let current = types.last().expect("the declared type starts the levels");
+        let mut base = current;
+        while let ColumnType::Domain { base: inner, .. } = base {
+            base = inner;
+        }
+        let next = match level {
+            AssignmentLevel::Field(field) => {
+                let ColumnType::Composite(reference) = base else {
+                    return Err(error("42804", format!(
+                        "cannot assign to field \"{field}\" of column \"{}\" because its type {} is not a composite type",
+                        target.column, current.display_name()
+                    )));
+                };
+                let descriptor = crate::expr::composites::descriptor(composites, reference.oid)?;
+                let Some((_, attribute)) = descriptor.attribute(field) else {
+                    return Err(error("42703", format!(
+                        "cannot assign to field \"{field}\" of column \"{}\" because there is no such column in data type {}",
+                        target.column, current.display_name()
+                    )));
+                };
+                attribute.ty.clone()
+            }
+            AssignmentLevel::Subscripts(steps) => {
+                let array = match base {
+                    ColumnType::Array(_) => base.clone(),
+                    ColumnType::Int2Vector => ColumnType::Array(Box::new(ColumnType::SmallInteger)),
+                    ColumnType::OidVector => ColumnType::Array(Box::new(ColumnType::Oid)),
+                    _ => {
+                        return Err(error(
+                            "42804",
+                            format!(
+                                "cannot subscript type {} because it does not support subscripting",
+                                current.display_name()
+                            ),
+                        ))
+                    }
+                };
+                if steps.len() > 6 {
+                    return Err(error(
+                        "54000",
+                        format!(
+                            "number of array dimensions ({}) exceeds the maximum allowed (6)",
+                            steps.len()
+                        ),
+                    ));
+                }
+                if steps
+                    .iter()
+                    .any(|step| matches!(step, AssignmentStep::Slice { .. }))
+                {
+                    array
+                } else {
+                    let mut element = &array;
+                    while let ColumnType::Array(inner) = element {
+                        element = inner;
+                    }
+                    element.clone()
+                }
+            }
+        };
+        types.push(next);
+    }
+    Ok(types)
+}
+
 /// Slices consume an array; any number of element subscripts consumes one scalar element.
 pub fn assignment_value_type<E>(
     target: &AssignmentTarget<E>,
@@ -147,15 +265,33 @@ pub fn validate_assignment_source<E>(
 ) -> Result<(), SQLError> {
     if let Some(source) = source {
         if !crate::assignment_type_compatible(source, required) {
-            let message = if target.is_whole_column() {
-                format!(
+            // `transformAssignmentIndirection` names the innermost field it assigns through.
+            let levels = assignment_levels(&target.indirection);
+            let name = levels
+                .iter()
+                .rev()
+                .find_map(|level| match level {
+                    AssignmentLevel::Field(field) => Some(*field),
+                    AssignmentLevel::Subscripts(_) => None,
+                })
+                .unwrap_or(&target.column);
+            let message = match levels.last() {
+                None => format!(
                     "column \"{}\" is of type {} but expression is of type {}",
                     target.column,
                     required.display_name(),
                     source.display_name()
-                )
-            } else {
-                format!("subscripted assignment to \"{}\" requires type {} but expression is of type {}", target.column, required.display_name(), source.display_name())
+                ),
+                Some(AssignmentLevel::Field(field)) => format!(
+                    "subfield \"{field}\" is of type {} but expression is of type {}",
+                    required.display_name(),
+                    source.display_name()
+                ),
+                Some(AssignmentLevel::Subscripts(_)) => format!(
+                    "subscripted assignment to \"{name}\" requires type {} but expression is of type {}",
+                    required.display_name(),
+                    source.display_name()
+                ),
             };
             return Err(SQLError::Diagnostic {
                 sqlstate: "42804".into(),
@@ -173,7 +309,8 @@ pub fn validate_assignment_result<E>(
     target: &AssignmentTarget<E>,
     declared: &ColumnType,
 ) -> Result<(), SQLError> {
-    if target.is_whole_column() {
+    // A field write rebuilds the column's own composite value.
+    if target.is_whole_column() || has_field_step(target) {
         return Ok(());
     }
     let container = array_assignment_type(target, declared)?;

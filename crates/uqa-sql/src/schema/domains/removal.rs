@@ -18,6 +18,11 @@ pub trait TypeObjectCatalog: DomainCatalog {
     fn format_drop_type(&self, oid: i64) -> Result<Option<String>, String>;
     /// An enum by its own type OID or by its generated array's OID.
     fn enum_by_type_oid(&self, oid: u32) -> Option<crate::catalog::enum_type::StoredEnum>;
+    /// A standalone composite type by its own type OID or by its generated array's OID.
+    fn composite_by_type_oid(
+        &self,
+        oid: u32,
+    ) -> Option<crate::catalog::composite_type::StoredComposite>;
     /// The element type of a generated array of a user-defined type.
     fn user_array_element(&self, oid: u32) -> Option<u32>;
     /// The relation whose row type has this OID: its object kind, display name and owner.
@@ -66,7 +71,7 @@ pub fn resolve_drop_domain(
     resolve_type_drop(context, name, if_exists, TypeDropKind::Domain)
 }
 
-/// `DROP TYPE` removes domains and enums. Built-in, generated array and relation row types are required by other objects and fail after the owner check, as in `PostgreSQL`.
+/// `DROP TYPE` removes domains, enums and composite types. Built-in, generated array and relation row types are required by other objects and fail after the owner check, as in `PostgreSQL`.
 pub fn resolve_drop_type(
     context: &TypeObjectBinding<'_>,
     name: &str,
@@ -197,6 +202,18 @@ fn drop_target(
         });
     }
     if let Some(definition) = context.catalog.enum_by_type_oid(oid) {
+        return Ok(DropTarget {
+            schema: Some(definition.identity.schema.clone()),
+            owner: definition.owner,
+            required_by: (definition.array_oid == oid)
+                .then(|| {
+                    format_type(context, i64::from(definition.oid))
+                        .map(|element| Requirement::Object(format!("type {element}")))
+                })
+                .transpose()?,
+        });
+    }
+    if let Some(definition) = context.catalog.composite_by_type_oid(oid) {
         return Ok(DropTarget {
             schema: Some(definition.identity.schema.clone()),
             owner: definition.owner,

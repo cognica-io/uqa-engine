@@ -40,11 +40,22 @@ impl CreationRelationGuards for Names {
     fn indexes(&self) -> Box<dyn CreationRelationNames + '_> {
         self.matches("index")
     }
+    fn composite_types(&self) -> Box<dyn CreationRelationNames + '_> {
+        self.matches("composite")
+    }
 }
 
 #[test]
 fn type_names_include_domains_and_row_types_but_not_sequences_or_indexes() {
-    for kind in ["domain", "table", "view", "foreign", "sequence", "index"] {
+    for kind in [
+        "domain",
+        "table",
+        "view",
+        "foreign",
+        "sequence",
+        "index",
+        "composite",
+    ] {
         let catalog = Names {
             kind,
             identity: RelationIdentity::new("other", "Mixed Name"),

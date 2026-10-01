@@ -41,7 +41,10 @@ impl uqa_sql::schema::SchemaExpressionCatalog for Engine {
 
 impl uqa_sql::schema::inheritance::InheritanceCatalog for Engine {
     fn resolve_parent(&self, name: &str) -> Result<String, SQLError> {
-        self.resolve_visible_table_reference(name)
+        uqa_sql::schema::inheritance::inheritance_parent_target(
+            self.resolve_visible_relation_kind(name)?,
+            name,
+        )
     }
     fn declared_constraints(
         &self,

@@ -19,7 +19,7 @@ const USER_DEFINED_FUNCTION_DETAIL: &str =
 /// Whether a declared type is a catalog object created by a user: an enum, a domain, or an array of either.
 pub(super) fn is_user_defined_type(ty: &ColumnType) -> bool {
     match ty {
-        ColumnType::Enum(_) | ColumnType::Domain { .. } => true,
+        ColumnType::Enum(_) | ColumnType::Composite(_) | ColumnType::Domain { .. } => true,
         ColumnType::Array(element) => is_user_defined_type(element),
         _ => false,
     }
@@ -119,7 +119,7 @@ fn node_has_user_defined_type(
 
 fn generation_type_is_user_defined(ty: &GenerationType) -> bool {
     match ty {
-        GenerationType::Enum(_) => true,
+        GenerationType::Enum(_) | GenerationType::Composite(_) => true,
         GenerationType::Array(element) => generation_type_is_user_defined(element),
         _ => false,
     }

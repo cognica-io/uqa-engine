@@ -310,7 +310,7 @@ impl Binder<'_, '_> {
 /// A catalog type created by a user, or an array of one.
 pub(super) fn is_user_defined_type(ty: &ColumnType) -> bool {
     match ty {
-        ColumnType::Enum(_) | ColumnType::Domain { .. } => true,
+        ColumnType::Enum(_) | ColumnType::Composite(_) | ColumnType::Domain { .. } => true,
         ColumnType::Array(element) => is_user_defined_type(element),
         _ => false,
     }

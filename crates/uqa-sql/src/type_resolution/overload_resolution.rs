@@ -68,6 +68,14 @@ pub fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool 
     {
         return routine_type_accepts_implicit_cast(actual, declared);
     }
+    // Every composite value is a record, as `can_coerce_type` accepts.
+    if declared == "record"
+        && crate::ast::UserTypeIdentity::parse(actual).is_some_and(|identity| {
+            identity.kind == crate::ast::UserTypeKind::Composite && identity.dimensions == 0
+        })
+    {
+        return true;
+    }
     matches!(
         (actual, declared),
         (
@@ -138,10 +146,10 @@ fn canonical_type_category(canonical: &str) -> char {
     if canonical.ends_with("[]") {
         return 'A';
     }
-    if crate::ast::UserTypeIdentity::parse(canonical)
-        .is_some_and(|identity| identity.kind == crate::ast::UserTypeKind::Enum)
-    {
-        return 'E';
+    match crate::ast::UserTypeIdentity::parse(canonical).map(|identity| identity.kind) {
+        Some(crate::ast::UserTypeKind::Enum) => return 'E',
+        Some(crate::ast::UserTypeKind::Composite) => return 'C',
+        _ => {}
     }
     match canonical {
         "bool" => 'B',

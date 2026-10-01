@@ -25,6 +25,19 @@ FROM (VALUES ('a_b'), ('axb')) AS candidates(value)
 WHERE value LIKE 'a!_b' ESCAPE '!';
 ```
 
+## Row and composite values
+
+`ROW(...)` and a parenthesized list of two or more expressions build an anonymous row; casting it to a [composite type](02-ddl.md#composite-types) or assigning it to a column of one coerces each field to its attribute's type, and a row with a different number of fields reports `42846` with PostgreSQL's detail. Text casts to a composite type as `record_in` reads it, and a composite value casts to text as `record_out` writes it, quoting a field that is empty or contains a separator, parenthesis, quote, backslash or whitespace. `(value).field` selects a field: an attribute of a composite value, the `fN` field of an anonymous row, or a column of a relation through its whole-row reference, which `pg_get_viewdef` prints as the column itself. A missing field reports `42703`, as `column t.missing does not exist`, `column "missing" not found in data type pair` or `could not identify column "f3" in record data type`, and field notation on a value that is not composite reports `42809`.
+
+Composite values compare field by field: equality treats two NULL fields as equal, and ordering places NULL fields after all other values, as PostgreSQL's record operators do; anonymous rows compare with SQL's three-valued row comparison instead. `IS NULL` is true for a row or composite value whose fields are all NULL, and `IS NOT NULL` is true when none of its fields is NULL, so a value with both kinds of fields satisfies neither.
+
+```sql execute
+SELECT (ROW(1, 'a')).f2 AS second_field,
+       ROW(NULL, NULL) IS NULL AS all_null,
+       ROW(1, NULL) IS NOT NULL AS none_null,
+       ROW(1, NULL) IS NULL AS some_null;
+```
+
 ## NULL and comparison helpers
 
 | Functions | Purpose |

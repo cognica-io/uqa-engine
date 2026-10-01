@@ -241,6 +241,12 @@ impl Engine {
             snapshot.enums,
             &snapshot.roles,
         )?;
+        snapshot.composites = uqa_execution::catalog::composite_type::merge_private(
+            self.storage.catalog.as_deref(),
+            &current.composites,
+            snapshot.composites,
+            &snapshot.roles,
+        )?;
         snapshot.sql_user_functions = uqa_execution::routines::catalog::merge_private(
             self.storage.catalog.as_deref(),
             &current.sql_user_functions,

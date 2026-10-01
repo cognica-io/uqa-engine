@@ -180,6 +180,7 @@ pub fn build_pg_attribute(
             ));
         }
     }
+    out.extend(super::composites::composite_attribute_rows(catalog));
     out.extend(index_attributes(catalog, resolution)?);
     out.extend(super::super::ag_catalog::age_pg_attribute_rows(catalog)?);
     Ok(out)
@@ -194,14 +195,19 @@ fn sequence_attribute_columns() -> [SQLColumnDef; 3] {
 }
 
 fn sequence_attribute_column(name: &str, ty: ColumnType) -> SQLColumnDef {
+    attribute_column(name, ty, true)
+}
+
+/// A column that has only a name, a type and its nullability, as the attributes of sequences and composite types have.
+pub(super) fn attribute_column(name: &str, ty: ColumnType, not_null: bool) -> SQLColumnDef {
     SQLColumnDef {
         name: name.into(),
         ty,
         object_id: None,
         missing_value: None,
         primary_key: false,
-        not_null: true,
-        not_null_explicit: true,
+        not_null,
+        not_null_explicit: not_null,
         not_null_name: None,
         not_null_identity: None,
         not_null_validated: true,
@@ -235,7 +241,7 @@ pub fn pg_attribute_row(relid: i64, attnum: i64, col: &SQLColumnDef) -> ResultRo
         ("attrelid", int_value(relid)),
         ("attname", str_value(col.name.clone())),
         ("atttypid", int_value(pg_type_oid(&col.ty))),
-        ("attstattarget", int_value(-1)),
+        ("attstattarget", Value::Null),
         ("attlen", int_value(pg_type_len(&col.ty))),
         ("attnum", int_value(attnum)),
         ("attndims", int_value(array_dimension_count(&col.ty))),

@@ -131,6 +131,21 @@ impl CatalogContext<'_> {
                             }
                         })
                 })
+                .or_else(|| {
+                    definitions
+                        .composites
+                        .values()
+                        .filter(|definition| definition.identity.schema == schema)
+                        .find_map(|definition| {
+                            if definition.identity.name == local {
+                                Some(definition.column_type())
+                            } else if definition.array_name == local {
+                                Some(ColumnType::Array(Box::new(definition.column_type())))
+                            } else {
+                                None
+                            }
+                        })
+                })
         };
         if let [schema, local] = names.as_slice() {
             return in_schema(schema, local);

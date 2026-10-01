@@ -25,6 +25,38 @@ impl ColumnType {
         )
     }
 
+    /// Copy a domain's names and base type, charging the boxed base.
+    fn domain_with_control(
+        schema: &str,
+        name: &str,
+        oid: u32,
+        array_oid: Option<u32>,
+        base: &Self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Self>, ValueRetentionError> {
+        let schema = control.copy_text(schema)?;
+        let name = control.copy_text(name)?;
+        let base = base.clone_with_control(control)?;
+        let box_memory = control.reserve(size_of::<Self>())?;
+        let (schema, schema_memory) = schema.into_parts();
+        let (name, name_memory) = name.into_parts();
+        let (base, base_memory) = base.into_parts();
+        let memory = control.combine(
+            control.combine(schema_memory, name_memory),
+            control.combine(base_memory, box_memory),
+        );
+        control.finish(
+            Self::Domain {
+                schema,
+                name,
+                oid,
+                array_oid,
+                base: Box::new(base),
+            },
+            memory,
+        )
+    }
+
     /// Copy only owned type payloads; inline scalar identities require no reservation.
     pub fn clone_with_control(
         &self,
@@ -43,35 +75,17 @@ impl ColumnType {
                 let (reference, memory) = reference.clone_with_control(control)?.into_parts();
                 control.finish(Self::Enum(reference), memory)
             }
+            Self::Composite(reference) => {
+                let (reference, memory) = reference.clone_with_control(control)?.into_parts();
+                control.finish(Self::Composite(reference), memory)
+            }
             Self::Domain {
                 schema,
                 name,
                 oid,
                 array_oid,
                 base,
-            } => {
-                let schema = control.copy_text(schema)?;
-                let name = control.copy_text(name)?;
-                let base = base.clone_with_control(control)?;
-                let box_memory = control.reserve(size_of::<Self>())?;
-                let (schema, schema_memory) = schema.into_parts();
-                let (name, name_memory) = name.into_parts();
-                let (base, base_memory) = base.into_parts();
-                let memory = control.combine(
-                    control.combine(schema_memory, name_memory),
-                    control.combine(base_memory, box_memory),
-                );
-                control.finish(
-                    Self::Domain {
-                        schema,
-                        name,
-                        oid: *oid,
-                        array_oid: *array_oid,
-                        base: Box::new(base),
-                    },
-                    memory,
-                )
-            }
+            } => Self::domain_with_control(schema, name, *oid, *array_oid, base, control),
             Self::SmallInteger
             | Self::Integer
             | Self::BigInteger

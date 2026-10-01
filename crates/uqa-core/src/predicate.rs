@@ -40,12 +40,13 @@ impl Predicate {
 
     /// Evaluate against an optional field value. The two null-aware
     /// variants treat both an absent field (`None`) and an explicit
-    /// `Value::Null` as null; the rest reject either form.
+    /// `Value::Null` as null, and test a row value field by field as
+    /// [`sql_null_test`] does; the rest reject a null value.
     pub fn evaluate(&self, value: Option<&Value>) -> bool {
         let is_null = matches!(value, None | Some(Value::Null));
         match self {
-            Predicate::IsNull => is_null,
-            Predicate::IsNotNull => !is_null,
+            Predicate::IsNull => sql_null_test(value, false),
+            Predicate::IsNotNull => sql_null_test(value, true),
             Predicate::Equals(target) => !is_null && value.is_some_and(|v| values_equal(v, target)),
             Predicate::NotEquals(target) => {
                 !is_null && value.is_some_and(|v| !values_equal(v, target))
@@ -73,6 +74,23 @@ impl Predicate {
                     })
             }
         }
+    }
+}
+
+/// SQL `IS NULL` (or `IS NOT NULL` when `negated`), as `PostgreSQL`'s `NullTest` evaluates it: a row value is null when every field is null and not null when no field is, so a row with both kinds of fields is neither; any other value is null only when it is the null value. An absent field is null.
+#[must_use]
+pub fn sql_null_test(value: Option<&Value>, negated: bool) -> bool {
+    let fields: Box<dyn Iterator<Item = &Value>> = match value {
+        None | Some(Value::Null) => return !negated,
+        Some(Value::Row(values)) => Box::new(values.iter()),
+        Some(Value::Record(fields)) => Box::new(fields.iter().map(|(_, value)| value)),
+        Some(_) => return negated,
+    };
+    let mut fields = fields;
+    if negated {
+        fields.all(|field| !matches!(field, Value::Null))
+    } else {
+        fields.all(|field| matches!(field, Value::Null))
     }
 }
 
@@ -165,5 +183,33 @@ mod tests {
         assert!(Predicate::Equals(Value::Str("x".into())).evaluate(Some(&fixed)));
         assert!(Predicate::Equals(Value::Str("x  ".into())).evaluate(Some(&fixed)));
         assert!(Predicate::LessThan(Value::Str("y".into())).evaluate(Some(&fixed)));
+    }
+}
+
+#[cfg(test)]
+mod null_test_tests {
+    use super::{sql_null_test, Predicate};
+    use crate::types::Value;
+
+    #[test]
+    fn row_values_are_null_only_when_every_field_is() {
+        let all_null = Value::Row(vec![Value::Null, Value::Null]);
+        let mixed = Value::Record(vec![("x".into(), Value::Int(1)), ("y".into(), Value::Null)]);
+        let none_null = Value::Row(vec![Value::Int(1)]);
+        let empty = Value::Row(Vec::new());
+        for (value, is_null, is_not_null) in [
+            (Some(&all_null), true, false),
+            (Some(&mixed), false, false),
+            (Some(&none_null), false, true),
+            (Some(&empty), true, true),
+            (Some(&Value::Null), true, false),
+            (None, true, false),
+            (Some(&Value::Int(0)), false, true),
+        ] {
+            assert_eq!(sql_null_test(value, false), is_null, "{value:?}");
+            assert_eq!(sql_null_test(value, true), is_not_null, "{value:?}");
+            assert_eq!(Predicate::IsNull.evaluate(value), is_null);
+            assert_eq!(Predicate::IsNotNull.evaluate(value), is_not_null);
+        }
     }
 }

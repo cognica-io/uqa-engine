@@ -7,7 +7,9 @@
 //! Targets of `ALTER TYPE | DOMAIN` and `GRANT | REVOKE ... ON TYPE | DOMAIN`: the user-defined type a name resolves to, and `PostgreSQL`'s diagnostics for the types a command cannot change. Each command applies the checks in its own `PostgreSQL` order.
 
 use crate::ast::{ObjectAclEntry, TypeObjectKind};
-use crate::catalog::{domain::StoredDomain, enum_type::StoredEnum};
+use crate::catalog::{
+    composite_type::StoredComposite, domain::StoredDomain, enum_type::StoredEnum,
+};
 use crate::schema::domains::removal::{RowTypeRelation, TypeObjectBinding};
 use crate::SQLError;
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
@@ -17,6 +19,8 @@ use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
 pub enum TypeObject {
     Enum(StoredEnum),
     Domain(Box<StoredDomain>),
+    /// A standalone composite type, whose relation follows it.
+    Composite(Box<StoredComposite>),
 }
 
 impl TypeObject {
@@ -25,6 +29,7 @@ impl TypeObject {
         match self {
             Self::Enum(definition) => definition.oid,
             Self::Domain(domain) => domain.oid,
+            Self::Composite(definition) => definition.oid,
         }
     }
 
@@ -33,6 +38,7 @@ impl TypeObject {
         match self {
             Self::Enum(definition) => &definition.identity,
             Self::Domain(domain) => &domain.identity,
+            Self::Composite(definition) => &definition.identity,
         }
     }
 
@@ -41,6 +47,7 @@ impl TypeObject {
         match self {
             Self::Enum(definition) => definition.owner,
             Self::Domain(domain) => domain.owner,
+            Self::Composite(definition) => definition.owner,
         }
     }
 
@@ -49,6 +56,7 @@ impl TypeObject {
         match self {
             Self::Enum(definition) => definition.array_name.clone(),
             Self::Domain(domain) => domain.array_type_name(),
+            Self::Composite(definition) => definition.array_name.clone(),
         }
     }
 
@@ -57,6 +65,7 @@ impl TypeObject {
         match self {
             Self::Enum(definition) => definition.usage_acl.as_deref(),
             Self::Domain(domain) => domain.usage_acl.as_deref(),
+            Self::Composite(definition) => definition.usage_acl.as_deref(),
         }
     }
 }
@@ -136,6 +145,14 @@ fn classify(context: &TypeObjectBinding<'_>, oid: u32) -> ResolvedKind {
         }
         return ResolvedKind::User(TypeObject::Enum(definition));
     }
+    if let Some(definition) = context.catalog.composite_by_type_oid(oid) {
+        if definition.array_oid == oid {
+            return ResolvedKind::Array {
+                element: definition.oid,
+            };
+        }
+        return ResolvedKind::User(TypeObject::Composite(Box::new(definition)));
+    }
     if let Some(element) = context.catalog.user_array_element(oid) {
         return ResolvedKind::Array { element };
     }
@@ -162,6 +179,12 @@ impl ResolvedTypeObject {
                     context
                         .catalog
                         .enum_by_type_oid(*element)
+                        .map(|definition| definition.owner)
+                })
+                .or_else(|| {
+                    context
+                        .catalog
+                        .composite_by_type_oid(*element)
                         .map(|definition| definition.owner)
                 })
                 .unwrap_or(RoleIdentity::BOOTSTRAP),

@@ -19,6 +19,8 @@ pub enum RelationOidKind {
     ForeignTable,
     /// Sequences have no row type.
     Sequence,
+    /// Standalone composite types: the composite relation, its row type and the row type's array type.
+    CompositeType,
 }
 
 /// Relation OIDs as the database's counter allocated them, in `PostgreSQL`'s order: the relation, the array type, the row type and then a view's rule. Relations created before OIDs were recorded derive them from their identity instead, and never change them.

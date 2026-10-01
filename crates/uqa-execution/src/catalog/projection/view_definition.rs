@@ -23,6 +23,7 @@ use crate::catalog::{
 use uqa_core::RelationIdentity;
 
 mod expressions;
+mod fields;
 mod query;
 mod references;
 mod rename;
@@ -231,6 +232,14 @@ impl Scope {
             column_names_visible: true,
             ..self.child()
         }
+    }
+
+    /// Whether a relation of this query level or an enclosing one has this alias.
+    fn has_relation(&self, qualifier: &str) -> bool {
+        self.columns
+            .iter()
+            .chain(&self.outer)
+            .any(|column| column.qualifier == qualifier)
     }
 
     /// Whether a column reference names a column of this query level or an enclosing one.

@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 mod acl_role_specification;
 mod assignment_target;
+mod composites;
 mod constraints;
 mod cte;
 mod domains;
@@ -40,6 +41,7 @@ mod types;
 
 pub use acl_role_specification::AclRoleSpecification;
 pub use assignment_target::{AssignmentStep, AssignmentTarget};
+pub use composites::*;
 pub use constraints::*;
 pub use cte::*;
 pub use domains::*;
@@ -547,6 +549,7 @@ pub struct VacuumStmt {
 pub enum Statement {
     CreateDomain(CreateDomain),
     CreateEnum(CreateEnum),
+    CreateCompositeType(CreateCompositeType),
     AlterEnum(AlterEnum),
     AlterTypeObject(AlterTypeObject),
     GrantType(GrantTypeStmt),

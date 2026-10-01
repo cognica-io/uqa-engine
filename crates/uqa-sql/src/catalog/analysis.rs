@@ -64,6 +64,56 @@ pub trait AnalysisCatalog: Send + Sync {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError>;
+
+    /// A relation that a query cannot open, such as a composite type's relation: its unqualified name and the kind `PostgreSQL`'s detail names.
+    fn unopenable_relation(
+        &self,
+        _resolution: &RelationNameResolution,
+        _name: &str,
+    ) -> Result<Option<UnopenableRelation>, SQLError> {
+        Ok(None)
+    }
+}
+
+/// `errdetail_relkind_not_supported`: the detail naming a relation kind that an operation refuses.
+#[must_use]
+pub fn relkind_not_supported_detail(kind: &str) -> Option<String> {
+    let plural = match kind {
+        "table" => "tables",
+        "index" => "indexes",
+        "sequence" => "sequences",
+        "view" => "views",
+        "materialized view" => "materialized views",
+        "composite type" => "composite types",
+        "foreign table" => "foreign tables",
+        "partitioned table" => "partitioned tables",
+        _ => return None,
+    };
+    Some(format!("This operation is not supported for {plural}."))
+}
+
+/// A relation that holds no rows a query or command can read or change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnopenableRelation {
+    pub name: String,
+    /// The relation kind in the plural, as `errdetail_relkind_not_supported` names it.
+    pub kinds: &'static str,
+}
+
+impl UnopenableRelation {
+    /// `table_open`'s refusal of a relation that is not a table.
+    #[must_use]
+    pub fn error(&self) -> SQLError {
+        SQLError::Diagnostic {
+            sqlstate: "42809".into(),
+            message: format!("cannot open relation \"{}\"", self.name),
+            detail: Some(format!(
+                "This operation is not supported for {}.",
+                self.kinds
+            )),
+            hint: None,
+        }
+    }
 }
 
 pub type CatalogReadView = Arc<dyn AnalysisCatalog>;

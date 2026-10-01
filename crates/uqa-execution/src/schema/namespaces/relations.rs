@@ -168,6 +168,10 @@ impl RelationCreationContext<'_> {
     pub fn persistent_relation_name(&self, name: &str) -> Result<String, SQLError> {
         self.lock_relation_namespace(|| self.persistent_name(name))
     }
+    /// Whether a relation of any kind already has this name. This does not reserve the name.
+    pub fn relation_name_in_use(&self, relation: &RelationIdentity) -> bool {
+        creation::relation_name_in_use(self.relations, relation)
+    }
     pub fn reserve_name(&self, name: &str) -> Result<(), SQLError> {
         let relation = RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?;
         super::relation_names::reserve_relation_name(self.locks, &relation, || {

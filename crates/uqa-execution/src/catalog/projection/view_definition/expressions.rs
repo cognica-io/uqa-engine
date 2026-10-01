@@ -274,6 +274,10 @@ impl Deparser<'_> {
             }
         }
         let value = self.expression(expr, scope, subqueries)?;
+        // A row constructor coerced to a named type is one `RowExpr`, which prints its type after the row.
+        if matches!(expr, ScalarExpr::Row(_)) {
+            return Ok(format!("{value}::{display}"));
+        }
         if self.pretty {
             Ok(format!(
                 "{}::{display}",
@@ -297,6 +301,9 @@ impl Deparser<'_> {
         ) = binding.and_then(|binding| binding.dispatch)
         {
             return self.array_subscripts(dispatch, args, scope, subqueries);
+        }
+        if binding.and_then(|binding| binding.dispatch) == Some(FunctionDispatch::FieldSelect) {
+            return self.field_selection(args, scope, subqueries);
         }
         if let Some(uqa_sql::ast::FunctionDispatch::NumericOperator(operator)) =
             binding.and_then(|binding| binding.dispatch)

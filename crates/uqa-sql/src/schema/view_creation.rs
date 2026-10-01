@@ -48,20 +48,25 @@ pub fn view_creation_target(
     namespace.relation_target(name, persistence)
 }
 
+/// `DefineVirtualRelation`: a relation that already has the name is a collision, or with `OR REPLACE` must be a view. Both diagnostics name the relation without its schema.
 pub fn replacement_is_view(
     name: &str,
     kind: Option<&str>,
     or_replace: bool,
 ) -> Result<bool, SQLError> {
+    let local = || {
+        uqa_core::RelationIdentity::from_legacy_name(name)
+            .map_or_else(|_| name.to_string(), |relation| relation.name)
+    };
     match kind {
         Some(_) if !or_replace => Err(SQLError::Routine {
             sqlstate: "42P07".into(),
-            message: format!("relation \"{name}\" already exists"),
+            message: format!("relation \"{}\" already exists", local()),
         }),
         Some("view") => Ok(true),
-        Some(kind) => Err(SQLError::Routine {
+        Some(_) => Err(SQLError::Routine {
             sqlstate: "42809".into(),
-            message: format!("\"{name}\" is not a view; it is a {kind}"),
+            message: format!("\"{}\" is not a view", local()),
         }),
         None => Ok(false),
     }

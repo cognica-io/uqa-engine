@@ -589,6 +589,9 @@ impl SchemaScope {
                     let schema = RowSchema::with_qualified_types(qualifier, columns, types);
                     return alias_table_schema(&schema, qualifier, column_aliases);
                 }
+                if let Some(relation) = self.catalog.unopenable_relation(&self.resolution, name)? {
+                    return Err(relation.error());
+                }
                 Err(SQLError::UnknownTable(name.clone()))
             }
             SourcePlan::Values {

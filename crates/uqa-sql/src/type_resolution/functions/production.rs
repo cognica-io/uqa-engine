@@ -525,6 +525,35 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
             FunctionDispatch::ArraySubscripts | FunctionDispatch::Subscript => {
                 return array_element_type(first(), control);
             }
+            // Scalar inference types field selections with the row schema before builtin dispatch; without it, a field has the base value's composite attribute type.
+            FunctionDispatch::FieldSelect => {
+                let field = match args.get(1) {
+                    Some(ScalarExpr::Literal(Value::Str(field))) => field,
+                    _ => {
+                        return Err(SQLError::Internal(
+                            "field selection takes an expression and a field name".into(),
+                        ))
+                    }
+                };
+                let literal = match args.first() {
+                    Some(ScalarExpr::Literal(value)) => {
+                        super::super::field_selection::literal_field_type(value, field)
+                    }
+                    _ => None,
+                };
+                let field_type = if let Some(ScalarExpr::Row(items)) = args.first() {
+                    let items = items
+                        .iter()
+                        .map(|item| infer(item).map(|ty| ty.map(|ty| (*ty).clone())))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    super::super::field_selection::row_field_type(&items, field)?
+                } else if let Some(field_type) = literal {
+                    field_type?
+                } else {
+                    super::super::field_selection::value_field_type(first(), field, resolver)?
+                };
+                return copy(field_type.as_ref(), control);
+            }
             FunctionDispatch::ArraySlices | FunctionDispatch::Slice => {
                 return copy(first(), control)
             }

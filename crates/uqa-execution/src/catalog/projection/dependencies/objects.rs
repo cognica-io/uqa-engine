@@ -33,6 +33,8 @@ pub enum RelationKind {
     View,
     MaterializedView,
     ForeignTable,
+    /// The relation of a standalone composite type, which belongs to the type.
+    CompositeType,
 }
 
 impl RelationKind {
@@ -44,6 +46,7 @@ impl RelationKind {
             Self::View => "view",
             Self::MaterializedView => "materialized view",
             Self::ForeignTable => "foreign table",
+            Self::CompositeType => "composite type",
         }
     }
 }
@@ -167,6 +170,32 @@ impl CatalogObjects {
         }
     }
 
+    /// The relation of each standalone composite type. Dropped attributes keep their numbers, so a column's position is its number.
+    fn collect_composite_relations(&mut self, snapshot: &crate::catalog::CatalogReadSnapshot) {
+        for definition in snapshot.definitions.composites.values() {
+            let columns = definition
+                .attributes
+                .iter()
+                .map(|attribute| {
+                    let name = if attribute.dropped {
+                        uqa_sql::catalog::composite_type::StoredCompositeAttribute::dropped_name(
+                            attribute.number,
+                        )
+                    } else {
+                        attribute.name.clone()
+                    };
+                    ColumnDef::nullable(name, attribute.ty.clone())
+                })
+                .collect();
+            self.add_relation(
+                definition.relation_oid,
+                definition.identity.clone(),
+                RelationKind::CompositeType,
+                columns,
+            );
+        }
+    }
+
     fn collect_relations(
         &mut self,
         context: &CatalogContext<'_>,
@@ -209,6 +238,7 @@ impl CatalogObjects {
             );
             self.unpin_row_type(oids);
         }
+        self.collect_composite_relations(snapshot);
         for (identity, object_id) in snapshot.definitions.sequence_object_ids.iter() {
             let oid = catalog_oid(
                 crate::catalog::sequence::catalog_oids::sequence_catalog_oid(
@@ -266,6 +296,15 @@ impl CatalogObjects {
     fn collect_types(&mut self, catalog: &CatalogReadView) {
         use super::addresses::TypeObject;
         for definition in catalog.enums() {
+            self.add_type(definition.oid, TypeObject::Defined);
+            self.add_type(
+                definition.array_oid,
+                TypeObject::Array {
+                    element: definition.oid,
+                },
+            );
+        }
+        for definition in catalog.composites() {
             self.add_type(definition.oid, TypeObject::Defined);
             self.add_type(
                 definition.array_oid,

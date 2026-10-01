@@ -162,6 +162,7 @@ fn reorder_command_joins(
         | CommandPlan::CreateSequence(_)
         | CommandPlan::CreateDomain(_)
         | CommandPlan::CreateEnum(_)
+        | CommandPlan::CreateCompositeType(_)
         | CommandPlan::AlterEnum(_)
         | CommandPlan::AlterTypeObject(_)
         | CommandPlan::GrantType(_)

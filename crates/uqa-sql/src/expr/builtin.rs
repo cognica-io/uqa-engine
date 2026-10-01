@@ -221,6 +221,7 @@ pub fn bound_scalar_function_strictness(
             FunctionDispatch::NumericOperator(_) => Some(true),
             FunctionDispatch::ArraySubscripts
             | FunctionDispatch::Subscript
+            | FunctionDispatch::FieldSelect
             | FunctionDispatch::BetweenSymmetric
             | FunctionDispatch::ToBinInt4
             | FunctionDispatch::ToBinInt8

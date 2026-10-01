@@ -122,6 +122,7 @@ impl CreationRelationGuards for Engine {
         uqa_execution::catalog::projection::named_type_exists(
             self.durable.domains.read().values(),
             self.durable.enums.read().values(),
+            self.durable.composites.read().values(),
             identity,
         )
     }
@@ -139,6 +140,19 @@ impl CreationRelationGuards for Engine {
     }
     fn indexes(&self) -> Box<dyn CreationRelationNames + '_> {
         Box::new(CreationNamesGuard(self.durable.catalog_indexes.read()))
+    }
+    fn composite_types(&self) -> Box<dyn CreationRelationNames + '_> {
+        Box::new(CompositeNamesGuard(self.durable.composites.read()))
+    }
+}
+
+/// The composite registry is keyed by qualified type name, which is also the composite relation's name.
+struct CompositeNamesGuard<G>(G);
+impl<G: std::ops::Deref<Target = uqa_execution::catalog::composite_type::CompositeRegistry>>
+    CreationRelationNames for CompositeNamesGuard<G>
+{
+    fn contains(&self, relation: &RelationIdentity) -> bool {
+        self.0.contains_key(&relation.qualified_name())
     }
 }
 impl RelationCreationRuntime for Engine {

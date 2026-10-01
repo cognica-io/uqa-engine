@@ -30,6 +30,10 @@ impl FunctionTypeResolver for BindingTypeResolver<'_> {
         self.routines.enum_labels()
     }
 
+    fn composite_types(&self) -> Option<&dyn crate::expr::composites::CompositeTypeCatalog> {
+        self.routines.composite_types()
+    }
+
     fn resolve_function_type(
         &self,
         name: &str,

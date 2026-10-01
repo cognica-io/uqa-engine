@@ -145,7 +145,7 @@ impl DependencyBuilder<'_> {
         }
     }
 
-    /// Sequences, enums, domains and routines.
+    /// Sequences, enums, domains, composite types and routines. A composite type's relation records no owner of its own: `heap_create_with_catalog` leaves ownership to the row type.
     fn record_shared_objects(&mut self, database: u32) -> Result<(), SQLError> {
         let catalog = self.catalog;
         let snapshot = catalog.snapshot();
@@ -179,6 +179,17 @@ impl DependencyBuilder<'_> {
                 (database, ObjectAddress::whole(TYPE_CLASS, domain.oid)),
                 domain.owner,
                 domain
+                    .usage_acl
+                    .iter()
+                    .flatten()
+                    .map(|entry| (entry.role, entry.grantor)),
+            );
+        }
+        for composite in catalog.composites() {
+            self.record_owned(
+                (database, ObjectAddress::whole(TYPE_CLASS, composite.oid)),
+                composite.owner,
+                composite
                     .usage_acl
                     .iter()
                     .flatten()

@@ -25,8 +25,9 @@ pub struct DomainCreationContext<'a> {
     pub bindings: &'a dyn DomainDeclarationBinding,
     pub allocate_identity: fn() -> Result<[u8; 16], SQLError>,
     pub publication: &'a dyn DomainRegistryPublication,
-    /// Enum arrays share the type namespace with domain arrays.
+    /// Enum and composite arrays share the type namespace with domain arrays.
     pub enums: &'a dyn crate::catalog::enum_type::EnumRegistryPublication,
+    pub composites: &'a dyn crate::catalog::composite_type::CompositeRegistryPublication,
     pub changes: &'a dyn super::namespaces::NamespaceCatalogChanges,
 }
 
@@ -43,6 +44,7 @@ pub fn create_domain(
         super::types::arrays::UserTypeRegistries {
             enums: context.enums,
             domains: context.publication,
+            composites: context.composites,
         },
         &uqa_core::RelationIdentity::from_legacy_name(&definition.name)
             .map_err(SQLError::Internal)?,

@@ -36,6 +36,8 @@ pub struct CatalogRemovalContext<'a> {
     pub foreign_tables: ForeignTableRemovalContext<'a>,
     pub indexes: IndexRemovalContext<'a>,
     pub domains: DomainDependencyContext<'a>,
+    /// Attributes of standalone composite types, whose removal rewrites the stored values of the type.
+    pub composites: crate::schema::composites::attributes::CompositeAttributeContext<'a>,
     pub schemas: EmptySchemaRemovalContext<'a>,
     pub events: &'a dyn crate::schema::removal::RelationRemovalEvents,
     pub notices: &'a parking_lot::Mutex<Vec<SQLNotice>>,

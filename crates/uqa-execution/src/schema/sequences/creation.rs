@@ -121,11 +121,12 @@ pub fn create_sequence(
 
 fn sequence_create_collision(name: &str, if_not_exists: bool) -> Result<bool, SQLError> {
     if if_not_exists {
-        Ok(false)
-    } else {
-        Err(SQLError::Routine {
-            sqlstate: "42P07".into(),
-            message: format!("relation \"{name}\" already exists"),
-        })
+        return Ok(false);
     }
+    let local = uqa_core::RelationIdentity::from_legacy_name(name)
+        .map_or_else(|_| name.to_string(), |relation| relation.name);
+    Err(SQLError::Routine {
+        sqlstate: "42P07".into(),
+        message: format!("relation \"{local}\" already exists"),
+    })
 }

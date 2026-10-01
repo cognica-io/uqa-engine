@@ -28,6 +28,7 @@ impl Engine {
             registries: UserTypeRegistries {
                 enums: self,
                 domains: self,
+                composites: self,
             },
             owner_schemas: self,
             changes: self,

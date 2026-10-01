@@ -175,6 +175,13 @@ impl Engine {
                 Some("foreign table")
             } else if self.durable.catalog_indexes.read().contains_key(&relation) {
                 Some("index")
+            } else if self
+                .durable
+                .composites
+                .read()
+                .contains_key(&relation.qualified_name())
+            {
+                Some("composite type")
             } else {
                 None
             };

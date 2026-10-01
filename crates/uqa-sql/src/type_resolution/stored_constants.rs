@@ -6,7 +6,7 @@
 
 //! Stored expressions keep the enum constants that parse analysis coerces from `unknown` literals by label identity, as `PostgreSQL` stores `Const` nodes: `ALTER TYPE ... RENAME VALUE` changes their label and never their meaning, and reloading the catalog never converts label text again. Binding decides every coercion; this module carries the constants it produced back into the stored tree. Binding changes a stored tree only by adding casts, binding calls and converting literals, so the two trees correspond node for node once the added casts are skipped.
 
-use super::FunctionTypeResolver;
+use super::{is_unknown_literal, FunctionTypeResolver};
 use crate::ast::ColumnType;
 use crate::expr::enums::{fold_unknown_literal, is_enum_bearing, EnumLabelCatalog};
 use crate::schema::ScalarTypeSchema;
@@ -39,10 +39,6 @@ pub fn fold_stored_enum_constants(
         return Ok(false);
     };
     transfer(expression, &bound, catalog)
-}
-
-fn is_unknown_literal(expression: &ScalarExpr) -> bool {
-    matches!(expression, ScalarExpr::Literal(Value::Str(_) | Value::Null))
 }
 
 /// Casts that binding added around a node are not part of the stored tree. A cast the stored tree already has keeps its written type name, which binding never changes.

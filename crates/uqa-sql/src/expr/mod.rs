@@ -47,6 +47,7 @@ pub use uuid::parse_uuid_bytes;
 use uuid::{generate_random_uuid, generate_uuid_v7};
 mod binary;
 mod casting;
+pub mod composites;
 mod conversion;
 mod current_time;
 pub mod enums;

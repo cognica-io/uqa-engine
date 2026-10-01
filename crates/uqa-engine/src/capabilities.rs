@@ -299,6 +299,7 @@ impl Engine {
 
                 domains: durable.domains.clone(),
                 enums: durable.enums.clone(),
+                composites: durable.composites.clone(),
                 graphs: durable.graphs.clone(),
                 views: durable.views.clone(),
                 catalog_indexes: durable.catalog_indexes.clone(),
@@ -650,6 +651,7 @@ mod view_alteration;
 mod view_creation;
 mod view_restoration;
 
+mod composites;
 mod domains;
 mod enums;
 mod namespaces;

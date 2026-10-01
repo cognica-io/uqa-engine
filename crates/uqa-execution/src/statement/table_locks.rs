@@ -123,9 +123,11 @@ impl TableLockContext<'_> {
             _ => {
                 let (_, local) = uqa_core::RelationIdentity::parse_reference(&canonical)
                     .map_err(SQLError::Internal)?;
-                return Err(SQLError::Routine {
+                return Err(SQLError::Diagnostic {
                     sqlstate: "42809".into(),
                     message: format!("cannot lock relation \"{local}\""),
+                    detail: uqa_sql::catalog::analysis::relkind_not_supported_detail(kind),
+                    hint: None,
                 });
             }
         }

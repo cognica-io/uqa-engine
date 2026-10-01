@@ -232,6 +232,20 @@ pub fn cast_value_from_with_control(
             return text_value(text, false, control);
         }
         "uuid" => return cast_uuid(v, control),
+        // Every row is a record; `record_in` cannot read text without a composite type to read it as.
+        "record" => {
+            return match v {
+                Value::Row(_) | Value::Record(_) => Ok(control.copy_value(v)?),
+                Value::Str(_) | Value::FixedChar(_) => Err(SQLError::Routine {
+                    sqlstate: "0A000".into(),
+                    message: "input of anonymous composite types is not implemented".into(),
+                }),
+                _ => Err(undefined_cast(
+                    &canonical_cast_source_with_control(source_ty, v, control)?,
+                    "record",
+                )),
+            }
+        }
         "varchar" | "character varying" => {
             let text = cast_text(v, source_ty, control)?;
             let Some(modifier) = modifier else {

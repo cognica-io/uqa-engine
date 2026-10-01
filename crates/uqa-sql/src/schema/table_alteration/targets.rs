@@ -88,6 +88,17 @@ pub fn bind_table_alteration(
                 },
             }
         }
+        // `RangeVarCallbackForAlterRelation` wants composite types altered through ALTER TYPE.
+        "composite type" => {
+            let local = uqa_core::RelationIdentity::from_legacy_name(&canonical)
+                .map_or_else(|_| canonical.clone(), |relation| relation.name);
+            return Err(SQLError::Diagnostic {
+                sqlstate: "42809".into(),
+                message: format!("\"{local}\" is a composite type"),
+                detail: None,
+                hint: Some("Use ALTER TYPE instead.".into()),
+            });
+        }
         _ => {
             return Err(SQLError::Routine {
                 sqlstate: "42809".into(),

@@ -69,6 +69,9 @@ impl ColumnType {
     pub fn display_name(&self) -> String {
         match self {
             ColumnType::Enum(reference) => visible_type_name(&reference.schema, &reference.name),
+            ColumnType::Composite(reference) => {
+                visible_type_name(&reference.schema, &reference.name)
+            }
             ColumnType::Domain { schema, name, .. } => visible_type_name(schema, name),
             // An array type of any dimensionality is the element's one array type.
             ColumnType::Array(element) => {
@@ -76,7 +79,10 @@ impl ColumnType {
                 while let ColumnType::Array(inner) = leaf {
                     leaf = inner;
                 }
-                if matches!(leaf, ColumnType::Enum(_) | ColumnType::Domain { .. }) {
+                if matches!(
+                    leaf,
+                    ColumnType::Enum(_) | ColumnType::Composite(_) | ColumnType::Domain { .. }
+                ) {
                     format!("{}[]", leaf.display_name())
                 } else {
                     self.regtype_name()

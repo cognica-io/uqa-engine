@@ -87,6 +87,54 @@ pub fn rewrite_view_type_references(
     publish_rewritten_views(context, next, &changed)
 }
 
+/// Materialized views store their rows, so a composite type's attribute change rewrites the stored values of the type in each column whose declared type holds it.
+pub fn rewrite_materialized_composite_values(
+    context: &ViewDependencyContext<'_>,
+    target: u32,
+    change: &uqa_sql::expr::composites::AttributeChange,
+    types: &dyn uqa_sql::expr::composites::CompositeTypeCatalog,
+) -> Result<(), uqa_sql::SQLError> {
+    let storage = |error: StorageBackendError| {
+        uqa_sql::catalog::errors::storage_error("rewrite materialized view rows", &error)
+    };
+    context.views.synchronize_catalog().map_err(storage)?;
+    let views = context.views.view_definitions();
+    let mut next = (**views).clone();
+    drop(views);
+    let mut changed = Vec::new();
+    for (relation, view) in &mut next {
+        let columns = view
+            .output_columns
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .zip(view.materialized_column_types.clone())
+            .filter_map(|(name, ty)| ty.map(|ty| (name, ty)))
+            .collect::<Vec<_>>();
+        let mut affected = Vec::new();
+        for (name, ty) in columns {
+            if uqa_sql::expr::composites::type_contains_composite(&ty, target, types)? {
+                affected.push((name, ty));
+            }
+        }
+        if affected.is_empty() {
+            continue;
+        }
+        for row in &mut view.materialized_rows {
+            for (name, ty) in &affected {
+                if let Some(value) = row.get(name).cloned() {
+                    let value = uqa_sql::expr::composites::apply_attribute_change(
+                        value, ty, target, change, types,
+                    )?;
+                    row.insert(name.clone(), value);
+                }
+            }
+        }
+        changed.push(relation.clone());
+    }
+    publish_rewritten_views(context, next, &changed).map_err(storage)
+}
+
 fn publish_rewritten_views(
     context: &ViewDependencyContext<'_>,
     next: std::collections::BTreeMap<RelationIdentity, uqa_sql::catalog::stored_view::StoredView>,

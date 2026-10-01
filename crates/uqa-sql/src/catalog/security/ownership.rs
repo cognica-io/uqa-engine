@@ -26,13 +26,18 @@ pub fn require_relation_ownership(
     has_owner_privileges: bool,
 ) -> Result<(), SQLError> {
     if has_owner_privileges {
-        Ok(())
-    } else {
-        Err(SQLError::Routine {
-            sqlstate: "42501".into(),
-            message: format!("must be owner of {kind} {name}"),
-        })
+        return Ok(());
     }
+    // `get_relkind_objtype` names a composite relation's owner check by its type.
+    let kind = if kind == "composite type" {
+        "type"
+    } else {
+        kind
+    };
+    Err(SQLError::Routine {
+        sqlstate: "42501".into(),
+        message: format!("must be owner of {kind} {name}"),
+    })
 }
 
 /// `PostgreSQL` protects pinned catalog relations and TOAST relations after checking ownership. Unpinned catalog views retain ordinary relation validation.

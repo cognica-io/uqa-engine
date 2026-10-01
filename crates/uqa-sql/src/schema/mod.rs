@@ -183,6 +183,7 @@ pub mod generated;
 pub mod indexes;
 
 pub mod columns;
+pub mod composites;
 pub mod constraints;
 pub mod defaults;
 pub mod domains;

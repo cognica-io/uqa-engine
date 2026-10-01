@@ -97,6 +97,38 @@ pub fn cast_value_with_type_resolution(
     .map_err(|_| SQLError::Internal("ordinary catalog cast owner".into()))
 }
 
+/// The text a value's output function spells, and the type to cast it from, when a cast goes through output: an enum label, `record_out` of a composite record cast to a string type, and a container whose enum fields and elements spell their current labels.
+fn output_for_cast<'a>(
+    engine: &dyn EngineHook,
+    value: &Value,
+    source_ty: Option<&'a str>,
+    resolved_source_type: Option<&ColumnType>,
+    target: &ColumnType,
+) -> Result<Option<(Value, Option<&'a str>)>> {
+    if let Value::Enum(label) = value {
+        let output =
+            super::super::enums::enum_output_for_cast(engine.enum_labels(), label, target)?;
+        return Ok(Some((output, Some("text"))));
+    }
+    // `record_out` spells each field through its attribute type's output function.
+    if let (Value::Record(_), Some(source @ ColumnType::Composite(_))) =
+        (value, resolved_source_type)
+    {
+        if is_string_type(target) {
+            let text = crate::result::format_postgres_text(value, source, Some(engine))?;
+            return Ok(Some((Value::Str(text), Some("text"))));
+        }
+    }
+    if matches!(value, Value::Record(_) | Value::Row(_))
+        && is_string_type(target)
+        && super::super::enums::contains_enum_carrier(value)
+    {
+        let rendered = super::super::enums::render_enum_labels(engine.enum_labels(), value)?;
+        return Ok(Some((rendered, source_ty)));
+    }
+    Ok(None)
+}
+
 /// Resolve catalog inputs at their external handoff, then admit SQL-owned names, element conversions and output before constructing them.
 pub fn cast_value_with_type_resolution_with_control(
     value: &Value,
@@ -132,12 +164,24 @@ pub fn cast_value_with_type_resolution_with_control(
         )? {
             return Ok(control.retain_external_value(value)?);
         }
-        if let Value::Enum(label) = value {
-            let output =
-                super::super::enums::enum_output_for_cast(engine.enum_labels(), label, target)?;
+        if let Some(value) = super::super::composites::cast_to_composite(
+            engine,
+            value,
+            resolved_source_type.as_ref(),
+            target,
+        )? {
+            return Ok(control.retain_external_value(value)?);
+        }
+        if let Some((output, output_source)) = output_for_cast(
+            engine,
+            value,
+            source_ty,
+            resolved_source_type.as_ref(),
+            target,
+        )? {
             return cast_value_with_type_resolution_with_control(
                 &output,
-                Some("text"),
+                output_source,
                 target_ty,
                 Some(engine),
                 control,
@@ -327,7 +371,10 @@ fn resolve_regobject_input(
 
 fn requires_catalog_array_cast(ty: &ColumnType) -> bool {
     match ty {
-        ColumnType::Domain { .. } | ColumnType::Regtype | ColumnType::Enum(_) => true,
+        ColumnType::Domain { .. }
+        | ColumnType::Regtype
+        | ColumnType::Enum(_)
+        | ColumnType::Composite(_) => true,
         ColumnType::Array(element) => requires_catalog_array_cast(element),
         _ => false,
     }

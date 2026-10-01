@@ -6,6 +6,7 @@
 
 //! Immutable catalog inputs and runtime catalog projections.
 
+pub mod composite_type;
 pub mod domain;
 pub mod enum_type;
 pub mod foreign;
@@ -13,6 +14,7 @@ pub mod identity;
 pub mod security;
 pub mod sequence;
 pub mod type_identity_restoration;
+pub(crate) mod type_records;
 pub mod value_restoration;
 pub mod view;
 
@@ -98,6 +100,7 @@ pub struct CatalogDefinitionSnapshot {
 
     pub domains: Arc<BTreeMap<String, uqa_sql::catalog::domain::StoredDomain>>,
     pub enums: Arc<enum_type::EnumRegistry>,
+    pub composites: Arc<composite_type::CompositeRegistry>,
     pub graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
     pub views: Arc<BTreeMap<RelationIdentity, StoredView>>,
     pub catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,

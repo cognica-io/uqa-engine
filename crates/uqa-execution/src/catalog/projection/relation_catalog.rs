@@ -287,6 +287,7 @@ pub fn build_pg_class(
         index_row.insert("relhassubclass".into(), bool_value(index.has_children));
         out.push(index_row);
     }
+    out.extend(super::pg_catalog::composite_class_rows(catalog)?);
     out.extend(super::ag_catalog::age_pg_class_rows(catalog)?);
     Ok(out)
 }

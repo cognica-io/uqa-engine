@@ -215,6 +215,11 @@ pub fn sql_column_type_to_fdw(column_type: &uqa_sql::ast::ColumnType) -> uqa_fdw
             name: reference.name.clone(),
             oid: reference.oid,
         },
+        uqa_sql::ast::ColumnType::Composite(reference) => uqa_fdw::ColumnType::Composite {
+            schema: reference.schema.clone(),
+            name: reference.name.clone(),
+            oid: reference.oid,
+        },
         uqa_sql::ast::ColumnType::Domain {
             schema,
             name,

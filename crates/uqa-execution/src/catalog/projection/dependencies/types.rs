@@ -4,10 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Dependencies of user-defined types, as `GenerateTypeDependencies` records them for enums, domains and their array types, and `domainAddConstraint` for domain constraints.
+//! Dependencies of user-defined types, as `GenerateTypeDependencies` records them for enums, domains, composite types and their array types, `heap_create_with_catalog` for a composite type's attributes, and `domainAddConstraint` for domain constraints.
 
 use super::{ColumnScope, ConstraintOwner, DependencyBuilder, MemberObject, References};
-use uqa_sql::catalog::dependencies::{DependencyKind, ObjectAddress, CONSTRAINT_CLASS, TYPE_CLASS};
+use uqa_sql::catalog::dependencies::{
+    DependencyKind, ObjectAddress, CONSTRAINT_CLASS, RELATION_CLASS, TYPE_CLASS,
+};
 use uqa_sql::SQLError;
 
 impl DependencyBuilder<'_> {
@@ -18,6 +20,30 @@ impl DependencyBuilder<'_> {
             self.record_array_type(definition.array_oid, definition.oid);
             let enum_type = ObjectAddress::whole(TYPE_CLASS, definition.oid);
             self.record_namespace(enum_type, &definition.identity.schema);
+        }
+        for definition in catalog.composites() {
+            // `heap_create_with_catalog`: each attribute depends on its type; `AddNewRelationType`: the array type, and then the row type, which a standalone composite relation belongs to.
+            for attribute in definition.live_attributes() {
+                let mut references = References::default();
+                if let Ok(ty) =
+                    u32::try_from(uqa_sql::catalog::type_metadata::pg_type_oid(&attribute.ty))
+                {
+                    references.add_type(ty);
+                }
+                self.recorder.record_references(
+                    ObjectAddress::column(definition.relation_oid, i32::from(attribute.number)),
+                    references,
+                    DependencyKind::Normal,
+                );
+            }
+            self.record_array_type(definition.array_oid, definition.oid);
+            let composite_type = ObjectAddress::whole(TYPE_CLASS, definition.oid);
+            self.record_namespace(composite_type, &definition.identity.schema);
+            self.recorder.record(
+                ObjectAddress::whole(RELATION_CLASS, definition.relation_oid),
+                composite_type,
+                DependencyKind::Internal,
+            );
         }
         for domain in catalog.domains() {
             let domain_type = ObjectAddress::whole(TYPE_CLASS, domain.oid);

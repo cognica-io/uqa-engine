@@ -22,6 +22,7 @@ use pg_query::NodeEnum;
 use types::compile_pg_type_name;
 
 mod administrative;
+mod composites;
 mod cursors;
 mod dispatch;
 mod dml;

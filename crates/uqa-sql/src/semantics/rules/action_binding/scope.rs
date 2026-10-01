@@ -400,8 +400,16 @@ fn projection_output_columns(
             Expr::Column(column) | Expr::QualifiedColumn { column, .. } => {
                 columns.push(column.clone());
             }
-            Expr::Func { name, binding, .. } => columns.push(
-                crate::semantics::function_projection_label(name, binding.as_ref()),
+            Expr::Func {
+                name,
+                binding,
+                args,
+                ..
+            } => columns.push(
+                crate::semantics::field_selection_label(binding.as_ref(), args.get(1))
+                    .unwrap_or_else(|| {
+                        crate::semantics::function_projection_label(name, binding.as_ref())
+                    }),
             ),
             Expr::WindowCall { name, .. } => {
                 columns.push(crate::semantics::function_projection_label(name, None));

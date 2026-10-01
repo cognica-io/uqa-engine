@@ -58,6 +58,16 @@ impl TypePrivilegeCatalog for TypeCatalog<'_, '_> {
                 usage_acl: domain.usage_acl.as_deref(),
             });
         }
+        if let Some(definition) = self
+            .catalog
+            .composites()
+            .find(|definition| definition.oid == governing)
+        {
+            return Some(TypePrivileges {
+                owner: definition.owner,
+                usage_acl: definition.usage_acl.as_deref(),
+            });
+        }
         let owner = row_type_relation(self.context, governing)
             .ok()
             .flatten()

@@ -22,10 +22,11 @@ static CATALOG_NAMED_TYPES: LazyLock<Vec<ColumnType>> = LazyLock::new(|| {
     domains
 });
 
-/// Creation reads current type declarations, independently of a query's retained snapshot. Enum array names occupy the type namespace too.
+/// Creation reads current type declarations, independently of a query's retained snapshot. Enum and composite array names occupy the type namespace too.
 pub fn named_type_exists<'a>(
     mut domains: impl Iterator<Item = &'a uqa_sql::catalog::domain::StoredDomain>,
     mut enums: impl Iterator<Item = &'a uqa_sql::catalog::enum_type::StoredEnum>,
+    mut composites: impl Iterator<Item = &'a uqa_sql::catalog::composite_type::StoredComposite>,
     identity: &uqa_core::RelationIdentity,
 ) -> bool {
     domains.any(|domain| {
@@ -33,6 +34,9 @@ pub fn named_type_exists<'a>(
             || (domain.identity.schema == identity.schema
                 && domain.array_type_name() == identity.name)
     }) || enums.any(|definition| {
+        definition.identity.schema == identity.schema
+            && (definition.identity.name == identity.name || definition.array_name == identity.name)
+    }) || composites.any(|definition| {
         definition.identity.schema == identity.schema
             && (definition.identity.name == identity.name || definition.array_name == identity.name)
     }) || ColumnType::from_sql_name(&identity.qualified_name()).is_ok()
@@ -65,6 +69,10 @@ pub fn catalog_user_type_identity(
             .find(|domain| domain.oid == identity.oid)
             .map(uqa_sql::catalog::domain::StoredDomain::column_type)
             .or_else(|| uqa_sql::catalog::system_catalog_domain(identity.oid))?,
+        uqa_sql::ast::UserTypeKind::Composite => catalog
+            .composites()
+            .find(|definition| definition.oid == identity.oid)?
+            .column_type(),
     };
     for _ in 0..identity.dimensions {
         resolved = ColumnType::Array(Box::new(resolved));
@@ -95,6 +103,11 @@ pub fn resolve_catalog_user_type_by_oid(
             catalog
                 .enums()
                 .map(uqa_sql::catalog::enum_type::StoredEnum::column_type),
+        )
+        .chain(
+            catalog
+                .composites()
+                .map(uqa_sql::catalog::composite_type::StoredComposite::column_type),
         )
         .chain(CATALOG_NAMED_TYPES.iter().cloned())
     {
@@ -176,6 +189,7 @@ pub fn catalog_type_display_name(
             format!("{}[]", catalog_type_display_name(resolution, element))
         }
         ColumnType::Enum(reference) => qualified(&reference.schema, &reference.name),
+        ColumnType::Composite(reference) => qualified(&reference.schema, &reference.name),
         ColumnType::Domain { schema, name, .. } => qualified(schema, name),
         other => other.sql_name(),
     }

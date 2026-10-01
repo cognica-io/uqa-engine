@@ -52,7 +52,10 @@ pub(super) fn infer_dispatched_function(
                 ))
             }
         },
-        FunctionDispatch::NamedArgument | FunctionDispatch::VariadicArgument => return Ok(None),
+        // Field selection needs the composite catalog; the caller types it.
+        FunctionDispatch::NamedArgument
+        | FunctionDispatch::VariadicArgument
+        | FunctionDispatch::FieldSelect => return Ok(None),
         FunctionDispatch::ArraySubscripts | FunctionDispatch::Subscript => match first()? {
             GenerationType::Array(element) => *element,
             GenerationType::Vector | GenerationType::Tensor => GenerationType::Real,

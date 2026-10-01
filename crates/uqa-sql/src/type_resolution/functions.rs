@@ -138,6 +138,17 @@ pub(super) fn builtin_function_type_inner(
     resolver: Option<&dyn FunctionTypeResolver>,
 ) -> Result<Option<ColumnType>, SQLError> {
     let control = ProductionControl::uncontrolled();
+    if binding.and_then(|binding| binding.dispatch)
+        == Some(crate::ast::FunctionDispatch::FieldSelect)
+    {
+        return super::inference::field_selection_type(args, schema, params, resolver, &control)
+            .map(|ty| {
+                ty.map(|ty| {
+                    ty.into_uncontrolled()
+                        .expect("ordinary field selection type")
+                })
+            });
+    }
     let mut infer = |expression: &ScalarExpr| {
         scalar_type_inner(expression, schema, params, resolver)?
             .map(|ty| {

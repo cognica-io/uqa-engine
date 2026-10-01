@@ -57,7 +57,7 @@ pub fn wrong_drop_kind_error(local: &str, expected: &str, found: &str) -> SQLErr
         "materialized view" => Some("Use DROP MATERIALIZED VIEW to remove a materialized view."),
         "index" => Some("Use DROP INDEX to remove an index."),
         "foreign table" => Some("Use DROP FOREIGN TABLE to remove a foreign table."),
-        "type" => Some("Use DROP TYPE to remove a type."),
+        "type" | "composite type" => Some("Use DROP TYPE to remove a type."),
         _ => None,
     };
     SQLError::Diagnostic {

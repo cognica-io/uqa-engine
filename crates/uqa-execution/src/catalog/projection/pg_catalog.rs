@@ -7,6 +7,7 @@
 //! Virtual `pg_catalog` relation builders.
 
 mod attributes;
+mod composites;
 mod constraint_definitions;
 mod constraints;
 mod indexes;
@@ -15,6 +16,7 @@ mod roles;
 mod sequences;
 mod types;
 pub use attributes::{attrdef_catalog_oid, build_pg_attrdef, build_pg_attribute};
+pub use composites::composite_class_rows;
 pub use constraint_definitions::pg_get_constraintdef_value;
 pub use constraints::build_pg_constraint;
 pub(crate) use constraints::{constraint_index_oid, constraint_parent_oid, constraint_row_oid};

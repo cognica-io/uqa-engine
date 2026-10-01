@@ -175,6 +175,10 @@ impl FunctionTypeResolver for ScopedExpressionEvaluator<'_> {
         FunctionTypeResolver::enum_labels(self.context.as_ref())
     }
 
+    fn composite_types(&self) -> Option<&dyn uqa_sql::expr::composites::CompositeTypeCatalog> {
+        FunctionTypeResolver::composite_types(self.context.as_ref())
+    }
+
     fn resolve_function_type(
         &self,
         name: &str,

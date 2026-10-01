@@ -213,6 +213,9 @@ impl CreationRelationGuards for Fixture {
     fn indexes(&self) -> Box<dyn CreationRelationNames + '_> {
         Box::new(EmptyNames)
     }
+    fn composite_types(&self) -> Box<dyn CreationRelationNames + '_> {
+        Box::new(EmptyNames)
+    }
 }
 impl RelationCreationRuntime for Fixture {
     fn synchronize_catalog_registries(&self) -> StorageBackendResult<()> {

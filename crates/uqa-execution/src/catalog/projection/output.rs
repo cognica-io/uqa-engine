@@ -22,6 +22,10 @@ impl EngineHook for CatalogOutput<'_> {
         self.0.routines.enum_labels()
     }
 
+    fn composite_types(&self) -> Option<&dyn uqa_sql::expr::composites::CompositeTypeCatalog> {
+        self.0.routines.composite_types()
+    }
+
     fn nextval(&self, _name: &str) -> Result<i64, SQLError> {
         Err(SQLError::Internal(
             "catalog output cannot advance a sequence".into(),

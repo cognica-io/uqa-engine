@@ -311,6 +311,11 @@ pub(super) fn scalar_type_inner_with_control(
             {
                 return Err(error.sql_error());
             }
+            if binding.as_ref().and_then(|binding| binding.dispatch)
+                == Some(crate::ast::FunctionDispatch::FieldSelect)
+            {
+                return field_selection_type(args, schema, params, resolver, control);
+            }
             if let Some(filter) = filter {
                 scalar_type_inner_with_control(filter, schema, params, resolver, control)?;
             }
@@ -414,6 +419,62 @@ pub(super) fn scalar_type_inner_with_control(
         }
         ScalarExpr::Star | ScalarExpr::QualifiedStar(_) | ScalarExpr::Default => Ok(None),
     }
+}
+
+/// `(expression).field`: a whole-row reference selects its relation's column, a row constructor its `fN` field, and any other expression its composite type's attribute.
+pub(super) fn field_selection_type(
+    args: &[ScalarExpr],
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    resolver: Option<&dyn FunctionTypeResolver>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    use super::field_selection;
+    let [base, ScalarExpr::Literal(uqa_core::Value::Str(field))] = args else {
+        return Err(SQLError::Internal(
+            "field selection takes an expression and a field name".into(),
+        ));
+    };
+    let whole_row = match base {
+        ScalarExpr::Column(qualifier)
+            if !schema.has_unqualified_column(qualifier)
+                && !schema.column_is_ambiguous(qualifier)
+                && schema.has_qualifier(qualifier) =>
+        {
+            Some(qualifier)
+        }
+        ScalarExpr::QualifiedStar(qualifier) if schema.has_qualifier(qualifier) => Some(qualifier),
+        _ => None,
+    };
+    if let Some(qualifier) = whole_row {
+        if !schema.has_qualified_column(qualifier, field) {
+            return Err(field_selection::missing_relation_column(qualifier, field));
+        }
+        return copy_type(schema.qualified_type(qualifier, field), control);
+    }
+    if let ScalarExpr::Row(items) = base {
+        let items = items
+            .iter()
+            .map(|item| {
+                scalar_type_inner_with_control(item, schema, params, resolver, control)
+                    .map(|ty| ty.map(|ty| (*ty).clone()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        return copy_type(
+            field_selection::row_field_type(&items, field)?.as_ref(),
+            control,
+        );
+    }
+    if let ScalarExpr::Literal(value) = base {
+        if let Some(field_type) = field_selection::literal_field_type(value, field) {
+            return copy_type(field_type?.as_ref(), control);
+        }
+    }
+    let base = scalar_type_inner_with_control(base, schema, params, resolver, control)?;
+    copy_type(
+        field_selection::value_field_type(base.as_deref(), field, resolver)?.as_ref(),
+        control,
+    )
 }
 
 fn copy_type(

@@ -150,6 +150,7 @@ mod namespaces;
 mod notifications;
 mod privileges;
 mod ranges;
+mod records;
 mod scalar;
 mod sequences;
 
@@ -177,6 +178,7 @@ pub const PG18_BUILTIN_ROUTINE_GROUPS: &[&[BuiltinRoutineCatalogEntry]] = &[
     enums::ROUTINES,
     definitions::ROUTINES,
     namespaces::ROUTINES,
+    records::ROUTINES,
     notifications::ROUTINES,
     privileges::ROUTINES,
     ranges::ROUTINES,

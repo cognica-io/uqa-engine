@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Remove domains, enums and domain constraints, each once what depends on it has been removed.
+//! Remove domains, enums, composite types and domain constraints, each once what depends on it has been removed.
 
 use crate::schema::namespaces::NamespaceCatalogChanges;
 use std::collections::{BTreeMap, BTreeSet};
@@ -18,6 +18,7 @@ pub struct DomainDependencyContext<'a> {
     pub catalog: &'a dyn DomainDependencyCatalog,
     pub publication: &'a dyn DomainRegistryPublication,
     pub enums: &'a dyn crate::catalog::enum_type::EnumRegistryPublication,
+    pub composites: &'a dyn crate::catalog::composite_type::CompositeRegistryPublication,
     pub changes: &'a dyn NamespaceCatalogChanges,
 }
 
@@ -52,7 +53,7 @@ pub fn remove_domain_constraint(
     Ok(())
 }
 
-/// `RemoveTypeById` for enums and domains, whose array types go with them. What depends on them has been removed.
+/// `RemoveTypeById` for enums, domains and composite types, whose array types, and a composite type's relation, go with them. What depends on them has been removed.
 pub fn remove_types(
     context: &DomainDependencyContext<'_>,
     targets: &BTreeSet<u32>,
@@ -71,6 +72,19 @@ pub fn remove_types(
         let mut enums = enums_before.clone();
         enums.retain(|_, definition| !targets.contains(&definition.oid));
         crate::catalog::enum_type::publish(context.enums, &enums_before, enums)?;
+    }
+    let composites_before = context.composites.composite_registry().clone();
+    if composites_before
+        .values()
+        .any(|definition| targets.contains(&definition.oid))
+    {
+        let mut composites = composites_before.clone();
+        composites.retain(|_, definition| !targets.contains(&definition.oid));
+        crate::catalog::composite_type::publish(
+            context.composites,
+            &composites_before,
+            composites,
+        )?;
     }
     context.changes.catalog_registry_changed();
     Ok(())

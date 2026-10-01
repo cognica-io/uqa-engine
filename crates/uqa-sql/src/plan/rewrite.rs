@@ -358,6 +358,7 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::CreateSequence(_)
         | CommandPlan::CreateDomain(_)
         | CommandPlan::CreateEnum(_)
+        | CommandPlan::CreateCompositeType(_)
         | CommandPlan::AlterEnum(_)
         | CommandPlan::AlterTypeObject(_)
         | CommandPlan::GrantType(_)

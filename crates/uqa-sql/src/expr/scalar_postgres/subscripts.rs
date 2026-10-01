@@ -26,6 +26,7 @@ pub(in crate::expr) fn eval_postgres_subscript_with_control(
         FunctionDispatch::ArraySlices => eval_array_slices,
         FunctionDispatch::Subscript => eval_subscript,
         FunctionDispatch::Slice => eval_slice,
+        FunctionDispatch::FieldSelect => eval_field_select,
         _ => return None,
     };
     Some((|| {
@@ -149,6 +150,33 @@ fn eval_subscript(args: &[Value], control: &ProductionControl<'_>) -> Result<Pro
             "cannot subscript {other:?}"
         ))),
     }
+}
+
+/// A composite value's field by its current attribute name, an anonymous row's field by its `fN` position, or a document map's key. Binding has already checked that the field exists.
+fn eval_field_select(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+    let [value, Value::Str(field)] = args else {
+        return Err(SQLError::Internal(
+            "field selection takes a value and a field name".into(),
+        ));
+    };
+    let selected = match value {
+        Value::Null => None,
+        Value::Record(fields) => fields
+            .iter()
+            .find(|(name, _)| name == field)
+            .map(|(_, value)| value),
+        Value::Row(values) => {
+            crate::type_resolution::field_selection::anonymous_field_position(field, values.len())
+                .and_then(|position| values.get(position))
+        }
+        Value::Map(map) => map.get(field.as_str()),
+        other => {
+            return Err(SQLError::TypeMismatch(format!(
+                "field selection .{field} applied to {other:?}"
+            )))
+        }
+    };
+    Ok(control.copy_value(selected.unwrap_or(&Value::Null))?)
 }
 
 fn eval_slice(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {

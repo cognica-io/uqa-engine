@@ -177,6 +177,8 @@ fn remove_relation(
         RelationKind::Index => {
             crate::schema::indexes::removal::drop_index_dependency(&context.indexes, identity)
         }
+        // A composite relation belongs to its type, whose removal removes it.
+        RelationKind::CompositeType => Ok(()),
     }
 }
 
@@ -186,6 +188,13 @@ fn remove_column(
     kind: RelationKind,
     column: &str,
 ) -> Result<(), SQLError> {
+    if kind == RelationKind::CompositeType {
+        return crate::schema::composites::attributes::drop_composite_attribute(
+            &context.composites,
+            relation,
+            column,
+        );
+    }
     let table = relation.qualified_name();
     let removed = if kind == RelationKind::ForeignTable {
         context

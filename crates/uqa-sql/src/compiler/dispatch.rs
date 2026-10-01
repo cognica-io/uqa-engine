@@ -275,6 +275,8 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::CreateEnumStmt(stmt) => {
             super::enums::compile_create_enum(stmt).map(Statement::CreateEnum)
         }
+        NodeEnum::CompositeTypeStmt(stmt) => super::composites::compile_create_composite_type(stmt)
+            .map(Statement::CreateCompositeType),
         NodeEnum::AlterEnumStmt(stmt) => {
             super::enums::compile_alter_enum(stmt).map(Statement::AlterEnum)
         }

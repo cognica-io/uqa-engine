@@ -136,6 +136,8 @@ pub enum ColumnType {
     },
     /// A user-defined enum type bound by catalog identity.
     Enum(super::EnumTypeReference),
+    /// A composite type bound by catalog identity: a standalone composite type or a relation's row type.
+    Composite(super::CompositeTypeReference),
 }
 
 pub(crate) fn builtin_array_element_name(type_name: &str) -> Option<&'static str> {

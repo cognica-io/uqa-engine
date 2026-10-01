@@ -29,6 +29,8 @@ pub trait CreationRelationGuards {
     fn sequences(&self) -> Box<dyn CreationRelationNames + '_>;
     fn foreign_tables(&self) -> Box<dyn CreationRelationNames + '_>;
     fn indexes(&self) -> Box<dyn CreationRelationNames + '_>;
+    /// The relations of standalone composite types, which occupy the relation namespace as well as the type namespace.
+    fn composite_types(&self) -> Box<dyn CreationRelationNames + '_>;
 }
 
 /// Domains and row types share the type namespace; sequences and indexes do not define row types.
@@ -37,6 +39,7 @@ pub fn type_name_in_use(catalog: &dyn CreationRelationGuards, identity: &Relatio
         || catalog.tables().contains(identity)
         || catalog.views().contains(identity)
         || catalog.foreign_tables().contains(identity)
+        || catalog.composite_types().contains(identity)
 }
 
 pub fn ensure_type_name_available(
@@ -62,6 +65,7 @@ pub fn relation_name_in_use(
         || catalog.sequences().contains(relation)
         || catalog.foreign_tables().contains(relation)
         || catalog.indexes().contains(relation)
+        || catalog.composite_types().contains(relation)
 }
 
 pub fn temporary_creation_parts(
@@ -268,11 +272,37 @@ pub fn resolve_index_table_name(
         if catalog.tables().contains(&relation) {
             return Ok(Some(relation.qualified_name()));
         }
-        if catalog.views().contains(&relation)
-            || catalog.sequences().contains(&relation)
-            || catalog.foreign_tables().contains(&relation)
-            || catalog.indexes().contains(&relation)
-        {
+        // `table_open` refuses indexes and composite types before `DefineIndex` names the relations it cannot index.
+        let unopenable = if catalog.indexes().contains(&relation) {
+            Some("indexes")
+        } else if catalog.composite_types().contains(&relation) {
+            Some("composite types")
+        } else {
+            None
+        };
+        if let Some(kinds) = unopenable {
+            return Err(crate::catalog::analysis::UnopenableRelation {
+                name: relation.name,
+                kinds,
+            }
+            .error());
+        }
+        let unindexable = if catalog.sequences().contains(&relation) {
+            Some("sequence")
+        } else if catalog.foreign_tables().contains(&relation) {
+            Some("foreign table")
+        } else {
+            None
+        };
+        if let Some(kind) = unindexable {
+            return Err(SQLError::Diagnostic {
+                sqlstate: "42809".into(),
+                message: format!("cannot create index on relation \"{}\"", relation.name),
+                detail: crate::catalog::analysis::relkind_not_supported_detail(kind),
+                hint: None,
+            });
+        }
+        if catalog.views().contains(&relation) {
             return Ok(None);
         }
     }

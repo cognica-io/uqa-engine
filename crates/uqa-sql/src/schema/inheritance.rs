@@ -25,6 +25,49 @@ pub struct InheritanceContext<'a> {
     pub roles: &'a dyn crate::expr::EngineHook,
 }
 
+/// The parent relation that `INHERITS` names: `table_openrv` refuses indexes and composite types, and `MergeAttributes` accepts only tables. Foreign tables are not inheritance parents here.
+pub fn inheritance_parent_target(
+    resolution: crate::catalog::resolution::RelationResolution,
+    requested: &str,
+) -> Result<String, SQLError> {
+    use crate::catalog::resolution::RelationResolution;
+    match resolution {
+        RelationResolution::Found(canonical, "table") => Ok(canonical),
+        RelationResolution::Found(canonical, kind @ ("index" | "composite type")) => {
+            Err(crate::catalog::analysis::UnopenableRelation {
+                name: local_relation_name(&canonical),
+                kinds: if kind == "index" {
+                    "indexes"
+                } else {
+                    "composite types"
+                },
+            }
+            .error())
+        }
+        RelationResolution::Found(canonical, "view" | "materialized view" | "sequence") => {
+            Err(SQLError::Routine {
+                sqlstate: "42809".into(),
+                message: format!(
+                    "inherited relation \"{}\" is not a table or foreign table",
+                    local_relation_name(&canonical)
+                ),
+            })
+        }
+        RelationResolution::MissingSchema(schema) => Err(SQLError::Routine {
+            sqlstate: "3F000".into(),
+            message: format!("schema \"{schema}\" does not exist"),
+        }),
+        RelationResolution::Found(_, _) | RelationResolution::MissingRelation => {
+            Err(SQLError::UnknownTable(requested.to_string()))
+        }
+    }
+}
+
+fn local_relation_name(canonical: &str) -> String {
+    uqa_core::RelationIdentity::from_legacy_name(canonical)
+        .map_or_else(|_| canonical.to_string(), |relation| relation.name)
+}
+
 /// `MergeAttributes`: the columns, CHECK constraints and partition keys a new table inherits from its parents, ahead of its own. The table's partition key and bound are bound by [`bind_create_table_partitioning`] once its row type is described, as `DefineRelation` computes them after creating the relation.
 #[expect(
     clippy::too_many_lines,

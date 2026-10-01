@@ -32,6 +32,7 @@ impl Engine {
             },
             publication: self,
             domains: self,
+            composites: self,
             changes: self,
             visibility: self,
             notices: self,

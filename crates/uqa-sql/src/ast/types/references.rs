@@ -20,6 +20,13 @@ impl ColumnType {
                 reference.name.clone_from(&identity.name);
                 changed
             }
+            ColumnType::Composite(reference) if reference.oid == oid => {
+                let changed =
+                    reference.schema != identity.schema || reference.name != identity.name;
+                reference.schema.clone_from(&identity.schema);
+                reference.name.clone_from(&identity.name);
+                changed
+            }
             ColumnType::Domain {
                 schema,
                 name,

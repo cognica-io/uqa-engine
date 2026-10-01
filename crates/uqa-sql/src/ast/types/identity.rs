@@ -10,11 +10,13 @@ use super::ColumnType;
 
 const ENUM_PREFIX: &str = "enum#";
 const DOMAIN_PREFIX: &str = "domain#";
+const COMPOSITE_PREFIX: &str = "composite#";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UserTypeKind {
     Enum,
     Domain,
+    Composite,
 }
 
 /// A parsed identity: the type's kind and OID, and the number of array dimensions around it.
@@ -26,7 +28,7 @@ pub struct UserTypeIdentity {
 }
 
 impl UserTypeIdentity {
-    /// Parse `enum#<oid>` or `domain#<oid>` with any number of `[]` suffixes.
+    /// Parse `enum#<oid>`, `domain#<oid>` or `composite#<oid>` with any number of `[]` suffixes.
     #[must_use]
     pub fn parse(name: &str) -> Option<Self> {
         let mut element = name.trim();
@@ -37,6 +39,8 @@ impl UserTypeIdentity {
         }
         let (kind, oid) = if let Some(oid) = element.strip_prefix(ENUM_PREFIX) {
             (UserTypeKind::Enum, oid)
+        } else if let Some(oid) = element.strip_prefix(COMPOSITE_PREFIX) {
+            (UserTypeKind::Composite, oid)
         } else {
             (UserTypeKind::Domain, element.strip_prefix(DOMAIN_PREFIX)?)
         };
@@ -57,6 +61,9 @@ impl ColumnType {
     pub fn user_type_identity(&self) -> Option<String> {
         match self {
             ColumnType::Enum(reference) => Some(format!("{ENUM_PREFIX}{}", reference.oid)),
+            ColumnType::Composite(reference) => {
+                Some(format!("{COMPOSITE_PREFIX}{}", reference.oid))
+            }
             ColumnType::Domain { oid, .. } => Some(format!("{DOMAIN_PREFIX}{oid}")),
             ColumnType::Array(element) => element
                 .user_type_identity()
@@ -88,6 +95,14 @@ mod tests {
                 kind: UserTypeKind::Enum,
                 oid: 20_000,
                 dimensions: 2,
+            })
+        );
+        assert_eq!(
+            UserTypeIdentity::parse("composite#9[]"),
+            Some(UserTypeIdentity {
+                kind: UserTypeKind::Composite,
+                oid: 9,
+                dimensions: 1,
             })
         );
         assert_eq!(

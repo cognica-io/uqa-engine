@@ -77,6 +77,16 @@ fn rename(
     let object = resolved.into_type_object(&context.binding)?;
     let schema = object.identity().schema.clone();
     let target = RelationIdentity::new(&schema, new_name);
+    // RenameRelationInternal: a composite type renames its relation first, whose name no other relation may hold.
+    if matches!(object, TypeObject::Composite(_)) {
+        if context.creation.relation_name_in_use(&target) {
+            return Err(SQLError::Routine {
+                sqlstate: "42P07".into(),
+                message: format!("relation \"{new_name}\" already exists"),
+            });
+        }
+        context.creation.reserve_name(&target.qualified_name())?;
+    }
     // RenameTypeInternal: a generated array holding the new name moves aside; any other type, including this one, is a conflict.
     if context.creation.type_name_in_use(&target)
         && !arrays::displace_array_type(&context.creation, context.registries, &target)?
@@ -136,14 +146,31 @@ fn set_schema(
     }
     let target = RelationIdentity::new(&destination, &identity.name);
     let array_target = RelationIdentity::new(&destination, object.array_name());
-    for moved in [&target, &array_target] {
-        if context.creation.type_name_in_use(moved) {
-            return Err(duplicate_in_schema(&moved.name, &destination));
-        }
-        context
-            .creation
-            .reserve_type_name(&moved.qualified_name())?;
+    // AlterTypeNamespaceInternal checks the type's name, then moves a composite type's relation, whose name no relation in the destination may hold, and then the array type.
+    if context.creation.type_name_in_use(&target) {
+        return Err(duplicate_in_schema(&target.name, &destination));
     }
+    context
+        .creation
+        .reserve_type_name(&target.qualified_name())?;
+    if matches!(object, TypeObject::Composite(_)) {
+        if context.creation.relation_name_in_use(&target) {
+            return Err(SQLError::Routine {
+                sqlstate: "42P07".into(),
+                message: format!(
+                    "relation \"{}\" already exists in schema \"{destination}\"",
+                    target.name
+                ),
+            });
+        }
+        context.creation.reserve_name(&target.qualified_name())?;
+    }
+    if context.creation.type_name_in_use(&array_target) {
+        return Err(duplicate_in_schema(&array_target.name, &destination));
+    }
+    context
+        .creation
+        .reserve_type_name(&array_target.qualified_name())?;
     publish_identity(context, object, target, None)
 }
 
@@ -230,6 +257,19 @@ fn set_owner(
             registry.insert(definition.identity.qualified_name(), *definition);
             domain::publish(context.registries.domains, &before, registry)?;
         }
+        // `ATExecChangeOwner` changes the composite relation's owner with the type's.
+        TypeObject::Composite(mut definition) => {
+            definition.owner = new_owner;
+            object_acl::rewrite_owner(&mut definition.usage_acl, previous, new_owner);
+            let before = context.registries.composites.composite_registry().clone();
+            let mut registry = before.clone();
+            registry.insert(definition.identity.qualified_name(), *definition);
+            crate::catalog::composite_type::publish(
+                context.registries.composites,
+                &before,
+                registry,
+            )?;
+        }
     }
     drop(candidate.memberships);
     drop(candidate.roles);
@@ -250,6 +290,15 @@ pub(super) fn current_definition(
         .find(|definition| definition.oid == oid)
     {
         return Ok(TypeObject::Enum(definition.clone()));
+    }
+    if let Some(definition) = context
+        .registries
+        .composites
+        .composite_registry()
+        .values()
+        .find(|definition| definition.oid == oid)
+    {
+        return Ok(TypeObject::Composite(Box::new(definition.clone())));
     }
     context
         .registries
@@ -295,8 +344,24 @@ fn publish_identity(
             registry.insert(identity.qualified_name(), *definition);
             domain::publish(context.registries.domains, &before, registry)?;
         }
+        TypeObject::Composite(mut definition) => {
+            let before = context.registries.composites.composite_registry().clone();
+            let mut registry = before.clone();
+            registry.remove(&definition.identity.qualified_name());
+            definition.identity = identity.clone();
+            if let Some(array_name) = array_name {
+                definition.array_name = array_name;
+            }
+            registry.insert(identity.qualified_name(), *definition);
+            crate::catalog::composite_type::publish(
+                context.registries.composites,
+                &before,
+                registry,
+            )?;
+        }
     }
     rewrite_domain_bases(context, oid, &identity)?;
+    rewrite_composite_attributes(context, oid, &identity)?;
     context.dependents.rewrite_type_references(oid, &identity)?;
     context.changes.catalog_registry_changed();
     Ok(())
@@ -316,6 +381,26 @@ fn rewrite_domain_bases(
     }
     if changed {
         domain::publish(context.registries.domains, &before, registry)?;
+    }
+    Ok(())
+}
+
+/// Composite attributes carry their types' catalog names.
+fn rewrite_composite_attributes(
+    context: &TypeLifecycleContext<'_>,
+    oid: u32,
+    identity: &RelationIdentity,
+) -> Result<(), SQLError> {
+    let before = context.registries.composites.composite_registry().clone();
+    let mut registry = before.clone();
+    let mut changed = false;
+    for definition in registry.values_mut() {
+        for attribute in &mut definition.attributes {
+            changed |= attribute.ty.rename_user_type(oid, identity);
+        }
+    }
+    if changed {
+        crate::catalog::composite_type::publish(context.registries.composites, &before, registry)?;
     }
     Ok(())
 }
