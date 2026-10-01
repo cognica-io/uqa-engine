@@ -63,6 +63,71 @@ fn point_metadata_preserves_historical_tombstones_and_head_diagnostics() {
 }
 
 #[test]
+fn point_values_read_small_payloads_with_their_metadata_in_one_bounded_statement() {
+    use rusqlite::StatementStatus;
+
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    let control = control();
+    let small = vec![7_u8; 3];
+    let large = vec![9_u8; usize::from(read::INLINE_PAYLOAD_BYTES) + 1];
+    store
+        .with(|sqlite| {
+            let _permit = schema::WritePermit::acquire(sqlite)?;
+            sqlite.execute_batch(
+                "INSERT INTO _uqa_mvcc_heads VALUES (x'61', x'0000000000000005', 0), (x'62', x'0000000000000002', 0);",
+            )?;
+            let mut insert = sqlite.prepare("INSERT INTO _uqa_mvcc_versions VALUES (?1, ?2, ?3)")?;
+            for (key, sequence, value) in [
+                (b"a", 2_u64, Some(small.as_slice())),
+                (b"a", 5, None),
+                (b"b", 2, Some(large.as_slice())),
+            ] {
+                insert.execute(params![key.as_slice(), sequence.to_be_bytes().as_slice(), value])?;
+            }
+            for (key, boundary, expected) in [
+                (&b"a"[..], 1_u64, None),
+                (b"a", 2, Some((2, Some(small.clone())))),
+                (b"a", 4, Some((2, Some(small.clone())))),
+                (b"a", 5, Some((5, None))),
+                (b"b", 2, Some((2, Some(large.clone())))),
+                (b"missing", 9, None),
+            ] {
+                let mut found = None;
+                read::value(
+                    sqlite,
+                    key,
+                    CommitSequence::from_u64(boundary),
+                    &control,
+                    &mut |record| {
+                        found = record.map(|record| {
+                            (
+                                record.revision.unwrap().as_u64(),
+                                record.value.map(<[u8]>::to_vec),
+                            )
+                        });
+                        Ok(())
+                    },
+                )?;
+                assert_eq!(found, expected, "{key:?} at {boundary}");
+            }
+            let mut statement = sqlite.prepare(read::POINT_VALUE_SQL)?;
+            let mut rows = statement.query(params![
+                b"a",
+                4_u64.to_be_bytes().as_slice(),
+                i64::from(read::INLINE_PAYLOAD_BYTES)
+            ])?;
+            assert_eq!(rows.next()?.unwrap().get::<_, Vec<u8>>(4)?, small);
+            assert!(rows.next()?.is_none());
+            drop(rows);
+            assert_eq!(statement.get_status(StatementStatus::Sort), 0);
+            assert_eq!(statement.get_status(StatementStatus::FullscanStep), 0);
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
 fn point_metadata_uses_bounded_instructions_for_long_version_histories() {
     use rusqlite::StatementStatus;
 
