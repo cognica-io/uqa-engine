@@ -542,6 +542,7 @@ pub(super) fn compile_alter_table(stmt: &pg_query::protobuf::AlterTableStmt) -> 
                                 name,
                                 kind,
                                 columns,
+                                included_columns: extract_strings(&constraint.including)?,
                                 nulls_not_distinct: constraint.nulls_not_distinct,
                                 without_overlaps: constraint.without_overlaps,
                             },

@@ -312,3 +312,26 @@ fn partial_and_expression_indexes_hold_their_plain_columns_for_every_row() {
     assert!(held.contains(&("b".into(), true)));
     assert!(held.contains(&("c".into(), false)));
 }
+
+#[test]
+fn a_key_constraint_holds_the_columns_it_includes() {
+    let engine = Engine::new();
+    run(
+        &engine,
+        "CREATE TABLE covered (id integer PRIMARY KEY, a integer, b text, c integer, UNIQUE (a) INCLUDE (b))",
+    );
+    run(
+        &engine,
+        "INSERT INTO covered SELECT g, g + 100, 'b' || g, g * 2 FROM generate_series(1, 40) AS g",
+    );
+    assert!(held_fields(&engine, "covered").contains(&("b".into(), true)));
+    diverge_documents(&engine);
+    assert_eq!(
+        column(&run(&engine, "SELECT a, b FROM covered WHERE a = 105"), "b"),
+        [s("b5")]
+    );
+    assert_eq!(
+        column(&run(&engine, "SELECT c FROM covered WHERE a = 105"), "c"),
+        [Value::Int(-1)]
+    );
+}

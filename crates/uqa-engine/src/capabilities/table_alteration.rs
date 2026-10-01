@@ -152,6 +152,12 @@ impl ColumnRemovalCatalog for Engine {
     fn try_foreign_keys(&self, table: &str) -> Result<Vec<ForeignKey>, ColumnCatalogError> {
         Engine::foreign_keys_in_execution(self, table).map_err(|error| Box::new(error) as _)
     }
+    fn try_key_constraints(
+        &self,
+        table: &str,
+    ) -> Result<Vec<uqa_sql::ast::TableKeyConstraint>, ColumnCatalogError> {
+        Engine::key_constraints_in_execution(self, table).map_err(|error| Box::new(error) as _)
+    }
 }
 impl ColumnRemovalRoutines for Engine {
     fn drop_dependents(&self, table: &str, column: &str, cascade: bool) -> Result<(), SQLError> {

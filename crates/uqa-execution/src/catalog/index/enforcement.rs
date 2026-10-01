@@ -74,6 +74,7 @@ pub fn enforced_keys(
                         .filter_map(IndexKey::column)
                         .map(str::to_owned)
                         .collect(),
+                    included_columns: Vec::new(),
                     nulls_not_distinct: definition.nulls_not_distinct,
                     without_overlaps: false,
                 },

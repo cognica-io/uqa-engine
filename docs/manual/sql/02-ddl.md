@@ -250,6 +250,8 @@ CREATE TABLE memberships (
 
 `NULLS NOT DISTINCT` makes NULL values compare as equal for uniqueness. A primary key also implies non-NULL key columns.
 
+A table-level `PRIMARY KEY (...)` or `UNIQUE (...)` may end with `INCLUDE (column, ...)`, which adds those columns to the constraint's supporting index beside the key, as [`CREATE INDEX ... INCLUDE`](#relational-b-tree-indexes) does. Included columns take no part in uniqueness and do not become NOT NULL; they may repeat and may name key columns, must exist, and cannot be virtual generated columns. The default constraint name lists the key columns and then the included ones, as `orders_account_id_total_key`, and `pg_index` and `pg_get_indexdef` report them while `pg_constraint.conkey` lists the key columns only. Renaming an included column renames it in the constraint, and dropping one drops the constraint, so a foreign key that references the constraint blocks the drop unless `CASCADE` removes it too.
+
 ## Check constraints
 
 ```sql

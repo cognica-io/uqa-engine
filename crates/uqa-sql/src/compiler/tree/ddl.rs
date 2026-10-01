@@ -186,6 +186,7 @@ pub(in crate::compiler) fn compile_create_table(
                             name: constraint_name(&cstr.conname),
                             kind,
                             columns: key_columns,
+                            included_columns: extract_strings(&cstr.including)?,
                             nulls_not_distinct: cstr.nulls_not_distinct,
                             without_overlaps: cstr.without_overlaps,
                         });
@@ -266,6 +267,7 @@ pub(in crate::compiler) fn compile_create_table(
                 )));
             }
         }
+        crate::schema::keys::validate_included_key_columns(constraint, &column_names)?;
         if constraint.without_overlaps {
             let period_column = constraint
                 .columns
@@ -408,6 +410,7 @@ pub(in crate::compiler) fn compile_column_key_constraints(
             name: constraint_name(&constraint.conname),
             kind,
             columns: vec![column.colname.clone()],
+            included_columns: Vec::new(),
             nulls_not_distinct: constraint.nulls_not_distinct,
             without_overlaps: constraint.without_overlaps,
         });

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixture_sha256": "f5cde8e375d73e1ae41339e261554cf4059fd5df4c93535751884e6276af2620",
+  "fixture_sha256": "dace02fb1552e0af33c4df92ef5acd03414f33ffa803f1f3eb7db2131ffe0ba5",
   "oracle": {
     "server_version": "18.4 (Debian 18.4-1.pgdg13+1)",
     "server_version_num": "180004",
@@ -1199,6 +1199,247 @@
       "name": "expression_runtime_update_error",
       "kind": "error",
       "sqlstate": "22012"
+    },
+    {
+      "name": "included_constraints",
+      "kind": "ok"
+    },
+    {
+      "name": "included_constraint_catalog",
+      "kind": "rows",
+      "rows": [
+        [
+          "included_m_a_b_key",
+          "u",
+          "{1}"
+        ],
+        [
+          "included_m_b_a_a1_key",
+          "u",
+          "{2}"
+        ],
+        [
+          "included_m_named",
+          "u",
+          "{1}"
+        ],
+        [
+          "included_u_a_b_key",
+          "u",
+          "{1}"
+        ],
+        [
+          "included_x_a_b_c_key",
+          "u",
+          "{1,2}"
+        ],
+        [
+          "included_x_pkey",
+          "p",
+          "{3}"
+        ]
+      ]
+    },
+    {
+      "name": "included_constraint_indexes",
+      "kind": "rows",
+      "rows": [
+        [
+          "included_m_a_b_key",
+          "2",
+          "1",
+          "1 2",
+          "t",
+          "f",
+          "CREATE UNIQUE INDEX included_m_a_b_key ON fixture.included_m USING btree (a) INCLUDE (b)"
+        ],
+        [
+          "included_m_b_a_a1_key",
+          "3",
+          "1",
+          "2 1 1",
+          "t",
+          "f",
+          "CREATE UNIQUE INDEX included_m_b_a_a1_key ON fixture.included_m USING btree (b) INCLUDE (a, a)"
+        ],
+        [
+          "included_m_named",
+          "2",
+          "1",
+          "1 2",
+          "t",
+          "f",
+          "CREATE UNIQUE INDEX included_m_named ON fixture.included_m USING btree (a) INCLUDE (b)"
+        ],
+        [
+          "included_u_a_b_key",
+          "2",
+          "1",
+          "1 2",
+          "t",
+          "f",
+          "CREATE UNIQUE INDEX included_u_a_b_key ON fixture.included_u USING btree (a) INCLUDE (b)"
+        ],
+        [
+          "included_x_a_b_c_key",
+          "3",
+          "2",
+          "1 2 3",
+          "t",
+          "f",
+          "CREATE UNIQUE INDEX included_x_a_b_c_key ON fixture.included_x USING btree (a, b) INCLUDE (c)"
+        ],
+        [
+          "included_x_pkey",
+          "2",
+          "1",
+          "3 1",
+          "t",
+          "t",
+          "CREATE UNIQUE INDEX included_x_pkey ON fixture.included_x USING btree (c) INCLUDE (a)"
+        ]
+      ]
+    },
+    {
+      "name": "included_constraint_attributes",
+      "kind": "rows",
+      "rows": [
+        [
+          "included_m_b_a_a1_key",
+          "1",
+          "b"
+        ],
+        [
+          "included_m_b_a_a1_key",
+          "2",
+          "a"
+        ],
+        [
+          "included_m_b_a_a1_key",
+          "3",
+          "a1"
+        ],
+        [
+          "included_x_a_b_c_key",
+          "1",
+          "a"
+        ],
+        [
+          "included_x_a_b_c_key",
+          "2",
+          "b"
+        ],
+        [
+          "included_x_a_b_c_key",
+          "3",
+          "c"
+        ],
+        [
+          "included_x_pkey",
+          "1",
+          "c"
+        ],
+        [
+          "included_x_pkey",
+          "2",
+          "a"
+        ]
+      ]
+    },
+    {
+      "name": "included_constraint_unique_key",
+      "kind": "error",
+      "sqlstate": "23505"
+    },
+    {
+      "name": "included_constraint_missing_column",
+      "kind": "error",
+      "sqlstate": "42703"
+    },
+    {
+      "name": "included_constraint_virtual_column",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "included_primary_virtual_column",
+      "kind": "error",
+      "sqlstate": "0A000"
+    },
+    {
+      "name": "included_constraint_rename",
+      "kind": "ok"
+    },
+    {
+      "name": "included_constraint_renamed",
+      "kind": "rows",
+      "rows": [
+        [
+          "CREATE UNIQUE INDEX included_u_a_b_key ON fixture.included_u USING btree (a) INCLUDE (bb)"
+        ]
+      ]
+    },
+    {
+      "name": "included_constraint_drop_column",
+      "kind": "ok"
+    },
+    {
+      "name": "included_constraint_dropped",
+      "kind": "rows",
+      "rows": [
+        [
+          "0",
+          "t"
+        ]
+      ]
+    },
+    {
+      "name": "included_primary_drop_column",
+      "kind": "ok"
+    },
+    {
+      "name": "included_primary_dropped",
+      "kind": "rows",
+      "rows": [
+        [
+          "included_x_c_not_null",
+          "n"
+        ]
+      ]
+    },
+    {
+      "name": "included_constraint_reference",
+      "kind": "ok"
+    },
+    {
+      "name": "included_constraint_reference_restrict",
+      "kind": "error",
+      "sqlstate": "2BP01"
+    },
+    {
+      "name": "included_constraint_reference_kept",
+      "kind": "rows",
+      "rows": [
+        [
+          "included_child_x_fkey"
+        ],
+        [
+          "included_parent_a_b_key"
+        ]
+      ]
+    },
+    {
+      "name": "included_constraint_reference_cascade",
+      "kind": "ok"
+    },
+    {
+      "name": "included_constraint_reference_cascaded",
+      "kind": "rows",
+      "rows": [
+        [
+          "0"
+        ]
+      ]
     }
   ]
 }

@@ -59,6 +59,7 @@ pub(crate) fn catalog_index_relations(
                 definition: IndexDefinition {
                     unique: true,
                     nulls_not_distinct: key.nulls_not_distinct,
+                    included_columns: key.included_columns.clone(),
                     ..IndexDefinition::default()
                 },
                 primary: key.kind == uqa_sql::ast::TableKeyConstraintKind::PrimaryKey,

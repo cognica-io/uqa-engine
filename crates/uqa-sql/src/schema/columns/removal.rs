@@ -4,13 +4,22 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Discover foreign keys that refer to a deleted column in catalog order.
-use crate::{assignment::columns::ColumnCatalogError, ast::ForeignKey, SQLError};
+//! Discover foreign keys that depend on a deleted column in catalog order.
+use crate::{
+    assignment::columns::ColumnCatalogError,
+    ast::{ForeignKey, TableKeyConstraint},
+    SQLError,
+};
 pub trait ColumnRemovalCatalog {
     fn try_resolve_table_name(&self, table: &str) -> Result<Option<String>, ColumnCatalogError>;
     fn table_names(&self) -> Result<Vec<String>, ColumnCatalogError>;
     fn try_foreign_keys(&self, table: &str) -> Result<Vec<ForeignKey>, ColumnCatalogError>;
+    fn try_key_constraints(
+        &self,
+        table: &str,
+    ) -> Result<Vec<TableKeyConstraint>, ColumnCatalogError>;
 }
+/// Foreign keys that reference `column`, or that reference the key of a constraint whose supporting index includes it: dropping an included column drops that constraint.
 pub fn foreign_keys_referencing_column(
     catalog: &dyn ColumnRemovalCatalog,
     table: &str,
@@ -22,6 +31,20 @@ pub fn foreign_keys_referencing_column(
             crate::catalog::errors::storage_error("ALTER TABLE DROP COLUMN", error.as_ref())
         })?
         .ok_or_else(|| SQLError::UnknownTable(table.to_string()))?;
+    let included_keys = catalog
+        .try_key_constraints(&canonical)
+        .map_err(|error| {
+            crate::catalog::errors::storage_error("ALTER TABLE DROP COLUMN", error.as_ref())
+        })?
+        .into_iter()
+        .filter(|constraint| {
+            constraint
+                .included_columns
+                .iter()
+                .any(|name| name == column)
+        })
+        .map(|constraint| constraint.columns)
+        .collect::<Vec<_>>();
     let mut dependents = Vec::new();
     for referrer in catalog.table_names().map_err(|error| {
         crate::catalog::errors::storage_error("ALTER TABLE DROP COLUMN", error.as_ref())
@@ -30,7 +53,8 @@ pub fn foreign_keys_referencing_column(
             crate::catalog::errors::storage_error("ALTER TABLE DROP COLUMN", error.as_ref())
         })? {
             if foreign_key.ref_table == canonical
-                && foreign_key.ref_columns.iter().any(|name| name == column)
+                && (foreign_key.ref_columns.iter().any(|name| name == column)
+                    || included_keys.contains(&foreign_key.ref_columns))
             {
                 dependents.push((
                     referrer.clone(),

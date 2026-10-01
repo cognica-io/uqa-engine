@@ -296,6 +296,7 @@ pub fn constraint_catalog_rows(
                 name: None,
                 kind,
                 columns: vec![column.name.clone()],
+                included_columns: Vec::new(),
                 nulls_not_distinct: false,
                 without_overlaps: false,
             });

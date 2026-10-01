@@ -78,8 +78,11 @@ impl IndexDefinition {
                 owning_constraint: Some(owner.object_id),
                 parent_index: None,
             },
-            key_names: constraint.columns.clone(),
+            key_names: crate::schema::indexes::keys::key_names(
+                &crate::schema::indexes::names::constraint_index_attributes(constraint),
+            ),
             key_types,
+            included_columns: constraint.included_columns.clone(),
             unique: true,
             nulls_not_distinct: constraint.nulls_not_distinct,
             ..Self::default()

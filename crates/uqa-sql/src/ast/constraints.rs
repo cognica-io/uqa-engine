@@ -194,6 +194,9 @@ pub struct TableKeyConstraint {
     pub name: Option<String>,
     pub kind: TableKeyConstraintKind,
     pub columns: Vec<String>,
+    /// Columns that the supporting index carries beside the key, in declaration order. They take no part in uniqueness, and `PostgreSQL` lets them repeat and name key columns.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub included_columns: Vec<String>,
     /// `PostgreSQL` UNIQUE keys normally treat every NULL-containing tuple as
     /// distinct. `UNIQUE NULLS NOT DISTINCT` opts into NULL equality.
     #[serde(default)]
