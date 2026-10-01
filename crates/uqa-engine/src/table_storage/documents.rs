@@ -595,7 +595,7 @@ impl Engine {
                 .add_many(doc_id, vectors.remove(field).unwrap_or_default())
                 .map_err(|error| SQLError::Internal(format!("index document vector: {error}")))?;
         }
-        self.mark_column_stats_dirty(&table_name, &t)
+        self.mark_row_write(&table_name, &t, super::DocumentCountChange::Unchanged)
             .map_err(|err| SQLError::Internal(format!("invalidate column stats: {err}")))?;
         self.note_row_changed(&table_name, doc_id)?;
         Ok(())
@@ -701,7 +701,12 @@ impl Engine {
                 .delete(doc_id)
                 .map_err(|error| SQLError::Internal(format!("delete indexed vector: {error}")))?;
         }
-        self.mark_column_stats_dirty(&table_name, &t)
+        let documents = if existed {
+            super::DocumentCountChange::Removed
+        } else {
+            super::DocumentCountChange::Unchanged
+        };
+        self.mark_row_write(&table_name, &t, documents)
             .map_err(|err| SQLError::Internal(format!("invalidate column stats: {err}")))?;
         if existed {
             self.note_row_deleted(&table_name, doc_id)?;

@@ -51,6 +51,8 @@ mod columns;
 mod constraints;
 pub(crate) use constraints::table_next_id_metadata_key;
 mod dependencies;
+mod document_count;
+pub(crate) use document_count::DocumentCountChange;
 mod documents;
 mod fts;
 mod persistent;

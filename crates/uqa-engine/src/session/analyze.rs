@@ -149,6 +149,7 @@ impl Engine {
         Ok(())
     }
 
+    /// Record a change whose effect on the stored documents its caller does not know, such as a schema rewrite or a truncation.
     pub(crate) fn mark_column_stats_dirty(
         &self,
         canonical_table_name: &str,
@@ -163,11 +164,32 @@ impl Engine {
         table: &Arc<TableState>,
         count: u64,
     ) -> StorageBackendResult<()> {
+        self.record_table_change(canonical_table_name, table, count, None)
+    }
+
+    /// Record one row write, which changes the stored documents of its own table alone and by a known amount.
+    pub(crate) fn mark_row_write(
+        &self,
+        canonical_table_name: &str,
+        table: &Arc<TableState>,
+        documents: crate::table_storage::DocumentCountChange,
+    ) -> StorageBackendResult<()> {
+        self.record_table_change(canonical_table_name, table, 1, Some(documents))
+    }
+
+    fn record_table_change(
+        &self,
+        canonical_table_name: &str,
+        table: &Arc<TableState>,
+        count: u64,
+        documents: Option<crate::table_storage::DocumentCountChange>,
+    ) -> StorageBackendResult<()> {
         let ancestors = self
             .hierarchy_ancestor_tables(canonical_table_name)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         for name in ancestors {
-            let state = if name == canonical_table_name {
+            let written = name == canonical_table_name;
+            let state = if written {
                 Arc::clone(table)
             } else {
                 self.try_table(&name)?.ok_or_else(|| {
@@ -179,7 +201,12 @@ impl Engine {
             // Estimates remain useful while a replacement is pending. Track
             // changes transactionally instead of deleting durable statistics.
             self.record_statistics_change(&name, &state, count)?;
-            state.doc_count_dirty.store(true, Ordering::Release);
+            match documents {
+                Some(change) if written => state.apply_document_count_change(change),
+                // An ancestor stores its own documents, which a row write below it leaves alone.
+                Some(_) => {}
+                None => state.discard_document_count(),
+            }
             state.column_stats_dirty.store(true, Ordering::Release);
         }
         self.note_table_data_changed();

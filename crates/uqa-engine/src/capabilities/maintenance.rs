@@ -225,6 +225,7 @@ impl VacuumTable for VacuumTableBinding<'_> {
         Engine::document_vector_values(&self.table, document)
     }
     fn clear_documents(&self) -> StorageBackendResult<()> {
+        self.table.discard_document_count();
         self.table.document_store.write().clear()
     }
     fn clear_text_index(&self) -> StorageBackendResult<()> {
@@ -240,7 +241,7 @@ impl VacuumTable for VacuumTableBinding<'_> {
         self.table.persistence
     }
     fn mark_doc_count_dirty(&self) {
-        self.table.doc_count_dirty.store(true, Ordering::Release);
+        self.table.discard_document_count();
     }
 }
 impl VacuumLocks for Engine {

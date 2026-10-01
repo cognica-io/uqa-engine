@@ -438,6 +438,8 @@ impl Engine {
     }
 
     pub(crate) fn reload_table_catalog_after_rollback(&self) -> StorageBackendResult<()> {
+        // First, so that a failed reload cannot leave a count ahead of its store.
+        self.discard_persistent_document_counts();
         *self.epochs.storage_cache_revisions.lock() = None;
         self.clear_persistent_table_bindings_for_catalog_reload();
         let target_epoch = self

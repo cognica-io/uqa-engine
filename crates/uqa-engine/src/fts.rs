@@ -427,7 +427,12 @@ impl Engine {
             Self::value_indexes_apply_write(&t, doc_id, old_indexed.as_ref(), Some(new));
         }
         drop(store);
-        self.mark_column_stats_dirty(&table_name, &t)
+        let documents = if existed {
+            crate::table_storage::DocumentCountChange::Unchanged
+        } else {
+            crate::table_storage::DocumentCountChange::Added
+        };
+        self.mark_row_write(&table_name, &t, documents)
             .map_err(|err| SQLError::Internal(format!("invalidate column stats: {err}")))?;
         if existed {
             self.note_row_changed(&table_name, doc_id)?;
