@@ -6,7 +6,7 @@
 
 //! Committed document rows read from their physical projection when it holds exactly a snapshot's records.
 //!
-//! Each record commit materializes the native projection in its own physical transaction and advances the database header in that transaction, so a read whose header sequence equals a snapshot's boundary sees the projection of exactly that boundary. Commit validation binds every document row's table name to its owner, and a name is retired only after its rows are gone, so the rows under a table's name are the records of the owner bound to that name. When that owner has no other bound name and the session holds no private records, the physical rows in document order stand in for the record scan, one sequential cursor instead of a version lookup per record.
+//! At a snapshot that is the latest commit, the projection holds the snapshot's committed records (see [`NativeSnapshot::read_latest_projection`]). Commit validation binds every document row's table name to its owner, and a name is retired only after its rows are gone, so the rows under a table's name are the records of the owner bound to that name. When that owner has no other bound name and the session holds no private records, the physical rows in document order stand in for the record scan, one sequential cursor instead of a version lookup per record.
 
 use rusqlite::{params, types::ValueRef, Connection, OptionalExtension};
 use uqa_core::memory::{MemoryError, MemoryReservation};
@@ -64,22 +64,10 @@ impl NativeSnapshot {
         control: &StorageReadControl,
         read: &mut dyn FnMut(&LatestDocuments<'_>) -> Result<T>,
     ) -> Result<Option<T>> {
-        self.control.check()?;
-        control.check()?;
-        if self.view.private_revision().is_some() {
-            return Ok(None);
-        }
-        let Some(snapshot) = self
-            .view
-            .committed()
-            .provider_snapshot()
-            .and_then(|snapshot| snapshot.downcast_ref::<crate::mvcc::read::Snapshot>())
-        else {
-            return Ok(None);
-        };
-        let result = snapshot.read_latest(|connection| {
-            if owners::lookup(connection, ValueRef::Text(table.as_bytes()), control)? != Some(owner)
-            {
+        self.read_latest_projection(control, &mut |connection| {
+            let bound = owners::lookup(connection, ValueRef::Text(table.as_bytes()), control)
+                .map_err(crate::mvcc::Error::into_version)?;
+            if bound != Some(owner) {
                 return Ok(None);
             }
             let names: i64 = connection
@@ -99,11 +87,8 @@ impl NativeSnapshot {
                 generation,
                 control,
             };
-            Ok(Some(read(&latest)?))
-        })?;
-        self.control.check()?;
-        control.check()?;
-        Ok(result)
+            read(&latest).map(Some)
+        })
     }
 }
 

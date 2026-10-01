@@ -12,7 +12,9 @@ mod graph_labels;
 mod graph_observations;
 mod graph_selection;
 mod identity_presence;
+mod latest;
 mod latest_documents;
+mod latest_vertices;
 
 use rusqlite::types::ValueRef;
 use uqa_storage::mvcc::{DatabaseId, MergedRecordSnapshot, VersionError, VersionedKeyValueStore};
