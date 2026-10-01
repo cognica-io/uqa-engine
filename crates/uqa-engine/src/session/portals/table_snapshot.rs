@@ -158,6 +158,9 @@ impl Engine {
                     .column_stats_dirty
                     .load(std::sync::atomic::Ordering::Acquire),
             ),
+            statistics_maintenance: parking_lot::Mutex::new(
+                metadata.statistics_maintenance.lock().clone(),
+            ),
             table_checks: crate::state::CatalogCell::from_snapshot(
                 metadata.table_checks.snapshot(),
             ),

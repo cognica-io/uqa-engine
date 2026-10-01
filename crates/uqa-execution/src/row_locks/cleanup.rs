@@ -48,9 +48,7 @@ impl RowLockManager {
         state.advertised_waits.remove(&session_id);
         remove_inactive_versions(&mut state);
         drop(state);
-        for (key, strength) in released_rows {
-            self.release_row_claims(session_id, key, strength);
-        }
+        self.release_row_claims(session_id, &released_rows);
         for (table, mode) in released_relations {
             self.release_relation_claims(session_id, table, mode);
         }
@@ -90,9 +88,7 @@ impl RowLockManager {
         state.advertised_waits.remove(&session_id);
         remove_inactive_versions(&mut state);
         drop(state);
-        for (key, strength) in released_rows {
-            self.release_row_claims(session_id, key, strength);
-        }
+        self.release_row_claims(session_id, &released_rows);
         for (table, mode) in released_relations {
             self.release_relation_claims(session_id, table, mode);
         }
@@ -123,7 +119,7 @@ impl RowLockManager {
         remove_inactive_versions(&mut state);
         drop(state);
         if let Some(strength) = released {
-            self.release_row_claims(acquisition.session_id, acquisition.key, strength);
+            self.release_row_claims(acquisition.session_id, &[(acquisition.key, strength)]);
         }
         self.wake.notify_all();
     }

@@ -419,15 +419,13 @@ impl Engine {
         )
     }
 
-    /// Move the watermark past `doc_id` if needed (called after a manual
-    /// id assignment so the next allocation does not collide).
+    /// Move the local watermark past `doc_id` after a supplied identity, so the next allocation of this session does not collide. The document write that publishes the row makes the identity durable.
     pub(crate) fn advance_next_id(&self, table: &str, doc_id: DocId) -> StorageBackendResult<()> {
         let t = self
             .try_table(table)?
             .ok_or_else(|| table_not_found(table))?;
         let mut next = t.next_id.lock();
-        self.table_identifier_allocator(&t)?
-            .observe(&mut next, doc_id)
+        DocumentIdAllocator::observe(&mut next, doc_id)
     }
 
     pub(crate) fn persist_next_id(&self, table: &str) -> StorageBackendResult<()> {

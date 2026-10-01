@@ -199,6 +199,7 @@ impl Engine {
             column_stats: crate::state::CatalogCell::new(column_stats),
             column_stats_loaded: AtomicBool::new(true),
             column_stats_dirty: AtomicBool::new(column_stats_dirty),
+            statistics_maintenance: parking_lot::Mutex::default(),
             table_checks: crate::state::CatalogCell::new(constraints.checks),
             foreign_keys: crate::state::CatalogCell::new(constraints.foreign_keys),
             key_constraints: crate::state::CatalogCell::new(constraints.key_constraints),

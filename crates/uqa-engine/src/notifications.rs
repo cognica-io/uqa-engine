@@ -489,6 +489,9 @@ struct NotificationHubState {
     next_sequence: u64,
     head_position: u64,
     last_queue_warning: Option<Instant>,
+    /// Cross-process synchronizations whose delivery commit failed; each failure fails every local subscription.
+    delivery_failures: u64,
+    last_delivery_failure: Option<SQLError>,
 }
 
 pub(crate) struct NotificationHub {
@@ -498,7 +501,13 @@ pub(crate) struct NotificationHub {
     max_queue_pages: u64,
     cross: Option<CrossProcessState>,
     cross_error: Mutex<Option<String>>,
+    /// Runs between a cross-process publication and the committing session's own synchronization.
+    #[cfg(test)]
+    after_publication: Mutex<Option<AfterPublication>>,
 }
+
+#[cfg(test)]
+type AfterPublication = Box<dyn FnOnce(&NotificationHub) + Send>;
 
 impl Default for NotificationHub {
     fn default() -> Self {
@@ -509,6 +518,8 @@ impl Default for NotificationHub {
             max_queue_pages: MAX_NOTIFICATION_QUEUE_PAGES,
             cross: None,
             cross_error: Mutex::new(None),
+            #[cfg(test)]
+            after_publication: Mutex::new(None),
         }
     }
 }
@@ -854,6 +865,8 @@ mod tests {
             max_queue_pages: 1,
             cross: None,
             cross_error: Mutex::new(None),
+            #[cfg(test)]
+            after_publication: Mutex::new(None),
         };
         assert_eq!(
             hub.queue_warning(&mut state).as_deref(),

@@ -49,6 +49,11 @@ impl VisibleRecordRevision {
             .flatten()
     }
 
+    /// The committed sequence this view includes, whether or not private changes accompany it.
+    pub(crate) fn committed_sequence(self) -> Option<CommitSequence> {
+        self.committed
+    }
+
     pub(crate) fn database(self) -> super::DatabaseId {
         self.database
     }

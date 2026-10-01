@@ -269,3 +269,49 @@ fn clean_open_repair_does_not_contend_for_sqlite_writer_lock() {
     new_session_result.unwrap();
     reopen_result.unwrap();
 }
+
+#[test]
+fn memory_value_indexes_survive_their_own_data_generations() {
+    let engine = crate::Engine::new();
+    engine
+        .sql("CREATE TABLE kept (id INTEGER PRIMARY KEY, v INTEGER)", &[])
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO kept SELECT g, g FROM generate_series(1, 50) AS g",
+            &[],
+        )
+        .unwrap();
+    let key = ValueIndexKey::from("id");
+    let count = |engine: &crate::Engine| {
+        engine
+            .sql("SELECT count(*) FROM kept WHERE id BETWEEN 10 AND 19", &[])
+            .unwrap()
+            .value_at(0, 0)
+            .cloned()
+    };
+    assert_eq!(count(&engine), Some(Value::Int(10)));
+    let has_index = |engine: &crate::Engine| {
+        engine
+            .try_table("kept")
+            .unwrap()
+            .unwrap()
+            .value_indexes
+            .read()
+            .contains_key(&key)
+    };
+    assert!(has_index(&engine));
+    // Only this engine writes its tables, and each write maintained the index, so a new data generation keeps it.
+    engine.sql("DELETE FROM kept WHERE id = 12", &[]).unwrap();
+    engine.synchronize_table_data().unwrap();
+    assert!(has_index(&engine));
+    assert_eq!(count(&engine), Some(Value::Int(9)));
+    // A rolled-back write restores the index of the snapshot instead of keeping the undone posting.
+    engine
+        .sql("BEGIN; INSERT INTO kept VALUES (12, 12)", &[])
+        .unwrap();
+    assert_eq!(count(&engine), Some(Value::Int(10)));
+    engine.sql("ROLLBACK", &[]).unwrap();
+    engine.synchronize_table_data().unwrap();
+    assert_eq!(count(&engine), Some(Value::Int(9)));
+}

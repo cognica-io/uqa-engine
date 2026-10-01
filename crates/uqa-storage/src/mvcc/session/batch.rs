@@ -251,29 +251,39 @@ impl<'a> Batch<'a> {
 
     fn apply_identifiers(&self) -> Result<(), VersionError> {
         let write_control = self.store.write_control();
+        let observe = |namespace: &[u8], value: u64| {
+            self.store.persistence.allocate_identifiers(
+                namespace,
+                crate::mvcc::IdentifierRequest::Observe(value),
+                &write_control,
+            )
+        };
+        // An observation only raises its namespace's watermark to the maximum observed value, so a run of observations of one namespace needs a single physical allocation. An inheritance reads its source watermark and ends the run.
+        let mut run: Option<(&[u8], u64)> = None;
         for operation in self.operations.iter() {
             match operation {
-                Operation::IdentifierObservation(namespace, value) => {
-                    self.store.persistence.allocate_identifiers(
-                        namespace,
-                        crate::mvcc::IdentifierRequest::Observe(*value),
-                        &write_control,
-                    )?;
-                }
+                Operation::IdentifierObservation(namespace, value) => match &mut run {
+                    Some((current, maximum)) if *current == &namespace[..] => {
+                        *maximum = (*maximum).max(*value);
+                    }
+                    _ => {
+                        if let Some((namespace, value)) = run.replace((namespace, *value)) {
+                            observe(namespace, value)?;
+                        }
+                    }
+                },
                 Operation::IdentifierInheritance(from, to) => {
-                    let source = self.store.persistence.allocate_identifiers(
-                        from,
-                        crate::mvcc::IdentifierRequest::Observe(0),
-                        &write_control,
-                    )?;
-                    self.store.persistence.allocate_identifiers(
-                        to,
-                        crate::mvcc::IdentifierRequest::Observe(source.watermark()),
-                        &write_control,
-                    )?;
+                    if let Some((namespace, value)) = run.take() {
+                        observe(namespace, value)?;
+                    }
+                    let source = observe(from, 0)?;
+                    observe(to, source.watermark())?;
                 }
                 _ => {}
             }
+        }
+        if let Some((namespace, value)) = run {
+            observe(namespace, value)?;
         }
         Ok(())
     }

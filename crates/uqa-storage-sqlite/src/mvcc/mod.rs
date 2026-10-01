@@ -8,6 +8,7 @@
 
 mod admission;
 mod codec;
+mod connection_functions;
 mod identifiers;
 mod key_value;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]

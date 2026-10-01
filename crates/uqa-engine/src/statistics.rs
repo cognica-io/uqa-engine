@@ -93,7 +93,18 @@ impl Engine {
         if self.storage.catalog.is_none()
             || table.persistence == uqa_sql::ast::RelationPersistence::Temporary
         {
-            return Ok(());
+            let previous_rows = table
+                .column_stats
+                .read()
+                .values()
+                .next()
+                .map(|stats| stats.row_count);
+            return table.statistics_maintenance.lock().record_changes(
+                table.object_id(),
+                count,
+                previous_rows,
+                now_ms(),
+            );
         }
         let mut stack = self.session.transactions.lock();
         if let Some(frame) = stack.last_mut() {

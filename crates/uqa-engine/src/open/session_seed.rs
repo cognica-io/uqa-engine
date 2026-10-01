@@ -121,6 +121,7 @@ impl Engine {
                 source.column_stats_loaded.load(Ordering::Acquire),
             ),
             column_stats_dirty: AtomicBool::new(source.column_stats_dirty.load(Ordering::Acquire)),
+            statistics_maintenance: Mutex::new(source.statistics_maintenance.lock().clone()),
             table_checks: CatalogCell::from_snapshot(source.table_checks.snapshot()),
             foreign_keys: CatalogCell::from_snapshot(source.foreign_keys.snapshot()),
             key_constraints: CatalogCell::from_snapshot(source.key_constraints.snapshot()),

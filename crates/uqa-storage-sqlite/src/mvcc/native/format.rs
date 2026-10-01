@@ -171,10 +171,10 @@ pub(in crate::mvcc) fn initialize(
     control: &StorageReadControl,
 ) -> PhysicalResult<NativeMapping> {
     control.cancellation().check().map_err(VersionError::from)?;
-    let _permit = schema::WritePermit::acquire(connection)?;
-    let transaction = schema::begin(connection)?;
+    let _permit = crate::mvcc::admission::permit(connection, control)?;
+    let transaction = crate::mvcc::admission::begin(connection, control)?;
     let mapping = initialize_in(&transaction, control)?;
-    transaction.commit()?;
+    crate::mvcc::admission::commit(transaction, control)?;
     Ok(mapping)
 }
 
