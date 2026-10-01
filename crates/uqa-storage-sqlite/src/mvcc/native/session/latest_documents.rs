@@ -24,6 +24,7 @@ const INLINE_BODY_BYTES: u16 = 16 * 1024;
 const ROWS: &str = "SELECT doc_id, octet_length(body), CASE WHEN octet_length(body) <= ?2 THEN body END, tuple_xmin FROM _documents WHERE table_name = ?1 ORDER BY doc_id";
 const ROWS_AFTER: &str = "SELECT doc_id, octet_length(body), CASE WHEN octet_length(body) <= ?2 THEN body END, tuple_xmin FROM _documents WHERE table_name = ?1 AND doc_id > ?3 ORDER BY doc_id";
 const BODY: &str = "SELECT body FROM _documents WHERE table_name = ?1 AND doc_id = ?2";
+const COUNT: &str = "SELECT count(*) FROM _documents WHERE table_name = ?1";
 const NAMES_OF_OWNER: &str = "SELECT count(*) FROM _uqa_mvcc_native_owners WHERE (object_id, generation) = (SELECT object_id, generation FROM _uqa_mvcc_native_owners WHERE name = ?1)";
 
 /// The table's data generation, which the `_documents` triggers advance in the transaction of every row change.
@@ -51,6 +52,12 @@ impl LatestDocuments<'_> {
         visit: &mut dyn FnMut(&[ValueRef<'_>]) -> Result<bool>,
     ) -> Result<()> {
         visit_rows(self.connection, self.table, after, self.control, visit)
+            .map_err(|error| error.into_version().into())
+    }
+
+    /// The number of rows, counted in the table's key order without reading a body.
+    pub(crate) fn count(&self) -> Result<u64> {
+        count_rows(self.connection, self.table, self.control)
             .map_err(|error| error.into_version().into())
     }
 }
@@ -90,6 +97,20 @@ impl NativeSnapshot {
             read(&latest).map(Some)
         })
     }
+}
+
+fn count_rows(
+    connection: &Connection,
+    table: &str,
+    control: &StorageReadControl,
+) -> PhysicalResult<u64> {
+    let _bindings = reserve_bindings(control, &[table.as_bytes()])?;
+    let count: i64 = connection
+        .prepare_cached(COUNT)?
+        .query_row([table], |row| row.get(0))?;
+    control.check().map_err(VersionError::from)?;
+    Ok(u64::try_from(count)
+        .map_err(|_| VersionError::InvalidEncoding("negative native document count"))?)
 }
 
 fn visit_rows(

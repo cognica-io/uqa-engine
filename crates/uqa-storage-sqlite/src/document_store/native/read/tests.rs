@@ -227,3 +227,80 @@ fn native_identity_page_buffers_share_the_read_allowance() {
     assert!(matches!(read.ids(None, 0), Err(SQLiteError::Cancelled(_))));
     assert_eq!(control.memory().used(), 0);
 }
+
+#[test]
+fn the_latest_document_count_reads_stored_rows_and_other_snapshots_count_records() {
+    use rusqlite::hooks::{AuthAction, Authorization};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    Catalog::open(connection.clone()).unwrap();
+    connection
+        .bind_native_records(VersionedSessionOptions::default())
+        .unwrap();
+    let mut documents = SQLiteDocumentStore::new(connection.clone(), "docs");
+    assert_eq!(documents.len().unwrap(), 0);
+    connection.begin_transaction().unwrap();
+    for id in 1..=64 {
+        documents.put(id, BTreeMap::new()).unwrap();
+    }
+    assert_eq!(documents.len().unwrap(), 64);
+    connection.commit_transaction().unwrap();
+    let retained = documents.snapshot().unwrap();
+    documents.delete(7).unwrap();
+    documents.put(100, BTreeMap::new()).unwrap();
+    documents.put(101, BTreeMap::new()).unwrap();
+
+    let stored_reads = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&stored_reads);
+    connection
+        .with_physical(|sqlite| {
+            sqlite.set_prepared_statement_cache_capacity(0);
+            sqlite.authorizer(Some(move |context: rusqlite::hooks::AuthContext<'_>| {
+                if matches!(
+                    context.action,
+                    AuthAction::Read {
+                        table_name: "_documents",
+                        ..
+                    }
+                ) {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                }
+                Authorization::Allow
+            }))?;
+            Ok(())
+        })
+        .unwrap();
+    stored_reads.store(0, Ordering::Relaxed);
+    assert_eq!(documents.len().unwrap(), 65);
+    assert!(
+        stored_reads.swap(0, Ordering::Relaxed) > 0,
+        "the latest count read no stored rows"
+    );
+    assert_eq!(retained.len().unwrap(), 64);
+    assert_eq!(
+        stored_reads.swap(0, Ordering::Relaxed),
+        0,
+        "a retained snapshot counted the latest stored rows"
+    );
+    connection.begin_transaction().unwrap();
+    documents.delete(1).unwrap();
+    stored_reads.store(0, Ordering::Relaxed);
+    assert_eq!(documents.len().unwrap(), 64);
+    assert_eq!(
+        stored_reads.swap(0, Ordering::Relaxed),
+        0,
+        "a transaction's own records were counted from the latest stored rows"
+    );
+    connection.rollback_transaction().unwrap();
+    assert_eq!(documents.len().unwrap(), 65);
+    connection
+        .with_physical(|sqlite| {
+            sqlite.authorizer(None::<fn(rusqlite::hooks::AuthContext<'_>) -> Authorization>)?;
+            sqlite.set_prepared_statement_cache_capacity(16);
+            Ok(())
+        })
+        .unwrap();
+}
