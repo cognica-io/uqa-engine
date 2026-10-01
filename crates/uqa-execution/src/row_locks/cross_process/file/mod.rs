@@ -77,12 +77,15 @@ struct CoordinatorState {
     released_holder_slots: Vec<u64>,
     /// Next holder slot to probe. Advancing past each allocation avoids restarting every acquisition at an unrelated hash location and repeatedly reading slots already known to be occupied by this process.
     next_holder_slot: u64,
+    /// Row claims of local sessions, which live in the shared claim table instead of record locks and holder slots.
+    rows: row_claims::RowClaims,
 }
 
 /// Process-wide coordinator for one durable database. All engine sessions of this process share one descriptor while the in-process lock table arbitrates between local sessions. On POSIX, nothing else in the process may open the sidecar path because closing another descriptor to it would drop this process's record locks.
 pub(in crate::row_locks) struct FileLockCoordinator {
     file: std::fs::File,
     change_file: std::fs::File,
+    claim_file: std::fs::File,
     change_journal: Mutex<()>,
     transaction_xids: Mutex<xids::TransactionXids>,
     temporary_role_slots: Mutex<temporary_roles::Slots>,
@@ -93,6 +96,7 @@ mod claims;
 mod journal;
 mod platform;
 mod relations;
+mod row_claims;
 mod temporary_roles;
 mod waits;
 mod xids;
@@ -129,10 +133,25 @@ impl FileLockCoordinator {
                     Path::new(&change_sidecar).display()
                 )
             })?;
+        let mut claim_sidecar = database_path.as_os_str().to_owned();
+        claim_sidecar.push(".uqa-row-claims");
+        let claim_file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&claim_sidecar)
+            .map_err(|error| {
+                format!(
+                    "open cross-process row claim table `{}`: {error}",
+                    Path::new(&claim_sidecar).display()
+                )
+            })?;
         let pid = std::process::id();
         let coordinator = Self {
             file,
             change_file,
+            claim_file,
             change_journal: Mutex::new(()),
             transaction_xids: Mutex::new(xids::TransactionXids::new()),
             temporary_role_slots: Mutex::new(temporary_roles::Slots::default()),
@@ -147,6 +166,7 @@ impl FileLockCoordinator {
                 occupied_holder_slots: vec![false; HOLDER_SLOT_COUNT as usize],
                 released_holder_slots: Vec::new(),
                 next_holder_slot: u64::from(pid).wrapping_mul(31) % HOLDER_SLOT_COUNT,
+                rows: row_claims::RowClaims::default(),
             }),
         };
         Ok(coordinator)

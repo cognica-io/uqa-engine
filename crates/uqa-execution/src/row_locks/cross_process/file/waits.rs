@@ -6,7 +6,7 @@
 
 //! Holder and waiter slots plus cross-process wait-graph traversal.
 
-use super::super::wait_blocking_claims;
+use super::super::{row_claim_address, wait_blocking_claims};
 use super::{
     process_alive, read_exact_at, write_all_at, ByteClaim, CoordinatorState, FileLockCoordinator,
     HOLDER_SLOT_BASE, HOLDER_SLOT_COUNT, HOLDER_SLOT_SIZE, SLOT_METADATA_LOCK_BYTE, WAIT_SLOT_BASE,
@@ -255,6 +255,9 @@ impl FileLockCoordinator {
     /// Local sessions holding a conflicting physical byte or relation mode.
     fn local_holders_conflicting(&self, claim: ByteClaim) -> Vec<u64> {
         let state = self.state.lock();
+        if row_claim_address(claim).is_some() {
+            return state.rows.holders(claim);
+        }
         let mut holders = Vec::new();
         for blocking in wait_blocking_claims(claim) {
             let Some(counts) = state.claims.get(&blocking.offset) else {
@@ -272,6 +275,9 @@ impl FileLockCoordinator {
     }
 
     fn holder_sessions(&self, claim: ByteClaim) -> Vec<HolderSlot> {
+        if row_claim_address(claim).is_some() {
+            return self.foreign_row_holders(claim);
+        }
         let mut holders = Vec::new();
         let blocking = wait_blocking_claims(claim);
         for index in 0..HOLDER_SLOT_COUNT {
@@ -311,10 +317,10 @@ struct WaitSlot {
 }
 
 pub(super) struct HolderSlot {
-    pid: u32,
+    pub(super) pid: u32,
     pub(super) session: u64,
     pub(super) offset: u64,
-    write: bool,
+    pub(super) write: bool,
 }
 
 impl HolderSlot {

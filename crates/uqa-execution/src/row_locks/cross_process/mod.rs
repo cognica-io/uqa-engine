@@ -6,16 +6,18 @@
 
 //! Cross-process row and relation lock coordination.
 //!
-//! Independent OS processes opening the same durable database coordinate logical locks through native byte-range locks on a sidecar file next to the database. Byte offsets derive from stable hashes of the relation name and row identity; hash collisions only make coordination more conservative, never less. Record locks die with the owning process, so a crashed process can never leave a stale logical lock behind.
+//! Independent OS processes opening the same durable database coordinate logical locks through sidecar files next to the database. Relation locks are native byte-range locks whose offsets derive from stable hashes of the relation identity; hash collisions only make coordination more conservative, never less. Record locks die with the owning process, so a crashed process can never leave a stale logical lock behind.
 //!
-//! Each row maps to a two-byte range whose first byte carries key-related claims and whose second byte carries row-update claims. Mapping the four `PostgreSQL` tuple-lock strengths onto shared and exclusive claims of those two bytes reproduces the exact `PostgreSQL` 18 tuple-lock conflict matrix across processes:
+//! Row claims are entries of a shared claim table instead of record locks, because a statement may claim any number of rows and each record lock call walks every record lock of its file. An entry names its owning process and session, and the owning process holds one record lock, its liveness byte, for as long as it is attached, so an entry whose owner died is recognized and discarded.
+//!
+//! Each row has a key byte carrying key-related claims and a row byte carrying row-update claims. Mapping the four `PostgreSQL` tuple-lock strengths onto shared and exclusive claims of those two bytes reproduces the exact `PostgreSQL` 18 tuple-lock conflict matrix across processes:
 //!
 //! - `FOR KEY SHARE`: shared claim of the key byte.
 //! - `FOR SHARE`: shared claim of the row byte.
 //! - `FOR NO KEY UPDATE`: exclusive claim of the row byte.
 //! - `FOR UPDATE`: exclusive claims of both bytes.
 //!
-//! Fixed slot tables at the start of the sidecar record the exact session holding or waiting for each byte. A waiter can therefore walk the cross-process wait-for graph and report `40P01` only when it reaches its own `(pid, session)`, mirroring `PostgreSQL`'s deadlock detector.
+//! The claim table names the exact session holding each row byte, and fixed slot tables at the start of the lock sidecar record the session holding each relation byte and the byte each session waits for. A waiter can therefore walk the cross-process wait-for graph and report `40P01` only when it reaches its own `(pid, session)`, mirroring `PostgreSQL`'s deadlock detector.
 
 use uqa_sql::ast::LockStrength;
 
@@ -54,15 +56,19 @@ pub(super) enum PublishedRowChangeKind {
     Rewrite(PublishedRowIdentity),
 }
 
-/// Sidecar layout. Coordination bytes and wait/holder slots occupy the low addresses; record-lock byte ranges for relations and rows start above them so lock offsets never alias structured data offsets.
+/// Sidecar layout. Coordination bytes and wait/holder slots occupy the low addresses; record-lock byte ranges start above them so lock offsets never alias structured data offsets.
 const RELATION_BASE: u64 = 1 << 20;
 const RELATION_SPAN: u64 = 1 << 20;
 const ROW_BASE: u64 = 1 << 21;
 const CHANGE_GATE_BYTE: u64 = 9;
-/// Row byte pairs occupy `[ROW_BASE, ROW_BASE + 2 * ROW_SPAN)`. Record-lock offsets travel through `off_t`, so the span is sized to the platform's `off_t` width: 2^40 rows on 64-bit `off_t`, and the largest power of two that keeps every offset below `i32::MAX` where `off_t` is 32 bits.
+/// `[ROW_BASE, ROW_BASE + 2 * ROW_SPAN)` carried one record lock per row byte before row claims moved to the shared claim table. The range stays reserved so the relation mode bytes above it keep their offsets. Record-lock offsets travel through `off_t`, so the span is sized to the platform's `off_t` width: 2^40 rows on 64-bit `off_t`, and the largest power of two that keeps every offset below `i32::MAX` where `off_t` is 32 bits.
 const ROW_SPAN: u64 = row_span_for_offset_width(std::mem::size_of::<OffsetWidth>());
 const RELATION_MODE_BASE: u64 = ROW_BASE + 2 * ROW_SPAN;
 const RELATION_WAIT_BASE: u64 = RELATION_MODE_BASE + 8 * RELATION_SPAN;
+/// One liveness byte for each process attached to the row claim table.
+const PROCESS_LIVENESS_BASE: u64 = RELATION_WAIT_BASE + 8 * RELATION_SPAN;
+/// Row claim addresses set the top bit, which no record-lock offset uses, so the two address spaces never alias. The bits below it are the row identity followed by the byte of the row.
+const ROW_CLAIM: u64 = 1 << 63;
 
 #[cfg(all(unix, not(target_os = "emscripten")))]
 type OffsetWidth = libc::off_t;
@@ -102,12 +108,62 @@ pub(super) const fn change_gate_claim(write: bool) -> ByteClaim {
     }
 }
 
+/// One of the two claimable bytes of a row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    not(any(windows, all(unix, not(target_os = "emscripten")))),
+    allow(dead_code)
+)]
+pub(super) enum RowByte {
+    Key,
+    Row,
+}
+
+/// The row identity and byte a claim addresses, or `None` for a record-lock claim.
+#[cfg_attr(
+    not(any(windows, all(unix, not(target_os = "emscripten")))),
+    allow(dead_code)
+)]
+pub(super) fn row_claim_address(claim: ByteClaim) -> Option<(u64, RowByte)> {
+    (claim.offset & ROW_CLAIM != 0).then(|| {
+        let byte = if claim.offset & 1 == 0 {
+            RowByte::Key
+        } else {
+            RowByte::Row
+        };
+        ((claim.offset & !ROW_CLAIM) >> 1, byte)
+    })
+}
+
+#[cfg_attr(
+    not(any(windows, all(unix, not(target_os = "emscripten")))),
+    allow(dead_code)
+)]
+pub(super) fn row_claim(identity: u64, byte: RowByte, write: bool) -> ByteClaim {
+    ByteClaim {
+        offset: ROW_CLAIM | (identity << 1) | u64::from(byte == RowByte::Row),
+        write,
+    }
+}
+
+/// The 62 bits that identify one row to every process. Two rows share them with probability 2^-62, in which case their claims conflict as one row's would.
+fn row_identity(relation: &[u8], doc_id: uqa_core::DocId) -> u64 {
+    let mut hash = stable_hash(&[relation, &doc_id.to_be_bytes()]);
+    // The low bits of FNV-1a depend only on the low bits of its input bytes; this finalizer makes every bit depend on all of them.
+    hash ^= hash >> 33;
+    hash = hash.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    hash ^= hash >> 33;
+    hash = hash.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+    hash ^= hash >> 33;
+    hash >> 2
+}
+
 pub(super) fn row_byte_claims(
     relation: &[u8],
     doc_id: uqa_core::DocId,
     strength: LockStrength,
 ) -> Vec<ByteClaim> {
-    let base = ROW_BASE + (stable_hash(&[relation, &doc_id.to_be_bytes()]) % ROW_SPAN) * 2;
+    let base = ROW_CLAIM | (row_identity(relation, doc_id) << 1);
     match strength {
         LockStrength::ForKeyShare => vec![ByteClaim {
             offset: base,

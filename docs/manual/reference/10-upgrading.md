@@ -8,6 +8,10 @@ Databases already opened with 0.4.5 or 0.4.6 use the same persistent formats in 
 
 Application-owned raw SQLite tables remain outside the native UQA record model. Initial open still rejects unmapped physical tables; application-specific migration must preserve their data before native conversion. This release does not infer ownership or silently discard those tables.
 
+## Row locks of cooperating processes
+
+Processes that share one database coordinate row locks through a claim table in a new `<database>.uqa-row-claims` sidecar; earlier versions took one record lock for each locked row in `<database>.uqa-locks`. The two do not see each other: a row locked by a process of one version is not locked for a process of the other. Stop every process of an earlier version before the first process of this version opens the database. No file is converted. The sidecar is created on first use, holds no committed data, and may be deleted while no process has the database open.
+
 ## B-tree postings for every index column
 
 A B-tree index now keeps durable postings for each of its plain key columns and for its `INCLUDE` columns; earlier versions kept them for the first key column only. The first open of an existing database builds the missing postings in its open-time index repair transaction, reading each affected table once. No record format changes: an earlier binary that opens the database afterwards removes the additional postings in its own repair, and a later open builds them again.

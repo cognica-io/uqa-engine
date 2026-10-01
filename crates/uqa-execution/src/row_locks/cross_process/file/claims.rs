@@ -6,6 +6,7 @@
 
 //! Atomic cross-process byte claims and release accounting.
 
+use super::super::row_claim_address;
 use super::{lock_would_block, ByteClaim, CoordinatorState, FileLockCoordinator};
 
 impl FileLockCoordinator {
@@ -59,6 +60,13 @@ impl FileLockCoordinator {
         session: u64,
         claims: &[ByteClaim],
     ) -> Result<Result<(), ByteClaim>, String> {
+        // One acquisition claims either rows or record-lock bytes, never both.
+        if claims
+            .first()
+            .is_some_and(|claim| row_claim_address(*claim).is_some())
+        {
+            return self.try_claim_rows(state, session, claims);
+        }
         let mut applied: Vec<ByteClaim> = Vec::with_capacity(claims.len());
         for claim in claims {
             let counts = state.claims.entry(claim.offset).or_default();
@@ -104,14 +112,17 @@ impl FileLockCoordinator {
         Ok(Ok(()))
     }
 
-    /// Release claims that were successfully applied earlier by `session`. Every holder slot is cleared before any byte is unlocked, so no waiter can acquire a byte while a slot still attributes it to `session`. The kernel keeps each process's record locks sorted by offset, so unlocking in ascending order finds each lock at the front of this process's locks.
+    /// Release claims that were successfully applied earlier by `session`. Every holder slot is cleared before any byte is unlocked, so no waiter can acquire a byte while a slot still attributes it to `session`. The kernel keeps each process's record locks sorted by offset, so unlocking in ascending order finds each lock at the front of this process's locks. Row claims, whose addresses follow every record-lock offset, leave the claim table under one hold of its lock byte.
     pub(in crate::row_locks) fn release(&self, session: u64, claims: &[ByteClaim]) {
         let mut ordered = claims.to_vec();
         ordered.sort_unstable_by_key(|claim| (claim.offset, claim.write));
+        let (records, rows) =
+            ordered.split_at(ordered.partition_point(|claim| row_claim_address(*claim).is_none()));
         let mut state = self.state.lock();
-        self.clear_holder_slots(&mut state, session, &ordered);
-        for claim in ordered {
-            self.unlock_claim(&mut state, session, claim);
+        self.clear_holder_slots(&mut state, session, records);
+        for claim in records {
+            self.unlock_claim(&mut state, session, *claim);
         }
+        self.release_rows(&mut state, session, rows);
     }
 }
