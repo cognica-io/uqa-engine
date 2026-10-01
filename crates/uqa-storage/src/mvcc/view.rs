@@ -632,6 +632,15 @@ impl MergedRecordSnapshot {
         )
     }
 
+    /// Whether this view holds a private change of `key`, whose committed record is then not what a read of the key returns.
+    pub fn has_private_change(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<bool> {
+        Ok(self.private.get(key, control)?.is_some())
+    }
+
     pub fn get(
         &self,
         key: &[u8],

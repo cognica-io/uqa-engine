@@ -363,6 +363,7 @@ impl VersionedPersistence for SQLiteRecordStore {
                 sequence: lease.sequence(),
                 reclamation_epoch,
                 monitor,
+                table_owners: read::table_owners::TableOwners::default(),
                 _lease: lease,
             },
             control,

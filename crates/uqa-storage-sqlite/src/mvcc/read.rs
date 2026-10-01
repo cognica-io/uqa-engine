@@ -8,6 +8,7 @@
 
 mod last;
 mod ordered;
+pub(crate) mod table_owners;
 mod values;
 
 use rusqlite::{params, types::ValueRef, Connection, OptionalExtension};
@@ -29,6 +30,7 @@ pub(super) struct Snapshot {
     pub(super) reclamation_epoch: u64,
     /// The commit monitor's value before this snapshot was captured.
     pub(super) monitor: Option<u64>,
+    pub(crate) table_owners: table_owners::TableOwners,
     pub(super) _lease: std::sync::Arc<uqa_storage::mvcc::SnapshotLease>,
 }
 

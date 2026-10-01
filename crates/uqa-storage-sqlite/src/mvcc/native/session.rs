@@ -209,7 +209,39 @@ impl NativeSnapshot {
         self.table_binding_controlled(table, &self.control)
     }
 
+    /// The binding of `table` in this view. A binding this transaction did not change is the committed one, which the committed snapshot keeps after its first read.
     fn table_binding_controlled(
+        &self,
+        table: &str,
+        control: &StorageReadControl,
+    ) -> Result<Option<(NativeRecordOwner, bool)>> {
+        let Some(committed) = self
+            .view
+            .committed()
+            .provider_snapshot()
+            .and_then(|snapshot| snapshot.downcast_ref::<crate::mvcc::read::Snapshot>())
+        else {
+            return self.read_table_binding(table, control);
+        };
+        self.control.check()?;
+        control.check()?;
+        let key = NativeRecordIdentity::new(
+            Family::TableOwners,
+            NativeRecordOwner::Database(self.database),
+        )?
+        .encode_key(&[ValueRef::Text(table.as_bytes())], control)?;
+        if self.view.has_private_change(&key, control)? {
+            return self.read_table_binding(table, control);
+        }
+        if let Some(binding) = committed.table_owners.get(table) {
+            return Ok(binding);
+        }
+        let binding = self.read_table_binding(table, control)?;
+        committed.table_owners.remember(table, binding);
+        Ok(binding)
+    }
+
+    fn read_table_binding(
         &self,
         table: &str,
         control: &StorageReadControl,
