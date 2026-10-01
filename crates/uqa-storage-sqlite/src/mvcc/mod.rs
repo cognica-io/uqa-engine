@@ -23,6 +23,7 @@ mod retention;
 mod runs;
 mod schema;
 mod serializable;
+mod synchronization;
 #[cfg(test)]
 mod tests;
 mod tombstones;

@@ -74,6 +74,82 @@ fn value_format_upgrade_preserves_receipt_capacity_acknowledgement_and_live_owne
     }
 }
 
+/// Whether each commit of the store's connection ran without its own sync, in commit order.
+fn record_commits(store: &SQLiteRecordStore) -> Arc<parking_lot::Mutex<Vec<bool>>> {
+    use crate::mvcc::connection_functions::ConnectionFunctions;
+    let commits = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let recorded = Arc::clone(&commits);
+    store
+        .with(|connection| {
+            let functions = ConnectionFunctions::of(connection)?;
+            connection.commit_hook(Some(move || {
+                recorded.lock().push(functions.synchronization_is_relaxed());
+                false
+            }))?;
+            Ok(())
+        })
+        .unwrap();
+    commits
+}
+
+#[test]
+fn only_a_managed_owners_acknowledgement_commits_without_its_own_sync() {
+    let directory = tempfile::tempdir().unwrap();
+    let connection = ManagedConnection::open(&directory.path().join("acknowledged.db")).unwrap();
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    let control = control();
+    let commits = record_commits(&store);
+    let synchronous = |expected: i64| {
+        store
+            .with(|connection| {
+                assert_eq!(
+                    connection
+                        .pragma_query_value(None, "synchronous", |row| row.get::<_, i64>(0))?,
+                    expected
+                );
+                Ok(())
+            })
+            .unwrap();
+    };
+
+    // The allocation and the commit of a managed owner keep their sync; its acknowledgement does not need one.
+    let owner = store.allocate_managed_transaction(&control).unwrap();
+    let receipt = store
+        .commit(owner.transaction(), &empty(&control), &control)
+        .unwrap();
+    assert_eq!(std::mem::take(&mut *commits.lock()), [false, false]);
+    store
+        .acknowledge_transaction(ReceiptAcknowledgement::Committed(receipt), &control)
+        .unwrap();
+    assert_eq!(std::mem::take(&mut *commits.lock()), [true]);
+    synchronous(2);
+    drop(owner);
+    assert_eq!(store.reclaim_transaction_receipts(&control).unwrap(), 1);
+
+    // An aborted managed owner is acknowledged the same way.
+    let aborted = store.allocate_managed_transaction(&control).unwrap();
+    store.abort(aborted.transaction(), &control).unwrap();
+    commits.lock().clear();
+    store
+        .acknowledge_transaction(
+            ReceiptAcknowledgement::Aborted(aborted.transaction()),
+            &control,
+        )
+        .unwrap();
+    assert_eq!(std::mem::take(&mut *commits.lock()), [true]);
+    synchronous(2);
+
+    // Nothing acknowledges a manual owner on its behalf, so its acknowledgement stays durable by itself.
+    let manual = store.allocate_transaction(&control).unwrap();
+    let receipt = store.commit(manual, &empty(&control), &control).unwrap();
+    commits.lock().clear();
+    store
+        .acknowledge_transaction(ReceiptAcknowledgement::Committed(receipt), &control)
+        .unwrap();
+    assert_eq!(std::mem::take(&mut *commits.lock()), [false]);
+    synchronous(2);
+}
+
 #[test]
 fn manual_receipts_require_exact_acknowledgement_and_keep_the_durable_limit() {
     for mode in 0..5 {

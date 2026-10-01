@@ -149,6 +149,12 @@ impl ConnectionFunctions {
         Ok(())
     }
 
+    /// Whether the connection's next commit runs without its own sync.
+    #[cfg(test)]
+    pub(in crate::mvcc) fn synchronization_is_relaxed(&self) -> bool {
+        self.relaxed_synchronization.load(Ordering::Acquire)
+    }
+
     /// Capture native keys under `control` until [`Self::end_capture`]. Materializations do not nest on one connection.
     pub(in crate::mvcc) fn begin_capture(
         &self,

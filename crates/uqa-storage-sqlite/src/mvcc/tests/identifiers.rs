@@ -19,7 +19,7 @@ fn synchronous(connection: &rusqlite::Connection) -> i64 {
 
 #[test]
 fn wal_observations_commit_without_their_own_sync_and_restore_full_synchronization() {
-    use crate::mvcc::{identifiers::ObservationSynchronization, schema::WritePermit};
+    use crate::mvcc::{schema::WritePermit, synchronization::RelaxedSynchronization};
     let directory = tempfile::tempdir().unwrap();
     let connection = ManagedConnection::open(&directory.path().join("observations.db")).unwrap();
     let store = SQLiteRecordStore::new(&connection).unwrap();
@@ -28,13 +28,13 @@ fn wal_observations_commit_without_their_own_sync_and_restore_full_synchronizati
         .with(|connection| {
             let permit = WritePermit::acquire(connection)?;
             assert_eq!(synchronous(connection), 2);
-            let relaxed = ObservationSynchronization::relax(connection, &permit)?;
+            let relaxed = RelaxedSynchronization::relax(connection, &permit)?;
             assert!(relaxed.is_some(), "WAL observations relax synchronization");
             assert_eq!(synchronous(connection), 1);
             drop(relaxed);
             assert_eq!(synchronous(connection), 2);
             // A restoration attempted inside a transaction fails and stays recorded until the next write admission restores it.
-            let relaxed = ObservationSynchronization::relax(connection, &permit)?;
+            let relaxed = RelaxedSynchronization::relax(connection, &permit)?;
             connection.execute_batch("BEGIN")?;
             drop(relaxed);
             connection.execute_batch("COMMIT")?;
@@ -74,7 +74,7 @@ fn wal_observations_commit_without_their_own_sync_and_restore_full_synchronizati
 
 #[test]
 fn rollback_journal_observations_keep_full_synchronization() {
-    use crate::mvcc::{identifiers::ObservationSynchronization, schema::WritePermit};
+    use crate::mvcc::{schema::WritePermit, synchronization::RelaxedSynchronization};
     let directory = tempfile::tempdir().unwrap();
     let connection = ManagedConnection::open_compressed(
         &directory.path().join("observations.db"),
@@ -85,7 +85,7 @@ fn rollback_journal_observations_keep_full_synchronization() {
     store
         .with(|connection| {
             let permit = WritePermit::acquire(connection)?;
-            assert!(ObservationSynchronization::relax(connection, &permit)?.is_none());
+            assert!(RelaxedSynchronization::relax(connection, &permit)?.is_none());
             assert_eq!(synchronous(connection), 2);
             Ok(())
         })

@@ -12,7 +12,7 @@ pub(in crate::mvcc) use liveness::lease_file;
 #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
 pub(in crate::mvcc) use liveness::local_file_registry;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use uqa_core::memory::BudgetedVec;
 use uqa_storage::{
     mvcc::{
@@ -23,6 +23,7 @@ use uqa_storage::{
     read_control::StorageReadControl,
 };
 
+use super::synchronization::RelaxedSynchronization;
 use super::{admission, codec, native, write, PhysicalResult, SQLiteRecordStore};
 
 impl SQLiteRecordStore {
@@ -103,10 +104,22 @@ pub(super) fn acknowledge(
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
     control.check().map_err(VersionError::from)?;
-    let _permit = admission::permit(connection, control)?;
+    let permit = admission::permit(connection, control)?;
+    let id = acknowledgement.transaction();
+    // An acknowledgement only releases its owner's right to resolve an outcome. A power loss that discards it leaves the receipt of a managed owner that is dead, which reclamation acknowledges on the owner's behalf. A manual owner is never acknowledged implicitly, so its acknowledgement keeps its own sync. The owner kind of an allocation never changes, and it is read before the transaction because the synchronization level cannot change inside one.
+    let managed = connection
+        .prepare_cached("SELECT managed FROM _uqa_mvcc_transactions WHERE allocation = ?1")?
+        .query_row([id.allocation().to_be_bytes().as_slice()], |row| {
+            row.get::<_, bool>(0)
+        })
+        .optional()?;
+    let _synchronization = if managed == Some(true) {
+        RelaxedSynchronization::relax(connection, &permit)?
+    } else {
+        None
+    };
     let transaction = admission::begin(connection, control)?;
     native::check_mapping(&transaction, native)?;
-    let id = acknowledgement.transaction();
     let header = codec::header(&transaction, id.database())?;
     if id.allocation() > header.allocated {
         return Err(VersionError::UnknownTransaction.into());
