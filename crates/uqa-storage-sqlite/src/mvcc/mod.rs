@@ -25,6 +25,7 @@ mod serializable;
 #[cfg(test)]
 mod tests;
 mod tombstones;
+mod version_metadata;
 mod write;
 
 pub(crate) use schema::WritePermit;

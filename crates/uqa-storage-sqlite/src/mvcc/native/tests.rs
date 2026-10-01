@@ -17,6 +17,7 @@ mod accelerators;
 pub(super) mod diskann;
 mod generations;
 mod graph_lookup;
+mod key_matching;
 pub(super) mod materialization;
 mod migration;
 mod namespace;

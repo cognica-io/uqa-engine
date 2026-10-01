@@ -6,7 +6,7 @@
 
 //! Typed row-change publication carried from mutation application to transaction completion.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::serializable::observe_row_write;
 use uqa_core::DocId;
@@ -27,11 +27,16 @@ type PreparedFtsTables = BTreeMap<String, PreparedFtsDocuments>;
 #[derive(Default)]
 pub struct MutationPublicationBatch {
     fts_tables: PreparedFtsTables,
+    fts_identities: BTreeMap<String, BTreeSet<DocId>>,
     fts_document_count: usize,
 }
 
 impl MutationPublicationBatch {
     fn push_fts(&mut self, table: String, doc_id: DocId, fields: BTreeMap<String, String>) {
+        self.fts_identities
+            .entry(table.clone())
+            .or_default()
+            .insert(doc_id);
         self.fts_tables
             .entry(table)
             .or_default()
@@ -43,11 +48,28 @@ impl MutationPublicationBatch {
         self.fts_document_count >= PREPARED_FTS_BATCH_DOCUMENTS
     }
 
-    fn flush_fts(&mut self, context: PublicationContext<'_>) -> Result<(), SQLError> {
+    fn flush_fts(&mut self, text: &dyn MutationTextIndex) -> Result<(), SQLError> {
         let tables = std::mem::take(&mut self.fts_tables);
+        self.fts_identities.clear();
         self.fts_document_count = 0;
         for (table, documents) in tables {
-            context.text.add_documents(&table, documents)?;
+            text.add_documents(&table, documents)?;
+        }
+        Ok(())
+    }
+
+    fn before_document(
+        &mut self,
+        text: &dyn MutationTextIndex,
+        table: &str,
+        doc_id: DocId,
+    ) -> Result<(), SQLError> {
+        if self
+            .fts_identities
+            .get(table)
+            .is_some_and(|ids| ids.contains(&doc_id))
+        {
+            self.flush_fts(text)?;
         }
         Ok(())
     }
@@ -65,9 +87,21 @@ pub fn publish_prepared_mutation_action(
             doc_id,
             document,
         }) => {
+            batch.before_document(context.text, &table, doc_id)?;
             let text_fields = context.text.text_fields(&table, &document)?;
             let vectors = document_vectors(context.catalog, &table, &document)?;
             observe_row_write(context.observations, &table, doc_id)?;
+            if !context.storage.can_defer_document_text(&table)? {
+                batch.flush_fts(context.text)?;
+                context.storage.insert_document(
+                    &table,
+                    doc_id,
+                    document,
+                    vectors,
+                    insert_known_new,
+                )?;
+                return context.deferrals.inserted(&table, doc_id);
+            }
             context.storage.insert_document_deferred_text(
                 &table,
                 doc_id,
@@ -78,16 +112,29 @@ pub fn publish_prepared_mutation_action(
             context.deferrals.inserted(&table, doc_id)?;
             batch.push_fts(table, doc_id, text_fields);
             if batch.fts_is_full() {
-                batch.flush_fts(context)?;
+                batch.flush_fts(context.text)?;
             }
         }
         PreparedMutationAction::Rewrite(mut rewrite) => {
-            batch.flush_fts(context)?;
-            apply_validated_prepared_document_rewrite(context, &mut rewrite)?;
+            apply_document_rewrite(context, &mut rewrite, Some(batch))?;
         }
         PreparedMutationAction::Delete(mut delete) => {
-            batch.flush_fts(context)?;
-            apply_validated_prepared_document_delete(context, &mut delete)?;
+            if !delete.actions.is_empty()
+                || !context.storage.can_defer_document_text(&delete.table)?
+            {
+                batch.flush_fts(context.text)?;
+                apply_validated_prepared_document_delete(context, &mut delete)?;
+            } else {
+                batch.before_document(context.text, &delete.table, delete.doc_id)?;
+                observe_row_write(context.observations, &delete.table, delete.doc_id)?;
+                context
+                    .storage
+                    .delete_document_deferred_text(&delete.table, delete.doc_id)?;
+                batch.push_fts(delete.table, delete.doc_id, BTreeMap::new());
+                if batch.fts_is_full() {
+                    batch.flush_fts(context.text)?;
+                }
+            }
         }
     }
     Ok(())
@@ -97,7 +144,7 @@ pub fn finish_mutation_publication(
     context: PublicationContext<'_>,
     batch: &mut MutationPublicationBatch,
 ) -> Result<(), SQLError> {
-    batch.flush_fts(context)
+    batch.flush_fts(context.text)
 }
 
 pub use crate::row_locks::publication::TransactionRowChange;
@@ -106,6 +153,23 @@ pub fn apply_validated_prepared_document_rewrite(
     context: PublicationContext<'_>,
     prepared: &mut PreparedDocumentRewrite,
 ) -> Result<DocId, SQLError> {
+    apply_document_rewrite(context, prepared, None)
+}
+
+fn apply_document_rewrite(
+    context: PublicationContext<'_>,
+    prepared: &mut PreparedDocumentRewrite,
+    mut batch: Option<&mut MutationPublicationBatch>,
+) -> Result<DocId, SQLError> {
+    if prepared.partition_move_delete.is_some()
+        || prepared.destination.is_some()
+        || !prepared.actions.is_empty()
+        || (batch.is_some() && !context.storage.can_defer_document_text(&prepared.table)?)
+    {
+        if let Some(batch) = batch.take() {
+            batch.flush_fts(context.text)?;
+        }
+    }
     if let Some(delete) = prepared.partition_move_delete.as_mut() {
         apply_validated_prepared_document_delete(context, delete)?;
         return Ok(prepared.doc_id);
@@ -151,6 +215,9 @@ pub fn apply_validated_prepared_document_rewrite(
         {
             // An integer primary key names the row's doc_id slot; keep that invariant when the key itself changes, or value -> doc_id lookups (the unique fast path and FOREIGN KEY validation) read the stale slot and miss the row.
             Some(new_id) if new_id != prepared.doc_id => {
+                if let Some(batch) = batch {
+                    batch.flush_fts(context.text)?;
+                }
                 observe_row_write(context.observations, &prepared.table, prepared.doc_id)?;
                 observe_row_write(context.observations, &prepared.table, new_id)?;
                 context
@@ -184,18 +251,7 @@ pub fn apply_validated_prepared_document_rewrite(
                 new_id
             }
             _ => {
-                observe_row_write(context.observations, &prepared.table, prepared.doc_id)?;
-                context.storage.rewrite_document(
-                    &prepared.table,
-                    prepared.doc_id,
-                    prepared.new_document.clone(),
-                )?;
-                context.deferrals.rewritten(
-                    &prepared.table,
-                    prepared.doc_id,
-                    Some(&prepared.old_document),
-                    &prepared.new_document,
-                )?;
+                rewrite_at_identity(context, prepared, batch)?;
                 prepared.doc_id
             }
         };
@@ -204,6 +260,44 @@ pub fn apply_validated_prepared_document_rewrite(
     }
     Ok(rewritten_doc_id)
 }
+
+fn rewrite_at_identity(
+    context: PublicationContext<'_>,
+    prepared: &PreparedDocumentRewrite,
+    batch: Option<&mut MutationPublicationBatch>,
+) -> Result<(), SQLError> {
+    observe_row_write(context.observations, &prepared.table, prepared.doc_id)?;
+    if let Some(batch) = batch {
+        batch.before_document(context.text, &prepared.table, prepared.doc_id)?;
+        let fields = context
+            .text
+            .text_fields(&prepared.table, &prepared.new_document)?;
+        context.storage.rewrite_document_deferred_text(
+            &prepared.table,
+            prepared.doc_id,
+            prepared.new_document.clone(),
+        )?;
+        batch.push_fts(prepared.table.clone(), prepared.doc_id, fields);
+        if batch.fts_is_full() {
+            batch.flush_fts(context.text)?;
+        }
+    } else {
+        context.storage.rewrite_document(
+            &prepared.table,
+            prepared.doc_id,
+            prepared.new_document.clone(),
+        )?;
+    }
+    context.deferrals.rewritten(
+        &prepared.table,
+        prepared.doc_id,
+        Some(&prepared.old_document),
+        &prepared.new_document,
+    )
+}
+
+#[cfg(test)]
+mod tests;
 
 pub fn apply_validated_prepared_document_delete(
     context: PublicationContext<'_>,

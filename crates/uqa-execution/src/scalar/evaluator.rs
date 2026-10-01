@@ -159,13 +159,15 @@ pub(super) fn eval_scalar_inner(
                     op,
                     BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
                 ) {
-                uqa_sql::scalar_integer_operation_width_with_control(
-                    lhs,
-                    rhs,
-                    context.row_schema().unwrap_or(&crate::RowSchema::default()),
-                    context.params(),
-                    control,
-                )?
+                context.with_type_schema(|schema| {
+                    uqa_sql::scalar_integer_operation_width_with_control(
+                        lhs,
+                        rhs,
+                        schema,
+                        context.params(),
+                        control,
+                    )
+                })?
             } else {
                 None
             };
@@ -220,12 +222,14 @@ pub(super) fn eval_scalar_inner(
             control,
         ),
         ScalarExpr::Cast { expr, ty } => {
-            let source_ty = uqa_sql::type_resolution::scalar_cast_source_type_name_with_control(
-                expr,
-                context.row_schema().unwrap_or(&crate::RowSchema::default()),
-                context.params(),
-                control,
-            )?;
+            let source_ty = context.with_type_schema(|schema| {
+                uqa_sql::type_resolution::scalar_cast_source_type_name_with_control(
+                    expr,
+                    schema,
+                    context.params(),
+                    control,
+                )
+            })?;
             let value = eval_scalar_inner(expr, context, control)?;
             cast_value_with_type_resolution_with_control(
                 &value,
@@ -510,12 +514,14 @@ fn scalar_source_type(
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<String>>, SQLError> {
-    uqa_sql::scalar_operand_type_name_with_control(
-        expression,
-        context.row_schema().unwrap_or(&crate::RowSchema::default()),
-        context.params(),
-        control,
-    )
+    context.with_type_schema(|schema| {
+        uqa_sql::scalar_operand_type_name_with_control(
+            expression,
+            schema,
+            context.params(),
+            control,
+        )
+    })
 }
 
 fn real_type_name(name: &str, control: &ProductionControl<'_>) -> Result<bool, SQLError> {

@@ -94,7 +94,7 @@ fn attach_deferred_order_projection<'a, S: Clone + 'static>(
     mut operator: Box<dyn crate::PhysicalOperator + 'a>,
     statement: &QueryBlockPlan,
     output: &[OutputColumnMapping],
-    mut projections: Vec<PhysicalProjection>,
+    projections: Vec<PhysicalProjection>,
     execution: FinalProjectionExecution<'a, '_, S>,
 ) -> Result<Box<dyn crate::PhysicalOperator + 'a>, SQLError> {
     let FinalProjectionExecution {
@@ -104,6 +104,43 @@ fn attach_deferred_order_projection<'a, S: Clone + 'static>(
         runtime,
         evaluator,
     } = execution;
+    let (sort_statement, sort_projections, projections) =
+        prepare_deferred_order_projection(statement, output, projections)?;
+    operator = Box::new(crate::Project::appending_target_evaluator(
+        operator,
+        sort_projections,
+        Arc::clone(&evaluator),
+    ));
+    operator = attach_order_limit(
+        operator,
+        &sort_statement,
+        &[],
+        context,
+        params,
+        ctes,
+        runtime,
+        Arc::clone(&evaluator),
+        None,
+    )?;
+    operator = Box::new(RowAtATime::new(operator));
+    Ok(Box::new(crate::Project::with_target_evaluator(
+        operator,
+        projections,
+        evaluator,
+    )))
+}
+
+type PreparedDeferredOrderProjection = (
+    QueryBlockPlan,
+    Vec<PhysicalProjection>,
+    Vec<PhysicalProjection>,
+);
+
+pub(super) fn prepare_deferred_order_projection(
+    statement: &QueryBlockPlan,
+    output: &[OutputColumnMapping],
+    mut projections: Vec<PhysicalProjection>,
+) -> Result<PreparedDeferredOrderProjection, SQLError> {
     let mut sort_statement = statement.clone();
     let sort_relation = uqa_sql::ast::InternalRelationId::allocate();
     let mut sort_projections =
@@ -119,8 +156,12 @@ fn attach_deferred_order_projection<'a, S: Clone + 'static>(
         };
         let target = direct_target
             .or_else(|| {
-                projections.iter().position(|(_, projected)| {
-                    uqa_sql::semantics::aggregates::exprs_match(projected, &resolved)
+                projections.iter().position(|(target, projected)| {
+                    matches!(
+                        (target, &resolved),
+                        (ProjectionTarget::Internal(column), ScalarExpr::InternalColumn(required))
+                            if column == required
+                    ) || uqa_sql::semantics::aggregates::exprs_match(projected, &resolved)
                 })
             })
             .filter(|position| *position < projections.len());
@@ -151,26 +192,5 @@ fn attach_deferred_order_projection<'a, S: Clone + 'static>(
         .into_iter()
         .map(|(_, expression, column)| (ProjectionTarget::Internal(column), expression))
         .collect();
-    operator = Box::new(crate::Project::appending_target_evaluator(
-        operator,
-        sort_projections,
-        Arc::clone(&evaluator),
-    ));
-    operator = attach_order_limit(
-        operator,
-        &sort_statement,
-        &[],
-        context,
-        params,
-        ctes,
-        runtime,
-        Arc::clone(&evaluator),
-        None,
-    )?;
-    operator = Box::new(RowAtATime::new(operator));
-    Ok(Box::new(crate::Project::with_target_evaluator(
-        operator,
-        projections,
-        evaluator,
-    )))
+    Ok((sort_statement, sort_projections, projections))
 }

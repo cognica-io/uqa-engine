@@ -133,6 +133,9 @@ fn merged_native_occurrence_replacements_and_deletions_survive_all_file_modes() 
             (true, None, None),
             (true, None, Some("alpha alpha")),
             (true, Some("beta beta"), Some("gamma")),
+            (true, Some("alpha"), Some("alpha gamma")),
+            (true, Some("beta beta"), Some("alpha alpha")),
+            (true, Some("alpha"), Some("alpha alpha")),
         ] {
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().join("merge.db");
@@ -181,6 +184,42 @@ fn merged_native_occurrence_replacements_and_deletions_survive_all_file_modes() 
             let reopened = open(mode, &path);
             bind(&reopened);
             verify(&index(&reopened, "docs\0日本語"), &expected);
+        }
+    }
+}
+
+#[test]
+fn unchanged_native_occurrences_keep_document_and_structural_conflicts() {
+    for other_first in [false, true] {
+        for clear in [false, true] {
+            let connection = memory();
+            let mut a = index(&connection, "docs");
+            a.clear().unwrap();
+            a.add_document(1, fields("alpha")).unwrap();
+            let other = connection.new_session();
+            let mut b = index(&other, "docs");
+            connection.begin_transaction().unwrap();
+            a.add_document(1, fields("alpha")).unwrap();
+            let retained = a.snapshot().unwrap();
+            other.begin_transaction().unwrap();
+            if clear {
+                b.clear().unwrap();
+            } else {
+                b.add_document(1, fields("beta beta")).unwrap();
+            }
+            if other_first {
+                other.commit_transaction().unwrap();
+                assert!(connection.commit_transaction().is_err());
+                connection.rollback_transaction().unwrap();
+                verify(&a, if clear { &[] } else { &[(1, "beta beta")] });
+            } else {
+                connection.commit_transaction().unwrap();
+                assert!(other.commit_transaction().is_err());
+                other.rollback_transaction().unwrap();
+                verify(&b, &[(1, "alpha")]);
+            }
+            assert_eq!(retained.get_term_freq(1, "body", "alpha").unwrap(), 1);
+            assert_eq!(retained.doc_count().unwrap(), 1);
         }
     }
 }

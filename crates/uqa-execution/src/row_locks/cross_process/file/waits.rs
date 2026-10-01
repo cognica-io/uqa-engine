@@ -46,17 +46,24 @@ impl FileLockCoordinator {
     ) {
         self.acquire_slot_metadata_lock();
         let pid = std::process::id();
+        let mut reused = None;
+        while let Some(index) = state.released_holder_slots.pop() {
+            if !self.holder_slot_occupied(state, pid, index) {
+                reused = Some(index);
+                break;
+            }
+        }
         let preferred = state.next_holder_slot;
-        let slot = (0..HOLDER_SLOT_COUNT).find_map(|probe| {
-            let index = (preferred + probe) % HOLDER_SLOT_COUNT;
-            let occupied = state.occupied_holder_slots[index as usize]
-                || self
-                    .read_holder_slot(index)
-                    .is_some_and(|existing| existing.pid != pid && process_alive(existing.pid));
-            (!occupied).then_some(index)
+        let slot = reused.or_else(|| {
+            (0..HOLDER_SLOT_COUNT).find_map(|probe| {
+                let index = (preferred + probe) % HOLDER_SLOT_COUNT;
+                (!self.holder_slot_occupied(state, pid, index)).then_some(index)
+            })
         });
         if let Some(index) = slot {
-            state.next_holder_slot = (index + 1) % HOLDER_SLOT_COUNT;
+            if reused.is_none() {
+                state.next_holder_slot = (index + 1) % HOLDER_SLOT_COUNT;
+            }
             self.write_holder_slot(
                 index,
                 Some(&HolderSlot {
@@ -74,6 +81,13 @@ impl FileLockCoordinator {
             state.occupied_holder_slots[index as usize] = true;
         }
         let _ = self.apply_byte_mode(SLOT_METADATA_LOCK_BYTE, Some(true), None);
+    }
+
+    fn holder_slot_occupied(&self, state: &CoordinatorState, pid: u32, index: u64) -> bool {
+        state.occupied_holder_slots[index as usize]
+            || self
+                .read_holder_slot(index)
+                .is_some_and(|existing| existing.pid != pid && process_alive(existing.pid))
     }
 
     pub(super) fn clear_holder_slot(
@@ -95,6 +109,8 @@ impl FileLockCoordinator {
         state.occupied_holder_slots[index as usize] = false;
         self.acquire_slot_metadata_lock();
         self.write_holder_slot(index, None);
+        // Allocation rechecks foreign process liveness before reusing this slot. The ordinary probe cursor keeps its position beyond live local holders.
+        state.released_holder_slots.push(index);
         let _ = self.apply_byte_mode(SLOT_METADATA_LOCK_BYTE, Some(true), None);
     }
 

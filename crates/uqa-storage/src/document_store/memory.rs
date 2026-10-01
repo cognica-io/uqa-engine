@@ -280,6 +280,20 @@ impl DocumentStore for MemoryDocumentStore {
         Ok(())
     }
 
+    fn for_each_fields_multi_borrowed(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        let mut visited = 0;
+        self.visit_fields_multi_ref_with_presence(ids, fields, &mut |id, present, values| {
+            visited += 1;
+            visitor(id, present, values)
+        });
+        Ok(Some(visited))
+    }
+
     fn with_field_ref_controlled(
         &self,
         id: DocId,

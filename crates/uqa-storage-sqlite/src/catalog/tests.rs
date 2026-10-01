@@ -8,6 +8,7 @@ use super::*;
 
 mod cache_revisions;
 mod metadata;
+mod metadata_prefix;
 mod migration;
 mod version_migrations;
 

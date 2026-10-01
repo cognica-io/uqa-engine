@@ -401,6 +401,18 @@ impl GraphStore for PersistentGraphStore {
         self.observe_entity(GraphEntityKind::Vertex, id)?;
         self.storage.vertex(id)
     }
+    fn for_each_vertex_borrowed(
+        &self,
+        ids: &[u64],
+        visit: &mut dyn FnMut(u64, Option<&Vertex>) -> bool,
+    ) -> GraphStoreResult<Option<usize>> {
+        // Observation namespaces can themselves require storage reads. Keep
+        // those per-entity admissions outside a borrowed physical read window.
+        if self.read.is_some() {
+            return Ok(None);
+        }
+        self.storage.for_each_vertex_borrowed(ids, visit)
+    }
     fn get_edge(&self, id: u64) -> GraphStoreResult<Option<Edge>> {
         self.observe_entity(GraphEntityKind::Edge, id)?;
         self.storage.edge(id)

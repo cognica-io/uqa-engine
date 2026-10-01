@@ -17,7 +17,7 @@ use uqa_storage::mvcc::{DatabaseId, VersionError};
 
 use super::{codec, PhysicalResult};
 
-pub(super) const RECORD_FORMAT: i64 = 54;
+pub(super) const RECORD_FORMAT: i64 = 55;
 
 const PREVIOUS_METADATA: &str = "CREATE TABLE _uqa_mvcc_metadata (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 42), database_id BLOB NOT NULL CHECK(typeof(database_id) = 'blob' AND length(database_id) = 16), allocated BLOB NOT NULL CHECK(typeof(allocated) = 'blob' AND length(allocated) = 8), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8), mapping INTEGER NOT NULL DEFAULT 0 CHECK(mapping IN (0, 1)))";
 
@@ -27,13 +27,14 @@ pub(super) const PREVIOUS_TRANSACTIONS: &str = "CREATE TABLE _uqa_mvcc_transacti
 
 const PREVIOUS_HEADS: &str = "CREATE TABLE _uqa_mvcc_heads (key BLOB PRIMARY KEY CHECK(typeof(key) = 'blob'), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8 AND sequence > x'0000000000000000')) WITHOUT ROWID";
 
-const TABLES: [(&str, &str); 6] = [
-    ("_uqa_mvcc_metadata", "CREATE TABLE _uqa_mvcc_metadata (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 54), database_id BLOB NOT NULL CHECK(typeof(database_id) = 'blob' AND length(database_id) = 16), allocated BLOB NOT NULL CHECK(typeof(allocated) = 'blob' AND length(allocated) = 8), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8), mapping INTEGER NOT NULL DEFAULT 0 CHECK(mapping IN (0, 1)), restore_target BLOB CHECK(restore_target IS NULL OR (typeof(restore_target) = 'blob' AND length(restore_target) = 16 AND restore_target != database_id)), receipt_limit INTEGER NOT NULL DEFAULT 65536 CHECK(receipt_limit > 0))"),
+const TABLES: [(&str, &str); 7] = [
+    ("_uqa_mvcc_metadata", "CREATE TABLE _uqa_mvcc_metadata (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 55), database_id BLOB NOT NULL CHECK(typeof(database_id) = 'blob' AND length(database_id) = 16), allocated BLOB NOT NULL CHECK(typeof(allocated) = 'blob' AND length(allocated) = 8), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8), mapping INTEGER NOT NULL DEFAULT 0 CHECK(mapping IN (0, 1)), restore_target BLOB CHECK(restore_target IS NULL OR (typeof(restore_target) = 'blob' AND length(restore_target) = 16 AND restore_target != database_id)), receipt_limit INTEGER NOT NULL DEFAULT 65536 CHECK(receipt_limit > 0))"),
     ("_uqa_mvcc_heads", "CREATE TABLE _uqa_mvcc_heads (key BLOB PRIMARY KEY CHECK(typeof(key) = 'blob'), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8 AND sequence > x'0000000000000000'), compacted INTEGER NOT NULL DEFAULT 0 CHECK(compacted IN (0, 1))) WITHOUT ROWID"),
     ("_uqa_mvcc_versions", "CREATE TABLE _uqa_mvcc_versions (key BLOB NOT NULL CHECK(typeof(key) = 'blob'), sequence BLOB NOT NULL CHECK(typeof(sequence) = 'blob' AND length(sequence) = 8 AND sequence > x'0000000000000000'), value BLOB CHECK(value IS NULL OR typeof(value) = 'blob'), PRIMARY KEY(key, sequence)) WITHOUT ROWID"),
     ("_uqa_mvcc_transactions", "CREATE TABLE _uqa_mvcc_transactions (allocation BLOB PRIMARY KEY CHECK(typeof(allocation) = 'blob' AND length(allocation) = 8 AND allocation > x'0000000000000000'), status INTEGER NOT NULL CHECK(status IN (0, 1, 2, 3, 4)), sequence BLOB, fingerprint BLOB, managed INTEGER NOT NULL DEFAULT 0 CHECK(managed IN (0, 1)), CHECK((status IN (0, 1, 3) AND sequence IS NULL AND fingerprint IS NULL) OR (status IN (2, 4) AND typeof(sequence) = 'blob' AND length(sequence) = 8 AND typeof(fingerprint) = 'blob' AND length(fingerprint) = 32))) WITHOUT ROWID"),
     super::identifiers::TABLE,
     super::runs::TABLE,
+    super::version_metadata::TABLE,
 ];
 
 /// A connection-local admission token. Dropping it closes permission without any fallible SQL cleanup, including on unwind or commit failure.
@@ -124,6 +125,7 @@ pub(super) fn initialize_in(transaction: &Connection) -> PhysicalResult<Initiali
                 transaction.execute_batch(&trigger(name, action).1)?;
             }
         }
+        super::version_metadata::create_triggers(transaction)?;
         let mut identity = [0; 16];
         getrandom::fill(&mut identity).map_err(|error| {
             VersionError::Storage(
@@ -131,7 +133,7 @@ pub(super) fn initialize_in(transaction: &Connection) -> PhysicalResult<Initiali
             )
         })?;
         transaction.execute(
-            "INSERT INTO _uqa_mvcc_metadata (singleton, format, database_id, allocated, sequence) VALUES (1, 54, ?1, ?2, ?2)",
+            "INSERT INTO _uqa_mvcc_metadata (singleton, format, database_id, allocated, sequence) VALUES (1, 55, ?1, ?2, ?2)",
             params![identity.as_slice(), 0_u64.to_be_bytes().as_slice()],
         )?;
         return Ok(Initialization {
@@ -167,6 +169,7 @@ fn validate_guards(transaction: &Connection, predecessor: Option<i64>) -> Physic
     for (name, _) in TABLES {
         if (predecessor.is_some_and(|format| format < 5) && name == super::identifiers::TABLE.0)
             || (predecessor.is_some_and(|format| format < 29) && name == super::runs::TABLE.0)
+            || (predecessor.is_some() && name == super::version_metadata::TABLE.0)
         {
             continue;
         }
@@ -179,6 +182,9 @@ fn validate_guards(transaction: &Connection, predecessor: Option<i64>) -> Physic
             }
         }
     }
+    if predecessor.is_none() {
+        super::version_metadata::validate_triggers(transaction)?;
+    }
     Ok(())
 }
 
@@ -189,12 +195,12 @@ fn validate_tables(transaction: &Connection) -> PhysicalResult<(usize, Option<i6
         if let Some(matches) = definition_matches(transaction, name, expected)? {
             if !matches {
                 if name == TABLES[0].0 {
-                    for format in 44..=53 {
+                    for format in 44..=54 {
                         if definition_matches(
                             transaction,
                             name,
                             &expected.replace(
-                                "CHECK(format = 54)",
+                                "CHECK(format = 55)",
                                 &format!("CHECK(format = {format})"),
                             ),
                         )? == Some(true)
@@ -240,6 +246,15 @@ fn validate_tables(transaction: &Connection) -> PhysicalResult<(usize, Option<i6
             present += 1;
         }
     }
+    validate_record_table_set(transaction, present, predecessor)?;
+    Ok((present, predecessor))
+}
+
+fn validate_record_table_set(
+    transaction: &Connection,
+    present: usize,
+    predecessor: Option<i64>,
+) -> PhysicalResult<()> {
     if predecessor.is_some_and(|format| format < 28)
         && definition_matches(transaction, TABLES[1].0, PREVIOUS_HEADS)? != Some(true)
     {
@@ -274,19 +289,35 @@ fn validate_tables(transaction: &Connection) -> PhysicalResult<(usize, Option<i6
             VersionError::InvalidEncoding("predecessor contains unexpected record runs").into(),
         );
     }
+    if predecessor.is_some()
+        && definition_matches(
+            transaction,
+            super::version_metadata::TABLE.0,
+            super::version_metadata::TABLE.1,
+        )?
+        .is_some()
+    {
+        return Err(VersionError::InvalidEncoding(
+            "predecessor contains unexpected version metadata",
+        )
+        .into());
+    }
     let expected = TABLES.len()
         - usize::from(predecessor.is_some_and(|format| format < 5))
-        - usize::from(predecessor.is_some_and(|format| format < 29));
+        - usize::from(predecessor.is_some_and(|format| format < 29))
+        - usize::from(predecessor.is_some());
     if present != 0 && present != expected {
         return Err(VersionError::InvalidEncoding("incomplete record table set").into());
     }
-    Ok((present, predecessor))
+    Ok(())
 }
 
 /// A resumed restore validates and, when necessary, atomically upgrades the intent-bearing predecessor without admitting normal record access through its pending marker.
 pub(super) fn initialize_restoration(connection: &Connection) -> PhysicalResult<()> {
     let (present, predecessor) = validate_tables(connection)?;
-    if present != TABLES.len() || predecessor.is_some_and(|format| !matches!(format, 43..=53)) {
+    if present != TABLES.len() - usize::from(predecessor.is_some())
+        || predecessor.is_some_and(|format| !matches!(format, 43..=54))
+    {
         return Err(VersionError::InvalidEncoding("incomplete restoration record schema").into());
     }
     validate_guards(connection, predecessor)?;
@@ -305,6 +336,7 @@ fn upgrade_metadata(transaction: &Connection, format: i64) -> PhysicalResult<()>
     if !valid {
         return Err(VersionError::InvalidEncoding("invalid predecessor record format").into());
     }
+    super::version_metadata::upgrade(transaction)?;
     if format < 28 {
         transaction.execute_batch("ALTER TABLE _uqa_mvcc_heads ADD COLUMN compacted INTEGER NOT NULL DEFAULT 0 CHECK(compacted IN (0, 1))")?;
     }
@@ -336,7 +368,7 @@ fn upgrade_metadata(transaction: &Connection, format: i64) -> PhysicalResult<()>
     } else {
         "65536"
     };
-    transaction.execute_batch(&format!("INSERT INTO _uqa_mvcc_metadata SELECT singleton, 54, database_id, allocated, sequence, mapping, {pending}, {receipt_limit} FROM _uqa_mvcc_previous_metadata; DROP TABLE _uqa_mvcc_previous_metadata;"))?;
+    transaction.execute_batch(&format!("INSERT INTO _uqa_mvcc_metadata SELECT singleton, 55, database_id, allocated, sequence, mapping, {pending}, {receipt_limit} FROM _uqa_mvcc_previous_metadata; DROP TABLE _uqa_mvcc_previous_metadata;"))?;
     if format >= 44 {
         for action in ["INSERT", "UPDATE", "DELETE"] {
             transaction.execute_batch(&trigger(TABLES[0].0, action).1)?;

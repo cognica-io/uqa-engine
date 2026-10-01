@@ -19,6 +19,7 @@ mod restore;
 mod search;
 mod types;
 mod validation;
+mod visited;
 
 pub use metric::MAX_HNSW_LEVEL;
 pub use prepare::HNSWMutation;

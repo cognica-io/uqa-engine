@@ -225,6 +225,18 @@ pub trait GraphStore {
     /// entities merely to return a borrow, and I/O failures are not absence.
     fn get_vertex(&self, vertex_id: VertexId) -> GraphStoreResult<Option<Vertex>>;
 
+    /// Visit requested vertices on the pinned view in caller order, retaining
+    /// duplicates and missing rows. The internal callback must not reenter
+    /// graph storage. Stop before reading another identity when it returns
+    /// false. `None` declines without invoking it; `Some` counts invocations.
+    fn for_each_vertex_borrowed(
+        &self,
+        _ids: &[VertexId],
+        _visit: &mut dyn FnMut(VertexId, Option<&Vertex>) -> bool,
+    ) -> GraphStoreResult<Option<usize>> {
+        Ok(None)
+    }
+
     fn get_edge(&self, edge_id: EdgeId) -> GraphStoreResult<Option<Edge>>;
 
     /// Returns and advances the next available vertex id.

@@ -8,10 +8,11 @@
 
 use crate::aggregation::{aggregate_value, AggregateAccumulator};
 use crate::scalar::plan::{PlanSubqueryArena, QueryExpressionContext};
+use crate::spill::BufferedIndexedSpill;
 use crate::RowSchemaExecution;
 use crate::{
-    eval_scalar, Batch, ExecResult, ExternalSort, IndexedSpill, PhysicalOperator, PhysicalRow,
-    RowSchema, ScalarEvalContext, ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarSubqueryRunner,
+    eval_scalar, Batch, ExecResult, ExternalSort, PhysicalOperator, PhysicalRow, RowSchema,
+    ScalarEvalContext, ScalarExpr, ScalarFrameBound, ScalarOrder, ScalarSubqueryRunner,
     ScalarWindowSpec, SortKey, SpillBuffer, SpillScan, WindowExecutor,
 };
 use uqa_core::Value;
@@ -19,6 +20,7 @@ use uqa_sql::plan::ProjectionPlan;
 use uqa_sql::semantics::projection_columns;
 use uqa_sql::{SQLError, SQLParam};
 
+mod groups;
 mod planning;
 
 pub use planning::expr_has_window;
@@ -215,7 +217,7 @@ fn execute_spilled_window_slot(
     let hook = context;
     let subquery_arena = PlanSubqueryArena::new(context.subquery_plans(), Some(hook));
     let partition_schema = sorted.row_schema().clone();
-    let mut partition = IndexedSpill::new(partition_schema.clone()).map_err(exec_to_sql_error)?;
+    let mut partition = BufferedIndexedSpill::new(partition_schema.clone(), phase_budget);
     let mut partition_key: Option<Vec<Value>> = None;
     let mut output = SpillBuffer::new(phase_budget);
     let output_schema =
@@ -257,8 +259,7 @@ fn execute_spilled_window_slot(
                         hook,
                         &subquery_arena,
                     )?;
-                    partition =
-                        IndexedSpill::new(partition_schema.clone()).map_err(exec_to_sql_error)?;
+                    partition = BufferedIndexedSpill::new(partition_schema.clone(), phase_budget);
                 }
                 partition_key = Some(key);
                 partition.push(&row).map_err(exec_to_sql_error)?;
@@ -309,7 +310,7 @@ fn exec_to_sql_error(error: crate::ExecError) -> SQLError {
 )]
 fn emit_window_partition(
     slot: &WindowSlot,
-    partition: &mut IndexedSpill,
+    partition: &mut BufferedIndexedSpill,
     schema: &RowSchema,
     output: &mut SpillBuffer,
     params: &[SQLParam],
@@ -703,7 +704,7 @@ fn evaluate_spilled_window_frame(
     name: &str,
     args: &[ScalarExpr],
     spec: &ScalarWindowSpec,
-    partition: &mut IndexedSpill,
+    partition: &mut BufferedIndexedSpill,
     current: u64,
     mode: uqa_sql::ast::FrameMode,
     start_bound: &ScalarFrameBound,
@@ -770,7 +771,7 @@ fn evaluate_spilled_window_frame(
     reason = "preserves partition peer and frame order"
 )]
 fn resolve_spilled_frame_bound(
-    partition: &mut IndexedSpill,
+    partition: &mut BufferedIndexedSpill,
     current: u64,
     spec: &ScalarWindowSpec,
     mode: uqa_sql::ast::FrameMode,
@@ -785,7 +786,19 @@ fn resolve_spilled_frame_bound(
     let partition_schema = partition.row_schema().clone();
     let len = i128::from(partition.len());
     let current_i128 = i128::from(current);
-    if !matches!(mode, FrameMode::Range) {
+    if matches!(mode, FrameMode::Groups) {
+        return groups::resolve(
+            partition,
+            current,
+            spec,
+            bound,
+            is_start,
+            params,
+            eval_hook,
+            subquery_runner,
+        );
+    }
+    if matches!(mode, FrameMode::Rows) {
         let row = partition.get(current).map_err(exec_to_sql_error)?;
         return Ok(match bound {
             ScalarFrameBound::UnboundedPreceding => 0,
@@ -800,7 +813,7 @@ fn resolve_spilled_frame_bound(
                     eval_hook,
                     subquery_runner,
                 )?;
-                (current_i128 - i128::from(offset)).max(0)
+                current_i128 - i128::from(offset)
             }
             ScalarFrameBound::Following(expression) => {
                 let offset = eval_frame_offset(
@@ -811,7 +824,7 @@ fn resolve_spilled_frame_bound(
                     eval_hook,
                     subquery_runner,
                 )?;
-                (current_i128 + i128::from(offset)).min(len - 1)
+                current_i128 + i128::from(offset)
             }
         });
     }

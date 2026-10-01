@@ -11,7 +11,8 @@ use std::cmp::{Ordering, Reverse};
 use super::metric::distance;
 use super::prepare::{check, Control};
 use super::types::{HNSWIndex, NodeId};
-use crate::vector_index::query::{QueryHeap, QuerySet, VectorQueryBuffer};
+use super::visited::Visited;
+use crate::vector_index::query::{QueryHeap, VectorQueryBuffer};
 use crate::StorageBackendResult;
 
 #[derive(Debug, Clone, Copy)]
@@ -99,8 +100,12 @@ impl HNSWIndex {
     ) -> StorageBackendResult<VectorQueryBuffer<Candidate>> {
         check(control)?;
         let ef = ef.max(1);
-        let mut visited =
-            QuerySet::with_capacity(ef.saturating_mul(2).min(self.nodes.len()), workspace)?;
+        let mut visited = Visited::new(
+            self.nodes.first_key_value().map(|(id, _)| *id),
+            self.nodes.last_key_value().map(|(id, _)| *id),
+            ef.saturating_mul(2).min(self.nodes.len()),
+            workspace,
+        )?;
         let mut candidates = QueryHeap::<Reverse<Candidate>>::new(workspace);
         let mut nearest = QueryHeap::<Candidate>::new(workspace);
         for entry in entries {

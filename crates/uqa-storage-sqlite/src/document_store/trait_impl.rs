@@ -677,6 +677,28 @@ impl DocumentStore for SQLiteDocumentStore {
         Ok(self.read_native(|read| read.visit_next_ids(after, limit, visitor))?)
     }
 
+    fn for_each_next_fields_borrowed(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        Ok(self.read_native(|read| read.visit_borrowed_fields(after, limit, fields, visitor))?)
+    }
+
+    fn for_each_fields_multi_borrowed(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        if fields.is_empty() {
+            return Ok(None);
+        }
+        Ok(self.read_native(|read| read.visit_borrowed_points(ids, fields, visitor))?)
+    }
+
     #[expect(
         clippy::redundant_closure_for_method_calls,
         reason = "a method item cannot satisfy the borrowed reader's higher-ranked lifetimes"

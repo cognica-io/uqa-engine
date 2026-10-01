@@ -8,13 +8,14 @@
 
 mod last;
 mod ordered;
+mod values;
 
 use rusqlite::{params, types::ValueRef, Connection, OptionalExtension};
 use uqa_core::memory::BudgetedVec;
 use uqa_storage::mvcc::{
-    BorrowedRecord, CommitSequence, CommittedRecordSnapshot, RecordKeyVisitor, RecordMetadata,
-    RecordPage, RecordScanVisitor, RecordValueVisitor, RecordVersion, ScannedRecord,
-    SharedRecordValue, VersionError, VersionResult,
+    BorrowedRecord, CommitSequence, CommittedRecordSnapshot, RecordKeyIterator, RecordKeyVisitor,
+    RecordMetadata, RecordPage, RecordPointVisitor, RecordScanVisitor, RecordValueVisitor,
+    RecordVersion, ScannedRecord, SharedRecordValue, VersionError, VersionResult,
 };
 use uqa_storage::read_control::StorageReadControl;
 
@@ -125,6 +126,38 @@ impl CommittedRecordSnapshot for Snapshot {
         })
     }
 
+    fn visit_values(
+        &self,
+        keys: &mut RecordKeyIterator<'_>,
+        control: &StorageReadControl,
+        visit: &mut RecordPointVisitor<'_>,
+    ) -> VersionResult<()> {
+        control.check()?;
+        // Read admission is lazy so an empty source does not acquire a physical transaction.
+        let Some(first) = keys.next() else {
+            return Ok(());
+        };
+        let first = first?;
+        self.read(|connection| {
+            let mut next = Some(first);
+            while let Some(key) = next {
+                control.check().map_err(VersionError::from)?;
+                let mut more = true;
+                value(connection, &key, self.sequence, control, &mut |record| {
+                    more = visit(&key, record)?;
+                    Ok(())
+                })?;
+                control.check().map_err(VersionError::from)?;
+                if !more {
+                    break;
+                }
+                drop(key);
+                next = keys.next().transpose()?;
+            }
+            Ok(())
+        })
+    }
+
     fn metadata(
         &self,
         key: &[u8],
@@ -155,29 +188,14 @@ impl CommittedRecordSnapshot for Snapshot {
             return Ok(());
         }
         self.read(|connection| {
-            ordered::visit(
+            values::visit(
                 connection,
                 prefix,
                 after,
                 limit,
                 self.sequence,
                 control,
-                &mut |key, info| {
-                    let mut more = true;
-                    value_from_info(
-                        connection,
-                        key,
-                        info,
-                        self.sequence,
-                        usize::MAX,
-                        control,
-                        &mut |record| {
-                            more = visit(key, record.expect("selected visible record"))?;
-                            Ok(())
-                        },
-                    )?;
-                    Ok(more)
-                },
+                visit,
             )
         })
     }
@@ -309,12 +327,21 @@ pub(super) struct Info {
     run: bool,
 }
 
+pub(super) const POINT_METADATA_SQL: &str = concat!(
+    "SELECT h.sequence, h.compacted, v.sequence, v.payload_length ",
+    "FROM _uqa_mvcc_heads h LEFT JOIN _uqa_mvcc_version_metadata v ",
+    "ON v.key = h.key AND v.sequence <= ?2 WHERE h.key = ?1 ",
+    "ORDER BY v.sequence DESC LIMIT 1"
+);
+
 pub(super) fn info(
     connection: &Connection,
     key: &[u8],
     boundary: CommitSequence,
 ) -> PhysicalResult<Option<Info>> {
-    let mut statement = connection.prepare_cached("SELECT h.sequence, h.compacted, v.sequence, CASE WHEN v.value IS NULL THEN NULL WHEN typeof(v.value) = 'blob' THEN length(v.value) ELSE -1 END FROM _uqa_mvcc_heads h LEFT JOIN _uqa_mvcc_versions v ON v.key = h.key AND v.sequence = (SELECT sequence FROM _uqa_mvcc_versions WHERE key = ?1 AND sequence <= ?2 ORDER BY sequence DESC LIMIT 1) WHERE h.key = ?1")?;
+    // The descending version range supplies its first row directly. A scalar
+    // predecessor subquery would seek the same version tree a second time.
+    let mut statement = connection.prepare_cached(POINT_METADATA_SQL)?;
     let mut rows = statement.query(params![key, boundary.as_u64().to_be_bytes().as_slice()])?;
     let Some(row) = rows.next()? else {
         return Ok(runs::info(connection, key)?
@@ -329,7 +356,22 @@ pub(super) fn info(
 }
 
 fn point_info(row: &rusqlite::Row<'_>, boundary: CommitSequence) -> PhysicalResult<Option<Info>> {
-    let (head, compacted) = codec::decode_head(row)?;
+    checked_point_info(codec::decode_head(row)?, boundary, || {
+        if matches!(row.get_ref(2)?, ValueRef::Null) {
+            return Ok(None);
+        }
+        Ok(Some((
+            codec::integer(codec::bytes(row, 2)?)?,
+            row.get::<_, Option<i64>>(3)?,
+        )))
+    })
+}
+
+fn checked_point_info(
+    (head, compacted): (CommitSequence, bool),
+    boundary: CommitSequence,
+    selected: impl FnOnce() -> PhysicalResult<Option<(u64, Option<i64>)>>,
+) -> PhysicalResult<Option<Info>> {
     let head_visible = head <= boundary;
     if head_visible && compacted {
         return Ok(Some(Info {
@@ -338,13 +380,12 @@ fn point_info(row: &rusqlite::Row<'_>, boundary: CommitSequence) -> PhysicalResu
             run: false,
         }));
     }
-    if matches!(row.get_ref(2)?, ValueRef::Null) {
+    let Some((revision, length)) = selected()? else {
         if head_visible {
             return Err(VersionError::InvalidEncoding("record head has no version").into());
         }
         return Ok(None);
-    }
-    let revision = codec::integer(codec::bytes(row, 2)?)?;
+    };
     if head_visible && head.as_u64() != revision {
         return Err(VersionError::InvalidEncoding("record head has no matching version").into());
     }
@@ -353,10 +394,7 @@ fn point_info(row: &rusqlite::Row<'_>, boundary: CommitSequence) -> PhysicalResu
     }
     Ok(Some(Info {
         revision,
-        length: row
-            .get::<_, Option<i64>>(3)?
-            .map(payload_length)
-            .transpose()?,
+        length: length.map(payload_length).transpose()?,
         run: false,
     }))
 }

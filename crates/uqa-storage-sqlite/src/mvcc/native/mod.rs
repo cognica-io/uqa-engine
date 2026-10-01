@@ -117,11 +117,7 @@ pub fn decode_record<'a>(
     let layout = identity.family().layout();
     let values = decode_row(row, layout.columns.len(), control)?;
     identity.validate_row(&values)?;
-    let mut components = BudgetedVec::new(control.memory());
-    for &column in layout.identity_columns {
-        components.push(values[column])?;
-    }
-    if identity.encode_key(&components, control)?.as_ref() != key {
+    if !identity.matches_row_key(key, &values, control)? {
         return Err(invalid("native row does not match its record key"));
     }
     Ok((identity, values))

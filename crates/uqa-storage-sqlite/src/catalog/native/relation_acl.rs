@@ -16,16 +16,13 @@ impl NativeSnapshot {
         mut visitor: impl FnMut(&str, &str) -> Result<()>,
     ) -> Result<()> {
         let prefix = relation_acl::prefix(relation);
-        self.visit_rows(
+        self.visit_text_prefix_rows(
             Family::Metadata,
-            Some(NativeRecordOwner::Database(self.database)),
-            &[],
+            NativeRecordOwner::Database(self.database),
+            &prefix,
             |row| {
                 let key = string(row[0])?;
-                if key.starts_with(&prefix) {
-                    visitor(&key, &string(row[1])?)?;
-                }
-                Ok(())
+                visitor(&key, &string(row[1])?)
             },
         )
     }
@@ -34,15 +31,13 @@ impl NativeSnapshot {
         &self,
     ) -> Result<relation_acl::RelationAclRecords> {
         let mut records = relation_acl::RelationAclRecords::default();
-        self.visit_rows(
+        self.visit_text_prefix_rows(
             Family::Metadata,
-            Some(NativeRecordOwner::Database(self.database)),
-            &[],
+            NativeRecordOwner::Database(self.database),
+            relation_acl::METADATA_PREFIX,
             |row| {
                 let key = string(row[0])?;
-                if key.starts_with(relation_acl::METADATA_PREFIX) {
-                    records.insert(&key, string(row[1])?.as_bytes())?;
-                }
+                records.insert(&key, string(row[1])?.as_bytes())?;
                 Ok(())
             },
         )?;

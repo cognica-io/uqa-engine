@@ -98,6 +98,36 @@ fn reconstruction_rejects_a_missing_live_tensor_ordinal() {
 }
 
 #[test]
+fn dense_and_sparse_restored_identities_preserve_search_scores_and_tombstones() {
+    let source = fixture();
+    for (offset, stride) in [(u64::MAX / 2, 1), (0, 1_000_000)] {
+        let remap = |id| offset + id * stride;
+        let mut snapshot = source.persistence_snapshot();
+        snapshot.meta.entry_point = snapshot.meta.entry_point.map(remap);
+        snapshot.meta.next_node_id = remap(snapshot.meta.next_node_id);
+        for node in &mut snapshot.nodes {
+            node.node_id = remap(node.node_id);
+            for layer in &mut node.neighbors {
+                for neighbor in layer {
+                    *neighbor = remap(*neighbor);
+                }
+            }
+        }
+        let restored =
+            HNSWIndex::from_persistence(4, source.params(), snapshot.meta, snapshot.nodes).unwrap();
+        restored.validate_invariants().unwrap();
+        for seed in 0..32 {
+            for k in [1, 7, 20] {
+                let query = vector(seed, 4);
+                let expected = source.search_knn(&query, k).unwrap();
+                let actual = restored.search_knn(&query, k).unwrap();
+                assert_eq!(actual, expected);
+            }
+        }
+    }
+}
+
+#[test]
 fn restoration_charges_transferred_vector_and_adjacency_capacity() {
     let source = fixture();
     let mut snapshot = source.persistence_snapshot();

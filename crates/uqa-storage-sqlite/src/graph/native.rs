@@ -452,10 +452,16 @@ impl GraphStorage for NativeGraphStorage {
         uqa_storage::catalog::validate_graph_page(limit)?;
         self.read(|snapshot| {
             let mut ids = Vec::new();
-            snapshot.visit_graph_ids(Some(&self.scope), filter, after, |id| {
-                ids.push(decode_graph_id("graph entity", id)?);
-                Ok(ids.len() < limit)
-            })?;
+            snapshot.visit_graph_ids_with_page_size(
+                Some(&self.scope),
+                filter,
+                after,
+                limit,
+                |id| {
+                    ids.push(decode_graph_id("graph entity", id)?);
+                    Ok(ids.len() < limit)
+                },
+            )?;
             Ok(ids)
         })
     }

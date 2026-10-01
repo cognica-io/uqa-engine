@@ -565,6 +565,20 @@ pub trait CatalogFacade: Send + Sync {
 
     /// Read one entity without loading any other graph payload.
     fn graph_vertex(&self, id: u64) -> StorageBackendResult<Option<GraphVertexRow>>;
+
+    /// Visit requested vertices on the pinned view, including missing rows and
+    /// duplicates in caller order. The internal callback must not reenter
+    /// storage. A false result stops before the next identity is admitted.
+    /// `None` declines the capability without invoking the callback; `Some`
+    /// counts all invocations, including the one that stopped the read.
+    fn for_each_graph_vertex_borrowed(
+        &self,
+        _ids: &[u64],
+        _visit: &mut dyn FnMut(u64, Option<&GraphVertexRow>) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        Ok(None)
+    }
+
     fn graph_edge(&self, id: u64) -> StorageBackendResult<Option<EdgeRow>>;
 
     /// Read a bounded, strictly ascending identity page from the pinned

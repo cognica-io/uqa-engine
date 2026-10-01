@@ -68,6 +68,9 @@ impl From<BorrowedRecord<'_>> for RecordMetadata {
 }
 
 pub type RecordValueVisitor<'a> = dyn FnMut(Option<BorrowedRecord<'_>>) -> VersionResult<()> + 'a;
+pub type RecordPointVisitor<'a> =
+    dyn FnMut(&[u8], Option<BorrowedRecord<'_>>) -> VersionResult<bool> + 'a;
+pub type RecordKeyIterator<'a> = dyn Iterator<Item = VersionResult<BudgetedVec<u8>>> + 'a;
 pub type RecordScanVisitor<'a> = dyn FnMut(&[u8], BorrowedRecord<'_>) -> VersionResult<bool> + 'a;
 pub type RecordKeyVisitor<'a> = dyn FnMut(&[u8], RecordMetadata) -> VersionResult<bool> + 'a;
 
@@ -164,6 +167,31 @@ pub trait CommittedRecordSnapshot: Send + Sync {
             "size-bounded committed record reads are not supported".into(),
         )
         .into())
+    }
+
+    /// Borrow requested values in input order under one optional provider read window. Key production and visitors are internal and must not reenter storage or invoke user code. Produce one key at a time; a false visitor or an error stops before requesting the next key, including duplicate and missing identities.
+    fn visit_values(
+        &self,
+        keys: &mut RecordKeyIterator<'_>,
+        control: &StorageReadControl,
+        visit: &mut RecordPointVisitor<'_>,
+    ) -> VersionResult<()> {
+        loop {
+            control.check()?;
+            let Some(key) = keys.next() else {
+                return Ok(());
+            };
+            let key = key?;
+            let mut more = true;
+            self.visit_value(&key, control, &mut |record| {
+                more = visit(&key, record)?;
+                Ok(())
+            })?;
+            control.check()?;
+            if !more {
+                return Ok(());
+            }
+        }
     }
 
     /// Visit ordered versions until the limit, exhaustion or a visitor returning `false`. Implementations with borrowed pages avoid charging their encoded payloads to the caller's decode allowance.
@@ -286,6 +314,14 @@ impl<T: CommittedRecordSnapshot> CommittedRecordSnapshot for RetainedSnapshot<T>
         visit: &mut RecordValueVisitor<'_>,
     ) -> VersionResult<()> {
         self.snapshot.visit_value(key, control, visit)
+    }
+    fn visit_values(
+        &self,
+        keys: &mut RecordKeyIterator<'_>,
+        control: &StorageReadControl,
+        visit: &mut RecordPointVisitor<'_>,
+    ) -> VersionResult<()> {
+        self.snapshot.visit_values(keys, control, visit)
     }
     fn visit_value_bounded(
         &self,
@@ -471,6 +507,34 @@ impl MergedRecordSnapshot {
             return Ok(());
         }
         self.committed.visit_value(key, control, visit)
+    }
+
+    /// Keep private replacements ahead of committed values while allowing an unchanged command view to reuse the provider's point-read window.
+    pub fn visit_values(
+        &self,
+        keys: &mut RecordKeyIterator<'_>,
+        control: &StorageReadControl,
+        visit: &mut RecordPointVisitor<'_>,
+    ) -> VersionResult<()> {
+        if self.private_revision().is_none() {
+            return self.committed.visit_values(keys, control, visit);
+        }
+        loop {
+            control.check()?;
+            let Some(key) = keys.next() else {
+                return Ok(());
+            };
+            let key = key?;
+            let mut more = true;
+            self.visit_value(&key, control, &mut |record| {
+                more = visit(&key, record)?;
+                Ok(())
+            })?;
+            control.check()?;
+            if !more {
+                return Ok(());
+            }
+        }
     }
 
     /// Preserve private replacement/tombstone precedence while enforcing the physical source's encoded-value cap.

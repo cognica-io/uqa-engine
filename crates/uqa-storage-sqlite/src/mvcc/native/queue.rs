@@ -24,23 +24,33 @@ pub(super) fn visit(
     let mut key: Option<BudgetedVec<u8>> = None;
     loop {
         control.cancellation().check().map_err(VersionError::from)?;
-        let bounds = if family.is_some() {
-            "(family, physical_key) > (?1, ?2)"
+        let _bindings =
+            crate::read_control::reserve_bindings(control, &[key.as_deref().unwrap_or_default()])?;
+        let mut bounds = if family.is_some() {
+            "family = ?1 AND physical_key > ?2"
         } else {
             "?1 IS NULL AND ?2 IS NULL"
         };
-        let suffix = format!(
+        let mut suffix = format!(
             "FROM {table} WHERE ({condition}) AND {bounds} ORDER BY family, physical_key LIMIT 1"
         );
-        let _bindings =
-            crate::read_control::reserve_bindings(control, &[key.as_deref().unwrap_or_default()])?;
-        let info: Option<(u16, i64)> = connection
-            .query_row(
-                &format!("SELECT family, length(physical_key) {suffix}"),
-                params![family, key.as_deref()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
+        let read_info = |suffix: &str| -> rusqlite::Result<Option<(u16, i64)>> {
+            connection
+                .prepare_cached(&format!("SELECT family, length(physical_key) {suffix}"))?
+                .query_row(params![family, key.as_deref()], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })
+                .optional()
+        };
+        let mut info = read_info(&suffix)?;
+        if info.is_none() && family.is_some() {
+            // Explicit equality lets SQLite seek both primary-key columns even when the work queue also filters a constant family.
+            bounds = "family > ?1 AND (?2 IS NOT NULL)";
+            suffix = format!(
+                "FROM {table} WHERE ({condition}) AND {bounds} ORDER BY family, physical_key LIMIT 1"
+            );
+            info = read_info(&suffix)?;
+        }
         let Some((next_family, length)) = info else {
             break;
         };
@@ -50,7 +60,7 @@ pub(super) fn visit(
             .memory()
             .reserve(length)
             .map_err(VersionError::from)?;
-        let mut statement = connection.prepare(&format!("SELECT physical_key {suffix}"))?;
+        let mut statement = connection.prepare_cached(&format!("SELECT physical_key {suffix}"))?;
         let mut rows = statement.query(params![family, key.as_deref()])?;
         let row = rows
             .next()?
@@ -73,3 +83,6 @@ pub(super) fn visit(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

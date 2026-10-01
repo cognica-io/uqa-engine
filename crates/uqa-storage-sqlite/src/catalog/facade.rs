@@ -83,6 +83,14 @@ impl CatalogFacade for Catalog {
         into_storage_result(Catalog::graph_vertex(self, id))
     }
 
+    fn for_each_graph_vertex_borrowed(
+        &self,
+        ids: &[u64],
+        visit: &mut dyn FnMut(u64, Option<&uqa_storage::GraphVertexRow>) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        into_storage_result(Catalog::for_each_graph_vertex_borrowed(self, ids, visit))
+    }
+
     fn graph_edge(&self, id: u64) -> StorageBackendResult<Option<EdgeRow>> {
         into_storage_result(Catalog::graph_edge(self, id))
     }

@@ -11,6 +11,7 @@ mod graph_definitions;
 mod graph_labels;
 mod graph_observations;
 mod graph_selection;
+mod identity_presence;
 
 use rusqlite::types::ValueRef;
 use uqa_storage::mvcc::{DatabaseId, MergedRecordSnapshot, VersionError, VersionedKeyValueStore};
@@ -45,7 +46,19 @@ impl NativeSnapshot {
         after: Option<u64>,
         visit: impl FnMut(i64) -> Result<bool>,
     ) -> Result<()> {
-        graph_selection::visit(self, scope, filter, after, visit)
+        self.visit_graph_ids_with_page_size(scope, filter, after, 256, visit)
+    }
+
+    /// Bound selection work by a caller's requested page while retaining secondary-filter and tombstone continuation.
+    pub(crate) fn visit_graph_ids_with_page_size(
+        &self,
+        scope: Option<&str>,
+        filter: uqa_storage::GraphEntityFilter<'_>,
+        after: Option<u64>,
+        page_size: usize,
+        visit: impl FnMut(i64) -> Result<bool>,
+    ) -> Result<()> {
+        graph_selection::visit(self, scope, filter, after, page_size.min(256), visit)
     }
 
     /// Release each physical read before visiting decoded rows, allowing callbacks to probe other records on this retained boundary.
@@ -148,6 +161,37 @@ impl NativeSnapshot {
         self.table_owner_controlled(table, &self.control)
     }
 
+    /// Decode one row from borrowed provider bytes. The internal decoder must not reenter persistence or invoke user callbacks.
+    pub(crate) fn borrow_row_controlled<R>(
+        &self,
+        family: Family,
+        owner: NativeRecordOwner,
+        components: &[ValueRef<'_>],
+        control: &StorageReadControl,
+        read: impl FnOnce(&[ValueRef<'_>]) -> Result<R>,
+    ) -> Result<Option<R>> {
+        self.control.check()?;
+        control.check()?;
+        let key = NativeRecordIdentity::new(family, owner)?.encode_key(components, control)?;
+        let mut read = Some(read);
+        let mut result = None;
+        self.view.visit_value(&key, control, &mut |record| {
+            self.control.check()?;
+            control.check()?;
+            if let Some(bytes) = record.and_then(|record| record.value) {
+                let (_, row) = decode_record(&key, bytes, control)?;
+                result = Some(
+                    read.take().expect("one visible record")(&row)
+                        .map_err(|error| VersionError::Storage(error.into()))?,
+                );
+            }
+            control.check()?;
+            self.control.check()?;
+            Ok(())
+        })?;
+        Ok(result)
+    }
+
     pub(crate) fn table_owner_controlled(
         &self,
         table: &str,
@@ -223,6 +267,19 @@ impl NativeSnapshot {
         visit: impl FnMut(&[ValueRef<'_>]) -> Result<()>,
     ) -> Result<()> {
         let prefix = NativeRecordIdentity::object_prefix(family, identity, &self.control)?;
+        self.visit_row_prefix(&prefix, visit)
+    }
+
+    /// Select a literal prefix within a single TEXT identity on this fixed view.
+    pub(crate) fn visit_text_prefix_rows(
+        &self,
+        family: Family,
+        owner: NativeRecordOwner,
+        prefix: &str,
+        visit: impl FnMut(&[ValueRef<'_>]) -> Result<()>,
+    ) -> Result<()> {
+        let prefix = NativeRecordIdentity::new(family, owner)?
+            .encode_text_prefix(prefix.as_bytes(), &self.control)?;
         self.visit_row_prefix(&prefix, visit)
     }
 

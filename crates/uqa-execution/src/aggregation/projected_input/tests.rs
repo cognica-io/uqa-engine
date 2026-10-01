@@ -100,6 +100,90 @@ fn non_integer_input_falls_back_to_canonical_expression_evaluation() {
 }
 
 #[test]
+fn bigint_operand_cast_preserves_postgresql_widening_and_null_aggregation() {
+    let expression = ScalarExpr::Binary {
+        op: BinaryOp::Multiply,
+        lhs: Box::new(ScalarExpr::Cast {
+            expr: Box::new(ScalarExpr::Column("price".into())),
+            ty: "bigint".into(),
+        }),
+        rhs: Box::new(ScalarExpr::Column("quantity".into())),
+    };
+    let targets = vec![aggregate("sum", expression)];
+    let schema = RowSchema::new(vec!["price".into(), "quantity".into()]);
+    let plans = ProjectedAggregatePlans::compile(&|_: &str| false, &targets, &schema);
+    assert!(plans.all_direct());
+    let mut accumulators = vec![AggregateAccumulator::builtin("sum")];
+    for values in [
+        vec![Value::Int(2_147_483_647), Value::Int(2)],
+        vec![Value::Null, Value::Int(3)],
+        vec![Value::Int(-2_147_483_648), Value::Int(2)],
+    ] {
+        plans
+            .observe_direct(
+                &mut accumulators,
+                &TestRow {
+                    schema: schema.columns().to_vec(),
+                    values,
+                },
+                &[],
+            )
+            .unwrap();
+    }
+    // Independent PostgreSQL 18.6: SUM(price::bigint * quantity) over these three rows is -2; the NULL product does not contribute.
+    assert_eq!(accumulators[0].integer_sum, -2);
+    assert_eq!(accumulators[0].count, 2);
+}
+
+#[test]
+fn projected_integer_arithmetic_preserves_postgresql_operand_widths() {
+    use uqa_sql::ast::ColumnType;
+    for (ty, maximum) in [
+        (ColumnType::SmallInteger, i64::from(i16::MAX)),
+        (ColumnType::Integer, i64::from(i32::MAX)),
+    ] {
+        let schema = RowSchema::with_types(
+            vec!["price".into(), "quantity".into()],
+            vec![Some(ty.clone()), Some(ty)],
+        );
+        let row = TestRow {
+            schema: schema.columns().to_vec(),
+            values: vec![Value::Int(maximum), Value::Int(2)],
+        };
+        for argument in [
+            ScalarExpr::Binary {
+                op: BinaryOp::Multiply,
+                lhs: Box::new(ScalarExpr::Column("price".into())),
+                rhs: Box::new(ScalarExpr::Column("quantity".into())),
+            },
+            ScalarExpr::Binary {
+                op: BinaryOp::Add,
+                lhs: Box::new(ScalarExpr::Column("quantity".into())),
+                rhs: Box::new(ScalarExpr::Binary {
+                    op: BinaryOp::Multiply,
+                    lhs: Box::new(ScalarExpr::Column("price".into())),
+                    rhs: Box::new(ScalarExpr::Column("quantity".into())),
+                }),
+            },
+        ] {
+            let plans = ProjectedAggregatePlans::compile(
+                &|_: &str| false,
+                &[aggregate("sum", argument)],
+                &schema,
+            );
+            assert!(plans.all_direct());
+            let mut accumulators = vec![AggregateAccumulator::builtin("sum")];
+            // Independent PostgreSQL 18.6 reports 22003 for both int2 and int4 multiplication before SUM observes a row.
+            let error = plans
+                .observe_direct(&mut accumulators, &row, &[])
+                .unwrap_err();
+            assert_eq!(error.sqlstate(), Some("22003"));
+            assert_eq!(accumulators[0].count, 0);
+        }
+    }
+}
+
+#[test]
 fn positional_compilation_resolves_duplicate_names_by_structured_qualifier() {
     use crate::ColumnIdentity;
 

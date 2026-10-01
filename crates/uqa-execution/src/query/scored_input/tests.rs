@@ -7,6 +7,8 @@
 use super::ScoredInput;
 use uqa_core::ScoredEntry;
 
+mod borrowed;
+
 #[test]
 fn score_cutoff_retains_the_complete_boundary_tie_group() {
     let mut input = ScoredInput::entries(

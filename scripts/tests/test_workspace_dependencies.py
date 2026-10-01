@@ -66,6 +66,7 @@ class StagedDependencyTests(unittest.TestCase):
         self.command("git", "init", "-q")
         self.command("git", "config", "user.name", "Dependency test")
         self.command("git", "config", "user.email", "dependency-test@example.invalid")
+        self.command("git", "config", "commit.gpgsign", "false")
         self.command("git", "config", "core.hooksPath", ".githooks")
         self.stage()
 

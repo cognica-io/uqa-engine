@@ -6,6 +6,7 @@
 
 //! Streaming scored-document input adapters.
 
+mod borrowed;
 mod deferred;
 mod hierarchy;
 mod materialize;
@@ -706,6 +707,9 @@ impl crate::RowSource for ScoredDocumentSource {
 
     fn next_physical_batch(&mut self, max_rows: usize) -> ExecResult<Vec<crate::PhysicalRow>> {
         if let Some(rows) = self.next_shared_physical_batch(max_rows)? {
+            return Ok(rows);
+        }
+        if let Some(rows) = self.next_borrowed_physical_batch(max_rows)? {
             return Ok(rows);
         }
         loop {

@@ -20,6 +20,7 @@ use uqa_storage::{
 use super::layout::RowLayout;
 use crate::query::document_changes::DocumentChanges;
 
+mod borrowed;
 mod identifiers;
 mod owned;
 pub(super) mod projection;
@@ -349,6 +350,15 @@ impl DocumentStore for RetainedDocuments {
         self.visit_projection(ids, fields, visitor)
     }
 
+    fn for_each_fields_multi_borrowed(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        self.visit_borrowed_points(ids, fields, visitor)
+    }
+
     fn for_each_fields_multi_ref(
         &self,
         ids: &[DocId],
@@ -438,6 +448,16 @@ impl DocumentStore for RetainedDocuments {
             visitor(id, values)
         })?;
         Ok(Some(visited))
+    }
+
+    fn for_each_next_fields_borrowed(
+        &self,
+        after: Option<DocId>,
+        limit: usize,
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> StorageBackendResult<Option<usize>> {
+        self.visit_borrowed_projection(after, limit, fields, visitor)
     }
 
     fn doc_ids(&self) -> StorageBackendResult<Vec<DocId>> {

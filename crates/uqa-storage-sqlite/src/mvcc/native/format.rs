@@ -106,8 +106,9 @@ pub(in crate::mvcc) fn check_mapping(
 }
 
 fn namespace(connection: &Connection) -> PhysicalResult<NativeRecordNamespace> {
-    let mut statement = connection
-        .prepare("SELECT record_namespace FROM _uqa_mvcc_native_format WHERE singleton = 1")?;
+    let mut statement = connection.prepare_cached(
+        "SELECT record_namespace FROM _uqa_mvcc_native_format WHERE singleton = 1",
+    )?;
     let mut rows = statement.query([])?;
     let row = rows
         .next()?
@@ -209,6 +210,7 @@ pub(in crate::mvcc) fn initialize_in(
         "_uqa_mvcc_heads",
         "_uqa_mvcc_runs",
         "_uqa_mvcc_versions",
+        "_uqa_mvcc_version_metadata",
         "_uqa_mvcc_transactions",
         "_uqa_mvcc_identifiers",
     ] {
@@ -647,6 +649,7 @@ fn validate_layouts(connection: &Connection, version: u32) -> PhysicalResult<()>
                     | "_uqa_mvcc_heads"
                     | "_uqa_mvcc_runs"
                     | "_uqa_mvcc_versions"
+                    | "_uqa_mvcc_version_metadata"
                     | "_uqa_mvcc_transactions"
                     | "_uqa_mvcc_identifiers"
             )

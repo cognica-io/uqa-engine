@@ -139,6 +139,37 @@ impl GraphStorage for CatalogGraphStorage {
             })
             .transpose()
     }
+    fn for_each_vertex_borrowed(
+        &self,
+        ids: &[u64],
+        visit: &mut dyn FnMut(u64, Option<&Vertex>) -> bool,
+    ) -> GraphStoreResult<Option<usize>> {
+        let mut failure = None;
+        let result = self
+            .catalog
+            .for_each_graph_vertex_borrowed(ids, &mut |id, row| {
+                let vertex = row
+                    .map(|row| {
+                        serde_json::from_str(&row.properties_json).map(|properties| Vertex {
+                            vertex_id: id,
+                            label: row.label.clone(),
+                            properties,
+                        })
+                    })
+                    .transpose();
+                match vertex {
+                    Ok(vertex) => visit(id, vertex.as_ref()),
+                    Err(error) => {
+                        failure = Some(json_error(&error));
+                        false
+                    }
+                }
+            });
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        Ok(result?)
+    }
     fn save_vertex(&self, vertex: &Vertex) -> GraphStoreResult<()> {
         Ok(self.catalog.save_vertex(
             vertex.vertex_id,

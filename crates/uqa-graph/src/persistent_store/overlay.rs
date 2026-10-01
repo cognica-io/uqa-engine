@@ -342,6 +342,19 @@ impl GraphStorage for OverlayGraphStorage {
             self.read.storage.vertex(id)
         }
     }
+    fn for_each_vertex_borrowed(
+        &self,
+        ids: &[u64],
+        visit: &mut dyn FnMut(u64, Option<&Vertex>) -> bool,
+    ) -> GraphStoreResult<Option<usize>> {
+        let state = self.state.lock();
+        if ids.iter().any(|id| state.changes.vertices.contains(id)) {
+            return Ok(None);
+        }
+        // The callback cannot reenter storage; retain the unchanged overlay
+        // selection through the physical read window.
+        self.read.storage.for_each_vertex_borrowed(ids, visit)
+    }
     fn edge(&self, id: u64) -> GraphStoreResult<Option<Edge>> {
         if self.changed(GraphEntityKind::Edge, id) {
             self.write.storage.edge(id)

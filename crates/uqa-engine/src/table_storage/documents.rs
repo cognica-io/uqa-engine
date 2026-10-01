@@ -476,6 +476,25 @@ impl Engine {
         doc_id: DocId,
         document: Document,
     ) -> Result<(), SQLError> {
+        self.rewrite_prepared_document_with_fts(table, doc_id, document, true)
+    }
+
+    pub(crate) fn rewrite_prepared_document_deferred_fts(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: Document,
+    ) -> Result<(), SQLError> {
+        self.rewrite_prepared_document_with_fts(table, doc_id, document, false)
+    }
+
+    fn rewrite_prepared_document_with_fts(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: Document,
+        index_fts: bool,
+    ) -> Result<(), SQLError> {
         let table_name = self
             .try_resolve_table_name(table)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
@@ -486,13 +505,23 @@ impl Engine {
             .ok_or_else(|| SQLError::UnknownTable(table_name.clone()))?;
         let vectors = Self::document_vector_values(&table_state, &document)?;
         self.with_prepared_row_write_transaction(&table_name, |engine| {
-            engine.add_prepared_document_with_vector_values_inner(
-                &table_name,
-                doc_id,
-                document,
-                vectors,
-                false,
-            )
+            if index_fts {
+                engine.add_prepared_document_with_vector_values_inner(
+                    &table_name,
+                    doc_id,
+                    document,
+                    vectors,
+                    false,
+                )
+            } else {
+                engine.add_prepared_document_with_vector_values_deferred_fts_inner(
+                    &table_name,
+                    doc_id,
+                    document,
+                    vectors,
+                    false,
+                )
+            }
         })
     }
 
@@ -582,6 +611,25 @@ impl Engine {
     }
 
     pub(super) fn delete_document_inner(&self, table: &str, doc_id: DocId) -> Result<(), SQLError> {
+        self.delete_document_with_text(table, doc_id, true)
+    }
+
+    pub(crate) fn delete_prepared_document_deferred_fts(
+        &self,
+        table: &str,
+        doc_id: DocId,
+    ) -> Result<(), SQLError> {
+        self.with_prepared_row_write_transaction(table, |engine| {
+            engine.delete_document_with_text(table, doc_id, false)
+        })
+    }
+
+    fn delete_document_with_text(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        index_text: bool,
+    ) -> Result<(), SQLError> {
         let table_name = self
             .try_resolve_table_name(table)
             .map_err(|error| SQLError::Internal(format!("resolve table `{table}`: {error}")))?
@@ -631,13 +679,15 @@ impl Engine {
             Self::value_indexes_apply_write(&t, doc_id, Some(old), None);
         }
         drop(store);
-        uqa_execution::serializable::text::remove_document(
-            self,
-            &table_name,
-            t.columns.snapshot(),
-            t.inverted_index.write().as_mut(),
-            doc_id,
-        )?;
+        if index_text {
+            uqa_execution::serializable::text::remove_document(
+                self,
+                &table_name,
+                t.columns.snapshot(),
+                t.inverted_index.write().as_mut(),
+                doc_id,
+            )?;
+        }
         for idx in t
             .vector_indexes
             .write()

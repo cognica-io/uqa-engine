@@ -42,8 +42,22 @@ impl MutationIdentifiers for Engine {
     }
 }
 impl MutationStorage for Engine {
+    fn can_defer_document_text(&self, table: &str) -> Result<bool, SQLError> {
+        let table = self
+            .try_resolve_table_name(table)
+            .map_err(|error| SQLError::Internal(error.to_string()))?
+            .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
+        Ok(!self
+            .physical_index_definitions()
+            .map_err(|error| SQLError::Internal(error.to_string()))?
+            .row_publication_uses_expressions(&table))
+    }
+
     fn delete_document(&self, table: &str, doc_id: DocId) -> Result<(), SQLError> {
         Engine::delete_document(self, table, doc_id)
+    }
+    fn delete_document_deferred_text(&self, table: &str, doc_id: DocId) -> Result<(), SQLError> {
+        self.delete_prepared_document_deferred_fts(table, doc_id)
     }
     fn insert_document(
         &self,
@@ -74,6 +88,14 @@ impl MutationStorage for Engine {
         document: Document,
     ) -> Result<(), SQLError> {
         self.rewrite_prepared_document(table, doc_id, document)
+    }
+    fn rewrite_document_deferred_text(
+        &self,
+        table: &str,
+        doc_id: DocId,
+        document: Document,
+    ) -> Result<(), SQLError> {
+        self.rewrite_prepared_document_deferred_fts(table, doc_id, document)
     }
 }
 impl MutationTextIndex for Engine {

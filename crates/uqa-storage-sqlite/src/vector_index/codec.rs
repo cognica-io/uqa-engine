@@ -60,14 +60,20 @@ pub(super) fn validate_vector_ordinal_count(count: u64) -> SQLiteResult<()> {
 pub(super) fn validate_persisted_ordinal_sequence(
     rows: &[(DocId, u32, Vec<f32>)],
 ) -> SQLiteResult<()> {
+    validate_persisted_ordinals(rows.iter().map(|(id, ordinal, _)| (*id, *ordinal)))
+}
+
+pub(super) fn validate_persisted_ordinals(
+    rows: impl IntoIterator<Item = (DocId, u32)>,
+) -> SQLiteResult<()> {
     let mut current_doc = None;
     let mut expected = 0_u64;
-    for (doc_id, ordinal, _) in rows {
-        if current_doc != Some(*doc_id) {
-            current_doc = Some(*doc_id);
+    for (doc_id, ordinal) in rows {
+        if current_doc != Some(doc_id) {
+            current_doc = Some(doc_id);
             expected = 0;
         }
-        if u64::from(*ordinal) != expected {
+        if u64::from(ordinal) != expected {
             return Err(SQLiteError::StorageBackend(format!(
                 "invalid persisted vector ordinal sequence for document {doc_id}: expected {expected}, found {ordinal}"
             )));

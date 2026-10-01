@@ -6,6 +6,7 @@
 
 use super::*;
 
+mod borrowed;
 mod cancellation;
 
 fn capture(control: &StorageReadControl) -> MaterializedTable {

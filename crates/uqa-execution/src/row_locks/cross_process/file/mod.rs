@@ -63,6 +63,8 @@ struct CoordinatorState {
     holder_slots: HashMap<(u64, u64, bool), Vec<u64>>,
     /// Holder-slot indexes owned by this process. Slot probing is on every durable row-lock acquisition, so deriving this set by scanning every acquisition makes a bulk write quadratic in the number of rows held by its transaction.
     occupied_holder_slots: Vec<bool>,
+    /// Released slots are considered before the advancing probe cursor. Keeping them separate avoids rescanning live holders after each short-lived acquisition inside a larger transaction.
+    released_holder_slots: Vec<u64>,
     /// Next holder slot to probe. Advancing past each allocation avoids restarting every acquisition at an unrelated hash location and repeatedly reading slots already known to be occupied by this process.
     next_holder_slot: u64,
 }
@@ -130,6 +132,7 @@ impl FileLockCoordinator {
                 wait_slots: HashMap::new(),
                 holder_slots: HashMap::new(),
                 occupied_holder_slots: vec![false; HOLDER_SLOT_COUNT as usize],
+                released_holder_slots: Vec::new(),
                 next_holder_slot: u64::from(pid).wrapping_mul(31) % HOLDER_SLOT_COUNT,
             }),
         };
@@ -186,5 +189,79 @@ mod tests {
         }
         assert!(state.holder_slots.is_empty());
         assert!(state.occupied_holder_slots.iter().all(|occupied| !occupied));
+    }
+
+    #[test]
+    fn released_holder_slots_bound_file_growth_across_transactions() {
+        let directory = tempfile::tempdir().unwrap();
+        let coordinator = FileLockCoordinator::open(&directory.path().join("reuse.db")).unwrap();
+        coordinator.state.lock().next_holder_slot = 0;
+        for transaction in 0..4 {
+            let claims = (0..128)
+                .map(|ordinal| ByteClaim {
+                    offset: 10_000 + transaction * 128 + ordinal,
+                    write: true,
+                })
+                .collect::<Vec<_>>();
+            assert!(matches!(coordinator.try_claim(17, &claims), Ok(Ok(()))));
+            assert_eq!(
+                coordinator.file.metadata().unwrap().len(),
+                HOLDER_SLOT_BASE + HOLDER_SLOT_SIZE * 128
+            );
+            coordinator.release(17, &claims);
+            let state = coordinator.state.lock();
+            assert!(state.holder_slots.is_empty());
+            assert!(state.claims.is_empty());
+            assert_eq!(state.next_holder_slot, 128);
+            assert_eq!(state.released_holder_slots.len(), 128);
+        }
+    }
+
+    #[test]
+    fn released_holes_are_reused_without_overwriting_live_holders() {
+        let directory = tempfile::tempdir().unwrap();
+        let coordinator = FileLockCoordinator::open(&directory.path().join("holes.db")).unwrap();
+        coordinator.state.lock().next_holder_slot = 0;
+        let first = (0..32)
+            .map(|ordinal| ByteClaim {
+                offset: 10_000 + ordinal,
+                write: true,
+            })
+            .collect::<Vec<_>>();
+        assert!(matches!(coordinator.try_claim(17, &first), Ok(Ok(()))));
+        for claim in first.iter().step_by(2) {
+            coordinator.release(17, &[*claim]);
+        }
+        let second = (0..16)
+            .map(|ordinal| ByteClaim {
+                offset: 20_000 + ordinal,
+                write: true,
+            })
+            .collect::<Vec<_>>();
+        assert!(matches!(coordinator.try_claim(23, &second), Ok(Ok(()))));
+        {
+            let state = coordinator.state.lock();
+            for (ordinal, claim) in first.iter().enumerate().skip(1).step_by(2) {
+                assert_eq!(
+                    state.holder_slots[&(17, claim.offset, claim.write)],
+                    [ordinal as u64]
+                );
+            }
+            let reused = second
+                .iter()
+                .map(|claim| state.holder_slots[&(23, claim.offset, claim.write)][0])
+                .collect::<std::collections::BTreeSet<_>>();
+            assert_eq!(reused, (0..32).step_by(2).collect());
+            assert_eq!(state.next_holder_slot, 32);
+        }
+        assert_eq!(
+            coordinator.file.metadata().unwrap().len(),
+            HOLDER_SLOT_BASE + HOLDER_SLOT_SIZE * 32
+        );
+        for claim in first.iter().skip(1).step_by(2) {
+            coordinator.release(17, &[*claim]);
+        }
+        coordinator.release(23, &second);
+        assert!(coordinator.state.lock().holder_slots.is_empty());
     }
 }
