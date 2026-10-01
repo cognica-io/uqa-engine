@@ -119,6 +119,17 @@ fn transaction_and_identifier_admission_survive_a_rejected_busy_attempt() {
         store.commit_status(id, &control).unwrap(),
         CommitStatus::Committed(receipt)
     );
+    // Recording an abort is admitted the same way, so a conflicting writer cannot turn rollback into a deferred cleanup failure.
+    let aborted = store.allocate_transaction(&control).unwrap();
+    let status = after_physical_contention(&path, &store, &control, false, false, |connection| {
+        write::abort(connection, aborted, None, &control)
+    })
+    .unwrap();
+    assert_eq!(status, CommitStatus::Aborted);
+    assert_eq!(
+        store.commit_status(aborted, &control).unwrap(),
+        CommitStatus::Aborted
+    );
 }
 
 #[test]

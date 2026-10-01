@@ -13,7 +13,7 @@ use uqa_storage::mvcc::{
 };
 use uqa_storage::read_control::StorageReadControl;
 
-use super::{admission, codec, native, schema, Error, PhysicalResult};
+use super::{admission, codec, native, Error, PhysicalResult};
 
 pub(super) fn reserve_bindings(
     prepared: &PreparedRecordCommit,
@@ -204,8 +204,9 @@ pub(super) fn abort(
     native: Option<native::NativeRecordNamespace>,
     control: &StorageReadControl,
 ) -> PhysicalResult<CommitStatus> {
-    let _permit = schema::WritePermit::acquire(connection)?;
-    let transaction = schema::begin(connection)?;
+    // Recording an abort waits for writer admission like any other write instead of failing once SQLite's busy timeout expires, which would leave the rollback to surface later as a cleanup failure.
+    let _permit = admission::permit(connection, control)?;
+    let transaction = admission::begin(connection, control)?;
     native::check_mapping(&transaction, native)?;
     codec::header(&transaction, id.database())?;
     let status = codec::status(&transaction, id)?;
@@ -217,6 +218,6 @@ pub(super) fn abort(
         params![id.allocation().to_be_bytes().as_slice()],
     )?;
     control.cancellation().check().map_err(VersionError::from)?;
-    transaction.commit()?;
+    admission::commit(transaction, control)?;
     Ok(CommitStatus::Aborted)
 }
