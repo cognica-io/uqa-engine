@@ -324,12 +324,21 @@ impl Engine {
         {
             return Ok(());
         }
+        // With the committed state unchanged since the last refresh, every private generation comes from this session's own transaction, whose writes its caches already include.
+        let committed_unchanged = read_view.as_ref().is_some_and(|current| {
+            self.epochs
+                .seen_storage_read_view
+                .lock()
+                .as_ref()
+                .is_some_and(|seen| current.same_committed_state(seen))
+        });
         // A failed partial restoration must not leave an older successful token eligible for reuse after undo.
         *self.epochs.seen_storage_read_view.lock() = None;
         if self.refresh_tracked_pinned_snapshot(
             table_catalog_epoch,
             table_data_epoch,
             catalog_registry_epoch,
+            committed_unchanged,
         )? {
             *self.epochs.seen_storage_read_view.lock() = read_view;
             if let Some(version) = stable_storage_version {

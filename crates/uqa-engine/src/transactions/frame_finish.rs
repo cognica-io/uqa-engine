@@ -76,7 +76,11 @@ impl Engine {
                 return Err(self.rollback_failed_statistics_preparation(stack, &error));
             }
         }
+        // Only a commit that wrote records advances the committed sequence, which lets the session recognize its own commit afterward.
+        let mut wrote_records = false;
         if let Some(backend) = self.storage.backend.as_ref() {
+            wrote_records = storage_savepoint.is_none()
+                && matches!(backend.transaction_has_written(), Ok(true));
             let commit_result = if let Some(savepoint) = storage_savepoint {
                 if savepoints_deferred {
                     Ok(())
@@ -123,6 +127,7 @@ impl Engine {
             committed,
             publication.changes,
             publication.notifications,
+            wrote_records,
         )
     }
 

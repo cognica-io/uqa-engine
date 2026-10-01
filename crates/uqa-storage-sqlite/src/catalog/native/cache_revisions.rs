@@ -18,7 +18,7 @@ use crate::catalog::cache_revisions::{metadata_scope, revision_slot};
 use crate::mvcc::native::{decode_record, NativeRecordIdentity};
 
 // Durable SQLite generations are nonnegative i64 values. Private identities occupy a disjoint domain and never enter physical rows or conflict preconditions.
-const PRIVATE: u64 = 1 << 63;
+const PRIVATE: u64 = CatalogCacheRevisions::PRIVATE_GENERATION_BASE;
 type Object = ([u8; 16], [u8; 16]);
 
 #[derive(Default)]
