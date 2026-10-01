@@ -9,6 +9,7 @@
 mod batch;
 mod evaluation;
 mod notifications;
+mod observed;
 mod read;
 pub use read::RecordRead;
 mod serializable;
@@ -60,6 +61,7 @@ pub struct VersionedKeyValueStore {
     write_cancellation: uqa_core::CancellationToken,
     retained: Option<MergedRecordSnapshot>,
     active: Mutex<Option<Transaction>>,
+    observed: Mutex<observed::ObservedWatermarks>,
 }
 
 impl VersionedKeyValueStore {
@@ -123,9 +125,15 @@ impl VersionedKeyValueStore {
                 .writable()
                 .map_err(VersionError::into_storage_error)?;
         }
-        self.persistence
+        let allocation = self
+            .persistence
             .allocate_identifiers(namespace, request, &self.write_control())
-            .map_err(VersionError::into_storage_error)
+            .map_err(VersionError::into_storage_error)?;
+        // A row written with a reserved identity observes it again; the reservation already covers that.
+        self.observed
+            .lock()
+            .record(namespace, allocation.watermark());
+        Ok(allocation)
     }
 
     pub fn new(
@@ -157,6 +165,7 @@ impl VersionedKeyValueStore {
             write_cancellation,
             retained: None,
             active: Mutex::new(None),
+            observed: Mutex::default(),
         }
     }
 

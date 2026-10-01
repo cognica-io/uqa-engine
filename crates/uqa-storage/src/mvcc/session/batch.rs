@@ -252,11 +252,23 @@ impl<'a> Batch<'a> {
     fn apply_identifiers(&self) -> Result<(), VersionError> {
         let write_control = self.store.write_control();
         let observe = |namespace: &[u8], value: u64| {
-            self.store.persistence.allocate_identifiers(
+            let allocation = self.store.persistence.allocate_identifiers(
                 namespace,
                 crate::mvcc::IdentifierRequest::Observe(value),
                 &write_control,
-            )
+            )?;
+            self.store
+                .observed
+                .lock()
+                .record(namespace, allocation.watermark());
+            Ok::<_, VersionError>(allocation)
+        };
+        // An observation at or below a watermark this session has read raises nothing, so it needs no allocation.
+        let raise = |namespace: &[u8], value: u64| {
+            if self.store.observed.lock().covers(namespace, value) {
+                return Ok(());
+            }
+            observe(namespace, value).map(|_| ())
         };
         // An observation only raises its namespace's watermark to the maximum observed value, so a run of observations of one namespace needs a single physical allocation. An inheritance reads its source watermark and ends the run.
         let mut run: Option<(&[u8], u64)> = None;
@@ -268,22 +280,23 @@ impl<'a> Batch<'a> {
                     }
                     _ => {
                         if let Some((namespace, value)) = run.replace((namespace, *value)) {
-                            observe(namespace, value)?;
+                            raise(namespace, value)?;
                         }
                     }
                 },
                 Operation::IdentifierInheritance(from, to) => {
                     if let Some((namespace, value)) = run.take() {
-                        observe(namespace, value)?;
+                        raise(namespace, value)?;
                     }
+                    // The source watermark must be the current one, which only an allocation reads.
                     let source = observe(from, 0)?;
-                    observe(to, source.watermark())?;
+                    raise(to, source.watermark())?;
                 }
                 _ => {}
             }
         }
         if let Some((namespace, value)) = run {
-            observe(namespace, value)?;
+            raise(namespace, value)?;
         }
         Ok(())
     }
