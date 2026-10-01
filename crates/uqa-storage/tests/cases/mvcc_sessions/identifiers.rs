@@ -225,8 +225,11 @@ fn document_allocator_capability_preserves_read_only_errors_and_the_local_cache(
     store.begin_read_transaction().unwrap();
     let mut next = 1;
     assert!(allocator.allocate(&mut next).is_err());
-    assert!(allocator.observe(&mut next, 100).is_err());
     assert_eq!(next, 1);
+    // A supplied identity moves only the local floor; the row that supplies it makes it durable when published.
+    let mut floor = next;
+    DocumentIdAllocator::observe(&mut floor, 100).unwrap();
+    assert_eq!(floor, 101);
     store.rollback_transaction().unwrap();
     assert_eq!(allocator.allocate(&mut next).unwrap(), 1);
 }
