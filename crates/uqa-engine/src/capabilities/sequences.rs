@@ -224,8 +224,23 @@ impl uqa_execution::schema::sequences::alteration::SequenceDefinitionCatalog for
             .get(relation)
             .copied()
     }
-    fn state(&self, relation: &RelationIdentity) -> Option<SequenceState> {
-        self.durable.sequences.read().get(relation).copied()
+    fn state(&self, relation: &RelationIdentity) -> Result<Option<SequenceState>, SQLError> {
+        let Some(state) = self.durable.sequences.read().get(relation).copied() else {
+            return Ok(None);
+        };
+        let object_id = self
+            .durable
+            .sequence_object_ids
+            .read()
+            .get(relation)
+            .copied();
+        let (Some(positions), Some(object_id)) = (self.shared_sequence_positions(), object_id)
+        else {
+            return Ok(Some(state));
+        };
+        Ok(Some(state.at_position(
+            positions.sequence_position(state.position_key(object_id))?,
+        )))
     }
     fn owner_target(&self, owner: uqa_storage::SequenceOwner) -> Option<(String, String, bool)> {
         self.sequence_owner_target(owner)

@@ -17,7 +17,8 @@ use uqa_storage::{SequenceOwner, SequenceOwnerDependency, StorageBackendResult};
 
 pub trait SequenceDefinitionCatalog {
     fn object_id(&self, relation: &RelationIdentity) -> Option<[u8; 16]>;
-    fn state(&self, relation: &RelationIdentity) -> Option<SequenceState>;
+    /// The state of a sequence at its exact position: a replaced definition continues the values handed out, not the durable record that runs ahead of them.
+    fn state(&self, relation: &RelationIdentity) -> Result<Option<SequenceState>, SQLError>;
     fn owner_target(&self, owner: SequenceOwner) -> Option<(String, String, bool)>;
 }
 pub trait SequenceDefinitionPublication {
@@ -61,7 +62,7 @@ pub fn alter_sequence_definition(
         .ok_or_else(|| SQLError::Internal(format!("sequence `{name}` has no object identity")))?;
     let state = context
         .catalog
-        .state(relation)
+        .state(relation)?
         .ok_or_else(|| SQLError::Internal(format!("sequence `{name}` disappeared")))?;
     let mut state = crate::catalog::sequence::altered_sequence_state(state, alter)?;
     if alter.ownership != uqa_sql::ast::SequenceOwnership::Unchanged {

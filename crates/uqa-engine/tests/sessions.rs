@@ -32,6 +32,8 @@ mod identifiers;
 mod native_publication;
 #[path = "sessions/native_records.rs"]
 mod native_records;
+#[path = "sessions/sequence_positions.rs"]
+mod sequence_positions;
 #[path = "sessions/serializable_observations.rs"]
 mod serializable_observations;
 

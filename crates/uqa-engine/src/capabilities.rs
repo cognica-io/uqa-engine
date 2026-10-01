@@ -259,11 +259,21 @@ impl Engine {
             || self.storage.tables.read().clone(),
             |tables| (**tables).clone(),
         );
-        Self::catalog_read_view_from(&durable, table_sources)
+        self.with_sequence_positions(Self::catalog_read_view_from(&durable, table_sources))
     }
 
     pub(crate) fn restored_catalog_read_view(&self) -> CatalogReadView {
-        Self::catalog_read_view_from(&self.durable.snapshot(), self.storage.tables.read().clone())
+        self.with_sequence_positions(Self::catalog_read_view_from(
+            &self.durable.snapshot(),
+            self.storage.tables.read().clone(),
+        ))
+    }
+
+    fn with_sequence_positions(&self, view: CatalogReadView) -> CatalogReadView {
+        match self.shared_sequence_positions() {
+            Some(positions) => view.with_sequence_positions(positions.clone()),
+            None => view,
+        }
     }
 
     fn catalog_read_view_from(

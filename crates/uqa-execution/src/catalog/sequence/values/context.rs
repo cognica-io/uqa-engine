@@ -48,6 +48,8 @@ pub trait SequenceValueRuntime {
         &self,
     ) -> StorageBackendResult<Option<PersistentStorageSession>>;
     fn prepare_explicit_transaction_writer(&self) -> Result<(), SQLError>;
+    /// The store of exact sequence positions, when persistent sequence values are allocated by independent sessions outside the caller's transaction. A durable record then runs ahead of the values handed out, and the position between two records lives in this store.
+    fn sequence_positions(&self) -> Option<&crate::row_locks::RowLockManager>;
     fn record_nontransactional_sequence_value(
         &self,
         definition_generation: [u8; 16],

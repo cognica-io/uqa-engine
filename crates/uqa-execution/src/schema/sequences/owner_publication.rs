@@ -74,7 +74,7 @@ impl SequenceOwnerPublicationContext<'_> {
         })?;
         let mut state = self
             .definitions
-            .state(&relation)
+            .state(&relation)?
             .ok_or_else(|| SQLError::Internal(format!("sequence `{canonical}` disappeared")))?;
         if state.owner == Some(owner) {
             return Ok(());

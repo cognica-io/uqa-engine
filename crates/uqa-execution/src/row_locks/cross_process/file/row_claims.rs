@@ -248,6 +248,51 @@ impl FileLockCoordinator {
         Ok(TableLock { byte, header })
     }
 
+    /// Attach this process to the claim table if it is not attached yet.
+    pub(super) fn attach_row_claims_process(&self) -> Result<(), String> {
+        let mut state = self.state.lock();
+        if state.rows.owner.is_none() {
+            drop(self.lock_row_claim_table(&mut state.rows)?);
+        }
+        Ok(())
+    }
+
+    /// Before the liveness byte of an attached process is released: when it is the last one attached, mark the sequence positions clean.
+    pub(super) fn detach_row_claims_process(&mut self) {
+        let Some(own) = self.state.get_mut().rows.owner else {
+            return;
+        };
+        if lock_byte(&self.file, TABLE_LOCK_BYTE, true).is_err() {
+            return;
+        }
+        let byte = TableLockByte(self);
+        if byte
+            .0
+            .other_row_claim_processes(own)
+            .is_ok_and(|others| !others)
+        {
+            let _ = byte.0.mark_sequence_positions_clean();
+        }
+    }
+
+    /// Whether a process other than `own` holds a liveness byte. The caller holds the claim table lock byte.
+    fn other_row_claim_processes(&self, own: Owner) -> std::io::Result<bool> {
+        for (slot, (generation, _)) in (0_u16..).zip(table::read_processes(&self.claim_file)?) {
+            if generation == 0 {
+                break;
+            }
+            if slot == own.slot {
+                continue;
+            }
+            match try_lock_byte(&self.file, liveness_byte(slot), true) {
+                Ok(()) => unlock_byte(&self.file, liveness_byte(slot))?,
+                Err(error) if lock_would_block(&error) => return Ok(true),
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(false)
+    }
+
     /// Take the first process slot no live process holds and return whether this process is the only one attached. The caller holds the claim table lock byte, which orders attachments.
     fn attach_row_claims(&self, rows: &mut RowClaims) -> Result<bool, String> {
         let mut alone = true;
@@ -278,10 +323,15 @@ impl FileLockCoordinator {
         })();
         match (attached, owner) {
             (Ok(()), Some(owner)) => {
-                rows.owner = Some(owner);
                 if alone {
+                    // No process remains from before, so a machine failure may have left older sequence positions behind.
+                    if let Err(error) = self.begin_sequence_position_run() {
+                        let _ = unlock_byte(&self.file, liveness_byte(owner.slot));
+                        return Err(table_error("attach to", &error));
+                    }
                     rows.dead.clear();
                 }
+                rows.owner = Some(owner);
                 Ok(alone)
             }
             (Ok(()), None) => {
@@ -566,18 +616,8 @@ impl FileLockCoordinator {
             return Ok(());
         }
         let own = rows.owner.expect("attached to the row claim table");
-        for (slot, (generation, _)) in (0_u16..).zip(table::read_processes(&self.claim_file)?) {
-            if generation == 0 {
-                break;
-            }
-            if slot == own.slot {
-                continue;
-            }
-            match try_lock_byte(&self.file, liveness_byte(slot), true) {
-                Ok(()) => unlock_byte(&self.file, liveness_byte(slot))?,
-                Err(error) if lock_would_block(&error) => return Ok(()),
-                Err(error) => return Err(error),
-            }
+        if self.other_row_claim_processes(own)? {
+            return Ok(());
         }
         lock.header = table::initialize(&self.claim_file, Some(lock.header))?;
         rows.dead.clear();

@@ -36,6 +36,8 @@ mod snapshot_read;
 pub struct CatalogReadView {
     snapshot: Arc<CatalogReadSnapshot>,
     graph_reads: Option<Arc<graph_reads::GraphCatalogRead>>,
+    /// The exact positions of sequences whose durable records run ahead of the values handed out. They move without a catalog change, so they are read when a sequence's values are.
+    sequence_positions: Option<Arc<crate::row_locks::RowLockManager>>,
 }
 
 /// Immutable catalog names and durable registries captured at one statement boundary.
@@ -121,7 +123,17 @@ impl CatalogReadView {
         Self {
             snapshot: Arc::new(snapshot),
             graph_reads: None,
+            sequence_positions: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_sequence_positions(
+        mut self,
+        positions: Arc<crate::row_locks::RowLockManager>,
+    ) -> Self {
+        self.sequence_positions = Some(positions);
+        self
     }
     pub fn snapshot(&self) -> &CatalogReadSnapshot {
         &self.snapshot

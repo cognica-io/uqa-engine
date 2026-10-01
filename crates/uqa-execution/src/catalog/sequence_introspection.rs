@@ -254,6 +254,13 @@ fn read_sequence(
             relation.qualified_name()
         ))
     })?;
+    let position = match snapshot.object_ids.get(&relation) {
+        Some(object_id) => catalog
+            .sequence_position(state.position_key(*object_id))
+            .map_err(|error| SQLError::Internal(format!("read sequence position: {error}")))?,
+        None => None,
+    };
+    let state = state.at_position(position);
     let security = snapshot.security.get(&relation).cloned().ok_or_else(|| {
         SQLError::Internal(format!(
             "sequence `{}` has no security metadata",

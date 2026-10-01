@@ -280,6 +280,9 @@ pub(super) use fallback::FileLockCoordinator;
 mod fallback {
     use std::path::Path;
 
+    use super::super::sequence_positions::{
+        RecordedSequencePosition, SequencePosition, SequencePositionKey, SequenceSlot,
+    };
     use super::{ByteClaim, RelationClaimWait, RelationLockMode};
 
     /// Sandboxed targets without native processes retain process-local lock semantics instead of rejecting every persistent mutation.
@@ -301,6 +304,53 @@ mod fallback {
         }
 
         pub(in crate::row_locks) fn release_temporary_role(&self, _session: u64, _role: u32) {}
+
+        /// Without a sidecar the positions stay in the lock manager of this process.
+        #[allow(clippy::unused_self)]
+        pub(in crate::row_locks) const fn shares_sequence_positions(&self) -> bool {
+            false
+        }
+
+        pub(in crate::row_locks) fn lock_sequence_positions(&self) -> Result<(), String> {
+            Ok(())
+        }
+
+        pub(in crate::row_locks) fn unlock_sequence_positions(&self) {}
+
+        pub(in crate::row_locks) fn read_sequence_slot(
+            &self,
+            _key: &SequencePositionKey,
+        ) -> Result<SequenceSlot, String> {
+            Err("sequence positions are not shared on this target".into())
+        }
+
+        pub(in crate::row_locks) fn record_sequence_position(
+            &self,
+            _key: &SequencePositionKey,
+            _position: &SequencePosition,
+        ) -> Result<bool, String> {
+            Err("sequence positions are not shared on this target".into())
+        }
+
+        pub(in crate::row_locks) fn remove_sequence_position(
+            &self,
+            _key: &SequencePositionKey,
+        ) -> Result<(), String> {
+            Err("sequence positions are not shared on this target".into())
+        }
+
+        pub(in crate::row_locks) fn read_sequence_positions(
+            &self,
+        ) -> Result<Vec<(SequencePositionKey, RecordedSequencePosition)>, String> {
+            Err("sequence positions are not shared on this target".into())
+        }
+
+        pub(in crate::row_locks) fn retain_sequence_positions(
+            &self,
+            _keep: &dyn Fn(&SequencePositionKey) -> bool,
+        ) -> Result<(), String> {
+            Err("sequence positions are not shared on this target".into())
+        }
 
         pub(in crate::row_locks) fn foreign_temporary_role_reference(
             &self,

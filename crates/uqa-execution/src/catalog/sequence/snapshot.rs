@@ -45,7 +45,16 @@ pub struct SequenceReadSnapshot {
 }
 
 pub trait SequenceSnapshotSource {
+    /// Sequence definitions with the value state of their durable records, which may run ahead of the values handed out.
     fn sequence_read_snapshot(&self) -> StorageBackendResult<SequenceReadSnapshot>;
+
+    /// The exact position recorded for one allocation generation of a sequence, if its durable record runs ahead.
+    fn sequence_position(
+        &self,
+        _key: crate::row_locks::SequencePositionKey,
+    ) -> StorageBackendResult<Option<crate::row_locks::RecordedSequencePosition>> {
+        Ok(None)
+    }
 }
 
 enum SequenceSource {

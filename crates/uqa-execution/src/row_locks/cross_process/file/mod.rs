@@ -86,6 +86,7 @@ pub(in crate::row_locks) struct FileLockCoordinator {
     file: std::fs::File,
     change_file: std::fs::File,
     claim_file: std::fs::File,
+    sequence_file: std::fs::File,
     change_journal: Mutex<()>,
     transaction_xids: Mutex<xids::TransactionXids>,
     temporary_role_slots: Mutex<temporary_roles::Slots>,
@@ -97,6 +98,7 @@ mod journal;
 mod platform;
 mod relations;
 mod row_claims;
+mod sequence_positions;
 mod temporary_roles;
 mod waits;
 mod xids;
@@ -147,11 +149,26 @@ impl FileLockCoordinator {
                     Path::new(&claim_sidecar).display()
                 )
             })?;
+        let mut sequence_sidecar = database_path.as_os_str().to_owned();
+        sequence_sidecar.push(".uqa-sequences");
+        let sequence_file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&sequence_sidecar)
+            .map_err(|error| {
+                format!(
+                    "open cross-process sequence positions `{}`: {error}",
+                    Path::new(&sequence_sidecar).display()
+                )
+            })?;
         let pid = std::process::id();
         let coordinator = Self {
             file,
             change_file,
             claim_file,
+            sequence_file,
             change_journal: Mutex::new(()),
             transaction_xids: Mutex::new(xids::TransactionXids::new()),
             temporary_role_slots: Mutex::new(temporary_roles::Slots::default()),
@@ -173,9 +190,18 @@ impl FileLockCoordinator {
     }
 }
 
+impl FileLockCoordinator {
+    /// Whether sequence positions are kept in a sidecar every attached process reads.
+    #[allow(clippy::unused_self)]
+    pub(in crate::row_locks) const fn shares_sequence_positions(&self) -> bool {
+        true
+    }
+}
+
 impl Drop for FileLockCoordinator {
     fn drop(&mut self) {
         self.detach_transaction_xids();
+        self.detach_row_claims_process();
     }
 }
 
