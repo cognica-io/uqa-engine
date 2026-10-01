@@ -73,9 +73,17 @@ impl DecimalValue {
                 },
             ) => {
                 let scale = (*left_scale).max(*right_scale);
-                let left = aligned(left, *left_scale, scale, control)?;
-                let right = aligned(right, *right_scale, scale, control)?;
-                finite(coefficient::add(&left, &right, control)?, scale, control)
+                let left_aligned = aligned(left, *left_scale, scale, control)?;
+                let right_aligned = aligned(right, *right_scale, scale, control)?;
+                finite(
+                    coefficient::add(
+                        left_aligned.as_deref().unwrap_or(left),
+                        right_aligned.as_deref().unwrap_or(right),
+                        control,
+                    )?,
+                    scale,
+                    control,
+                )
             }
         }
     }
@@ -256,10 +264,14 @@ impl DecimalValue {
             unreachable!("special numeric handled above")
         };
         let scale = (*left_scale).max(*right_scale);
-        let left = aligned(left, *left_scale, scale, control)?;
-        let right = aligned(right, *right_scale, scale, control)?;
+        let left_aligned = aligned(left, *left_scale, scale, control)?;
+        let right_aligned = aligned(right, *right_scale, scale, control)?;
         finite(
-            coefficient::remainder(&left, &right, control)?,
+            coefficient::remainder(
+                left_aligned.as_deref().unwrap_or(left),
+                right_aligned.as_deref().unwrap_or(right),
+                control,
+            )?,
             scale,
             control,
         )
@@ -274,11 +286,12 @@ pub(super) fn finite(
     if scale > MAX_FRACTIONAL_DIGITS {
         return Err(Failure::Invalid);
     }
-    let digits = coefficient_digits_with_control(&value, control)?;
-    if digits.len().saturating_sub(scale as usize) > MAX_INTEGER_DIGITS {
-        return Err(Failure::Invalid);
+    if integer_digits_may_exceed_limit(&value, scale) {
+        let digits = coefficient_digits_with_control(&value, control)?;
+        if digits.len().saturating_sub(scale as usize) > MAX_INTEGER_DIGITS {
+            return Err(Failure::Invalid);
+        }
     }
-    drop(digits);
     let header = control.reserve(size_of::<DecimalRepr>())?;
     let (coefficient, memory) = value.into_parts();
     Ok(control.finish(
@@ -310,14 +323,29 @@ pub(super) fn infinity(
     )
 }
 
+/// Whether a coefficient's decimal digits, less `scale` fractional digits, can exceed the integer digit limit. A value with `b` significant bits has at most `floor(b * log10(2)) + 1` digits, and 30103/100000 bounds `log10(2)` from above, so only a value near the limit needs its exact digit count.
+fn integer_digits_may_exceed_limit(coefficient: &BigInt, scale: u32) -> bool {
+    let bits = u128::from(coefficient.bits());
+    let digits = bits.saturating_mul(30_103) / 100_000 + 1;
+    digits.saturating_sub(u128::from(scale)) > MAX_INTEGER_DIGITS as u128
+}
+
+/// The coefficient at `target_scale`, or `None` when the scale already matches and the coefficient can be used as it is. A power of ten that fits in a machine word multiplies the coefficient directly.
 fn aligned(
     value: &BigInt,
     source_scale: u32,
     target_scale: u32,
     control: &ProductionControl<'_>,
-) -> Calculation<Produced<BigInt>> {
-    let power = coefficient::power_of_ten(target_scale - source_scale, control)?;
-    Ok(coefficient::multiply(value, &power, control)?)
+) -> Calculation<Option<Produced<BigInt>>> {
+    let power = target_scale - source_scale;
+    if power == 0 {
+        return Ok(None);
+    }
+    if let Some(factor) = 10_u64.checked_pow(power) {
+        return Ok(Some(coefficient::multiply_by_word(value, factor, control)?));
+    }
+    let power = coefficient::power_of_ten(power, control)?;
+    Ok(Some(coefficient::multiply(value, &power, control)?))
 }
 
 pub(super) fn divide_rounded(
