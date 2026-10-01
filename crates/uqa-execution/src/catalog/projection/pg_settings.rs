@@ -19,6 +19,10 @@ pub fn build_pg_settings(session: &dyn CatalogSession) -> Result<Vec<ResultRow>,
         ("DateStyle", "Locale and formatting"),
         ("TimeZone", "Locale and formatting"),
         ("work_mem", "Resource usage"),
+        (
+            "enable_indexonlyscan",
+            "Query Tuning / Planner Method Configuration",
+        ),
         ("plan_cache_mode", "Query Tuning / Other Planner Options"),
         ("session_replication_role", "Replication"),
         ("plpgsql.check_asserts", "Customized Options"),
@@ -62,6 +66,7 @@ fn build_pg_setting_row(
     let replication_role = name == "session_replication_role";
     let plan_cache_mode = name == "plan_cache_mode";
     let check_asserts = name == "plpgsql.check_asserts";
+    let index_only_scan = name == "enable_indexonlyscan";
     let enumvals = if replication_role || plan_cache_mode {
         catalog_array(
             if plan_cache_mode {
@@ -88,6 +93,8 @@ fn build_pg_setting_row(
                 "Controls the planner's selection of custom or generic plan."
             } else if check_asserts {
                 "Perform checks given in ASSERT statements."
+            } else if index_only_scan {
+                "Enables the planner's use of index-only-scan plans."
             } else {
                 name
             }),
@@ -112,7 +119,7 @@ fn build_pg_setting_row(
             "vartype",
             str_value(if replication_role || plan_cache_mode {
                 "enum"
-            } else if check_asserts {
+            } else if check_asserts || index_only_scan {
                 "bool"
             } else {
                 "string"
@@ -128,7 +135,7 @@ fn build_pg_setting_row(
                 "auto"
             } else if replication_role {
                 "origin"
-            } else if check_asserts {
+            } else if check_asserts || index_only_scan {
                 "on"
             } else {
                 setting
@@ -140,7 +147,7 @@ fn build_pg_setting_row(
                 "auto"
             } else if replication_role {
                 "origin"
-            } else if check_asserts {
+            } else if check_asserts || index_only_scan {
                 "on"
             } else {
                 setting

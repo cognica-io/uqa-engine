@@ -384,7 +384,9 @@ pub(super) fn default_runtime_parameter(name: &str) -> Option<&'static str> {
     if name.eq_ignore_ascii_case("session_replication_role") {
         return Some("origin");
     }
-    if name.eq_ignore_ascii_case("plpgsql.check_asserts") {
+    if name.eq_ignore_ascii_case("plpgsql.check_asserts")
+        || name.eq_ignore_ascii_case("enable_indexonlyscan")
+    {
         return Some("on");
     }
     if name.eq_ignore_ascii_case("default_transaction_isolation")
@@ -418,6 +420,7 @@ pub(super) fn is_mutable_runtime_parameter(name: &str) -> bool {
         || name.eq_ignore_ascii_case("plan_cache_mode")
         || name.eq_ignore_ascii_case("session_replication_role")
         || name.eq_ignore_ascii_case("plpgsql.check_asserts")
+        || name.eq_ignore_ascii_case("enable_indexonlyscan")
         || name.eq_ignore_ascii_case("default_transaction_isolation")
         || name.eq_ignore_ascii_case("default_transaction_read_only")
         || name.eq_ignore_ascii_case("default_transaction_deferrable")

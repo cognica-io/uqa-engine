@@ -484,6 +484,19 @@ A partial index's `WHERE` predicate must be an immutable Boolean expression. Uni
 
 `INCLUDE (column, ...)` names columns that a B-tree index carries beside its key, as in PostgreSQL. They take no part in ordering, uniqueness or search, may repeat, and may also be key columns. Other access methods reject them with `0A000`, as do an expression and a virtual generated column. An index holds the stored value of every plain key column and every included column for each row, including rows outside a partial index's predicate.
 
+A query over one table whose predicate selects rows through an index, and whose referenced columns are all held by the table's indexes, is answered from the index entries without reading the rows, as PostgreSQL's index-only scan does. Key columns alone are enough, and the columns may come from different indexes of the table. A row-locking query, a query that references a column no index holds, a virtual generated column or `xmin`, and a query on a transaction snapshot other than the session's current table state read the rows; the results are the same either way. `SET enable_indexonlyscan = off` turns index-only reads off for the session, with PostgreSQL's setting name, Boolean values and `pg_settings` row.
+
+```sql execute
+CREATE TABLE covered_orders (order_id integer PRIMARY KEY, account_id integer, state text, total numeric(10, 2));
+CREATE INDEX covered_orders_account ON covered_orders (account_id) INCLUDE (total);
+INSERT INTO covered_orders VALUES (1, 7, 'open', 12.50), (2, 7, 'paid', 30.00), (3, 8, 'open', 4.25);
+SELECT sum(total) AS account_total FROM covered_orders WHERE account_id = 7;
+SELECT pg_get_indexdef('covered_orders_account'::regclass) AS definition;
+SET enable_indexonlyscan = off;
+SELECT sum(total) AS account_total FROM covered_orders WHERE account_id = 7;
+RESET enable_indexonlyscan;
+```
+
 PRIMARY KEY and UNIQUE constraints expose their supporting indexes through `pg_class`, `pg_index`, and `pg_indexes`. `pg_constraint.conindid` identifies the constraint's supporting index or a foreign key's selected referenced index. Directly dropping a constraint-owned index raises `2BP01`; drop its constraint instead. A foreign key can reference a non-partial unique index whose keys are ordinary columns and retains that index dependency across reopen. `DROP INDEX` rejects a referenced index unless CASCADE removes the dependent foreign keys. Index key expressions and partial predicates retain routine identities across function renames; DROP FUNCTION RESTRICT protects dependent indexes and CASCADE removes them. Key expressions, predicates, and included-column references follow column renames and durable reopen in SQLite and key-value providers.
 
 ```sql execute

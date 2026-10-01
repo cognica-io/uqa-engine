@@ -211,6 +211,41 @@ impl crate::Engine {
         Ok(supported)
     }
 
+    /// Make the accelerators of `fields` available to an index-only read of `table`, the handle a query bound for `name`. Only the live table loads or builds an accelerator: a detached snapshot table lives for one statement, and building its accelerators would read every document to save reading a few.
+    pub(crate) fn prepare_index_only_read(
+        &self,
+        name: &str,
+        table: &std::sync::Arc<dyn uqa_execution::query::table_read::TableRead>,
+        fields: &[String],
+    ) -> Result<bool, SQLError> {
+        if !self.index_only_scans_enabled() {
+            return Ok(false);
+        }
+        let prepare = || -> StorageBackendResult<bool> {
+            let Some(table_name) = self.try_resolve_query_table_name(name)? else {
+                return Ok(false);
+            };
+            let Some(live) = self.try_table(&table_name)? else {
+                return Ok(false);
+            };
+            if !std::ptr::addr_eq(std::sync::Arc::as_ptr(&live), std::sync::Arc::as_ptr(table)) {
+                return Ok(false);
+            }
+            for field in fields {
+                let field = ValueIndexKey::Column(field.clone());
+                // A loaded accelerator answers without consulting the catalog or the durable postings again.
+                if !self.ensure_query_value_index(&table_name, &live, &field)? {
+                    return Ok(false);
+                }
+            }
+            // A read of no field asks whichever accelerator its access path has loaded by then whether each row exists.
+            Ok(true)
+        };
+        prepare().map_err(|error| {
+            uqa_execution::storage_errors::storage_error("prepare index-only read", &error)
+        })
+    }
+
     fn ensure_query_value_index(
         &self,
         table_name: &str,

@@ -256,6 +256,14 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
         .and_then(|(origin_qualifier, storage_name)| {
             ctes.recheck_docs_for_scan(origin_qualifier, storage_name)
         });
+    // An access path that yields row identities needs the documents only for the projected fields. When the table's indexes hold all of them, the rows are projected from the index entries. A row-locking read and a pinned recheck read the current documents.
+    let index_only = pending.is_some()
+        && lock_origin.is_none()
+        && recheck_pins.is_none()
+        && context
+            .scans
+            .tables
+            .index_holds_fields(table, &table_state, &source_schema)?;
     let source = ScoredDocumentSource::new_with_metadata(
         table,
         table_state,
@@ -265,6 +273,7 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
         pushed_predicate,
         metadata_projection,
     )
+    .with_index_only(index_only)
     .with_serializable_read(context.scans.tables.serializable_read(table)?)
     .with_table_oid(crate::catalog::projection::snapshot_table_relation_oid(
         &catalog,
