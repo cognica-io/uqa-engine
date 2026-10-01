@@ -27,6 +27,8 @@ pub(super) struct Snapshot {
     pub(super) store: SQLiteRecordStore,
     pub(super) sequence: CommitSequence,
     pub(super) reclamation_epoch: u64,
+    /// The commit monitor's value before this snapshot was captured.
+    pub(super) monitor: Option<u64>,
     pub(super) _lease: std::sync::Arc<uqa_storage::mvcc::SnapshotLease>,
 }
 
@@ -65,6 +67,9 @@ impl CommittedRecordSnapshot for Snapshot {
     }
     fn provider_snapshot(&self) -> Option<&dyn std::any::Any> {
         Some(self)
+    }
+    fn commit_monitor(&self) -> Option<u64> {
+        self.monitor
     }
     fn sequence(&self) -> CommitSequence {
         self.sequence

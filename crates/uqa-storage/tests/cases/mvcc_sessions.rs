@@ -34,6 +34,8 @@ mod identifiers;
 mod maintenance;
 #[path = "mvcc_sessions/metadata.rs"]
 mod metadata;
+#[path = "mvcc_sessions/monitor.rs"]
+mod monitor;
 #[path = "mvcc_sessions/notifications.rs"]
 mod notifications;
 #[path = "mvcc_sessions/occurrence_merging.rs"]
@@ -161,6 +163,9 @@ struct State {
     required_keys: Vec<Vec<u8>>,
     acknowledgements: Vec<ReceiptAcknowledgement>,
     acknowledgement_fault: bool,
+    /// The commit monitor's value, for a test that gives the persistence one.
+    monitor: Option<u64>,
+    captures: usize,
 }
 struct Persistence {
     store: MemoryVersionStore,
@@ -187,6 +192,8 @@ impl Persistence {
                 required_keys: Vec::new(),
                 acknowledgements: Vec::new(),
                 acknowledgement_fault: false,
+                monitor: None,
+                captures: 0,
             }),
         })
     }
@@ -316,7 +323,21 @@ impl VersionedPersistence for Persistence {
         &self,
         control: &StorageReadControl,
     ) -> VersionResult<Arc<dyn CommittedRecordSnapshot>> {
-        retain_record_snapshot(self.store.snapshot()?, control)
+        let monitor = {
+            let mut state = self.state.lock();
+            state.captures += 1;
+            state.monitor
+        };
+        let source = self.store.snapshot()?;
+        match monitor {
+            Some(monitor) => {
+                retain_record_snapshot(monitor::MonitoredSnapshot { source, monitor }, control)
+            }
+            None => retain_record_snapshot(source, control),
+        }
+    }
+    fn commit_monitor_version(&self) -> VersionResult<Option<u64>> {
+        Ok(self.state.lock().monitor)
     }
     fn commit(
         &self,

@@ -19,8 +19,19 @@ impl Transaction {
         control: &StorageReadControl,
     ) -> VersionResult<()> {
         self.unsealed()?;
+        if let Some(captured_at) = self.committed.commit_monitor() {
+            // Nothing was committed since this snapshot was captured, so a new one would be the same.
+            if persistence.commit_monitor_version()? == Some(captured_at) {
+                control.cancellation().check()?;
+                return Ok(());
+            }
+        }
         let current = persistence.snapshot(control)?;
         if current.sequence() == self.committed.sequence() {
+            if current.commit_monitor().is_some() {
+                // The same records under the monitor's current value, which spares the next refresh this capture.
+                self.committed = current;
+            }
             return Ok(());
         }
         let prepared = self.prepare(control)?;

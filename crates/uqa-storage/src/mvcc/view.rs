@@ -93,6 +93,11 @@ pub trait CommittedRecordSnapshot: Send + Sync {
         None
     }
 
+    /// The value [`VersionedPersistence::commit_monitor_version`](super::VersionedPersistence::commit_monitor_version) returned before this snapshot was captured. While the monitor still returns it, nothing was committed after the capture began, so this snapshot is the latest one. `None` when the provider has no monitor. Wrappers must forward the original value.
+    fn commit_monitor(&self) -> Option<u64> {
+        None
+    }
+
     /// Read a revision and tombstone marker without materializing its value when the provider supports key-only access.
     fn metadata(
         &self,
@@ -276,6 +281,9 @@ impl<T: CommittedRecordSnapshot> CommittedRecordSnapshot for RetainedSnapshot<T>
     }
     fn provider_snapshot(&self) -> Option<&dyn std::any::Any> {
         self.snapshot.provider_snapshot()
+    }
+    fn commit_monitor(&self) -> Option<u64> {
+        self.snapshot.commit_monitor()
     }
     fn visit_last_key(
         &self,

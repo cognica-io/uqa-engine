@@ -344,6 +344,8 @@ impl VersionedPersistence for SQLiteRecordStore {
         control: &StorageReadControl,
     ) -> VersionResult<Arc<dyn CommittedRecordSnapshot>> {
         control.cancellation().check()?;
+        // Read before the capture: a commit that lands in between changes the monitor and is in the snapshot, which then only looks older than it is.
+        let monitor = self.commit_monitor_version()?;
         let mut reclamation_epoch = 0;
         let lease = self.snapshots.capture(control, || {
             self.with(|connection| {
@@ -360,10 +362,16 @@ impl VersionedPersistence for SQLiteRecordStore {
                 store: self.clone(),
                 sequence: lease.sequence(),
                 reclamation_epoch,
+                monitor,
                 _lease: lease,
             },
             control,
         )
+    }
+    fn commit_monitor_version(&self) -> VersionResult<Option<u64>> {
+        self.connection
+            .commit_monitor_version()
+            .map_err(|error| VersionError::Storage(error.into()))
     }
     fn reclaim_versions(&self, control: &StorageReadControl) -> VersionResult<u64> {
         self.snapshots.reclaim(control, |oldest| {
