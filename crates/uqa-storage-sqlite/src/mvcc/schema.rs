@@ -4,18 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::Arc;
 
-use rusqlite::{
-    functions::FunctionFlags, params, Connection, OptionalExtension, Transaction,
-    TransactionBehavior,
-};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use uqa_storage::mvcc::{DatabaseId, VersionError};
 
-use super::{codec, PhysicalResult};
+use super::{codec, connection_functions::ConnectionFunctions, PhysicalResult};
 
 pub(super) const RECORD_FORMAT: i64 = 55;
 
@@ -38,7 +32,7 @@ const TABLES: [(&str, &str); 7] = [
 ];
 
 /// A connection-local admission token. Dropping it closes permission without any fallible SQL cleanup, including on unwind or commit failure.
-pub(crate) struct WritePermit(Arc<AtomicBool>);
+pub(crate) struct WritePermit(Arc<ConnectionFunctions>);
 
 impl WritePermit {
     pub(crate) fn for_native_restore(connection: &Connection) -> super::VersionResult<Self> {
@@ -52,23 +46,15 @@ impl WritePermit {
             )
             .into());
         }
-        connection.pragma_update(None, "synchronous", "FULL")?;
-        let enabled = Arc::new(AtomicBool::new(false));
-        let flag = Arc::clone(&enabled);
-        connection.create_scalar_function(
-            "__uqa_mvcc_write_permit",
-            0,
-            FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_INNOCUOUS,
-            move |_| Ok(i64::from(flag.load(Ordering::Acquire))),
-        )?;
-        enabled.store(true, Ordering::Release);
-        Ok(Self(enabled))
+        let functions = ConnectionFunctions::of(connection)?;
+        functions.open_write_permit();
+        Ok(Self(functions))
     }
 }
 
 impl Drop for WritePermit {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::Release);
+        self.0.close_write_permit();
     }
 }
 
