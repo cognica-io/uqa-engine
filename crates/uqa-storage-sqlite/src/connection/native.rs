@@ -116,6 +116,20 @@ impl ManagedConnection {
             .map_err(Into::into)
     }
 
+    pub(crate) fn observe_native_identifier(&self, namespace: &[u8], value: u64) -> Result<()> {
+        self.surface_cleanup_failure()?;
+        let _gate = self.session.gate.read();
+        let logical = self
+            .session
+            .logical
+            .get()
+            .filter(|session| session.native.is_some())
+            .ok_or(SQLiteError::SessionMappingMismatch)?;
+        logical
+            .observe_identifier(namespace, value)
+            .map_err(Into::into)
+    }
+
     pub(crate) fn is_native_record_session(&self) -> bool {
         self.session
             .logical

@@ -226,6 +226,58 @@ fn an_observation_its_session_already_covers_allocates_nothing() {
 }
 
 #[test]
+fn an_observation_ahead_of_its_rows_covers_them_under_the_admission_of_an_allocation() {
+    let persistence = Persistence::new();
+    let store = persistence.session(1 << 20);
+    let requests = || {
+        persistence
+            .state
+            .lock()
+            .identifier_requests
+            .iter()
+            .map(|(_, value)| *value)
+            .collect::<Vec<_>>()
+    };
+    // A statement raises the watermark to the greatest identity it supplies, and the rows it then writes observe identities that covers.
+    store.observe_identifier(b"rows", 50).unwrap();
+    let mut batch = store.batch();
+    for value in [1, 25, 50] {
+        batch.observe_identifier(b"rows", value).unwrap();
+    }
+    batch.put(b"row", b"value").unwrap();
+    batch.commit().unwrap();
+    assert_eq!(requests(), [Some(50)]);
+
+    // A covered identity is answered from what the session has read; an allocation reports the current watermark and stays physical.
+    store.observe_identifier(b"rows", 20).unwrap();
+    assert_eq!(requests(), [Some(50)]);
+    assert_eq!(
+        store
+            .allocate_identifiers(b"rows", IdentifierRequest::Observe(20))
+            .unwrap()
+            .watermark(),
+        50
+    );
+    store.observe_identifier(b"rows", 51).unwrap();
+    assert_eq!(requests(), [Some(50), Some(20), Some(51)]);
+    assert_eq!(persistence.state.lock().identifiers[b"rows".as_slice()], 51);
+
+    // A covered identity is refused wherever an allocation is refused.
+    store.begin_read_transaction().unwrap();
+    let error = store.observe_identifier(b"rows", 20).unwrap_err();
+    assert!(error.to_string().contains("read-only"), "{error}");
+    store.commit_transaction().unwrap();
+    assert_eq!(requests(), [Some(50), Some(20), Some(51)]);
+
+    // A failed observation is not remembered.
+    persistence.state.lock().identifier_fault = true;
+    assert!(store.observe_identifier(b"rows", 60).is_err());
+    persistence.state.lock().identifier_fault = false;
+    store.observe_identifier(b"rows", 60).unwrap();
+    assert_eq!(persistence.state.lock().identifiers[b"rows".as_slice()], 60);
+}
+
+#[test]
 fn rejected_record_staging_does_not_consume_queued_identifiers() {
     let persistence = Persistence::new();
     let mut failures = 0;

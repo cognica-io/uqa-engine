@@ -56,6 +56,17 @@ impl MutationStorage for Engine {
     fn delete_document(&self, table: &str, doc_id: DocId) -> Result<(), SQLError> {
         Engine::delete_document(self, table, doc_id)
     }
+    fn observe_document_identity(&self, table: &str, doc_id: DocId) -> Result<(), SQLError> {
+        let state = self
+            .try_table(table)
+            .map_err(|error| SQLError::Internal(error.to_string()))?
+            .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
+        self.table_identifier_allocator(&state)
+            .and_then(|allocator| allocator.observe_durably(doc_id))
+            .map_err(|error| {
+                uqa_execution::storage_errors::storage_error("observe document identity", &error)
+            })
+    }
     fn delete_document_deferred_text(&self, table: &str, doc_id: DocId) -> Result<(), SQLError> {
         self.delete_prepared_document_deferred_fts(table, doc_id)
     }

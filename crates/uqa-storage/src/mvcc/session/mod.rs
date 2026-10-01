@@ -23,7 +23,7 @@ pub use vector_fields::VectorFieldGuardMaintenance;
 
 use std::sync::Arc;
 
-use parking_lot::Mutex;
+use parking_lot::{Mutex, MutexGuard};
 
 use crate::read_control::{KeyValueReadVisitor, StorageReadControl, ValueReadVisitor};
 use crate::{
@@ -118,6 +118,24 @@ impl VersionedKeyValueStore {
         namespace: &[u8],
         request: super::IdentifierRequest,
     ) -> StorageBackendResult<super::IdentifierAllocation> {
+        let _active = self.admit_identifier_allocation()?;
+        self.allocate_admitted_identifiers(namespace, request)
+    }
+
+    /// Raise the watermark of `namespace` to at least `value` without reporting it. An allocation reports the current watermark and so is always physical; this answers from a watermark the session has already read when that covers `value`. The admission of an allocation applies either way.
+    pub fn observe_identifier(&self, namespace: &[u8], value: u64) -> StorageBackendResult<()> {
+        let _active = self.admit_identifier_allocation()?;
+        if self.observed.lock().covers(namespace, value) {
+            return Ok(());
+        }
+        self.allocate_admitted_identifiers(namespace, super::IdentifierRequest::Observe(value))
+            .map(|_| ())
+    }
+
+    /// Admit an identifier allocation: the session can write and its transaction, when it has one, has not been sealed. The guard keeps the transaction from changing while the allocation runs.
+    fn admit_identifier_allocation(
+        &self,
+    ) -> StorageBackendResult<MutexGuard<'_, Option<Transaction>>> {
         self.require_mutable_session()?;
         let active = self.active.lock();
         if let Some(transaction) = active.as_ref() {
@@ -125,6 +143,14 @@ impl VersionedKeyValueStore {
                 .writable()
                 .map_err(VersionError::into_storage_error)?;
         }
+        Ok(active)
+    }
+
+    fn allocate_admitted_identifiers(
+        &self,
+        namespace: &[u8],
+        request: super::IdentifierRequest,
+    ) -> StorageBackendResult<super::IdentifierAllocation> {
         let allocation = self
             .persistence
             .allocate_identifiers(namespace, request, &self.write_control())
@@ -390,6 +416,10 @@ impl super::IdentifierAllocator for VersionedKeyValueStore {
         request: super::IdentifierRequest,
     ) -> StorageBackendResult<super::IdentifierAllocation> {
         Self::allocate_identifiers(self, namespace, request)
+    }
+
+    fn observe_identifier(&self, namespace: &[u8], value: u64) -> StorageBackendResult<()> {
+        Self::observe_identifier(self, namespace, value)
     }
 }
 

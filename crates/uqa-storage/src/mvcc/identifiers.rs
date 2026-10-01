@@ -27,6 +27,12 @@ pub trait IdentifierAllocator: Send + Sync {
         namespace: &[u8],
         request: IdentifierRequest,
     ) -> StorageBackendResult<IdentifierAllocation>;
+
+    /// Raise the watermark to at least `value` without reporting it. A session that has already read a watermark at or above `value` answers without a physical allocation, which an `Observe` allocation cannot do because it reports the current watermark. Forwarding wrappers forward this as well, or every such observation stays physical.
+    fn observe_identifier(&self, namespace: &[u8], value: u64) -> StorageBackendResult<()> {
+        self.allocate_identifiers(namespace, IdentifierRequest::Observe(value))
+            .map(|_| ())
+    }
 }
 
 /// Observe an externally supplied identity or reserve a contiguous range. Namespace keys must include the allocation domain and the owning object's non-reused generation, rather than its reusable name.

@@ -13,6 +13,7 @@ use super::{
         insert_source_expression_rows, InsertSelectConsumer, InsertSelectIdentity,
         PreparedInsertSelect,
     },
+    supplied_identities::SuppliedIdentities,
     triggers::fire_insert_after_triggers,
 };
 use crate::mutation::statement::context::{with_mutation_snapshot, MutationStatementContext};
@@ -311,6 +312,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         events,
                         has_prepared_effect,
                         has_prepared_auto_identity,
+                        supplied_identities,
                     } = consumer.take_prepared()?;
                     drop(overlay);
                     if has_prepared_effect || has_prepared_auto_identity {
@@ -323,6 +325,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         )?;
                     }
                     drop(conflict_locks);
+                    supplied_identities.observe(mutation.publication.storage)?;
                     let cancel = context.query.source.relational.runtime.cancellation_token();
                     let apply_reader = prepared_rows
                         .read_rows()
@@ -739,6 +742,11 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 )?;
             }
             drop(conflict_locks);
+            let mut supplied_identities = SuppliedIdentities::default();
+            for (target_table, prepared) in target_tables.iter().zip(&prepared_conflicts) {
+                supplied_identities.note(target_table, prepared);
+            }
+            supplied_identities.observe(mutation.publication.storage)?;
             let mut publication = MutationPublicationBatch::default();
             let mut known_new = KnownNewInserts::new(
                 preparation.referential.constraints.catalog,

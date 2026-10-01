@@ -94,6 +94,7 @@ pub struct InsertSelectConsumerState<S: Clone + 'static> {
     pub events: crate::mutation::events::MutationEventQueue,
     pub has_prepared_effect: bool,
     pub has_prepared_auto_identity: bool,
+    pub supplied_identities: super::supplied_identities::SuppliedIdentities,
 }
 
 pub struct PreparedInsertSelect {
@@ -104,6 +105,7 @@ pub struct PreparedInsertSelect {
     pub events: crate::mutation::events::MutationEventQueue,
     pub has_prepared_effect: bool,
     pub has_prepared_auto_identity: bool,
+    pub supplied_identities: super::supplied_identities::SuppliedIdentities,
 }
 
 impl<S: Clone + 'static> InsertSelectConsumer<S> {
@@ -142,6 +144,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
                 events: crate::mutation::events::MutationEventQueue::default(),
                 has_prepared_effect: false,
                 has_prepared_auto_identity: false,
+                supplied_identities: super::supplied_identities::SuppliedIdentities::default(),
             }),
         })
     }
@@ -165,6 +168,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             events: std::mem::take(&mut state.events),
             has_prepared_effect: state.has_prepared_effect,
             has_prepared_auto_identity: state.has_prepared_auto_identity,
+            supplied_identities: std::mem::take(&mut state.supplied_identities),
         })
     }
 }
@@ -250,6 +254,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             events,
             has_prepared_effect,
             has_prepared_auto_identity,
+            supplied_identities,
         } = &mut *state;
         let columns = columns.as_ref().ok_or_else(|| {
             SQLError::Internal("INSERT SELECT row consumer was not initialized".into())
@@ -429,6 +434,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             returning_rows.push(row);
         }
         events.append_after_rows(row_after_events);
+        supplied_identities.note(&target_table, &prepared_conflict);
         prepared_buffer
             .as_mut()
             .ok_or_else(|| {

@@ -10,6 +10,8 @@
 mod conflicts;
 #[path = "commit_resolution/diskann.rs"]
 mod diskann;
+#[path = "commit_resolution/identities.rs"]
+mod identities;
 #[path = "commit_resolution/notifications.rs"]
 mod notifications;
 #[path = "commit_resolution/serializable.rs"]
@@ -78,6 +80,7 @@ struct FaultPersistence {
     serializable_completion: Mutex<Option<uqa_storage::mvcc::SerializableTransactionId>>,
     foreground: std::thread::ThreadId,
     foreground_transaction_allocations: AtomicUsize,
+    foreground_identifier_observations: AtomicUsize,
     foreground_record_commits: AtomicUsize,
     last_foreground_record_commit: Mutex<Option<(StorageTransactionId, CommitFingerprint)>>,
     attempt: Mutex<Option<StorageTransactionId>>,
@@ -153,6 +156,8 @@ impl VersionedPersistence for FaultPersistence {
             {
                 return Err(error);
             }
+            self.foreground_identifier_observations
+                .fetch_add(1, Ordering::AcqRel);
         }
         self.inner.allocate_identifiers(namespace, request, control)
     }
@@ -313,6 +318,7 @@ fn fixture(directory: &std::path::Path, provider: &str) -> Arc<FaultPersistence>
         serializable_completion: Mutex::new(None),
         foreground: std::thread::current().id(),
         foreground_transaction_allocations: AtomicUsize::new(0),
+        foreground_identifier_observations: AtomicUsize::new(0),
         foreground_record_commits: AtomicUsize::new(0),
         last_foreground_record_commit: Mutex::new(None),
         attempt: Mutex::new(None),

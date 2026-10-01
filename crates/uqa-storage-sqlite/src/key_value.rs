@@ -84,6 +84,11 @@ impl uqa_storage::mvcc::IdentifierAllocator for SQLiteKeyValueStore {
         self.conn
             .with_records(|store| store.allocate_identifiers(namespace, request))
     }
+
+    fn observe_identifier(&self, namespace: &[u8], value: u64) -> StorageBackendResult<()> {
+        self.conn
+            .with_records(|store| store.observe_identifier(namespace, value))
+    }
 }
 
 impl KeyValueStore for SQLiteKeyValueStore {
