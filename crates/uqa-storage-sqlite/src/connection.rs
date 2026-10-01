@@ -240,6 +240,13 @@ pub struct ManagedConnection {
 }
 
 impl ManagedConnection {
+    /// Decoded document columns shared by every session of this database.
+    pub(crate) fn decoded_columns(
+        &self,
+    ) -> &crate::document_store::decoded_columns::DecodedColumns {
+        &self.pool.decoded_columns
+    }
+
     fn surface_cleanup_failure(&self) -> Result<()> {
         if let Some(error) = self.session.cleanup_failure.lock().take() {
             return Err(SQLiteError::SessionCleanupFailed(error));

@@ -11,6 +11,7 @@ use uqa_core::{memory::BudgetedSmallVec, DocId, Value};
 use uqa_storage::mvcc::VersionError;
 
 use super::{controlled, sqlite_doc_id, Decoded, Family, NativeDocumentRead, SQLiteResult};
+use crate::document_store::decoded_columns::{CachedColumns, ColumnBuilder};
 use crate::document_store::document_id_from_sqlite;
 use crate::mvcc::native::{decode_record, NativeRecordIdentity};
 
@@ -134,35 +135,108 @@ impl NativeDocumentRead<'_> {
     ) -> SQLiteResult<Option<LatestSegment>> {
         let mut visited = 0;
         let mut pending = None;
-        let available = self.snapshot.visit_latest_documents(
+        let available = self.snapshot.read_latest_documents(
             self.table,
             owner,
-            after,
             self.control,
-            &mut |row| {
-                self.snapshot.control.cancellation().check()?;
-                self.control.cancellation().check()?;
-                let id = row[1].as_i64().map_err(|_| {
-                    VersionError::InvalidEncoding("native document key must be integer")
-                })?;
-                let id = document_id_from_sqlite(id)?;
-                let row = self.decode_body_with_projection(id, row, Some(fields))?;
-                if fields.iter().any(|field| {
-                    row.fields
-                        .get(*field)
-                        .is_some_and(|value| controlled::marker(value).is_some())
-                }) {
-                    pending = Some((id, row));
-                    return Ok(false);
+            &mut |latest| {
+                let generation = latest.generation();
+                if let Some(cached) = self
+                    .columns
+                    .and_then(|cache| cache.get(self.table, owner, generation, fields))
+                {
+                    visited = self.visit_cached_columns(&cached, after, limit, visitor)?;
+                    return Ok(());
                 }
-                let more = self.visit_decoded_fields(id, &row.fields, fields, visitor)?;
-                visited += 1;
-                self.snapshot.control.cancellation().check()?;
-                self.control.cancellation().check()?;
-                Ok(more && visited < limit)
+                // A build starts at the table's first row and continues only with the page that resumes exactly where it stopped.
+                let mut builder = self.columns.and_then(|cache| match after {
+                    None => Some(ColumnBuilder::start(
+                        cache, self.table, owner, generation, fields,
+                    )),
+                    Some(_) => cache.resume(self.table, owner, generation, fields, after),
+                });
+                let mut exhausted = true;
+                let mut paged = false;
+                latest.visit(after, &mut |row| {
+                    self.snapshot.control.cancellation().check()?;
+                    self.control.cancellation().check()?;
+                    let stored_id = row[1].as_i64().map_err(|_| {
+                        VersionError::InvalidEncoding("native document key must be integer")
+                    })?;
+                    let id = document_id_from_sqlite(stored_id)?;
+                    let mut row = self.decode_body_with_projection(id, row, Some(fields))?;
+                    if fields.iter().any(|field| {
+                        row.fields
+                            .get(*field)
+                            .is_some_and(|value| controlled::marker(value).is_some())
+                    }) {
+                        pending = Some((id, row));
+                        exhausted = false;
+                        return Ok(false);
+                    }
+                    let more = self.visit_decoded_fields(id, &row.fields, fields, visitor)?;
+                    visited += 1;
+                    if let (Some(cache), Some(build)) = (self.columns, builder.as_mut()) {
+                        if !build.push(cache, stored_id, &mut row.fields) {
+                            builder = None;
+                        }
+                    }
+                    self.snapshot.control.cancellation().check()?;
+                    self.control.cancellation().check()?;
+                    if !more {
+                        exhausted = false;
+                        return Ok(false);
+                    }
+                    if visited >= limit {
+                        exhausted = false;
+                        paged = true;
+                        return Ok(false);
+                    }
+                    Ok(true)
+                })?;
+                if let (Some(cache), Some(build)) = (self.columns, builder) {
+                    if exhausted {
+                        cache.finish(build);
+                    } else if paged {
+                        cache.park(build);
+                    }
+                }
+                Ok(())
             },
         )?;
         Ok(available.map(|()| (visited, pending)))
+    }
+
+    /// Serve a projection from columns decoded at the snapshot's own data generation, without reading or decoding rows.
+    fn visit_cached_columns(
+        &self,
+        (ids, columns): &CachedColumns,
+        after: Option<i64>,
+        limit: usize,
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> SQLiteResult<usize> {
+        let start = after.map_or(0, |after| ids.partition_point(|id| *id <= after));
+        let mut row = BudgetedSmallVec::<[&Value; 8]>::new(self.control.memory());
+        row.reserve(columns.len())?;
+        let mut visited = 0;
+        for (position, id) in ids.iter().enumerate().skip(start) {
+            if visited >= limit {
+                break;
+            }
+            self.snapshot.control.cancellation().check()?;
+            self.control.cancellation().check()?;
+            row.clear();
+            for column in columns {
+                row.push(&column[position])?;
+            }
+            visited += 1;
+            if !visitor(document_id_from_sqlite(*id)?, &row) {
+                break;
+            }
+        }
+        self.snapshot.control.check()?;
+        self.control.check()?;
+        Ok(visited)
     }
 
     fn visit_decoded_fields(

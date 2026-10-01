@@ -20,23 +20,27 @@ pub(super) struct NativeDocumentRead<'a> {
     table: &'a str,
     owner: Option<NativeRecordOwner>,
     control: &'a StorageReadControl,
+    /// The database's decoded columns, for scans that may serve or record them.
+    columns: Option<&'a super::decoded_columns::DecodedColumns>,
 }
 
 impl<'a> NativeDocumentRead<'a> {
     fn new(snapshot: &'a NativeSnapshot, table: &'a str) -> SQLiteResult<Self> {
-        Self::with_control(snapshot, table, &snapshot.control)
+        Self::with_control(snapshot, table, &snapshot.control, None)
     }
 
     fn with_control(
         snapshot: &'a NativeSnapshot,
         table: &'a str,
         control: &'a StorageReadControl,
+        columns: Option<&'a super::decoded_columns::DecodedColumns>,
     ) -> SQLiteResult<Self> {
         Ok(Self {
             snapshot,
             table,
             owner: snapshot.table_owner_controlled(table, control)?,
             control,
+            columns,
         })
     }
 }
@@ -64,6 +68,7 @@ impl SQLiteDocumentStore {
                     &snapshot,
                     &self.table,
                     control.unwrap_or(&snapshot.control),
+                    Some(self.conn.decoded_columns()),
                 )?)
             })
             .transpose()
