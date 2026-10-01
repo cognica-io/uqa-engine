@@ -136,15 +136,7 @@ fn finish_index_keys(
                     }
                     return Err(SQLError::UnknownColumn(name.clone()));
                 };
-                if column
-                    .generated
-                    .as_ref()
-                    .is_some_and(|generated| generated.kind == GeneratedColumnKind::Virtual)
-                {
-                    return Err(SQLError::Unsupported(format!(
-                        "indexes on virtual generated column `{name}` are not supported"
-                    )));
-                }
+                reject_virtual_generated_column(column)?;
                 types.push(column.ty.clone());
             }
             IndexKey::Expression(expression) => {
@@ -195,29 +187,40 @@ fn finish_index_keys(
             }
         }
     }
-    let mut included = std::collections::BTreeSet::new();
+    // As in `PostgreSQL`, an included column may repeat and may also be a key column.
     for name in &statement.included_columns {
-        if !definitions.is_empty() && !definitions.iter().any(|column| column.name == *name) {
-            return Err(SQLError::UnknownColumn(name.clone()));
-        }
-        if !included.insert(name)
-            || statement
-                .columns
-                .iter()
-                .any(|key| key.column() == Some(name.as_str()))
-        {
-            return Err(SQLError::Routine {
-                sqlstate: "42701".into(),
-                message: format!("column \"{name}\" included more than once"),
-            });
+        match definitions.iter().find(|column| column.name == *name) {
+            Some(column) => reject_virtual_generated_column(column)?,
+            None if definitions.is_empty() => {}
+            None => return Err(SQLError::UnknownColumn(name.clone())),
         }
     }
-    if !included.is_empty() && statement.access_method == "gin" {
+    reject_unsupported_included_columns(statement)?;
+    Ok(types)
+}
+
+fn reject_virtual_generated_column(column: &crate::ast::ColumnDef) -> Result<(), SQLError> {
+    if column
+        .generated
+        .as_ref()
+        .is_some_and(|generated| generated.kind == GeneratedColumnKind::Virtual)
+    {
         return Err(SQLError::Unsupported(
-            "access method \"gin\" does not support included columns".into(),
+            "indexes on virtual generated columns are not supported".into(),
         ));
     }
-    Ok(types)
+    Ok(())
+}
+
+/// Only a btree index carries columns beside its key.
+fn reject_unsupported_included_columns(statement: &CreateIndex) -> Result<(), SQLError> {
+    let method = statement.access_method.to_ascii_lowercase();
+    if statement.included_columns.is_empty() || matches!(method.as_str(), "" | "btree") {
+        return Ok(());
+    }
+    Err(SQLError::Unsupported(format!(
+        "access method \"{method}\" does not support included columns"
+    )))
 }
 
 /// Bind keys and predicates and retain the public attribute names assigned before expression simplification.
@@ -252,11 +255,7 @@ pub fn prepare_index_definition(
     if c.unique {
         super::unique::validate_unique_index_method(c)?;
     }
-    if !c.included_columns.is_empty() && c.access_method.eq_ignore_ascii_case("gin") {
-        return Err(SQLError::Unsupported(
-            "access method \"gin\" does not support included columns".into(),
-        ));
-    }
+    reject_unsupported_included_columns(c)?;
     if let Some(predicate) = c.predicate.as_deref_mut() {
         super::validate_index_expression_immutability(catalog, &c.table, predicate, true)?;
     }

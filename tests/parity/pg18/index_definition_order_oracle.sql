@@ -5,6 +5,7 @@ BEGIN;
 CREATE TEMP TABLE index_validation(id integer, embedding integer[]);
 INSERT INTO index_validation VALUES (1, ARRAY[1,0]), (1, ARRAY[0,1]);
 CREATE INDEX occupied_index ON index_validation(id);
+CREATE TEMP TABLE index_generated(id integer, doubled integer GENERATED ALWAYS AS (id * 2) VIRTUAL);
 CREATE FUNCTION pg_temp.index_definition_probe(command text) RETURNS jsonb LANGUAGE plpgsql AS $oracle$
 DECLARE
     succeeded boolean := false;
@@ -81,6 +82,16 @@ FROM (VALUES
 ('quoted-option-case', 'CREATE INDEX new_index ON index_validation(id) WITH("FILLFACTOR"=80)'),
 ('gin-unknown-option', 'CREATE INDEX new_index ON index_validation USING gin(embedding) WITH(unknown_option=1)'),
 ('gin-pending-low', 'CREATE INDEX new_index ON index_validation USING gin(embedding) WITH(gin_pending_list_limit=63)'),
-('gin-bool-invalid', 'CREATE INDEX new_index ON index_validation USING gin(embedding) WITH(fastupdate=''o'')')
+('gin-bool-invalid', 'CREATE INDEX new_index ON index_validation USING gin(embedding) WITH(fastupdate=''o'')'),
+('include-key-column', 'CREATE INDEX included_index ON index_validation(id) INCLUDE (id)'),
+('include-repeated', 'CREATE INDEX included_index ON index_validation(id) INCLUDE (embedding, embedding)'),
+('include-missing', 'CREATE INDEX included_index ON index_validation(id) INCLUDE (absent)'),
+('include-expression', 'CREATE INDEX included_index ON index_validation(id) INCLUDE ((id + 1))'),
+('include-gin', 'CREATE INDEX included_index ON index_validation USING gin(embedding) INCLUDE (id)'),
+('include-missing-before-options', 'CREATE INDEX included_index ON index_validation(id) INCLUDE (absent) WITH(unknown_option=1)'),
+('include-missing-existing-name', 'CREATE INDEX occupied_index ON index_validation(id) INCLUDE (absent)'),
+('include-skip-missing', 'CREATE INDEX IF NOT EXISTS occupied_index ON index_validation(id) INCLUDE (absent)'),
+('include-virtual-generated', 'CREATE INDEX included_index ON index_generated(id) INCLUDE (doubled)'),
+('key-virtual-generated', 'CREATE INDEX included_index ON index_generated(doubled)')
 ) AS probes(label, command);
 ROLLBACK;

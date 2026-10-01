@@ -26,7 +26,7 @@ fn diagnostic(result: Result<uqa_sql::SQLResult, SQLError>) -> serde_json::Value
 #[test]
 fn index_creation_validates_the_definition_before_an_existing_name() {
     let engine = Engine::new();
-    sql(&engine, "CREATE TABLE index_validation(id int, embedding vector(2)); INSERT INTO index_validation VALUES(1,ARRAY[1,0]),(1,ARRAY[0,1]); CREATE INDEX occupied_index ON index_validation(id)");
+    sql(&engine, "CREATE TABLE index_validation(id int, embedding vector(2)); INSERT INTO index_validation VALUES(1,ARRAY[1,0]),(1,ARRAY[0,1]); CREATE INDEX occupied_index ON index_validation(id); CREATE TABLE index_generated(id int, doubled int GENERATED ALWAYS AS (id * 2) VIRTUAL)");
     let original = definition(&engine, "occupied_index");
     let reference: serde_json::Value = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -44,6 +44,7 @@ fn index_creation_validates_the_definition_before_an_existing_name() {
         }
         assert_eq!(definition(&engine, "occupied_index"), original);
         assert!(engine.catalog_index("new_index").unwrap().is_none());
+        assert!(engine.catalog_index("included_index").unwrap().is_none());
     }
     assert!(
         failures.is_empty(),
