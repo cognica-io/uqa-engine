@@ -82,7 +82,7 @@ fn build_analyze_stats(
 pub(crate) enum StatisticsRefresh {
     /// An explicit statistics request reports the current rows.
     Current,
-    /// Planning keeps its estimates until enough rows changed, as autovacuum decides for PostgreSQL, so a write is not followed by a full ANALYZE of its table.
+    /// Planning keeps its estimates until enough rows changed, as autovacuum decides for `PostgreSQL`, so a write is not followed by a full ANALYZE of its table.
     Maintained,
 }
 
