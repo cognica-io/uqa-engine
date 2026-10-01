@@ -11,6 +11,8 @@ use super::{Arc, Connection, ManagedConnection, Result, SQLiteError};
 pub(super) struct PhysicalConnection {
     pub(super) connection: Connection,
     identity: Arc<()>,
+    /// The committed state at which a record store last found the database behind this connection to be its own.
+    pub(super) validated_read: std::cell::Cell<Option<ValidatedRead>>,
 }
 
 impl PhysicalConnection {
@@ -18,8 +20,18 @@ impl PhysicalConnection {
         Self {
             connection,
             identity: Arc::new(()),
+            validated_read: std::cell::Cell::new(None),
         }
     }
+}
+
+/// One committed state of a database as one connection sees it, with the store that validated it. Every commit of another connection changes the connection's data version, and every row the connection itself changes counts in its changes, so an equal state is the same committed database.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ValidatedRead {
+    /// The history identity the store expects, and its native namespace when it has one.
+    pub(crate) store: ([u8; 16], Option<[u8; 16]>),
+    pub(crate) data_version: i64,
+    pub(crate) changes: u64,
 }
 
 /// Tokens retain their connection and rollback-branch identities, so allocator reuse cannot make an unrelated view compare equal.

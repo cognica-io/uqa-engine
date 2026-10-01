@@ -39,14 +39,7 @@ impl Snapshot {
         &self,
         operation: impl FnOnce(&Connection) -> PhysicalResult<T>,
     ) -> VersionResult<T> {
-        self.store.with(|connection| {
-            let transaction = connection.unchecked_transaction()?;
-            super::native::check_mapping(&transaction, self.store.native)?;
-            codec::header(&transaction, self.store.identity)?;
-            let result = operation(&transaction)?;
-            transaction.commit()?;
-            Ok(result)
-        })
+        self.store.read(operation)
     }
 
     /// Run `operation` in one physical read when this snapshot's boundary is the database's latest commit, so the native projections, which each commit materializes in its own transaction, hold exactly this snapshot's committed records. Returns `None` when a newer commit exists.

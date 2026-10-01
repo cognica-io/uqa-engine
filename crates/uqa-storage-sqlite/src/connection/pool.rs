@@ -171,6 +171,12 @@ impl PooledConnection {
             .ok_or(SQLiteError::MissingCheckedOutConnection)
     }
 
+    pub(super) fn physical(&self) -> Result<&PhysicalConnection> {
+        self.connection
+            .as_ref()
+            .ok_or(SQLiteError::MissingCheckedOutConnection)
+    }
+
     pub(super) fn physical_mut(&mut self) -> Result<&mut PhysicalConnection> {
         self.connection
             .as_mut()

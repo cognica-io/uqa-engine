@@ -89,6 +89,12 @@ pub struct SQLiteRecordStore {
     snapshots: Arc<uqa_storage::mvcc::SnapshotRegistry>,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many reads of this thread ran the full validation.
+    static READ_VALIDATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl SQLiteRecordStore {
     pub(crate) fn has_native_mapping(connection: &Connection) -> VersionResult<bool> {
         native::present(connection).map_err(Error::into_version)
@@ -186,6 +192,41 @@ impl SQLiteRecordStore {
     ) -> VersionResult<T> {
         self.connection
             .with(|connection| Ok(operation(connection)))
+            .map_err(|error| VersionError::Storage(error.into()))?
+            .map_err(Error::into_version)
+    }
+
+    /// Run a read in one physical transaction of a database that still is this store's. Its native format, history identity and restoration state are checked, unless the connection found them valid at the committed state it now reads: every read begins this way, and the checks cost more than a point read.
+    fn read<T>(
+        &self,
+        operation: impl FnOnce(&Connection) -> PhysicalResult<T>,
+    ) -> VersionResult<T> {
+        self.connection
+            .with_record_read(|connection, validated| {
+                Ok((|| {
+                    let transaction = connection.unchecked_transaction()?;
+                    let state = crate::connection::ValidatedRead {
+                        store: (
+                            self.identity.as_bytes(),
+                            self.native.map(|namespace| namespace.0.as_bytes()),
+                        ),
+                        data_version: transaction
+                            .prepare_cached("PRAGMA data_version")?
+                            .query_row([], |row| row.get(0))?,
+                        changes: connection.total_changes(),
+                    };
+                    if validated.get() != Some(state) {
+                        native::check_mapping(&transaction, self.native)?;
+                        codec::header(&transaction, self.identity)?;
+                        validated.set(Some(state));
+                        #[cfg(test)]
+                        READ_VALIDATIONS.with(|count| count.set(count.get() + 1));
+                    }
+                    let result = operation(&transaction)?;
+                    transaction.commit()?;
+                    Ok(result)
+                })())
+            })
             .map_err(|error| VersionError::Storage(error.into()))?
             .map_err(Error::into_version)
     }

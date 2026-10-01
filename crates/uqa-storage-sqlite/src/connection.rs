@@ -36,7 +36,7 @@ mod serializable;
 mod snapshot;
 mod source;
 use snapshot::PhysicalConnection;
-pub(crate) use snapshot::SnapshotIdentity;
+pub(crate) use snapshot::{SnapshotIdentity, ValidatedRead};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SQLiteError {
