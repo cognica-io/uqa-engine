@@ -6,6 +6,7 @@
 
 //! Physical INSERT row preparation, spill transport and trigger completion.
 pub mod codec;
+mod known_new;
 pub mod rows;
 pub mod triggers;
 
