@@ -251,3 +251,122 @@ fn native_projection_avoids_unselected_inline_payload_allocation_and_keeps_field
     drop(presence);
     assert_eq!(control.memory().used(), 0);
 }
+
+type Scanned = Vec<(u64, Vec<Value>)>;
+
+/// Scan `fields` and record which physical tables the scan's statements read.
+fn scan_reading(
+    store: &SQLiteDocumentStore,
+    snapshot: &dyn DocumentStore,
+    after: Option<u64>,
+    limit: usize,
+    fields: &[&str],
+) -> (Scanned, std::collections::BTreeSet<String>) {
+    use rusqlite::hooks::{AuthAction, Authorization};
+    use std::sync::{Arc, Mutex};
+    let tables = Arc::new(Mutex::new(std::collections::BTreeSet::new()));
+    let seen = Arc::clone(&tables);
+    store
+        .conn
+        .with_physical(|sqlite| {
+            sqlite.set_prepared_statement_cache_capacity(0);
+            sqlite.authorizer(Some(move |context: rusqlite::hooks::AuthContext<'_>| {
+                if let AuthAction::Read { table_name, .. } = context.action {
+                    seen.lock().unwrap().insert(table_name.to_owned());
+                }
+                Authorization::Allow
+            }))?;
+            Ok(())
+        })
+        .unwrap();
+    let mut scanned = Vec::new();
+    snapshot
+        .for_each_next_fields_borrowed(after, limit, fields, &mut |id, values| {
+            scanned.push((id, values.iter().map(|value| (*value).clone()).collect()));
+            true
+        })
+        .unwrap();
+    store
+        .conn
+        .with_physical(|sqlite| {
+            sqlite.authorizer(None::<fn(rusqlite::hooks::AuthContext<'_>) -> Authorization>)?;
+            sqlite.set_prepared_statement_cache_capacity(16);
+            Ok(())
+        })
+        .unwrap();
+    let tables = tables.lock().unwrap().clone();
+    (scanned, tables)
+}
+
+#[test]
+fn latest_committed_rows_read_the_physical_projection_and_match_the_records() {
+    let mut store = fixture();
+    let mut other = SQLiteDocumentStore::new(store.conn.clone(), "other");
+    for id in 1..=300_u64 {
+        let mut fields = BTreeMap::from([("value".into(), Value::Int(id as i64))]);
+        if id == 150 {
+            // A body above the inline limit is admitted and read by itself.
+            fields.extend((0..2000).map(|field| (format!("f{field}"), Value::Int(field))));
+        }
+        if id % 50 == 0 {
+            // Values stored outside the body end a physical read to hydrate.
+            fields.insert("body".into(), Value::Str(format!("body{id}").repeat(2048)));
+        }
+        store.put(id, fields).unwrap();
+    }
+    let stale = store.snapshot().unwrap();
+    other
+        .put(1, BTreeMap::from([("x".into(), Value::Int(1))]))
+        .unwrap();
+    let latest = store.snapshot().unwrap();
+    for (after, limit) in [
+        (None, usize::MAX),
+        (Some(100), 120),
+        (Some(149), 3),
+        (None, 1),
+    ] {
+        for fields in [&["value"][..], &["body", "value", "f7"][..]] {
+            let (expected, record_tables) =
+                scan_reading(&store, stale.as_ref(), after, limit, fields);
+            let (actual, latest_tables) =
+                scan_reading(&store, latest.as_ref(), after, limit, fields);
+            assert_eq!(
+                actual, expected,
+                "after {after:?}, limit {limit}, {fields:?}"
+            );
+            assert!(!record_tables.contains("_documents"), "{record_tables:?}");
+            assert!(latest_tables.contains("_documents"), "{latest_tables:?}");
+        }
+    }
+}
+
+#[test]
+fn private_records_keep_the_record_scan() {
+    let mut store = fixture();
+    for id in 1..=3 {
+        store
+            .put(
+                id,
+                BTreeMap::from([("value".into(), Value::Int(id as i64))]),
+            )
+            .unwrap();
+    }
+    store.conn.begin_transaction().unwrap();
+    store
+        .put(2, BTreeMap::from([("value".into(), Value::Int(20))]))
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    // The committed projection still holds 2; only the private records hold 20.
+    let mut scanned = Vec::new();
+    snapshot
+        .for_each_next_fields_borrowed(None, usize::MAX, &["value"], &mut |id, values| {
+            scanned.push((id, values[0].clone()));
+            true
+        })
+        .unwrap();
+    assert_eq!(
+        scanned,
+        [(1, Value::Int(1)), (2, Value::Int(20)), (3, Value::Int(3))]
+    );
+    store.conn.rollback_transaction().unwrap();
+}

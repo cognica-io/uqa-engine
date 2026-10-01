@@ -44,11 +44,27 @@ impl Snapshot {
             Ok(result)
         })
     }
+
+    /// Run `operation` in one physical read when this snapshot's boundary is the database's latest commit, so the native projections, which each commit materializes in its own transaction, hold exactly this snapshot's committed records. Returns `None` when a newer commit exists.
+    pub(super) fn read_latest<T>(
+        &self,
+        operation: impl FnOnce(&Connection) -> PhysicalResult<Option<T>>,
+    ) -> VersionResult<Option<T>> {
+        self.read(|connection| {
+            if codec::header(connection, self.store.identity)?.sequence != self.sequence {
+                return Ok(None);
+            }
+            operation(connection)
+        })
+    }
 }
 
 impl CommittedRecordSnapshot for Snapshot {
     fn reclamation_epoch(&self) -> Option<u64> {
         Some(self.reclamation_epoch)
+    }
+    fn provider_snapshot(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
     }
     fn sequence(&self) -> CommitSequence {
         self.sequence

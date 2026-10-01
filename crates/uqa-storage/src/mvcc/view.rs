@@ -88,6 +88,11 @@ pub trait CommittedRecordSnapshot: Send + Sync {
         None
     }
 
+    /// The provider's own snapshot type, which its native read paths may serve from physical projections at the same boundary. Wrappers must forward the original provider snapshot.
+    fn provider_snapshot(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
+
     /// Read a revision and tombstone marker without materializing its value when the provider supports key-only access.
     fn metadata(
         &self,
@@ -268,6 +273,9 @@ impl<T: CommittedRecordSnapshot> CommittedRecordSnapshot for RetainedSnapshot<T>
     }
     fn reclamation_epoch(&self) -> Option<u64> {
         self.snapshot.reclamation_epoch()
+    }
+    fn provider_snapshot(&self) -> Option<&dyn std::any::Any> {
+        self.snapshot.provider_snapshot()
     }
     fn visit_last_key(
         &self,
