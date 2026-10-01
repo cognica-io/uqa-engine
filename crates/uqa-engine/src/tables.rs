@@ -239,6 +239,7 @@ impl Engine {
             column_stats: crate::state::CatalogCell::new(BTreeMap::new()),
             column_stats_loaded: AtomicBool::new(true),
             column_stats_dirty: AtomicBool::new(true),
+            statistics_maintenance: parking_lot::Mutex::default(),
             table_checks: crate::state::CatalogCell::new(Vec::new()),
             foreign_keys: crate::state::CatalogCell::new(Vec::new()),
             key_constraints: crate::state::CatalogCell::new(Vec::new()),

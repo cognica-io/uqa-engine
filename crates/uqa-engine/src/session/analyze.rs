@@ -235,6 +235,11 @@ impl Engine {
         *t.column_stats.write() = stats_out;
         t.column_stats_loaded.store(true, Ordering::Release);
         t.column_stats_dirty.store(false, Ordering::Release);
+        t.statistics_maintenance.lock().analyzed(
+            t.object_id(),
+            row_count,
+            crate::statistics::value_size::FORMAT_VERSION,
+        )?;
         self.clear_pending_statistics_changes(canonical_table_name, t.object_id());
         Ok(())
     }
@@ -424,7 +429,20 @@ impl Engine {
             if self.storage.catalog.is_none() {
                 // Memory-only lazy collection has no durable publication and
                 // must not invalidate the statement currently being planned.
-                self.analyze_table(&canonical_name, &t, false, None, true)?;
+                // Estimates stay in use until enough rows changed, as autovacuum
+                // decides for PostgreSQL, so a write is not followed by a full
+                // ANALYZE of its table.
+                let due = {
+                    let maintenance = t.statistics_maintenance.lock();
+                    maintenance.due(
+                        maintenance.missing(t.column_stats.read().is_empty()),
+                        crate::statistics::now_ms(),
+                        crate::statistics::value_size::FORMAT_VERSION,
+                    )
+                };
+                if due {
+                    self.analyze_table(&canonical_name, &t, false, None, true)?;
+                }
                 return Ok(t.column_stats.read().clone());
             }
             self.run_analyze(Some(&canonical_name))?;

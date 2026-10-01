@@ -66,6 +66,7 @@ impl Engine {
                     column_stats_dirty: table
                         .column_stats_dirty
                         .load(std::sync::atomic::Ordering::Acquire),
+                    statistics_maintenance: table.statistics_maintenance.lock().clone(),
                     table_checks: table.table_checks.read().clone(),
                     foreign_keys: table.foreign_keys.read().clone(),
                     key_constraints: table.key_constraints.read().clone(),
@@ -150,6 +151,10 @@ impl Engine {
                 table_snapshot.column_stats_dirty,
                 std::sync::atomic::Ordering::Release,
             );
+            table
+                .statistics_maintenance
+                .lock()
+                .clone_from(&table_snapshot.statistics_maintenance);
             table
                 .table_checks
                 .write()

@@ -223,11 +223,10 @@ impl Engine {
         for (name, table) in tables {
             let name = name.qualified_name();
             let temporary = table.persistence == uqa_sql::ast::RelationPersistence::Temporary;
+            // Only this session writes a memory-only or temporary table, and every write maintains or explicitly clears its value indexes, so they stay valid across its own data generations.
             if self.storage.backend.is_some() && !temporary {
                 self.rebind_persistent_table_stores(&name, &table)?;
                 self.refresh_table_next_id(&name, &table)?;
-            } else {
-                Self::value_indexes_clear_column_accelerators(&table);
             }
             table
                 .doc_count_dirty

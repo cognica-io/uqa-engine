@@ -641,13 +641,6 @@ impl crate::Engine {
     pub(crate) fn value_indexes_clear(t: &TableState) {
         t.value_indexes.write().clear();
     }
-
-    /// Named memory indexes own evaluated SQL keys; data-epoch invalidation may discard only reconstructible column accelerators.
-    pub(crate) fn value_indexes_clear_column_accelerators(t: &TableState) {
-        t.value_indexes
-            .write()
-            .retain(|key, _| matches!(key, ValueIndexKey::Index(_)));
-    }
 }
 
 #[cfg(test)]
