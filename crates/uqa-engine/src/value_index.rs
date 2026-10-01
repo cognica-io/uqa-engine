@@ -237,10 +237,8 @@ impl crate::Engine {
         }
         let ids = table.document_store.read().doc_ids()?;
         let values = self.project_value_index_rows(table, &table_name, field, &ids)?;
-        table.value_indexes.write().insert(
-            field.clone(),
-            ColumnValueIndex::build(field.name(), values.into_iter()),
-        );
+        let built = self.build_value_index(&table_name, table, field, values)?;
+        table.value_indexes.write().insert(field.clone(), built);
         Ok(true)
     }
 
@@ -345,7 +343,7 @@ impl crate::Engine {
             }
         }
         if !memory_index_exists || support_changed {
-            let built = ColumnValueIndex::build(field.name(), values.into_iter());
+            let built = self.build_value_index(&table_name, &t, field, values)?;
             let mut indexes = t.value_indexes.write();
             if support_changed {
                 indexes.insert(field.clone(), built);
@@ -388,9 +386,22 @@ impl crate::Engine {
                 persisted_fields.remove(field);
             }
         }
-        t.value_indexes
-            .write()
-            .retain(|field, _| desired.contains(field));
+        let carried = self.value_index_carried_fields(&table_name, &t)?;
+        {
+            let mut indexes = t.value_indexes.write();
+            indexes.retain(|field, _| desired.contains(field));
+            // An index definition may have turned a carried column into a search key, or the reverse.
+            for (field, index) in indexes.iter_mut() {
+                let carry = carried.contains(field);
+                if index.is_carried() != carry {
+                    let current = std::mem::replace(
+                        index,
+                        ColumnValueIndex::build_carried(std::iter::empty()),
+                    );
+                    *index = current.with_use(field.name(), carry);
+                }
+            }
+        }
 
         if let Some(backend) = persistent_backend {
             let missing = desired
@@ -522,13 +533,13 @@ impl crate::Engine {
             let fields = table
                 .value_indexes
                 .read()
-                .keys()
-                .cloned()
+                .iter()
+                .map(|(field, index)| (field.clone(), index.is_carried()))
                 .collect::<Vec<_>>();
             table.value_indexes.write().clear();
-            for field in fields {
+            for (field, carried) in fields {
                 if let Some(values) = backend.load_btree_index(&name, &field)? {
-                    let index = ColumnValueIndex::build(field.name(), values.into_iter());
+                    let index = Self::build_value_index_as(&field, carried, values);
                     table.value_indexes.write().insert(field, index);
                 }
             }

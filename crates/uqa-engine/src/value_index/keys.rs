@@ -95,6 +95,46 @@ impl Engine {
         )
     }
 
+    /// Build the accelerator of `field` for the use the table's indexes give it: a search key, or the stored values of a column they only carry.
+    pub(super) fn build_value_index(
+        &self,
+        name: &str,
+        state: &TableState,
+        field: &ValueIndexKey,
+        values: Vec<(DocId, Value)>,
+    ) -> StorageBackendResult<ColumnValueIndex> {
+        let carried = self.value_index_carried_fields(name, state)?;
+        Ok(Self::build_value_index_as(
+            field,
+            carried.contains(field),
+            values,
+        ))
+    }
+
+    pub(super) fn build_value_index_as(
+        field: &ValueIndexKey,
+        carried: bool,
+        values: Vec<(DocId, Value)>,
+    ) -> ColumnValueIndex {
+        if carried {
+            ColumnValueIndex::build_carried(values.into_iter())
+        } else {
+            ColumnValueIndex::build(field.name(), values.into_iter())
+        }
+    }
+
+    pub(super) fn value_index_carried_fields(
+        &self,
+        name: &str,
+        state: &TableState,
+    ) -> StorageBackendResult<std::collections::BTreeSet<ValueIndexKey>> {
+        Ok(self.physical_index_definitions()?.carried_fields(
+            name,
+            &state.columns.snapshot(),
+            &state.key_constraints.snapshot(),
+        ))
+    }
+
     pub(crate) fn value_index_document_values(
         &self,
         table: &str,
@@ -159,11 +199,12 @@ impl Engine {
             .map(|(field, values)| (field, values.as_slice()))
             .collect::<Vec<_>>();
         backend.replace_btree_indexes(table_name, &replacements)?;
+        let carried = self.value_index_carried_fields(table_name, table)?;
         let mut indexes = table.value_indexes.write();
         for (field, values) in fields.iter().zip(values) {
-            indexes
-                .entry(field.clone())
-                .or_insert_with(|| ColumnValueIndex::build(field.name(), values.into_iter()));
+            indexes.entry(field.clone()).or_insert_with(|| {
+                Self::build_value_index_as(field, carried.contains(field), values)
+            });
         }
         Ok(())
     }

@@ -8,6 +8,10 @@ Databases already opened with 0.4.5 or 0.4.6 use the same persistent formats in 
 
 Application-owned raw SQLite tables remain outside the native UQA record model. Initial open still rejects unmapped physical tables; application-specific migration must preserve their data before native conversion. This release does not infer ownership or silently discard those tables.
 
+## B-tree postings for every index column
+
+A B-tree index now keeps durable postings for each of its plain key columns and for its `INCLUDE` columns; earlier versions kept them for the first key column only. The first open of an existing database builds the missing postings in its open-time index repair transaction, reading each affected table once. No record format changes: an earlier binary that opens the database afterwards removes the additional postings in its own repair, and a later open builds them again.
+
 ## SQLite version metadata pages
 
 SQLite record format 55 stores predecessor lengths in a guarded metadata table separate from version payload pages. Opening a supported record format from 1 through 54 converts it atomically while preserving its database identity, committed histories, pending transactions, receipts and identifier watermarks. Pending backup restoration performs the same conversion inside its existing restoration transaction. Native catalog mapping 13 and catalog format 49 do not change. Older binaries reject the new record format; retain a backup before opening a file that must remain usable by an older binary.
