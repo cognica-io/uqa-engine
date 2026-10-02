@@ -8,7 +8,7 @@
 
 use std::num::NonZeroU64;
 
-use crate::mvcc::{IdentifierAllocator, IdentifierRequest};
+use crate::mvcc::{IdentifierAllocator, IdentifierRequest, ObservedIdentifier};
 use crate::{CatalogFacade, KeyValueBatch, StorageBackendError, StorageBackendResult};
 
 pub mod conformance;
@@ -67,12 +67,12 @@ impl<'a> DocumentIdAllocator<'a> {
         Ok(())
     }
 
-    /// Observe a supplied document identity durably now, ahead of the rows that will observe it when they are written. A statement that supplies ascending identities observes the greatest one this way, which covers the observation of each row.
-    pub fn observe_durably(&self, id: u64) -> StorageBackendResult<()> {
-        if let Some(allocator) = self.durable {
-            allocator.observe_identifier(&self.namespace, id)?;
+    /// Observe a supplied document identity durably now, ahead of the rows that will observe it when they are written. A statement that supplies ascending identities observes the greatest one this way, which covers the observation of each row. The answer tells which identities no document of this table ever had; a table without a durable allocator cannot tell.
+    pub fn observe_durably(&self, id: u64) -> StorageBackendResult<ObservedIdentifier> {
+        match self.durable {
+            Some(allocator) => allocator.observe_identifier(&self.namespace, id),
+            None => Ok(ObservedIdentifier::Covered),
         }
-        Ok(())
     }
 
     /// Seed existing data and legacy reservations before exposing a migrated table to new sessions. The one-past-last representation preserves the exhausted full-width domain.

@@ -116,7 +116,11 @@ impl ManagedConnection {
             .map_err(Into::into)
     }
 
-    pub(crate) fn observe_native_identifier(&self, namespace: &[u8], value: u64) -> Result<()> {
+    pub(crate) fn observe_native_identifier(
+        &self,
+        namespace: &[u8],
+        value: u64,
+    ) -> Result<uqa_storage::mvcc::ObservedIdentifier> {
         self.surface_cleanup_failure()?;
         let _gate = self.session.gate.read();
         let logical = self

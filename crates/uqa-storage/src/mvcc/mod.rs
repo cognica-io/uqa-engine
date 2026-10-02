@@ -50,7 +50,7 @@ pub use history::{RecordHistory, RecordVersion, ScannedRecord, SharedRecordValue
 pub use hnsw::{HNSWRecordHeader, HNSWRecordKey, HNSWRecordLayout, HNSWRecordValue};
 pub use identifiers::{
     reserve_identifier_workspace, verify_identifier_allocations, verify_identifier_batches,
-    IdentifierAllocation, IdentifierAllocator, IdentifierRequest,
+    IdentifierAllocation, IdentifierAllocator, IdentifierRequest, ObservedIdentifier,
 };
 pub use ivf::{IVFRecordHeader, IVFRecordKey, IVFRecordLayout, IVFRecordValue};
 pub use memory::{MemoryRecordSnapshot, MemoryVersionStore};

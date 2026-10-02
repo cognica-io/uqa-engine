@@ -125,13 +125,19 @@ impl VersionedKeyValueStore {
     }
 
     /// Raise the watermark of `namespace` to at least `value` without reporting it. An allocation reports the current watermark and so is always physical; this answers from a watermark the session has already read when that covers `value`. The admission of an allocation applies either way.
-    pub fn observe_identifier(&self, namespace: &[u8], value: u64) -> StorageBackendResult<()> {
+    pub fn observe_identifier(
+        &self,
+        namespace: &[u8],
+        value: u64,
+    ) -> StorageBackendResult<super::ObservedIdentifier> {
         let _active = self.admit_identifier_allocation()?;
         if self.observed.lock().covers(namespace, value) {
-            return Ok(());
+            return Ok(super::ObservedIdentifier::Covered);
         }
         self.allocate_admitted_identifiers(namespace, super::IdentifierRequest::Observe(value))
-            .map(|_| ())
+            .map(|allocation| super::ObservedIdentifier::Observed {
+                previous: allocation.previous(),
+            })
     }
 
     /// Admit an identifier allocation: the session can write and its transaction, when it has one, has not been sealed. The guard keeps the transaction from changing while the allocation runs.
@@ -443,7 +449,11 @@ impl super::IdentifierAllocator for VersionedKeyValueStore {
         Self::allocate_identifiers(self, namespace, request)
     }
 
-    fn observe_identifier(&self, namespace: &[u8], value: u64) -> StorageBackendResult<()> {
+    fn observe_identifier(
+        &self,
+        namespace: &[u8],
+        value: u64,
+    ) -> StorageBackendResult<super::ObservedIdentifier> {
         Self::observe_identifier(self, namespace, value)
     }
 }

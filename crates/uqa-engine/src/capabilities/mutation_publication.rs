@@ -56,7 +56,11 @@ impl MutationStorage for Engine {
     fn delete_document(&self, table: &str, doc_id: DocId) -> Result<(), SQLError> {
         Engine::delete_document(self, table, doc_id)
     }
-    fn observe_document_identity(&self, table: &str, doc_id: DocId) -> Result<(), SQLError> {
+    fn observe_document_identity(
+        &self,
+        table: &str,
+        doc_id: DocId,
+    ) -> Result<uqa_storage::mvcc::ObservedIdentifier, SQLError> {
         let state = self
             .try_table(table)
             .map_err(|error| SQLError::Internal(error.to_string()))?

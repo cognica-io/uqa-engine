@@ -60,9 +60,13 @@ impl MutationStorage for Observed {
     ) -> Result<(), SQLError> {
         unreachable!()
     }
-    fn observe_document_identity(&self, table: &str, doc_id: DocId) -> Result<(), SQLError> {
+    fn observe_document_identity(
+        &self,
+        table: &str,
+        doc_id: DocId,
+    ) -> Result<uqa_storage::mvcc::ObservedIdentifier, SQLError> {
         self.0.borrow_mut().push((table.to_owned(), doc_id));
-        Ok(())
+        Ok(uqa_storage::mvcc::ObservedIdentifier::Covered)
     }
 }
 

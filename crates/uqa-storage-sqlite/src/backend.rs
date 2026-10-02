@@ -122,7 +122,11 @@ impl uqa_storage::mvcc::IdentifierAllocator for SQLiteStorageBackend {
             .map_err(Into::into)
     }
 
-    fn observe_identifier(&self, namespace: &[u8], value: u64) -> StorageBackendResult<()> {
+    fn observe_identifier(
+        &self,
+        namespace: &[u8],
+        value: u64,
+    ) -> StorageBackendResult<uqa_storage::mvcc::ObservedIdentifier> {
         self.conn
             .observe_native_identifier(namespace, value)
             .map_err(Into::into)

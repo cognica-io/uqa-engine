@@ -238,8 +238,10 @@ fn an_observation_ahead_of_its_rows_covers_them_under_the_admission_of_an_alloca
             .map(|(_, value)| *value)
             .collect::<Vec<_>>()
     };
-    // A statement raises the watermark to the greatest identity it supplies, and the rows it then writes observe identities that covers.
-    store.observe_identifier(b"rows", 50).unwrap();
+    // A statement raises the watermark to the greatest identity it supplies, and the rows it then writes observe identities that covers. A namespace without a watermark had no identity in use.
+    let first = store.observe_identifier(b"rows", 50).unwrap();
+    assert_eq!(first, ObservedIdentifier::Observed { previous: None });
+    assert!(first.unused_before(1) && first.unused_before(50));
     let mut batch = store.batch();
     for value in [1, 25, 50] {
         batch.observe_identifier(b"rows", value).unwrap();
@@ -248,8 +250,10 @@ fn an_observation_ahead_of_its_rows_covers_them_under_the_admission_of_an_alloca
     batch.commit().unwrap();
     assert_eq!(requests(), [Some(50)]);
 
-    // A covered identity is answered from what the session has read; an allocation reports the current watermark and stays physical.
-    store.observe_identifier(b"rows", 20).unwrap();
+    // A covered identity is answered from what the session has read, which does not tell where the watermark stood before; an allocation reports the current watermark and stays physical.
+    let covered = store.observe_identifier(b"rows", 20).unwrap();
+    assert_eq!(covered, ObservedIdentifier::Covered);
+    assert!(!covered.unused_before(20) && !covered.unused_before(u64::MAX));
     assert_eq!(requests(), [Some(50)]);
     assert_eq!(
         store
@@ -258,7 +262,10 @@ fn an_observation_ahead_of_its_rows_covers_them_under_the_admission_of_an_alloca
             .watermark(),
         50
     );
-    store.observe_identifier(b"rows", 51).unwrap();
+    // An observation that raises the watermark tells where it stood: only identities above that were unused.
+    let raised = store.observe_identifier(b"rows", 51).unwrap();
+    assert_eq!(raised, ObservedIdentifier::Observed { previous: Some(50) });
+    assert!(raised.unused_before(51) && !raised.unused_before(50));
     assert_eq!(requests(), [Some(50), Some(20), Some(51)]);
     assert_eq!(persistence.state.lock().identifiers[b"rows".as_slice()], 51);
 
