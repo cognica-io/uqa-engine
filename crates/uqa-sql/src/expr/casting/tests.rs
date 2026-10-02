@@ -256,9 +256,49 @@ fn bytea_cast_preserves_postgresql_source_type_and_input_rules() {
         let error = cast_value_from(&value, "bytea", Some(source)).unwrap_err();
         assert_eq!(error.sqlstate(), Some("42846"));
     }
-    for input in ["\\x1", "\\xzz", "\\9"] {
+    // `byteain` skips whitespace between the digit pairs of the hex format, and an empty hex value is empty.
+    for (input, expected) in [
+        ("\\x01 02\t0a\r\n", vec![0x01, 0x02, 0x0a]),
+        ("\\xE282ac", vec![0xe2, 0x82, 0xac]),
+        ("\\x", Vec::new()),
+        ("\u{3ba}", "\u{3ba}".as_bytes().to_vec()),
+    ] {
+        assert_eq!(
+            cast_value(&Value::Str(input.into()), "bytea").unwrap(),
+            Value::Bytes(expected),
+            "{input:?}"
+        );
+    }
+    for (input, sqlstate, message) in [
+        (
+            "\\x1",
+            "22023",
+            "invalid hexadecimal data: odd number of digits",
+        ),
+        (
+            "\\x01 0",
+            "22023",
+            "invalid hexadecimal data: odd number of digits",
+        ),
+        ("\\xzz", "22023", "invalid hexadecimal digit: \"z\""),
+        // A digit pair may not be split by whitespace.
+        ("\\x0 1", "22023", "invalid hexadecimal digit: \" \""),
+        (
+            "\\x\u{e9}",
+            "22023",
+            "invalid hexadecimal digit: \"\u{e9}\"",
+        ),
+        ("\\9", "22P02", "invalid input syntax for type bytea"),
+        ("a\\", "22P02", "invalid input syntax for type bytea"),
+        ("\\X0102", "22P02", "invalid input syntax for type bytea"),
+        ("\\08", "22P02", "invalid input syntax for type bytea"),
+    ] {
         let error = cast_value(&Value::Str(input.into()), "bytea").unwrap_err();
-        assert_eq!(error.sqlstate(), Some("22023"));
+        assert_eq!(
+            (error.sqlstate(), error.to_string().as_str()),
+            (Some(sqlstate), message),
+            "{input:?}"
+        );
     }
 }
 

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Hashing and base64 helpers for scalar functions.
+//! Hashing and the text formats of bytea values for scalar functions and the `bytea` input function.
 
 use crate::error::{Result, SQLError};
 use uqa_core::memory::{Produced, ProductionControl, ProductionString, ProductionVec};
@@ -165,12 +165,14 @@ fn md5_compute(input: &[u8], control: &ProductionControl<'_>) -> Result<[u8; 16]
 }
 
 // -------------------------------------------------------------------------
-// Minimal base64 (RFC 4648). Used only for the SQL `encode` /
-// `decode` builtins; not performance-critical.
+// The text formats of bytea values, as PostgreSQL's `encode.c` writes and reads them for `encode`, `decode` and the `bytea` input function.
 // -------------------------------------------------------------------------
 
 const BASE64_ALPHABET: &[u8; 64] =
     b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// The output line length of the base64 format, after which `pg_base64_encode` starts a new line.
+const BASE64_LINE: usize = 76;
 
 #[cfg(test)]
 pub(super) fn base64_encode(input: &[u8]) -> String {
@@ -180,17 +182,19 @@ pub(super) fn base64_encode(input: &[u8]) -> String {
         .expect("ordinary base64 owner")
 }
 
+/// The base64 format of `input` as `pg_base64_encode` writes it: a line break after every 76 characters, including one that ends the output.
 pub(super) fn base64_encode_with_control(
     input: &[u8],
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>> {
-    let capacity = input
+    let encoded = input
         .len()
         .div_ceil(3)
         .checked_mul(4)
         .ok_or_else(|| super::allocation_error("base64 encode"))?;
     let mut out = ProductionString::new(*control);
-    out.reserve(capacity)?;
+    out.reserve(encoded + encoded / BASE64_LINE)?;
+    let mut line = 0;
     for chunk in input.chunks(3) {
         let b0 = chunk[0];
         let b1 = chunk.get(1).copied().unwrap_or(0);
@@ -204,6 +208,11 @@ pub(super) fn base64_encode_with_control(
         }
         if chunk.len() > 2 {
             out.push(BASE64_ALPHABET[(b2 & 0b11_1111) as usize] as char)?;
+            line += 4;
+            if line >= BASE64_LINE {
+                out.push('\n')?;
+                line = 0;
+            }
         } else {
             out.push('=')?;
         }
@@ -218,38 +227,170 @@ pub(super) fn base64_decode(input: &str) -> Result<Vec<u8>> {
         .map_err(|_| SQLError::Internal("ordinary base64 owner".into()))
 }
 
+/// Read the base64 format as `pg_base64_decode` does: whitespace is skipped, `=` pads the last group of a sequence, and a group left incomplete fails.
 pub(super) fn base64_decode_with_control(
     input: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Vec<u8>>> {
     let mut decoded = ProductionVec::new(*control);
     decoded.reserve(input.len() / 4 * 3)?;
-    let mut buf = [0u8; 4];
-    let mut idx = 0usize;
-    let mut padding = 0;
-    for c in input.chars() {
+    let mut buffer = 0_u32;
+    let mut position = 0;
+    // The padding that ended a sequence: 1 after two symbols, 2 after three. `PostgreSQL` keeps it for every later group.
+    let mut end = 0;
+    for symbol in input.chars() {
         control.check()?;
-        if c == '=' {
-            padding += 1;
-            buf[idx] = 0;
-        } else {
-            let val = BASE64_ALPHABET
-                .iter()
-                .position(|&b| b as char == c)
-                .ok_or_else(|| SQLError::TypeMismatch(format!("invalid base64 char {c:?}")))?;
-            buf[idx] = val as u8;
+        if matches!(symbol, ' ' | '\t' | '\n' | '\r') {
+            continue;
         }
-        idx += 1;
-        if idx == 4 {
-            decoded.push_copy((buf[0] << 2) | (buf[1] >> 4))?;
-            decoded.push_copy((buf[1] << 4) | (buf[2] >> 2))?;
-            decoded.push_copy((buf[2] << 6) | buf[3])?;
-            idx = 0;
+        let value = if symbol == '=' {
+            if end == 0 {
+                end = match position {
+                    2 => 1,
+                    3 => 2,
+                    _ => {
+                        return Err(invalid_encoding(
+                            "unexpected \"=\" while decoding base64 sequence".into(),
+                        ))
+                    }
+                };
+            }
+            0
+        } else {
+            u8::try_from(symbol)
+                .ok()
+                .and_then(|byte| BASE64_ALPHABET.iter().position(|letter| *letter == byte))
+                .and_then(|value| u32::try_from(value).ok())
+                .ok_or_else(|| {
+                    invalid_encoding(format!(
+                        "invalid symbol \"{symbol}\" found while decoding base64 sequence"
+                    ))
+                })?
+        };
+        buffer = (buffer << 6) + value;
+        position += 1;
+        if position == 4 {
+            let [_, first, second, third] = buffer.to_be_bytes();
+            decoded.push_copy(first)?;
+            if end == 0 || end > 1 {
+                decoded.push_copy(second)?;
+            }
+            if end == 0 || end > 2 {
+                decoded.push_copy(third)?;
+            }
+            buffer = 0;
+            position = 0;
         }
     }
-    let (mut decoded, memory) = decoded.finish()?.into_parts();
-    decoded.truncate(decoded.len().saturating_sub(padding));
-    Ok(control.finish(decoded, memory)?)
+    if position != 0 {
+        return Err(SQLError::Diagnostic {
+            sqlstate: "22023".into(),
+            message: "invalid base64 end sequence".into(),
+            detail: None,
+            hint: Some(
+                "Input data is missing padding, is truncated, or is otherwise corrupted.".into(),
+            ),
+        });
+    }
+    Ok(decoded.finish()?)
+}
+
+/// Read the hex format as `hex_decode_safe` does: pairs of hex digits, which spaces, tabs and line breaks may separate.
+pub(crate) fn hex_decode_with_control(
+    input: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<u8>>> {
+    let mut decoded = ProductionVec::new(*control);
+    decoded.reserve(input.len() / 2)?;
+    let mut digits = input.chars();
+    while let Some(high) = digits.next() {
+        control.check()?;
+        if matches!(high, ' ' | '\n' | '\t' | '\r') {
+            continue;
+        }
+        let high = hex_digit(high)?;
+        let low = digits.next().ok_or_else(|| {
+            invalid_encoding("invalid hexadecimal data: odd number of digits".into())
+        })?;
+        decoded.push_copy(high * 16 + hex_digit(low)?)?;
+    }
+    Ok(decoded.finish()?)
+}
+
+fn hex_digit(digit: char) -> Result<u8> {
+    digit
+        .to_digit(16)
+        .and_then(|value| u8::try_from(value).ok())
+        .ok_or_else(|| invalid_encoding(format!("invalid hexadecimal digit: \"{digit}\"")))
+}
+
+/// The escape format of `input` as `esc_enc` writes it: a NUL or a byte with its high bit set as a backslash and three octal digits, a backslash doubled, and every other byte as it is.
+pub(super) fn escape_encode_with_control(
+    input: &[u8],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>> {
+    let mut encoded = ProductionString::new(*control);
+    encoded.reserve(input.len())?;
+    for &byte in input {
+        control.check()?;
+        if byte == 0 || byte & 0x80 != 0 {
+            for digit in [
+                b'\\',
+                b'0' + (byte >> 6),
+                b'0' + ((byte >> 3) & 7),
+                b'0' + (byte & 7),
+            ] {
+                encoded.push(char::from(digit))?;
+            }
+        } else if byte == b'\\' {
+            encoded.push('\\')?;
+            encoded.push('\\')?;
+        } else {
+            encoded.push(char::from(byte))?;
+        }
+    }
+    Ok(encoded.finish()?)
+}
+
+/// Read the escape format as `esc_dec` and the `bytea` input function do: a backslash introduces another backslash or three octal digits, the first of them at most 3.
+pub(crate) fn escape_decode_with_control(
+    input: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<u8>>> {
+    let input = input.as_bytes();
+    let mut decoded = ProductionVec::new(*control);
+    decoded.reserve(input.len())?;
+    let mut index = 0;
+    while index < input.len() {
+        control.check()?;
+        if input[index] != b'\\' {
+            decoded.push_copy(input[index])?;
+            index += 1;
+            continue;
+        }
+        if let Some([first @ b'0'..=b'3', second @ b'0'..=b'7', third @ b'0'..=b'7']) =
+            input.get(index + 1..index + 4)
+        {
+            decoded.push_copy((first - b'0') * 64 + (second - b'0') * 8 + (third - b'0'))?;
+            index += 4;
+        } else if input.get(index + 1) == Some(&b'\\') {
+            decoded.push_copy(b'\\')?;
+            index += 2;
+        } else {
+            return Err(SQLError::Routine {
+                sqlstate: "22P02".into(),
+                message: "invalid input syntax for type bytea".into(),
+            });
+        }
+    }
+    Ok(decoded.finish()?)
+}
+
+fn invalid_encoding(message: String) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "22023".into(),
+        message,
+    }
 }
 
 pub(super) fn hex_encode_with_control(

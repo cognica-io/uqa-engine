@@ -87,18 +87,15 @@ pub fn convert_value_to_column_type_with_control(
         }
         ColumnType::Json => cast_value_from_with_control(&value, "json", None, control),
         ColumnType::JsonB => cast_value_from_with_control(&value, "jsonb", None, control),
+        // Text reaches a bytea column through its input function, `byteain`, which decodes the hex and escape formats; no other type has an assignment cast to bytea.
         ColumnType::Bytea => match &*value {
             Value::Bytes(_) => Ok(value),
-            Value::Str(_) => {
-                let (Value::Str(text), memory) = value.into_parts() else {
-                    unreachable!();
-                };
-                Ok(control.finish(Value::Bytes(text.into_bytes()), memory)?)
+            Value::Str(_) | Value::FixedChar(_) => {
+                cast_value_from_with_control(&value, "bytea", Some("text"), control)
             }
-            _ => {
-                let (text, memory) = value_to_text_with_control(&value, control)?.into_parts();
-                Ok(control.finish(Value::Bytes(text.into_bytes()), memory)?)
-            }
+            other => Err(SQLError::TypeMismatch(format!(
+                "cannot cast {other:?} to bytea"
+            ))),
         },
         ColumnType::InternalChar => {
             let text = value_to_text_with_control(&value, control)?;
