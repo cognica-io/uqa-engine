@@ -14,6 +14,7 @@ mod graph_selection;
 mod identity_presence;
 mod latest;
 mod latest_documents;
+pub(crate) use latest_documents::PrivateDocuments;
 mod latest_vertices;
 
 use rusqlite::types::ValueRef;

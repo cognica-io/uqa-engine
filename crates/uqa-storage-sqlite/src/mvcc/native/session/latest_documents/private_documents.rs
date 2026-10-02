@@ -10,18 +10,17 @@
 
 use rusqlite::types::ValueRef;
 use uqa_core::memory::BudgetedVec;
-use uqa_storage::mvcc::{MergedRecordSnapshot, PrivateRecordKey, VersionError};
+use uqa_storage::mvcc::{MergedRecordSnapshot, PrivateRecordKey, VersionError, VersionResult};
 use uqa_storage::read_control::StorageReadControl;
 
 use super::super::super::{decode_record, NativeRecordIdentity};
 use crate::connection::Result;
-use crate::mvcc::PhysicalResult;
 
 /// Private keys are read in pages of this many, so a transaction that changed many rows of the table holds one page of keys at a time.
 const PAGE: usize = 64;
 
 /// A cursor over the private document records of one owner.
-pub(super) struct PrivateDocuments<'a> {
+pub(crate) struct PrivateDocuments<'a> {
     view: &'a MergedRecordSnapshot,
     prefix: &'a [u8],
     control: &'a StorageReadControl,
@@ -39,7 +38,7 @@ impl<'a> PrivateDocuments<'a> {
         prefix: &'a [u8],
         after: Option<i64>,
         control: &'a StorageReadControl,
-    ) -> PhysicalResult<Self> {
+    ) -> VersionResult<Self> {
         let after = after
             .map(|id| identity.encode_key(&[ValueRef::Integer(id)], control))
             .transpose()?;
@@ -56,22 +55,21 @@ impl<'a> PrivateDocuments<'a> {
     }
 
     /// The document of the current record, or `None` after the last one.
-    pub(super) fn peek(&self) -> Option<i64> {
+    pub(crate) fn peek(&self) -> Option<i64> {
         self.ids.get(self.position).copied()
     }
 
-    pub(super) fn advance(&mut self) -> PhysicalResult<()> {
+    pub(crate) fn advance(&mut self) -> VersionResult<()> {
         self.position += 1;
         if self.position == PAGE {
             let mut last = BudgetedVec::new(self.control.memory());
-            last.extend_from_slice(self.keys[PAGE - 1].key())
-                .map_err(VersionError::from)?;
+            last.extend_from_slice(self.keys[PAGE - 1].key())?;
             self.load(Some(&last))?;
         }
         Ok(())
     }
 
-    fn load(&mut self, after: Option<&[u8]>) -> PhysicalResult<()> {
+    fn load(&mut self, after: Option<&[u8]>) -> VersionResult<()> {
         self.keys = self
             .view
             .private_keys(self.prefix, after, PAGE, self.control)?;
@@ -84,21 +82,19 @@ impl<'a> PrivateDocuments<'a> {
                 })?);
                 Ok(())
             })?;
-            self.ids
-                .push(id.ok_or(VersionError::InvalidEncoding(
-                    "native document key lacks its identity",
-                ))?)
-                .map_err(VersionError::from)?;
+            self.ids.push(id.ok_or(VersionError::InvalidEncoding(
+                "native document key lacks its identity",
+            ))?)?;
         }
         self.position = 0;
         Ok(())
     }
 
     /// Visit the current record as a `_documents` row, in its column order. Returns `None` for a deletion, which has no row, and otherwise what `visit` returned.
-    pub(super) fn visit(
+    pub(crate) fn visit(
         &self,
         visit: &mut dyn FnMut(&[ValueRef<'_>]) -> Result<bool>,
-    ) -> PhysicalResult<Option<bool>> {
+    ) -> VersionResult<Option<bool>> {
         let key = self.keys[self.position].key();
         let mut visited = None;
         self.view.visit_value(key, self.control, &mut |record| {
@@ -113,7 +109,7 @@ impl<'a> PrivateDocuments<'a> {
     }
 
     /// Whether the current record holds a document, which a deletion does not.
-    pub(super) fn live(&self) -> PhysicalResult<bool> {
+    pub(crate) fn live(&self) -> VersionResult<bool> {
         let mut live = false;
         self.view.visit_value(
             self.keys[self.position].key(),

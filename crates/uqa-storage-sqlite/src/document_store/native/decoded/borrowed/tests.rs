@@ -635,3 +635,94 @@ fn private_records_of_another_table_leave_the_physical_rows_as_they_are() {
     assert!(read.contains("_documents"), "{read:?}");
     stop_recording_tables(&store);
 }
+
+#[test]
+fn private_documents_merge_into_the_decoded_columns_of_the_stored_rows() {
+    let mut store = fixture();
+    let blob = Value::Bytes("private blob".repeat(2048).into_bytes());
+    for id in [10_u64, 20, 30, 40] {
+        store
+            .put(
+                id,
+                BTreeMap::from([("value".into(), Value::Int(id as i64))]),
+            )
+            .unwrap();
+    }
+    let tables = record_tables_read(&store);
+    let scan_tables = |snapshot: &dyn DocumentStore, after, limit, fields: &[&str]| {
+        tables.lock().unwrap().clear();
+        let scanned = scan(snapshot, after, limit, fields);
+        (scanned, tables.lock().unwrap().clone())
+    };
+    // Complete scans of the stored rows record their columns, which the next scans serve.
+    let snapshot = store.snapshot().unwrap();
+    for fields in [&["value"][..], &["value", "raw"][..]] {
+        scan_tables(snapshot.as_ref(), None, usize::MAX, fields);
+        let (_, read) = scan_tables(snapshot.as_ref(), None, usize::MAX, fields);
+        assert!(!read.contains("_documents"), "{fields:?}: {read:?}");
+    }
+    store.conn.begin_transaction().unwrap();
+    for (id, value) in [(5_u64, 5_i64), (20, 200), (35, 35), (60, 60)] {
+        store
+            .put(id, BTreeMap::from([("value".into(), Value::Int(value))]))
+            .unwrap();
+    }
+    store.delete(30).unwrap();
+    // A private value stored outside the body ends the visit of the columns to hydrate.
+    store
+        .put(
+            70,
+            BTreeMap::from([
+                ("value".into(), Value::Int(70)),
+                ("raw".into(), blob.clone()),
+            ]),
+        )
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let row = |id: u64, value: i64| (id, vec![Value::Int(value), Value::Null]);
+    let mut merged = vec![
+        row(5, 5),
+        row(10, 10),
+        row(20, 200),
+        row(35, 35),
+        row(40, 40),
+        row(60, 60),
+        row(70, 70),
+    ];
+    merged[6].1[1] = blob;
+    let (scanned, read) = scan_tables(snapshot.as_ref(), None, usize::MAX, &["value", "raw"]);
+    assert_eq!(scanned, merged);
+    assert!(!read.contains("_documents"), "{read:?}");
+    for (after, limit, expected) in [
+        (Some(10), 2, &merged[2..4]),
+        (Some(35), 3, &merged[4..]),
+        (Some(60), 3, &merged[6..]),
+        (None, 1, &merged[..1]),
+    ] {
+        let (scanned, read) = scan_tables(snapshot.as_ref(), after, limit, &["value", "raw"]);
+        assert_eq!(scanned, expected, "after {after:?}, limit {limit}");
+        assert!(!read.contains("_documents"), "{read:?}");
+    }
+    let (scanned, _) = scan_tables(snapshot.as_ref(), None, usize::MAX, &["value"]);
+    assert_eq!(
+        scanned,
+        merged
+            .iter()
+            .map(|(id, values)| (*id, vec![values[0].clone()]))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(snapshot.len().unwrap(), 7);
+    store.conn.rollback_transaction().unwrap();
+
+    let snapshot = store.snapshot().unwrap();
+    let (scanned, read) = scan_tables(snapshot.as_ref(), None, usize::MAX, &["value"]);
+    assert_eq!(
+        scanned,
+        [10, 20, 30, 40]
+            .into_iter()
+            .map(|id| (id, vec![Value::Int(id as i64)]))
+            .collect::<Vec<_>>()
+    );
+    assert!(!read.contains("_documents"), "{read:?}");
+    stop_recording_tables(&store);
+}

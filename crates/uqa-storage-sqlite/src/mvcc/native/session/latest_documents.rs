@@ -19,7 +19,7 @@ use super::{owners, Family, NativeRecordIdentity, NativeRecordOwner, NativeSnaps
 use crate::connection::Result;
 use crate::mvcc::PhysicalResult;
 use crate::read_control::{payload_length, reserve_bindings};
-use private_documents::PrivateDocuments;
+pub(crate) use private_documents::PrivateDocuments;
 
 /// Bodies of at most this many bytes are read with their row. The selected byte length bounds `SQLite`'s copy before the body is evaluated; a larger body is admitted and then read by itself.
 const INLINE_BODY_BYTES: u16 = 16 * 1024;
@@ -49,9 +49,9 @@ pub(crate) struct LatestDocuments<'a> {
 }
 
 impl LatestDocuments<'_> {
-    /// The table's data generation, while the rows read are its committed ones. Every commit that changes the table's rows advances it in the same transaction, so reads observing an equal generation for the same owner see the same rows. `None` while the session's private records are merged into them, which no other read shares.
-    pub(crate) fn committed_generation(&self) -> Option<i64> {
-        self.private.is_none().then_some(self.generation)
+    /// The data generation of the table's stored rows. Every commit that changes them advances it in the same transaction, so reads observing an equal generation for the same owner see the same stored rows; the session's private records, which [`Self::private_documents`] yields, are not among them.
+    pub(crate) fn generation(&self) -> i64 {
+        self.generation
     }
 
     /// Visit the rows after document `after`, in document order and in `_documents` column order, while `visit` returns true. `visit` runs inside the physical read and must not read the snapshot.
@@ -60,36 +60,36 @@ impl LatestDocuments<'_> {
         after: Option<i64>,
         visit: &mut dyn FnMut(&[ValueRef<'_>]) -> Result<bool>,
     ) -> Result<()> {
-        self.private_documents(after)
-            .and_then(|private| {
-                visit_rows(
-                    self.connection,
-                    self.table,
-                    after,
-                    private,
-                    self.control,
-                    visit,
-                )
-            })
-            .map_err(|error| error.into_version().into())
+        let private = self.private_documents(after)?;
+        visit_rows(
+            self.connection,
+            self.table,
+            after,
+            private,
+            self.control,
+            visit,
+        )
+        .map_err(|error| error.into_version().into())
     }
 
     /// The number of rows, counted in the table's key order without reading a body, with the documents the session's private records insert or delete.
     pub(crate) fn count(&self) -> Result<u64> {
-        self.private_documents(None)
-            .and_then(|private| count_rows(self.connection, self.table, private, self.control))
+        let private = self.private_documents(None)?;
+        count_rows(self.connection, self.table, private, self.control)
             .map_err(|error| error.into_version().into())
     }
 
-    fn private_documents(
+    /// The session's private document records of the table after document `after`, in document order, or `None` when it holds none. The rows [`Self::visit`] yields have them merged in already.
+    pub(crate) fn private_documents(
         &self,
         after: Option<i64>,
-    ) -> PhysicalResult<Option<PrivateDocuments<'_>>> {
-        self.private
+    ) -> Result<Option<PrivateDocuments<'_>>> {
+        Ok(self
+            .private
             .map(|prefix| {
                 PrivateDocuments::after(self.view, self.documents, prefix, after, self.control)
             })
-            .transpose()
+            .transpose()?)
     }
 }
 

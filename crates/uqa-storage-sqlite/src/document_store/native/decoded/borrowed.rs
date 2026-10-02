@@ -13,7 +13,7 @@ use uqa_storage::mvcc::VersionError;
 use super::{controlled, sqlite_doc_id, Decoded, Family, NativeDocumentRead, SQLiteResult};
 use crate::document_store::decoded_columns::{CachedColumns, ColumnBuilder};
 use crate::document_store::document_id_from_sqlite;
-use crate::mvcc::native::{decode_record, NativeRecordIdentity};
+use crate::mvcc::native::{decode_record, NativeRecordIdentity, PrivateDocuments};
 
 /// The rows one latest-commit read visited, and the row that ended it to hydrate fields stored outside its body.
 type LatestSegment = (usize, Option<(DocId, Decoded)>);
@@ -140,18 +140,28 @@ impl NativeDocumentRead<'_> {
             owner,
             self.control,
             &mut |latest| {
-                // Decoded columns hold committed rows alone; a read that merges private records neither serves nor records them.
-                let cache = latest
-                    .committed_generation()
-                    .and_then(|generation| self.columns.map(|cache| (cache, generation)));
-                if let Some(cached) = cache.and_then(|(cache, generation)| {
-                    cache.get(self.table, owner, generation, fields)
-                }) {
-                    visited = self.visit_cached_columns(&cached, after, limit, visitor)?;
+                let generation = latest.generation();
+                let private = latest.private_documents(after)?;
+                if let Some(cached) = self
+                    .columns
+                    .and_then(|cache| cache.get(self.table, owner, generation, fields))
+                {
+                    // Decoded columns hold the stored rows; the session's private records of the table are merged into them.
+                    (visited, pending) = match private {
+                        Some(private) => self.visit_cached_columns_merged(
+                            &cached, private, after, limit, fields, visitor,
+                        )?,
+                        None => (
+                            self.visit_cached_columns(&cached, after, limit, visitor)?,
+                            None,
+                        ),
+                    };
                     return Ok(());
                 }
-                // A build starts at the table's first row and continues only with the page that resumes exactly where it stopped.
-                let mut builder = cache.and_then(|(cache, generation)| match after {
+                // A build starts at the table's first row and continues only with the page that resumes exactly where it stopped. Rows merged with private records are the session's own and are never recorded.
+                let cache = self.columns.filter(|_| private.is_none());
+                drop(private);
+                let mut builder = cache.and_then(|cache| match after {
                     None => Some(ColumnBuilder::start(
                         cache, self.table, owner, generation, fields,
                     )),
@@ -239,6 +249,73 @@ impl NativeDocumentRead<'_> {
         self.snapshot.control.check()?;
         self.control.check()?;
         Ok(visited)
+    }
+
+    /// Serve a projection from the stored rows' decoded columns, merging the session's private records of the table in document order: a private record before a cached row inserts a document, and one at a cached row replaces or deletes it. Returns the rows visited and a private row whose selected fields are stored outside its body, which ends the visit to hydrate outside the physical read.
+    fn visit_cached_columns_merged(
+        &self,
+        (ids, columns): &CachedColumns,
+        mut private: PrivateDocuments<'_>,
+        after: Option<i64>,
+        limit: usize,
+        fields: &[&str],
+        visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
+    ) -> SQLiteResult<LatestSegment> {
+        let mut position = after.map_or(0, |after| ids.partition_point(|id| *id <= after));
+        let mut row = BudgetedSmallVec::<[&Value; 8]>::new(self.control.memory());
+        row.reserve(columns.len())?;
+        let mut visited = 0;
+        while visited < limit {
+            self.snapshot.control.cancellation().check()?;
+            self.control.cancellation().check()?;
+            let stored = ids.get(position).copied();
+            let next = private.peek();
+            let Some(private_id) = next.filter(|id| stored.is_none_or(|stored| *id <= stored))
+            else {
+                let Some(stored) = stored else {
+                    break;
+                };
+                row.clear();
+                for column in columns {
+                    row.push(&column[position])?;
+                }
+                position += 1;
+                visited += 1;
+                if !visitor(document_id_from_sqlite(stored)?, &row) {
+                    break;
+                }
+                continue;
+            };
+            if stored == Some(private_id) {
+                position += 1;
+            }
+            let id = document_id_from_sqlite(private_id)?;
+            let mut decoded = None;
+            private.visit(&mut |values| {
+                decoded = Some(self.decode_body_with_projection(id, values, Some(fields))?);
+                Ok(true)
+            })?;
+            private.advance()?;
+            // A deletion has no row.
+            let Some(decoded) = decoded else {
+                continue;
+            };
+            if fields.iter().any(|field| {
+                decoded
+                    .fields
+                    .get(*field)
+                    .is_some_and(|value| controlled::marker(value).is_some())
+            }) {
+                return Ok((visited, Some((id, decoded))));
+            }
+            visited += 1;
+            if !self.visit_decoded_fields(id, &decoded.fields, fields, visitor)? {
+                break;
+            }
+        }
+        self.snapshot.control.check()?;
+        self.control.check()?;
+        Ok((visited, None))
     }
 
     fn visit_decoded_fields(
