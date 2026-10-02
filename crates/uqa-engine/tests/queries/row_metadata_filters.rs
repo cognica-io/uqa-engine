@@ -124,7 +124,11 @@ fn check(engine: &Engine, label: &str) {
         ["10"],
         "{label}"
     );
-    // A stored column named `_doc_id` is the column, not the identity, which `_meta.doc_id` still names.
+    check_named_column(engine, label);
+}
+
+/// A stored column named `_doc_id` is the column, not the identity, which `_meta.doc_id` still names.
+fn check_named_column(engine: &Engine, label: &str) {
     run(
         engine,
         "CREATE TABLE named (_doc_id integer, v integer);
