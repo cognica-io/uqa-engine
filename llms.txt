@@ -10,6 +10,8 @@ Version 0.4.7 also provides owned [Rust notifications](docs/manual/reference/02-
 
 Do not infer behavior beyond the verified surface from familiar labels such as PostgreSQL 18 compatibility, AGE compatibility, vector search, fusion, or CJK analysis. Read the exact UQA Engine contract for the feature in question.
 
+Korean (`nori`) and Japanese (`kuromoji`) analysis are optional Cargo features of the `uqa` and `uqa-engine` crates, off by default: `cargo add uqa@0.4.7` alone does not include them, and an embedded Rust application that uses either enables it separately, as in `cargo add uqa@0.4.7 --features nori,kuromoji`. A build without the feature rejects requests for that analyzer. The `usql` CLI and the Python, Node.js, and browser WASM packages enable both by default.
+
 When generating SQL:
 
 - Keep relation and column identifiers in SQL syntax. Positional parameters bind values only.
