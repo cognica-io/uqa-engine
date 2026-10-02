@@ -106,13 +106,15 @@ pub(super) fn acknowledge(
     control.check().map_err(VersionError::from)?;
     let permit = admission::permit(connection, control)?;
     let id = acknowledgement.transaction();
-    // An acknowledgement only releases its owner's right to resolve an outcome. A power loss that discards it leaves the receipt of a managed owner that is dead, which reclamation acknowledges on the owner's behalf. A manual owner is never acknowledged implicitly, so its acknowledgement keeps its own sync. The owner kind of an allocation never changes, and it is read before the transaction because the synchronization level cannot change inside one.
-    let managed = connection
-        .prepare_cached("SELECT managed FROM _uqa_mvcc_transactions WHERE allocation = ?1")?
-        .query_row([id.allocation().to_be_bytes().as_slice()], |row| {
-            row.get::<_, bool>(0)
-        })
-        .optional()?;
+    // An acknowledgement only releases its owner's right to resolve an outcome. A power loss that discards it leaves the receipt of a managed owner that is dead, which reclamation acknowledges on the owner's behalf. A manual owner is never acknowledged implicitly, so its acknowledgement keeps its own sync. The owner kind of an allocation never changes, and it is read before the transaction because the synchronization level cannot change inside one. Under a rollback journal that read waits for a writer that holds the database, so it is admitted as the transaction is: a busy database is waited for, not reported.
+    let managed = admission::retry(connection, true, control, || {
+        Ok(connection
+            .prepare_cached("SELECT managed FROM _uqa_mvcc_transactions WHERE allocation = ?1")?
+            .query_row([id.allocation().to_be_bytes().as_slice()], |row| {
+                row.get::<_, bool>(0)
+            })
+            .optional()?)
+    })?;
     let _synchronization = if managed == Some(true) {
         RelaxedSynchronization::relax(connection, &permit)?
     } else {
