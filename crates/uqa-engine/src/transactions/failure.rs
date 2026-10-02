@@ -212,12 +212,7 @@ impl Engine {
         self.restore_transaction_dirty_state(rollback_state.dirty);
         self.drop_persistent_value_indexes();
         if self.storage.backend.is_some() {
-            if let Err(restore_error) = self.reload_table_catalog_after_rollback() {
-                cleanup_errors.push(format!("table catalog restore: {restore_error}"));
-            }
-            if let Err(restore_error) = self.reload_catalog_registries_after_rollback() {
-                cleanup_errors.push(format!("registry restore: {restore_error}"));
-            }
+            self.reload_catalogs_after_rollback(&mut cleanup_errors);
         }
         self.restore_session_state_preserving_sequences(
             &rollback_state.session,

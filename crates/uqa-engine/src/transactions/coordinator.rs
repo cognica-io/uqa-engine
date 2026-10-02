@@ -513,12 +513,7 @@ impl Engine {
         } else {
             self.restore_graph_transaction_overlay(session_snapshot);
             self.drop_persistent_value_indexes();
-            if let Err(error) = self.reload_table_catalog_after_rollback() {
-                cleanup_errors.push(format!("table catalog restore: {error}"));
-            }
-            if let Err(error) = self.reload_catalog_registries_after_rollback() {
-                cleanup_errors.push(format!("registry restore: {error}"));
-            }
+            self.reload_catalogs_after_rollback(&mut cleanup_errors);
         }
         self.restore_session_state(session_snapshot);
         if cleanup_errors.is_empty() {

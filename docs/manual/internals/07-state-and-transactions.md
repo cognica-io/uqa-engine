@@ -91,6 +91,8 @@ A backend committed-change version detects commits made outside the in-process s
 
 Epochs are invalidation signals, not data. A refresh still reads and validates authoritative provider state.
 
+A rollback, of a transaction, a savepoint or a failed statement, rebuilds the state of every durable table and reloads the registries ([`reload_catalogs_after_rollback`](../../../crates/uqa-engine/src/open/catalog_sync.rs)). Both read one snapshot: the transaction's when one remains open, and otherwise a read transaction pinned for them, so a commit of another session cannot leave the rebuilt tables at different states. When both succeed, the session records the catalog's cache revisions, the read view, the data epoch and the commit version they read, as a refresh records them, and its next statement refreshes only what other sessions committed since. A catalog without cache revisions, as the SQLite Key/Value and redb providers have, has every statement reload all tables instead.
+
 ## Cache publication rules
 
 - Persist and validate a candidate before inserting it into a published registry.
