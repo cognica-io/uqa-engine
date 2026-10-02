@@ -408,6 +408,50 @@ fn cancelled_or_exhausted_collection_keeps_acknowledgements_for_a_bounded_retry(
 }
 
 #[test]
+fn the_receipt_limit_counts_receipts_and_not_the_distance_between_them() {
+    let control = control();
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    store.set_receipt_retention_limit(3, &control).unwrap();
+    let exhausted = |store: &SQLiteRecordStore| {
+        matches!(
+            store.allocate_transaction(&control),
+            Err(VersionError::ReceiptRetentionExhausted { limit: 3 })
+        )
+    };
+    // An old pending receipt stays while later ones are acknowledged and reclaimed, which leaves a gap behind it wider than the limit.
+    let old = store.allocate_transaction(&control).unwrap();
+    for _ in 0..5 {
+        let id = store.allocate_transaction(&control).unwrap();
+        let receipt = store.commit(id, &empty(&control), &control).unwrap();
+        store
+            .acknowledge_transaction(ReceiptAcknowledgement::Committed(receipt), &control)
+            .unwrap();
+        assert_eq!(store.reclaim_transaction_receipts(&control).unwrap(), 1);
+    }
+    let second = store.allocate_transaction(&control).unwrap();
+    assert_eq!(second.allocation(), old.allocation() + 6);
+    let third = store.allocate_transaction(&control).unwrap();
+    assert!(exhausted(&store));
+    // Releasing one receipt makes room for exactly one.
+    store.abort(third, &control).unwrap();
+    store
+        .acknowledge_transaction(ReceiptAcknowledgement::Aborted(third), &control)
+        .unwrap();
+    assert_eq!(store.reclaim_transaction_receipts(&control).unwrap(), 1);
+    store.allocate_transaction(&control).unwrap();
+    assert!(exhausted(&store));
+
+    // Receipts without gaps reach the limit at the same count.
+    let dense = SQLiteRecordStore::new(&ManagedConnection::open_in_memory().unwrap()).unwrap();
+    dense.set_receipt_retention_limit(3, &control).unwrap();
+    for _ in 0..3 {
+        dense.allocate_transaction(&control).unwrap();
+    }
+    assert!(exhausted(&dense));
+}
+
+#[test]
 fn managed_allocation_failure_does_not_consume_a_pending_identity() {
     let control = control();
     let connection = ManagedConnection::open_in_memory().unwrap();

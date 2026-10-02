@@ -59,12 +59,7 @@ pub(super) fn allocate_with_owner(
     let transaction = admission::begin(connection, control)?;
     native::check_mapping(&transaction, native)?;
     let current = codec::header(&transaction, identity)?;
-    let retained: i64 = transaction
-        .prepare_cached("SELECT count(*) FROM _uqa_mvcc_transactions")?
-        .query_row([], |row| row.get(0))?;
-    let retained = u64::try_from(retained)
-        .map_err(|_| VersionError::InvalidEncoding("negative transaction receipt count"))?;
-    if retained >= current.receipt_limit {
+    if receipts_reach_limit(&transaction, &current)? {
         return Err(VersionError::ReceiptRetentionExhausted {
             limit: current.receipt_limit,
         }
@@ -86,6 +81,33 @@ pub(super) fn allocate_with_owner(
     control.cancellation().check().map_err(VersionError::from)?;
     admission::commit(transaction, control)?;
     Ok(id)
+}
+
+/// Whether the retained receipts have reached the retention limit. Every retained receipt lies between the oldest one and the last allocation, so their distance bounds the count without visiting a row. Counting is linear in the receipts kept, which are deleted only when the limit is reached, so they are counted only when the bound does not settle the answer.
+fn receipts_reach_limit(connection: &Connection, current: &codec::Header) -> PhysicalResult<bool> {
+    let oldest = {
+        let mut statement = connection.prepare_cached(
+            "SELECT allocation FROM _uqa_mvcc_transactions ORDER BY allocation LIMIT 1",
+        )?;
+        let mut rows = statement.query([])?;
+        let Some(row) = rows.next()? else {
+            return Ok(current.receipt_limit == 0);
+        };
+        codec::integer(codec::bytes(row, 0)?)?
+    };
+    if current
+        .allocated
+        .checked_sub(oldest)
+        .is_some_and(|span| span.saturating_add(1) < current.receipt_limit)
+    {
+        return Ok(false);
+    }
+    let retained: i64 = connection
+        .prepare_cached("SELECT count(*) FROM _uqa_mvcc_transactions")?
+        .query_row([], |row| row.get(0))?;
+    let retained = u64::try_from(retained)
+        .map_err(|_| VersionError::InvalidEncoding("negative transaction receipt count"))?;
+    Ok(retained >= current.receipt_limit)
 }
 
 pub(super) fn commit(
