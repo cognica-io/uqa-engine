@@ -76,6 +76,10 @@ jobs:
     name: test FDW Linux
     if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ubuntu-24.04
+    env:
+      # Optimized test binaries that keep debug assertions, as in the workspace tests.
+      CARGO_PROFILE_DEV_OPT_LEVEL: "2"
+      CARGO_PROFILE_TEST_OPT_LEVEL: "2"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -316,6 +320,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       RUSTFLAGS: ${{ matrix.os == 'ubuntu-24.04' && '-D warnings -C linker-features=-lld' || '-D warnings' }}
+      # Optimized test binaries that keep debug assertions, as in the workspace tests.
+      CARGO_PROFILE_DEV_OPT_LEVEL: "2"
+      CARGO_PROFILE_TEST_OPT_LEVEL: "2"
     timeout-minutes: 180
     strategy:
       fail-fast: false

@@ -15,12 +15,15 @@ env:
   RUSTFLAGS: ${{ inputs.os == 'ubuntu-24.04' && '-D warnings -C linker-features=-lld' || '-D warnings' }}
   CARGO_PROFILE_TEST_DEBUG: "0"
   CARGO_INCREMENTAL: "0"
+  # Test binaries are optimized and keep debug assertions and overflow checks, as the suites run locally: they run faster than unoptimized binaries and take longer to compile.
+  CARGO_PROFILE_DEV_OPT_LEVEL: "2"
+  CARGO_PROFILE_TEST_OPT_LEVEL: "2"
 
 jobs:
   build:
     name: Build test archive and check documentation
     runs-on: ${{ inputs.os }}
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -58,7 +61,7 @@ jobs:
   features:
     name: Verify analyzer feature configurations
     runs-on: ${{ inputs.os }}
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
