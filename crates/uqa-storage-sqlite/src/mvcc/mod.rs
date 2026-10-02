@@ -8,6 +8,7 @@
 
 mod admission;
 mod codec;
+mod commit_cache;
 mod connection_functions;
 mod identifiers;
 mod key_value;
@@ -487,6 +488,7 @@ impl VersionedPersistence for SQLiteRecordStore {
         control.cancellation().check().map_err(VersionError::from)?;
         let _bindings = write::reserve_bindings(prepared, control)?;
         self.with_write(control, |connection| {
+            let _cache = commit_cache::CommitCache::grow(connection, prepared)?;
             Ok(write::commit(
                 connection,
                 transaction,
