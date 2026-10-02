@@ -213,11 +213,14 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
     }
 
     let table_state = context.scans.tables.table(table)?;
-    let ordered_primary_key = table_snapshot
+    let ordered_primary_key = match table_snapshot
         .columns
         .iter()
         .find(|column| column.primary_key && column.ty.is_integer())
-        .map(|column| column.name.clone());
+    {
+        Some(column) if identities_follow_keys(table_state.as_ref())? => Some(column.name.clone()),
+        _ => None,
+    };
     let predicate_schema = crate::RowSchema::with_qualified_types(
         qualifier,
         source_schema.clone(),
@@ -358,4 +361,23 @@ fn split_projected_filter(
 fn expression_references_tableoid(expression: &ScalarExpr) -> bool {
     let mut columns = std::collections::BTreeSet::new();
     expression.collect_columns(&mut columns) && columns.contains(TABLE_OID_COLUMN)
+}
+
+/// Whether a scan in identity order reads the rows of `table` in integer key order: the table maps its keys to identities and holds no row at an identity no key names, all of which lie above the identities keys name.
+fn identities_follow_keys(
+    table: &dyn crate::query::table_read::TableRead,
+) -> Result<bool, SQLError> {
+    if !table.maps_integer_keys() {
+        return Ok(false);
+    }
+    let unmapped = table
+        .read_documents()
+        .next_doc_ids(
+            Some(uqa_sql::semantics::key_identity::KEY_IDENTITY_LIMIT - 1),
+            1,
+        )
+        .map_err(|error| {
+            crate::storage_errors::storage_error("probe identities no key names", &error)
+        })?;
+    Ok(unmapped.is_empty())
 }

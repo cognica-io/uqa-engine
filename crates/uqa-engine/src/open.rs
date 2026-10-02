@@ -18,6 +18,7 @@ mod cache_refresh;
 mod catalog_sync;
 mod data_sync;
 mod graphs;
+mod key_identities;
 mod lifecycle;
 mod registries;
 mod session_seed;

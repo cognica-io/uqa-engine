@@ -43,9 +43,7 @@ use uqa_sql::{
     semantics::{
         conflict::InferenceContext,
         partition::partition_insert_target,
-        returning::{
-            document_supplied_id, validate_returning_alias_relations, ReturningAnalysisContext,
-        },
+        returning::{validate_returning_alias_relations, ReturningAnalysisContext},
         rules::insert_inputs::{
             required_view_rule_insert_input_positions, view_rule_insert_column_type,
         },
@@ -265,7 +263,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             )?;
             scope.scalar_subqueries.clone_from(&stmt.subqueries);
             // Resolve the column that names an inserted row: the table's single PRIMARY KEY column, whether a sequence generates its values or not, and otherwise the conventional legacy `id` slot of a table without declared columns. Both VALUES and SELECT sources must derive the internal doc id from this same column or later primary-key rewrites can address a different row than the one that was inserted.
-            let (auto_id_col, id_column, accepts_supplied_identity) =
+            let (auto_id_col, id_column, identity_source) =
                 insert_identity_columns(mutation.identities, &stmt.table, "INSERT")?;
             let mut rule_source_rows = None;
             // INSERT ... SELECT: the query executor feeds each positional physical row directly into the INSERT sink. Ordinary source scans and scalar subqueries retain the statement snapshot, while a VOLATILE callback observes the logical mutations staged by preceding rows of this command.
@@ -290,7 +288,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         InsertSelectIdentity {
                             auto_id_column: auto_id_col.clone(),
                             id_column: id_column.clone(),
-                            accepts_supplied_identity,
+                            identity_source,
                         },
                         conflict_update_columns.clone().unwrap_or_default(),
                     )?);
@@ -546,7 +544,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     mutation.identities,
                     &stmt.table,
                     &id_column,
-                    accepts_supplied_identity,
+                    identity_source,
                     auto_id_col.as_deref(),
                     stmt.overriding,
                     &mut document,
@@ -570,7 +568,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         mutation.identities,
                         &target_table,
                         &id_column,
-                        accepts_supplied_identity,
+                        identity_source,
                         None,
                         &mut document,
                         "prepare INSERT identity",
@@ -582,9 +580,8 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     params,
                     &snapshot_scope,
                     conflict_update_columns.as_deref().unwrap_or(&[]),
-                    auto_id_col.as_deref(),
                     &id_column,
-                    accepts_supplied_identity,
+                    identity_source,
                     target_table,
                     document,
                     insert_identity,
@@ -606,15 +603,11 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             }
             let mut view_rule_rows = Vec::with_capacity(pending_rule_rows.len());
             for document in &pending_rule_rows {
-                let rule_doc_id = if accepts_supplied_identity {
-                    document_supplied_id(
-                        document,
-                        &id_column,
-                        auto_id_col.as_deref() == Some(id_column.as_str()),
-                    )?
-                } else {
-                    None
-                };
+                let rule_doc_id = crate::mutation::identity::supplied_document_identity(
+                    identity_source,
+                    document,
+                    &id_column,
+                )?;
                 view_rule_rows.push(crate::mutation::rules::RuleRowImage {
                     old_storage_table: None,
                     old_doc_id: None,
@@ -648,7 +641,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     mutation.identities,
                     &stmt.table,
                     &id_column,
-                    accepts_supplied_identity,
+                    identity_source,
                     auto_id_col.as_deref(),
                     stmt.overriding,
                     &mut document,
@@ -668,15 +661,12 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                                 &stmt.table,
                                 &mut rule_document,
                             )?;
-                            let rule_doc_id = if accepts_supplied_identity {
-                                document_supplied_id(
+                            let rule_doc_id =
+                                crate::mutation::identity::supplied_document_identity(
+                                    identity_source,
                                     &rule_document,
                                     &id_column,
-                                    auto_id_col.as_deref() == Some(id_column.as_str()),
-                                )?
-                            } else {
-                                None
-                            };
+                                )?;
                             Ok(crate::mutation::rules::RuleRowImage {
                                 old_storage_table: None,
                                 old_doc_id: None,
@@ -723,7 +713,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                             mutation.identities,
                             &target_table,
                             &id_column,
-                            accepts_supplied_identity,
+                            identity_source,
                             None,
                             &mut document,
                             "prepare INSERT identity",
@@ -735,9 +725,8 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         params,
                         &snapshot_scope,
                         conflict_update_columns.as_deref().unwrap_or(&[]),
-                        auto_id_col.as_deref(),
                         &id_column,
-                        accepts_supplied_identity,
+                        identity_source,
                         target_table,
                         document,
                         insert_identity,

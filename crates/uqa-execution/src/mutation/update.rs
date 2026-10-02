@@ -9,7 +9,6 @@ use super::{
     assignment::{validate_view_checks, ViewCheckContext},
     constraints::validate_key_constraints_with_previous,
     events::ReferentialActionContext,
-    identity::integer_primary_key_doc_id,
     preparation::MutationPreparationContext,
     prepared::PreparedDocumentRewrite,
     referential::{prepare_partition_update_route, prepare_routed_document_rewrite},
@@ -84,11 +83,7 @@ pub fn prepare_update_row<S: Clone + 'static>(
     else {
         return Ok(None);
     };
-    let primary_key_doc_id = integer_primary_key_doc_id(
-        context.referential.constraints.catalog,
-        &stmt.table,
-        &rewrite.new_document,
-    )?;
+    let primary_key_doc_id = rewrite.relocation;
     let rewritten_doc_id = rewrite
         .destination
         .as_ref()

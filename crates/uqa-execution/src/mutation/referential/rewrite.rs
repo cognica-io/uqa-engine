@@ -5,7 +5,7 @@
 //
 
 use super::{
-    integer_primary_key_doc_id, lock_document_key_dependencies,
+    arriving_key_identity, key_relocation, lock_document_key_dependencies,
     lock_existing_document_foreign_key_dependencies,
     lock_existing_document_rewrite_foreign_key_dependencies, lock_mutation_row,
     partition_insert_target, prepare_referenced_key_update_actions,
@@ -72,14 +72,23 @@ pub fn prepare_document_rewrite<S: Clone + 'static>(
         referential_actions,
     );
     referential_actions.rewrite_stack.pop();
+    let actions = actions?;
+    let relocation = key_relocation(
+        context.constraints.catalog,
+        context.identifiers,
+        table,
+        doc_id,
+        &new_document,
+    )?;
     Ok(Some(PreparedDocumentRewrite {
         table: table.to_string(),
         doc_id,
         destination: None,
+        relocation,
         partition_move_delete: None,
         old_document,
         new_document,
-        actions: actions?,
+        actions,
         trigger_updated_columns: None,
         capture_partition_move_update_transition: true,
     }))
@@ -182,13 +191,18 @@ fn retarget_prepared_document_rewrite<S: Clone + 'static>(
         destination_table,
         &prepared.new_document,
     )?;
-    let destination_doc_id = integer_primary_key_doc_id(
+    let destination_doc_id = match arriving_key_identity(
         context.constraints.catalog,
+        context.identifiers,
         destination_table,
         &prepared.new_document,
-    )?
-    .unwrap_or(context.identifiers.allocate_next_id(destination_table)?);
+    )? {
+        Some(doc_id) => doc_id,
+        None => context.identifiers.allocate_next_id(destination_table)?,
+    };
     prepared.destination = Some((destination_table.to_string(), destination_doc_id));
+    // The row leaves its table, so it takes no identity there.
+    prepared.relocation = None;
     Ok(())
 }
 
@@ -324,6 +338,7 @@ pub fn prepare_routed_document_rewrite<S: Clone + 'static>(
                 table: table.to_string(),
                 doc_id,
                 destination: None,
+                relocation: None,
                 partition_move_delete: Some(Box::new(delete)),
                 old_document,
                 new_document: attempted_document,

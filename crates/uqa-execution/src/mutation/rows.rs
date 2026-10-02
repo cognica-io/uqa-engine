@@ -30,6 +30,20 @@ pub fn is_virtual_document_id_column(
             .any(|definition| definition.name == DOC_ID_COLUMN)
 }
 
+/// The value of an integer primary-key column in a row image: the stored value, or, for an image that lacks the column, the key its identity names. An identity no key names says nothing of the key.
+pub fn integer_key_value(
+    document: &Document,
+    column: &str,
+    doc_id: Option<DocId>,
+) -> Result<Value, SQLError> {
+    if let Some(value) = document.get(column) {
+        return Ok(value.clone());
+    }
+    doc_id
+        .filter(|doc_id| uqa_sql::semantics::key_identity::is_key_document_id(*doc_id))
+        .map_or(Ok(Value::Null), doc_id_value)
+}
+
 pub fn target_row(
     context: MutationRowContext<'_>,
     table: &str,
@@ -174,14 +188,12 @@ pub fn target_row_for_storage_optional_with_metadata(
     let values = columns
         .iter()
         .map(|column| {
-            if is_virtual_document_id_column(column, &definitions)
-                || definitions.iter().any(|definition| {
-                    definition.name == *column
-                        && definition.primary_key
-                        && definition.ty.is_integer()
-                })
-            {
+            if is_virtual_document_id_column(column, &definitions) {
                 doc_id.map_or(Ok(Value::Null), doc_id_value)
+            } else if definitions.iter().any(|definition| {
+                definition.name == *column && definition.primary_key && definition.ty.is_integer()
+            }) {
+                integer_key_value(&materialized, column, doc_id)
             } else if column == TABLE_OID_COLUMN {
                 storage_table.map_or(Ok(Value::Null), |storage_table| {
                     Ok(Value::Int(crate::catalog::projection::table_relation_oid(

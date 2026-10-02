@@ -49,9 +49,8 @@ pub fn prepare_values_insert_row<S: Clone + 'static>(
     params: &[SQLParam],
     snapshot_scope: &CteScope<S>,
     conflict_update_columns: &[String],
-    auto_id_column: Option<&str>,
     id_column: &str,
-    accepts_supplied_identity: bool,
+    identity_source: crate::mutation::identity::IdentitySource,
     target_table: String,
     mut document: Document,
     mut insert_identity: (DocId, bool),
@@ -83,8 +82,7 @@ pub fn prepare_values_insert_row<S: Clone + 'static>(
         },
         &target_table,
         id_column,
-        accepts_supplied_identity,
-        auto_id_column,
+        identity_source,
         &document,
         &mut insert_identity,
     )?;
@@ -261,11 +259,7 @@ pub fn stage_prepared_insert_row<S: Clone + 'static>(
                 .as_ref()
                 .map_or_else(|| old_storage_table.clone(), |(table, _)| table.clone());
             let old_doc_id = prepared.doc_id;
-            let primary_key_doc_id = crate::mutation::identity::integer_primary_key_doc_id(
-                services.referential.constraints.catalog,
-                &stmt.table,
-                &prepared.new_document,
-            )?;
+            let primary_key_doc_id = prepared.relocation;
             let new_doc_id = prepared
                 .destination
                 .as_ref()

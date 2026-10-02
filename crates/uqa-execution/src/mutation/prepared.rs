@@ -12,13 +12,15 @@ use uqa_core::{DocId, Value};
 use uqa_sql::SQLError;
 use uqa_storage::document_store::Document;
 
-const PREPARED_MUTATION_CODEC_VERSION: i64 = 1;
+const PREPARED_MUTATION_CODEC_VERSION: i64 = 2;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreparedDocumentRewrite {
     pub table: String,
     pub doc_id: DocId,
     pub destination: Option<(String, DocId)>,
+    /// The identity within its own table the row moves to because its integer primary key changed, decided once when the rewrite is prepared so that every later stage moves it to the same one.
+    pub relocation: Option<DocId>,
     pub partition_move_delete: Option<Box<PreparedDocumentDelete>>,
     pub old_document: Document,
     pub new_document: Document,
@@ -125,6 +127,12 @@ pub fn encode_prepared_document_rewrite(prepared: PreparedDocumentRewrite) -> Va
             }),
         ),
         (
+            "relocation".into(),
+            prepared
+                .relocation
+                .map_or(Value::Null, encode_prepared_doc_id),
+        ),
+        (
             "partition_move_delete".into(),
             prepared
                 .partition_move_delete
@@ -207,6 +215,18 @@ pub fn decode_prepared_document_rewrite(value: Value) -> Result<PreparedDocument
             ))
         }
     };
+    let relocation = match fields.remove("relocation") {
+        Some(Value::Null) => None,
+        Some(doc_id) => Some(decode_prepared_doc_id(
+            doc_id,
+            "prepared rewrite relocation",
+        )?),
+        None => {
+            return Err(SQLError::Internal(
+                "prepared rewrite spill payload has no relocation".into(),
+            ))
+        }
+    };
     let partition_move_delete = match fields.remove("partition_move_delete") {
         Some(Value::Null) | None => None,
         Some(delete) => Some(Box::new(decode_prepared_document_delete(delete)?)),
@@ -272,6 +292,7 @@ pub fn decode_prepared_document_rewrite(value: Value) -> Result<PreparedDocument
         table,
         doc_id,
         destination,
+        relocation,
         partition_move_delete,
         old_document,
         new_document,
@@ -568,6 +589,7 @@ mod tests {
             table: "public.source".into(),
             doc_id: 7,
             destination: Some(("public.destination".into(), 9)),
+            relocation: None,
             partition_move_delete: Some(Box::new(PreparedDocumentDelete {
                 table: "public.source".into(),
                 doc_id: 7,
@@ -580,6 +602,7 @@ mod tests {
                 table: "public.child".into(),
                 doc_id: 11,
                 destination: None,
+                relocation: Some(1 << 62),
                 partition_move_delete: None,
                 old_document: document("parent", 7),
                 new_document: document("parent", 9),
@@ -624,12 +647,17 @@ mod tests {
 
     #[test]
     fn prepared_codec_rejects_version_width_and_unknown_fields() {
-        let mut wrong_version = match encode_prepared_document_rewrite(rewrite()) {
-            Value::Map(fields) => fields,
-            _ => unreachable!(),
-        };
-        wrong_version.insert("version".into(), Value::Int(2));
-        assert!(decode_prepared_document_rewrite(Value::Map(wrong_version)).is_err());
+        for version in [
+            PREPARED_MUTATION_CODEC_VERSION - 1,
+            PREPARED_MUTATION_CODEC_VERSION + 1,
+        ] {
+            let mut wrong_version = match encode_prepared_document_rewrite(rewrite()) {
+                Value::Map(fields) => fields,
+                _ => unreachable!(),
+            };
+            wrong_version.insert("version".into(), Value::Int(version));
+            assert!(decode_prepared_document_rewrite(Value::Map(wrong_version)).is_err());
+        }
 
         assert!(decode_prepared_doc_id(Value::Bytes(vec![0; 3]), "test identity").is_err());
 

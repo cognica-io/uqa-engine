@@ -15,7 +15,7 @@ use super::{
     },
     errors::{dml_storage_error, missing_document_error},
     events::{ReferentialActionContext, ReferentialRewritePreparation},
-    identity::integer_primary_key_doc_id,
+    identity::{arriving_key_identity, key_relocation},
     locking::{lock_mutation_row, lock_mutation_target, lock_physical_mutation_target},
     prepared::{PreparedDeleteAction, PreparedDocumentDelete, PreparedDocumentRewrite},
 };

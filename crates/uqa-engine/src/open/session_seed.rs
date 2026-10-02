@@ -115,6 +115,7 @@ impl Engine {
             columns: CatalogCell::from_snapshot(source.columns.snapshot()),
             columns_declared: CatalogCell::from_snapshot(source.columns_declared.snapshot()),
             next_id: Mutex::new(*source.next_id.lock()),
+            maps_integer_keys: AtomicBool::new(source.maps_integer_keys.load(Ordering::Acquire)),
             analyzer: CatalogCell::from_snapshot(source.analyzer.snapshot()),
             column_stats: CatalogCell::from_snapshot(source.column_stats.snapshot()),
             column_stats_loaded: AtomicBool::new(

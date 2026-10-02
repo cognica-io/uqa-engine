@@ -29,7 +29,7 @@ use crate::{
         errors::{dml_storage_error, missing_document_error},
         expressions::eval_mutation_expr,
         identity::{
-            insert_identity_columns, integer_primary_key_doc_id, persist_auto_increment_identity,
+            insert_identity_columns, persist_auto_increment_identity,
             prepare_auto_increment_identity, prepare_insert_identity,
             refresh_insert_identity_after_trigger, IdentityAllocationContext,
         },
@@ -571,11 +571,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             .destination
                             .as_ref()
                             .map_or_else(|| old_storage_table.clone(), |(table, _)| table.clone());
-                        let primary_key_doc_id = integer_primary_key_doc_id(
-                            constraints.catalog,
-                            &target_table,
-                            &prepared.new_document,
-                        )?;
+                        let primary_key_doc_id = prepared.relocation;
                         let checked_doc_id = prepared
                             .destination
                             .as_ref()
@@ -734,17 +730,16 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                         mut document,
                         overriding,
                     } => {
-                        let (auto_id_col, id_column, accepts_supplied_identity) =
-                            insert_identity_columns(
-                                mutation.identities,
-                                &target_table,
-                                "MERGE INSERT",
-                            )?;
+                        let (auto_id_col, id_column, identity_source) = insert_identity_columns(
+                            mutation.identities,
+                            &target_table,
+                            "MERGE INSERT",
+                        )?;
                         let prepared_auto_identity = prepare_auto_increment_identity(
                             mutation.identities,
                             &target_table,
                             &id_column,
-                            accepts_supplied_identity,
+                            identity_source,
                             auto_id_col.as_deref(),
                             overriding,
                             &mut document,
@@ -768,7 +763,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                                 mutation.identities,
                                 &storage_table,
                                 &id_column,
-                                accepts_supplied_identity,
+                                identity_source,
                                 None,
                                 &mut document,
                                 "prepare MERGE INSERT identity",
@@ -801,8 +796,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             },
                             &storage_table,
                             &id_column,
-                            accepts_supplied_identity,
-                            auto_id_col.as_deref(),
+                            identity_source,
                             &document,
                             &mut insert_identity,
                         )?;

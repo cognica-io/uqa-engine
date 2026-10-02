@@ -73,7 +73,7 @@ pub struct InsertSelectConsumer<S: Clone + 'static> {
 pub struct InsertSelectIdentity {
     pub auto_id_column: Option<String>,
     pub id_column: String,
-    pub accepts_supplied_identity: bool,
+    pub identity_source: crate::mutation::identity::IdentitySource,
 }
 
 pub struct InsertSelectConsumerState<S: Clone + 'static> {
@@ -82,7 +82,7 @@ pub struct InsertSelectConsumerState<S: Clone + 'static> {
     pub snapshot_scope: CteScope<S>,
     pub auto_id_column: Option<String>,
     pub id_column: String,
-    pub accepts_supplied_identity: bool,
+    pub identity_source: crate::mutation::identity::IdentitySource,
     pub conflict_update_columns: Vec<String>,
     pub columns: Option<Vec<uqa_sql::ast::AssignmentTarget<crate::ScalarExpr>>>,
     /// The identity columns whose source values `OVERRIDING USER VALUE` discards.
@@ -122,7 +122,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
         let InsertSelectIdentity {
             auto_id_column,
             id_column,
-            accepts_supplied_identity,
+            identity_source,
         } = identity;
         let prepared_schema = prepared_insert_spill_schema();
         Ok(Self {
@@ -132,7 +132,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
                 snapshot_scope,
                 auto_id_column,
                 id_column,
-                accepts_supplied_identity,
+                identity_source,
                 conflict_update_columns,
                 columns: None,
                 discarded_identities: std::collections::BTreeSet::new(),
@@ -250,7 +250,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             snapshot_scope,
             auto_id_column,
             id_column,
-            accepts_supplied_identity,
+            identity_source,
             conflict_update_columns,
             columns,
             discarded_identities,
@@ -324,7 +324,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             services.identities,
             &stmt.table,
             id_column,
-            *accepts_supplied_identity,
+            *identity_source,
             auto_id_column.as_deref(),
             stmt.overriding,
             &mut document,
@@ -348,7 +348,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
                 services.identities,
                 &target_table,
                 id_column,
-                *accepts_supplied_identity,
+                *identity_source,
                 None,
                 &mut document,
                 "prepare INSERT SELECT identity",
@@ -379,8 +379,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             },
             &target_table,
             id_column,
-            *accepts_supplied_identity,
-            auto_id_column.as_deref(),
+            *identity_source,
             &document,
             &mut insert_identity,
         )?;

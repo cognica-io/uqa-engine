@@ -434,11 +434,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
             events.referential_actions_mut(),
         )? {
             let row_affected = !prepared.is_partition_move_delete();
-            let primary_key_doc_id = crate::mutation::identity::integer_primary_key_doc_id(
-                context.mutation.preparation.referential.constraints.catalog,
-                &stmt.table,
-                &prepared.new_document,
-            )?;
+            let primary_key_doc_id = prepared.relocation;
             let rewritten_doc_id = prepared
                 .destination
                 .as_ref()

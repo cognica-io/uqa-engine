@@ -22,6 +22,7 @@ pub struct GeneratedRewriteContext<'a, S: Clone + 'static> {
     pub assignment: MutationAssignmentContext<'a, S>,
     pub storage: &'a dyn MutationStorage,
     pub state: &'a dyn GeneratedRewriteState,
+    pub identifiers: &'a dyn crate::mutation::identity::MutationIdentifiers,
 }
 fn ddl_storage_error(action: &str, error: uqa_storage::StorageBackendError) -> SQLError {
     uqa_sql::catalog::errors::storage_error(action, &error)
@@ -54,9 +55,11 @@ pub fn validate_and_rewrite_generated_rows<S: Clone + 'static>(
         let mut replacements = Vec::with_capacity(rows.len());
         let mut remaps_primary_key = false;
         for (old_doc_id, document) in rows {
-            let new_doc_id = crate::mutation::identity::integer_primary_key_doc_id(
+            let new_doc_id = crate::mutation::identity::key_relocation(
                 context.keys.constraints.catalog,
+                context.identifiers,
                 table,
+                old_doc_id,
                 &document,
             )?
             .unwrap_or(old_doc_id);

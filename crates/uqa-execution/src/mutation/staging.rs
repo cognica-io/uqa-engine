@@ -10,7 +10,6 @@ use super::{
         context::ConstraintContext, validate_document_non_key_constraints,
         validate_document_rewrite_constraints, validate_key_constraints,
     },
-    identity::integer_primary_key_doc_id,
     prepared::{PreparedDeleteAction, PreparedDocumentDelete, PreparedDocumentRewrite},
     triggers::context::TriggerContext,
 };
@@ -129,12 +128,7 @@ pub fn stage_prepared_document_rewrite_with_parent(
                 params,
                 prepared.doc_id,
             )?;
-            let rewritten_doc_id = integer_primary_key_doc_id(
-                context.constraints.catalog,
-                &prepared.table,
-                &prepared.new_document,
-            )?
-            .unwrap_or(prepared.doc_id);
+            let rewritten_doc_id = prepared.relocation.unwrap_or(prepared.doc_id);
             if rewritten_doc_id != prepared.doc_id {
                 context
                     .commands

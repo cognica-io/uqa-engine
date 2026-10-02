@@ -48,6 +48,7 @@ impl Engine {
             assignment: self.mutation_assignment_context(),
             storage: self,
             state: self,
+            identifiers: self,
         }
     }
 }

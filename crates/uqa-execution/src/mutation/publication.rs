@@ -16,7 +16,7 @@ use super::prepared::{
     PreparedDeleteAction, PreparedDocumentDelete, PreparedDocumentInsert, PreparedDocumentRewrite,
     PreparedMutationAction,
 };
-use super::{identity::integer_primary_key_doc_id, vectors::document_vectors};
+use super::vectors::document_vectors;
 mod context;
 pub use context::*;
 mod identity;
@@ -214,51 +214,49 @@ fn apply_document_rewrite(
         }
         return Ok(*destination_doc_id);
     }
-    let rewritten_doc_id =
-        match integer_primary_key_doc_id(context.catalog, &prepared.table, &prepared.new_document)?
-        {
-            // An integer primary key names the row's doc_id slot; keep that invariant when the key itself changes, or value -> doc_id lookups (the unique fast path and FOREIGN KEY validation) read the stale slot and miss the row.
-            Some(new_id) if new_id != prepared.doc_id => {
-                if let Some(batch) = batch {
-                    batch.flush_fts(context.text)?;
-                }
-                observe_row_write(context.observations, &prepared.table, prepared.doc_id)?;
-                observe_row_write(context.observations, &prepared.table, new_id)?;
-                context
-                    .storage
-                    .delete_document(&prepared.table, prepared.doc_id)?;
-                context.storage.insert_document(
-                    &prepared.table,
-                    new_id,
-                    prepared.new_document.clone(),
-                    document_vectors(context.catalog, &prepared.table, &prepared.new_document)?,
-                    InsertedIdentity::Vacant,
-                )?;
-                context
-                    .identifiers
-                    .advance_next_id(&prepared.table, new_id)
-                    .map_err(|err| {
-                        super::errors::identifier_storage_error("UPDATE primary key", &err)
-                    })?;
-                context.history.note_rewrite(
-                    &prepared.table,
-                    prepared.doc_id,
-                    &prepared.table,
-                    new_id,
-                )?;
-                context.deferrals.rewritten(
-                    &prepared.table,
-                    new_id,
-                    Some(&prepared.old_document),
-                    &prepared.new_document,
-                )?;
-                new_id
+    let rewritten_doc_id = match prepared.relocation {
+        // An integer primary key names the row's doc_id slot; keep that invariant when the key itself changes, or value -> doc_id lookups (the unique fast path and FOREIGN KEY validation) read the stale slot and miss the row. A key that names no slot moves the row out of the one its old key named, to the identity its rewrite generated.
+        Some(new_id) if new_id != prepared.doc_id => {
+            if let Some(batch) = batch {
+                batch.flush_fts(context.text)?;
             }
-            _ => {
-                rewrite_at_identity(context, prepared, batch)?;
-                prepared.doc_id
-            }
-        };
+            observe_row_write(context.observations, &prepared.table, prepared.doc_id)?;
+            observe_row_write(context.observations, &prepared.table, new_id)?;
+            context
+                .storage
+                .delete_document(&prepared.table, prepared.doc_id)?;
+            context.storage.insert_document(
+                &prepared.table,
+                new_id,
+                prepared.new_document.clone(),
+                document_vectors(context.catalog, &prepared.table, &prepared.new_document)?,
+                InsertedIdentity::Vacant,
+            )?;
+            context
+                .identifiers
+                .advance_next_id(&prepared.table, new_id)
+                .map_err(|err| {
+                    super::errors::identifier_storage_error("UPDATE primary key", &err)
+                })?;
+            context.history.note_rewrite(
+                &prepared.table,
+                prepared.doc_id,
+                &prepared.table,
+                new_id,
+            )?;
+            context.deferrals.rewritten(
+                &prepared.table,
+                new_id,
+                Some(&prepared.old_document),
+                &prepared.new_document,
+            )?;
+            new_id
+        }
+        _ => {
+            rewrite_at_identity(context, prepared, batch)?;
+            prepared.doc_id
+        }
+    };
     for action in &mut prepared.actions {
         apply_validated_prepared_document_rewrite(context, action)?;
     }
