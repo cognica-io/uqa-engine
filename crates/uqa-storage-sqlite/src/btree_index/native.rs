@@ -272,7 +272,11 @@ pub(super) fn apply_write(
     if let Some(values) = values {
         for (field, value) in values {
             let field = SQLiteValueIndexKey(field);
-            if snapshot.contains_row(Family::BtreeIndexes, owner, &[field.as_value_ref()])? {
+            if snapshot.contains_definition_row(
+                Family::BtreeIndexes,
+                owner,
+                &[field.as_value_ref()],
+            )? {
                 entry(
                     snapshot,
                     batch,

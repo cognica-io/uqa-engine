@@ -415,6 +415,7 @@ impl VersionedPersistence for SQLiteRecordStore {
                 reclamation_epoch,
                 monitor: monitor.map(std::sync::atomic::AtomicU64::new),
                 table_owners: read::table_owners::TableOwners::default(),
+                row_presence: read::row_presence::RowPresence::default(),
                 _lease: lease,
             },
             control,

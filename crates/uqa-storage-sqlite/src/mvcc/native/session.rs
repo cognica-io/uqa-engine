@@ -353,6 +353,40 @@ impl NativeSnapshot {
             .is_some_and(|record| record.live))
     }
 
+    /// Whether a definition row exists that every write of a table asks about. A row this transaction did not change is the committed one, whose presence the committed snapshot keeps after its first read.
+    pub(crate) fn contains_definition_row(
+        &self,
+        family: Family,
+        owner: NativeRecordOwner,
+        components: &[ValueRef<'_>],
+    ) -> Result<bool> {
+        let key =
+            NativeRecordIdentity::new(family, owner)?.encode_key(components, &self.control)?;
+        let live = || -> Result<bool> {
+            Ok(self
+                .view
+                .metadata(&key, &self.control)?
+                .is_some_and(|record| record.live))
+        };
+        let Some(committed) = self
+            .view
+            .committed()
+            .provider_snapshot()
+            .and_then(|snapshot| snapshot.downcast_ref::<crate::mvcc::read::Snapshot>())
+        else {
+            return live();
+        };
+        if self.view.has_private_change(&key, &self.control)? {
+            return live();
+        }
+        if let Some(live) = committed.row_presence.get(&key) {
+            return Ok(live);
+        }
+        let live = live()?;
+        committed.row_presence.remember(&key, live);
+        Ok(live)
+    }
+
     pub(crate) fn ensure_table_owner(
         &self,
         table: &str,

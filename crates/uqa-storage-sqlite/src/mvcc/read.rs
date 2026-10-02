@@ -8,6 +8,7 @@
 
 mod last;
 mod ordered;
+pub(crate) mod row_presence;
 pub(crate) mod table_owners;
 mod values;
 
@@ -31,6 +32,7 @@ pub(super) struct Snapshot {
     /// The commit monitor's value before this snapshot, or a later one of the same sequence, was captured.
     pub(super) monitor: Option<std::sync::atomic::AtomicU64>,
     pub(crate) table_owners: table_owners::TableOwners,
+    pub(crate) row_presence: row_presence::RowPresence,
     pub(super) _lease: std::sync::Arc<uqa_storage::mvcc::SnapshotLease>,
 }
 
