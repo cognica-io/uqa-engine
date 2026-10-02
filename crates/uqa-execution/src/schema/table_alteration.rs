@@ -90,6 +90,34 @@ pub fn run_alter_table<S: Clone + 'static>(
     Ok(SQLResult::empty())
 }
 
+/// Create the sequence of an added `SERIAL` or identity column once, before the column reaches a child table: a partition draws from its parent's identity sequence and an inheritance child from its parent's `SERIAL` default. Identity is not inherited, so `PostgreSQL` rejects an identity column for a table with inheritance children before it creates anything.
+fn prepare_added_column_sequence<S: Clone + 'static>(
+    context: &TableAlterContext<'_, S>,
+    table: &str,
+    recurse: bool,
+    column: &mut uqa_sql::ast::ColumnDef,
+) -> Result<(), SQLError> {
+    let Some(provenance) = column.auto_increment.as_ref() else {
+        return Ok(());
+    };
+    if provenance.is_identity() && recurse {
+        let catalog = context.hierarchy.partitions.catalog;
+        let partitioned = catalog
+            .try_table_hierarchy(table)
+            .map_err(SQLError::Internal)?
+            .partition_spec
+            .is_some();
+        if !partitioned && !catalog.direct_hierarchy_children(table)?.is_empty() {
+            return Err(SQLError::Routine {
+                sqlstate: "42P16".into(),
+                message: "cannot recursively add identity column to table that has child tables"
+                    .into(),
+            });
+        }
+    }
+    crate::schema::columns::addition::create_added_column_sequence(&context.addition, table, column)
+}
+
 fn prepare_alter_action<S: Clone + 'static>(
     context: &TableAlterContext<'_, S>,
     table: &str,
@@ -103,6 +131,7 @@ fn prepare_alter_action<S: Clone + 'static>(
                 context.hierarchy.publication.types,
                 &column.ty,
             )?;
+            prepare_added_column_sequence(context, table, recurse, column)?;
         }
         AlterTableAction::AlterColumnType { ty, .. } => {
             *ty = uqa_sql::type_resolution::resolve_declared_column_type(

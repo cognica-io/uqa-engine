@@ -387,3 +387,68 @@ fn an_added_sequence_column_numbers_the_rows_its_table_holds() {
         ["0"]
     );
 }
+
+fn hierarchy_rows(engine: &Engine, label: &str) {
+    for (query, columns, expected) in [
+        (
+            "SELECT k, id FROM parted ORDER BY k",
+            &["k", "id"][..],
+            vec!["1|100", "2|101", "3|102", "4|103"],
+        ),
+        (
+            "SELECT pg_get_serial_sequence('parted_low', 'id') AS child, pg_get_serial_sequence('parted', 'id') AS parent",
+            &["child", "parent"],
+            vec!["null|public.parted_id_seq"],
+        ),
+        ("SELECT v, s FROM serial_child", &["v", "s"], vec!["1|1"]),
+        (
+            "SELECT relname FROM pg_class WHERE relkind = 'S' ORDER BY relname",
+            &["relname"],
+            vec!["parted_id_seq", "serial_parent_s_seq"],
+        ),
+    ] {
+        assert_eq!(rows(engine, query, columns), expected, "{label}: {query}");
+    }
+}
+
+#[test]
+fn an_added_sequence_column_reaches_child_tables_as_postgresql_does() {
+    on_every_engine(
+        |engine, label| {
+            // Partitions draw from their parent's identity sequence.
+            run(
+                engine,
+                "CREATE TABLE parted (k int) PARTITION BY RANGE (k);
+                 CREATE TABLE parted_low PARTITION OF parted FOR VALUES FROM (0) TO (10);
+                 INSERT INTO parted VALUES (1), (2);
+                 ALTER TABLE parted ADD COLUMN id int GENERATED ALWAYS AS IDENTITY (START WITH 100);
+                 INSERT INTO parted_low (k) VALUES (3);
+                 INSERT INTO parted (k) VALUES (4)",
+            );
+            // Identity is not inherited, so an inheritance parent cannot take an identity column, while its children take the default of a `SERIAL` one.
+            run(
+                engine,
+                "CREATE TABLE identity_parent (v int);
+                 CREATE TABLE identity_child () INHERITS (identity_parent);
+                 CREATE TABLE serial_parent (v int);
+                 CREATE TABLE serial_child () INHERITS (serial_parent);
+                 INSERT INTO serial_child VALUES (1);
+                 ALTER TABLE serial_parent ADD COLUMN s serial",
+            );
+            assert_eq!(
+                error(
+                    engine,
+                    "ALTER TABLE identity_parent ADD COLUMN id int GENERATED ALWAYS AS IDENTITY"
+                ),
+                (
+                    "42P16".to_owned(),
+                    "cannot recursively add identity column to table that has child tables"
+                        .to_owned()
+                ),
+                "{label}"
+            );
+            hierarchy_rows(engine, label);
+        },
+        hierarchy_rows,
+    );
+}

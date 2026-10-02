@@ -59,7 +59,6 @@ pub fn add_column<S: Clone + 'static>(
     if column_exists(context, table, &col_name, if_not_exists)? {
         return Ok(());
     }
-    create_column_sequence(context, table, &mut column)?;
     uqa_sql::schema::columns::addition::bind_added_column(
         &context.analysis,
         table,
@@ -184,15 +183,20 @@ fn column_exists<S: Clone + 'static>(
     })
 }
 
-/// Create the sequence of a `SERIAL` or identity column, which exists before the column does.
-fn create_column_sequence<S: Clone + 'static>(
+/// Create the sequence of a `SERIAL` or identity column added to `table`, which exists before the column does. An existing column fails first, so no sequence is created for it.
+pub fn create_added_column_sequence<S: Clone + 'static>(
     context: &ColumnAdditionContext<'_, S>,
     table: &str,
     column: &mut ColumnDef,
 ) -> Result<(), SQLError> {
-    if column.auto_increment.is_none() {
+    if column
+        .auto_increment
+        .as_ref()
+        .is_none_or(|provenance| provenance.sequence.is_some())
+    {
         return Ok(());
     }
+    column_exists(context, table, &column.name, false)?;
     let persistence = context
         .generated
         .keys
