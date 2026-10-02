@@ -261,7 +261,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 &mut scope,
             )?;
             scope.scalar_subqueries.clone_from(&stmt.subqueries);
-            // Resolve the table's primary-key column name. Auto-increment (SERIAL / BIGSERIAL) wins; otherwise the scalar PRIMARY KEY column wins; otherwise use the conventional legacy `id` slot. Both VALUES and SELECT sources must derive the internal doc id from this same column or later primary-key rewrites can address a different row than the one that was inserted.
+            // Resolve the column that names an inserted row: the table's single PRIMARY KEY column, whether a sequence generates its values or not, and otherwise the conventional legacy `id` slot of a table without declared columns. Both VALUES and SELECT sources must derive the internal doc id from this same column or later primary-key rewrites can address a different row than the one that was inserted.
             let (auto_id_col, id_column, accepts_supplied_identity) =
                 insert_identity_columns(mutation.identities, &stmt.table, "INSERT")?;
             let mut rule_source_rows = None;
@@ -534,6 +534,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     mutation.identities,
                     &stmt.table,
                     &id_column,
+                    accepts_supplied_identity,
                     auto_id_col.as_deref(),
                     &mut document,
                     "prepare INSERT identity",
@@ -592,11 +593,15 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             }
             let mut view_rule_rows = Vec::with_capacity(pending_rule_rows.len());
             for document in &pending_rule_rows {
-                let rule_doc_id = document_supplied_id(
-                    document,
-                    &id_column,
-                    auto_id_col.as_deref() == Some(id_column.as_str()),
-                )?;
+                let rule_doc_id = if accepts_supplied_identity {
+                    document_supplied_id(
+                        document,
+                        &id_column,
+                        auto_id_col.as_deref() == Some(id_column.as_str()),
+                    )?
+                } else {
+                    None
+                };
                 view_rule_rows.push(crate::mutation::rules::RuleRowImage {
                     old_storage_table: None,
                     old_doc_id: None,
@@ -630,6 +635,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     mutation.identities,
                     &stmt.table,
                     &id_column,
+                    accepts_supplied_identity,
                     auto_id_col.as_deref(),
                     &mut document,
                     "prepare INSERT identity",
@@ -648,11 +654,15 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                                 &stmt.table,
                                 &mut rule_document,
                             )?;
-                            let rule_doc_id = document_supplied_id(
-                                &rule_document,
-                                &id_column,
-                                auto_id_col.as_deref() == Some(id_column.as_str()),
-                            )?;
+                            let rule_doc_id = if accepts_supplied_identity {
+                                document_supplied_id(
+                                    &rule_document,
+                                    &id_column,
+                                    auto_id_col.as_deref() == Some(id_column.as_str()),
+                                )?
+                            } else {
+                                None
+                            };
                             Ok(crate::mutation::rules::RuleRowImage {
                                 old_storage_table: None,
                                 old_doc_id: None,

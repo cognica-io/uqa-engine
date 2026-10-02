@@ -311,6 +311,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             services.identities,
             &stmt.table,
             id_column,
+            *accepts_supplied_identity,
             auto_id_column.as_deref(),
             &mut document,
             "prepare INSERT SELECT identity",

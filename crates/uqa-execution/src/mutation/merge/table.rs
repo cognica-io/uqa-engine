@@ -741,6 +741,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             mutation.identities,
                             &target_table,
                             &id_column,
+                            accepts_supplied_identity,
                             auto_id_col.as_deref(),
                             &mut document,
                             "prepare MERGE INSERT identity",

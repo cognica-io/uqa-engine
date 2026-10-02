@@ -85,23 +85,25 @@ pub fn insert_identity_columns(
         .map(|column| column.name.clone())
         .collect::<Vec<_>>();
     let primary_key = (primary_keys.len() == 1).then(|| primary_keys[0].clone());
-    let accepts_supplied_identity =
-        auto_increment.is_some() || primary_key.is_some() || definitions.is_empty();
-    let id_column = auto_increment
-        .clone()
-        .or(primary_key)
-        .unwrap_or_else(|| "id".into());
-    // The conventional `id` field is a storage identity only for the legacy
-    // schema-less document API. A declared SQL table without an identity or
-    // primary key may contain duplicate ordinary `id` values, so using that
-    // field as the physical document key would silently replace rows.
+    let accepts_supplied_identity = primary_key.is_some() || definitions.is_empty();
+    let id_column = primary_key.unwrap_or_else(|| "id".into());
+    // Only a key names a row. A SERIAL or identity column that is not the
+    // table's single primary key is an ordinary column with a sequence
+    // default, and two rows may supply the same value to it, so its value
+    // cannot choose the physical document. The conventional `id` field is a
+    // storage identity only for the legacy schema-less document API. A
+    // declared SQL table without a primary key may contain duplicate ordinary
+    // `id` values, so using that field as the physical document key would
+    // silently replace rows.
     Ok((auto_increment, id_column, accepts_supplied_identity))
 }
 
+/// Draw the values an inserted row leaves to its identity columns from their sequences, and select the identity of a row that a legacy counter column decides. A sequence value is an ordinary column value: when its column is the table's single primary key it names the row as any supplied key value does, so the caller selects the identity of every row this returns none for.
 pub fn prepare_auto_increment_identity(
     context: InsertIdentityContext<'_>,
     table: &str,
     id_column: &str,
+    accepts_supplied_identity: bool,
     auto_id_column: Option<&str>,
     document: &mut Document,
     action: &str,
@@ -113,7 +115,6 @@ pub fn prepare_auto_increment_identity(
         .catalog
         .auto_increment_columns(table)
         .map_err(|error| dml_storage_error(action, error))?;
-    let mut selected_generated = false;
     for (column, provenance) in &definitions {
         if !provenance.is_identity() {
             continue;
@@ -148,7 +149,6 @@ pub fn prepare_auto_increment_identity(
                 Value::Int(value),
             )?,
         );
-        selected_generated |= column == auto_id_column;
     }
     let provenance = definitions
         .iter()
@@ -159,41 +159,57 @@ pub fn prepare_auto_increment_identity(
                 "auto-increment column `{table}.{auto_id_column}` disappeared"
             ))
         })?;
-    match provenance.kind {
-        uqa_sql::ast::AutoIncrementKind::Serial => Ok(None),
-        uqa_sql::ast::AutoIncrementKind::IdentityAlways
-        | uqa_sql::ast::AutoIncrementKind::IdentityByDefault => {
-            let mut identity = prepare_insert_identity(
-                context,
-                table,
-                id_column,
-                true,
-                Some(auto_id_column),
-                document,
-                action,
-            )?;
-            if selected_generated {
-                identity.1 = false;
+    if provenance.kind != uqa_sql::ast::AutoIncrementKind::Legacy {
+        return Ok(None);
+    }
+    let owner = uqa_sql::semantics::partition::partition_identity_owner(context.partitions, table)?;
+    context
+        .locks
+        .lock_relation(&owner, crate::row_locks::RelationLockMode::RowExclusive)?;
+    if accepts_supplied_identity && auto_id_column == id_column {
+        return prepare_insert_identity(
+            context,
+            &owner,
+            id_column,
+            true,
+            Some(auto_id_column),
+            document,
+            action,
+        )
+        .map(Some);
+    }
+    let generated =
+        prepare_legacy_counter_value(context, &owner, auto_id_column, document, action)?;
+    // A table without a key names its rows by generated identities from the same counter, so a generated counter value names its row too and the counter advances once per row.
+    Ok(generated
+        .filter(|_| !accepts_supplied_identity)
+        .map(|value| (value, false)))
+}
+
+/// Draw a missing value of a legacy counter column that is not the row's key from the table counter, which a supplied value advances past, and return the value drawn.
+fn prepare_legacy_counter_value(
+    context: InsertIdentityContext<'_>,
+    owner: &str,
+    column: &str,
+    document: &mut Document,
+    action: &str,
+) -> Result<Option<DocId>, SQLError> {
+    match document.get(column) {
+        None | Some(Value::Null) => {
+            let value = context.identifiers.allocate_next_id(owner)?;
+            document.insert(column.to_string(), doc_id_value(value)?);
+            Ok(Some(value))
+        }
+        Some(Value::Int(value)) => {
+            if let Ok(value) = DocId::try_from(*value) {
+                context
+                    .identifiers
+                    .advance_next_id(owner, value)
+                    .map_err(|error| identifier_storage_error(action, &error))?;
             }
-            Ok(Some(identity))
+            Ok(None)
         }
-        uqa_sql::ast::AutoIncrementKind::Legacy => {
-            let owner =
-                uqa_sql::semantics::partition::partition_identity_owner(context.partitions, table)?;
-            context
-                .locks
-                .lock_relation(&owner, crate::row_locks::RelationLockMode::RowExclusive)?;
-            prepare_insert_identity(
-                context,
-                &owner,
-                id_column,
-                true,
-                Some(auto_id_column),
-                document,
-                action,
-            )
-            .map(Some)
-        }
+        Some(_) => Ok(None),
     }
 }
 

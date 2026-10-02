@@ -24,6 +24,8 @@ enum Layout {
 
 const LAYOUTS: [Layout; 3] = [Layout::Native, Layout::KeyValue, Layout::Redb];
 
+#[path = "identifiers/sequence_columns.rs"]
+mod sequence_columns;
 #[path = "identifiers/unused.rs"]
 mod unused;
 
@@ -47,6 +49,43 @@ fn provider(layout: Layout, path: &Path) -> Arc<dyn PersistentStorageProvider> {
         Layout::KeyValue => Arc::new(SQLiteKeyValueStorage::open(path).unwrap()),
         Layout::Redb => Arc::new(uqa_storage_redb::RedbStorage::open(path).unwrap()),
     }
+}
+
+fn run(engine: &Engine, statement: &str) {
+    engine
+        .sql(statement, &[])
+        .unwrap_or_else(|error| panic!("{statement}: {error}"));
+}
+
+fn state(engine: &Engine, statement: &str) -> Option<String> {
+    engine
+        .sql(statement, &[])
+        .unwrap_err()
+        .sqlstate()
+        .map(str::to_owned)
+}
+
+/// The rows of `query` as text, one `|`-separated list of the named columns per row.
+fn rows(engine: &Engine, query: &str, columns: &[&str]) -> Vec<String> {
+    engine
+        .sql(query, &[])
+        .unwrap_or_else(|error| panic!("{query}: {error}"))
+        .rows
+        .iter()
+        .map(|row| {
+            columns
+                .iter()
+                .map(|column| match row.get(*column) {
+                    Some(Value::Int(value)) => value.to_string(),
+                    Some(Value::Str(value)) => value.clone(),
+                    Some(Value::Bytes(value)) => format!("{value:?}"),
+                    Some(Value::Null) | None => "null".into(),
+                    Some(other) => panic!("unexpected value {other:?}"),
+                })
+                .collect::<Vec<_>>()
+                .join("|")
+        })
+        .collect()
 }
 
 fn assert_body(engine: &Engine, table: &str, id: u64, body: &str) {
