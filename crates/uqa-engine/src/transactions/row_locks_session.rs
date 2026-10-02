@@ -52,6 +52,38 @@ impl Engine {
         strength: uqa_sql::ast::LockStrength,
         f: impl FnOnce(&Self) -> Result<R, SQLError>,
     ) -> Result<R, SQLError> {
+        self.row_write_transaction(table, Some((doc_id, strength)), true, f)
+    }
+
+    /// Run the write of an inserted row. One that may replace a row locks it as any typed row mutation does.
+    ///
+    /// A new row takes no lock of its own. No other transaction can address its identity before this one commits: a supplied identity is a unique key whose value this transaction has reserved, a generated one was reserved for the row, and a versioned transaction keeps the row private until it commits. `PostgreSQL` likewise locks no tuple it inserts and makes no session wait for a row that session cannot see. The row may still be written over the revision a deleted row left, which the write must expect as it stands now, so the storage target is refreshed unless the identity was never used.
+    pub(crate) fn with_inserted_row_write_transaction<R>(
+        &self,
+        table: &str,
+        doc_id: uqa_core::DocId,
+        inserted: uqa_execution::mutation::publication::InsertedIdentity,
+        f: impl FnOnce(&Self) -> Result<R, SQLError>,
+    ) -> Result<R, SQLError> {
+        if inserted.is_vacant() && self.versioned_backend_transactions() {
+            return self.row_write_transaction(table, None, !inserted.is_unused(), f);
+        }
+        self.with_implicit_row_write_transaction(
+            table,
+            doc_id,
+            uqa_sql::ast::LockStrength::ForUpdate,
+            f,
+        )
+    }
+
+    /// `row` is the tuple to lock before the write, and `refresh` says whether the write needs the latest committed state, as it does after a lock that may have waited for a writer that has since committed.
+    fn row_write_transaction<R>(
+        &self,
+        table: &str,
+        row: Option<(uqa_core::DocId, uqa_sql::ast::LockStrength)>,
+        refresh: bool,
+        f: impl FnOnce(&Self) -> Result<R, SQLError>,
+    ) -> Result<R, SQLError> {
         let _statement = self.runtime.statement_gate.lock();
         self.ensure_row_mutation_allowed(table)?;
         if self.storage.backend.is_none() && self.transaction_depth() == 0 {
@@ -68,21 +100,27 @@ impl Engine {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.prepare_serializable_transaction_snapshot()?;
             self.lock_relation(table, crate::row_locks::RelationLockMode::RowExclusive)?;
-            match self.lock_row(
-                table,
-                doc_id,
-                strength,
-                uqa_sql::ast::LockWait::Block,
-                table,
-            )? {
-                crate::row_locks::LockAcquire::Granted { .. } => {}
-                crate::row_locks::LockAcquire::Skipped => {
-                    return Err(SQLError::Internal(
-                        "blocking typed row mutation unexpectedly skipped a row".into(),
-                    ));
+            if let Some((doc_id, strength)) = row {
+                match self.lock_row(
+                    table,
+                    doc_id,
+                    strength,
+                    uqa_sql::ast::LockWait::Block,
+                    table,
+                )? {
+                    crate::row_locks::LockAcquire::Granted { .. } => {}
+                    crate::row_locks::LockAcquire::Skipped => {
+                        return Err(SQLError::Internal(
+                            "blocking typed row mutation unexpectedly skipped a row".into(),
+                        ));
+                    }
                 }
             }
-            self.prepare_explicit_transaction_writer()?;
+            if refresh {
+                self.prepare_explicit_transaction_writer()?;
+            } else {
+                self.prepare_unrefreshed_transaction_writer()?;
+            }
             f(self)
         }));
 

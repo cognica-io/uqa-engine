@@ -774,16 +774,11 @@ impl Engine {
         vectors: BTreeMap<FieldName, Vec<Vec<f32>>>,
         inserted: uqa_execution::mutation::publication::InsertedIdentity,
     ) -> Result<(), SQLError> {
-        self.with_implicit_row_write_transaction(
-            table,
-            doc_id,
-            uqa_sql::ast::LockStrength::ForUpdate,
-            |engine| {
-                engine.add_prepared_document_with_vector_values_inner(
-                    table, doc_id, document, vectors, inserted,
-                )
-            },
-        )
+        self.with_inserted_row_write_transaction(table, doc_id, inserted, |engine| {
+            engine.add_prepared_document_with_vector_values_inner(
+                table, doc_id, document, vectors, inserted,
+            )
+        })
     }
 
     pub(crate) fn add_prepared_document_with_vector_values_deferred_fts(
@@ -794,16 +789,11 @@ impl Engine {
         vectors: BTreeMap<FieldName, Vec<Vec<f32>>>,
         inserted: uqa_execution::mutation::publication::InsertedIdentity,
     ) -> Result<(), SQLError> {
-        self.with_implicit_row_write_transaction(
-            table,
-            doc_id,
-            uqa_sql::ast::LockStrength::ForUpdate,
-            |engine| {
-                engine.add_prepared_document_with_vector_values_deferred_fts_inner(
-                    table, doc_id, document, vectors, inserted,
-                )
-            },
-        )
+        self.with_inserted_row_write_transaction(table, doc_id, inserted, |engine| {
+            engine.add_prepared_document_with_vector_values_deferred_fts_inner(
+                table, doc_id, document, vectors, inserted,
+            )
+        })
     }
 
     pub(crate) fn add_prepared_document_with_vector_values_deferred_fts_inner(

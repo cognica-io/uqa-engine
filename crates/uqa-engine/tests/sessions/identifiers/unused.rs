@@ -418,3 +418,53 @@ fn serial_and_identity_keys_are_written_as_the_unique_identities_they_are() {
         assert_eq!(listed(&reopened), identities, "{layout:?}");
     }
 }
+
+#[test]
+fn an_identity_another_session_used_and_freed_while_the_statement_ran_is_written_over_what_it_left()
+{
+    for layout in LAYOUTS {
+        let directory = tempfile::tempdir().unwrap();
+        let engine = keyed_table(layout, &directory.path().join("interleaved-identities.db"));
+        let other = std::sync::Mutex::new(engine.new_session().unwrap());
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        // While the statement evaluates its first row, another session inserts and deletes the identity of its second.
+        engine
+            .register_scalar_function_with_options(
+                "interleave",
+                uqa_engine::SQLFunctionOptions::read_only(
+                    uqa_engine::SQLFunctionVolatility::Volatile,
+                ),
+                move |arguments: &[Value]| {
+                    if calls.fetch_add(1, std::sync::atomic::Ordering::AcqRel) == 0 {
+                        other
+                            .lock()
+                            .unwrap()
+                            .sql(
+                                "INSERT INTO keyed VALUES (21, 'theirs', 1, 'x'::bytea);
+                                 DELETE FROM keyed WHERE id = 21",
+                                &[],
+                            )
+                            .map_err(|error| uqa_sql::SQLError::Internal(error.to_string()))?;
+                    }
+                    Ok(arguments[0].clone())
+                },
+            )
+            .unwrap();
+        // The statement began before that commit. It writes identity 21 over the revision the deleted row left there, and 22 at an identity nobody used.
+        run(
+            &engine,
+            "INSERT INTO keyed SELECT interleave(g), 'mine ' || g, 2, NULL FROM generate_series(20, 22) AS g",
+        );
+        assert_eq!(
+            keyed(&engine)[9..],
+            ["20|mine 20|2", "21|mine 21|2", "22|mine 22|2"],
+            "{layout:?}"
+        );
+        assert_eq!(
+            tagged(&engine, 2),
+            ["2", "5", "8", "20", "21", "22"],
+            "{layout:?}"
+        );
+        assert_eq!(tagged(&engine, 1), ["1", "4", "7"], "{layout:?}");
+    }
+}

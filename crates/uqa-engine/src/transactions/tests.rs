@@ -11,6 +11,7 @@ use super::*;
 
 mod graph_diagnostics;
 mod mutation_failures;
+mod new_rows;
 
 #[test]
 fn serializable_dependency_errors_preserve_uncertain_commit_precedence() {
