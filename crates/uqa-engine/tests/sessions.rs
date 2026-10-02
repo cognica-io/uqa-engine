@@ -92,7 +92,7 @@ fn one_engine_serializes_overlapping_sql_statements() {
     let first_engine = engine.clone();
     let first = thread::spawn(move || first_engine.sql("SELECT block_same_session() AS n", &[]));
     entered_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .expect("first statement did not enter the blocking scalar");
 
     let second_engine = engine.clone();
@@ -105,7 +105,7 @@ fn one_engine_serializes_overlapping_sql_statements() {
     release_tx.send(()).unwrap();
     assert_eq!(first.join().unwrap().unwrap().rows[0]["n"], Value::Int(1));
     entered_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .expect("second statement did not enter after the first released the gate");
     release_tx.send(()).unwrap();
     assert_eq!(second.join().unwrap().unwrap().rows[0]["n"], Value::Int(1));
@@ -124,10 +124,10 @@ fn independent_sessions_run_read_statements_concurrently() {
     let second = thread::spawn(move || second.sql("SELECT block_independent_session() AS n", &[]));
 
     entered_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .expect("first session did not enter its read statement");
     entered_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .expect("second session was serialized behind the first read statement");
     release_tx.send(()).unwrap();
     release_tx.send(()).unwrap();
@@ -483,7 +483,7 @@ fn one_session_transaction_is_atomic_across_catalog_documents_text_and_vectors()
                 .send((scoring, document, text_hits, vector_hits))
                 .unwrap();
         });
-        let read_result = observed_rx.recv_timeout(Duration::from_secs(2));
+        let read_result = observed_rx.recv_timeout(crate::waits::COMPLETION);
         // Always release the writer before the scope joins, even when the
         // read timed out, so a serialization regression cannot hang the test.
         writer.rollback().unwrap();

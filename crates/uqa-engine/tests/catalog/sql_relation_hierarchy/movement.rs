@@ -718,7 +718,7 @@ fn waiting_parent_update_follows_a_row_moved_to_another_partition() {
     exec(&holder, "COMMIT");
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -777,7 +777,7 @@ fn waiting_update_from_spill_follows_a_row_moved_to_another_partition() {
     exec(&holder, "COMMIT");
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -834,7 +834,7 @@ fn waiting_parent_delete_follows_a_row_moved_to_another_partition() {
     exec(&holder, "COMMIT");
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();
@@ -880,7 +880,7 @@ fn waiting_merge_follows_a_row_moved_to_another_partition() {
     exec(&holder, "COMMIT");
 
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     waiting_thread.join().unwrap();

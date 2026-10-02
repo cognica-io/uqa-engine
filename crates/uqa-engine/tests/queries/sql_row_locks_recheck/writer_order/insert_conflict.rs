@@ -54,11 +54,11 @@ fn insert_returning_rebuilds_after_a_concurrent_conflict_commits() {
             ))
             .unwrap();
     });
-    entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    entered_rx.recv_timeout(crate::waits::COMPLETION).unwrap();
     writer.sql("COMMIT", &[]).unwrap();
     gate.wait();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     insert_thread.join().unwrap();

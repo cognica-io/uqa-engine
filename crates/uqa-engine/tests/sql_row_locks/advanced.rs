@@ -372,7 +372,7 @@ fn outer_nowait_is_merged_into_a_view_row_mark() {
         result
     } else {
         cancel.cancel();
-        done_rx.recv_timeout(Duration::from_secs(2)).unwrap()
+        done_rx.recv_timeout(crate::waits::COMPLETION).unwrap()
     };
     let error = result.expect_err("the outer NOWAIT must reach the view's base-table lock");
     assert_eq!(error.sqlstate(), Some("55P03"));

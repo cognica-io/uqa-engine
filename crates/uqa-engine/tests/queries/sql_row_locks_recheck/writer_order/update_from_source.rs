@@ -43,11 +43,11 @@ fn update_from_recheck_keeps_the_source_row_selected_by_the_command_snapshot() {
             .send(updater.sql("UPDATE update_from_target AS target SET value = source.value FROM update_from_source AS source WHERE target.id = 1 AND target.match_key = source.match_key AND update_from_source_gate() = 1", &[]))
             .unwrap();
     });
-    entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    entered_rx.recv_timeout(crate::waits::COMPLETION).unwrap();
     gate.wait();
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(crate::waits::COMPLETION)
         .unwrap()
         .unwrap();
     update_thread.join().unwrap();
