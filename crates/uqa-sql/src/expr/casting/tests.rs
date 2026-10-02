@@ -303,3 +303,61 @@ fn unary_minus_preserves_interval_fields() {
         })
     );
 }
+
+#[test]
+fn integer_text_input_reads_what_postgresql_reads() {
+    for (text, target, expected) in [
+        ("0x10", "bigint", 16),
+        (" 1_000 ", "integer", 1000),
+        ("0o17", "smallint", 15),
+        ("-0b101", "integer", -5),
+        ("+7", "bigint", 7),
+        ("-32768", "smallint", -32768),
+    ] {
+        assert_eq!(
+            cast_value(&Value::Str(text.into()), target).unwrap(),
+            Value::Int(expected),
+            "{text} as {target}"
+        );
+    }
+    // An integer outside the type's range names the text, unlike a number converted to a narrower type.
+    for (text, target, sqlstate, message) in [
+        (
+            "99999999999999999999",
+            "bigint",
+            "22003",
+            "value \"99999999999999999999\" is out of range for type bigint",
+        ),
+        (
+            "40000",
+            "smallint",
+            "22003",
+            "value \"40000\" is out of range for type smallint",
+        ),
+        (
+            "2147483648",
+            "integer",
+            "22003",
+            "value \"2147483648\" is out of range for type integer",
+        ),
+        (
+            "1__0",
+            "integer",
+            "22P02",
+            "invalid input syntax for type integer: \"1__0\"",
+        ),
+        (
+            "1.5",
+            "integer",
+            "22P02",
+            "invalid input syntax for type integer: \"1.5\"",
+        ),
+    ] {
+        let error = cast_value(&Value::Str(text.into()), target).unwrap_err();
+        assert_eq!(
+            (error.sqlstate(), error.to_string().as_str()),
+            (Some(sqlstate), message),
+            "{text} as {target}"
+        );
+    }
+}
