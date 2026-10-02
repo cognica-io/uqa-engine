@@ -309,18 +309,20 @@ impl Engine {
             .map(|backend| backend.read_view_revision())
             .transpose()?
             .flatten();
-        // A complete command-root identity distinguishes writes and undo without scanning catalog records. Providers lacking it retain the conservative private-view refresh.
+        // A complete command-root identity distinguishes writes and undo without scanning catalog records. Providers lacking it retain the conservative private-view refresh. A view is recorded only once the caches reflect it, so an unchanged view proves them current whether or not the catalog reports cache revisions.
         let same_read_view = read_view.as_ref().is_some_and(|current| {
             self.epochs.seen_storage_read_view.lock().as_ref() == Some(current)
-                && self.epochs.storage_cache_revisions.lock().is_some()
         });
         let private_view = self.storage.backend.as_ref().is_some_and(|backend| {
             backend.transaction_model().is_versioned() && backend.in_transaction()
         });
+        let epochs = [
+            table_catalog_epoch,
+            table_data_epoch,
+            catalog_registry_epoch,
+        ];
         if (same_read_view || (read_view.is_none() && !private_view && storage_snapshot_unchanged))
-            && self.epochs.table_catalog.seen.load(Ordering::Acquire) == table_catalog_epoch
-            && self.epochs.table_data.seen.load(Ordering::Acquire) == table_data_epoch
-            && self.epochs.catalog_registry.seen.load(Ordering::Acquire) == catalog_registry_epoch
+            && self.observes_epochs(epochs)
         {
             return Ok(());
         }
@@ -340,15 +342,19 @@ impl Engine {
             catalog_registry_epoch,
             committed_unchanged,
         )? {
-            *self.epochs.seen_storage_read_view.lock() = read_view;
-            if let Some(version) = stable_storage_version {
-                self.epochs
-                    .seen_storage_change_version
-                    .store(version, Ordering::Release);
-            }
+            self.observe_read_view(read_view, stable_storage_version);
             return Ok(());
         }
 
+        // A catalog without cache revisions cannot say which tables a commit changed. With the committed state the one the caches reflect, the view differs only by this transaction's own writes, which its caches already include unless it changed definitions.
+        if committed_unchanged
+            && !self.epochs.table_catalog.dirty.load(Ordering::Acquire)
+            && !self.epochs.catalog_registry.dirty.load(Ordering::Acquire)
+            && self.observes_epochs(epochs)
+        {
+            self.observe_read_view(read_view, stable_storage_version);
+            return Ok(());
+        }
         self.clear_persistent_table_bindings_for_catalog_reload();
         self.reload_table_catalog(table_catalog_epoch)?;
         // Newly restored table handles already include their statistics and
@@ -359,12 +365,29 @@ impl Engine {
             .store(table_data_epoch, Ordering::Release);
         self.synchronize_partition_identity_watermarks()?;
         self.reload_catalog_registries(catalog_registry_epoch)?;
+        self.observe_read_view(read_view, stable_storage_version);
+        Ok(())
+    }
+
+    /// Whether this session has observed the published table catalog, table data and catalog registry epochs `[catalog, data, registry]`.
+    fn observes_epochs(&self, [catalog, data, registry]: [u64; 3]) -> bool {
+        use std::sync::atomic::Ordering;
+        self.epochs.table_catalog.seen.load(Ordering::Acquire) == catalog
+            && self.epochs.table_data.seen.load(Ordering::Acquire) == data
+            && self.epochs.catalog_registry.seen.load(Ordering::Acquire) == registry
+    }
+
+    /// Record the read view the caches now reflect, and the commit version when it stood still around the pin.
+    fn observe_read_view(
+        &self,
+        read_view: Option<uqa_storage::key_value::KeyValueReadRevision>,
+        stable_version: Option<u64>,
+    ) {
         *self.epochs.seen_storage_read_view.lock() = read_view;
-        if let Some(version) = stable_storage_version {
+        if let Some(version) = stable_version {
             self.epochs
                 .seen_storage_change_version
-                .store(version, Ordering::Release);
+                .store(version, std::sync::atomic::Ordering::Release);
         }
-        Ok(())
     }
 }

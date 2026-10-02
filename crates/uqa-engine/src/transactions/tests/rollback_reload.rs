@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! A rollback reloads the catalog at one snapshot and records it, so the next statement refreshes only what other sessions committed since.
+//! A rollback reloads the catalog at one snapshot and records it, so the next statement refreshes only what other sessions committed since; reads and the session's own data commits leave the table states alone on every provider, whether or not its catalog reports cache revisions.
 
 use std::sync::Arc;
 
@@ -30,14 +30,6 @@ fn the_statement_after_a_rollback_keeps_the_tables_the_rollback_reloaded() {
                 &[],
             )
             .unwrap();
-        let tracks_revisions = engine
-            .storage
-            .catalog
-            .as_ref()
-            .unwrap()
-            .cache_revisions()
-            .unwrap()
-            .is_some();
         for rollback in [
             "BEGIN; UPDATE items SET v = 2 WHERE id = 1; ROLLBACK",
             "INSERT INTO items VALUES (2, 2), (1, 9)",
@@ -51,11 +43,9 @@ fn the_statement_after_a_rollback_keeps_the_tables_the_rollback_reloaded() {
                 "{provider}: {rollback}"
             );
             let after = engine.try_table("items").unwrap().unwrap();
-            // A catalog without cache revisions has the next statement reload every table, after a rollback as after anything else.
-            assert_eq!(
+            assert!(
                 Arc::ptr_eq(&reloaded, &after),
-                tracks_revisions,
-                "{provider}: the statement after `{rollback}`"
+                "{provider}: the statement after `{rollback}` reloaded the catalog again"
             );
         }
         engine.sql("COMMIT", &[]).unwrap();
@@ -121,5 +111,42 @@ fn commits_of_another_session_after_a_rollback_reach_the_next_statement() {
             Some("42P01"),
             "{provider}"
         );
+    }
+}
+
+#[test]
+fn reads_and_own_data_commits_keep_the_table_states_on_every_provider() {
+    for provider in 0..3 {
+        let directory = tempfile::tempdir().unwrap();
+        let engine = persistent_engine(provider, &directory.path().join("statement-reload.db"));
+        engine
+            .sql(
+                "CREATE TABLE items (id INTEGER PRIMARY KEY, v INTEGER); INSERT INTO items VALUES (1, 1); CREATE TABLE others (id INTEGER PRIMARY KEY, v INTEGER); INSERT INTO others VALUES (1, 10)",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(value(&engine, "items"), Value::Int(1));
+        let state = engine.try_table("others").unwrap().unwrap();
+        for statement in [
+            "SELECT v FROM items WHERE id = 1",
+            "UPDATE items SET v = 2 WHERE id = 1",
+            "SELECT v FROM items WHERE id = 1",
+            "INSERT INTO items VALUES (2, 20)",
+            "BEGIN; UPDATE items SET v = 3 WHERE id = 1; COMMIT",
+        ] {
+            engine.sql(statement, &[]).unwrap();
+            assert_eq!(value(&engine, "others"), Value::Int(10));
+            assert!(
+                Arc::ptr_eq(&state, &engine.try_table("others").unwrap().unwrap()),
+                "{provider}: `{statement}` reloaded the table states"
+            );
+        }
+        assert_eq!(value(&engine, "items"), Value::Int(3), "{provider}");
+        // Another session's commit still reaches the next statement.
+        let other = engine.new_session().unwrap();
+        other
+            .sql("UPDATE others SET v = 11 WHERE id = 1", &[])
+            .unwrap();
+        assert_eq!(value(&engine, "others"), Value::Int(11), "{provider}");
     }
 }
