@@ -12,8 +12,8 @@ use crate::{
         conflict::update::{InsertConflictLocks, InsertConflictPreparation},
         constraints::{
             lock_document_key_dependencies, lock_existing_document_foreign_key_dependencies,
-            validate_document_non_key_constraints, validate_key_constraints,
-            validate_key_constraints_with_previous,
+            partition_insert_target, validate_document_non_key_constraints,
+            validate_key_constraints, validate_key_constraints_with_previous, ConstraintStatement,
         },
         events::ReferentialActionContext,
         identity::refresh_insert_identity_after_trigger,
@@ -26,9 +26,7 @@ use crate::{
 };
 use std::sync::Arc;
 use uqa_core::DocId;
-use uqa_sql::{
-    plan::InsertPlan, semantics::partition::partition_insert_target, SQLError, SQLParam,
-};
+use uqa_sql::{plan::InsertPlan, SQLError, SQLParam};
 use uqa_storage::document_store::Document;
 pub struct StagedValuesInsertRow {
     pub target_table: String,
@@ -46,6 +44,7 @@ pub struct StagedValuesInsertRow {
 pub fn prepare_values_insert_row<S: Clone + 'static>(
     services: MutationPreparationContext<'_, S>,
     stmt: &InsertPlan,
+    statement: ConstraintStatement<'_>,
     params: &[SQLParam],
     snapshot_scope: &CteScope<S>,
     conflict_update_columns: &[String],
@@ -87,7 +86,8 @@ pub fn prepare_values_insert_row<S: Clone + 'static>(
         &mut insert_identity,
     )?;
     let trigger_target = partition_insert_target(
-        &services.referential.constraints.partitions,
+        services.referential.constraints,
+        statement,
         &stmt.table,
         &document,
         params,
@@ -133,6 +133,7 @@ pub fn prepare_values_insert_row<S: Clone + 'static>(
         PreparedInsertRowContext {
             services,
             stmt,
+            statement,
             storage_table: &target_table,
             document: document.as_ref(),
             shared_document: Some(&document),
@@ -176,6 +177,7 @@ pub fn stage_prepared_insert_row<S: Clone + 'static>(
     let PreparedInsertRowContext {
         services,
         stmt,
+        statement,
         storage_table,
         document,
         shared_document,
@@ -185,6 +187,7 @@ pub fn stage_prepared_insert_row<S: Clone + 'static>(
     } = context;
     validate_document_non_key_constraints(
         services.referential.constraints,
+        Some(statement),
         storage_table,
         document,
         params,
@@ -296,6 +299,7 @@ pub fn stage_prepared_insert_row<S: Clone + 'static>(
                 services.staging,
                 prepared,
                 params,
+                statement,
                 Some(conflict_update_columns),
                 &mut after_row_events,
             )?;
@@ -347,6 +351,8 @@ pub fn stage_prepared_insert_row<S: Clone + 'static>(
 pub struct PreparedInsertRowContext<'a, S: Clone + 'static> {
     pub services: MutationPreparationContext<'a, S>,
     pub stmt: &'a InsertPlan,
+    /// The statement as the row's constraint violations describe it.
+    pub statement: ConstraintStatement<'a>,
     pub storage_table: &'a str,
     pub document: &'a Document,
     pub shared_document: Option<&'a Arc<Document>>,

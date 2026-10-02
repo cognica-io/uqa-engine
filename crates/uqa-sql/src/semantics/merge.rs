@@ -249,6 +249,43 @@ pub fn merge_returning_source_schema(
     crate::RowSchema::with_physical_internal_aliases(source_schema, &aliases)
 }
 
+/// The columns a `MERGE` supplies, as `PostgreSQL` records them in its target's `insertedCols` and `updatedCols`: those each `INSERT` action fills and those each `UPDATE` action sets.
+pub fn merge_target_columns(
+    catalog: &dyn super::mutation_privileges::MutationPrivilegeCatalog,
+    stmt: &MergePlan,
+) -> Result<Vec<String>, SQLError> {
+    let table_columns = catalog.bound_table_column_names(&stmt.target)?;
+    let mut supplied = Vec::new();
+    for clause in &stmt.when_clauses {
+        match clause {
+            MergeWhenPlan::InsertNotMatched {
+                columns, values, ..
+            } => supplied.extend(merge_insert_columns(&table_columns, columns, values)),
+            MergeWhenPlan::UpdateMatched { assignments, .. }
+            | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => supplied.extend(
+                assignments
+                    .iter()
+                    .map(|assignment| assignment.target.column.clone()),
+            ),
+            _ => {}
+        }
+    }
+    Ok(supplied)
+}
+
+/// The columns an `INSERT` action fills: those it names, or else the leading columns of the table, one for each value; `DEFAULT VALUES` fills none.
+fn merge_insert_columns<T, V>(
+    table_columns: &[String],
+    columns: &[crate::ast::AssignmentTarget<T>],
+    values: &[V],
+) -> Vec<String> {
+    if columns.is_empty() {
+        table_columns.iter().take(values.len()).cloned().collect()
+    } else {
+        columns.iter().map(|target| target.column.clone()).collect()
+    }
+}
+
 pub fn ensure_merge_mutation_privileges(
     catalog: &dyn super::mutation_privileges::MutationPrivilegeCatalog,
     stmt: &MergePlan,
@@ -269,15 +306,7 @@ pub fn ensure_merge_mutation_privileges(
                 if columns.is_empty() && values.is_empty() {
                     requires_any_insert = true;
                 } else {
-                    let columns = if columns.is_empty() {
-                        table_columns
-                            .iter()
-                            .take(values.len())
-                            .cloned()
-                            .collect::<Vec<_>>()
-                    } else {
-                        columns.iter().map(|target| target.column.clone()).collect()
-                    };
+                    let columns = merge_insert_columns(&table_columns, columns, values);
                     column_privileges.extend(columns.into_iter().map(|column| {
                         (
                             crate::catalog::security::table::TableAclPrivilege::Insert,

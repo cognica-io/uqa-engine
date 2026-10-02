@@ -16,6 +16,7 @@ use crate::mutation::{
     conflict::update::{InsertConflictLocks, InsertConflictPreparation},
     constraints::{
         lock_document_key_dependencies, lock_existing_document_foreign_key_dependencies,
+        partition_insert_target, ConstraintStatement,
     },
     errors::dml_storage_error,
     identity::{
@@ -26,9 +27,7 @@ use crate::mutation::{
 };
 use crate::query::{projection::physical_work_mem_bytes, runtime::QueryRuntimeView, CteScope};
 use std::cell::RefCell;
-use uqa_sql::{
-    plan::InsertPlan, semantics::partition::partition_insert_target, SQLError, SQLParam,
-};
+use uqa_sql::{plan::InsertPlan, SQLError, SQLParam};
 use uqa_storage::document_store::Document;
 #[derive(Clone)]
 pub struct InsertSourceContext<'a, S: Clone + 'static> {
@@ -85,6 +84,10 @@ pub struct InsertSelectConsumerState<S: Clone + 'static> {
     pub identity_source: crate::mutation::identity::IdentitySource,
     pub conflict_update_columns: Vec<String>,
     pub columns: Option<Vec<uqa_sql::ast::AssignmentTarget<crate::ScalarExpr>>>,
+    /// The columns the statement supplies, which its constraint violations show to a role that may not read the table: the target columns the source fills and those `ON CONFLICT DO UPDATE` sets.
+    pub supplied_columns: Vec<String>,
+    /// The catalog name of the relation the statement names.
+    pub statement_relation: String,
     /// The identity columns whose source values `OVERRIDING USER VALUE` discards.
     pub discarded_identities: std::collections::BTreeSet<String>,
     pub result_width: Option<usize>,
@@ -135,6 +138,8 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
                 identity_source,
                 conflict_update_columns,
                 columns: None,
+                supplied_columns: Vec::new(),
+                statement_relation: String::new(),
                 discarded_identities: std::collections::BTreeSet::new(),
                 result_width: None,
                 prepared_schema,
@@ -231,6 +236,16 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             &state.stmt,
             columns.iter().map(|column| column.column.as_str()),
         )?;
+        state.statement_relation = crate::mutation::constraints::statement_relation(
+            services.rows.referential.constraints,
+            &state.stmt.table,
+        )?;
+        state.supplied_columns = columns
+            .iter()
+            .take(result_width)
+            .map(|column| column.column.clone())
+            .chain(state.conflict_update_columns.iter().cloned())
+            .collect();
         state.columns = Some(columns);
         state.result_width = Some(result_width);
         Ok(())
@@ -253,6 +268,8 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             identity_source,
             conflict_update_columns,
             columns,
+            supplied_columns,
+            statement_relation,
             discarded_identities,
             result_width,
             prepared_schema,
@@ -332,8 +349,10 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             "prepare INSERT SELECT identity",
         )?;
         *has_prepared_auto_identity |= prepared_auto_identity.is_some();
+        let statement = ConstraintStatement::new(statement_relation, supplied_columns);
         let target_table = partition_insert_target(
-            &services.rows.referential.constraints.partitions,
+            services.rows.referential.constraints,
+            statement,
             &stmt.table,
             &document,
             params,
@@ -385,7 +404,8 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             &mut insert_identity,
         )?;
         let trigger_target = partition_insert_target(
-            &services.rows.referential.constraints.partitions,
+            services.rows.referential.constraints,
+            statement,
             &stmt.table,
             &document,
             params,
@@ -436,6 +456,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             PreparedInsertRowContext {
                 services: services.rows,
                 stmt,
+                statement,
                 storage_table: &target_table,
                 document: &document,
                 shared_document: None,

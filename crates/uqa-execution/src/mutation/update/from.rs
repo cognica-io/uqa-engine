@@ -52,6 +52,14 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         .iter()
         .map(|assignment| assignment.target.column.clone())
         .collect::<Vec<_>>();
+    let statement_relation = crate::mutation::constraints::statement_relation(
+        context.mutation.preparation.referential.constraints,
+        &target,
+    )?;
+    let statement = crate::mutation::constraints::ConstraintStatement::new(
+        &statement_relation,
+        &assigned_columns,
+    );
     let update_rules = context
         .mutation
         .rules
@@ -413,6 +421,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
         };
         let Some(route) = crate::mutation::referential::prepare_partition_update_route(
             &context.mutation.preparation.referential,
+            statement,
             &candidate.identity.table,
             candidate.identity.doc_id,
             &candidate.old_document,
@@ -476,6 +485,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
                 context.mutation.preparation.staging,
                 &mut prepared,
                 params,
+                statement,
                 Some(&assigned_columns),
                 &mut after_row_events,
             )?;

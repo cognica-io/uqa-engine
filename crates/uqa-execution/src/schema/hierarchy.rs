@@ -497,6 +497,7 @@ fn validate_existing_constraints(
         };
         crate::mutation::constraints::validate_document_constraints(
             context.constraints,
+            None,
             table,
             &document,
             &[],
@@ -633,8 +634,10 @@ fn validate_matching_persistence(
     )
 }
 
-fn local_relation_name(name: &str) -> &str {
-    name.rsplit('.').next().unwrap_or(name)
+/// The relation's own name, which `PostgreSQL`'s messages print without its schema.
+fn local_relation_name(name: &str) -> String {
+    uqa_core::RelationIdentity::from_legacy_name(name)
+        .map_or_else(|_| name.to_string(), |identity| identity.name)
 }
 
 fn wrong_object(message: impl Into<String>) -> SQLError {

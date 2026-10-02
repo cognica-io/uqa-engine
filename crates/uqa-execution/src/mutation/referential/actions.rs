@@ -201,6 +201,7 @@ pub fn prepare_referenced_key_update_actions<S: Clone + 'static>(
                     if let Some(prepared) = prepare_referential_document_rewrite(
                         context,
                         ReferentialRewritePreparation {
+                            constraint_table: &ref_table,
                             table: &child.table,
                             doc_id: child.doc_id,
                             old_document: child_doc,
@@ -242,6 +243,7 @@ pub fn prepare_referenced_key_update_actions<S: Clone + 'static>(
                     if let Some(prepared) = prepare_referential_document_rewrite(
                         context,
                         ReferentialRewritePreparation {
+                            constraint_table: &ref_table,
                             table: &child.table,
                             doc_id: child.doc_id,
                             old_document: child_doc,
@@ -479,6 +481,7 @@ pub fn prepare_referenced_key_delete_actions<S: Clone + 'static>(
                     if let Some(prepared) = prepare_referential_document_rewrite(
                         context,
                         ReferentialRewritePreparation {
+                            constraint_table: &ref_table,
                             table: &child.table,
                             doc_id: child.doc_id,
                             old_document: child_document,

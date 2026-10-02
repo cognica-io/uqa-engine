@@ -380,12 +380,7 @@ impl InsertConflictLocks {
                         "INSERT ON CONFLICT rewrite dependency tree was cyclic at its root".into(),
                     )
                 })?;
-                if let Some(root) = uqa_sql::semantics::partition::partition_hierarchy_root(
-                    context.constraints.partitions.catalog,
-                    &prepared.table,
-                )? {
-                    reject_partition_rewrite(&context, &prepared, &root, params, true)?;
-                }
+                reject_partition_rewrite(&context, &prepared, params)?;
                 self.overlay
                     .as_mut()
                     .ok_or_else(|| SQLError::Internal("INSERT conflict overlay is absent".into()))?

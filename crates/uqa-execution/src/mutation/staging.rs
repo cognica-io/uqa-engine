@@ -8,7 +8,7 @@
 use super::{
     constraints::{
         context::ConstraintContext, validate_document_non_key_constraints,
-        validate_document_rewrite_constraints, validate_key_constraints,
+        validate_document_rewrite_constraints, validate_key_constraints, ConstraintStatement,
     },
     prepared::{PreparedDeleteAction, PreparedDocumentDelete, PreparedDocumentRewrite},
     triggers::context::TriggerContext,
@@ -36,10 +36,12 @@ pub struct MutationStagingContext<'a> {
     pub constraints: ConstraintContext<'a>,
     pub triggers: TriggerContext<'a>,
 }
+/// Stage the row that `statement` writes in place of a row, with the rewrites of its referential actions.
 pub fn stage_prepared_document_rewrite(
     context: MutationStagingContext<'_>,
     prepared: &mut PreparedDocumentRewrite,
     params: &[SQLParam],
+    statement: ConstraintStatement<'_>,
     root_updated_columns: Option<&[String]>,
     after_row_events: &mut Vec<crate::mutation::triggers::AfterRowTriggerEvent>,
 ) -> Result<DocId, SQLError> {
@@ -47,6 +49,7 @@ pub fn stage_prepared_document_rewrite(
         context,
         prepared,
         params,
+        statement,
         root_updated_columns,
         after_row_events,
         None,
@@ -58,13 +61,14 @@ pub fn stage_prepared_document_rewrite_with_parent(
     context: MutationStagingContext<'_>,
     prepared: &mut PreparedDocumentRewrite,
     params: &[SQLParam],
+    statement: ConstraintStatement<'_>,
     root_updated_columns: Option<&[String]>,
     after_row_events: &mut Vec<crate::mutation::triggers::AfterRowTriggerEvent>,
     mut cascade_parent: Option<usize>,
 ) -> Result<DocId, SQLError> {
     let trigger_updated_columns = root_updated_columns
-        .map(<[String]>::to_vec)
-        .or_else(|| prepared.trigger_updated_columns.clone());
+        .or_else(|| prepared.referential_columns())
+        .map(<[String]>::to_vec);
     if let Some(delete) = prepared.partition_move_delete.as_mut() {
         stage_prepared_document_delete_with_parent(
             context,
@@ -100,6 +104,7 @@ pub fn stage_prepared_document_rewrite_with_parent(
         if let Some((destination_table, destination_doc_id)) = prepared.destination.as_ref() {
             validate_document_non_key_constraints(
                 context.constraints,
+                Some(statement),
                 destination_table,
                 &prepared.new_document,
                 params,
@@ -122,6 +127,7 @@ pub fn stage_prepared_document_rewrite_with_parent(
         } else {
             validate_document_rewrite_constraints(
                 context.constraints,
+                statement,
                 &prepared.table,
                 &prepared.old_document,
                 &prepared.new_document,
@@ -229,16 +235,31 @@ pub fn stage_prepared_document_rewrite_with_parent(
         }
     }
     for action in &mut prepared.actions {
-        stage_prepared_document_rewrite_with_parent(
-            context,
-            action,
-            params,
-            None,
-            after_row_events,
-            cascade_parent,
-        )?;
+        stage_referential_rewrite(&context, action, params, after_row_events, cascade_parent)?;
     }
     Ok(rewritten_doc_id)
+}
+
+/// Stage a rewrite that a referential action prepared, which writes as a statement of its own that names the foreign key's table and sets its columns.
+fn stage_referential_rewrite(
+    context: &MutationStagingContext<'_>,
+    action: &mut PreparedDocumentRewrite,
+    params: &[SQLParam],
+    after_row_events: &mut Vec<crate::mutation::triggers::AfterRowTriggerEvent>,
+    cascade_parent: Option<usize>,
+) -> Result<DocId, SQLError> {
+    let referential = action.referential_action.clone().ok_or_else(|| {
+        SQLError::Internal("a referential action rewrite does not name its foreign key".into())
+    })?;
+    stage_prepared_document_rewrite_with_parent(
+        *context,
+        action,
+        params,
+        ConstraintStatement::referential_action(&referential.relation, &referential.columns),
+        None,
+        after_row_events,
+        cascade_parent,
+    )
 }
 
 pub fn stage_prepared_document_delete(
@@ -290,11 +311,10 @@ pub fn stage_prepared_document_delete_with_parent(
                 )?;
             }
             PreparedDeleteAction::Rewrite(rewrite) => {
-                stage_prepared_document_rewrite_with_parent(
-                    context,
+                stage_referential_rewrite(
+                    &context,
                     rewrite,
                     params,
-                    None,
                     after_row_events,
                     cascade_parent,
                 )?;

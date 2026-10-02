@@ -178,6 +178,8 @@ struct Scope {
     indent: usize,
     nested: bool,
     qualify: bool,
+    /// Whether the scope prints a stored expression on its own, whose keywords `PostgreSQL` indents from `indent` (`deparse_expression_pretty` with no starting indent) rather than from the clause of a query, which adds a level.
+    standalone: bool,
 }
 
 impl Scope {
@@ -287,7 +289,20 @@ pub fn stored_expression_definition(
     let expression = uqa_sql::plan::ExpressionPlan::lower(expression.clone());
     deparser.expression(
         &expression.scalar,
-        &Scope::default(),
+        &Scope {
+            standalone: true,
+            ..Scope::default()
+        },
         &expression.subqueries,
+    )
+}
+
+/// Whether a stored expression prints as a function call, which needs no parentheses of its own where `PostgreSQL` prints an expression in an index or partition key (`looks_like_function`).
+pub fn stored_expression_prints_as_call(expression: &uqa_sql::ast::Expr) -> bool {
+    let expression = uqa_sql::plan::ExpressionPlan::lower(expression.clone());
+    matches!(
+        &expression.scalar,
+        ScalarExpr::Func { name, binding, args, .. }
+            if expressions::prints_as_call(name, binding.as_ref(), args)
     )
 }

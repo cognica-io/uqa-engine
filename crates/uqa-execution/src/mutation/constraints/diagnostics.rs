@@ -95,7 +95,8 @@ fn index_key_detail(
     Ok(Some(format!("Key ({names})=({values})")))
 }
 
-struct OutputNames<'a>(CatalogContext<'a>);
+/// Prints values with the catalog's names for the types that print them, as type output functions do.
+pub(super) struct OutputNames<'a>(pub(super) CatalogContext<'a>);
 
 impl EngineHook for OutputNames<'_> {
     fn resolve_regtype_output(&self, ty: &ColumnType, oid: i64) -> Result<Option<String>, String> {

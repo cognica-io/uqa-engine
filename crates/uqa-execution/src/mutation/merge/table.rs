@@ -24,7 +24,7 @@ use crate::{
         command_scope::MutationOverlayScope,
         constraints::{
             lock_document_key_dependencies, lock_existing_document_foreign_key_dependencies,
-            validate_document_constraints,
+            partition_insert_target, validate_document_constraints, ConstraintStatement,
         },
         errors::{dml_storage_error, missing_document_error},
         expressions::eval_mutation_expr,
@@ -61,7 +61,6 @@ use uqa_sql::{
             expanded_merge_returning_projections, merge_returning_source_schema,
             validate_merge_action_scopes,
         },
-        partition::partition_insert_target,
         returning::validate_returning_alias_relations,
     },
     SQLError, SQLParam, SQLResult,
@@ -84,6 +83,12 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
     super::analysis::ensure_merge_privileges(mutation, stmt, inherited_ctes)?;
     let _trigger_scope = crate::mutation::triggers::TriggerStatementScope::enter();
     let target_table = stmt.target.clone();
+    // The columns the statement supplies, which its constraint violations show to a role that may not read the table.
+    let supplied_columns =
+        uqa_sql::semantics::merge::merge_target_columns(mutation.privileges, stmt)?;
+    let statement_relation =
+        crate::mutation::constraints::statement_relation(constraints, &target_table)?;
+    let statement = ConstraintStatement::new(&statement_relation, &supplied_columns);
     referential.locking.session.lock_relation(
         &target_table,
         crate::row_locks::RelationLockMode::RowExclusive,
@@ -539,6 +544,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                         )?;
                         let Some(route) = prepare_partition_update_route(
                             referential,
+                            statement,
                             storage_table,
                             doc_id,
                             &old_document,
@@ -599,6 +605,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                             preparation.staging,
                             &mut prepared,
                             params,
+                            statement,
                             Some(&updated_columns),
                             events.after_rows_mut(),
                         )?;
@@ -747,7 +754,8 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                         )?;
                         // MERGE INTO ONLY excludes descendants from matching, while PostgreSQL still routes INSERT actions through the target's partition tree.
                         let storage_table = partition_insert_target(
-                            &constraints.partitions,
+                            constraints,
+                            statement,
                             &target_table,
                             &document,
                             params,
@@ -802,7 +810,8 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                         )?;
                         let doc_id = insert_identity.0;
                         let trigger_target = partition_insert_target(
-                            &constraints.partitions,
+                            constraints,
+                            statement,
                             &target_table,
                             &document,
                             params,
@@ -827,6 +836,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                         )?;
                         validate_document_constraints(
                             constraints,
+                            Some(statement),
                             &storage_table,
                             &document,
                             params,

@@ -122,6 +122,7 @@ pub fn validate_all_table_rows(
             };
             crate::mutation::constraints::validate_document_constraints(
                 constraints,
+                None,
                 &table,
                 &document,
                 &[],

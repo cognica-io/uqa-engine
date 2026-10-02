@@ -24,6 +24,7 @@ use crate::{
         },
         command_scope::MutationOverlayScope,
         conflict::update::InsertConflictLocks,
+        constraints::{partition_insert_target, ConstraintStatement},
         errors::dml_storage_error,
         identity::{
             insert_identity_columns, persist_auto_increment_identity,
@@ -42,7 +43,6 @@ use uqa_sql::{
     plan::{ConflictActionPlan, ConflictPlan, InsertPlan, QueryPlan},
     semantics::{
         conflict::InferenceContext,
-        partition::partition_insert_target,
         returning::{validate_returning_alias_relations, ReturningAnalysisContext},
         rules::insert_inputs::{
             required_view_rule_insert_input_positions, view_rule_insert_column_type,
@@ -172,6 +172,17 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
         stmt,
         conflict_update_columns.as_deref(),
     )?;
+    // The columns the statement supplies, which its constraint violations show to a role that may not read the table.
+    let supplied_columns =
+        uqa_sql::semantics::mutation_privileges::insert_target_columns(mutation.privileges, stmt)?
+            .into_iter()
+            .chain(conflict_update_columns.iter().flatten().cloned())
+            .collect::<Vec<_>>();
+    let statement_relation = crate::mutation::constraints::statement_relation(
+        preparation.referential.constraints,
+        &stmt.table,
+    )?;
+    let statement = ConstraintStatement::new(&statement_relation, &supplied_columns);
     let view_original_query = !stmt.view_rule_relations.iter().try_fold(
         false,
         |suppressed, relation| -> Result<bool, SQLError> {
@@ -552,7 +563,8 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 )?;
                 has_prepared_auto_identity |= prepared_auto_identity.is_some();
                 let target_table = partition_insert_target(
-                    &preparation.referential.constraints.partitions,
+                    preparation.referential.constraints,
+                    statement,
                     &stmt.table,
                     &document,
                     params,
@@ -577,6 +589,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 if let Some(staged) = prepare_values_insert_row(
                     preparation,
                     stmt,
+                    statement,
                     params,
                     &snapshot_scope,
                     conflict_update_columns.as_deref().unwrap_or(&[]),
@@ -697,7 +710,8 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                         continue;
                     }
                     let target_table = partition_insert_target(
-                        &preparation.referential.constraints.partitions,
+                        preparation.referential.constraints,
+                        statement,
                         &stmt.table,
                         &document,
                         params,
@@ -722,6 +736,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     let Some(staged) = prepare_values_insert_row(
                         preparation,
                         stmt,
+                        statement,
                         params,
                         &snapshot_scope,
                         conflict_update_columns.as_deref().unwrap_or(&[]),
