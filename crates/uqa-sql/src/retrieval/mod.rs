@@ -35,14 +35,29 @@ pub type ConstantEvaluator<'a> = dyn Fn(&ScalarExpr, &[SQLParam]) -> Result<Valu
 pub struct RetrievalConstants<'a> {
     pub params: &'a [SQLParam],
     pub evaluate: &'a ConstantEvaluator<'a>,
+    /// Whether the relation a predicate filters declares a column of the given name. A predicate on an engine pseudo column such as `_doc_id` filters a stored field only where the relation declares one; elsewhere it stays relational, where the column carries each row's value.
+    pub stores: &'a dyn Fn(&str) -> bool,
 }
 impl RetrievalConstants<'_> {
     fn without_parameters(&self) -> RetrievalConstants<'_> {
         RetrievalConstants {
             params: &[],
             evaluate: self.evaluate,
+            stores: self.stores,
         }
     }
+}
+
+/// Whether `expression` names an engine pseudo column, whose predicates lower according to the columns the relation declares.
+#[must_use]
+pub fn names_engine_pseudo_column(expression: &ScalarExpr) -> bool {
+    let mut names = false;
+    expression.visit(&mut |node| {
+        if let ScalarExpr::Column(column) | ScalarExpr::QualifiedColumn { column, .. } = node {
+            names |= crate::semantics::is_engine_pseudo_column(column);
+        }
+    });
+    names
 }
 /// Runtime scalar evaluation and graph catalog access; SQL owns recursion and validation order.
 pub trait RetrievalArguments: GraphNameCatalog {
@@ -113,7 +128,7 @@ pub fn lower_where(expr: &ScalarExpr, constants: &RetrievalConstants<'_>) -> Opt
         ScalarExpr::Func { name, args, .. } => lower_function(name, args, constants),
         ScalarExpr::Binary { op, lhs, rhs } => lower_comparison(*op, lhs, rhs, constants),
         ScalarExpr::IsNull { expr, negated } => {
-            let field = predicates::filter_field(expr)?;
+            let field = predicates::filter_field(expr, constants)?;
             let predicate = if *negated {
                 Predicate::IsNotNull
             } else {
@@ -126,7 +141,7 @@ pub fn lower_where(expr: &ScalarExpr, constants: &RetrievalConstants<'_>) -> Opt
             })
         }
         ScalarExpr::Between { expr, low, high } => {
-            let field = predicates::filter_field(expr)?;
+            let field = predicates::filter_field(expr, constants)?;
             let lo = const_value(low, constants)?;
             let hi = const_value(high, constants)?;
             Some(RetrievalExpr::Filter {
@@ -140,7 +155,7 @@ pub fn lower_where(expr: &ScalarExpr, constants: &RetrievalConstants<'_>) -> Opt
             list,
             negated,
         } => {
-            let field = predicates::filter_field(expr)?;
+            let field = predicates::filter_field(expr, constants)?;
             let mut set: BTreeSet<Value> = BTreeSet::new();
             let mut has_null = false;
             for v in list {

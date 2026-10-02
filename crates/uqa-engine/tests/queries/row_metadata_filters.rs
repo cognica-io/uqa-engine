@@ -147,12 +147,63 @@ fn check_named_column(engine: &Engine, label: &str) {
     }
 }
 
+/// A text retrieval combined with a filter on the identity reads the identity of each matching row.
+fn check_retrieval(engine: &Engine, label: &str) {
+    run(
+        engine,
+        "CREATE TABLE texts (k integer, body text);
+         CREATE INDEX texts_body ON texts USING gin (body);
+         INSERT INTO texts VALUES (1, 'alpha'), (2, 'alpha beta'), (3, 'beta');
+         CREATE TABLE stored_ids (k integer, body text, _doc_id text);
+         CREATE INDEX stored_ids_body ON stored_ids USING gin (body);
+         INSERT INTO stored_ids VALUES (1, 'alpha', 'a'), (2, 'beta', 'z'), (3, 'beta', 'b')",
+    );
+    for (query, expected) in [
+        (
+            "SELECT k FROM texts WHERE text_match(body, 'alpha') AND length(body) > 6",
+            "2",
+        ),
+        (
+            "SELECT k FROM texts WHERE text_match(body, 'alpha') AND k + 0 = 2",
+            "2",
+        ),
+        (
+            "SELECT k FROM texts WHERE text_match(body, 'alpha') AND _doc_id = 2",
+            "2",
+        ),
+        (
+            "SELECT k FROM texts WHERE text_match(body, 'alpha') AND _doc_id > 1 ORDER BY k",
+            "2",
+        ),
+        (
+            "SELECT k FROM texts WHERE text_match(body, 'beta') OR _doc_id = 1 ORDER BY k",
+            "1,2,3",
+        ),
+        // A deletion filters its rows the same way, and a column named `_doc_id` is the stored column there too.
+        (
+            "DELETE FROM texts WHERE text_match(body, 'beta') AND _doc_id = 3 RETURNING k",
+            "3",
+        ),
+        (
+            "DELETE FROM stored_ids WHERE text_match(body, 'alpha') OR _doc_id = 'z' RETURNING k",
+            "1,2",
+        ),
+    ] {
+        assert_eq!(
+            texts(engine, query, "k").join(","),
+            expected,
+            "{label}: {query}"
+        );
+    }
+}
+
 #[test]
 fn doc_id_filters_compare_the_identity_of_each_row() {
-    check(&Engine::new(), "memory");
+    let memory = Engine::new();
+    check(&memory, "memory");
+    check_retrieval(&memory, "memory");
     let directory = tempfile::tempdir().unwrap();
-    check(
-        &Engine::open(&directory.path().join("row-metadata-filters.db")).unwrap(),
-        "native",
-    );
+    let native = Engine::open(&directory.path().join("row-metadata-filters.db")).unwrap();
+    check(&native, "native");
+    check_retrieval(&native, "native");
 }
