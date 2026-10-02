@@ -45,7 +45,7 @@ pub fn integer_primary_key_doc_id(
 use crate::query::locking::context::QueryRowLockSession;
 use uqa_sql::{
     assignment::{columns::AssignmentColumnCatalog, AssignmentContext},
-    ast::AutoIncrement,
+    ast::{AutoIncrement, AutoIncrementKind, OverridingKind},
     semantics::{doc_id_value, partition::PartitionCatalog, returning::document_supplied_id},
 };
 pub trait InsertIdentityCatalog {
@@ -98,13 +98,18 @@ pub fn insert_identity_columns(
     Ok((auto_increment, id_column, accepts_supplied_identity))
 }
 
-/// Draw the values an inserted row leaves to its identity columns from their sequences, and select the identity of a row that a legacy counter column decides. A sequence value is an ordinary column value: when its column is the table's single primary key it names the row as any supplied key value does, so the caller selects the identity of every row this returns none for.
+/// Draw the values an inserted row leaves to its identity columns from their sequences, and select the identity of a row that a legacy counter column decides. A sequence value is an ordinary column value: when its column is the table's single primary key it names the row as any supplied key value does, so the caller selects the identity of every row this returns none for. A value the row supplies, NULL included, is kept; a `GENERATED ALWAYS` column accepts one only under `OVERRIDING SYSTEM VALUE`. `OVERRIDING USER VALUE` leaves every identity column out of the row before this runs.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the identity columns and the OVERRIDING clause select one row's identity"
+)]
 pub fn prepare_auto_increment_identity(
     context: InsertIdentityContext<'_>,
     table: &str,
     id_column: &str,
     accepts_supplied_identity: bool,
     auto_id_column: Option<&str>,
+    overriding: Option<OverridingKind>,
     document: &mut Document,
     action: &str,
 ) -> Result<Option<(DocId, bool)>, SQLError> {
@@ -119,17 +124,13 @@ pub fn prepare_auto_increment_identity(
         if !provenance.is_identity() {
             continue;
         }
-        let supplied = document
-            .get(column)
-            .is_some_and(|value| !matches!(value, Value::Null));
-        if supplied {
-            if provenance.kind == uqa_sql::ast::AutoIncrementKind::IdentityAlways {
-                return Err(SQLError::Routine {
-                    sqlstate: "428C9".into(),
-                    message: format!(
-                        "cannot insert a non-DEFAULT value into identity column \"{column}\""
-                    ),
-                });
+        if document.contains_key(column) {
+            if provenance.kind == AutoIncrementKind::IdentityAlways
+                && overriding != Some(OverridingKind::SystemValue)
+            {
+                return Err(
+                    uqa_sql::semantics::identity_columns::generated_always_insert_error(column),
+                );
             }
             continue;
         }
@@ -159,7 +160,7 @@ pub fn prepare_auto_increment_identity(
                 "auto-increment column `{table}.{auto_id_column}` disappeared"
             ))
         })?;
-    if provenance.kind != uqa_sql::ast::AutoIncrementKind::Legacy {
+    if provenance.kind != AutoIncrementKind::Legacy {
         return Ok(None);
     }
     let owner = uqa_sql::semantics::partition::partition_identity_owner(context.partitions, table)?;
@@ -228,7 +229,7 @@ pub fn persist_auto_increment_identity(
         .map_err(|error| dml_storage_error(action, error))?
         .into_iter()
         .find(|(column, _)| column == auto_id_column)
-        .is_some_and(|(_, provenance)| provenance.kind == uqa_sql::ast::AutoIncrementKind::Legacy);
+        .is_some_and(|(_, provenance)| provenance.kind == AutoIncrementKind::Legacy);
     if !legacy {
         return Ok(());
     }

@@ -63,6 +63,7 @@ where
                     condition,
                     columns,
                     values,
+                    ..
                 } => {
                     if let Some(condition) = condition {
                         self.bind_expr(condition, &ctes)?;

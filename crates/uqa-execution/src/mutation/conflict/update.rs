@@ -150,6 +150,7 @@ fn build_conflict_update<S: Clone + 'static>(
                     .iter()
                     .any(|next| next.target.column == assignment.target.column),
                 action: "INSERT ON CONFLICT DO UPDATE",
+                new_row: false,
             },
             &assignment.value,
             Some(&conflict_row),

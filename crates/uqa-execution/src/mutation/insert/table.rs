@@ -160,6 +160,9 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             true,
         )?;
     }
+    if stmt.view_rule_relations.is_empty() {
+        super::identity_targets::validate_insert_identity_targets(mutation.identities, stmt)?;
+    }
     uqa_sql::semantics::returning::validate_insert_returning(
         planning.returning,
         stmt,
@@ -454,6 +457,11 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             let mut has_prepared_effect = false;
             let mut has_prepared_auto_identity = false;
             let mut pending_rule_rows = Vec::with_capacity(input_rows.len());
+            let discarded_identities = super::identity_targets::user_value_identity_columns(
+                mutation.identities,
+                stmt,
+                columns.iter().map(|column| column.column.as_str()),
+            )?;
             let required_rule_input_positions = (!view_original_query)
                 .then(|| {
                     required_view_rule_insert_input_positions(mutation.rules.rules.analysis, stmt)
@@ -475,6 +483,9 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                 }
                 let mut document = Document::new();
                 for (i, col) in columns.iter().take(row.len()).enumerate() {
+                    if discarded_identities.contains(&col.column) {
+                        continue;
+                    }
                     if required_rule_input_positions
                         .as_ref()
                         .is_some_and(|required| !required.contains(&i))
@@ -515,6 +526,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                                     .iter()
                                     .any(|next| next.column == col.column),
                                 action: "INSERT",
+                                new_row: true,
                             },
                             &row[i],
                             None,
@@ -536,6 +548,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     &id_column,
                     accepts_supplied_identity,
                     auto_id_col.as_deref(),
+                    stmt.overriding,
                     &mut document,
                     "prepare INSERT identity",
                 )?;
@@ -637,6 +650,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
                     &id_column,
                     accepts_supplied_identity,
                     auto_id_col.as_deref(),
+                    stmt.overriding,
                     &mut document,
                     "prepare INSERT identity",
                 )?;

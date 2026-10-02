@@ -115,6 +115,7 @@ pub(super) fn select_merge_action<S: Clone + 'static>(
                                 .iter()
                                 .any(|next| next.target.column == assignment.target.column),
                             action: "MERGE UPDATE",
+                            new_row: false,
                         },
                         &assignment.value,
                         Some(action_row),
@@ -143,7 +144,10 @@ pub(super) fn select_merge_action<S: Clone + 'static>(
                 })?,
             }),
             MergeWhenPlan::InsertNotMatched {
-                columns, values, ..
+                columns,
+                overriding,
+                values,
+                ..
             } => {
                 let implicit_columns = columns.is_empty();
                 let target_columns = if implicit_columns {
@@ -176,6 +180,17 @@ pub(super) fn select_merge_action<S: Clone + 'static>(
                 )?;
                 let mut document = Document::new();
                 for (index, column) in target_columns.iter().take(values.len()).enumerate() {
+                    // `OVERRIDING USER VALUE` leaves an identity column to its sequence without evaluating the value the action supplies.
+                    if *overriding == Some(uqa_sql::ast::OverridingKind::UserValue)
+                        && uqa_sql::assignment::columns::identity_column_sequence(
+                            services.columns,
+                            target_table,
+                            &column.column,
+                        )?
+                        .is_some()
+                    {
+                        continue;
+                    }
                     let value = eval_mutation_assignment(
                         services,
                         ctes,
@@ -187,6 +202,7 @@ pub(super) fn select_merge_action<S: Clone + 'static>(
                                 .iter()
                                 .any(|next| next.column == column.column),
                             action: "MERGE INSERT",
+                            new_row: true,
                         },
                         &values[index],
                         Some(action_row),
@@ -197,7 +213,10 @@ pub(super) fn select_merge_action<S: Clone + 'static>(
                     }
                 }
                 apply_missing_column_defaults(services, target_table, &mut document, params)?;
-                Ok(SelectedMergeAction::Insert { document })
+                Ok(SelectedMergeAction::Insert {
+                    document,
+                    overriding: *overriding,
+                })
             }
             MergeWhenPlan::NothingMatched { .. }
             | MergeWhenPlan::NothingNotMatched { .. }

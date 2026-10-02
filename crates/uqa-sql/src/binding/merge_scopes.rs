@@ -76,6 +76,7 @@ impl SchemaScope {
                     condition,
                     columns,
                     values,
+                    ..
                 } => (
                     condition,
                     columns

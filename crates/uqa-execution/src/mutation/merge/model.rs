@@ -23,5 +23,6 @@ pub(super) enum SelectedMergeAction {
     },
     Insert {
         document: Document,
+        overriding: Option<uqa_sql::ast::OverridingKind>,
     },
 }

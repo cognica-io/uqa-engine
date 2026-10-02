@@ -24,6 +24,7 @@ mod indexes;
 mod interval;
 mod locking;
 mod namespaces;
+mod overriding;
 mod ranges;
 mod relation_hierarchy;
 mod relation_lifecycle;
@@ -46,6 +47,7 @@ pub use indexes::*;
 pub use interval::*;
 pub use locking::*;
 pub use namespaces::*;
+pub use overriding::OverridingKind;
 pub use ranges::*;
 pub use relation_hierarchy::*;
 pub use relation_lifecycle::*;
@@ -282,6 +284,9 @@ pub struct InsertStmt {
     #[serde(default = "default_include_descendants")]
     pub include_descendants: bool,
     pub columns: Vec<AssignmentTarget>,
+    /// `OVERRIDING SYSTEM VALUE` or `OVERRIDING USER VALUE`; `None` without the clause.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overriding: Option<OverridingKind>,
     /// Common table expressions defined with `WITH [RECURSIVE] ...`.
     pub with: Vec<CTE>,
     /// Inline `VALUES (...) (...)` rows. `DEFAULT VALUES` is represented by one empty row; the vector itself is empty only for `INSERT ... SELECT`, whose query is in `select_source`.
@@ -809,10 +814,12 @@ pub enum MergeWhen {
     },
     /// `WHEN NOT MATCHED BY SOURCE [AND <cond>] THEN DELETE`.
     DeleteNotMatchedBySource { condition: Option<Expr> },
-    /// `WHEN NOT MATCHED [AND <cond>] THEN INSERT (cols) VALUES (vals)`.
+    /// `WHEN NOT MATCHED [AND <cond>] THEN INSERT (cols) [OVERRIDING ...] VALUES (vals)`.
     InsertNotMatched {
         condition: Option<Expr>,
         columns: Vec<AssignmentTarget>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        overriding: Option<OverridingKind>,
         values: Vec<Expr>,
     },
     /// `WHEN MATCHED [AND <cond>] THEN DO NOTHING`.

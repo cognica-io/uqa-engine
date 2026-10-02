@@ -155,6 +155,7 @@ pub(super) fn compile_merge(stmt: &pg_query::protobuf::MergeStmt) -> Result<crat
                 when_clauses.push(MergeWhen::InsertNotMatched {
                     condition,
                     columns,
+                    overriding: super::tree::compile_overriding(w.r#override)?,
                     values,
                 });
             }

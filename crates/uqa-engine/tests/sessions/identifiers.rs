@@ -24,6 +24,8 @@ enum Layout {
 
 const LAYOUTS: [Layout; 3] = [Layout::Native, Layout::KeyValue, Layout::Redb];
 
+#[path = "identifiers/identity_values.rs"]
+mod identity_values;
 #[path = "identifiers/sequence_columns.rs"]
 mod sequence_columns;
 #[path = "identifiers/unused.rs"]

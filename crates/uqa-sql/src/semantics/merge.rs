@@ -136,6 +136,7 @@ pub fn validate_merge_action_scopes(
                 condition,
                 columns,
                 values,
+                ..
             } => (
                 condition.as_ref(),
                 columns
@@ -413,6 +414,57 @@ pub fn validate_merge_target_columns(
                 "MERGE INSERT",
                 true,
             )?,
+            _ => {}
+        }
+    }
+    validate_merge_identity_targets(catalog, stmt)
+}
+
+/// Reject a `MERGE` update that assigns a `GENERATED ALWAYS` identity column anything but `DEFAULT`, and an insert that supplies a value for one without an `OVERRIDING` clause, whether or not a row reaches the action.
+fn validate_merge_identity_targets(
+    catalog: &dyn crate::assignment::columns::AssignmentColumnCatalog,
+    stmt: &MergePlan,
+) -> Result<(), SQLError> {
+    let identity = super::identity_columns::IdentityColumns::of(catalog, &stmt.target)?;
+    for clause in &stmt.when_clauses {
+        match clause {
+            MergeWhenPlan::UpdateMatched { assignments, .. }
+            | MergeWhenPlan::UpdateNotMatchedBySource { assignments, .. } => {
+                identity.validate_update(assignments.iter().map(|assignment| {
+                    (
+                        assignment.target.column.as_str(),
+                        matches!(assignment.value, crate::ScalarExpr::Default),
+                    )
+                }))?;
+            }
+            MergeWhenPlan::InsertNotMatched {
+                columns,
+                overriding,
+                values,
+                ..
+            } => {
+                let targets = if columns.is_empty() {
+                    catalog
+                        .try_describe_table(&stmt.target)
+                        .map_err(|error| {
+                            SQLError::Internal(format!("read MERGE target columns: {error}"))
+                        })?
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|column| column.name)
+                        .collect::<Vec<_>>()
+                } else {
+                    columns.iter().map(|target| target.column.clone()).collect()
+                };
+                identity.validate_insert(
+                    targets.iter().map(String::as_str).zip(
+                        values
+                            .iter()
+                            .map(|value| !matches!(value, crate::ScalarExpr::Default)),
+                    ),
+                    *overriding,
+                )?;
+            }
             _ => {}
         }
     }

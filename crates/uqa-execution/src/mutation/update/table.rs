@@ -62,6 +62,16 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
             "UPDATE",
             false,
         )?;
+        uqa_sql::semantics::identity_columns::IdentityColumns::of(
+            context.mutation.preparation.referential.assignment.columns,
+            &stmt.table,
+        )?
+        .validate_update(stmt.assignments.iter().map(|assignment| {
+            (
+                assignment.target.column.as_str(),
+                matches!(assignment.value, crate::ScalarExpr::Default),
+            )
+        }))?;
     }
     let privilege_expressions =
         uqa_sql::semantics::mutation_privileges::ensure_update_target_privileges(
@@ -450,6 +460,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
                                         .iter()
                                         .any(|next| next.target.column == assignment.target.column),
                                     action: "UPDATE",
+                                    new_row: false,
                                 },
                                 &assignment.value,
                                 Some(&target_row),

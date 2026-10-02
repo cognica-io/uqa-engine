@@ -85,6 +85,8 @@ pub struct InsertSelectConsumerState<S: Clone + 'static> {
     pub accepts_supplied_identity: bool,
     pub conflict_update_columns: Vec<String>,
     pub columns: Option<Vec<uqa_sql::ast::AssignmentTarget<crate::ScalarExpr>>>,
+    /// The identity columns whose source values `OVERRIDING USER VALUE` discards.
+    pub discarded_identities: std::collections::BTreeSet<String>,
     pub result_width: Option<usize>,
     pub prepared_schema: crate::RowSchema,
     pub prepared_buffer: Option<crate::SpillBuffer>,
@@ -133,6 +135,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
                 accepts_supplied_identity,
                 conflict_update_columns,
                 columns: None,
+                discarded_identities: std::collections::BTreeSet::new(),
                 result_width: None,
                 prepared_schema,
                 prepared_buffer: Some(crate::SpillBuffer::new(
@@ -223,6 +226,11 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             }
             return Ok(());
         }
+        state.discarded_identities = super::identity_targets::user_value_identity_columns(
+            services.identities,
+            &state.stmt,
+            columns.iter().map(|column| column.column.as_str()),
+        )?;
         state.columns = Some(columns);
         state.result_width = Some(result_width);
         Ok(())
@@ -245,6 +253,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             accepts_supplied_identity,
             conflict_update_columns,
             columns,
+            discarded_identities,
             result_width,
             prepared_schema,
             prepared_buffer,
@@ -266,6 +275,9 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
         let source_row = source_row.view();
         let mut document = Document::new();
         for (index, column) in columns.iter().take(result_width).enumerate() {
+            if discarded_identities.contains(&column.column) {
+                continue;
+            }
             if uqa_sql::assignment::columns::generated_column_kind(
                 services.rows.referential.assignment.columns,
                 &stmt.table,
@@ -293,6 +305,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
                         .iter()
                         .any(|next| next.column == column.column),
                     action: "INSERT SELECT",
+                    new_row: true,
                 },
                 value,
                 source_schema.column_types()[index].as_ref(),
@@ -313,6 +326,7 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             id_column,
             *accepts_supplied_identity,
             auto_id_column.as_deref(),
+            stmt.overriding,
             &mut document,
             "prepare INSERT SELECT identity",
         )?;

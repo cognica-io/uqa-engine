@@ -39,6 +39,8 @@ pub struct MutationAssignmentTarget<'a> {
     pub current: Option<&'a Value>,
     pub final_column_write: bool,
     pub action: &'a str,
+    /// Whether the assignment builds a row an `INSERT` adds. `DEFAULT` leaves such a row's identity column out, for the identity generator to draw its value under the statement's `OVERRIDING` clause; it draws the next sequence value for a row an update assigns.
+    pub new_row: bool,
 }
 
 pub fn eval_mutation_assignment<S: Clone + 'static>(
@@ -53,6 +55,7 @@ pub fn eval_mutation_assignment<S: Clone + 'static>(
         table,
         target: assignment_target,
         action,
+        new_row,
         ..
     } = target;
     let column = &assignment_target.column;
@@ -62,6 +65,35 @@ pub fn eval_mutation_assignment<S: Clone + 'static>(
         uqa_sql::assignment::targets::validate_assignment_default(assignment_target)?;
         if generated.is_some() {
             return Ok(None);
+        }
+        if let Some(sequence) =
+            uqa_sql::assignment::columns::identity_column_sequence(services.columns, table, column)?
+        {
+            if new_row {
+                return Ok(None);
+            }
+            let next = crate::query::catalog_expression::eval_lowered_expression(
+                services.expressions.expressions,
+                services.scopes.current_routine_scope(),
+                &uqa_sql::ast::Expr::Func {
+                    name: "nextval".into(),
+                    binding: None,
+                    args: vec![uqa_sql::ast::Expr::Literal(Value::Str(sequence))],
+                    distinct: false,
+                    order_by: Vec::new(),
+                    filter: None,
+                },
+                None,
+                params,
+            )?;
+            return uqa_sql::assignment::columns::coerce_to_column_type(
+                services.assignment,
+                services.columns,
+                table,
+                column,
+                next,
+            )
+            .map(Some);
         }
         let value = match services
             .columns

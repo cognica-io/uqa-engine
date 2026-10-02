@@ -102,6 +102,7 @@ pub(in crate::compiler) fn compile_insert(
         target_qualifier,
         include_descendants: relation.inh,
         columns,
+        overriding: compile_overriding(stmt.r#override)?,
         with,
         rows,
         select_source,
@@ -109,6 +110,23 @@ pub(in crate::compiler) fn compile_insert(
         returning,
         returning_aliases,
     })
+}
+
+/// The `OVERRIDING` clause of an `INSERT` or a `MERGE` insert action.
+pub(in crate::compiler) fn compile_overriding(
+    kind: i32,
+) -> Result<Option<crate::ast::OverridingKind>> {
+    use pg_query::protobuf::OverridingKind as PgOverriding;
+    match PgOverriding::try_from(kind) {
+        Ok(PgOverriding::Undefined | PgOverriding::OverridingNotSet) => Ok(None),
+        Ok(PgOverriding::OverridingSystemValue) => {
+            Ok(Some(crate::ast::OverridingKind::SystemValue))
+        }
+        Ok(PgOverriding::OverridingUserValue) => Ok(Some(crate::ast::OverridingKind::UserValue)),
+        Err(_) => Err(SQLError::Internal(format!(
+            "INSERT has an unknown OVERRIDING kind {kind}"
+        ))),
+    }
 }
 
 pub(in crate::compiler) fn compile_on_conflict(

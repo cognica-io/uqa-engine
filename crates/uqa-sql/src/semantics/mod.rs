@@ -111,6 +111,7 @@ pub mod mutation_patch;
 
 pub mod mutation_privileges;
 
+pub mod identity_columns;
 pub mod merge;
 pub mod view_mutation;
 

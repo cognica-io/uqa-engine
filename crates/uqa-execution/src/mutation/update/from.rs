@@ -263,6 +263,7 @@ pub fn run_update_from<S: Clone + Send + Sync + 'static>(
                                 .iter()
                                 .any(|next| next.target.column == assignment.target.column),
                             action: "UPDATE FROM",
+                            new_row: false,
                         },
                         &assignment.value,
                         Some(&joined),
