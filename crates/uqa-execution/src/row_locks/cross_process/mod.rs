@@ -65,7 +65,8 @@ const CHANGE_GATE_BYTE: u64 = 9;
 const ROW_SPAN: u64 = row_span_for_offset_width(std::mem::size_of::<OffsetWidth>());
 const RELATION_MODE_BASE: u64 = ROW_BASE + 2 * ROW_SPAN;
 const RELATION_WAIT_BASE: u64 = RELATION_MODE_BASE + 8 * RELATION_SPAN;
-/// One liveness byte for each process attached to the row claim table.
+/// One liveness byte for each process attached to the row claim table, which only the file coordinator keeps.
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 const PROCESS_LIVENESS_BASE: u64 = RELATION_WAIT_BASE + 8 * RELATION_SPAN;
 /// Row claim addresses set the top bit, which no record-lock offset uses, so the two address spaces never alias. The bits below it are the row identity followed by the byte of the row.
 const ROW_CLAIM: u64 = 1 << 63;
