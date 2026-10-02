@@ -34,7 +34,7 @@ The first open with this version reads the primary-key index of every table with
 
 ## Document identity filters
 
-A `WHERE` clause that compares `_doc_id` or `_meta.doc_id` now selects rows by their storage document identity. Earlier versions did not compare the identity: `_doc_id = 2` found no row, `_doc_id > 1` could return a row at identity 1, a query that projected `_doc_id` returned no rows for a filter on another column, `_meta.doc_id` in a filter reported `42P01`, and `UPDATE` or `DELETE` filtering on `_doc_id` reported `42703`. A table column named `_doc_id` keeps its own meaning in a filter, as before.
+A `WHERE` clause that compares `_doc_id` or `_meta.doc_id` now selects rows by their storage document identity. Earlier versions evaluated such a filter, and any filter of a query that also read `_doc_id`, against misaligned stored fields: `_doc_id` read a stored column, so `_doc_id > 3` compared that column's value and failed with `42804` when it held text, and a filter on another column could read its neighbor, so `SELECT _doc_id ... WHERE v = 3` could return no rows. `_meta.doc_id` in a filter reported `42P01`, and `UPDATE` or `DELETE` filtering on `_doc_id` reported `42703`. A table column named `_doc_id` keeps its own meaning in a filter, as before.
 
 ## Statistics change counts
 
