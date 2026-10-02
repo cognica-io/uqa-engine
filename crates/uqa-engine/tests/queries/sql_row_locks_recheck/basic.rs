@@ -188,6 +188,18 @@ fn row_lock_recheck_keeps_the_original_unmarked_join_partner() {
         &[],
     )
     .unwrap();
+    // The waiter has to read the row before the holder commits: a statement that begins afterwards joins the new version with that version's own partner and returns it.
+    let (scanned_tx, scanned_rx) = mpsc::channel();
+    root.register_scalar_function_with_options(
+        "epq_join_partner_scanned",
+        SQLFunctionOptions::read_only(SQLFunctionVolatility::Volatile),
+        move |_args: &[Value]| {
+            // The recheck evaluates the qualifier again after the receiver is gone.
+            let _ = scanned_tx.send(());
+            Ok(Value::Bool(true))
+        },
+    )
+    .unwrap();
     let holder = root.new_session().unwrap();
     let waiter = root.new_session().unwrap();
     holder.sql("BEGIN", &[]).unwrap();
@@ -198,11 +210,12 @@ fn row_lock_recheck_keeps_the_original_unmarked_join_partner() {
     let waiting_thread = std::thread::spawn(move || {
         done_tx
             .send(waiter.sql(
-                "SELECT target.match_key, source.label FROM epq_target AS target JOIN epq_source AS source ON target.match_key = source.match_key WHERE target.id = 1 FOR UPDATE OF target",
+                "SELECT target.match_key, source.label FROM epq_target AS target JOIN epq_source AS source ON target.match_key = source.match_key WHERE target.id = 1 AND epq_join_partner_scanned() FOR UPDATE OF target",
                 &[],
             ))
             .unwrap();
     });
+    scanned_rx.recv_timeout(crate::waits::COMPLETION).unwrap();
     assert!(done_rx.recv_timeout(Duration::from_millis(150)).is_err());
     holder.sql("COMMIT", &[]).unwrap();
     let result = done_rx
