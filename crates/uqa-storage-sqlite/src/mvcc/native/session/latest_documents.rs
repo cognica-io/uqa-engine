@@ -6,14 +6,14 @@
 
 //! Committed document rows read from their physical projection when it holds exactly a snapshot's records.
 //!
-//! At a snapshot that is the latest commit, the projection holds the snapshot's committed records (see [`NativeSnapshot::read_latest_projection`]). Commit validation binds every document row's table name to its owner, and a name is retired only after its rows are gone, so the rows under a table's name are the records of the owner bound to that name. When that owner has no other bound name and the session holds no private records, the physical rows in document order stand in for the record scan, one sequential cursor instead of a version lookup per record.
+//! At a snapshot that is the latest commit, the projection holds the snapshot's committed records (see [`NativeSnapshot::read_latest_projection`]). Commit validation binds every document row's table name to its owner, and a name is retired only after its rows are gone, so the rows under a table's name are the records of the owner bound to that name. When that owner has no other bound name and the session holds no private document record of the owner, the physical rows in document order stand in for the record scan, one sequential cursor instead of a version lookup per record. Private records of other tables leave these rows as the session sees them, so a transaction keeps this read for the tables it has not written.
 
 use rusqlite::{params, types::ValueRef, Connection, OptionalExtension};
 use uqa_core::memory::{MemoryError, MemoryReservation};
 use uqa_storage::mvcc::VersionError;
 use uqa_storage::read_control::StorageReadControl;
 
-use super::{owners, NativeRecordOwner, NativeSnapshot};
+use super::{owners, Family, NativeRecordIdentity, NativeRecordOwner, NativeSnapshot};
 use crate::connection::Result;
 use crate::mvcc::PhysicalResult;
 use crate::read_control::{payload_length, reserve_bindings};
@@ -71,7 +71,10 @@ impl NativeSnapshot {
         control: &StorageReadControl,
         read: &mut dyn FnMut(&LatestDocuments<'_>) -> Result<T>,
     ) -> Result<Option<T>> {
-        self.read_latest_projection(control, &mut |connection| {
+        let documents = || {
+            Ok(NativeRecordIdentity::new(Family::Documents, owner)?.encode_prefix(&[], control)?)
+        };
+        self.read_latest_projection_under(&documents, control, &mut |connection| {
             let bound = owners::lookup(connection, ValueRef::Text(table.as_bytes()), control)
                 .map_err(crate::mvcc::Error::into_version)?;
             if bound != Some(owner) {

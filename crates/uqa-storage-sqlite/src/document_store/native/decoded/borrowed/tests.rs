@@ -255,19 +255,13 @@ fn native_projection_avoids_unselected_inline_payload_allocation_and_keeps_field
 }
 
 type Scanned = Vec<(u64, Vec<Value>)>;
+type TablesRead = std::sync::Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>;
 
-/// Scan `fields` and record which physical tables the scan's statements read.
-fn scan_reading(
-    store: &SQLiteDocumentStore,
-    snapshot: &dyn DocumentStore,
-    after: Option<u64>,
-    limit: usize,
-    fields: &[&str],
-) -> (Scanned, std::collections::BTreeSet<String>) {
+/// Record the physical tables that the statements of `store`'s connection read from now on. A transaction cannot reach the physical connection, so a test that scans inside one starts recording before it begins.
+fn record_tables_read(store: &SQLiteDocumentStore) -> TablesRead {
     use rusqlite::hooks::{AuthAction, Authorization};
-    use std::sync::{Arc, Mutex};
-    let tables = Arc::new(Mutex::new(std::collections::BTreeSet::new()));
-    let seen = Arc::clone(&tables);
+    let tables = TablesRead::default();
+    let seen = std::sync::Arc::clone(&tables);
     store
         .conn
         .with_physical(|sqlite| {
@@ -281,13 +275,11 @@ fn scan_reading(
             Ok(())
         })
         .unwrap();
-    let mut scanned = Vec::new();
-    snapshot
-        .for_each_next_fields_borrowed(after, limit, fields, &mut |id, values| {
-            scanned.push((id, values.iter().map(|value| (*value).clone()).collect()));
-            true
-        })
-        .unwrap();
+    tables
+}
+
+fn stop_recording_tables(store: &SQLiteDocumentStore) {
+    use rusqlite::hooks::Authorization;
     store
         .conn
         .with_physical(|sqlite| {
@@ -298,6 +290,35 @@ fn scan_reading(
             Ok(())
         })
         .unwrap();
+}
+
+fn scan(
+    snapshot: &dyn DocumentStore,
+    after: Option<u64>,
+    limit: usize,
+    fields: &[&str],
+) -> Scanned {
+    let mut scanned = Vec::new();
+    snapshot
+        .for_each_next_fields_borrowed(after, limit, fields, &mut |id, values| {
+            scanned.push((id, values.iter().map(|value| (*value).clone()).collect()));
+            true
+        })
+        .unwrap();
+    scanned
+}
+
+/// Scan `fields` and record which physical tables the scan's statements read.
+fn scan_reading(
+    store: &SQLiteDocumentStore,
+    snapshot: &dyn DocumentStore,
+    after: Option<u64>,
+    limit: usize,
+    fields: &[&str],
+) -> (Scanned, std::collections::BTreeSet<String>) {
+    let tables = record_tables_read(store);
+    let scanned = scan(snapshot, after, limit, fields);
+    stop_recording_tables(store);
     let tables = tables.lock().unwrap().clone();
     (scanned, tables)
 }
@@ -475,4 +496,80 @@ fn paged_latest_scans_build_decoded_columns_across_pages() {
         second.extend(rows);
     }
     assert_eq!(second, first);
+}
+
+#[test]
+fn private_records_of_another_table_keep_the_physical_projection() {
+    let mut store = fixture();
+    let mut other = SQLiteDocumentStore::new(store.conn.clone(), "other");
+    for id in 1..=3 {
+        store
+            .put(
+                id,
+                BTreeMap::from([("value".into(), Value::Int(id as i64))]),
+            )
+            .unwrap();
+    }
+    other
+        .put(1, BTreeMap::from([("x".into(), Value::Int(1))]))
+        .unwrap();
+    let committed = [
+        (1, vec![Value::Int(1)]),
+        (2, vec![Value::Int(2)]),
+        (3, vec![Value::Int(3)]),
+    ];
+    let tables = record_tables_read(&store);
+    // Only a scan from the table's first row keeps its decoded columns, and the one that does selects a field the later scans add another to, so every scan reads rows.
+    let scan_tables = |snapshot: &dyn DocumentStore, after, fields: &[&str]| {
+        tables.lock().unwrap().clear();
+        let scanned = scan(snapshot, after, usize::MAX, fields);
+        (scanned, tables.lock().unwrap().clone())
+    };
+    store.conn.begin_transaction().unwrap();
+    // A change and an insertion in another table are not among this table's rows.
+    other
+        .put(1, BTreeMap::from([("x".into(), Value::Int(10))]))
+        .unwrap();
+    other
+        .put(2, BTreeMap::from([("x".into(), Value::Int(2))]))
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let (scanned, read) = scan_tables(snapshot.as_ref(), None, &["value"]);
+    assert_eq!(scanned, committed);
+    assert!(read.contains("_documents"), "{read:?}");
+    assert_eq!(snapshot.len().unwrap(), 3);
+    // Nor is a deletion there.
+    other.delete(1).unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let (scanned, read) = scan_tables(snapshot.as_ref(), Some(1), &["value", "absent"]);
+    assert_eq!(
+        scanned,
+        [
+            (2, vec![Value::Int(2), Value::Null]),
+            (3, vec![Value::Int(3), Value::Null])
+        ]
+    );
+    assert!(read.contains("_documents"), "{read:?}");
+
+    // A private record of the table itself, a deletion as much as a write, is not projected.
+    store.delete(3).unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let (scanned, read) = scan_tables(snapshot.as_ref(), None, &["absent", "value"]);
+    assert_eq!(
+        scanned,
+        [
+            (1, vec![Value::Null, Value::Int(1)]),
+            (2, vec![Value::Null, Value::Int(2)])
+        ]
+    );
+    assert!(!read.contains("_documents"), "{read:?}");
+    assert_eq!(snapshot.len().unwrap(), 2);
+    store.conn.rollback_transaction().unwrap();
+
+    // The rollback leaves no private record, and the rows are read where they are stored again.
+    let snapshot = store.snapshot().unwrap();
+    let (scanned, read) = scan_tables(snapshot.as_ref(), Some(2), &["absent", "value"]);
+    assert_eq!(scanned, [(3, vec![Value::Null, Value::Int(3)])]);
+    assert!(read.contains("_documents"), "{read:?}");
+    stop_recording_tables(&store);
 }
