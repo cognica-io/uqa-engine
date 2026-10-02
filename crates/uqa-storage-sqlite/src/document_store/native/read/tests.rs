@@ -287,12 +287,14 @@ fn the_latest_document_count_reads_stored_rows_and_other_snapshots_count_records
     );
     connection.begin_transaction().unwrap();
     documents.delete(1).unwrap();
+    documents.put(102, BTreeMap::new()).unwrap();
+    documents.delete(103).unwrap();
     stored_reads.store(0, Ordering::Relaxed);
-    assert_eq!(documents.len().unwrap(), 64);
-    assert_eq!(
-        stored_reads.swap(0, Ordering::Relaxed),
-        0,
-        "a transaction's own records were counted from the latest stored rows"
+    // The stored rows are counted, and the transaction's own records add or remove what they insert or delete; deleting a document that was never stored removes nothing.
+    assert_eq!(documents.len().unwrap(), 65);
+    assert!(
+        stored_reads.swap(0, Ordering::Relaxed) > 0,
+        "the count of a transaction that changed the table read no stored rows"
     );
     connection.rollback_transaction().unwrap();
     assert_eq!(documents.len().unwrap(), 65);

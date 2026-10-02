@@ -140,16 +140,18 @@ impl NativeDocumentRead<'_> {
             owner,
             self.control,
             &mut |latest| {
-                let generation = latest.generation();
-                if let Some(cached) = self
-                    .columns
-                    .and_then(|cache| cache.get(self.table, owner, generation, fields))
-                {
+                // Decoded columns hold committed rows alone; a read that merges private records neither serves nor records them.
+                let cache = latest
+                    .committed_generation()
+                    .and_then(|generation| self.columns.map(|cache| (cache, generation)));
+                if let Some(cached) = cache.and_then(|(cache, generation)| {
+                    cache.get(self.table, owner, generation, fields)
+                }) {
                     visited = self.visit_cached_columns(&cached, after, limit, visitor)?;
                     return Ok(());
                 }
                 // A build starts at the table's first row and continues only with the page that resumes exactly where it stopped.
-                let mut builder = self.columns.and_then(|cache| match after {
+                let mut builder = cache.and_then(|(cache, generation)| match after {
                     None => Some(ColumnBuilder::start(
                         cache, self.table, owner, generation, fields,
                     )),

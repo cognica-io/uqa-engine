@@ -6,17 +6,20 @@
 
 //! Committed document rows read from their physical projection when it holds exactly a snapshot's records.
 //!
-//! At a snapshot that is the latest commit, the projection holds the snapshot's committed records (see [`NativeSnapshot::read_latest_projection`]). Commit validation binds every document row's table name to its owner, and a name is retired only after its rows are gone, so the rows under a table's name are the records of the owner bound to that name. When that owner has no other bound name and the session holds no private document record of the owner, the physical rows in document order stand in for the record scan, one sequential cursor instead of a version lookup per record. Private records of other tables leave these rows as the session sees them, so a transaction keeps this read for the tables it has not written.
+//! At a snapshot that is the latest commit, the projection holds the snapshot's committed records (see [`NativeSnapshot::read_latest_projection`]). Commit validation binds every document row's table name to its owner, and a name is retired only after its rows are gone, so the rows under a table's name are the records of the owner bound to that name. When that owner has no other bound name, the physical rows in document order stand in for the record scan, one sequential cursor instead of a version lookup per record. Private records of other tables are not among these rows. The session's private document records of the owner, which the projection does not hold, are merged into them in document order: a private record before a row inserts a document, one at a row replaces or deletes it, and the work is that of the private records rather than a version lookup for every row.
+
+mod private_documents;
 
 use rusqlite::{params, types::ValueRef, Connection, OptionalExtension};
 use uqa_core::memory::{MemoryError, MemoryReservation};
-use uqa_storage::mvcc::VersionError;
+use uqa_storage::mvcc::{MergedRecordSnapshot, VersionError};
 use uqa_storage::read_control::StorageReadControl;
 
 use super::{owners, Family, NativeRecordIdentity, NativeRecordOwner, NativeSnapshot};
 use crate::connection::Result;
 use crate::mvcc::PhysicalResult;
 use crate::read_control::{payload_length, reserve_bindings};
+use private_documents::PrivateDocuments;
 
 /// Bodies of at most this many bytes are read with their row. The selected byte length bounds `SQLite`'s copy before the body is evaluated; a larger body is admitted and then read by itself.
 const INLINE_BODY_BYTES: u16 = 16 * 1024;
@@ -25,24 +28,30 @@ const ROWS: &str = "SELECT doc_id, octet_length(body), CASE WHEN octet_length(bo
 const ROWS_AFTER: &str = "SELECT doc_id, octet_length(body), CASE WHEN octet_length(body) <= ?2 THEN body END, tuple_xmin FROM _documents WHERE table_name = ?1 AND doc_id > ?3 ORDER BY doc_id";
 const BODY: &str = "SELECT body FROM _documents WHERE table_name = ?1 AND doc_id = ?2";
 const COUNT: &str = "SELECT count(*) FROM _documents WHERE table_name = ?1";
+const STORED: &str =
+    "SELECT EXISTS(SELECT 1 FROM _documents WHERE table_name = ?1 AND doc_id = ?2)";
 const NAMES_OF_OWNER: &str = "SELECT count(*) FROM _uqa_mvcc_native_owners WHERE (object_id, generation) = (SELECT object_id, generation FROM _uqa_mvcc_native_owners WHERE name = ?1)";
 
 /// The table's data generation, which the `_documents` triggers advance in the transaction of every row change.
 const GENERATION: &str =
     "SELECT generation FROM _cache_revisions WHERE kind = 'data' AND name = ?1";
 
-/// One physical read of a table's latest committed rows.
+/// One physical read of a table's latest committed rows, with the session's private records of them.
 pub(crate) struct LatestDocuments<'a> {
     connection: &'a Connection,
     table: &'a str,
     generation: i64,
     control: &'a StorageReadControl,
+    view: &'a MergedRecordSnapshot,
+    documents: NativeRecordIdentity,
+    /// The document key prefix of the table's owner, when the session holds a private record under it.
+    private: Option<&'a [u8]>,
 }
 
 impl LatestDocuments<'_> {
-    /// Every commit that changes the table's rows advances this generation in the same transaction, so reads observing an equal generation for the same owner see the same rows.
-    pub(crate) fn generation(&self) -> i64 {
-        self.generation
+    /// The table's data generation, while the rows read are its committed ones. Every commit that changes the table's rows advances it in the same transaction, so reads observing an equal generation for the same owner see the same rows. `None` while the session's private records are merged into them, which no other read shares.
+    pub(crate) fn committed_generation(&self) -> Option<i64> {
+        self.private.is_none().then_some(self.generation)
     }
 
     /// Visit the rows after document `after`, in document order and in `_documents` column order, while `visit` returns true. `visit` runs inside the physical read and must not read the snapshot.
@@ -51,14 +60,36 @@ impl LatestDocuments<'_> {
         after: Option<i64>,
         visit: &mut dyn FnMut(&[ValueRef<'_>]) -> Result<bool>,
     ) -> Result<()> {
-        visit_rows(self.connection, self.table, after, self.control, visit)
+        self.private_documents(after)
+            .and_then(|private| {
+                visit_rows(
+                    self.connection,
+                    self.table,
+                    after,
+                    private,
+                    self.control,
+                    visit,
+                )
+            })
             .map_err(|error| error.into_version().into())
     }
 
-    /// The number of rows, counted in the table's key order without reading a body.
+    /// The number of rows, counted in the table's key order without reading a body, with the documents the session's private records insert or delete.
     pub(crate) fn count(&self) -> Result<u64> {
-        count_rows(self.connection, self.table, self.control)
+        self.private_documents(None)
+            .and_then(|private| count_rows(self.connection, self.table, private, self.control))
             .map_err(|error| error.into_version().into())
+    }
+
+    fn private_documents(
+        &self,
+        after: Option<i64>,
+    ) -> PhysicalResult<Option<PrivateDocuments<'_>>> {
+        self.private
+            .map(|prefix| {
+                PrivateDocuments::after(self.view, self.documents, prefix, after, self.control)
+            })
+            .transpose()
     }
 }
 
@@ -71,10 +102,17 @@ impl NativeSnapshot {
         control: &StorageReadControl,
         read: &mut dyn FnMut(&LatestDocuments<'_>) -> Result<T>,
     ) -> Result<Option<T>> {
-        let documents = || {
-            Ok(NativeRecordIdentity::new(Family::Documents, owner)?.encode_prefix(&[], control)?)
-        };
-        self.read_latest_projection_under(&documents, control, &mut |connection| {
+        self.control.check()?;
+        control.check()?;
+        let documents = NativeRecordIdentity::new(Family::Documents, owner)?;
+        let prefix = documents.encode_prefix(&[], control)?;
+        // A session that holds no private record at all skips the seek for one under the prefix.
+        let private = self.view.private_revision().is_some()
+            && !self
+                .view
+                .private_keys(&prefix, None, 1, control)?
+                .is_empty();
+        self.read_latest_committed(control, &mut |connection| {
             let bound = owners::lookup(connection, ValueRef::Text(table.as_bytes()), control)
                 .map_err(crate::mvcc::Error::into_version)?;
             if bound != Some(owner) {
@@ -96,6 +134,9 @@ impl NativeSnapshot {
                 table,
                 generation,
                 control,
+                view: &self.view,
+                documents,
+                private: private.then_some(&*prefix),
             };
             read(&latest).map(Some)
         })
@@ -105,6 +146,7 @@ impl NativeSnapshot {
 fn count_rows(
     connection: &Connection,
     table: &str,
+    private: Option<PrivateDocuments<'_>>,
     control: &StorageReadControl,
 ) -> PhysicalResult<u64> {
     let _bindings = reserve_bindings(control, &[table.as_bytes()])?;
@@ -112,14 +154,33 @@ fn count_rows(
         .prepare_cached(COUNT)?
         .query_row([table], |row| row.get(0))?;
     control.check().map_err(VersionError::from)?;
-    Ok(u64::try_from(count)
-        .map_err(|_| VersionError::InvalidEncoding("negative native document count"))?)
+    let mut count = u64::try_from(count)
+        .map_err(|_| VersionError::InvalidEncoding("negative native document count"))?;
+    if let Some(mut private) = private {
+        let mut stored = connection.prepare_cached(STORED)?;
+        while let Some(id) = private.peek() {
+            control.check().map_err(VersionError::from)?;
+            let present: bool = stored.query_row(params![table, id], |row| row.get(0))?;
+            match (private.live()?, present) {
+                (true, false) => count += 1,
+                (false, true) => {
+                    count = count.checked_sub(1).ok_or(VersionError::InvalidEncoding(
+                        "a private deletion exceeds the native document count",
+                    ))?;
+                }
+                _ => {}
+            }
+            private.advance()?;
+        }
+    }
+    Ok(count)
 }
 
 fn visit_rows(
     connection: &Connection,
     table: &str,
     after: Option<i64>,
+    mut private: Option<PrivateDocuments<'_>>,
     control: &StorageReadControl,
     visit: &mut dyn FnMut(&[ValueRef<'_>]) -> Result<bool>,
 ) -> PhysicalResult<()> {
@@ -134,9 +195,29 @@ fn visit_rows(
         Some(after) => statement.query(params![table, limit, after])?,
         None => statement.query(params![table, limit])?,
     };
+    let mut stopped = false;
     while let Some(row) = rows.next()? {
         control.check().map_err(VersionError::from)?;
         let id: i64 = row.get(0)?;
+        // A private record before this row inserts a document; one at this row replaces or deletes it.
+        let mut replaced = false;
+        if let Some(private) = private.as_mut() {
+            while let Some(next) = private.peek().filter(|next| *next <= id) {
+                let more = private.visit(visit)?;
+                private.advance()?;
+                replaced |= next == id;
+                if more == Some(false) {
+                    stopped = true;
+                    break;
+                }
+            }
+        }
+        if stopped {
+            break;
+        }
+        if replaced {
+            continue;
+        }
         let length = payload_length(row.get(1)?)?;
         admitted = Some(
             control
@@ -184,6 +265,7 @@ fn visit_rows(
             }
         };
         if !more {
+            stopped = true;
             break;
         }
     }
@@ -191,6 +273,17 @@ fn visit_rows(
     drop(statement);
     drop(body_statement);
     drop(admitted);
+    // The private records after the last row insert documents.
+    if let Some(private) = private.as_mut().filter(|_| !stopped) {
+        while private.peek().is_some() {
+            control.check().map_err(VersionError::from)?;
+            let more = private.visit(visit)?;
+            private.advance()?;
+            if more == Some(false) {
+                break;
+            }
+        }
+    }
     control.check().map_err(VersionError::from)?;
     Ok(())
 }

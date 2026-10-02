@@ -375,9 +375,10 @@ fn latest_committed_rows_read_the_physical_projection_and_match_the_records() {
 }
 
 #[test]
-fn private_records_keep_the_record_scan() {
+fn private_documents_merge_into_the_physical_rows_in_document_order() {
     let mut store = fixture();
-    for id in 1..=3 {
+    let blob = |id: u64| Value::Bytes(format!("blob{id}").repeat(2048).into_bytes());
+    for id in [10_u64, 20, 30, 40] {
         store
             .put(
                 id,
@@ -385,24 +386,85 @@ fn private_records_keep_the_record_scan() {
             )
             .unwrap();
     }
-    store.conn.begin_transaction().unwrap();
+    // Values stored outside the body end a physical read to hydrate, committed or private.
     store
-        .put(2, BTreeMap::from([("value".into(), Value::Int(20))]))
+        .put(
+            50,
+            BTreeMap::from([("value".into(), Value::Int(50)), ("raw".into(), blob(50))]),
+        )
+        .unwrap();
+    let tables = record_tables_read(&store);
+    let scan_tables = |snapshot: &dyn DocumentStore, after, limit, fields: &[&str]| {
+        tables.lock().unwrap().clear();
+        let scanned = scan(snapshot, after, limit, fields);
+        (scanned, tables.lock().unwrap().clone())
+    };
+    store.conn.begin_transaction().unwrap();
+    for (id, value) in [(5_u64, 5_i64), (20, 200), (35, 35), (60, 60)] {
+        store
+            .put(id, BTreeMap::from([("value".into(), Value::Int(value))]))
+            .unwrap();
+    }
+    store.delete(30).unwrap();
+    store
+        .put(
+            70,
+            BTreeMap::from([("value".into(), Value::Int(70)), ("raw".into(), blob(70))]),
+        )
         .unwrap();
     let snapshot = store.snapshot().unwrap();
-    // The committed projection still holds 2; only the private records hold 20.
-    let mut scanned = Vec::new();
-    snapshot
-        .for_each_next_fields_borrowed(None, usize::MAX, &["value"], &mut |id, values| {
-            scanned.push((id, values[0].clone()));
-            true
-        })
-        .unwrap();
+    let row = |id: u64, value: i64, raw: Option<u64>| {
+        (id, vec![Value::Int(value), raw.map_or(Value::Null, blob)])
+    };
+    let merged = vec![
+        row(5, 5, None),
+        row(10, 10, None),
+        row(20, 200, None),
+        row(35, 35, None),
+        row(40, 40, None),
+        row(50, 50, Some(50)),
+        row(60, 60, None),
+        row(70, 70, Some(70)),
+    ];
+    let (scanned, read) = scan_tables(snapshot.as_ref(), None, usize::MAX, &["value", "raw"]);
+    assert_eq!(scanned, merged);
+    assert!(read.contains("_documents"), "{read:?}");
+    // Pages resume after the last document they visited, whether it was stored or private.
+    for (after, limit, expected) in [
+        (Some(10), 2, &merged[2..4]),
+        (Some(35), 2, &merged[4..6]),
+        (Some(50), 5, &merged[6..]),
+        (Some(70), 5, &merged[8..]),
+        (None, 1, &merged[..1]),
+    ] {
+        let (scanned, read) = scan_tables(snapshot.as_ref(), after, limit, &["value", "raw"]);
+        assert_eq!(scanned, expected, "after {after:?}, limit {limit}");
+        assert!(read.contains("_documents"), "{read:?}");
+    }
+    assert_eq!(snapshot.len().unwrap(), 8);
+    // Merged rows are the transaction's own, so a complete scan of them records no decoded columns for others to serve.
+    let values = merged
+        .iter()
+        .map(|(id, values)| (*id, vec![values[0].clone()]))
+        .collect::<Vec<_>>();
+    for _ in 0..2 {
+        let (scanned, read) = scan_tables(snapshot.as_ref(), None, usize::MAX, &["value"]);
+        assert_eq!(scanned, values);
+        assert!(read.contains("_documents"), "{read:?}");
+    }
+    store.conn.rollback_transaction().unwrap();
+
+    let snapshot = store.snapshot().unwrap();
+    let (scanned, _) = scan_tables(snapshot.as_ref(), None, usize::MAX, &["value"]);
     assert_eq!(
         scanned,
-        [(1, Value::Int(1)), (2, Value::Int(20)), (3, Value::Int(3))]
+        [10, 20, 30, 40, 50]
+            .into_iter()
+            .map(|id| (id, vec![Value::Int(id as i64)]))
+            .collect::<Vec<_>>()
     );
-    store.conn.rollback_transaction().unwrap();
+    assert_eq!(snapshot.len().unwrap(), 5);
+    stop_recording_tables(&store);
 }
 
 #[test]
@@ -499,7 +561,7 @@ fn paged_latest_scans_build_decoded_columns_across_pages() {
 }
 
 #[test]
-fn private_records_of_another_table_keep_the_physical_projection() {
+fn private_records_of_another_table_leave_the_physical_rows_as_they_are() {
     let mut store = fixture();
     let mut other = SQLiteDocumentStore::new(store.conn.clone(), "other");
     for id in 1..=3 {
@@ -551,7 +613,7 @@ fn private_records_of_another_table_keep_the_physical_projection() {
     );
     assert!(read.contains("_documents"), "{read:?}");
 
-    // A private record of the table itself, a deletion as much as a write, is not projected.
+    // A private record of the table itself, a deletion as much as a write, is merged into its rows.
     store.delete(3).unwrap();
     let snapshot = store.snapshot().unwrap();
     let (scanned, read) = scan_tables(snapshot.as_ref(), None, &["absent", "value"]);
@@ -562,7 +624,7 @@ fn private_records_of_another_table_keep_the_physical_projection() {
             (2, vec![Value::Null, Value::Int(2)])
         ]
     );
-    assert!(!read.contains("_documents"), "{read:?}");
+    assert!(read.contains("_documents"), "{read:?}");
     assert_eq!(snapshot.len().unwrap(), 2);
     store.conn.rollback_transaction().unwrap();
 
