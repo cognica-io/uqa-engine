@@ -19,6 +19,7 @@ impl Engine {
         SequenceRemovalContext {
             locks: self,
             names: self,
+            relations: self,
             publication: self,
             privileges: self.sequence_privilege_inquiry(),
             dependencies: self.sequence_dependency_context(),

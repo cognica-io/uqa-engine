@@ -309,3 +309,65 @@ fn a_partitioned_tables_identity_actions_reach_its_partitions() {
         partitioned_rows,
     );
 }
+
+#[test]
+fn an_identity_sequence_resists_a_direct_drop_and_another_owner() {
+    let engine = Engine::new();
+    run(
+        &engine,
+        "CREATE TABLE t (id int GENERATED ALWAYS AS IDENTITY);
+         CREATE SCHEMA other;
+         CREATE TABLE other.o (id int GENERATED ALWAYS AS IDENTITY);
+         CREATE TABLE \"Mixed\" (\"Col\" int GENERATED ALWAYS AS IDENTITY)",
+    );
+    // Objects are named as the search path shows them: by their own name when it finds them, quoted as identifiers need.
+    for (statement, sqlstate, message, detail, hint) in [
+        (
+            "DROP SEQUENCE t_id_seq",
+            "2BP01",
+            "cannot drop sequence t_id_seq because column id of table t requires it",
+            None,
+            Some("You can drop column id of table t instead."),
+        ),
+        (
+            "DROP SEQUENCE other.o_id_seq",
+            "2BP01",
+            "cannot drop sequence other.o_id_seq because column id of table other.o requires it",
+            None,
+            Some("You can drop column id of table other.o instead."),
+        ),
+        (
+            "DROP SEQUENCE \"Mixed_Col_seq\"",
+            "2BP01",
+            "cannot drop sequence \"Mixed_Col_seq\" because column Col of table \"Mixed\" requires it",
+            None,
+            Some("You can drop column Col of table \"Mixed\" instead."),
+        ),
+        (
+            "ALTER SEQUENCE t_id_seq OWNED BY NONE",
+            "0A000",
+            "cannot change ownership of identity sequence",
+            Some("Sequence \"t_id_seq\" is linked to table \"t\"."),
+            None,
+        ),
+    ] {
+        match engine.sql(statement, &[]) {
+            Err(uqa_sql::SQLError::Diagnostic {
+                sqlstate: actual_state,
+                message: actual_message,
+                detail: actual_detail,
+                hint: actual_hint,
+            }) => assert_eq!(
+                (
+                    actual_state.as_str(),
+                    actual_message.as_str(),
+                    actual_detail.as_deref(),
+                    actual_hint.as_deref()
+                ),
+                (sqlstate, message, detail, hint),
+                "{statement}"
+            ),
+            other => panic!("{statement}: expected a diagnostic, got {other:?}"),
+        }
+    }
+}

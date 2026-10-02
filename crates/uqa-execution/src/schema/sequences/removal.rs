@@ -28,6 +28,8 @@ pub trait SequenceRemovalInputs {
 pub struct SequenceRemovalContext<'a> {
     pub locks: &'a dyn crate::row_locks::binding::RelationDefinitionSession,
     pub names: &'a dyn SequenceOwnerNames,
+    /// Resolves names through the search path, which decides how a diagnostic names a relation.
+    pub relations: &'a dyn super::dispatch::SequenceCommandCatalog,
     pub publication: &'a dyn SequenceRemovalPublication,
     pub privileges: SequencePrivilegeInquiry<'a>,
     pub dependencies: SequenceDependencyContext<'a>,
@@ -134,11 +136,23 @@ impl SequenceRemovalContext<'_> {
                         ))
                     })?;
                     let relation_kind = if foreign { "foreign table" } else { "table" };
-                    return Err(SQLError::Routine {
+                    let described = |relation: &RelationIdentity| {
+                        uqa_sql::catalog::resolution::described_relation_name(relation, |name| {
+                            self.relations.resolve_visible_relation(name)
+                        })
+                    };
+                    let sequence = described(&relation)?;
+                    let table = described(&RelationIdentity::from_legacy_name(&table).map_err(
+                        |error| SQLError::Internal(format!("resolve table `{table}`: {error}")),
+                    )?)?;
+                    let owner = format!("column {column} of {relation_kind} {table}");
+                    return Err(SQLError::Diagnostic {
                         sqlstate: "2BP01".into(),
                         message: format!(
-                            "cannot drop sequence {name} because column {column} of {relation_kind} {table} requires it"
+                            "cannot drop sequence {sequence} because {owner} requires it"
                         ),
+                        detail: None,
+                        hint: Some(format!("You can drop {owner} instead.")),
                     });
                 }
             }

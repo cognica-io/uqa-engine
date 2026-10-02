@@ -78,14 +78,17 @@ pub fn alter_sequence_definition(
             let owner_table = context
                 .catalog
                 .owner_target(state.owner.expect("identity owner was checked"))
-                .map_or_else(|| "<missing>".into(), |(table, _, _)| table);
-            return Err(SQLError::Routine {
-                    sqlstate: "0A000".into(),
-                    message: format!(
-                        "cannot change ownership of identity sequence; sequence \"{}\" is linked to table \"{owner_table}\"",
-                        relation.name
-                    ),
-                });
+                .and_then(|(table, _, _)| RelationIdentity::from_legacy_name(&table).ok())
+                .map_or_else(|| "<missing>".into(), |table| table.name);
+            return Err(SQLError::Diagnostic {
+                sqlstate: "0A000".into(),
+                message: "cannot change ownership of identity sequence".into(),
+                detail: Some(format!(
+                    "Sequence \"{}\" is linked to table \"{owner_table}\".",
+                    relation.name
+                )),
+                hint: None,
+            });
         }
         state.owner = owner;
     }
