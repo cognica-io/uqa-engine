@@ -169,6 +169,8 @@ fn persisted_column_stats_refresh_after_an_external_commit() {
             "CREATE TABLE t (id INTEGER PRIMARY KEY, val INTEGER)",
         );
         exec(&engine, "INSERT INTO t (id, val) VALUES (1, 10)");
+        // A table that was never analyzed is due for an automatic analysis, which the maintenance worker of the engine below would publish over the rows written here.
+        exec(&engine, "ANALYZE t");
     }
 
     write_persisted_row_count(&db_path, 999);
