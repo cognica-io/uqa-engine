@@ -113,7 +113,7 @@ pub fn lower_where(expr: &ScalarExpr, constants: &RetrievalConstants<'_>) -> Opt
         ScalarExpr::Func { name, args, .. } => lower_function(name, args, constants),
         ScalarExpr::Binary { op, lhs, rhs } => lower_comparison(*op, lhs, rhs, constants),
         ScalarExpr::IsNull { expr, negated } => {
-            let field = column_name(expr)?;
+            let field = predicates::filter_field(expr)?;
             let predicate = if *negated {
                 Predicate::IsNotNull
             } else {
@@ -126,7 +126,7 @@ pub fn lower_where(expr: &ScalarExpr, constants: &RetrievalConstants<'_>) -> Opt
             })
         }
         ScalarExpr::Between { expr, low, high } => {
-            let field = column_name(expr)?;
+            let field = predicates::filter_field(expr)?;
             let lo = const_value(low, constants)?;
             let hi = const_value(high, constants)?;
             Some(RetrievalExpr::Filter {
@@ -140,7 +140,7 @@ pub fn lower_where(expr: &ScalarExpr, constants: &RetrievalConstants<'_>) -> Opt
             list,
             negated,
         } => {
-            let field = column_name(expr)?;
+            let field = predicates::filter_field(expr)?;
             let mut set: BTreeSet<Value> = BTreeSet::new();
             let mut has_null = false;
             for v in list {

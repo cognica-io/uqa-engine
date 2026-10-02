@@ -87,6 +87,19 @@ impl HiddenColumn {
     }
 }
 
+/// Whether a column of a scan's schema is one the scan attaches from row metadata instead of reading it from the stored fields: `_doc_id`, `_score` or `tableoid` where the table declares no column of that name. A predicate pushed into the scan sees only the stored fields.
+pub(crate) fn is_attached_metadata_column(
+    column: &str,
+    definitions: &[uqa_sql::ast::ColumnDef],
+) -> bool {
+    HiddenColumn::ALL
+        .iter()
+        .any(|hidden| hidden.name() == column)
+        && !definitions
+            .iter()
+            .any(|definition| definition.name == column)
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct HiddenColumns(u8);
 
@@ -427,11 +440,7 @@ impl ScoredDocumentSource {
         }
         let projected_fields = schema
             .iter()
-            .filter(|column| {
-                !HiddenColumn::ALL.iter().any(|hidden| {
-                    hidden_columns.contains(*hidden) && column.as_str() == hidden.name()
-                })
-            })
+            .filter(|column| !is_attached_metadata_column(column, &column_definitions))
             .cloned()
             .collect::<Vec<_>>();
         let extra_columns = HiddenColumn::ALL.map(HiddenColumn::name);

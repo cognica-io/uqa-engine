@@ -34,6 +34,8 @@ ORDER BY _meta.score DESC, id ASC;
 
 The metadata namespace is binding-only: it adds nothing to `*`, and `_meta.*` is not a relation wildcard. When a query block contains more than one local-table metadata source, qualify and project the desired metadata inside a single-source subquery before joining. A real relation alias named `_meta` retains ordinary SQL name resolution and disables the virtual namespace for that query block.
 
+A `WHERE` clause compares `_doc_id` and `_meta.doc_id` with each row's storage document identity, whatever the table's key is and whatever else the statement projects or filters on. An equality or an `IN` list on `_doc_id`, alone or as a conjunct, reads only the named identities, and `UPDATE` and `DELETE` accept the same `_doc_id` filters. A table column named `_doc_id` keeps its own meaning in a filter, as it does in a projection, while `_meta.doc_id` still names the identity in a query block.
+
 ## Analyzer resolution
 
 Document text and query leaves are transformed by a field-specific analyzer pipeline. Query execution resolves an explicit search analyzer, then falls back to the field's index analyzer, then to the built-in `standard` analyzer. Multiple tokens emitted for one leaf, including synonym expansions, are unioned across posting lists and feed scoring term accounting.

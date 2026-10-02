@@ -20,6 +20,8 @@ mod operator_tree_full_surface;
 mod operator_tree_pipeline;
 #[path = "optimizer_passes.rs"]
 mod optimizer_passes;
+#[path = "queries/row_metadata_filters.rs"]
+mod row_metadata_filters;
 #[path = "sql_aggregates.rs"]
 mod sql_aggregates;
 #[path = "sql_blocking_spill.rs"]

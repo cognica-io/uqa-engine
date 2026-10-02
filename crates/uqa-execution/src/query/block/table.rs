@@ -213,6 +213,24 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
     }
 
     let table_state = context.scans.tables.table(table)?;
+    // A filter that names its rows by `_doc_id` reads only those of them that exist and evaluates the whole filter on them.
+    if matches!(scored, ScoredInput::All) {
+        if let Some(identities) = physical_filter.as_ref().and_then(|filter| {
+            super::document_ids::document_id_candidates(filter, params, &table_snapshot.columns)
+        }) {
+            let documents = table_state.read_documents();
+            let mut entries = Vec::with_capacity(identities.len());
+            for doc_id in identities {
+                if documents.contains_doc_id(doc_id).map_err(|error| {
+                    crate::storage_errors::storage_error("probe a named document identity", &error)
+                })? {
+                    entries.push(uqa_core::ScoredEntry { doc_id, score: 0.0 });
+                }
+            }
+            drop(documents);
+            scored = ScoredInput::entries(entries, false);
+        }
+    }
     let ordered_primary_key = match table_snapshot
         .columns
         .iter()
@@ -235,8 +253,30 @@ pub fn run_single_table_select_output<'a, S: Clone + Send + Sync + 'static>(
             })
             .collect(),
     );
+    // A pushed predicate reads the stored fields alone. A column the scan attaches from row metadata is left to the residual filter, which sees the whole row.
+    let stored_fields = source_schema
+        .iter()
+        .filter(|name| {
+            !crate::query::scored_input::is_attached_metadata_column(name, &table_snapshot.columns)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let stored_schema = crate::RowSchema::with_qualified_types(
+        qualifier,
+        stored_fields.clone(),
+        stored_fields
+            .iter()
+            .map(|name| {
+                table_snapshot
+                    .columns
+                    .iter()
+                    .find(|column| column.name == *name)
+                    .map(|column| column.ty.clone())
+            })
+            .collect(),
+    );
     let (pushed_predicate, residual_filter) =
-        split_projected_filter(physical_filter.take(), &predicate_schema, params)?;
+        split_projected_filter(physical_filter.take(), &stored_schema, params)?;
     physical_filter = residual_filter;
     let cutoff =
         post_retrieval_top_k.filter(|_| pushed_predicate.is_none() && physical_filter.is_none());
@@ -323,10 +363,12 @@ fn split_projected_filter(
     if expression_references_tableoid(&predicate) {
         return Ok((None, Some(predicate)));
     }
-    if let Some(compiled) =
-        crate::ProjectedPredicate::compile_with_schema(&predicate, source_schema, params)?
-    {
-        return Ok((Some(compiled), None));
+    if reads_stored_fields_only(&predicate, source_schema) {
+        if let Some(compiled) =
+            crate::ProjectedPredicate::compile_with_schema(&predicate, source_schema, params)?
+        {
+            return Ok((Some(compiled), None));
+        }
     }
     if !matches!(predicate, ScalarExpr::And(_)) {
         return Ok((None, Some(predicate)));
@@ -336,6 +378,7 @@ fn split_projected_filter(
     let mut residual = Vec::new();
     for conjunct in flatten_and_filter_parts(&predicate) {
         if !expression_references_tableoid(conjunct)
+            && reads_stored_fields_only(conjunct, source_schema)
             && crate::ProjectedPredicate::compile_with_schema(conjunct, source_schema, params)?
                 .is_some()
         {
@@ -380,4 +423,17 @@ fn identities_follow_keys(
             crate::storage_errors::storage_error("probe identities no key names", &error)
         })?;
     Ok(unmapped.is_empty())
+}
+
+/// Whether every column `expression` reads is one of the stored fields a pushed predicate sees. A column the scan attaches from row metadata, or the `_meta` namespace, is left to the residual filter.
+fn reads_stored_fields_only(expression: &ScalarExpr, stored: &crate::RowSchema) -> bool {
+    let mut stored_only = true;
+    expression.visit(&mut |node| match node {
+        ScalarExpr::Column(column) => stored_only &= stored.has_unqualified_column(column),
+        ScalarExpr::QualifiedColumn { qualifier, column } => {
+            stored_only &= stored.has_qualified_column(qualifier, column);
+        }
+        _ => {}
+    });
+    stored_only
 }

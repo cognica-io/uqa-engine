@@ -125,7 +125,7 @@ pub(super) fn lower_comparison(
         (None, Some(_)) => (rhs, lhs, true),
         _ => return None,
     };
-    let field = column_name(col_expr)?;
+    let field = filter_field(col_expr)?;
     let value = const_value(val_expr, constants)?;
     let predicate = match (op, swap) {
         (BinaryOp::Equal, _) => Predicate::Equals(value),
@@ -145,6 +145,18 @@ pub(super) fn lower_comparison(
         predicate,
         source: None,
     })
+}
+
+/// The stored field a predicate on `expr` filters, which a pseudo column the engine attaches to each row never is: a predicate on one stays relational, where the column carries the row's value.
+pub(super) fn filter_field(expr: &ScalarExpr) -> Option<String> {
+    match expr {
+        ScalarExpr::QualifiedColumn { qualifier, .. }
+            if qualifier == crate::semantics::META_QUALIFIER =>
+        {
+            None
+        }
+        _ => column_name(expr).filter(|column| !crate::semantics::is_engine_pseudo_column(column)),
+    }
 }
 
 pub(super) fn column_name(expr: &ScalarExpr) -> Option<String> {

@@ -27,6 +27,16 @@ pub const XMIN_COLUMN: &str = "xmin";
 pub const META_QUALIFIER: &str = "_meta";
 pub const META_DOC_ID_COLUMN: &str = "doc_id";
 pub const META_SCORE_COLUMN: &str = "score";
+
+/// Whether `column` names a value the engine attaches to each row rather than one its table stores: the row's document identity, its retrieval score, its relation and its creating transaction. A table column of the same name shadows it.
+#[must_use]
+pub fn is_engine_pseudo_column(column: &str) -> bool {
+    matches!(
+        column,
+        DOC_ID_COLUMN | SCORE_COLUMN | TABLE_OID_COLUMN | XMIN_COLUMN
+    )
+}
+
 pub fn expr_contains_subquery(expr: &crate::ScalarExpr) -> bool {
     expr.contains_subquery()
 }
