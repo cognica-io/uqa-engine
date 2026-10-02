@@ -34,7 +34,7 @@ pub fn run_table_update<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<SQLResult, SQLError> {
-    let _transition_capture_scope = crate::mutation::triggers::TransitionCaptureScope::enter();
+    let _trigger_scope = crate::mutation::triggers::TriggerStatementScope::enter();
     context.query.source.locking.session.lock_relation(
         &stmt.table,
         crate::row_locks::RelationLockMode::RowExclusive,

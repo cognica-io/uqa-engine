@@ -82,7 +82,7 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
     let constraints = referential.constraints;
     let triggers = referential.triggers;
     super::analysis::ensure_merge_privileges(mutation, stmt, inherited_ctes)?;
-    let _transition_capture_scope = crate::mutation::triggers::TransitionCaptureScope::enter();
+    let _trigger_scope = crate::mutation::triggers::TriggerStatementScope::enter();
     let target_table = stmt.target.clone();
     referential.locking.session.lock_relation(
         &target_table,

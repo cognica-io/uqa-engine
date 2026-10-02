@@ -74,17 +74,20 @@ pub fn enter_empty_transition_relation_scope() -> TransitionRelationScope {
     TransitionRelationScope::empty()
 }
 
-pub struct TransitionCaptureScope;
+/// A statement that writes rows. What it resolves about the triggers of its tables, which row triggers they have and whether their transitions are captured, holds until it ends.
+pub struct TriggerStatementScope;
 
-impl TransitionCaptureScope {
+impl TriggerStatementScope {
     pub fn enter() -> Self {
         TRANSITION_CAPTURE_CACHE.with(|cache| cache.borrow_mut().push(BTreeMap::new()));
+        row_triggers::enter();
         Self
     }
 }
 
-impl Drop for TransitionCaptureScope {
+impl Drop for TriggerStatementScope {
     fn drop(&mut self) {
+        row_triggers::leave();
         TRANSITION_CAPTURE_CACHE.with(|cache| {
             let removed = cache.borrow_mut().pop();
             debug_assert!(
@@ -98,6 +101,7 @@ impl Drop for TransitionCaptureScope {
 mod transitions;
 pub use transitions::{build_transition_tables, transition_capture_required, TransitionTables};
 
+mod row_triggers;
 mod rows;
 use rows::{trigger_column_types, trigger_document, trigger_record, TriggerVariableResolver};
 
@@ -537,30 +541,39 @@ pub fn fire_before_row_triggers(
     new_document: Option<&Document>,
     updated_columns: &[String],
 ) -> Result<Option<Document>> {
-    let triggers =
-        context
-            .catalog
-            .triggers_for(table, TriggerTiming::Before, event, true, updated_columns)?;
+    let triggers = row_triggers::resolve(
+        context,
+        table,
+        TriggerTiming::Before,
+        event,
+        updated_columns,
+    )?;
     let original = if event == TriggerEvent::Delete {
         old_document
     } else {
         new_document
     };
-    if triggers.is_empty() {
+    if !triggers
+        .iter()
+        .any(|trigger| row_triggers::fires(context, trigger))
+    {
         return Ok(original.cloned());
     }
     let types = trigger_column_types(context, table)?;
     let old = trigger_record(context, table, doc_id, old_document, false)?;
     let mut new = trigger_record(context, table, doc_id, new_document, true)?;
     let mut invoked = false;
-    for trigger in triggers {
-        if !trigger_condition_matches(
-            context,
-            trigger.definition.when.as_ref(),
-            &old,
-            &new,
-            &types,
-        )? {
+    for trigger in triggers.iter() {
+        // An earlier trigger of this row may have changed the role.
+        if !row_triggers::fires(context, trigger)
+            || !trigger_condition_matches(
+                context,
+                trigger.definition.when.as_ref(),
+                &old,
+                &new,
+                &types,
+            )?
+        {
             continue;
         }
         invoked = true;
@@ -568,7 +581,7 @@ pub fn fire_before_row_triggers(
             context,
             TriggerInvocation {
                 table,
-                trigger: &trigger,
+                trigger,
                 timing: TriggerTiming::Before,
                 event,
                 row: true,
@@ -707,31 +720,33 @@ impl AfterRowTriggerEvent {
             updated_columns,
             cascade_parent,
         } = input;
-        let candidates = context.catalog.triggers_for(
-            table,
-            TriggerTiming::After,
-            event,
-            true,
-            updated_columns,
-        )?;
+        let candidates =
+            row_triggers::resolve(context, table, TriggerTiming::After, event, updated_columns)?;
         let capture_transition =
             transition_capture_required(context, table, event, updated_columns)?;
-        if candidates.is_empty() && !capture_transition {
+        // The role is read when the row's events are queued, as `PostgreSQL` checks each trigger in `AfterTriggerSaveEvent`.
+        if !capture_transition
+            && !candidates
+                .iter()
+                .any(|trigger| row_triggers::fires(context, trigger))
+        {
             return Ok(None);
         }
         let types = trigger_column_types(context, table)?;
         let old = trigger_record(context, table, old_doc_id, old_document, false)?;
         let new = trigger_record(context, table, new_doc_id, new_document, false)?;
         let mut matching = Vec::new();
-        for trigger in candidates {
-            if trigger_condition_matches(
-                context,
-                trigger.definition.when.as_ref(),
-                &old,
-                &new,
-                &types,
-            )? {
-                matching.push(trigger);
+        for trigger in candidates.iter() {
+            if row_triggers::fires(context, trigger)
+                && trigger_condition_matches(
+                    context,
+                    trigger.definition.when.as_ref(),
+                    &old,
+                    &new,
+                    &types,
+                )?
+            {
+                matching.push(trigger.clone());
             }
         }
         if matching.is_empty() && !capture_transition {
