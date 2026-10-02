@@ -13,7 +13,7 @@ use uqa_storage::mvcc::VersionError;
 use super::{controlled, sqlite_doc_id, Decoded, Family, NativeDocumentRead, SQLiteResult};
 use crate::document_store::decoded_columns::{CachedColumns, ColumnBuilder};
 use crate::document_store::document_id_from_sqlite;
-use crate::mvcc::native::{decode_record, NativeRecordIdentity, PrivateDocuments};
+use crate::mvcc::native::{decode_record, NativeRecordIdentity, PrivateRows};
 
 /// The rows one latest-commit read visited, and the row that ended it to hydrate fields stored outside its body.
 type LatestSegment = (usize, Option<(DocId, Decoded)>);
@@ -255,7 +255,7 @@ impl NativeDocumentRead<'_> {
     fn visit_cached_columns_merged(
         &self,
         (ids, columns): &CachedColumns,
-        mut private: PrivateDocuments<'_>,
+        mut private: PrivateRows<'_>,
         after: Option<i64>,
         limit: usize,
         fields: &[&str],
