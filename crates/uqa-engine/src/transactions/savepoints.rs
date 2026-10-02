@@ -141,9 +141,7 @@ impl Engine {
             }
         }
         self.restore_transaction_dirty_state(savepoint.dirty);
-        if let Err(error) = self.reload_persistent_value_indexes() {
-            cleanup_errors.push(format!("btree restore: {error}"));
-        }
+        self.drop_persistent_value_indexes();
         if self.storage.backend.is_some() {
             if let Err(error) = self.reload_table_catalog_after_rollback() {
                 cleanup_errors.push(format!("table catalog restore: {error}"));

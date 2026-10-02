@@ -545,41 +545,23 @@ impl crate::Engine {
     }
 
     /// Restore hot accelerators directly from rolled-back postings. Recovery can hold the transaction mutex, so it must never bind SQL expressions or execute callbacks; missing indexes remain cold until the next statement.
-    pub(crate) fn reload_persistent_value_indexes(&self) -> StorageBackendResult<()> {
-        let Some(backend) = self
-            .storage
-            .backend
-            .as_ref()
-            .filter(|backend| backend.persists_btree_indexes())
-        else {
-            return Ok(());
-        };
+    /// Drop the in-memory value indexes of every durable table after a rollback. The table catalog reload that follows every rollback builds a new state for each durable table, without indexes, so reloading them from storage beforehand was thrown away: a query builds the indexes it needs again from the snapshot it reads. Dropping them here keeps the earlier states from serving rolled-back keys when that reload fails. A temporary table's indexes are restored with its data snapshot instead, and a memory-only engine restores every table that way.
+    pub(crate) fn drop_persistent_value_indexes(&self) {
+        if self.storage.backend.is_none() {
+            return;
+        }
         let tables = self
             .storage
             .tables
             .read()
-            .iter()
-            .map(|(name, table)| (name.qualified_name(), table.clone()))
+            .values()
+            .cloned()
             .collect::<Vec<_>>();
-        for (name, table) in tables {
-            if table.persistence == uqa_sql::ast::RelationPersistence::Temporary {
-                continue;
-            }
-            let fields = table
-                .value_indexes
-                .read()
-                .iter()
-                .map(|(field, index)| (field.clone(), index.is_carried()))
-                .collect::<Vec<_>>();
-            table.value_indexes.write().clear();
-            for (field, carried) in fields {
-                if let Some(values) = backend.load_btree_index(&name, &field)? {
-                    let index = Self::build_value_index_as(&field, carried, values);
-                    table.value_indexes.write().insert(field, index);
-                }
+        for table in tables {
+            if table.persistence != uqa_sql::ast::RelationPersistence::Temporary {
+                table.value_indexes.write().clear();
             }
         }
-        Ok(())
     }
 
     /// `unused` names the namespace in which no document ever had `doc_id`, so that the document's entries replace none.
