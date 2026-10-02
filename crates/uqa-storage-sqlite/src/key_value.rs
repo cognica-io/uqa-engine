@@ -375,6 +375,9 @@ impl KeyValueBatch for SQLiteKeyValueBatch<'_> {
     fn serializable_participant(&self) -> Option<uqa_storage::mvcc::SerializableTransactionId> {
         self.batch.serializable_participant()
     }
+    fn put_unused(&mut self, key: &[u8], value: &[u8]) -> StorageBackendResult<()> {
+        self.batch.put_unused(key, value)
+    }
     fn observe_serializable_write(
         &mut self,
         predicate: uqa_storage::mvcc::SerializablePredicate<'_>,

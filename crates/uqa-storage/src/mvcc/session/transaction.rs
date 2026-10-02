@@ -194,6 +194,22 @@ impl Transaction {
         self.changes.apply_owned(&[write], control)
     }
 
+    /// Write a canonical record at a key that never had one. Such a key has no committed revision, so the write expects none and reads none. A change this transaction already made to the key is in its overlay, and the write then takes its condition from there as any other does.
+    pub(super) fn write_unused_record(
+        &mut self,
+        key: &RecordKey,
+        value: &SharedRecordValue,
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        if self.changes.write_kind(key.bytes(), control)?.is_some() {
+            return self.write_shared_record(key, Some(value), RecordWriteKind::Canonical, control);
+        }
+        self.writable()?;
+        let write = PreparedRecordWrite::from_shared(key.clone(), None, Some(value.clone()))
+            .with_kind(RecordWriteKind::Canonical);
+        self.changes.apply_owned(&[write], control)
+    }
+
     pub(super) fn write_with_retained_source(
         &mut self,
         key: &RecordKey,
